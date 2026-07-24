@@ -116,19 +116,23 @@ object TypedAstScopeWalker {
                     for (b in case.bindings) {
                         out.add(ScopeBinding(b.name, b.type, b.loc, ScopeBinding.Kind.MATCH_BINDING))
                     }
-                    // if-let bindings layer on top of pattern bindings
+                    // if-let bindings layer on top of pattern bindings. Each
+                    // `TypedIfLetBinding` carries the destructuring `pattern`
+                    // (every node typed) and `bindingNames`. We recover a REAL
+                    // type per name by walking the pattern — same as the
+                    // regular `case.bindings` path — rather than the old
+                    // best-effort fresh-VarType placeholder (which made hover
+                    // and dot-completion on if-let bindings show `'a`).
                     for (ilb in case.ifLetBindings) {
                         if (walk(ilb.expr, line, col, out)) return true
-                        // if-let bindings ARE in scope for the body but we
-                        // don't have per-name types here — `bindingNames`
-                        // is the only metadata. Best-effort: emit them with
-                        // the binding loc and an unknown type placeholder.
-                        // Better than nothing for completion; hover will
-                        // miss the precise type but knows the name.
+                        val typed = collectPatternBindings(ilb.pattern)
                         for (name in ilb.bindingNames) {
+                            val pb = typed[name]
                             out.add(ScopeBinding(
-                                name, MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(name)),
-                                ilb.loc, ScopeBinding.Kind.IF_LET_BINDING
+                                name,
+                                pb?.first ?: MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(name)),
+                                pb?.second ?: ilb.loc,
+                                ScopeBinding.Kind.IF_LET_BINDING
                             ))
                         }
                     }
@@ -196,6 +200,54 @@ object TypedAstScopeWalker {
             is TypedBoolLit, is TypedCharLit, is TypedFracLit, is TypedPerformOp -> {}
         }
         return true
+    }
+
+    /**
+     * Recursively collect every variable a pattern binds, with its real type
+     * and loc. Mirrors how the typechecker produces `PatternBinding`s for the
+     * regular match path — used to give if-let bindings real types instead of
+     * a placeholder tyvar.
+     *
+     * Record-field shorthand (`{ x }`, where the field pattern is null) binds
+     * the field NAME to the field's type, which we read off the enclosing
+     * record type's `fields` map.
+     */
+    private fun collectPatternBindings(pattern: TypedPattern): Map<String, Pair<MezzeType, Loc>> {
+        val out = LinkedHashMap<String, Pair<MezzeType, Loc>>()
+        fun go(p: TypedPattern) {
+            when (p) {
+                is TypedVarPattern -> out[p.name] = p.type to p.loc
+                is TypedVariantPattern -> p.payload?.let { go(it) }
+                is TypedRecordPattern -> {
+                    val recFields = (p.type as? MezzeType.RecordType)?.fields
+                    for (f in p.fields) {
+                        val inner = f.pattern
+                        if (inner != null) {
+                            go(inner)
+                        } else {
+                            // shorthand `{ x }` — bind the field name to its type.
+                            val t = recFields?.get(f.name)
+                                ?: MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(f.name))
+                            out[f.name] = t to f.loc
+                        }
+                    }
+                }
+                is TypedSeqPattern -> {
+                    for (e in p.elements) go(e)
+                    p.rest?.let { out[it] = p.type to p.loc }
+                }
+                is TypedStringInterpPattern -> {
+                    for (part in p.parts) {
+                        if (part is TypedStringPatternPart.Capture) {
+                            out[part.variableName] = MezzeType.StringType to p.loc
+                        }
+                    }
+                }
+                is TypedWildcardPattern, is TypedLiteralPattern -> {}
+            }
+        }
+        go(pattern)
+        return out
     }
 
     private fun containsPosition(loc: Loc, line: Int, col: Int): Boolean {

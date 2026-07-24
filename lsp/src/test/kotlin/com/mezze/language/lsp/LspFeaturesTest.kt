@@ -514,6 +514,43 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `type-directed generation offers Ok and Err when the expected type is Result`() {
+        // At a value position whose expected type is `Result Int Str`, the menu
+        // should GENERATE `Ok { … }` / `Err { … }` snippet items pre-filled,
+        // sorted to the very top (sortText prefix "0_gen").
+        // A function body whose return type is annotated `Result Int Str` is a
+        // canonical expected-type site: the body expression's loc carries that
+        // expected type. A partial identifier `xR` as the body parses and gets
+        // the annotated return type as its expected type.
+        val src = """
+            let f : {} -> Result Int Str = {} -> xR
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        // Cursor at the end of `xR` on line 0.
+        val col = "let f : {} -> Result Int Str = {} -> xR".length
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(0, col)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        // The generated items are the ones tagged `detail = "construct Result"`
+        // and sorted `0_gen…`. (There can also be a base variant-constructor
+        // `Ok` from the general menu; we specifically want the generated pair.)
+        val ok = comps.firstOrNull { it.label == "Ok" && it.detail == "construct Result" }
+        val err = comps.firstOrNull { it.label == "Err" && it.detail == "construct Result" }
+        assertNotNull(ok, "expected a generated `Ok` for expected type Result; got ${comps.map { it.label to it.detail }}")
+        assertNotNull(err, "expected a generated `Err` for expected type Result")
+        assertTrue(ok!!.insertText.contains("Ok {"), "Ok snippet should build a record, got: ${ok.insertText}")
+        assertTrue(err!!.insertText.contains("error ="), "Err snippet should pre-fill the error field, got: ${err.insertText}")
+        // Generated items float to the top. (The expected-type ranking pass may
+        // prepend another "0_", so we check the tell-tale "gen" marker + a "0"
+        // lead rather than an exact prefix.)
+        assertTrue(ok.sortText.startsWith("0") && ok.sortText.contains("gen"),
+            "generated Ok should sort to top, got: ${ok.sortText}")
+    }
+
+    @Test
     fun `hover on an effect declaration name shows the effect, not a type var`() {
         // Reported bug: hovering `Log` at its `effect Log where {…}` decl showed
         // `Log : 'a` (a synthetic type var from findAtPosition). It must show the
@@ -1611,6 +1648,44 @@ class LspFeaturesTest {
             "must not edit the string-literal line, got edits on lines: ${edits.map { it.range.start.line }}")
         assertTrue(edits.any { it.newText == "5" && it.range.start.line == 3 },
             "expected the real use on line 3 replaced with `5`, got: ${edits.map { it.range.start.line to it.newText }}")
+    }
+
+    @Test
+    fun `toggle do-bind converts a plain let to a bind and back`() {
+        // `let x = e` inside a do-block → offer "Convert to do-bind (<-)",
+        // which flips `=` to `<-`. And a bind offers the reverse.
+        val (uri, _) = openSingleFile("""
+            let f = {} -> do
+              let a = fetch {}
+              let b <- fetch {}
+              a
+        """.trimIndent())
+
+        // Cursor on the plain-let line (line 1): expect let→bind.
+        val a1 = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = Range(Position(1, 6), Position(1, 6))
+            context = CodeActionContext(emptyList())
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+        val toBind = a1.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title.startsWith("Convert to do-bind") }
+            ?: fail("expected 'Convert to do-bind', got: ${a1.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val bindEdits = toBind.edit?.changes?.values?.flatten() ?: emptyList()
+        assertTrue(bindEdits.any { it.newText == "<-" },
+            "let→bind should insert `<-`, got: ${bindEdits.map { it.newText }}")
+
+        // Cursor on the bind line (line 2): expect bind→let.
+        val a2 = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = Range(Position(2, 6), Position(2, 6))
+            context = CodeActionContext(emptyList())
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+        val toLet = a2.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title.startsWith("Convert to plain let") }
+            ?: fail("expected 'Convert to plain let', got: ${a2.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val letEdits = toLet.edit?.changes?.values?.flatten() ?: emptyList()
+        assertTrue(letEdits.any { it.newText == "=" },
+            "bind→let should insert `=`, got: ${letEdits.map { it.newText }}")
     }
 
     @Test

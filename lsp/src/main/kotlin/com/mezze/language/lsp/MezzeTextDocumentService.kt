@@ -2941,7 +2941,18 @@ class MezzeTextDocumentService(
                 // items that haven't set their own sortText (auto-import,
                 // postfix, snippets keep theirs). The expected-type pass then
                 // promotes matches ABOVE their tier by prepending "0_".
-                val tiered = applyBaseRelevanceTiers(filtered)
+                // Type-directed GENERATION: when the cursor sits at a position
+                // with a known expected type, synthesize the construct that
+                // produces it (Ok/Err, a full record literal, a lambda stub)
+                // pre-filled — so the user doesn't have to type the skeleton.
+                // These are prepended and float to the very top (sortText "0").
+                // Suppressed in a type-annotation slot (we want type NAMES there,
+                // not value constructors).
+                val withGenerated = if (state != null && !inTypeAnnotation) {
+                    generateExpectedTypeItems(state, position) + filtered
+                } else filtered
+
+                val tiered = applyBaseRelevanceTiers(withGenerated)
                 val ranked = if (state != null) {
                     rankItemsByExpectedTypeGeneric(tiered, state, position)
                 } else tiered
@@ -2998,19 +3009,20 @@ class MezzeTextDocumentService(
      * an item already has a sortText we preserve it; lexicographic order
      * within a rank class keeps existing intra-group orderings.
      */
-    private fun rankItemsByExpectedTypeGeneric(
-        items: List<CompletionItem>,
-        state: DocumentState,
-        pos: Position,
-    ): List<CompletionItem> {
-        val result = state.typeCheckResult ?: return items
+    /**
+     * The typechecker's expected type at the cursor, if any — the smallest
+     * `expectedTypeAt` entry whose loc contains (pos), with a little trailing
+     * slack so a cursor just past the slot's end still counts. Shared by the
+     * expected-type ranking pass and type-directed generation.
+     */
+    private fun expectedTypeAtCursor(state: DocumentState, pos: Position): MezzeType? {
+        val result = state.typeCheckResult ?: return null
         val expectedTypeAt = result.expectedTypeAt
-        if (expectedTypeAt.isEmpty()) return items
-
+        if (expectedTypeAt.isEmpty()) return null
         val cursorLine = pos.line + 1
         val cursorCol = pos.character + 1
         val slack = 3
-        val expected = expectedTypeAt
+        return expectedTypeAt
             .filterKeys { loc ->
                 val sb = loc.startLine < cursorLine ||
                     (loc.startLine == cursorLine && loc.startCol <= cursorCol)
@@ -3020,7 +3032,132 @@ class MezzeTextDocumentService(
             }
             .entries
             .minByOrNull { (loc, _) -> (loc.endLine - loc.startLine) * 1_000_000 + (loc.endCol - loc.startCol) }
-            ?.value ?: return items
+            ?.value
+    }
+
+    /**
+     * Type-directed generation: given the expected type at the cursor, produce
+     * completion items that CONSTRUCT a value of that type, pre-filled with
+     * snippet tabstops. Ranking already floats matching candidates; this goes
+     * a step further and emits the skeleton the user would otherwise type.
+     *
+     *   expected `Result 'a 'e` → `Ok { $1 }`, `Err { error = $1 }`
+     *   expected `Option 'a`    → `Some { $1 }`, `None`
+     *   expected a user variant → one item per constructor (payload pre-filled)
+     *   expected a record type  → the full `{ f1 = $1, f2 = $2 }` literal
+     *   expected a function type → `{param} -> $1` lambda stub
+     *
+     * All items sort to the very top ("0"). Returns empty when the expected
+     * type isn't a shape we can helpfully build (tyvar, scalar, etc.).
+     */
+    private fun generateExpectedTypeItems(state: DocumentState, pos: Position): List<CompletionItem> {
+        val expected = expectedTypeAtCursor(state, pos) ?: return emptyList()
+        val out = mutableListOf<CompletionItem>()
+
+        fun snippetItem(label: String, snippet: String, detail: String, order: Int): CompletionItem =
+            CompletionItem(label).apply {
+                kind = CompletionItemKind.Snippet
+                insertText = snippet
+                insertTextFormat = InsertTextFormat.Snippet
+                this.detail = detail
+                sortText = "0_gen_${order}_$label"
+            }
+
+        // A tabstop that shows the element type where helpful, e.g. `${1:Int}`.
+        fun tab(idx: Int, t: MezzeType): String {
+            val hint = concreteTypeHint(t)
+            return if (hint != null) "\${${idx}:$hint}" else "\$$idx"
+        }
+
+        when (expected) {
+            is MezzeType.TypeApplication -> when (expected.constructor) {
+                "Result" -> {
+                    val okT = expected.args.getOrNull(0)
+                    val errT = expected.args.getOrNull(1)
+                    out += snippetItem("Ok", "Ok { ${if (okT != null) tab(1, okT) else "\$1"} }", "construct Result", 0)
+                    out += snippetItem("Err", "Err { error = ${if (errT != null) tab(1, errT) else "\$1"} }", "construct Result", 1)
+                }
+                "Option" -> {
+                    val someT = expected.args.getOrNull(0)
+                    out += snippetItem("Some", "Some { ${if (someT != null) tab(1, someT) else "\$1"} }", "construct Option", 0)
+                    out += snippetItem("None", "None", "construct Option", 1)
+                }
+                else -> generateForNamedType(state, expected.constructor, out)
+            }
+            is MezzeType.VariantType -> {
+                expected.typeName?.let { generateForNamedType(state, it, out) }
+            }
+            is MezzeType.RecordType -> {
+                if (expected.fields.isNotEmpty()) {
+                    val body = expected.fields.entries.toList().mapIndexed { idx, (fn, ft) ->
+                        "$fn = ${renderFieldPlaceholderPublic(fn, ft, idx + 1)}"
+                    }.joinToString(", ")
+                    out += snippetItem("{ … } record", "{ $body }", "fill record literal", 0)
+                }
+            }
+            is MezzeType.FunctionType -> {
+                val params = (expected.paramType as? MezzeType.RecordType)?.fields?.keys?.toList()
+                    ?: listOf("x")
+                out += snippetItem("{ … } -> …", "{${params.joinToString(", ")}} -> \$1", "fill lambda", 0)
+            }
+            is MezzeType.BoolType -> {
+                out += snippetItem("True", "True", "Bool", 0)
+                out += snippetItem("False", "False", "Bool", 1)
+            }
+            // Not usefully constructible from a bare expected type.
+            is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
+            is MezzeType.StringType, is MezzeType.CharType, is MezzeType.NatType,
+            is MezzeType.FracType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+            is MezzeType.OrderingType, is MezzeType.NewtypeType, is MezzeType.ListType,
+            is MezzeType.SeqType, is MezzeType.MapType, is MezzeType.SetType,
+            is MezzeType.SortedMapType, is MezzeType.SortedSetType,
+            is MezzeType.SuspendedType, is MezzeType.EffectRow -> {}
+        }
+        return out
+    }
+
+    /**
+     * Emit a construction item per constructor of a locally-declared variant
+     * type. `Color` → `Red`, `Green`, `Blue`; a payload-carrying constructor
+     * gets a `{ $1 }` skeleton. No-op if the type isn't a variant decl in this
+     * module (cross-module constructor generation would need the store index).
+     */
+    private fun generateForNamedType(state: DocumentState, typeName: String, out: MutableList<CompletionItem>) {
+        val decl = state.parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.find { it.name == typeName }
+        val def = decl?.definition as? com.mezze.language.parsedast.ParsedVariantDef ?: return
+        def.constructors.forEachIndexed { idx, ctor ->
+            // A constructor's payload is a type annotation; when it's a record
+            // (the common case), pre-fill each field as a named tabstop.
+            val recordEntries = (ctor.dataType as? com.mezze.language.parsedast.ParsedRecordType)?.entries
+            val snippet = when {
+                recordEntries != null && recordEntries.isNotEmpty() -> {
+                    val body = recordEntries.mapIndexed { i, e -> "${e.name} = \${${i + 1}:${e.name}}" }
+                        .joinToString(", ")
+                    "${ctor.name} { $body }"
+                }
+                ctor.dataType != null -> "${ctor.name} { \$1 }"  // non-record payload
+                else -> ctor.name                                 // no payload
+            }
+            out += CompletionItem(ctor.name).apply {
+                kind = CompletionItemKind.Snippet
+                insertText = snippet
+                insertTextFormat = InsertTextFormat.Snippet
+                detail = "construct $typeName"
+                sortText = "0_gen_${idx}_${ctor.name}"
+            }
+        }
+    }
+
+    /** Public shim so generation can reuse the typed field-placeholder renderer. */
+    private fun renderFieldPlaceholderPublic(fieldName: String, fieldType: MezzeType, idx: Int): String =
+        renderFieldPlaceholder(fieldName, fieldType, idx)
+
+    private fun rankItemsByExpectedTypeGeneric(
+        items: List<CompletionItem>,
+        state: DocumentState,
+        pos: Position,
+    ): List<CompletionItem> {
+        val expected = expectedTypeAtCursor(state, pos) ?: return items
 
         val expectedVariantName = (expected as? MezzeType.TypeApplication)?.constructor
             ?: (expected as? MezzeType.BoolType)?.let { "Bool" }
@@ -3529,33 +3666,55 @@ class MezzeTextDocumentService(
      * would add noise rather than signal in a one-line placeholder (tyvars,
      * functions, records, variants, containers, effect rows).
      */
-    private fun concreteTypeHint(type: MezzeType): String? = when (type) {
-        is MezzeType.IntType -> "Int"
-        is MezzeType.FloatType -> "Float"
-        is MezzeType.StringType -> "Str"
-        is MezzeType.BoolType -> "Bool"
-        is MezzeType.CharType -> "Char"
-        is MezzeType.NatType -> "Nat"
-        is MezzeType.FracType -> "Frac"
-        is MezzeType.BytesType -> "Bytes"
-        is MezzeType.ByteBufferType -> "ByteBuffer"
-        is MezzeType.OrderingType -> "Ordering"
-        is MezzeType.TypeApplication -> type.constructor
-        is MezzeType.NewtypeType -> concreteTypeHint(type.wrappedType)
-        // Structural / polymorphic / composite — a bare name would mislead, so
-        // fall back to just the field name (null = no type hint appended).
-        is MezzeType.VarType,
-        is MezzeType.FunctionType,
-        is MezzeType.RecordType,
-        is MezzeType.VariantType,
-        is MezzeType.ListType,
-        is MezzeType.SeqType,
-        is MezzeType.MapType,
-        is MezzeType.SetType,
-        is MezzeType.SortedMapType,
-        is MezzeType.SortedSetType,
-        is MezzeType.SuspendedType,
-        is MezzeType.EffectRow -> null
+    private fun concreteTypeHint(type: MezzeType): String? = concreteTypeHint(type, depth = 0)
+
+    /**
+     * [depth] bounds how deep we recurse into container element types so a
+     * `List (Map Str (Set Int))` doesn't produce a wall of text in a one-line
+     * placeholder. Beyond the limit, or for a genuinely un-nameable element,
+     * the container renders with a `_` element (`List _`) — still signals the
+     * shape without the noise.
+     */
+    private fun concreteTypeHint(type: MezzeType, depth: Int): String? {
+        // Element rendering for containers: nameable → its name; too deep or
+        // un-nameable → `_` so the container shape still shows.
+        fun elem(t: MezzeType): String = if (depth >= 2) "_" else (concreteTypeHint(t, depth + 1) ?: "_")
+        return when (type) {
+            is MezzeType.IntType -> "Int"
+            is MezzeType.FloatType -> "Float"
+            is MezzeType.StringType -> "Str"
+            is MezzeType.BoolType -> "Bool"
+            is MezzeType.CharType -> "Char"
+            is MezzeType.NatType -> "Nat"
+            is MezzeType.FracType -> "Frac"
+            is MezzeType.BytesType -> "Bytes"
+            is MezzeType.ByteBufferType -> "ByteBuffer"
+            is MezzeType.OrderingType -> "Ordering"
+            is MezzeType.TypeApplication ->
+                // e.g. `Option Str`, `Result Int Str`. Render the arg vector too
+                // so the user sees the full shape; drop it once it gets deep.
+                if (type.args.isEmpty()) type.constructor
+                else "${type.constructor} ${type.args.joinToString(" ") { elem(it) }}"
+            is MezzeType.NewtypeType -> concreteTypeHint(type.wrappedType, depth)
+            // Containers — a short shape is helpful signal (`List Int`, not the
+            // opaque field name). Element rendering is depth-bounded above.
+            is MezzeType.ListType -> "List ${elem(type.elementType)}"
+            is MezzeType.SeqType -> "Seq ${elem(type.elementType)}"
+            is MezzeType.SetType -> "Set ${elem(type.elementType)}"
+            is MezzeType.SortedSetType -> "SortedSet ${elem(type.elementType)}"
+            is MezzeType.MapType -> "Map ${elem(type.keyType)} ${elem(type.valueType)}"
+            is MezzeType.SortedMapType -> "SortedMap ${elem(type.keyType)} ${elem(type.valueType)}"
+            // A named variant alias (`type Color = | Red, … |`) renders as its
+            // name; an anonymous/inline union would be noise.
+            is MezzeType.VariantType -> type.typeName
+            // Structural / polymorphic — a bare name would mislead, so fall back
+            // to just the field name (null = no type hint appended).
+            is MezzeType.VarType,
+            is MezzeType.FunctionType,
+            is MezzeType.RecordType,
+            is MezzeType.SuspendedType,
+            is MezzeType.EffectRow -> null
+        }
     }
 
     /** Hint about a method parameter for snippet placeholder rendering. */
@@ -6725,7 +6884,109 @@ class MezzeTextDocumentService(
         if (addAnnotation != null) out.add(Either.forRight(addAnnotation))
         val implMembers = buildImplementMembersAction(uri, state, range)
         if (implMembers != null) out.add(Either.forRight(implMembers))
+        val toggleBind = buildToggleDoBindAction(uri, state, range)
+        if (toggleBind != null) out.add(Either.forRight(toggleBind))
         return out
+    }
+
+    /**
+     * Toggle a do-block statement between a plain `let x = e` and a bind
+     * `let x <- e`. Binds unwrap a Result/Option (the Tryable sugar); flipping
+     * between the two forms is one of the most frequent edits when authoring
+     * effectful code, and doing it by hand means retyping the arrow (and, going
+     * to a bind, deleting any `: T` annotation — binds don't take one).
+     *
+     * Text-level and comment-safe: we edit only the arrow token (and, for
+     * let→bind, drop a type annotation) inside the statement's own loc, leaving
+     * leading/trailing comments untouched. Returns null unless the cursor is on
+     * a do-block Let or Bind statement.
+     */
+    private fun buildToggleDoBindAction(uri: String, state: DocumentState, range: Range): CodeAction? {
+        val parsed = state.parsedModule ?: return null
+        val doBlock = findParsedExprCovering(parsed, range) { it is ParsedDo } as? ParsedDo ?: return null
+        val cursorLine = range.start.line + 1
+        val cursorCol = range.start.character + 1
+        fun contains(loc: com.mezze.language.parsedast.Loc): Boolean {
+            val sb = loc.startLine < cursorLine || (loc.startLine == cursorLine && loc.startCol <= cursorCol)
+            val ea = loc.endLine > cursorLine || (loc.endLine == cursorLine && loc.endCol >= cursorCol)
+            return sb && ea
+        }
+        val content = state.content
+
+        // The pattern's end is where we start scanning for the arrow — this
+        // skips any `=`/`<-` that appears inside the pattern or a type name.
+        for (stmt in doBlock.statements) {
+            when (stmt) {
+                is ParsedStatement.Let -> {
+                    if (!contains(stmt.loc)) continue
+                    // Find the top-level `=` after the pattern (and any `: T`).
+                    val scanFrom = (stmt.typeAnnotation?.loc ?: stmt.pattern.loc)
+                    val eqLoc = findArrowToken(content, scanFrom, stmt.value.loc, "=") ?: return null
+                    // Replace `=` with `<-`. If there's a type annotation, also
+                    // delete it (from the pattern's end through the `:`+type) —
+                    // binds don't carry one.
+                    val edits = mutableListOf(TextEdit(eqLoc, "<-"))
+                    stmt.typeAnnotation?.let { ann ->
+                        // Delete from just after the pattern to the end of the
+                        // annotation, inclusive of the leading `:`.
+                        val delStart = Position(stmt.pattern.loc.endLine - 1, stmt.pattern.loc.endCol)
+                        val delEnd = Position(ann.loc.endLine - 1, ann.loc.endCol)
+                        edits.add(0, TextEdit(Range(delStart, delEnd), ""))
+                    }
+                    return CodeAction("Convert to do-bind (<-)").apply {
+                        kind = CodeActionKind.RefactorRewrite
+                        edit = WorkspaceEdit(mapOf(uri to edits))
+                    }
+                }
+                is ParsedStatement.Bind -> {
+                    if (!contains(stmt.loc)) continue
+                    val arrowLoc = findArrowToken(content, stmt.pattern.loc, stmt.expr.loc, "<-") ?: return null
+                    return CodeAction("Convert to plain let (=)").apply {
+                        kind = CodeActionKind.RefactorRewrite
+                        edit = WorkspaceEdit(mapOf(uri to listOf(TextEdit(arrowLoc, "="))))
+                    }
+                }
+                is ParsedStatement.Expr -> {}
+            }
+        }
+        return null
+    }
+
+    /**
+     * Locate the `token` (`=` or `<-`) that sits between [afterLoc] and
+     * [beforeLoc] in [content] and return its Range. Scans the source slice
+     * from the end of [afterLoc] to the start of [beforeLoc]; returns null if
+     * not found (defensive — a malformed edit is worse than no action).
+     */
+    private fun findArrowToken(
+        content: String,
+        afterLoc: com.mezze.language.parsedast.Loc,
+        beforeLoc: com.mezze.language.parsedast.Loc,
+        token: String
+    ): Range? {
+        val lines = content.split('\n')
+        // Absolute char offset of a (1-based line, 1-based col) position.
+        fun offsetOf(line: Int, col: Int): Int {
+            var off = 0
+            for (i in 0 until line - 1) off += (lines.getOrNull(i)?.length ?: 0) + 1
+            return off + (col - 1)
+        }
+        val from = offsetOf(afterLoc.endLine, afterLoc.endCol)
+        val to = offsetOf(beforeLoc.startLine, beforeLoc.startCol)
+        if (from < 0 || to > content.length || from >= to) return null
+        val idx = content.substring(from, to).indexOf(token)
+        if (idx < 0) return null
+        val absStart = from + idx
+        // Convert absolute offset back to (line, col) 0-based for LSP.
+        var remaining = absStart
+        var lineIdx = 0
+        while (lineIdx < lines.size && remaining > lines[lineIdx].length) {
+            remaining -= lines[lineIdx].length + 1
+            lineIdx++
+        }
+        val startPos = Position(lineIdx, remaining)
+        val endPos = Position(lineIdx, remaining + token.length)
+        return Range(startPos, endPos)
     }
 
     /**
