@@ -181,6 +181,7 @@ object JsonDiagnosticFormatter {
         is FixHint.FillMatchArms -> FixHintJson.FillMatchArms(loc.toJson(), missingConstructors)
         is FixHint.RemoveRange -> FixHintJson.RemoveRange(loc.toJson(), label)
         is FixHint.WrapInConstructor -> FixHintJson.WrapInConstructor(loc.toJson(), constructor)
+        is FixHint.WrapInMethodCall -> FixHintJson.WrapInMethodCall(loc.toJson(), methods)
     }
 
     /**
@@ -333,6 +334,13 @@ sealed class FixHintJson {
     data class WrapInConstructor(
         override val loc: SourceLocationJson,
         val constructor: String,
+    ) : FixHintJson()
+
+    @Serializable
+    @SerialName("WrapInMethodCall")
+    data class WrapInMethodCall(
+        override val loc: SourceLocationJson,
+        val methods: List<String>,
     ) : FixHintJson()
 }
 

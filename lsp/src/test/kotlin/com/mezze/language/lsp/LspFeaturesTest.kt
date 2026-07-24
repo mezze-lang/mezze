@@ -2571,6 +2571,36 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `interpolating a non-Str offers an Append to_str quick-fix`() {
+        // `"$(x)"` where x: Int is a T0201 (interpolation needs Str). Offer a
+        // one-click fix that appends `.to_str {}` to the interpolated expr.
+        val src = "let f = {x: Int} -> \"hi \$(x)\""
+        val (uri, _) = openSingleFile(src)
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected a T0201 diagnostic for the interpolation")
+        val t0201 = diags!!.diagnostics.firstOrNull { it.code?.left == "T0201" }
+            ?: fail("expected a T0201 diagnostic, got: ${diags.diagnostics.map { it.code?.left }}")
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = t0201.range
+            context = CodeActionContext(listOf(t0201))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val titles = actions.mapNotNull { if (it.isRight) it.right.title else null }
+        val toStr = actions.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title.contains("to_str") }
+            ?: fail("expected an 'Append `.to_str {}`' action, got: $titles; diag.data=${t0201.data}")
+        // Both to_str and to_dbg_str should be offered.
+        assertTrue(titles.any { it.contains("to_dbg_str") },
+            "expected a to_dbg_str option too, got: $titles")
+        val edit = toStr.edit?.changes?.values?.flatten()?.firstOrNull() ?: fail("no edit on the to_str action")
+        val after = applyEdit(src, edit)
+        assertTrue(after.contains("x.to_str {}"),
+            "fix should append `.to_str {}` to the interpolated `x`, got: $after")
+    }
+
+    @Test
     fun `extract to function lifts a selection into a top-level fn with free vars as params`() {
         // #117: selecting `x + 1` in a lambda body extracts a top-level
         // `let extracted = { x } -> x + 1` (x is the enclosing param → a

@@ -71,7 +71,10 @@ internal fun ExpressionConstraintGenerator.generateStringLiteral(expr: ParsedStr
                         left = exprResult.type,
                         right = MezzeType.StringType,
                         context = "String interpolation requires String type",
-                        loc = expr.loc,
+                        // Point at the interpolated EXPRESSION, not the whole
+                        // string literal — so the T0201 squiggle and its
+                        // `.to_str {}` quick-fix target just `$( … )`'s inner expr.
+                        loc = part.expr.loc,
                         errorContext = ErrorContext.StringInterpolation(interpolationIndex)
                     )
                 )

@@ -994,6 +994,11 @@ class MezzeTextDocumentService(
                 "loc" to loc,
                 "constructor" to hint.constructor,
             )
+            is com.mezze.language.parsedast.diagnostics.FixHint.WrapInMethodCall -> mapOf(
+                "kind" to "WrapInMethodCall",
+                "loc" to loc,
+                "methods" to hint.methods,
+            )
         }
     }
 
@@ -6319,6 +6324,22 @@ class MezzeTextDocumentService(
                                 actions.add(Either.forRight(action))
                             }
                         }
+                        is FixHintData.WrapInMethodCall -> {
+                            // Append a conversion: `expr` → `expr.<method> {}`.
+                            // One action per candidate method (to_str preferred).
+                            val inner = sliceLspRange(state.content, hint.loc)
+                            if (inner.isNotBlank()) {
+                                hint.methods.forEachIndexed { idx, method ->
+                                    val edit = TextEdit(hint.loc, "$inner.$method {}")
+                                    val action = CodeAction("Append `.$method {}`")
+                                    action.kind = CodeActionKind.QuickFix
+                                    action.isPreferred = idx == 0
+                                    action.diagnostics = listOf(diagnostic)
+                                    action.edit = WorkspaceEdit(mapOf(uri to listOf(edit)))
+                                    actions.add(Either.forRight(action))
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -7343,6 +7364,12 @@ class MezzeTextDocumentService(
                     val ctor = entry["constructor"] as? String ?: return@mapNotNull null
                     FixHintData.WrapInConstructor(loc, ctor)
                 }
+                "WrapInMethodCall" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val methods = (entry["methods"] as? List<*>)?.mapNotNull { it as? String }
+                        ?: return@mapNotNull null
+                    FixHintData.WrapInMethodCall(loc, methods)
+                }
                 else -> null
             }
         }
@@ -7415,6 +7442,7 @@ class MezzeTextDocumentService(
         data class FillMatchArms(val loc: Range, val missingConstructors: List<String>) : FixHintData()
         data class RemoveRange(val loc: Range, val label: String) : FixHintData()
         data class WrapInConstructor(val loc: Range, val constructor: String) : FixHintData()
+        data class WrapInMethodCall(val loc: Range, val methods: List<String>) : FixHintData()
     }
 
     /**

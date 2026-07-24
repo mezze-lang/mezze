@@ -67,6 +67,16 @@ internal fun classifyConstraintError(
         // mismatch context (annotation, return, argument), keyed off the
         // Equality's two sides.
         wrapConstructorHint(constraint)?.let { add(it) }
+
+        // String interpolation needs a `Str` — offer to append `.to_str {}` /
+        // `.to_dbg_str {}` to the interpolated expression. The diagnostic's own
+        // hint text already says this; this makes it a one-click fix.
+        if (ctx is ErrorContext.StringInterpolation) {
+            val loc = error.constraint.loc
+            if (loc != null) {
+                add(FixHint.WrapInMethodCall(loc, listOf("to_str", "to_dbg_str")))
+            }
+        }
     }
 
     return TypeChecker.TypeCheckError(
