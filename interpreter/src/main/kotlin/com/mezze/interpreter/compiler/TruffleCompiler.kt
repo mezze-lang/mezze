@@ -127,8 +127,25 @@ class TruffleCompiler(
     fun compileNode(node: NodeIR, source: Source): MezzeNode {
         val mezzeNode = compileNodeImpl(node, source)
         val section = createSourceSection(source, node.src)
-        if (section != null) mezzeNode.setSourceSection(section)
+        if (section != null) {
+            mezzeNode.setSourceSection(section)
+            // Tag statement-level nodes with StandardTags.StatementTag so the
+            // debugger can place line breakpoints + single-step. We tag the
+            // meaningful stop points — calls (where work happens) and local
+            // writes (let bindings) — rather than every sub-expression, which
+            // keeps the instrumentation surface small (no wrapper on literals
+            // / local reads) while still stopping on every line a user cares
+            // about. Only when the node has a real source section.
+            if (isStatementLevel(node)) mezzeNode.markStatement()
+        }
         return mezzeNode
+    }
+
+    /** True for IR nodes that make good debugger line-breakpoint stop points. */
+    private fun isStatementLevel(node: NodeIR): Boolean = when (node) {
+        is CallDirectIR, is CallLocalIR, is CallIndirectIR, is CallNativeIR,
+        is WriteLocalIR -> true
+        else -> false
     }
 
     private fun compileNodeImpl(node: NodeIR, source: Source): MezzeNode {
