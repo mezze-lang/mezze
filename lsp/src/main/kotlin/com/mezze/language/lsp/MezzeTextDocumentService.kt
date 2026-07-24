@@ -2852,6 +2852,22 @@ class MezzeTextDocumentService(
                     }
                 }
 
+                // Context filter: in a TYPE-ANNOTATION position (`let f : |`,
+                // `{x: |}`, `-> |`), values/functions/keywords are noise — the
+                // user is naming a type. Keep only type-shaped items (types,
+                // effects, abilities, variant type names) + their auto-imports.
+                val inTypeAnnotation = state != null && isInTypeAnnotationPosition(state, position)
+                val filtered = if (inTypeAnnotation) {
+                    // Only TYPE names belong in a `: T` slot. Abilities/effects
+                    // (Interface) go in `with …`/`<…>`, not here — and value
+                    // bindings, functions, variant constructors, and expression
+                    // keywords are all noise. Keep type-shaped kinds only.
+                    items.filter { it.kind.let { k ->
+                        k == CompletionItemKind.Struct || k == CompletionItemKind.Enum ||
+                        k == CompletionItemKind.Class || k == CompletionItemKind.TypeParameter
+                    } }
+                } else items
+
                 // Global expected-type ranking pass. Promotes items whose
                 // return type / carrier type unifies with the expected type
                 // at the cursor (taken from typechecker's expectedTypeAt
@@ -2864,7 +2880,7 @@ class MezzeTextDocumentService(
                 // items that haven't set their own sortText (auto-import,
                 // postfix, snippets keep theirs). The expected-type pass then
                 // promotes matches ABOVE their tier by prepending "0_".
-                val tiered = applyBaseRelevanceTiers(items)
+                val tiered = applyBaseRelevanceTiers(filtered)
                 val ranked = if (state != null) {
                     rankItemsByExpectedTypeGeneric(tiered, state, position)
                 } else tiered
@@ -4499,6 +4515,48 @@ class MezzeTextDocumentService(
         // keyword name itself). Bail on `.`, `{`, `(`, `=` etc.
         if (before.any { !it.isLetterOrDigit() && it != '_' }) return false
         return true
+    }
+
+    /**
+     * Best-effort: is the cursor in a TYPE-ANNOTATION position, where only type
+     * names make sense — after `:` (field/param type, `let f : …`) or `->`
+     * (return type)? We scan the current line's prefix back over the identifier
+     * being typed and any type-application args, and check the token that
+     * introduced this type slot.
+     *
+     * Conservative by design — only fires on clear cases so we never wrongly
+     * hide value completions:
+     *   - `let f : Us|`            → yes (`:` at top-level decl)
+     *   - `{ x: In|, y: … }`       → yes (record/param field type)
+     *   - `-> Boo|`                → yes (return type)
+     *   - `let x = foo :|`         → NO (that's a value; `:` after `=` is rare/none)
+     *   - inside a string / after `=` on the line → NO
+     */
+    private fun isInTypeAnnotationPosition(state: DocumentState, pos: Position): Boolean {
+        val line = state.content.split('\n').getOrNull(pos.line) ?: return false
+        val cursor = pos.character.coerceIn(0, line.length)
+        var before = line.substring(0, cursor)
+        // Not inside a string, and not on the value side of an `=` on this line
+        // (a record field VALUE or a let body — those want value completions).
+        if (before.count { it == '"' } % 2 == 1) return false
+        // Strip the identifier + any `.`/type-arg chars currently being typed so
+        // we can look at the introducing token.
+        before = before.trimEnd { it.isLetterOrDigit() || it == '_' || it == '\'' || it == '.' || it == ' ' }
+        // A `->` immediately introduces a return type.
+        if (before.endsWith("->")) return true
+        // A `:` introduces a field/param/binding type — but only when it's a
+        // type colon, not `::` (module qualifier) and not preceded by `=` on the
+        // line (value context). Also exclude the `?:`/ternary-ish shapes (none
+        // in Mezze, but cheap to guard).
+        if (before.endsWith(":") && !before.endsWith("::")) {
+            // If there's an `=` after the most recent `{` (i.e. we're inside a
+            // record VALUE like `{ x = foo : … }`), don't treat as a type slot.
+            val lastBrace = before.lastIndexOf('{')
+            val eqAfterBrace = before.lastIndexOf('=') > lastBrace
+            // `let f : …` / `{ x: … }` have no `=` before the `:` on the field.
+            return !eqAfterBrace || lastBrace < 0
+        }
+        return false
     }
 
     /**

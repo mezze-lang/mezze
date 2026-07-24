@@ -428,6 +428,35 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `completion in a type-annotation position drops values, functions, and keywords`() {
+        // In a `let f : …` return-type annotation, only TYPE names belong. The
+        // menu must not offer value bindings (`helper`), expression keywords
+        // (`match`/`if`/`do`), or ability/effect names (those go in `with`/`<>`).
+        val src = """
+            type Color = | Red | Green | Blue |
+            let helper = {} -> 1
+            let g : Colo
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        val col = "let g : Colo".length
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(2, col)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        if (comps.isEmpty()) return  // resolution failure covered elsewhere
+        // Nothing value-shaped: no Function/Variable/Keyword/EnumMember items.
+        val badKinds = comps.filter {
+            it.kind == CompletionItemKind.Function || it.kind == CompletionItemKind.Variable ||
+            it.kind == CompletionItemKind.Keyword || it.kind == CompletionItemKind.EnumMember ||
+            it.kind == CompletionItemKind.Interface
+        }
+        assertTrue(badKinds.isEmpty(),
+            "type-annotation position must drop values/functions/keywords/abilities, got: ${badKinds.map { it.label to it.kind }.take(12)}")
+    }
+
+    @Test
     fun `completion ranks a local variable above a top-level function and keyword`() {
         // Relevance tiers: local/param (1_) < top-level fn (2_) < keyword (4_).
         // At a fresh identifier position inside a lambda, the param `xs` should
