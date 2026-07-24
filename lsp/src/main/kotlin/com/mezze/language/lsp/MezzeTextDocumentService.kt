@@ -457,8 +457,64 @@ class MezzeTextDocumentService(
                 lastAnalyzedContent[uri] = content
                 publishDiagnostics(uri, newState.diagnostics)
                 refreshPositionFeatures()
+
+                // Cross-file staleness: the saved module's exports may have
+                // changed, but ModuleTypeChecker.globalCache is keyed by module
+                // path and served on a path hit BEFORE re-checking — so open
+                // dependents (files that `use` this module) would keep showing
+                // diagnostics/hover computed against the OLD exports until a
+                // full restart. Invalidate this module's cache entry and
+                // re-analyze every open dependent so they pick up the change.
+                invalidateAndReanalyzeDependents(uri)
             }
         }
+    }
+
+    /**
+     * After a file is saved, drop its stale entry from the typechecker's global
+     * module cache and re-analyze every OTHER open document that imports it, so
+     * cross-file edits are reflected without a manual `mezze.restart`.
+     */
+    private fun invalidateAndReanalyzeDependents(savedUri: String) {
+        try {
+            val savedPath = moduleUriToPath(savedUri) ?: return
+            // Drop the saved module's cached typed result so dependents that
+            // re-typecheck below resolve its exports freshly.
+            com.mezze.language.typechecker.module.ModuleTypeChecker
+                .invalidateModulePaths(listOf(savedPath))
+
+            // A dependent is any OTHER open doc whose resolved imports name the
+            // saved module. Re-analyze each; its diagnostics/hover then reflect
+            // the saved file's new exports.
+            val dependents = documents.entries.filter { (depUri, depState) ->
+                depUri != savedUri &&
+                    depState.typeCheckResult?.resolvedImports?.any { it.modulePath == savedPath } == true
+            }
+            for ((depUri, depState) in dependents) {
+                val fresh = analyzeDocument(depUri, depState.content, depState.version, persistToStore = false)
+                documents[depUri] = fresh
+                publishDiagnostics(depUri, fresh.diagnostics)
+            }
+            if (dependents.isNotEmpty()) {
+                server.logInfo("Re-analyzed ${dependents.size} open dependent(s) of $savedPath after save")
+                refreshPositionFeatures()
+            }
+        } catch (e: Exception) {
+            server.logError("Cross-file re-analysis after save failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Derive the `a::b::c` module path for an open document's URI, matching the
+     * derivation `mez dev` / the store use. Returns null for files outside the
+     * project's src/ (scratch files) or when project context isn't set up.
+     */
+    private fun moduleUriToPath(uri: String): String? {
+        val filePath = uriToPath(uri) ?: return null
+        val rootDir = projectRootDir ?: return null
+        val pkgName = packageName ?: return null
+        return com.mezze.language.codebase.ModulePath
+            .derive(rootDir, filePath.toFile(), pkgName, entryFilePath)
     }
 
     // ========== Analysis ==========
@@ -4587,8 +4643,17 @@ class MezzeTextDocumentService(
         // Strip the identifier + any `.`/type-arg chars currently being typed so
         // we can look at the introducing token.
         before = before.trimEnd { it.isLetterOrDigit() || it == '_' || it == '\'' || it == '.' || it == ' ' }
-        // A `->` immediately introduces a return type.
-        if (before.endsWith("->")) return true
+        // A `->` introduces a return type ONLY inside a type annotation — i.e.
+        // when a type colon appears earlier on the line (`let f : {} -> Ret`).
+        // A bare `{} -> body` is a LAMBDA whose `->` precedes an EXPRESSION, not
+        // a type; classifying that as a type slot wrongly hides value completions
+        // (e.g. `let main = {} -> hel|` where the user wants `helper`).
+        if (before.endsWith("->")) {
+            val colonIdx = before.indexOf(':')
+            val hasTypeColon = colonIdx >= 0 && (colonIdx == 0 || before[colonIdx - 1] != ':')
+            val hasEquals = before.contains('=')  // `=` means a value body, not a sig
+            return hasTypeColon && !hasEquals
+        }
         // A `:` introduces a field/param/binding type — but only when it's a
         // type colon, not `::` (module qualifier) and not preceded by `=` on the
         // line (value context). Also exclude the `?:`/ternary-ish shapes (none
@@ -6637,7 +6702,93 @@ class MezzeTextDocumentService(
         if (ifToMatch != null) out.add(Either.forRight(ifToMatch))
         val addAnnotation = buildAddTypeAnnotationAction(uri, state, range)
         if (addAnnotation != null) out.add(Either.forRight(addAnnotation))
+        val implMembers = buildImplementMembersAction(uri, state, range)
+        if (implMembers != null) out.add(Either.forRight(implMembers))
         return out
+    }
+
+    /**
+     * "Implement missing members": when the cursor sits inside an `impl Ability
+     * for X where { … }` (or a performer `impl Effect for X`) that is missing
+     * some of the ability/effect's ops, offer a code action that inserts a
+     * correctly-shaped stub (`op = { it } -> {}`) for every unimplemented op.
+     * Mezze-specific ergonomics — the single biggest win for an effect language.
+     *
+     * Returns null when the cursor isn't in such an impl, or nothing is missing.
+     */
+    private fun buildImplementMembersAction(uri: String, state: DocumentState, range: Range): CodeAction? {
+        val pm = state.parsedModule ?: return null
+        val lineNo = range.start.line + 1  // Loc is 1-indexed
+
+        for (decl in pm.decls) {
+            // Resolve (impl loc, all op names of the ability/effect, op decls for
+            // param shape, already-implemented names) for an impl/performer decl.
+            val info: Triple<Loc, List<Pair<String, ParsedTypeAnnotation?>>, Set<String>> = when (decl) {
+                is com.mezze.language.parsedast.ParsedImplAbilityDecl -> {
+                    val ability = pm.decls.filterIsInstance<ParsedAbilityDecl>()
+                        .find { it.name == decl.abilityName } ?: continue
+                    Triple(
+                        decl.loc,
+                        ability.operations.map { it.name to it.paramType },
+                        decl.operations.map { it.name }.toSet(),
+                    )
+                }
+                is ParsedPerformerDecl -> {
+                    val effect = pm.decls.filterIsInstance<ParsedEffectDecl>()
+                        .find { it.name == decl.effect.localName } ?: continue
+                    Triple(
+                        decl.loc,
+                        effect.operations.map { it.name to it.paramType },
+                        decl.operations.map { it.name }.toSet(),
+                    )
+                }
+                else -> continue
+            }
+
+            val (declLoc, allOps, implemented) = info
+            if (lineNo < declLoc.startLine || lineNo > declLoc.endLine) continue
+
+            val missing = allOps.filter { it.first !in implemented }
+            if (missing.isEmpty()) return null
+
+            // Insert the stubs on their own lines just before the impl's closing
+            // `}` (declLoc.endLine, 1-indexed → 0-indexed endLine-1). Match the
+            // indentation of the last body line for tidy output.
+            val lines = state.content.lines()
+            val closeLine0 = declLoc.endLine - 1
+            if (closeLine0 !in lines.indices) return null
+            val bodyIndent = run {
+                // Indentation of the line before the closing brace, else 2 spaces.
+                val prev = lines.getOrNull(closeLine0 - 1) ?: ""
+                val ws = prev.takeWhile { it == ' ' }
+                if (ws.isNotEmpty() && prev.isNotBlank()) ws else "  "
+            }
+            // A trailing comma is needed after each op if the block already has
+            // ops (Mezze impl ops are comma-separated). Best-effort: prefix each
+            // new op with a comma when there are already-implemented ops.
+            val needsLeadingComma = implemented.isNotEmpty()
+            val stubs = missing.mapIndexed { idx, (opName, paramType) ->
+                val itParam = if (paramType != null && formatTypeAnnotation(paramType).contains("it")) "it" else "it"
+                val sep = if (needsLeadingComma || idx > 0) "," else ""
+                "$sep\n$bodyIndent$opName = { $itParam } -> {}"
+            }.joinToString("")
+
+            // Insert right before the closing brace's line. We put it at the end
+            // of the line preceding the `}` (column = that line's length).
+            val insertLine = closeLine0 - 1
+            val insertCol = lines.getOrNull(insertLine)?.length ?: 0
+            val at = Range(Position(insertLine, insertCol), Position(insertLine, insertCol))
+            val edit = TextEdit(at, stubs)
+
+            val title = if (missing.size == 1)
+                "Implement missing member '${missing.single().first}'"
+            else "Implement ${missing.size} missing members"
+            val action = CodeAction(title)
+            action.kind = CodeActionKind.QuickFix
+            action.edit = WorkspaceEdit(mapOf(uri to listOf(edit)))
+            return action
+        }
+        return null
     }
 
     /**

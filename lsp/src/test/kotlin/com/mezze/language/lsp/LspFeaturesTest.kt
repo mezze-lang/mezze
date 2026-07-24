@@ -2895,6 +2895,82 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `code action implements missing ability members`() {
+        // An `impl Show for Int where { }` missing both ops should offer an
+        // "Implement N missing members" quick-fix that inserts stub bodies.
+        val src = """
+            ability Show for 'a where {
+              show : { it: 'a } -> Str,
+              label : { it: 'a } -> Str
+            }
+
+            impl Show for Int where {
+            }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        // Cursor on the `impl Show for Int where {` header line (line 5).
+        val params = CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = Range(Position(5, 0), Position(5, 0))
+            context = CodeActionContext(emptyList())
+        }
+        val actions = server.textDocumentService.codeAction(params).get(5, TimeUnit.SECONDS)
+        val impl = actions.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title.contains("missing member") }
+        assertNotNull(impl, "expected an 'Implement missing members' action, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        // The edit should insert stubs for both unimplemented ops.
+        val edits = impl!!.edit?.changes?.get(uri) ?: emptyList()
+        val inserted = edits.joinToString("") { it.newText }
+        assertTrue(inserted.contains("show =") && inserted.contains("label ="),
+            "expected stubs for both `show` and `label`, got: $inserted")
+    }
+
+    @Test
+    fun `saving a module re-analyzes open dependents (cross-file staleness)`() {
+        // app.mz calls math::id_int { n = 4 } — valid. Editing math.mz so id_int
+        // takes `{ m: Int }` (renamed field) and SAVING it must make app.mz
+        // (still open, unedited) show a fresh diagnostic, without a restart.
+        val ws = mkProject(
+            "app.mz" to """
+                use math::id_int
+                let main = {} -> id_int { n = 4 }
+            """.trimIndent(),
+            "math.mz" to """
+                pub let id_int = {n: Int} -> n
+            """.trimIndent()
+        )
+        openProject(ws)
+        val appUri = ws.resolve("src/app.mz").toUri().toString()
+        val mathUri = ws.resolve("src/math.mz").toUri().toString()
+        openFile(mathUri, ws.resolve("src/math.mz").toFile().readText())
+        openFile(appUri, ws.resolve("src/app.mz").toFile().readText())
+        // Baseline: app.mz has no errors (the call matches id_int's `n` field).
+        client.awaitDiagnostics(appUri, 5_000)
+
+        // Break the contract in math.mz: rename the field `n` → `m`. app.mz still
+        // passes `n`, which is now wrong. Save math.mz.
+        val brokenMath = "pub let id_int = {m: Int} -> m\n"
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(mathUri, 2),
+            listOf(TextDocumentContentChangeEvent(brokenMath))
+        ))
+        Thread.sleep(400)
+        server.textDocumentService.didSave(DidSaveTextDocumentParams(
+            TextDocumentIdentifier(mathUri), brokenMath
+        ))
+
+        // app.mz (unedited, still open) must now report an error — the save
+        // triggered re-analysis of the dependent. Without the fix it'd stay
+        // clean (served from the stale cached exports).
+        val appDiag = client.awaitDiagnosticsMatching(appUri, 6_000) { it.diagnostics.isNotEmpty() }
+        assertNotNull(appDiag, "expected a publishDiagnostics for the open dependent app.mz")
+        assertTrue(appDiag!!.diagnostics.isNotEmpty(),
+            "app.mz should show a fresh error after its dependency math.mz changed field n→m and was saved, " +
+            "but got no diagnostics (stale cross-file state)")
+    }
+
+    @Test
     fun `typeDefinition jumps to a type declared in another module`() {
         // #112: a value whose type is defined in another module — go-to-type
         // resolves the type name and jumps to the OTHER file via the store's
@@ -3272,6 +3348,19 @@ class LspFeaturesTest {
                 Thread.sleep(50)
             }
             return null
+        }
+
+        /** Wait until the LATEST publish for [uri] satisfies [pred], or timeout. */
+        fun awaitDiagnosticsMatching(
+            uri: String, timeoutMs: Long, pred: (PublishDiagnosticsParams) -> Boolean
+        ): PublishDiagnosticsParams? {
+            val deadline = System.currentTimeMillis() + timeoutMs
+            while (System.currentTimeMillis() < deadline) {
+                val match = diagnostics.lastOrNull { it.uri == uri }
+                if (match != null && pred(match)) return match
+                Thread.sleep(50)
+            }
+            return diagnostics.lastOrNull { it.uri == uri }
         }
     }
 }
