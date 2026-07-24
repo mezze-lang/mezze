@@ -3096,37 +3096,52 @@ class MezzeTextDocumentService(
 
         val items = mutableListOf<CompletionItem>()
         val seen = mutableSetOf<String>()
+
+        // Shared builder for an auto-import completion of one store decl.
+        // `itemKind`/`detailKind` tag the menu entry; a `use mod::{name}`
+        // side-edit is attached so accepting also imports it.
+        fun addAutoImport(
+            declRow: com.mezze.language.store.DeclRow,
+            itemKind: CompletionItemKind,
+            detailKind: String,
+        ): Boolean {
+            val name = declRow.declName
+            if (name in visibleNames) return false
+            if (!name.startsWith(prefix, ignoreCase = false) && !name.contains(prefix, ignoreCase = true)) return false
+            if (name.startsWith("_")) return false  // mangled/private convention
+            if (!seen.add("${declRow.modulePath}::$name")) return false
+            items.add(CompletionItem(name).apply {
+                kind = itemKind
+                detail = "$detailKind from ${declRow.modulePath}"
+                declRow.doc?.takeIf { it.isNotBlank() }?.let {
+                    documentation = Either.forRight(MarkupContent(MarkupKind.MARKDOWN, renderDocMarkdown(it)))
+                }
+                sortText = "zz_$name"  // penalize below locally-visible names
+                insertText = name
+                buildAutoImportEdit(state, declRow.modulePath, name)?.let {
+                    additionalTextEdits = listOf(it)
+                }
+            })
+            return true
+        }
+
         try {
             for (declRow in store.getDeclsByKind(com.mezze.language.store.DeclKind.LET)) {
-                val name = declRow.declName
-                if (name in visibleNames) continue
-                if (!name.startsWith(prefix, ignoreCase = false) && !name.contains(prefix, ignoreCase = true)) continue
-                // Skip mangled/private names — convention: `__name` / `_name`.
-                if (name.startsWith("_")) continue
-                if (!seen.add("${declRow.modulePath}::$name")) continue
-
-                val item = CompletionItem(name).apply {
-                    kind = CompletionItemKind.Function
-                    detail = "from ${declRow.modulePath}"
-                    // The store row already has the doc-comment in hand, so
-                    // attach it eagerly (no resolve round-trip needed).
-                    declRow.doc?.takeIf { it.isNotBlank() }?.let {
-                        documentation = Either.forRight(MarkupContent(MarkupKind.MARKDOWN, renderDocMarkdown(it)))
-                    }
-                    // Slight ranking penalty so locally-visible bindings win.
-                    sortText = "zz_$name"
-                    // Insert the bare name at the cursor; let the user fill
-                    // its args. The auto-import side-edit handles the `use`.
-                    insertText = name
-                    val importEdit = buildAutoImportEdit(state, declRow.modulePath, name)
-                    if (importEdit != null) {
-                        additionalTextEdits = listOf(importEdit)
-                    }
-                }
-                items.add(item)
-                // Hard cap so the menu doesn't blow up if the prefix is
-                // shared by hundreds of decls (e.g. `m`, `to`).
+                addAutoImport(declRow, CompletionItemKind.Function, "fn")
                 if (items.size >= 30) break
+            }
+            // Types, effects, and abilities are also importable by name — a
+            // type annotation `: Us…` should offer `UserId` with its `use`.
+            for ((kind, itemKind, label) in listOf(
+                Triple(com.mezze.language.store.DeclKind.TYPE, CompletionItemKind.Struct, "type"),
+                Triple(com.mezze.language.store.DeclKind.EFFECT, CompletionItemKind.Interface, "effect"),
+                Triple(com.mezze.language.store.DeclKind.ABILITY, CompletionItemKind.Interface, "ability"),
+            )) {
+                if (items.size >= 40) break
+                for (declRow in store.getDeclsByKind(kind)) {
+                    addAutoImport(declRow, itemKind, label)
+                    if (items.size >= 40) break
+                }
             }
         } catch (e: Exception) {
             // Best-effort. Don't fail the whole completion if the store
