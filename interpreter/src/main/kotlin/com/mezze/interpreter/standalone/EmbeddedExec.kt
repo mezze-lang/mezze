@@ -153,6 +153,15 @@ object EmbeddedExec {
         val allocations = args.contains("--allocations")
         val inspect = args.contains("--inspect")
         val inspectBrk = args.contains("--inspect-brk")
+        // `--dap` / `--dap=<port>`: start GraalVM's Debug Adapter Protocol server
+        // so VS Code (or any DAP client) can attach for breakpoints/stepping.
+        // Defaults to port 4711 (the DAP tool's default). `--dap-brk` suspends on
+        // entry so the client can set breakpoints before anything runs.
+        val dap = args.contains("--dap") || args.any { it.startsWith("--dap=") } || args.contains("--dap-brk")
+        val dapBrk = args.contains("--dap-brk")
+        val dapPort = args.firstNotNullOfOrNull { a ->
+            if (a.startsWith("--dap=")) a.substringAfter("=").toIntOrNull() else null
+        } ?: 4711
         val insightFile = args.firstNotNullOfOrNull { a ->
             if (a.startsWith("--insight=")) a.substringAfter("=") else null
         }
@@ -234,6 +243,21 @@ object EmbeddedExec {
             engineBuilder.option("inspect", "4242")
             if (inspectBrk) engineBuilder.option("inspect.Suspend", "true")
             System.err.println("[mezze] devtools listening on chrome://inspect — port 4242")
+        }
+        if (dap && !jitCapable) {
+            System.err.println(
+                "[mezze] --dap ignored — this binary doesn't ship the debug adapter. " +
+                "Run via `mez exec` / `mez dev` (JIT mode) for the debugger."
+            )
+        }
+        if (dap && jitCapable) {
+            // GraalVM's built-in DAP server (dap-tool). Statement/root source
+            // sections + StatementTag on the Truffle nodes make Mezze line
+            // breakpoints + stepping work through it.
+            engineBuilder.option("dap", dapPort.toString())
+            if (dapBrk) engineBuilder.option("dap.Suspend", "true")
+            else engineBuilder.option("dap.Suspend", "false")
+            System.err.println("[mezze] DAP server listening on port $dapPort — attach a DAP client (VS Code)")
         }
 
         val engine = engineBuilder.build()

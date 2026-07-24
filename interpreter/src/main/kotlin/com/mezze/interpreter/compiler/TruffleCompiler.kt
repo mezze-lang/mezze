@@ -1459,6 +1459,13 @@ class TruffleCompiler(
 
     fun getOrCreateSourcePublic(file: String): Source = getOrCreateSource(file)
 
+    /** Public accessor for building a SourceSection — used by PipelineRunner to
+     *  attribute the entry root node so the debugger doesn't treat it as
+     *  internal (isInternal() = section == null → the debugger skips the whole
+     *  root and never fires probes inside it). */
+    fun createSourceSectionPublic(source: Source, info: SourceInfo): SourceSection? =
+        createSourceSection(source, info)
+
     /**
      * Try to compile an indirect call as an inline operator.
      * Pattern: CallIndirect(ReadField(receiver, "add"), MakeRecord({r = ...}))

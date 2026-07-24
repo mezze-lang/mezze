@@ -246,7 +246,7 @@ object PipelineRunner {
             fdBuilder.addSlot(FrameSlotKind.Illegal, mainFn.localNames.getOrElse(i) { "l$i" }, null)
         }
 
-        val target = MezzeRootNode(
+        val rootNode = MezzeRootNode(
             language,
             fdBuilder.build(),
             wrapped,
@@ -254,7 +254,15 @@ object PipelineRunner {
             mainFn.paramSlots.size,
             0,
             IntArray(0)
-        ).callTarget
+        )
+        // Attribute the entry root to the user source so the debugger doesn't
+        // treat it as internal (isInternal() = section == null) and skip it —
+        // without a root section, NO statement probe inside the root ever fires,
+        // so a resolved breakpoint never suspends.
+        compiler.createSourceSectionPublic(source, mainFn.body.src)?.let {
+            rootNode.setSourceSection(it)
+        }
+        val target = rootNode.callTarget
         mark("entry CallTarget built — compileFromIR returning")
         return target
     }

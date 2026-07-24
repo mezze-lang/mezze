@@ -5,7 +5,6 @@ import com.oracle.truffle.api.debug.Debugger
 import com.oracle.truffle.api.debug.SuspendedEvent
 import org.graalvm.polyglot.Context
 import org.graalvm.polyglot.Source
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import java.util.concurrent.atomic.AtomicInteger
@@ -30,20 +29,6 @@ class DebuggerBreakpointTest {
 
     @Test
     @Timeout(60)
-    @Disabled(
-        "DAP Phase 1 — breakpoint now RESOLVES (resolved=true); remaining: it doesn't SUSPEND.\n" +
-        "DONE: MezzeNode InstrumentableNode + @GenerateWrapper; do-block statements (StmtIR.Let/" +
-        "Expr) attributed to their OWN source line via attributeStatement() + tagged StatementTag " +
-        "(fixes the earlier 'user code untagged' + inlining-scrambled-loc issue); Source content " +
-        "threading + file:// URIs. A line-3 breakpoint now RESOLVES.\n" +
-        "REMAINING (proven via session.suspendNextExecution() ALSO giving hits=0): suspension " +
-        "itself never fires in the eval path — the callback is never invoked even for suspend-" +
-        "next. Strong hypothesis: the enclosing ROOT nodes (MezzeFunctionRootNode, MezzeRootNode) " +
-        "are NOT InstrumentableNode and declare no RootTag/RootBodyTag, which GraalVM requires " +
-        "for statement probes inside a root to activate. NEXT: make the root nodes instrumentable " +
-        "(hasTag RootTag/RootBodyTag) OR verify the entry CallTarget isn't executed via a probe-" +
-        "bypassing direct .call(). Then this test's hits>=1 and it passes."
-    )
     fun `a line breakpoint suspends execution at that line`() {
         // Top-level `let`s EXECUTE on eval (they bind + run each value), unlike a
         // `main` fn body which is only defined, not called. So line 3's `let x =
