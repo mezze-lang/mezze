@@ -24,6 +24,7 @@ class DevCommand {
          */
         private val DEV_FLAGS_BOOLEAN = setOf(
             "--inspect", "--inspect-brk",
+            "--dap", "--dap-brk",
             "--profile", "--coverage", "--allocations", "--trace-jit",
         )
     }
@@ -38,7 +39,9 @@ class DevCommand {
 
         // Collect dev instrumentation flags to forward to the child.
         // Boolean flags pass through verbatim; --insight=<path> too.
-        val devFlags = args.filter { it in DEV_FLAGS_BOOLEAN || it.startsWith("--insight=") }
+        val devFlags = args.filter {
+            it in DEV_FLAGS_BOOLEAN || it.startsWith("--insight=") || it.startsWith("--dap=")
+        }
 
         val msg = CliMessages()
         val mezzeToml = File(currentDir, "Mezze.toml")

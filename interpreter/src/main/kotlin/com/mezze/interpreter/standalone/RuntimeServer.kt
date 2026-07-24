@@ -187,6 +187,23 @@ object RuntimeServer {
             if (devFlags.inspectBrk) engineBuilder.option("inspect.Suspend", "true")
             originalStderr.println("[mezze] devtools listening on chrome://inspect — port 4242")
         }
+        if (devFlags.dap && !jitCapable) {
+            originalStderr.println(
+                "[mezze] --dap ignored — no JIT-capable runtime. Debugging needs the " +
+                "JVM runtime (mez dev/exec on a JDK), not the AOT native binary."
+            )
+        }
+        if (devFlags.dap && jitCapable) {
+            // GraalVM's bundled DAP server (dap-tool). Statement/root source
+            // sections + StatementTag on Mezze's Truffle nodes make line
+            // breakpoints + stepping work through it. dap.Suspend=true suspends
+            // on first statement so a client can install breakpoints first.
+            engineBuilder.option("dap", devFlags.dapPort.toString())
+            engineBuilder.option("dap.Suspend", devFlags.dapBrk.toString())
+            originalStderr.println(
+                "[mezze] DAP server listening on port ${devFlags.dapPort} — attach a DAP client (VS Code)"
+            )
+        }
         val engine = engineBuilder.build()
 
         val context = Context.newBuilder(MezzeLanguage.ID)
@@ -854,6 +871,9 @@ private class WireFrameOutputStream(
 private data class DevFlags(
     val inspect: Boolean,
     val inspectBrk: Boolean,
+    val dap: Boolean,
+    val dapBrk: Boolean,
+    val dapPort: Int,
     val traceJit: Boolean,
     val profile: File?,
     val coverage: File?,
@@ -864,6 +884,15 @@ private data class DevFlags(
         fun parse(args: Array<String>, diag: PrintStream): DevFlags {
             val inspect = args.contains("--inspect") || args.contains("--inspect-brk")
             val inspectBrk = args.contains("--inspect-brk")
+            // `--dap` / `--dap=<port>` / `--dap-brk`: GraalVM Debug Adapter
+            // Protocol server so VS Code (or any DAP client) can attach for
+            // breakpoints / stepping. `--dap-brk` suspends on entry so the client
+            // can install breakpoints before anything runs.
+            val dap = args.contains("--dap") || args.any { it.startsWith("--dap=") } || args.contains("--dap-brk")
+            val dapBrk = args.contains("--dap-brk")
+            val dapPort = args.firstNotNullOfOrNull { a ->
+                if (a.startsWith("--dap=")) a.substringAfter("=").toIntOrNull() else null
+            } ?: 4711
             val traceJit = args.contains("--trace-jit")
             val profile = if (args.contains("--profile")) profileOut("mezze-profile.txt") else null
             val coverage = if (args.contains("--coverage")) profileOut("mezze-coverage.txt") else null
@@ -875,7 +904,7 @@ private data class DevFlags(
                 diag.println("Error: --insight=${insight.path}: file not found")
                 kotlin.system.exitProcess(1)
             }
-            return DevFlags(inspect, inspectBrk, traceJit, profile, coverage, allocations, insight)
+            return DevFlags(inspect, inspectBrk, dap, dapBrk, dapPort, traceJit, profile, coverage, allocations, insight)
         }
 
         private fun profileOut(name: String): File {

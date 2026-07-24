@@ -21,7 +21,9 @@
     "pattern-matching"
   ],
   "activationEvents": [
-    "onLanguage:mezze"
+    "onLanguage:mezze",
+    "onDebugResolve:mezze",
+    "onDebugDynamicConfigurations:mezze"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -140,6 +142,79 @@
       {
         "command": "mezze.resetServerState",
         "title": "Mezze: Reset Server State"
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "mezze"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "mezze",
+        "label": "Mezze",
+        "languages": [
+          "mezze"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Absolute path to the Mezze program (.mz) or project directory to run.",
+                "default": "${file}"
+              },
+              "args": {
+                "type": "array",
+                "description": "Command-line arguments passed to the program.",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Suspend on the first statement so breakpoints can be set before anything runs.",
+                "default": false
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory. Defaults to the workspace folder.",
+                "default": "${workspaceFolder}"
+              },
+              "port": {
+                "type": "number",
+                "description": "Port the mez DAP server listens on. Defaults to 4711.",
+                "default": 4711
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "mezze",
+            "request": "launch",
+            "name": "Debug Mezze File",
+            "program": "${file}",
+            "stopOnEntry": false
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Mezze: Launch Current File",
+            "description": "Run and debug the currently open .mz file",
+            "body": {
+              "type": "mezze",
+              "request": "launch",
+              "name": "Debug ${1:Mezze File}",
+              "program": "^\"\\${file}\"",
+              "stopOnEntry": false
+            }
+          }
+        ]
       }
     ]
   },
