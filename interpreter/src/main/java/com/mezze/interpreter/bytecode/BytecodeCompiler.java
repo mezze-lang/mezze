@@ -1566,15 +1566,14 @@ public final class BytecodeCompiler {
             case "mul": return InlineOp.MUL;
             case "div": return InlineOp.DIV;
             case "mod": return InlineOp.MOD;
-            // eq/neq intentionally NOT folded: user impls of Eq for
-            // newtypes (variants) chain `.eq {r=r}.not {}` where the
-            // receiver is a Variant, not a primitive. Folding would
-            // dispatch to DirectEqualNode's eqGeneric which uses
-            // Object.equals — semantically identical to AST here, but
-            // the newtype user impl overrides `eq` via dict-passing
-            // and a peephole would sidestep that. Keep .eq/.neq going
-            // through the general CallIndirect emit so dict dispatch
-            // works.
+            // eq/neq: fold to inline op, mirroring AST's tryCompileInlineOp
+            // which unconditionally folds these. Without this, code shaped
+            // like `let x : Int = ...; if x == 0 then ...` inside a `perform`
+            // block emits ReadFieldByName("eq") on the scalar Long, hitting
+            // ReadFieldByName.doNotRecord @Fallback → "Expected record for
+            // field 'eq', got: Long" at runtime. See task #346.
+            case "eq":  return InlineOp.EQ;
+            case "neq": return InlineOp.NEQ;
             case "lt":  return InlineOp.LT;
             case "le":  return InlineOp.LE;
             case "gt":  return InlineOp.GT;
