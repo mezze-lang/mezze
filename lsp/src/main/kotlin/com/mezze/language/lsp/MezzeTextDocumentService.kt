@@ -3445,11 +3445,56 @@ class MezzeTextDocumentService(
      * lambda skeleton placeholder; everything else gets a named placeholder.
      */
     private fun renderFieldPlaceholder(fieldName: String, fieldType: MezzeType, idx: Int): String {
-        val fnType = fieldType as? MezzeType.FunctionType ?: return "\${${idx}:${fieldName}}"
+        val fnType = fieldType as? MezzeType.FunctionType
+        if (fnType == null) {
+            // Plain field: label the tabstop with the field name, and — when the
+            // type is a concrete named type — append it so the user sees what's
+            // expected (`${1:msg: Str}`). Skip for tyvars / structural types
+            // where the annotation would be noise (`'a`, `{ … }`).
+            val hint = concreteTypeHint(fieldType)
+            return if (hint != null) "\${${idx}:$fieldName: $hint}" else "\${${idx}:$fieldName}"
+        }
         val innerParams = (fnType.paramType as? MezzeType.RecordType)
             ?.fields?.keys?.toList()
             ?: listOf("x")
         return "\${${idx}:{${innerParams.joinToString(", ")}} -> $0}"
+    }
+
+    /**
+     * A short type name to show inside a snippet placeholder, or null when the
+     * type isn't a helpfully-nameable concrete type. Exhaustive over MezzeType
+     * (no `else`, per the codebase's no-silent-fallthrough rule) so a new type
+     * variant forces an explicit decision here. The `null` cases are types that
+     * would add noise rather than signal in a one-line placeholder (tyvars,
+     * functions, records, variants, containers, effect rows).
+     */
+    private fun concreteTypeHint(type: MezzeType): String? = when (type) {
+        is MezzeType.IntType -> "Int"
+        is MezzeType.FloatType -> "Float"
+        is MezzeType.StringType -> "Str"
+        is MezzeType.BoolType -> "Bool"
+        is MezzeType.CharType -> "Char"
+        is MezzeType.NatType -> "Nat"
+        is MezzeType.FracType -> "Frac"
+        is MezzeType.BytesType -> "Bytes"
+        is MezzeType.ByteBufferType -> "ByteBuffer"
+        is MezzeType.OrderingType -> "Ordering"
+        is MezzeType.TypeApplication -> type.constructor
+        is MezzeType.NewtypeType -> concreteTypeHint(type.wrappedType)
+        // Structural / polymorphic / composite — a bare name would mislead, so
+        // fall back to just the field name (null = no type hint appended).
+        is MezzeType.VarType,
+        is MezzeType.FunctionType,
+        is MezzeType.RecordType,
+        is MezzeType.VariantType,
+        is MezzeType.ListType,
+        is MezzeType.SeqType,
+        is MezzeType.MapType,
+        is MezzeType.SetType,
+        is MezzeType.SortedMapType,
+        is MezzeType.SortedSetType,
+        is MezzeType.SuspendedType,
+        is MezzeType.EffectRow -> null
     }
 
     /** Hint about a method parameter for snippet placeholder rendering. */

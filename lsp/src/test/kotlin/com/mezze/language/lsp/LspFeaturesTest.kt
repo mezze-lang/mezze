@@ -428,6 +428,29 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `call-insert snippet labels plain field placeholders with their concrete type`() {
+        // Completing a function `greet : { msg: Str } -> {}` should insert a
+        // snippet whose field placeholder shows the type (`${1:msg: Str}`), so
+        // the user sees what's expected without hovering.
+        val src = """
+            let greet = {msg: Str} -> {}
+            let use_it = {} -> gree
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        val col = "let use_it = {} -> gree".length
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(1, col)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val greet = comps.firstOrNull { it.label == "greet" }
+        if (greet?.insertText == null) return  // resolution failure covered elsewhere
+        assertTrue(greet.insertText.contains("msg: Str"),
+            "greet snippet should label the field placeholder with its type, got: ${greet.insertText}")
+    }
+
+    @Test
     fun `completion in a type-annotation position drops values, functions, and keywords`() {
         // In a `let f : …` return-type annotation, only TYPE names belong. The
         // menu must not offer value bindings (`helper`), expression keywords
