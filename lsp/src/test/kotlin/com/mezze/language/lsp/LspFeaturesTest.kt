@@ -551,6 +551,62 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `add-missing-fields quick-fix inserts the absent variant fields`() {
+        // `Point { x = 1 }` where the constructor needs `{x, y}` → T0204 with a
+        // "missing field(s): y" message. The quick-fix should insert `y = ???`.
+        val src = """
+            type Shape = | Point { x: Int, y: Int } |
+            let p = Point { x = 1 }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        val diags = client.awaitDiagnostics(uri, 5_000)?.diagnostics ?: emptyList()
+        val missing = diags.firstOrNull { it.message.contains("missing field(s)") }
+            ?: fail("expected a missing-field diagnostic, got: ${diags.map { it.message }}")
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = missing.range
+            context = CodeActionContext(listOf(missing))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val fix = actions.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title.startsWith("Add missing field") }
+            ?: fail("expected an 'Add missing field' fix, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val edits = fix.edit?.changes?.values?.flatten() ?: emptyList()
+        val inserted = edits.joinToString("") { it.newText }
+        assertTrue(inserted.contains("y = "),
+            "fix should insert the missing field `y`, got: $inserted")
+    }
+
+    @Test
+    fun `type-directed generation fires at a record field-value position`() {
+        // `want { r = | }` — the cursor is writing the value of field `r`, whose
+        // type is `Result Int Str`. Completion should GENERATE `Ok`/`Err` for
+        // that field's type (not offer the field-name list).
+        val src = """
+            let want : {r: Result Int Str} -> Int = {r} -> 1
+            let f = {} -> want { r =  }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        // Cursor just after `r = ` (before the closing space+brace) on line 1.
+        val col = "let f = {} -> want { r = ".length
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(1, col)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val ok = comps.firstOrNull { it.label == "Ok" && it.detail == "construct Result" }
+        val err = comps.firstOrNull { it.label == "Err" && it.detail == "construct Result" }
+        assertNotNull(ok, "expected a generated `Ok` at the field-value position; got ${comps.map { it.label to it.detail }}")
+        assertNotNull(err, "expected a generated `Err` at the field-value position")
+        // At a field-value position we should NOT also be offering the field
+        // name `r` — that would be noise (the user already typed `r = `).
+        assertTrue(comps.none { it.label == "r" && it.kind == CompletionItemKind.Field },
+            "field-value position should not offer the field name; got ${comps.map { it.label }}")
+    }
+
+    @Test
     fun `hover on an effect declaration name shows the effect, not a type var`() {
         // Reported bug: hovering `Log` at its `effect Log where {…}` decl showed
         // `Log : 'a` (a synthetic type var from findAtPosition). It must show the

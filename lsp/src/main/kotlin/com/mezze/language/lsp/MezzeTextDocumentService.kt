@@ -98,6 +98,12 @@ class MezzeTextDocumentService(
     private val V0404_MISSING_METHOD_CODE: String =
         com.mezze.language.parsedast.diagnostics.ErrorCode.V0404_IMPL_MISSING_METHOD.display()
 
+    // T0204 covers both variant extra-fields AND missing-fields; the branch that
+    // offers "Add missing field(s)" guards on the message so it only fires for
+    // the missing case. Computed from the enum so it can't drift.
+    private val T0204_VARIANT_ARITY_CODE: String =
+        com.mezze.language.parsedast.diagnostics.ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY.display()
+
     // Configurable via workspace/didChangeConfiguration under the `mezze` key.
     // Defaults match the historical hardcoded behavior; a client that never
     // sends settings sees no change.
@@ -3052,6 +3058,15 @@ class MezzeTextDocumentService(
      */
     private fun generateExpectedTypeItems(state: DocumentState, pos: Position): List<CompletionItem> {
         val expected = expectedTypeAtCursor(state, pos) ?: return emptyList()
+        return generateItemsForType(state, expected)
+    }
+
+    /**
+     * The type→construction-items core, callable directly with a concrete
+     * [expected] type (used both by the cursor-based path and by field-value
+     * completion, which knows the field's type from the call's record param).
+     */
+    private fun generateItemsForType(state: DocumentState, expected: MezzeType): List<CompletionItem> {
         val out = mutableListOf<CompletionItem>()
 
         fun snippetItem(label: String, snippet: String, detail: String, order: Int): CompletionItem =
@@ -3403,6 +3418,21 @@ class MezzeTextDocumentService(
         val recordFields = extractRecordParameterFields(funcType)
         if (recordFields.isEmpty()) return emptyList()
 
+        // Field-VALUE position: `foo { field = |` (possibly with a partial
+        // value typed). The user is writing the field's value, not naming a
+        // field — so offer type-directed GENERATION for that field's type
+        // (Ok/Err, a nested record, constructors, a lambda stub) rather than
+        // the field-name list. `fieldValuePrefix` finds the field whose value
+        // we're inside on the current partial line.
+        val activeField = fieldValueContext(beforeCursor, recordFields.map { it.first })
+        if (activeField != null) {
+            val fieldType = recordFields.firstOrNull { it.first == activeField }?.second
+            if (fieldType != null) {
+                val gen = generateItemsForType(state, fieldType)
+                if (gen.isNotEmpty()) return gen
+            }
+        }
+
         val items = mutableListOf<CompletionItem>()
 
         // First item: complete ALL fields at once (most useful). For
@@ -3440,6 +3470,31 @@ class MezzeTextDocumentService(
         }
 
         return items
+    }
+
+    /**
+     * If the cursor sits at a field-VALUE position inside a record-arg call
+     * (`… { field = ⟨here⟩`), return the field's name; else null. We look at
+     * the text after the last `{` or `,` (a field separator) and check it
+     * matches `<name> = <partial value>` where `<name>` is a known field. The
+     * value part may be empty (just after `=`) or a partial expression — either
+     * way the user is writing that field's value.
+     */
+    private fun fieldValueContext(beforeCursor: String, fieldNames: List<String>): String? {
+        // The current field segment starts after the last `{` or `,`.
+        val segStart = maxOf(beforeCursor.lastIndexOf('{'), beforeCursor.lastIndexOf(','))
+        if (segStart < 0) return null
+        val seg = beforeCursor.substring(segStart + 1)
+        // Must contain a top-level `=` (the field-name/value divider). If there's
+        // no `=`, we're still typing the field NAME, not its value.
+        val eq = seg.indexOf('=')
+        if (eq < 0) return null
+        // Guard against `==`, `<=`, `>=`, `!=` inside an already-started value —
+        // those mean we're past the field-name `=` and deep in an expression;
+        // still a value position, so that's fine. But a lone `=` divider must be
+        // the field assignment: the char before it shouldn't be a comparison op.
+        val name = seg.substring(0, eq).trim()
+        return if (name in fieldNames) name else null
     }
 
     /**
@@ -6613,8 +6668,67 @@ class MezzeTextDocumentService(
                     out.add(Either.forRight(quickFix(fix.first, fix.second)))
                 }
             }
+            // A variant constructor is missing required fields (`Point { x = 1 }`
+            // where Point needs `{x, y}`). Raised as T0204 (same code as the
+            // extra-fields case, so buildAddMissingFieldsFix guards on the
+            // "missing field(s):" message and returns null otherwise). The
+            // message carries the missing names; insert `field = ???` for each.
+            T0204_VARIANT_ARITY_CODE -> {
+                val fix = buildAddMissingFieldsFix(state, diagnostic)
+                if (fix != null) {
+                    out.add(Either.forRight(quickFix(fix.first, fix.second)))
+                }
+            }
         }
         return out
+    }
+
+    /**
+     * Build the "Add missing field(s)" edit for a MISSING_FIELD diagnostic on a
+     * variant/record literal. The missing names come from the message tail
+     * `missing field(s): a, b`. We find the record literal covering the
+     * diagnostic loc and splice `, name = ???` for each missing field before its
+     * closing `}` (or `name = ???` as the first field when the record is empty).
+     * `???` is the Mezze hole so the typechecker keeps flagging it until filled.
+     */
+    private fun buildAddMissingFieldsFix(
+        state: DocumentState,
+        diagnostic: Diagnostic,
+    ): Pair<String, List<TextEdit>>? {
+        val msg = diagnostic.message
+        val marker = "missing field(s): "
+        val idx = msg.indexOf(marker)
+        if (idx < 0) return null
+        val missing = msg.substring(idx + marker.length)
+            .substringBefore('.')            // stop at a trailing sentence period
+            .split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        if (missing.isEmpty()) return null
+
+        // The record literal to splice into. The diagnostic is raised at the
+        // whole `Ctor { … }` construct loc, so the inner record doesn't *cover*
+        // the range — find the covering ParsedVariantConstruct and take its
+        // record payload. (Fall back to a directly-covering record for a bare
+        // record literal, though variant constructors are the T0204 case.)
+        val parsed = state.parsedModule ?: return null
+        val construct = findParsedExprCovering(parsed, diagnostic.range) { it is ParsedVariantConstruct }
+            as? ParsedVariantConstruct
+        val record = (construct?.value as? ParsedRecordLit)
+            ?: (findParsedExprCovering(parsed, diagnostic.range) { it is ParsedRecordLit } as? ParsedRecordLit)
+            ?: return null
+
+        val newFields = missing.joinToString("") { name -> "$name = ???, " }
+        // Insert just after the opening `{`. locToRange gives the record's span;
+        // the `{` is its first char.
+        val recRange = locToRange(record.loc)
+        val open = Position(recRange.start.line, recRange.start.character + 1)
+        // If the record already has fields, the inserted text ends with `, ` to
+        // separate from the first existing field; if empty, trim the trailing
+        // separator so we don't leave `{ x = ???,  }`.
+        val hasFields = record.entries.isNotEmpty()
+        val insertText = if (hasFields) newFields else newFields.trimEnd().removeSuffix(",")
+        val title = if (missing.size == 1) "Add missing field `${missing.single()}`"
+                    else "Add missing fields: ${missing.joinToString(", ")}"
+        return title to listOf(TextEdit(Range(open, open), insertText))
     }
 
     /**
