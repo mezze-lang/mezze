@@ -31,28 +31,28 @@ class DebuggerBreakpointTest {
     @Test
     @Timeout(60)
     @Disabled(
-        "DAP Phase 1 — foundation LANDED, breakpoint resolution still blocked. DONE: MezzeNode " +
-        "is InstrumentableNode + @GenerateWrapper; TruffleCompiler tags statement-level nodes " +
-        "(CallDirect/Local/Indirect/Native, WriteLocal) with StatementTag; Source-content " +
-        "threading + file:// URI stamping (getOrCreateSource) so a client breakpoint matches by " +
-        "URI. All interpreter-suite-safe. REMAINING: the breakpoint doesn't resolve for the eval " +
-        "path — needs investigation with a build.gradle env/systemProperty passthrough (gradle " +
-        "forks test workers WITHOUT inherited env, so MEZZE_DAP_DEBUG dumps were empty — the " +
-        "diagnostic itself needs plumbing). Candidate causes: (a) the user module's nodes may " +
-        "compile via a route that bypasses compileNode tagging, (b) section line-numbering vs the " +
-        "breakpoint line, (c) Source URI still not matching. NEXT: add the systemProperty " +
-        "passthrough, dump the tagged sections' URIs+lines during the eval, compare to the " +
-        "breakpoint's, and fix the mismatch."
+        "DAP Phase 1 — breakpoint now RESOLVES (resolved=true); remaining: it doesn't SUSPEND.\n" +
+        "DONE: MezzeNode InstrumentableNode + @GenerateWrapper; do-block statements (StmtIR.Let/" +
+        "Expr) attributed to their OWN source line via attributeStatement() + tagged StatementTag " +
+        "(fixes the earlier 'user code untagged' + inlining-scrambled-loc issue); Source content " +
+        "threading + file:// URIs. A line-3 breakpoint now RESOLVES.\n" +
+        "REMAINING (proven via session.suspendNextExecution() ALSO giving hits=0): suspension " +
+        "itself never fires in the eval path — the callback is never invoked even for suspend-" +
+        "next. Strong hypothesis: the enclosing ROOT nodes (MezzeFunctionRootNode, MezzeRootNode) " +
+        "are NOT InstrumentableNode and declare no RootTag/RootBodyTag, which GraalVM requires " +
+        "for statement probes inside a root to activate. NEXT: make the root nodes instrumentable " +
+        "(hasTag RootTag/RootBodyTag) OR verify the entry CallTarget isn't executed via a probe-" +
+        "bypassing direct .call(). Then this test's hits>=1 and it passes."
     )
     fun `a line breakpoint suspends execution at that line`() {
-        // A do-block with distinct statement lines. Line 3 has a call
-        // (`add {..}`) — a tagged statement stop point.
+        // Top-level `let`s EXECUTE on eval (they bind + run each value), unlike a
+        // `main` fn body which is only defined, not called. So line 3's `let x =
+        // add {..}` actually runs — a tagged statement stop point.
         val program = """
             let add = {a: Int, b: Int} -> a + b
-            let main = {} -> do
-              let x = add { a = 1, b = 2 }
-              let y = add { a = x, b = 10 }
-              y
+            let start = 1
+            let x = add { a = start, b = 2 }
+            let y = add { a = x, b = 10 }
         """.trimIndent()
 
         // Write to a REAL file — the actual debugging scenario (VS Code sets a

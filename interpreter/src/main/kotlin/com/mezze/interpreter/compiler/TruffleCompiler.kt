@@ -157,6 +157,20 @@ class TruffleCompiler(
         return mezzeNode
     }
 
+    /**
+     * Attribute [node] to the statement's own source [info] and tag it as a
+     * debugger stop-point. Used for do-block statements, whose wrapper node
+     * (WriteLocalWithContextNode) is created directly (not via compileNode) and
+     * whose value's own loc is unreliable after inlining. Overwrites any section
+     * the node already got from its value — the statement line is what a user
+     * sets a breakpoint on.
+     */
+    private fun attributeStatement(node: MezzeNode, info: SourceInfo, source: Source) {
+        val section = createSourceSection(source, info) ?: return
+        node.setSourceSection(section)
+        node.markStatement()
+    }
+
     /** True for IR nodes that make good debugger line-breakpoint stop points. */
     private fun isStatementLevel(node: NodeIR): Boolean = when (node) {
         is CallDirectIR, is CallLocalIR, is CallIndirectIR, is CallNativeIR,
@@ -476,12 +490,22 @@ class TruffleCompiler(
                             val valueNode = compileNode(stmt.value, source)
                             // WriteLocalWithContextNode registers in both frame AND global context
                             // This ensures local functions are findable by MonomorphicCallNode via hash
-                            allNodes.add(WriteLocalWithContextNode.create(
+                            val writeNode = WriteLocalWithContextNode.create(
                                 valueNode, stmt.slot, slotKindToInt(stmt.kind),
                                 stmt.name, stmt.contentHash
-                            ))
+                            )
+                            // Attribute the statement to its OWN source line (not
+                            // the value's, which inlining can scramble to another
+                            // line) and tag it as a debugger stop-point. A do-block
+                            // `let` is the canonical line a user breakpoints on.
+                            attributeStatement(writeNode, stmt.src, source)
+                            allNodes.add(writeNode)
                         }
-                        is StmtIR.Expr -> allNodes.add(compileNode(stmt.node, source))
+                        is StmtIR.Expr -> {
+                            val exprNode = compileNode(stmt.node, source)
+                            attributeStatement(exprNode, stmt.src, source)
+                            allNodes.add(exprNode)
+                        }
                     }
                 }
                 allNodes.add(compileNode(node.result, source))
