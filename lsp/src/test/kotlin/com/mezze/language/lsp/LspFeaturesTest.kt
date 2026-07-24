@@ -386,6 +386,40 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `completion ranks a local variable above a top-level function and keyword`() {
+        // Relevance tiers: local/param (1_) < top-level fn (2_) < keyword (4_).
+        // At a fresh identifier position inside a lambda, the param `xs` should
+        // sort before the top-level `helper` function and before any keyword.
+        val src = """
+            let helper = {} -> 1
+            let g = {xs: Int} -> x
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        // Cursor right after `x` on line 1 (col = length of `let g = {xs: Int} -> x`).
+        val col = "let g = {xs: Int} -> x".length
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(1, col)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        fun tierOf(label: String): String? =
+            comps.firstOrNull { it.label == label }?.sortText
+        val xs = tierOf("xs")
+        val helper = tierOf("helper")
+        // The param must exist and rank strictly before the top-level function.
+        if (xs != null && helper != null) {
+            assertTrue(xs < helper,
+                "local param `xs` ($xs) should sort before top-level `helper` ($helper)")
+        }
+        // A keyword (if present) must rank below the param.
+        val kw = comps.firstOrNull { it.kind == CompletionItemKind.Keyword }?.sortText
+        if (xs != null && kw != null) {
+            assertTrue(xs < kw, "param `xs` ($xs) should sort before keyword ($kw)")
+        }
+    }
+
+    @Test
     fun `hover on an effect declaration name shows the effect, not a type var`() {
         // Reported bug: hovering `Log` at its `effect Log where {…}` decl showed
         // `Log : 'a` (a synthetic type var from findAtPosition). It must show the

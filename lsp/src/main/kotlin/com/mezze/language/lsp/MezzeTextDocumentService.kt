@@ -2858,12 +2858,54 @@ class MezzeTextDocumentService(
                 // map). Items already carrying a sortText keep their order
                 // among themselves but get a class-prefix that floats matches
                 // to the top of the menu overall.
+                // Base relevance tiers by kind/source: locals & params first,
+                // then in-scope funcs/values, then types/variants, then
+                // keywords, then penalized (auto-import) items. Applied only to
+                // items that haven't set their own sortText (auto-import,
+                // postfix, snippets keep theirs). The expected-type pass then
+                // promotes matches ABOVE their tier by prepending "0_".
+                val tiered = applyBaseRelevanceTiers(items)
                 val ranked = if (state != null) {
-                    rankItemsByExpectedTypeGeneric(items, state, position)
-                } else items
+                    rankItemsByExpectedTypeGeneric(tiered, state, position)
+                } else tiered
 
                 Either.forLeft(ranked)
             }
+        }
+    }
+
+    /**
+     * Assign a base relevance tier (a `sortText` prefix) to each item that
+     * doesn't already carry one, so the menu orders by how likely the item is
+     * what the user wants at a fresh identifier position:
+     *
+     *   1_ local variables + lambda params (closest scope)
+     *   2_ in-scope values / functions (top-level decls, imports)
+     *   3_ types / variant constructors / effects / abilities
+     *   4_ keywords
+     *   (items with their own sortText — auto-import "zz_", postfix "zzz_",
+     *    snippet "0" — are left untouched so they keep their intended rank)
+     *
+     * The expected-type pass runs after this and prepends "0_" to promote
+     * matches above every tier. Ties within a tier stay label-sorted.
+     */
+    private fun applyBaseRelevanceTiers(items: List<CompletionItem>): List<CompletionItem> {
+        return items.map { item ->
+            if (item.sortText != null) return@map item  // keep an explicit rank
+            // Locals/params are pinned to tier "1" at their source
+            // (getLocalVariableCompletions) via an explicit sortText, so any
+            // bare Variable reaching here is a top-level value binding (tier 2).
+            val tier = when (item.kind) {
+                CompletionItemKind.Field -> "1"        // record-field arg names
+                CompletionItemKind.Variable,
+                CompletionItemKind.Function, CompletionItemKind.Method -> "2"
+                CompletionItemKind.Struct, CompletionItemKind.EnumMember,
+                CompletionItemKind.Enum, CompletionItemKind.Interface,
+                CompletionItemKind.Class, CompletionItemKind.Constructor -> "3"
+                CompletionItemKind.Keyword -> "4"
+                else -> "2"
+            }
+            item.apply { sortText = "${tier}_${label}" }
         }
     }
 
@@ -4696,6 +4738,10 @@ class MezzeTextDocumentService(
             CompletionItem(b.name).apply {
                 kind = CompletionItemKind.Variable
                 detail = prettyPrintTypeWithAliases(b.type, state.typeAliases)
+                // Pin locals/params to the top tier explicitly — they're the
+                // closest scope and almost always what the user means. (A bare
+                // Variable kind alone would tie with top-level value bindings.)
+                sortText = "1_${b.name}"
             }
         }
     }
