@@ -244,9 +244,7 @@ class LazyEffectsTest {
                 Exception.throw {error = "ignored"}
                 {}
 
-            let suspended = will_throw {}
-
-            let handle = {} -> perform IgnoreException in suspended
+            let handle = {} -> perform IgnoreException in will_throw {}
             handle {}
         """.trimIndent()
 
@@ -629,9 +627,8 @@ class LazyEffectsTest {
             let safe_div = {a, b} ->
                 if b == 0 then Exception.throw {error = "Div by zero"} else a / b
 
-            let res = safe_div {a = 4, b = 0}
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = res}
+            let handle = {} -> perform ExceptionToResult in
+                Ok {val = safe_div {a = 4, b = 0}}
 
             let main = {} -> perform Console in
                 info {msg = "Result: $((handle {}).to_dbg_str {})"}

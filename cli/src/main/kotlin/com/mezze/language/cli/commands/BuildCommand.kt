@@ -394,7 +394,7 @@ class BuildCommand {
         // module from scratch.
         StoreHydrator.hydrate(store, modulePath, timing = timing)
 
-        val typeChecker = TypeChecker()
+        val typeChecker = TypeChecker(strictTopLevel = true)
         val rawResult = try {
             typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
         } catch (e: TypeCheckError) {

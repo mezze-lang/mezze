@@ -40,7 +40,8 @@ import com.mezze.language.typechecker.TypeCheckResult as OutputTypeCheckResult
 import com.mezze.language.typechecker.TypeCheckWarning as OutputTypeCheckWarning
 
 class TypeChecker(
-    internal val parentContext: TypingContext = createInitialContext()
+    internal val parentContext: TypingContext = createInitialContext(),
+    internal val strictTopLevel: Boolean = false,
 ) {
     internal fun loadPreludeModulesPublic(importResolver: ImportResolver): ModuleImportContext {
         return loadPreludeModulesInternal(importResolver, ModuleImportContext.empty())
@@ -409,7 +410,7 @@ class TypeChecker(
                     )
                 )
 
-                val validator = TypeValidator(context, registry, buildResult.implDeclarations)
+                val validator = TypeValidator(context, registry, buildResult.implDeclarations, strictTopLevel)
                 val constraintValidation = validator.validateConstraints(allConstraints, substitution)
                 collectValidationResult(constraintValidation, collectedErrors, warnings)
 
@@ -765,6 +766,8 @@ class TypeChecker(
 
         fun create(): TypeChecker = TypeChecker()
         fun withContext(context: TypingContext): TypeChecker = TypeChecker(context)
+        fun withContext(context: TypingContext, strictTopLevel: Boolean): TypeChecker =
+            TypeChecker(context, strictTopLevel)
 
         @JvmStatic
         fun clearCache() {

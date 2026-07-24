@@ -15,7 +15,8 @@ import com.mezze.language.typedast.TypedModule as V2TypedModule
 
 class ModuleTypeChecker(
     private val baseContext: TypingContext = TypingContext.empty,
-    private val moduleResolver: ModuleResolver? = null
+    private val moduleResolver: ModuleResolver? = null,
+    private val strictTopLevel: Boolean = false,
 ) {
     companion object {
         private val typeCheckingStack = mutableSetOf<String>()
@@ -154,7 +155,7 @@ class ModuleTypeChecker(
         try {
             val moduleContext = buildModuleContext(importContext)
 
-            val typeChecker = TypeChecker.withContext(moduleContext)
+            val typeChecker = TypeChecker.withContext(moduleContext, strictTopLevel)
             val modulePath = java.nio.file.Paths.get(module.filePath).parent ?: java.nio.file.Paths.get(".")
             val parsedModule = module.parsedModule
                 ?: throw IllegalStateException("LoadedModule for '${module.modulePath}' has no parsedModule")

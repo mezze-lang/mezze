@@ -425,7 +425,7 @@ object WireRunner {
         val ast = parseResult.module
         if (timing) System.err.println("[${ms()}ms] parsed")
 
-        val typeChecker = TypeChecker()
+        val typeChecker = TypeChecker(strictTopLevel = true)
         val rawResult = try {
             typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
         } catch (e: com.mezze.language.typechecker.TypeCheckError) {

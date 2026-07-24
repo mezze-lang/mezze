@@ -78,7 +78,7 @@ class CheckCommand {
             }
 
             val typeCheckStart = System.nanoTime()
-            val typeChecker = TypeChecker()
+            val typeChecker = TypeChecker(strictTopLevel = true)
             // Use the lower-level result-returning API so we can report ALL
             // type errors at once, not just the first. The previous
             // checkParsedModuleToTyped path threw the first error and dropped
@@ -257,7 +257,7 @@ class CheckCommand {
                 println(ParseErrorFormatter.formatAll(parseResult.errors))
             }
 
-            val typeChecker = TypeChecker()
+            val typeChecker = TypeChecker(strictTopLevel = true)
             // Run via the result-returning lower-level API so we can show
             // ALL collected errors (#218), not just the first one — sibling
             // declarations with independent failures used to be hidden.
