@@ -35,7 +35,17 @@ class TypedASTCompiler(
      * keep the existing dict-passing path. Empty by default → mono is off.
      */
     private val monoCallSiteRewrites: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap(),
-    private val preloweredFunctions: Map<Hash, FunctionIR> = emptyMap()
+    private val preloweredFunctions: Map<Hash, FunctionIR> = emptyMap(),
+    /**
+     * Final module substitution — used to refresh stale VarType on TypedVar
+     * nodes whose type field was captured before the outer scope solved the
+     * relevant TyVar (e.g. `<-` desugar binds the payload before the
+     * synthetic ExceptionToResult handler's existential unifies with the
+     * receiver at the outer scope). See #346 / project_346_stale_typevar_root_cause.
+     * Empty default keeps existing behavior for callers that don't have one.
+     */
+    private val substitution: com.mezze.language.ast.solving.Substitution =
+        com.mezze.language.ast.solving.Substitution.empty
 ) {
 
     /** Ability operation index: methodName → list of (implHash, targetTypes, opHash) */
@@ -1208,7 +1218,15 @@ class TypedASTCompiler(
         // Check for method call: receiver.method { args }
         if (fn is TypedFieldAccess) {
             val methodName = fn.field
-            val receiverType = fn.record.type
+            // Refresh the receiver type against the module's final substitution.
+            // TypedVar nodes are built when the substitution may not yet know the
+            // TyVar's resolution (e.g. `let next <- safe_decr {...}` — the payload
+            // TyVar unifies with Int only at the OUTER scope, after the TypedVar
+            // was built). Without this refresh, receiverType stays VarType and
+            // every hash-based dispatch path (tryInlineOp, tryResolveAbilityOp,
+            // dict-passing) falls through, ending in name-based ReadFieldIR ->
+            // runtime crash under BDSL. See project_346_stale_typevar_root_cause.
+            val receiverType = substitution.apply(fn.record.type)
 
             // Try inline ops for primitives
             val inlineOp = tryInlineOp(methodName, receiverType)
@@ -1221,12 +1239,15 @@ class TypedASTCompiler(
 
             // Try ability method resolution. For concrete types, resolve directly.
             // For VarType, try single-candidate resolution (monomorphized code where
-            // the type variable wasn't fully substituted but only one impl exists).
+            // the type variable wasn't fully substituted but only one impl exists),
+            // and if that fails, try arg-based resolution (concrete types in the arg
+            // record can pin the ability's type parameter — see #346).
             val opHashConcrete = tryResolveAbilityOp(methodName, receiverType)
             val opHash = opHashConcrete
                 ?: if (receiverType is VarType) {
                     val candidates = abilityOpIndex[methodName]
-                    if (candidates != null && candidates.size == 1) candidates.first().opHash else null
+                    if (candidates != null && candidates.size == 1) candidates.first().opHash
+                    else tryResolveAbilityOpByArgs(methodName, expr.arg)
                 } else null
             if (opHash != null) {
                 if (opHashConcrete != null) census.methodConcrete++ else census.methodSingleVar++
@@ -2377,6 +2398,40 @@ class TypedASTCompiler(
             return candidates.first().opHash
         }
         return null
+    }
+
+    /**
+     * Ability method resolution using arg types when the receiver is unresolved.
+     *
+     * For `x.eq {r = 0}` where `x : VarType` but `0 : Int`, ability
+     * `eq: {it: 'a, r: 'a} -> Bool` — the concrete arg pins `'a = Int` so
+     * we can dispatch to `impl Eq for Int` even though the receiver type
+     * never got solved. Necessary because upstream constraint generation
+     * (specifically the `<-` desugar) can leave payload TyVars unresolved
+     * in the final substitution — see project_346_stale_typevar_root_cause.
+     *
+     * Strategy: for each ability-op candidate, check whether ANY concrete
+     * type on the arg record matches one of the candidate's targetTypes.
+     * If a single candidate matches uniquely, use it. Bail on ambiguity.
+     */
+    private fun tryResolveAbilityOpByArgs(
+        methodName: String,
+        argRecord: TypedExpr,
+    ): Hash? {
+        val candidates = abilityOpIndex[methodName] ?: return null
+        if (argRecord !is TypedRecord) return null
+        val argConcreteTypes = argRecord.entries.mapNotNull { entry ->
+            if (entry !is TypedRecordEntry.Field) return@mapNotNull null
+            val t = substitution.apply(entry.value.type)
+            if (t is VarType) null else t
+        }
+        if (argConcreteTypes.isEmpty()) return null
+        val matches = candidates.filter { op ->
+            op.targetTypes.any { target ->
+                argConcreteTypes.any { concrete -> typeMatchesTarget(concrete, target) }
+            }
+        }
+        return if (matches.size == 1) matches.first().opHash else null
     }
 
     private fun findAbilityOpBody(methodName: String, receiverType: MezzeType): TypedExpr? {

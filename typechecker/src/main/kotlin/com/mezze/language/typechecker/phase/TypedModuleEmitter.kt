@@ -127,7 +127,7 @@ internal fun emitTypedModuleAndLower(
     }
 
     if (!isStdlibModule && emittedTypedModule != null) try {
-        val compileResult = compileModule(emittedTypedModule!!, loadedModules)
+        val compileResult = compileModule(emittedTypedModule!!, loadedModules, substitution)
         loweredFns = compileResult.functions
         loweredPerformers = compileResult.performerRecords
     } catch (e: Exception) {
@@ -185,6 +185,7 @@ private data class CompileResult(
 private fun compileModule(
     typedModule: OutputTypedModule,
     loadedModules: Map<ModulePath, TypedModule>,
+    substitution: Substitution,
 ): CompileResult {
     val wrapped = EntryFunctionBuilder.wrapTopLevel(typedModule)
 
@@ -242,7 +243,8 @@ private fun compileModule(
         abilityImpls = allAbilityImpls,
         stdlibHashes = preludeHashes,
         monoCallSiteRewrites = monoResult.bySiteLoc,
-        preloweredFunctions = stdlibFns
+        preloweredFunctions = stdlibFns,
+        substitution = substitution
     )
     compiler.setDeclIndex(declIndex)
 
