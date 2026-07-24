@@ -38,3 +38,34 @@ object ScopedEffectConstants {
     /** Field name carried by `abort` and `resume` records. */
     const val VAL_FIELD = "val"
 }
+
+/**
+ * The three runtime-bound names an effect handler body can reference.
+ * Enum instead of string keeps EffectBindingIR dispatch off the hot
+ * name-lookup path — the runtime picks a branch on int tag, no
+ * string equality checks (see project_no_name_based_dispatch).
+ */
+enum class EffectBindingKind {
+    RESUME,
+    ABORT,
+    SCOPE;
+
+    /**
+     * The user-visible name (matches `ScopedEffectConstants.RESUME` etc.).
+     * Kept for error messages and LSP display only — not for dispatch.
+     */
+    fun displayName(): String = when (this) {
+        RESUME -> ScopedEffectConstants.RESUME
+        ABORT -> ScopedEffectConstants.ABORT
+        SCOPE -> ScopedEffectConstants.SCOPE
+    }
+
+    companion object {
+        fun fromName(name: String): EffectBindingKind? = when (name) {
+            ScopedEffectConstants.RESUME -> RESUME
+            ScopedEffectConstants.ABORT -> ABORT
+            ScopedEffectConstants.SCOPE -> SCOPE
+            else -> null
+        }
+    }
+}

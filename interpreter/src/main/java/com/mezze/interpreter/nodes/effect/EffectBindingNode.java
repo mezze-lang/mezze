@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes.effect;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.continuation.EffectFiber;
 import com.mezze.interpreter.runtime.MezzeContext;
+import com.mezze.language.ast.EffectBindingKind;
 import com.mezze.language.ast.ScopedEffectConstants;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -32,27 +33,36 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 public final class EffectBindingNode extends MezzeNode {
 
     @CompilationFinal
-    private final String name;
+    private final EffectBindingKind kind;
 
     public EffectBindingNode(String name) {
-        this.name = name;
+        // Resolve name → enum at construction time, off the hot path. Bad names
+        // are a compiler bug — the typechecker only emits EffectBindingIR for
+        // resume/abort/scope. Throw eagerly so a corrupted IR never dispatches.
+        EffectBindingKind resolved = EffectBindingKind.Companion.fromName(name);
+        if (resolved == null) {
+            throw new RuntimeException("Unknown effect-binding name: '" + name + "'");
+        }
+        this.kind = resolved;
     }
 
     @Override
     public Object execute(VirtualFrame frame) {
-        if (ScopedEffectConstants.RESUME.equals(name)
-            || ScopedEffectConstants.ABORT.equals(name)) {
-            return lookupOnFiber(name);
-        }
-        if (ScopedEffectConstants.SCOPE.equals(name)) {
-            return lookupOnContext(name);
+        // Enum-tagged dispatch — no runtime string equality, no name lookup on
+        // the hot path. See project_no_name_based_dispatch.
+        switch (kind) {
+            case RESUME:
+            case ABORT:
+                return lookupOnFiber(kind);
+            case SCOPE:
+                return lookupOnContext(kind.displayName());
         }
         CompilerDirectives.transferToInterpreterAndInvalidate();
-        throw new RuntimeException("Unknown effect-binding name: '" + name + "'");
+        throw new RuntimeException("Unreachable: unknown EffectBindingKind " + kind);
     }
 
     @TruffleBoundary
-    private Object lookupOnFiber(String which) {
+    private Object lookupOnFiber(EffectBindingKind which) {
         // resume/abort handles live on the fiber whose op handler is being
         // dispatched right now (driver pins it via enterDispatch). The
         // running fiber, if any, is a different concept and has a separate
@@ -60,16 +70,16 @@ public final class EffectBindingNode extends MezzeNode {
         EffectFiber fiber = EffectFiber.dispatching();
         if (fiber == null) {
             throw new RuntimeException(
-                "'" + which + "' referenced outside any op handler body. "
+                "'" + which.displayName() + "' referenced outside any op handler body. "
                 + "These names are only available inside `op = { ... } -> body` "
                 + "of an `impl X for Y where`.");
         }
-        Object handle = ScopedEffectConstants.RESUME.equals(which)
+        Object handle = (which == EffectBindingKind.RESUME)
             ? fiber.currentResume()
             : fiber.currentAbort();
         if (handle == null) {
             throw new RuntimeException(
-                "'" + which + "' is not in scope. This name is only bound "
+                "'" + which.displayName() + "' is not in scope. This name is only bound "
                 + "inside an op handler body during dispatch.");
         }
         return handle;
