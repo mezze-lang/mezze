@@ -32,6 +32,22 @@ class TruffleCompiler(
     private val language: MezzeLanguage
 ) {
     private val sourceCache = mutableMapOf<String, Source>()
+
+    /**
+     * In-memory source content, keyed by file path, provided by the caller
+     * (e.g. the polyglot `ParsingRequest.getSource()` on `context.eval`). When
+     * present, [getOrCreateSource] builds the Truffle Source from THIS content
+     * instead of re-reading the file from disk — essential for the debugger,
+     * whose breakpoints match against the exact Source the client evaluated
+     * (an in-memory eval source has no on-disk file, so disk-reading yields
+     * empty content and breakpoints never resolve).
+     */
+    private val sourceContentOverrides = mutableMapOf<String, String>()
+
+    /** Provide the real source text for [file] (overrides disk-reading). */
+    fun registerSourceContent(file: String, content: String) {
+        sourceContentOverrides[file] = content
+    }
     private val functionRegistry = mutableMapOf<com.mezze.language.typedast.Hash, FunctionIR>()
 
     /**
@@ -1523,12 +1539,25 @@ class TruffleCompiler(
 
     private fun getOrCreateSource(file: String): Source {
         return sourceCache.getOrPut(file) {
-            try {
-                val content = java.io.File(file).readText()
-                Source.newBuilder("mezze", content, file).build()
-            } catch (_: Exception) {
-                Source.newBuilder("mezze", "", file).build()
+            // For a real on-disk file, build from the File so the Source carries
+            // a `file://` URI — the debugger matches a client breakpoint (also a
+            // `file://` URI) to a source section by URI, so the schemes MUST
+            // agree. The `(lang, content, name)` overload instead yields a
+            // content-hashed `truffle:<hash>//path` URI that never matches.
+            val f = java.io.File(file)
+            val override = sourceContentOverrides[file]
+            // Content: caller override, else the file's text, else empty.
+            val content = override
+                ?: try { f.readText() } catch (_: Exception) { "" }
+            val builder = Source.newBuilder("mezze", content, file)
+            // For a real on-disk file, stamp the `file://` URI explicitly so the
+            // debugger can match a client breakpoint (also a `file://` URI) to a
+            // source section — the default `(lang, content, name)` URI is a
+            // content-hashed `truffle:<hash>//path` that never matches.
+            if (f.isFile) {
+                try { builder.uri(f.toURI()) } catch (_: Exception) { /* keep default */ }
             }
+            builder.build()
         }
     }
 }

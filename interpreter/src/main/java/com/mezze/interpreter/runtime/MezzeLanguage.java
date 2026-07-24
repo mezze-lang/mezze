@@ -345,9 +345,17 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             @SuppressWarnings("unchecked")
             java.util.List<String[]> performers =
                 (java.util.List<String[]>) typeCheckResult.getClass().getMethod("getPerformerRecords").invoke(typeCheckResult);
+            // Provide the eval Source's real text keyed by its file path so the
+            // compiler's Truffle Sources (and their sections) match what a
+            // debugger client set breakpoints against — the FunctionIRs were
+            // parsed with this same path as their sourceFile.
+            String srcFile = source.getPath() != null ? source.getPath() : "<unknown>";
+            java.util.Map<String, String> sourceOverrides =
+                java.util.Collections.singletonMap(srcFile, sourceCode);
             return com.mezze.interpreter.compiler.PipelineRunner.compileFromIR(
                 this, loweredFunctions, Collections.emptyList(), projectRoot,
-                performers != null ? performers : Collections.emptyList()
+                performers != null ? performers : Collections.emptyList(),
+                null, sourceOverrides
             );
         }
 

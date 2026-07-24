@@ -31,15 +31,18 @@ class DebuggerBreakpointTest {
     @Test
     @Timeout(60)
     @Disabled(
-        "DAP Phase 1 spec — breakpoint RESOLUTION is blocked on Source identity. " +
-        "MezzeNode is now InstrumentableNode + @GenerateWrapper and TruffleCompiler tags " +
-        "statement-level nodes (calls, local writes) with StatementTag + a SourceSection, " +
-        "so the debugger CAN attach probes. The remaining wiring: TruffleCompiler." +
-        "getOrCreateSource re-reads the file from DISK by path, so an in-memory eval Source " +
-        "(e.g. 'bp.mz') resolves to EMPTY content and the section can't match a breakpoint on " +
-        "the real text. Fix = thread the caller's actual polyglot Source (content + URI) " +
-        "through PipelineRunner.compileFromIR into TruffleCompiler instead of re-reading disk. " +
-        "Then this test passes and Phase 2 (debug session) can build on it."
+        "DAP Phase 1 — foundation LANDED, breakpoint resolution still blocked. DONE: MezzeNode " +
+        "is InstrumentableNode + @GenerateWrapper; TruffleCompiler tags statement-level nodes " +
+        "(CallDirect/Local/Indirect/Native, WriteLocal) with StatementTag; Source-content " +
+        "threading + file:// URI stamping (getOrCreateSource) so a client breakpoint matches by " +
+        "URI. All interpreter-suite-safe. REMAINING: the breakpoint doesn't resolve for the eval " +
+        "path — needs investigation with a build.gradle env/systemProperty passthrough (gradle " +
+        "forks test workers WITHOUT inherited env, so MEZZE_DAP_DEBUG dumps were empty — the " +
+        "diagnostic itself needs plumbing). Candidate causes: (a) the user module's nodes may " +
+        "compile via a route that bypasses compileNode tagging, (b) section line-numbering vs the " +
+        "breakpoint line, (c) Source URI still not matching. NEXT: add the systemProperty " +
+        "passthrough, dump the tagged sections' URIs+lines during the eval, compare to the " +
+        "breakpoint's, and fix the mismatch."
     )
     fun `a line breakpoint suspends execution at that line`() {
         // A do-block with distinct statement lines. Line 3 has a call
@@ -52,6 +55,12 @@ class DebuggerBreakpointTest {
               y
         """.trimIndent()
 
+        // Write to a REAL file — the actual debugging scenario (VS Code sets a
+        // breakpoint on a file:// URI, `mez` compiles the same file). Both the
+        // breakpoint and the compiler's Source then share the file:// URI, which
+        // is how GraalVM matches a breakpoint to a source section.
+        val tmp = java.io.File.createTempFile("bp_", ".mz").apply { writeText(program); deleteOnExit() }
+
         val ctx = makeContext()
         val hits = AtomicInteger(0)
         val suspendedLines = mutableListOf<Int>()
@@ -63,16 +72,13 @@ class DebuggerBreakpointTest {
                 event.prepareContinue()  // resume — we only want to prove it stopped
             }
             session.use {
+                val fileSource = Source.newBuilder("mezze", tmp).build()
                 // Break on line 3 (`let x = add { … }`).
-                val bp = Breakpoint.newBuilder(
-                    Source.newBuilder("mezze", program, "bp.mz").build().uri
-                ).lineIs(3).build()
+                val bp = Breakpoint.newBuilder(fileSource.uri).lineIs(3).build()
                 session.install(bp)
 
-                val src = Source.newBuilder("mezze", program, "bp.mz").build()
-                ctx.eval(src)
+                ctx.eval(fileSource)
 
-                // Diagnostic: dump what the debugger sees.
                 System.err.println("[bp-test] resolved=${bp.isResolved} hits=${hits.get()} lines=$suspendedLines")
                 assertTrue(bp.isResolved,
                     "breakpoint on line 3 should RESOLVE to a tagged node — if not, " +

@@ -34,7 +34,12 @@ object PipelineRunner {
         importedModulePaths: List<String> = emptyList(),
         projectRoot: Path = Path.of("."),
         performerRecords: List<Array<String>> = emptyList(),
-        entryName: String? = null
+        entryName: String? = null,
+        // Caller-provided source text keyed by file path. When present, the
+        // compiler builds Truffle Sources from THIS content (not disk) so the
+        // debugger's breakpoints resolve against the exact source the client
+        // evaluated. Empty = read from disk (the default, unchanged behavior).
+        sourceOverrides: Map<String, String> = emptyMap()
     ): CallTarget {
         val timing = System.getenv("MEZZE_TIMING") != null
         val tStart = System.nanoTime()
@@ -53,6 +58,7 @@ object PipelineRunner {
         // Compile only REFERENCED stdlib functions (lazy, per-Language instance).
         // ~35 per test instead of 1044. Each Language instance (=Context) compiles its own.
         val compiler = TruffleCompiler(language)
+        for ((file, content) in sourceOverrides) compiler.registerSourceContent(file, content)
         mark("TruffleCompiler constructed")
         // StdlibRuntimeData self-loads via its init block on first class
         // reference (via FunctionIRReachability below). Compile paths that
