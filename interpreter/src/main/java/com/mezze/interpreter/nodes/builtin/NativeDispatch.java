@@ -2791,6 +2791,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_stm_ensure_cfg", (r, c) -> ConcurrencyNatives.stmEnsure(r));
         HANDLERS.put("__native_stm_seq_read", (r, c) -> ConcurrencyNatives.stmSeqRead(r));
         HANDLERS.put("__native_stm_seq_write", (r, c) -> ConcurrencyNatives.stmSeqWrite(r));
+        HANDLERS.put("__native_stm_seq_ensure", (r, c) -> ConcurrencyNatives.stmSeqEnsure(r));
 
         // === Atom ===
         HANDLERS.put("__native_atom_new", (r, c) -> ConcurrencyNatives.atomNew(r));

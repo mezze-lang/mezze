@@ -140,6 +140,17 @@ public final class ConcurrencyNatives {
         return MezzeRecord.empty();
     }
 
+    /**
+     * Non-transactional counterpart of {@link #stmEnsure}. Outside a
+     * transaction, `ensure` (which marks a TVar for validation in the read
+     * set) is meaningless — return the current value like a plain read.
+     */
+    @TruffleBoundary
+    public static Object stmSeqEnsure(MezzeRecord args) {
+        MezzeTVar tvar = getTVar(args, "var");
+        return tvar.read();
+    }
+
     private static MezzeTVar getTVar(MezzeRecord args, String fieldName) {
         Object value = getField(args, fieldName);
         if (value instanceof MezzeTVar tvar) {
