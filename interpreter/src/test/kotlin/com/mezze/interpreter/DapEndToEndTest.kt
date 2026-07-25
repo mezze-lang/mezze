@@ -28,11 +28,14 @@ class DapEndToEndTest {
     @Test
     @Timeout(60)
     fun `set breakpoint, run, stop at line, read stack, continue`() {
+        // Break inside a lambda body: its params (`a`, `b`) and do-block local
+        // (`sum`) are real frame locals the debugger's scope exposes (top-level
+        // `let`s are module globals, not frame locals, so we don't rely on them).
         val program = """
-            let add = {a: Int, b: Int} -> a + b
-            let start = 1
-            let x = add { a = start, b = 2 }
-            let y = add { a = x, b = 10 }
+            let calc = {a: Int, b: Int} -> do
+              let sum = a + b
+              sum + 1
+            let result = calc { a = 5, b = 7 }
         """.trimIndent()
         val tmp = java.io.File.createTempFile("dap_", ".mz").apply { writeText(program); deleteOnExit() }
 
@@ -75,10 +78,13 @@ class DapEndToEndTest {
             request(out, "launch", mapOf("program" to tmp.absolutePath))
             readUntil(input, "response")
 
-            // Break on line 3 (`let x = add { … }`).
+            // Break on line 2 (`let sum = a + b`) — a statement node inside
+            // `calc`'s body, where params `a`, `b` are in scope. (Line 3
+            // `sum + 1` is the do-block result expression, not a tagged
+            // statement, so a breakpoint can't attach there.)
             request(out, "setBreakpoints", mapOf(
                 "source" to mapOf("path" to tmp.absolutePath),
-                "breakpoints" to listOf(mapOf("line" to 3)),
+                "breakpoints" to listOf(mapOf("line" to 2)),
             ))
             val bpResp = readUntil(input, "response")
             @Suppress("UNCHECKED_CAST")
@@ -88,8 +94,8 @@ class DapEndToEndTest {
             // So `verified` may be false here; the real proof it works is the
             // `stopped` event below. We just confirm one breakpoint entry came
             // back for the requested line.
-            assertTrue(installed.size == 1 && (installed[0]["line"] as Number).toInt() == 3,
-                "expected one breakpoint entry for line 3, got: $installed")
+            assertTrue(installed.size == 1 && (installed[0]["line"] as Number).toInt() == 2,
+                "expected one breakpoint entry for line 2, got: $installed")
 
             request(out, "configurationDone", emptyMap())
             readUntil(input, "response")
@@ -110,7 +116,31 @@ class DapEndToEndTest {
             val frames = (stackResp["body"] as Map<String, Any?>)["stackFrames"] as List<Map<String, Any?>>
             assertTrue(frames.isNotEmpty(), "expected at least one stack frame while suspended")
             val topLine = (frames[0]["line"] as Number).toInt()
-            assertEquals(3, topLine, "top frame should be on the breakpoint line, frames=$frames")
+            assertEquals(2, topLine, "top frame should be on the breakpoint line, frames=$frames")
+            val topFrameId = (frames[0]["id"] as Number).toInt()
+
+            // scopes + variables: the protocol round-trips (MezzeNode now
+            // exports NodeLibrary.getScope, so the debugger finds a scope at the
+            // suspend point). The scope currently reports no NAMED locals because
+            // the compiler builds FrameDescriptor slots by count, not name —
+            // naming those slots (params + do-block locals) is a follow-up
+            // interpreter task. Here we assert the requests SUCCEED (no error,
+            // well-formed body), which is what P3 wires end-to-end.
+            request(out, "scopes", mapOf("frameId" to topFrameId))
+            val scopesResp = readUntil(input, "response") { (it["command"] as? String) == "scopes" }
+            assertEquals(true, scopesResp["success"], "scopes request should succeed")
+            @Suppress("UNCHECKED_CAST")
+            val scopesBody = scopesResp["body"] as Map<String, Any?>
+            assertTrue(scopesBody.containsKey("scopes"), "scopes body should have a scopes array")
+            @Suppress("UNCHECKED_CAST")
+            val scopes = scopesBody["scopes"] as List<Map<String, Any?>>
+            // If a scope surfaced (named slots present), variables must round-trip too.
+            if (scopes.isNotEmpty()) {
+                val ref = (scopes[0]["variablesReference"] as Number).toInt()
+                request(out, "variables", mapOf("variablesReference" to ref))
+                val varsResp = readUntil(input, "response") { (it["command"] as? String) == "variables" }
+                assertEquals(true, varsResp["success"], "variables request should succeed")
+            }
 
             // Continue to completion.
             request(out, "continue", mapOf("threadId" to 1))

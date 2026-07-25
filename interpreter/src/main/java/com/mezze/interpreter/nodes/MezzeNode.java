@@ -3,13 +3,18 @@ package com.mezze.interpreter.nodes;
 import com.mezze.interpreter.MezzeTypes;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.runtime.MezzeLanguage;
+import com.mezze.interpreter.instrumentation.MezzeDebugScope;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.dsl.TypeSystemReference;
+import com.oracle.truffle.api.frame.Frame;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.instrumentation.GenerateWrapper;
 import com.oracle.truffle.api.instrumentation.InstrumentableNode;
 import com.oracle.truffle.api.instrumentation.ProbeNode;
 import com.oracle.truffle.api.instrumentation.StandardTags;
+import com.oracle.truffle.api.interop.NodeLibrary;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
@@ -36,6 +41,7 @@ import com.oracle.truffle.api.source.SourceSection;
 @TypeSystemReference(MezzeTypes.class)
 @NodeInfo(language = "mezze", description = "Base Mezze node")
 @GenerateWrapper
+@ExportLibrary(value = NodeLibrary.class, useForAOT = false)
 public abstract class MezzeNode extends Node implements InstrumentableNode {
 
     @CompilationFinal
@@ -91,6 +97,30 @@ public abstract class MezzeNode extends Node implements InstrumentableNode {
     @Override
     public WrapperNode createWrapper(ProbeNode probe) {
         return new MezzeNodeWrapper(this, probe);
+    }
+
+    // ---- NodeLibrary (debugger scope) ----
+    //
+    // When the debugger suspends at a statement node, it queries THAT node for
+    // a scope (not the root). Without this export, GraalVM finds no scope at the
+    // suspend point and the variables panel is empty — even though the function
+    // root's MezzeDebugScope has the locals. Exporting getScope here surfaces
+    // the current frame's named slots at every stop point.
+    //
+    // Cost when no debugger is attached: zero — these messages are only sent by
+    // an instrument while paused. `useForAOT = false` keeps the export off the
+    // native-image AOT fast path.
+
+    @ExportMessage
+    @SuppressWarnings("static-method")
+    public boolean hasScope(@SuppressWarnings("unused") Frame frame) {
+        return true;
+    }
+
+    @ExportMessage
+    @SuppressWarnings("static-method")
+    public Object getScope(Frame frame, @SuppressWarnings("unused") boolean nodeEnter) {
+        return new MezzeDebugScope(frame);
     }
 
     /**

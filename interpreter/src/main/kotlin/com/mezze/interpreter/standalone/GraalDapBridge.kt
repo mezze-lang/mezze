@@ -55,9 +55,18 @@ class GraalDapBridge(
      */
     @Volatile private var snapshot: SuspendSnapshot? = null
 
-    /** A per-suspension, thread-safe view of the stack + scopes + variables. */
+    /**
+     * A per-suspension, thread-safe view of the stack + scopes + variables,
+     * captured on the eval thread. `varsByRef` maps a DAP `variablesReference`
+     * to the flat list of variables under it (a scope or a nested value's
+     * properties) so `variables` requests answer from the snapshot.
+     */
     private class SuspendSnapshot(
         val frames: List<FrameSnapshot>,
+        /** frameId → its scopes (each with a variablesReference). */
+        val scopesByFrame: Map<Int, List<ScopeSnapshot>>,
+        /** variablesReference → the variables it contains. */
+        val varsByRef: Map<Int, List<VarSnapshot>>,
     )
     private class FrameSnapshot(
         val id: Int,
@@ -65,6 +74,16 @@ class GraalDapBridge(
         val line: Int,
         val column: Int,
         val sourcePath: String?,
+    )
+    private class ScopeSnapshot(
+        val name: String,
+        val variablesReference: Int,
+    )
+    private class VarSnapshot(
+        val name: String,
+        val value: String,
+        /** 0 = leaf; else a variablesReference into `varsByRef` for expansion. */
+        val variablesReference: Int,
     )
 
     /** Handoff of the next step command from the DAP thread to the eval thread. */
@@ -124,23 +143,93 @@ class GraalDapBridge(
         snapshot = null
     }
 
-    /** Capture a thread-safe view of the suspended stack (on the eval thread). */
+    /**
+     * Capture a thread-safe view of the suspended stack + scopes + variables ON
+     * THE EVAL THREAD. Assigns `variablesReference` handles: each scope gets
+     * one; each expandable value (record / list / object with properties) gets
+     * one so the client can drill in. Values are rendered via
+     * `DebugValue.toDisplayString()`. Depth is bounded so a cyclic/huge object
+     * graph can't blow up capture.
+     */
     private fun captureSnapshot(event: SuspendedEvent): SuspendSnapshot {
         val frames = mutableListOf<FrameSnapshot>()
-        var id = 0
+        val scopesByFrame = LinkedHashMap<Int, List<ScopeSnapshot>>()
+        val varsByRef = LinkedHashMap<Int, List<VarSnapshot>>()
+        var nextRef = 1
+
+        var frameId = 0
         for (frame in event.stackFrames) {
             val sec = frame.sourceSection
-            val name = try { frame.name ?: "<anonymous>" } catch (e: Exception) { "<frame>" }
+            val fname = try { frame.name ?: "<anonymous>" } catch (e: Exception) { "<frame>" }
             frames.add(FrameSnapshot(
-                id = id,
-                name = name,
+                id = frameId,
+                name = fname,
                 line = sec?.startLine ?: 0,
                 column = sec?.startColumn ?: 0,
                 sourcePath = sec?.source?.path,
             ))
-            id++
+
+            // Walk the scope chain for this frame (innermost → outermost). We
+            // fold arguments + declared values of each Truffle scope into one
+            // DAP "Locals" scope for the top scope, and label parents by name.
+            val frameScopes = mutableListOf<ScopeSnapshot>()
+            try {
+                var scope = frame.scope
+                var depth = 0
+                while (scope != null && depth < 8) {
+                    val vars = mutableListOf<VarSnapshot>()
+                    fun addValue(dv: com.oracle.truffle.api.debug.DebugValue) {
+                        if (!dv.isReadable) return
+                        val name = dv.name ?: return
+                        val (display, childRef) = renderValue(dv, varsByRef, { nextRef++ }, 0)
+                        vars.add(VarSnapshot(name, display, childRef))
+                    }
+                    try { scope.arguments?.forEach(::addValue) } catch (_: Exception) {}
+                    try { scope.declaredValues?.forEach(::addValue) } catch (_: Exception) {}
+                    if (vars.isNotEmpty()) {
+                        val ref = nextRef++
+                        varsByRef[ref] = vars
+                        val scopeName = if (depth == 0) "Locals" else (scope.name ?: "Scope")
+                        frameScopes.add(ScopeSnapshot(scopeName, ref))
+                    }
+                    scope = try { scope.parent } catch (e: Exception) { null }
+                    depth++
+                }
+            } catch (e: Exception) {
+                log("[dap] scope capture failed for frame $frameId: ${e.message}")
+            }
+            scopesByFrame[frameId] = frameScopes
+            frameId++
         }
-        return SuspendSnapshot(frames)
+        return SuspendSnapshot(frames, scopesByFrame, varsByRef)
+    }
+
+    /**
+     * Render a DebugValue to a (displayString, childRef) pair. If the value has
+     * properties (a record/object), assign a fresh ref and recursively capture
+     * its children into [varsByRef] (depth-bounded). Leaves get childRef 0.
+     */
+    private fun renderValue(
+        dv: com.oracle.truffle.api.debug.DebugValue,
+        varsByRef: MutableMap<Int, List<VarSnapshot>>,
+        freshRef: () -> Int,
+        depth: Int,
+    ): Pair<String, Int> {
+        val display = try { dv.toDisplayString() } catch (e: Exception) { "<error>" }
+        if (depth >= 4) return display to 0
+        val props: Collection<com.oracle.truffle.api.debug.DebugValue>? = try {
+            if (dv.isReadable && dv.properties != null) dv.properties else null
+        } catch (e: Exception) { null }
+        if (props.isNullOrEmpty()) return display to 0
+        val ref = freshRef()
+        val children = props.mapNotNull { p ->
+            if (!p.isReadable) return@mapNotNull null
+            val pname = p.name ?: return@mapNotNull null
+            val (pdisp, pref) = renderValue(p, varsByRef, freshRef, depth + 1)
+            VarSnapshot(pname, pdisp, pref)
+        }
+        varsByRef[ref] = children
+        return display to ref
     }
 
     // ─── DapDebuggerBridge ───────────────────────────────────────────────
@@ -193,12 +282,29 @@ class GraalDapBridge(
     }
 
     override fun scopes(args: Map<String, Any?>): Map<String, Any?> {
-        // Phase 3 fills this in (frame.getScope chain). Handshake-safe stub.
-        return mapOf("scopes" to emptyList<Any>())
+        val snap = snapshot ?: return mapOf("scopes" to emptyList<Any>())
+        val frameId = (args["frameId"] as? Number)?.toInt() ?: 0
+        val scopes = (snap.scopesByFrame[frameId] ?: emptyList()).map { s ->
+            mapOf(
+                "name" to s.name,
+                "variablesReference" to s.variablesReference,
+                "expensive" to false,
+            )
+        }
+        return mapOf("scopes" to scopes)
     }
 
     override fun variables(args: Map<String, Any?>): Map<String, Any?> {
-        return mapOf("variables" to emptyList<Any>())
+        val snap = snapshot ?: return mapOf("variables" to emptyList<Any>())
+        val ref = (args["variablesReference"] as? Number)?.toInt() ?: return mapOf("variables" to emptyList<Any>())
+        val vars = (snap.varsByRef[ref] ?: emptyList()).map { v ->
+            mapOf(
+                "name" to v.name,
+                "value" to v.value,
+                "variablesReference" to v.variablesReference,
+            )
+        }
+        return mapOf("variables" to vars)
     }
 
     override fun evaluate(args: Map<String, Any?>): Map<String, Any?> {
