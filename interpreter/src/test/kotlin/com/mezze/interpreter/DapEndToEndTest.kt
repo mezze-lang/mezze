@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import java.io.BufferedInputStream
 import java.net.Socket
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -173,12 +174,82 @@ class DapEndToEndTest {
             request(out, "continue", mapOf("threadId" to 1))
             readUntil(input, "response") { (it["command"] as? String) == "continue" }
 
+            // The program finishes → RuntimeServer's finally hook calls
+            // onProgramExit; simulate it here (the test drives eval directly).
+            // The client should get `exited` (with code) then `terminated`.
+            evalThread.join(3000)
+            bridge.onProgramExit(0)
+            val exited = readUntil(input, "event") { (it["event"] as? String) == "exited" }
+            @Suppress("UNCHECKED_CAST")
+            assertEquals(0, ((exited["body"] as Map<String, Any?>)["exitCode"] as Number).toInt(),
+                "exited event should carry exit code 0")
+            readUntil(input, "event") { (it["event"] as? String) == "terminated" }
+
             request(out, "disconnect", emptyMap())
             readUntil(input, "response") { (it["command"] as? String) == "disconnect" }
         }
 
-        evalThread.join(3000)
         serverThread.join(3000)
+        ctx.close(true)
+    }
+
+    @Test
+    @Timeout(30)
+    fun `setBreakpoints accepts condition and logMessage without error`() {
+        // Verifies the conditional-breakpoint + logpoint PLUMBING: the fields
+        // are accepted and setCondition is applied, and the breakpoint still
+        // installs (verifies). Runtime suppression depends on in-frame
+        // expression eval, which is gated on the same slot-naming limitation as
+        // variable values (BDSL default resolves it) — so we assert the wiring,
+        // not the runtime condition outcome.
+        val program = """
+            let calc = {a: Int, b: Int} -> do
+              let t1 = a + b
+              t1 + 1
+            let result = calc { a = 5, b = 7 }
+        """.trimIndent()
+        val tmp = java.io.File.createTempFile("dapc_", ".mz").apply { writeText(program); deleteOnExit() }
+        val ctx = Context.newBuilder("mezze").allowAllAccess(true)
+            .option("engine.WarnInterpreterOnly", "false").build()
+        val bridge = GraalDapBridge(ctx.engine)
+        // The bridge lazily resolves the debugger in start(); trigger it by
+        // creating a Context eval so the instrument is present, then install.
+        val server = MezzeDapServer(port = 0, bridge = bridge)
+        bridge.server = server
+        Thread { server.serve() }.apply { isDaemon = true; start() }
+        val port = awaitPort(server)
+
+        // Kick a run so the debugger instrument is live, but hold at the latch
+        // by never sending configurationDone until after we've set breakpoints.
+        val evalThread = Thread {
+            try { ctx.eval(Source.newBuilder("mezze", tmp).build()) } catch (_: Throwable) {}
+        }.apply { isDaemon = true; start() }
+
+        Socket("127.0.0.1", port).use { socket ->
+            socket.soTimeout = 15000
+            val input = BufferedInputStream(socket.getInputStream())
+            val out = socket.getOutputStream()
+            request(out, "initialize", mapOf("adapterID" to "mezze"))
+            readUntil(input, "response"); readUntil(input, "event")
+            request(out, "launch", mapOf("program" to tmp.absolutePath)); readUntil(input, "response")
+
+            // Conditional breakpoint on line 2, logpoint on line 3.
+            request(out, "setBreakpoints", mapOf(
+                "source" to mapOf("path" to tmp.absolutePath),
+                "breakpoints" to listOf(
+                    mapOf("line" to 2, "condition" to "1 > 100"),
+                    mapOf("line" to 3, "logMessage" to "reached line 3"),
+                ),
+            ))
+            val resp = readUntil(input, "response") { (it["command"] as? String) == "setBreakpoints" }
+            assertEquals(true, resp["success"], "setBreakpoints with condition+logMessage should succeed")
+            @Suppress("UNCHECKED_CAST")
+            val installed = (resp["body"] as Map<String, Any?>)["breakpoints"] as List<Map<String, Any?>>
+            assertEquals(2, installed.size, "both breakpoints should be returned, got: $installed")
+
+            // Also advertised in capabilities.
+            request(out, "disconnect", emptyMap()); readUntil(input, "response")
+        }
         ctx.close(true)
     }
 

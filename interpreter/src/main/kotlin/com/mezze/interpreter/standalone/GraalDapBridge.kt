@@ -114,6 +114,13 @@ class GraalDapBridge(
     /** If true, suspend on the first statement (stopOnEntry). */
     @Volatile var stopOnEntry: Boolean = false
 
+    /**
+     * Logpoints: line → message template. A logpoint breakpoint doesn't stop;
+     * on hit we emit the (interpolated) message as an `output` event and
+     * auto-continue. Keyed by line — good enough for one source at a time.
+     */
+    private val logpointsByLine = java.util.concurrent.ConcurrentHashMap<Int, String>()
+
     private var started = false
 
     /** Resolve the debugger instrument, retrying briefly if the Context that
@@ -146,11 +153,21 @@ class GraalDapBridge(
     }
 
     private fun onSuspend(event: SuspendedEvent) {
+        val line = event.sourceSection?.startLine ?: -1
+        // Logpoint: emit the (interpolated) message and continue WITHOUT
+        // stopping. `{expr}` segments are evaluated in the top frame.
+        val logTemplate = if (event.breakpoints.isNotEmpty()) logpointsByLine[line] else null
+        if (logTemplate != null) {
+            val msg = interpolateLog(logTemplate, event)
+            server?.sendEvent("output", mapOf("category" to "console", "output" to msg + "\n"))
+            event.prepareContinue()
+            return
+        }
+
         currentEvent.set(event)
         // Snapshot the stack ON THIS (eval) thread — the DAP thread can't touch
         // the live event's frames.
         snapshot = captureSnapshot(event)
-        val line = event.sourceSection?.startLine ?: -1
         log("[dap] suspended at line $line")
         // Reason: entry vs breakpoint vs step. Good enough: report "breakpoint"
         // when a breakpoint matched, else "step"/"entry".
@@ -195,6 +212,24 @@ class GraalDapBridge(
         }
         currentEvent.set(null)
         snapshot = null
+    }
+
+    /**
+     * Interpolate a logpoint message: `{expr}` segments are evaluated in the
+     * top frame (via frame.eval — safe here, we're on the eval thread inside
+     * onSuspend) and substituted; other text is literal.
+     */
+    private fun interpolateLog(template: String, event: SuspendedEvent): String {
+        val re = Regex("""\{([^}]*)\}""")
+        return re.replace(template) { m ->
+            val expr = m.groupValues[1].trim()
+            if (expr.isEmpty()) return@replace ""
+            try {
+                event.topStackFrame?.eval(expr)?.toDisplayString() ?: ""
+            } catch (e: Exception) {
+                "{$expr}"  // leave the source visible if it can't be evaluated
+            }
+        }
     }
 
     /**
@@ -304,11 +339,21 @@ class GraalDapBridge(
         // WON'T match and the breakpoint never resolves. canonicalFile fixes
         // both the symlink and the authority-slash form.
         val uri = try { File(path).canonicalFile.toURI() } catch (e: Exception) { File(path).toURI() }
+        // Reset logpoints for this source (setBreakpoints is authoritative).
+        logpointsByLine.clear()
         val results = bps.map { bp ->
             val line = (bp["line"] as? Number)?.toInt() ?: return@map mapOf("verified" to false)
+            val condition = (bp["condition"] as? String)?.takeIf { it.isNotBlank() }
+            val logMessage = (bp["logMessage"] as? String)?.takeIf { it.isNotBlank() }
             try {
                 val breakpoint = Breakpoint.newBuilder(uri).lineIs(line).build()
+                // Conditional breakpoint: a Mezze expression evaluated in the
+                // frame; the debugger only stops when it's truthy.
+                if (condition != null) breakpoint.setCondition(condition)
                 session.install(breakpoint)
+                // Logpoint: record the template; onSuspend emits `output` +
+                // auto-continues instead of stopping.
+                if (logMessage != null) logpointsByLine[line] = logMessage
                 mapOf("verified" to breakpoint.isResolved, "line" to line)
             } catch (e: Exception) {
                 log("[dap] setBreakpoint line $line failed: ${e.message}")
@@ -392,5 +437,21 @@ class GraalDapBridge(
             try { cmdQueue.put(ParkCommand.Step(DapDebuggerBridge.StepKind.CONTINUE)) } catch (_: Exception) {}
         }
         try { session?.close() } catch (_: Exception) {}
+    }
+
+    /** Program finished — notify the client so VS Code closes the session. */
+    fun onProgramExit(exitCode: Int) {
+        server?.sendEvent("exited", mapOf("exitCode" to exitCode))
+        server?.sendEvent("terminated", null)
+        try { session?.close() } catch (_: Exception) {}
+    }
+
+    /**
+     * Forward one chunk of program output to the DAP client's Debug Console.
+     * [category] is "stdout" or "stderr". Called from the wire-output tee in
+     * RuntimeServer so `println` etc. show up in VS Code while debugging.
+     */
+    fun onProgramOutput(text: String, category: String) {
+        server?.sendEvent("output", mapOf("category" to category, "output" to text))
     }
 }

@@ -147,6 +147,8 @@ class MezzeDapServer(
         "supportsConfigurationDoneRequest" to true,
         "supportsEvaluateForHovers" to true,
         "supportsTerminateRequest" to true,
+        "supportsConditionalBreakpoints" to true,
+        "supportsLogPoints" to true,
         "supportsSingleThreadExecutionRequests" to false,
     )
 

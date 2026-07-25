@@ -124,8 +124,14 @@ object RuntimeServer {
         // Mezze's println native writes to System.out directly (not via
         // Truffle Context.out), so redirecting System.out is required to
         // capture user output into the wire.
-        val wireOut = PrintStream(WireFrameOutputStream(MessageType.STDOUT_DATA, runIdCarrier, ::send), true)
-        val wireErr = PrintStream(WireFrameOutputStream(MessageType.STDERR_DATA, runIdCarrier, ::send), true)
+        // When --dap is active, we also tee user output to the DAP client so it
+        // shows in VS Code's Debug Console. `dapOutputSink` is set once the DAP
+        // bridge exists (below); a no-op until then and when not debugging.
+        val dapOutputSink = java.util.concurrent.atomic.AtomicReference<((String, String) -> Unit)?>(null)
+        val wireOut = PrintStream(DapTeeOutputStream(
+            WireFrameOutputStream(MessageType.STDOUT_DATA, runIdCarrier, ::send), "stdout", dapOutputSink), true)
+        val wireErr = PrintStream(DapTeeOutputStream(
+            WireFrameOutputStream(MessageType.STDERR_DATA, runIdCarrier, ::send), "stderr", dapOutputSink), true)
 
         val jitEnabled = System.getenv("MEZZE_JIT")?.let { it == "1" || it.equals("true", ignoreCase = true) } ?: false
 
@@ -242,6 +248,8 @@ object RuntimeServer {
             bridge.server = dapServer
             state.dapBridge = bridge
             state.dapAttachLatch = attached
+            // Tee program output to the Debug Console.
+            dapOutputSink.set { text, category -> bridge.onProgramOutput(text, category) }
             Thread({ try { dapServer.serve() } catch (_: Exception) {} }, "mezze-dap")
                 .apply { isDaemon = true; start() }
             originalStderr.println(
@@ -614,11 +622,13 @@ object RuntimeServer {
             }
         }
 
+        var dapExitCode = 0
         try {
             state.context.eval(source)
             sendExited(send, state, code = 0, reason = "normal", detail = null)
         } catch (e: PolyglotException) {
             if (e.isExit) {
+                dapExitCode = e.exitStatus
                 sendExited(send, state, code = e.exitStatus, reason = "exit_called", detail = null)
             } else if (e.isCancelled || e.isInterrupted) {
                 // Distinguish SIGTERM (143) from SIGINT/Ctrl-C (130) so
@@ -635,15 +645,22 @@ object RuntimeServer {
                     null -> 130 to "interrupted"
                     else -> (128 + signumOf(sig)) to "terminated"
                 }
+                dapExitCode = code
                 sendExited(send, state, code = code, reason = reason, detail = null)
             } else {
+                dapExitCode = 1
                 sendExited(send, state, code = 1, reason = "error", detail = exitDetailFor(e))
             }
         } catch (e: Exception) {
+            dapExitCode = 1
             sendExited(send, state, code = 1, reason = "error", detail = ExitDetail(
                 message = "${e.javaClass.simpleName}: ${e.message ?: "no message"}"
             ))
         } finally {
+            // DAP: tell the client the debuggee finished so VS Code closes the
+            // session (otherwise it hangs "running"). exited carries the code;
+            // terminated ends the session.
+            state.dapBridge?.onProgramExit(dapExitCode)
             state.runEnded()
         }
     }
@@ -896,6 +913,32 @@ private class WireFrameOutputStream(
         // Don't actually close the underlying stream — RuntimeServer
         // controls its lifecycle. Flushing is a no-op (see above).
     }
+}
+
+/**
+ * Wraps a [WireFrameOutputStream]: passes every write to the wire (so the
+ * parent terminal still gets it), and — when a DAP sink is set — ALSO forwards
+ * the text to the DAP client as an `output` event (Debug Console). The sink is
+ * null unless --dap is active, so there's no cost on the normal path.
+ */
+private class DapTeeOutputStream(
+    private val delegate: OutputStream,
+    private val category: String,
+    private val sink: java.util.concurrent.atomic.AtomicReference<((String, String) -> Unit)?>,
+) : OutputStream() {
+    override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
+
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        delegate.write(b, off, len)
+        if (len > 0) {
+            sink.get()?.let { forward ->
+                try { forward(String(b, off, len, Charsets.UTF_8), category) } catch (_: Exception) {}
+            }
+        }
+    }
+
+    override fun flush() = delegate.flush()
+    override fun close() = delegate.close()
 }
 
 // ─── Dev instrumentation flags ───────────────────────────────────────
