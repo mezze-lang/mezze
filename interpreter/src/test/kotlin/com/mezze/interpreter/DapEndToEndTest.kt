@@ -253,6 +253,50 @@ class DapEndToEndTest {
         ctx.close(true)
     }
 
+    @Test
+    @Timeout(60)
+    fun `an uncaught error stops on an exception breakpoint`() {
+        // `1 / 0` throws a guest error at runtime. With an "uncaught" exception
+        // breakpoint set, the debugger stops at the raise site (reason
+        // "exception") before the error propagates out.
+        val program = "let x = 1 / 0"
+        val tmp = java.io.File.createTempFile("dape_", ".mz").apply { writeText(program); deleteOnExit() }
+        val ctx = Context.newBuilder("mezze").allowAllAccess(true)
+            .option("engine.WarnInterpreterOnly", "false").build()
+        val bridge = GraalDapBridge(ctx.engine)
+        val server = MezzeDapServer(port = 0, bridge = bridge)
+        bridge.server = server
+        Thread { server.serve() }.apply { isDaemon = true; start() }
+        val port = awaitPort(server)
+
+        val evalThread = Thread {
+            try { ctx.eval(Source.newBuilder("mezze", tmp).build()) } catch (_: Throwable) {}
+        }.apply { isDaemon = true }
+
+        Socket("127.0.0.1", port).use { socket ->
+            socket.soTimeout = 15000
+            val input = BufferedInputStream(socket.getInputStream())
+            val out = socket.getOutputStream()
+            request(out, "initialize", mapOf("adapterID" to "mezze"))
+            readUntil(input, "response"); readUntil(input, "event")
+            request(out, "launch", mapOf("program" to tmp.absolutePath)); readUntil(input, "response")
+            request(out, "setExceptionBreakpoints", mapOf("filters" to listOf("uncaught")))
+            readUntil(input, "response") { (it["command"] as? String) == "setExceptionBreakpoints" }
+            request(out, "configurationDone", emptyMap()); readUntil(input, "response")
+            evalThread.start()
+
+            val stopped = readUntil(input, "event") { (it["event"] as? String) == "stopped" }
+            @Suppress("UNCHECKED_CAST")
+            val body = stopped["body"] as Map<String, Any?>
+            assertEquals("exception", body["reason"], "should stop with reason 'exception', got: $body")
+
+            request(out, "continue", mapOf("threadId" to 1))
+            readUntil(input, "response") { (it["command"] as? String) == "continue" }
+            request(out, "disconnect", emptyMap()); readUntil(input, "response")
+        }
+        ctx.close(true)
+    }
+
     // ─── Fake DAP client helpers ─────────────────────────────────────────
 
     private fun awaitPort(server: MezzeDapServer): Int {

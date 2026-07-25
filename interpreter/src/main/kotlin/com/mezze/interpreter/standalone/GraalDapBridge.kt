@@ -121,6 +121,9 @@ class GraalDapBridge(
      */
     private val logpointsByLine = java.util.concurrent.ConcurrentHashMap<Int, String>()
 
+    /** The currently-installed exception breakpoint (replaced on each request). */
+    private var exceptionBreakpoint: Breakpoint? = null
+
     private var started = false
 
     /** Resolve the debugger instrument, retrying briefly if the Context that
@@ -169,17 +172,24 @@ class GraalDapBridge(
         // the live event's frames.
         snapshot = captureSnapshot(event)
         log("[dap] suspended at line $line")
-        // Reason: entry vs breakpoint vs step. Good enough: report "breakpoint"
-        // when a breakpoint matched, else "step"/"entry".
+        // Reason: exception (a thrown error hit an exception breakpoint) vs
+        // line breakpoint vs step.
+        val exception = try { event.exception } catch (e: Exception) { null }
         val reason = when {
+            exception != null -> "exception"
             event.breakpoints.isNotEmpty() -> "breakpoint"
             else -> "step"
         }
-        server?.sendEvent("stopped", mapOf(
+        val stoppedBody = linkedMapOf<String, Any?>(
             "reason" to reason,
             "threadId" to 1,
             "allThreadsStopped" to true,
-        ))
+        )
+        if (exception != null) {
+            stoppedBody["description"] = "Paused on exception"
+            stoppedBody["text"] = try { exception.message ?: exception.toString() } catch (e: Exception) { "error" }
+        }
+        server?.sendEvent("stopped", stoppedBody)
         // Park until the DAP thread sends a Step command. Service Eval tasks
         // in the meantime (they must run on this thread — frames are
         // thread-bound). Loop exits only on a Step.
@@ -361,6 +371,27 @@ class GraalDapBridge(
             }
         }
         return mapOf("breakpoints" to results)
+    }
+
+    override fun setExceptionBreakpoints(args: Map<String, Any?>) {
+        val session = this.session ?: run { start(); this.session!! }
+        @Suppress("UNCHECKED_CAST")
+        val filters = (args["filters"] as? List<String>) ?: emptyList()
+        // Remove any previously-installed exception breakpoint (setExceptionBreakpoints
+        // is authoritative — replaces the whole set each call).
+        exceptionBreakpoint?.let { try { it.dispose() } catch (_: Exception) {} }
+        exceptionBreakpoint = null
+        if (filters.isEmpty()) return
+        val caught = filters.contains("all")
+        val uncaught = filters.contains("uncaught") || filters.contains("all")
+        try {
+            val bp = Breakpoint.newExceptionBuilder(caught, uncaught).build()
+            session.install(bp)
+            exceptionBreakpoint = bp
+            log("[dap] exception breakpoints: caught=$caught uncaught=$uncaught")
+        } catch (e: Exception) {
+            log("[dap] setExceptionBreakpoints failed: ${e.message}")
+        }
     }
 
     override fun stackTrace(): Map<String, Any?> {

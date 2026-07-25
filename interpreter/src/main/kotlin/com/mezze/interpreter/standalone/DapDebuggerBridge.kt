@@ -25,6 +25,13 @@ interface DapDebuggerBridge {
      */
     fun setBreakpoints(args: Map<String, Any?>): Map<String, Any?>
 
+    /**
+     * `setExceptionBreakpoints`: install/replace exception breakpoints from the
+     * `filters` list (a subset of the advertised filters: "uncaught", "all").
+     * Break at the raise site of a matching guest error.
+     */
+    fun setExceptionBreakpoints(args: Map<String, Any?>)
+
     /** `stackTrace`: `{ stackFrames: [{ id, name, line, column, source }], totalFrames }`. */
     fun stackTrace(): Map<String, Any?>
 

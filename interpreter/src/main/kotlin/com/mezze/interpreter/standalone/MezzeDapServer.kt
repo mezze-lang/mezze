@@ -112,6 +112,10 @@ class MezzeDapServer(
             "setBreakpoints" -> {
                 respond(command, reqSeq, handleSetBreakpoints(args))
             }
+            "setExceptionBreakpoints" -> {
+                bridge?.setExceptionBreakpoints(args)
+                respond(command, reqSeq, null)
+            }
             "threads" -> {
                 // One synthetic thread; Mezze fibers are a follow-up.
                 respond(command, reqSeq, mapOf(
@@ -150,6 +154,12 @@ class MezzeDapServer(
         "supportsConditionalBreakpoints" to true,
         "supportsLogPoints" to true,
         "supportsSingleThreadExecutionRequests" to false,
+        // Exception breakpoints: the client can toggle "break on uncaught" and
+        // "break on all thrown". Mezze failures surface here as guest exceptions.
+        "exceptionBreakpointFilters" to listOf(
+            mapOf("filter" to "uncaught", "label" to "Uncaught Errors", "default" to true),
+            mapOf("filter" to "all", "label" to "All Thrown Errors", "default" to false),
+        ),
     )
 
     private fun handleSetBreakpoints(args: Map<String, Any?>): Map<String, Any?> {
