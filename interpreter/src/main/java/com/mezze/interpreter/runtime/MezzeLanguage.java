@@ -1,5 +1,6 @@
 package com.mezze.interpreter.runtime;
 
+import com.mezze.interpreter.instrumentation.FrameSlotResolver;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeUnit;
 import com.mezze.language.truffleir.FunctionIR;
@@ -9,6 +10,7 @@ import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.TruffleLanguage;
 import com.oracle.truffle.api.instrumentation.ProvidedTags;
 import com.oracle.truffle.api.instrumentation.StandardTags;
+import com.oracle.truffle.api.nodes.ExecutableNode;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.source.Source;
 
@@ -267,6 +269,40 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     protected void initializeMultipleContexts() {
         // Called by Truffle when SHARED policy is active.
         // Our caches are already thread-safe ConcurrentHashMaps — nothing extra needed.
+    }
+
+    /**
+     * Inline eval in a suspended frame — the debugger's watch / conditional
+     * breakpoint / logpoint path (DebugStackFrame.eval → parse(InlineParsingRequest)).
+     * The regular parse() compiles a whole standalone module and can't see the
+     * frame's locals, so `a` there is "Undefined variable". Here we resolve the
+     * expression against the FRAME'S named slots.
+     *
+     * We handle the expressions watch/conditions actually use: a bare identifier
+     * (`a`), and a binary form `<lhs> <op> <rhs>` where each side is an
+     * identifier or an integer literal, for the comparison + arithmetic ops.
+     * Returning null (unrecognized shape) falls through to the module parse
+     * (which still handles literals + globals), so nothing regresses.
+     */
+    @Override
+    protected ExecutableNode parse(InlineParsingRequest request) throws Exception {
+        String expr = request.getSource().getCharacters().toString().trim();
+        FrameSlotResolver.Expr parsed = FrameSlotResolver.parse(expr);
+        if (parsed == null) return null;
+        return new FrameEvalNode(this, parsed);
+    }
+
+    /** Read locals from the frame + evaluate a small watch/condition expr. */
+    private static final class FrameEvalNode extends ExecutableNode {
+        private final FrameSlotResolver.Expr expr;
+        FrameEvalNode(MezzeLanguage lang, FrameSlotResolver.Expr expr) {
+            super(lang);
+            this.expr = expr;
+        }
+        @Override
+        public Object execute(com.oracle.truffle.api.frame.VirtualFrame frame) {
+            return FrameSlotResolver.evaluate(expr, frame);
+        }
     }
 
     @Override

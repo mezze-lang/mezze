@@ -140,18 +140,23 @@ class DapEndToEndTest {
             assertTrue(a != null, "expected local `a` in scope, got: ${vars.map { it["name"] }}")
             assertEquals("5", a!!["value"], "param a should be 5 at line 2, got: ${a["value"]}")
 
-            // evaluate a watch expression while paused (frame.eval on the eval
-            // thread via the park command queue). NOTE: inline eval compiles the
-            // expression as a fresh module, so it sees globals but NOT the
-            // frame's LOCALS yet (making inline eval frame-scope-aware is a
-            // separate follow-up). Variable INSPECTION (above) fully works; here
-            // we assert the evaluate round-trip succeeds and returns a result.
-            request(out, "evaluate", mapOf("expression" to "1 + 1", "context" to "watch"))
+            // evaluate a watch expression referencing a LOCAL while paused — the
+            // inline-eval override resolves `a` against the frame's named slots,
+            // so watch now reads locals (not just globals/literals).
+            request(out, "evaluate", mapOf("expression" to "a", "context" to "watch"))
             val evalResp = readUntil(input, "response") { (it["command"] as? String) == "evaluate" }
             assertEquals(true, evalResp["success"], "evaluate request should succeed")
             @Suppress("UNCHECKED_CAST")
             val evalResult = (evalResp["body"] as Map<String, Any?>)["result"] as? String
-            assertNotNull(evalResult, "watch evaluate should return a result string")
+            assertEquals("5", evalResult, "watch `a` should read the local as 5, got: $evalResult")
+
+            // arithmetic watch over locals: `a + b` where a=5, b=7 → 12 (both
+            // params are bound at the line-2 breakpoint).
+            request(out, "evaluate", mapOf("expression" to "a + b", "context" to "watch"))
+            val evalResp2 = readUntil(input, "response") { (it["command"] as? String) == "evaluate" }
+            @Suppress("UNCHECKED_CAST")
+            val evalResult2 = (evalResp2["body"] as Map<String, Any?>)["result"] as? String
+            assertEquals("12", evalResult2, "watch `a + b` should be 12, got: $evalResult2")
 
             // step over (`next`) → the debugger advances and re-suspends.
             request(out, "next", mapOf("threadId" to 1))
@@ -186,13 +191,10 @@ class DapEndToEndTest {
 
     @Test
     @Timeout(30)
-    fun `setBreakpoints accepts condition and logMessage without error`() {
-        // Verifies the conditional-breakpoint + logpoint PLUMBING: the fields
-        // are accepted and setCondition is applied, and the breakpoint still
-        // installs (verifies). Runtime suppression depends on in-frame
-        // expression eval, which is gated on the same slot-naming limitation as
-        // variable values (BDSL default resolves it) — so we assert the wiring,
-        // not the runtime condition outcome.
+    fun `a conditional breakpoint over a local suppresses the stop when false`() {
+        // Break on line 2 only when `a > 100`. `a` is 5, and the condition now
+        // resolves the LOCAL (via the inline-eval override), so it's false — the
+        // program runs to completion with no `stopped` event.
         val program = """
             let calc = {a: Int, b: Int} -> do
               let t1 = a + b
@@ -203,18 +205,15 @@ class DapEndToEndTest {
         val ctx = Context.newBuilder("mezze").allowAllAccess(true)
             .option("engine.WarnInterpreterOnly", "false").build()
         val bridge = GraalDapBridge(ctx.engine)
-        // The bridge lazily resolves the debugger in start(); trigger it by
-        // creating a Context eval so the instrument is present, then install.
         val server = MezzeDapServer(port = 0, bridge = bridge)
         bridge.server = server
         Thread { server.serve() }.apply { isDaemon = true; start() }
         val port = awaitPort(server)
 
-        // Kick a run so the debugger instrument is live, but hold at the latch
-        // by never sending configurationDone until after we've set breakpoints.
+        val done = java.util.concurrent.CountDownLatch(1)
         val evalThread = Thread {
-            try { ctx.eval(Source.newBuilder("mezze", tmp).build()) } catch (_: Throwable) {}
-        }.apply { isDaemon = true; start() }
+            try { ctx.eval(Source.newBuilder("mezze", tmp).build()) } catch (_: Throwable) {} finally { done.countDown() }
+        }.apply { isDaemon = true }
 
         Socket("127.0.0.1", port).use { socket ->
             socket.soTimeout = 15000
@@ -224,21 +223,18 @@ class DapEndToEndTest {
             readUntil(input, "response"); readUntil(input, "event")
             request(out, "launch", mapOf("program" to tmp.absolutePath)); readUntil(input, "response")
 
-            // Conditional breakpoint on line 2, logpoint on line 3.
             request(out, "setBreakpoints", mapOf(
                 "source" to mapOf("path" to tmp.absolutePath),
-                "breakpoints" to listOf(
-                    mapOf("line" to 2, "condition" to "1 > 100"),
-                    mapOf("line" to 3, "logMessage" to "reached line 3"),
-                ),
+                "breakpoints" to listOf(mapOf("line" to 2, "condition" to "a > 100")),
             ))
             val resp = readUntil(input, "response") { (it["command"] as? String) == "setBreakpoints" }
-            assertEquals(true, resp["success"], "setBreakpoints with condition+logMessage should succeed")
-            @Suppress("UNCHECKED_CAST")
-            val installed = (resp["body"] as Map<String, Any?>)["breakpoints"] as List<Map<String, Any?>>
-            assertEquals(2, installed.size, "both breakpoints should be returned, got: $installed")
+            assertEquals(true, resp["success"], "setBreakpoints with a local condition should succeed")
+            request(out, "configurationDone", emptyMap()); readUntil(input, "response")
+            evalThread.start()
 
-            // Also advertised in capabilities.
+            // Condition `a > 100` is false (a=5) → program finishes, no stop.
+            assertTrue(done.await(10, TimeUnit.SECONDS),
+                "program should run to completion (local condition a>100 is false)")
             request(out, "disconnect", emptyMap()); readUntil(input, "response")
         }
         ctx.close(true)
