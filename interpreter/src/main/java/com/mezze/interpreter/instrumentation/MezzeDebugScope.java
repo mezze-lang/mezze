@@ -112,6 +112,26 @@ public final class MezzeDebugScope implements TruffleObject {
         return com.mezze.interpreter.runtime.MezzeLanguage.class;
     }
 
+    // GraalVM's DebugScope.getDeclaredValues() only enumerates members when the
+    // interop object identifies itself as a SCOPE. Without isScope()==true the
+    // debugger sees an object with members but not a scope, so the variables
+    // panel comes back empty even though getMembers() is populated. This was
+    // the real cause of the "empty locals" — NOT unnamed slots (slots are named
+    // by TruffleCompiler.buildFrameDescriptor).
+    @ExportMessage
+    boolean isScope() { return true; }
+
+    // A scope must also be a member-bearing object per the interop scope
+    // contract; hasMembers() above already returns true.
+
+    @ExportMessage
+    boolean hasScopeParent() { return false; }
+
+    @ExportMessage
+    Object getScopeParent() throws com.oracle.truffle.api.interop.UnsupportedMessageException {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create();
+    }
+
     @ExportMessage
     Object toDisplayString(boolean allowSideEffects) {
         return "Mezze scope";

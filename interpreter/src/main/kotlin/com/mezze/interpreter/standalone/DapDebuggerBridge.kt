@@ -32,6 +32,10 @@ interface DapDebuggerBridge {
      */
     fun setExceptionBreakpoints(args: Map<String, Any?>)
 
+    /** `threads`: the JVM threads seen so far (main + Async.spawn'd fibers), as
+     *  `[{ id, name }]`. Empty before anything has run. */
+    fun threads(): List<Map<String, Any?>>
+
     /** `stackTrace`: `{ stackFrames: [{ id, name, line, column, source }], totalFrames }`. */
     fun stackTrace(): Map<String, Any?>
 

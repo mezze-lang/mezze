@@ -117,10 +117,12 @@ class MezzeDapServer(
                 respond(command, reqSeq, null)
             }
             "threads" -> {
-                // One synthetic thread; Mezze fibers are a follow-up.
-                respond(command, reqSeq, mapOf(
-                    "threads" to listOf(mapOf("id" to 1, "name" to "main"))
-                ))
+                // Enumerate the JVM threads the debugger has seen (main +
+                // Async.spawn'd virtual threads). Falls back to a single
+                // synthetic thread before anything has suspended.
+                val threads = bridge?.threads()?.takeIf { it.isNotEmpty() }
+                    ?: listOf(mapOf("id" to 1, "name" to "main"))
+                respond(command, reqSeq, mapOf("threads" to threads))
             }
             "stackTrace" -> respond(command, reqSeq, bridge?.stackTrace() ?: emptyStack())
             "scopes" -> respond(command, reqSeq, bridge?.scopes(args) ?: mapOf("scopes" to emptyList<Any>()))

@@ -47,6 +47,30 @@ class GraalDapBridge(
     private var debugger: Debugger? = null
     private var session: DebuggerSession? = null
 
+    /**
+     * DAP thread registry. Mezze's `Async.spawn` runs each task on its own
+     * virtual `java.lang.Thread`, which GraalVM's debugger sees as a real
+     * thread — so we can present them as distinct DAP threads. We assign a
+     * stable DAP id per Thread (id 1 = the main/first thread) and remember the
+     * name so `threads` can enumerate them.
+     *
+     * (Pure-continuation effect fibers — EffectFiber — are NOT threads and stay
+     * invisible; that's the BDSL-gated follow-up #166.)
+     */
+    private val threadIds = java.util.concurrent.ConcurrentHashMap<Long, Int>()
+    private val threadNames = java.util.concurrent.ConcurrentHashMap<Int, String>()
+    private val nextThreadId = java.util.concurrent.atomic.AtomicInteger(1)
+
+    /** DAP thread id for a JVM thread, assigning one on first sight. */
+    private fun dapThreadId(t: Thread): Int {
+        return threadIds.computeIfAbsent(t.threadId()) {
+            val id = nextThreadId.getAndIncrement()
+            val name = if (id == 1) "main" else (t.name.ifBlank { "fiber-$id" })
+            threadNames[id] = name
+            id
+        }
+    }
+
     /** The event we're currently parked on (null when running). */
     private val currentEvent = AtomicReference<SuspendedEvent?>(null)
 
@@ -180,10 +204,14 @@ class GraalDapBridge(
             event.breakpoints.isNotEmpty() -> "breakpoint"
             else -> "step"
         }
+        // Identify which JVM thread suspended (a spawned virtual thread gets its
+        // own DAP thread id). `allThreadsStopped` = false: with single-threaded
+        // suspend, only this thread is paused; others (if any) keep running.
+        val threadId = dapThreadId(Thread.currentThread())
         val stoppedBody = linkedMapOf<String, Any?>(
             "reason" to reason,
-            "threadId" to 1,
-            "allThreadsStopped" to true,
+            "threadId" to threadId,
+            "allThreadsStopped" to false,
         )
         if (exception != null) {
             stoppedBody["description"] = "Paused on exception"
@@ -392,6 +420,13 @@ class GraalDapBridge(
         } catch (e: Exception) {
             log("[dap] setExceptionBreakpoints failed: ${e.message}")
         }
+    }
+
+    override fun threads(): List<Map<String, Any?>> {
+        // Snapshot the registry (populated as threads suspend). Always include a
+        // "main" (id 1) so `threads` is never empty once a session exists.
+        if (threadNames.isEmpty()) threadNames[1] = "main"
+        return threadNames.entries.sortedBy { it.key }.map { mapOf("id" to it.key, "name" to it.value) }
     }
 
     override fun stackTrace(): Map<String, Any?> {
