@@ -36,11 +36,15 @@ import java.util.concurrent.atomic.AtomicReference
  * event's frame APIs which GraalVM permits from another thread while suspended.
  */
 class GraalDapBridge(
-    engine: Engine,
+    private val engine: Engine,
     private val log: (String) -> Unit = {},
 ) : DapDebuggerBridge {
 
-    private val debugger: Debugger = Debugger.find(engine)
+    // Resolved lazily in start(): the "debugger" instrument may not be
+    // registered on a bare Engine until a Context has been created from it, so
+    // Debugger.find(engine) at construction can NPE. By start() the RuntimeServer
+    // has built its Context, so the instrument is present.
+    private var debugger: Debugger? = null
     private var session: DebuggerSession? = null
 
     /** The event we're currently parked on (null when running). */
@@ -112,11 +116,30 @@ class GraalDapBridge(
 
     private var started = false
 
+    /** Resolve the debugger instrument, retrying briefly if the Context that
+     *  registers it hasn't finished coming up yet. */
+    private fun resolveDebugger(): Debugger {
+        debugger?.let { return it }
+        var lastErr: Exception? = null
+        repeat(50) {
+            try {
+                val d = Debugger.find(engine)
+                debugger = d
+                return d
+            } catch (e: Exception) {
+                lastErr = e
+                Thread.sleep(20)
+            }
+        }
+        throw IllegalStateException("debugger instrument unavailable on this engine", lastErr)
+    }
+
     /** Start the debug session. Call once, before the program runs. */
     @Synchronized
     fun start() {
         if (started) return
         started = true
+        val debugger = resolveDebugger()
         session = debugger.startSession { event -> onSuspend(event) }
         if (stopOnEntry) session?.suspendNextExecution()
         log("[dap] debugger session started (stopOnEntry=$stopOnEntry)")

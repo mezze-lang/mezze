@@ -193,17 +193,13 @@ object RuntimeServer {
                 "JVM runtime (mez dev/exec on a JDK), not the AOT native binary."
             )
         }
-        if (devFlags.dap && jitCapable) {
-            // GraalVM's bundled DAP server (dap-tool). Statement/root source
-            // sections + StatementTag on Mezze's Truffle nodes make line
-            // breakpoints + stepping work through it. dap.Suspend=true suspends
-            // on first statement so a client can install breakpoints first.
-            engineBuilder.option("dap", devFlags.dapPort.toString())
-            engineBuilder.option("dap.Suspend", devFlags.dapBrk.toString())
-            originalStderr.println(
-                "[mezze] DAP server listening on port ${devFlags.dapPort} — attach a DAP client (VS Code)"
-            )
-        }
+        // NOTE: we deliberately do NOT use GraalVM's bundled dap-tool
+        // (`engineBuilder.option("dap", …)`) — it hooks the Context output
+        // stream, which IS the wire channel here, corrupting the protocol
+        // (PROTO_TOO_LARGE), and NPEs on client connect. Instead we run our own
+        // MezzeDapServer (below, after the engine is built) which drives the
+        // same GraalVM Debugger over a SEPARATE socket. See
+        // docs/lsp/dap-adapter-design.md.
         val engine = engineBuilder.build()
 
         val context = Context.newBuilder(MezzeLanguage.ID)
@@ -221,6 +217,38 @@ object RuntimeServer {
             .build()
 
         val state = ServerState(context, engine, runIdCarrier, jitEnabled)
+
+        // Hand-written DAP debugger. When --dap is set (JIT runtime only), start
+        // our MezzeDapServer on a SEPARATE socket and a GraalDapBridge that
+        // drives the GraalVM Debugger. A latch gates program execution until the
+        // client has attached + finished configuration (so breakpoints are
+        // installed first). See docs/lsp/dap-adapter-design.md.
+        if (devFlags.dap && !jitCapable) {
+            originalStderr.println(
+                "[mezze] --dap ignored — no JIT-capable runtime. Debugging needs " +
+                "the JVM runtime (mez dev/exec on a JDK), not the AOT native binary."
+            )
+        }
+        if (devFlags.dap && jitCapable) {
+            val bridge = GraalDapBridge(engine) { if (System.getenv("MEZZE_DEBUG") != null) originalStderr.println(it) }
+            bridge.stopOnEntry = devFlags.dapBrk
+            val attached = java.util.concurrent.CountDownLatch(1)
+            val dapServer = MezzeDapServer(
+                port = devFlags.dapPort,
+                onLaunch = { attached.countDown() },
+                bridge = bridge,
+                log = { if (System.getenv("MEZZE_DEBUG") != null) originalStderr.println(it) },
+            )
+            bridge.server = dapServer
+            state.dapBridge = bridge
+            state.dapAttachLatch = attached
+            Thread({ try { dapServer.serve() } catch (_: Exception) {} }, "mezze-dap")
+                .apply { isDaemon = true; start() }
+            originalStderr.println(
+                "[mezze] DAP server listening on port ${devFlags.dapPort} — attach a DAP client (VS Code)"
+            )
+        }
+
         // Diagnostics destination: silent by default, opt-in via MEZZE_DEBUG.
         // Without this, every `mez exec` prints "[RuntimeServer] handshake
         // ok ..." and "QUIT (done)" lines to the user's terminal.
@@ -576,6 +604,16 @@ object RuntimeServer {
             "__runtime_server_${runId}__.mz"
         ).buildLiteral()
 
+        // DAP: block until the debug client has attached + configured (so
+        // breakpoints are installed before anything runs), then start the debug
+        // session. `configurationDone` fires the latch via onLaunch.
+        state.dapAttachLatch?.let { latch ->
+            state.dapBridge?.let { bridge ->
+                latch.await()
+                bridge.start()
+            }
+        }
+
         try {
             state.context.eval(source)
             sendExited(send, state, code = 0, reason = "normal", detail = null)
@@ -757,6 +795,9 @@ private class ServerState(
      * Reset per-run alongside `interrupting`.
      */
     @Volatile var terminatingSignal: String? = null
+    /** DAP debugger bridge + attach latch, set when --dap is active. */
+    @Volatile var dapBridge: GraalDapBridge? = null
+    @Volatile var dapAttachLatch: java.util.concurrent.CountDownLatch? = null
     /** Wire-fed stdin buffer; reset between runs. */
     var stdinBuffer: WireStdinBuffer? = null
     /**

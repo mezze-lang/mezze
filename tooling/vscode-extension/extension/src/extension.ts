@@ -193,33 +193,23 @@ export function activate(context: vscode.ExtensionContext) {
     });
 }
 
-// ─── Debugger (DAP) — EXPERIMENTAL, currently blocked upstream ────────────
+// ─── Debugger (DAP) ──────────────────────────────────────────────────────
 //
-// The debug ENGINE works: Mezze's Truffle nodes carry the source sections +
-// StatementTag that make GraalVM's Debugger resolve + suspend on line
-// breakpoints (proven by DebuggerBreakpointTest in the interpreter suite).
+// The debug flow: on F5 we spawn `mez exec --dap=<port> <program>`. That starts
+// Mezze's HAND-WRITTEN DAP server (MezzeDapServer in the JVM RuntimeServer),
+// which drives GraalVM's Debugger over its OWN socket and blocks execution until
+// the client attaches. We point VS Code's DAP client at localhost:<port> (a
+// DebugAdapterServer descriptor). Breakpoints / stepping / stack / scopes /
+// evaluate flow through the standard DAP wire.
 //
-// The debug flow here: on F5 we spawn `mez exec --dap=<port> <program>`, which
-// asks GraalVM's bundled DAP tool to serve <port>, then point VS Code's DAP
-// client at localhost:<port> (a DebugAdapterServer descriptor).
+// We deliberately do NOT use GraalVM's bundled dap-tool — it hooks the polyglot
+// output stream, which `mez` routes through its wire protocol (native CLI ↔ JVM
+// child over stdio), corrupting the channel (PROTO_TOO_LARGE) and NPEing on
+// connect. Our server uses a separate socket and drives the Debugger API
+// directly, so the wire stdio stays clean. See docs/lsp/dap-adapter-design.md.
 //
-// KNOWN BLOCKERS (GraalVM dap-tool in the `mez` wire embedding), see
-// docs/lsp/dap-debugger-plan.md:
-//   (a) The dap-tool's ConsoleOutputListener writes to the polyglot output
-//       stream, which `mez dev`/`exec` route through the wire protocol
-//       (native CLI ↔ JVM child over stdio). A pre-attach program write NPEs
-//       inside the tool and its stack trace corrupts the wire channel
-//       (PROTO_TOO_LARGE). The tool cannot coexist with a stdio-owning wire
-//       protocol.
-//   (b) On client connect, the tool NPEs in startDebuggerSession
-//       (getPolyglotInstrument() info == null) — a GraalVM bug in this
-//       embedding.
-// A future hand-written DAP adapter that drives the Debugger API directly
-// (bypassing dap-tool + the wire protocol) is the planned fix. Until then this
-// factory is wired but will surface the tool's failure to the user.
-//
-// DAP also requires a JIT-capable JVM runtime, so it never runs on the AOT
-// native binary — `mez` prints "--dap ignored" there and we surface it.
+// DAP requires a JIT-capable JVM runtime, so it never runs on the AOT native
+// binary — `mez` prints "--dap ignored" there and we surface it.
 
 const DEFAULT_DAP_PORT = 4711;
 
