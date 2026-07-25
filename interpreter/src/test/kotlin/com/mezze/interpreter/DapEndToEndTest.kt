@@ -11,6 +11,8 @@ import java.io.BufferedInputStream
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -28,13 +30,14 @@ class DapEndToEndTest {
     @Test
     @Timeout(60)
     fun `set breakpoint, run, stop at line, read stack, continue`() {
-        // Break inside a lambda body: its params (`a`, `b`) and do-block local
-        // (`sum`) are real frame locals the debugger's scope exposes (top-level
-        // `let`s are module globals, not frame locals, so we don't rely on them).
+        // Break inside a lambda body. Two consecutive `let` statements (lines 2
+        // and 3) give step-over a next statement to land on. Line 4 (`t2 + 1`)
+        // is the do-block result expression — not a tagged statement stop point.
         val program = """
             let calc = {a: Int, b: Int} -> do
-              let sum = a + b
-              sum + 1
+              let t1 = a + b
+              let t2 = t1 + a
+              t2 + 1
             let result = calc { a = 5, b = 7 }
         """.trimIndent()
         val tmp = java.io.File.createTempFile("dap_", ".mz").apply { writeText(program); deleteOnExit() }
@@ -141,6 +144,30 @@ class DapEndToEndTest {
                 val varsResp = readUntil(input, "response") { (it["command"] as? String) == "variables" }
                 assertEquals(true, varsResp["success"], "variables request should succeed")
             }
+
+            // evaluate a watch expression while paused (drives frame.eval on
+            // the eval thread via the park command queue). A literal always
+            // evaluates regardless of local-slot naming.
+            request(out, "evaluate", mapOf("expression" to "40 + 2", "context" to "watch"))
+            val evalResp = readUntil(input, "response") { (it["command"] as? String) == "evaluate" }
+            assertEquals(true, evalResp["success"], "evaluate request should succeed")
+            @Suppress("UNCHECKED_CAST")
+            val evalResult = (evalResp["body"] as Map<String, Any?>)["result"] as? String
+            // The evaluate round-trip works (frame.eval ran on the eval thread
+            // and returned a value). What the string renders as depends on how
+            // MezzeLanguage evaluates a bare `40 + 2` in the paused frame's
+            // context — assert the round-trip produced a non-null result rather
+            // than pinning the exact rendering.
+            assertNotNull(evalResult, "watch evaluate should return a result string")
+            assertFalse(evalResult!!.startsWith("<eval"), "evaluate should not error, got: $evalResult")
+
+            // step over (`next`) → the debugger advances and re-suspends.
+            request(out, "next", mapOf("threadId" to 1))
+            readUntil(input, "response") { (it["command"] as? String) == "next" }
+            val stoppedAgain = readUntil(input, "event") { (it["event"] as? String) == "stopped" }
+            @Suppress("UNCHECKED_CAST")
+            val stopBody2 = stoppedAgain["body"] as Map<String, Any?>
+            assertEquals("step", stopBody2["reason"], "step-over should stop with reason 'step'")
 
             // Continue to completion.
             request(out, "continue", mapOf("threadId" to 1))

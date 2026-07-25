@@ -6,7 +6,6 @@ import com.oracle.truffle.api.debug.DebuggerSession
 import com.oracle.truffle.api.debug.SuspendedEvent
 import org.graalvm.polyglot.Engine
 import java.io.File
-import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -22,8 +21,9 @@ import java.util.concurrent.atomic.AtomicReference
  * invokes `onSuspend(event)` ON THAT THREAD when a breakpoint/step hits. We:
  *   1. stash the event (it's only valid inside the callback),
  *   2. send a DAP `stopped` event to the client,
- *   3. BLOCK the eval thread on a SynchronousQueue, waiting for the next step
- *      command from the DAP thread,
+ *   3. BLOCK the eval thread on a command queue, waiting for the next step
+ *      command from the DAP thread (servicing `evaluate` tasks meanwhile —
+ *      they must run on this thread too),
  *   4. when `resume(kind)` arrives from the DAP thread, apply the corresponding
  *      `prepareStep*`/`prepareContinue` on the event (still on the eval thread,
  *      via the queue handoff) and return from the callback — the program runs on.
@@ -86,8 +86,23 @@ class GraalDapBridge(
         val variablesReference: Int,
     )
 
-    /** Handoff of the next step command from the DAP thread to the eval thread. */
-    private val stepQueue = SynchronousQueue<DapDebuggerBridge.StepKind>()
+    /**
+     * Command queue from the DAP thread to the parked eval thread. While
+     * suspended, the eval thread loops on this queue: `Eval` tasks (watch /
+     * hover `evaluate`) run `frame.eval` ON the eval thread (frames are
+     * thread-bound) and signal a latch; a `Step` command breaks the loop and
+     * resumes execution. Using one queue keeps all frame access on the correct
+     * thread.
+     */
+    private val cmdQueue = java.util.concurrent.LinkedBlockingQueue<ParkCommand>()
+
+    private sealed interface ParkCommand {
+        data class Step(val kind: DapDebuggerBridge.StepKind) : ParkCommand
+        class Eval(
+            val expression: String,
+            val result: java.util.concurrent.CompletableFuture<String>,
+        ) : ParkCommand
+    }
 
     /** Set by MezzeDapServer so the bridge can push `stopped`/`continued`/`output`. */
     @Volatile var server: MezzeDapServer? = null
@@ -125,12 +140,28 @@ class GraalDapBridge(
             "threadId" to 1,
             "allThreadsStopped" to true,
         ))
-        // Park until the DAP thread hands us a step command.
-        val kind = try {
-            stepQueue.take()
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            DapDebuggerBridge.StepKind.CONTINUE
+        // Park until the DAP thread sends a Step command. Service Eval tasks
+        // in the meantime (they must run on this thread — frames are
+        // thread-bound). Loop exits only on a Step.
+        var kind = DapDebuggerBridge.StepKind.CONTINUE
+        loop@ while (true) {
+            val cmd = try {
+                cmdQueue.take()
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                break@loop
+            }
+            when (cmd) {
+                is ParkCommand.Step -> { kind = cmd.kind; break@loop }
+                is ParkCommand.Eval -> {
+                    val out = try {
+                        event.topStackFrame?.eval(cmd.expression)?.toDisplayString() ?: "<no frame>"
+                    } catch (e: Exception) {
+                        "<eval error: ${e.message}>"
+                    }
+                    cmd.result.complete(out)
+                }
+            }
         }
         // Apply the step ON THE EVAL THREAD (here, inside the callback).
         when (kind) {
@@ -308,21 +339,34 @@ class GraalDapBridge(
     }
 
     override fun evaluate(args: Map<String, Any?>): Map<String, Any?> {
-        return mapOf("result" to "", "variablesReference" to 0)
+        val expr = args["expression"] as? String ?: return mapOf("result" to "", "variablesReference" to 0)
+        // Only meaningful while suspended (watch / hover eval). Hand the
+        // expression to the parked eval thread and wait for the result.
+        if (currentEvent.get() == null) {
+            return mapOf("result" to "<not paused>", "variablesReference" to 0)
+        }
+        val future = java.util.concurrent.CompletableFuture<String>()
+        cmdQueue.put(ParkCommand.Eval(expr, future))
+        val result = try {
+            future.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            "<eval timeout>"
+        }
+        return mapOf("result" to result, "variablesReference" to 0)
     }
 
     override fun resume(kind: DapDebuggerBridge.StepKind) {
         // Hand the step to the parked eval thread. If nothing is parked (e.g. a
-        // spurious continue before any stop), this offer just no-ops.
+        // spurious continue before any stop), this just queues harmlessly.
         if (currentEvent.get() != null) {
-            stepQueue.put(kind)
+            cmdQueue.put(ParkCommand.Step(kind))
         }
     }
 
     override fun disconnect() {
         // Let the program finish: if parked, continue; then close the session.
         if (currentEvent.get() != null) {
-            try { stepQueue.put(DapDebuggerBridge.StepKind.CONTINUE) } catch (_: Exception) {}
+            try { cmdQueue.put(ParkCommand.Step(DapDebuggerBridge.StepKind.CONTINUE)) } catch (_: Exception) {}
         }
         try { session?.close() } catch (_: Exception) {}
     }
