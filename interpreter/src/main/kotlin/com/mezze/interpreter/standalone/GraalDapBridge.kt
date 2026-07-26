@@ -40,6 +40,18 @@ class GraalDapBridge(
     private val log: (String) -> Unit = {},
 ) : DapDebuggerBridge {
 
+    init {
+        // #356 — BDSL bytecode has no debugger instrumentation
+        // (getScope / StatementTag / frame-slot names). Any DAP session
+        // built through this bridge — CLI, wire-runtime, or the test
+        // harness (DapEndToEndTest) — needs BDSL off so scopes /
+        // breakpoints / stepping keep working on the AST path.
+        // Flipping in the ctor covers every entry point; EmbeddedExec /
+        // RuntimeServer still flip explicitly before Engine build, but
+        // this is the belt to their suspenders.
+        com.mezze.interpreter.runtime.MezzeLanguage.disableBdslForDebugger()
+    }
+
     // Resolved lazily in start(): the "debugger" instrument may not be
     // registered on a bare Engine until a Context has been created from it, so
     // Debugger.find(engine) at construction can NPE. By start() the RuntimeServer
