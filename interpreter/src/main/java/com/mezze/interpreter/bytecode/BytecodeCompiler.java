@@ -505,12 +505,32 @@ public final class BytecodeCompiler {
             // by-coverage matches without a wildcard until Phase 3.
             var cases = m.getCases();
             if (cases.isEmpty()) { markReject(node, "empty-cases"); return false; }
-            // Trailing case: Wildcard/Record → truly unconditional. Variant/
-            // Literal/Seq → refutable, so we emit a NonExhaustiveMatch throw
-            // as the tail. StringInterp still rejected — needs its own
+            // Determine the effective terminal case: emitMatchChain
+            // terminates at the FIRST Wildcard or Record pattern that
+            // is TRULY unconditional (no guard, no iflet bindings).
+            // A guard or iflet can fall through, so cases after remain
+            // reachable. Without this both-conditions check, `k if ...`
+            // (Wildcard-shape with guard) would eat the fallthrough
+            // case at supports-time and emit would then drop it.
+            int effectiveEnd = cases.size();
+            for (int i = 0; i < cases.size(); i++) {
+                CaseIR ci = cases.get(i);
+                PatternIR p = ci.getPattern();
+                boolean unconditional = (p instanceof PatternIR.Wildcard || p instanceof PatternIR.Record)
+                        && ci.getGuard() == null
+                        && ci.getIfLetBindings().isEmpty();
+                if (unconditional) {
+                    effectiveEnd = i + 1;
+                    break;
+                }
+            }
+            // Trailing case (of the effective, dead-code-trimmed list):
+            // Wildcard/Record → truly unconditional. Variant/Literal/Seq
+            // → refutable, so we emit a NonExhaustiveMatch throw as the
+            // tail. StringInterp still rejected — needs its own
             // fallthrough shape.
             {
-                PatternIR lastPat = cases.get(cases.size() - 1).getPattern();
+                PatternIR lastPat = cases.get(effectiveEnd - 1).getPattern();
                 if (!(lastPat instanceof PatternIR.Wildcard)
                     && !(lastPat instanceof PatternIR.Record)
                     && !(lastPat instanceof PatternIR.Variant)
@@ -520,7 +540,7 @@ public final class BytecodeCompiler {
                     return false;
                 }
             }
-            for (int i = 0; i < cases.size(); i++) {
+            for (int i = 0; i < effectiveEnd; i++) {
                 CaseIR c = cases.get(i);
                 if (c.getGuard() != null) {
                     if (!supportsNode(c.getGuard(), argCount)) return false;
@@ -540,7 +560,6 @@ public final class BytecodeCompiler {
                     }
                 }
                 PatternIR pat = c.getPattern();
-                boolean isLast = i == cases.size() - 1;
                 if (pat instanceof PatternIR.Variant v) {
                     // Supported: any number of fieldNames — each becomes
                     // a ReadFieldByName on the unwrapped payload record.
@@ -549,16 +568,20 @@ public final class BytecodeCompiler {
                 } else if (pat instanceof PatternIR.Literal lit) {
                     if (!supportsNode(lit.getValue(), argCount)) return false;
                 } else if (pat instanceof PatternIR.Record) {
-                    // Record pattern is unconditional — must be the last
-                    // case (anything after it is dead). Its fields are
-                    // extracted directly from the scrutinee via
-                    // ReadFieldByName. isOpen doesn't change semantics
-                    // (typechecker guarantees shape compatibility).
-                    if (!isLast) { markReject(node, "record-pat-not-last"); return false; }
+                    // Emit path for Record pattern ignores guard + iflet
+                    // (writes fields + emits body directly). If either
+                    // is present, reject — needs the guard/iflet-aware
+                    // emit shape used by Variant cases.
+                    if (c.getGuard() != null) { markReject(node, "record-with-guard"); return false; }
+                    if (!c.getIfLetBindings().isEmpty()) { markReject(node, "record-with-iflet"); return false; }
                 } else if (pat instanceof PatternIR.Seq) {
                     // Fine — length check + element extract, optional rest.
                 } else if (pat instanceof PatternIR.Wildcard) {
-                    if (!isLast) { markReject(node, "wildcard-not-last"); return false; }
+                    // Same guard/iflet gap as Record — emitMatchChain's
+                    // Wildcard branch emits the body directly, skipping
+                    // any guard test or iflet fallthrough.
+                    if (c.getGuard() != null) { markReject(node, "wildcard-with-guard"); return false; }
+                    if (!c.getIfLetBindings().isEmpty()) { markReject(node, "wildcard-with-iflet"); return false; }
                 } else {
                     markReject(node, "pat:" + pat.getClass().getSimpleName());
                     return false;
