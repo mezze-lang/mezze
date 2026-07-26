@@ -92,21 +92,23 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 && !"0".equals(System.getenv("MEZZE_BDSL"))
                 && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL"));
 
-    // #356 — BDSL bytecode has no debugger instrumentation (getScope /
-    // StatementTag / frame-slot names). GraalVM Debugger + MezzeDapServer only
-    // see the AST path (MezzeNode.hasScope). When DAP or Chrome Inspector is
-    // attached, force BDSL off so line breakpoints / scopes / stepping keep
-    // working. Callers (EmbeddedExec, WireRunner) flip this before building
-    // Engine when they see --dap / --inspect. Runtime cost is one volatile
-    // read per compile.
-    private static volatile boolean BDSL_DISABLED_FOR_DEBUGGER = false;
+    // #356 — When a debugger is attached (DAP, Chrome Inspector), BDSL
+    // compilation switches to BytecodeConfig.COMPLETE + source/tag/name
+    // annotations so line breakpoints, stepping, scopes, and setVariable
+    // work on BDSL-compiled functions. Off by default so the hot path
+    // stays lean (parseSources allocates per-op source-section bytes).
+    //
+    // Flipped by GraalDapBridge ctor + EmbeddedExec/RuntimeServer wire-in.
+    // BDSL still routes (unlike the previous disable-flip); the compile
+    // shape is what changes.
+    private static volatile boolean BDSL_DEBUG_INSTRUMENTATION = false;
 
-    public static void disableBdslForDebugger() {
-        BDSL_DISABLED_FOR_DEBUGGER = true;
+    public static void enableBdslDebugInstrumentation() {
+        BDSL_DEBUG_INSTRUMENTATION = true;
     }
 
-    public static boolean isBdslDisabledForDebugger() {
-        return BDSL_DISABLED_FOR_DEBUGGER;
+    public static boolean isBdslDebugInstrumentation() {
+        return BDSL_DEBUG_INSTRUMENTATION;
     }
 
     // CPS routing (Path C, docs/perf/bdsl-effects-path-c-2026-07.md) — opt-in
@@ -208,7 +210,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private com.oracle.truffle.api.nodes.RootNode compileOne(
             com.mezze.interpreter.compiler.TruffleCompiler astCompiler,
             com.mezze.language.truffleir.FunctionIR ir) {
-        if (BDSL_ENABLED && !BDSL_DISABLED_FOR_DEBUGGER) {
+        if (BDSL_ENABLED) {
             if (!isBdslSafeCallee(ir)) {
                 bdslMisses.incrementAndGet();
                 if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSAFE.incrementAndGet();
@@ -422,7 +424,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     /** Test/telemetry: how many functions hit BDSL vs fell back to AST. */
     public long getBdslHits() { return bdslHits.get(); }
     public long getBdslMisses() { return bdslMisses.get(); }
-    public boolean isBdslEnabled() { return BDSL_ENABLED && !BDSL_DISABLED_FOR_DEBUGGER; }
+    public boolean isBdslEnabled() { return BDSL_ENABLED; }
 
     /**
      * Public wrapper so Kotlin callers (PipelineRunner) can route their

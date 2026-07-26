@@ -152,11 +152,67 @@ public final class BytecodeCompiler {
     private final MezzeLanguage language;
 
     /**
+     * #356 — Source cache keyed by file path. Materialising
+     * com.oracle.truffle.api.source.Source is IO-heavy (reads the file);
+     * cache so repeated compiles of fns from the same module share one.
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, com.oracle.truffle.api.source.Source> sourceCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Resolve a Truffle Source for a FunctionIR's source file. Returns null on unreadable files. */
+    private com.oracle.truffle.api.source.Source resolveSource(String path) {
+        if (path == null || path.isEmpty()) return null;
+        var cached = sourceCache.get(path);
+        if (cached != null) return cached;
+        try {
+            var f = new java.io.File(path);
+            if (!f.exists()) return null;
+            String text = new String(java.nio.file.Files.readAllBytes(f.toPath()),
+                                     java.nio.charset.StandardCharsets.UTF_8);
+            var src = com.oracle.truffle.api.source.Source
+                    .newBuilder("mezze", text, f.getName())
+                    .uri(f.toURI())
+                    .build();
+            sourceCache.putIfAbsent(path, src);
+            return src;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Convert a {@link com.mezze.language.truffleir.SourceInfo}'s
+     * line/col range into a Truffle {@code (charIndex, length)} pair via
+     * {@code Source.createSection}. Returns null if any coordinate is
+     * out of range (avoids crashing on desugared / synthetic nodes).
+     */
+    private int[] toCharRange(com.oracle.truffle.api.source.Source source,
+                              com.mezze.language.truffleir.SourceInfo si) {
+        if (source == null || si == null) return null;
+        try {
+            var section = source.createSection(
+                    si.getStartLine(), si.getStartCol(),
+                    si.getEndLine(), si.getEndCol());
+            return new int[] { section.getCharIndex(), section.getCharLength() };
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * Cache of already-compiled callee CallTargets, keyed by hash.
      * Populated by {@link #compileWithCallees} before a caller is
      * emitted so its CallDirect2 sites can bake in the callee's target.
      */
     private final Map<Hash, CallTarget> compiledCallTargets = new HashMap<>();
+
+    /**
+     * #356 — set by {@link #compile} at the top of each fn compile.
+     * Non-null iff BDSL debug instrumentation is on AND the fn's source
+     * file could be resolved. Read by {@link #emitNode} to decide
+     * whether to emit StatementTag / SourceSection wraps.
+     */
+    private com.oracle.truffle.api.source.Source currentSource;
 
     /**
      * Optional external CallTarget resolver — used when this compiler
@@ -700,7 +756,24 @@ public final class BytecodeCompiler {
             }
         }
 
-        var nodes = MezzeBytecodeRootNodeGen.create(language, BytecodeConfig.DEFAULT, b -> {
+        // #356 — when a debugger is attached, use COMPLETE so source
+        // sections, statement tags and named locals materialize. Off by
+        // default keeps the hot path lean (no per-op source bytes).
+        final boolean debug = MezzeLanguage.isBdslDebugInstrumentation();
+        BytecodeConfig config = debug ? BytecodeConfig.COMPLETE : BytecodeConfig.DEFAULT;
+        final com.oracle.truffle.api.source.Source source =
+                debug ? resolveSource(ir.getSourceFile()) : null;
+        final int[] rootRange = (source != null)
+                ? toCharRange(source, ir.getSourceSection())
+                : null;
+        this.currentSource = source;
+        var nodes = MezzeBytecodeRootNodeGen.create(language, config, b -> {
+            if (source != null) {
+                b.beginSource(source);
+                if (rootRange != null) {
+                    b.beginSourceSection(rootRange[0], rootRange[1]);
+                }
+            }
             b.beginRoot();
 
             // Allocate a BDSL local for each IR local slot. The IR uses
@@ -708,9 +781,16 @@ public final class BytecodeCompiler {
             // with slot numbers indexing into it. Under BDSL params
             // come from LoadArgument(i) and locals from BytecodeLocal
             // objects — we translate at emit time.
+            //
+            // #356 — pass the source-level local name to createLocal so
+            // debugger scopes surface a "Locals" section with the
+            // user's names, matching the AST path
+            // (PipelineRunner.compileFromIR line 246).
             BytecodeLocal[] localMap = new BytecodeLocal[localCount];
+            java.util.List<String> localNames = ir.getLocalNames();
             for (int i = 0; i < localCount; i++) {
-                localMap[i] = b.createLocal();
+                String name = (i < localNames.size()) ? localNames.get(i) : ("l" + i);
+                localMap[i] = b.createLocal(name, null);
             }
 
             b.beginReturn();
@@ -718,6 +798,12 @@ public final class BytecodeCompiler {
             b.endReturn();
 
             b.endRoot();
+            if (source != null) {
+                if (rootRange != null) {
+                    b.endSourceSection();
+                }
+                b.endSource();
+            }
         });
         RootNode inner = nodes.getNode(0);
         if (trampoline != null) {
@@ -1030,15 +1116,25 @@ public final class BytecodeCompiler {
         }
         if (node instanceof BlockIR blk) {
             b.beginBlock();
+            final boolean debug = currentSource != null;
             for (StmtIR s : blk.getStmts()) {
                 if (s instanceof StmtIR.Let l) {
                     // A `let` in Mezze IR is a WriteLocal to the let's
                     // slot; the AST compiler models it that way too.
                     // Emit the write, discarding the pushed value
                     // isn't needed because StoreLocal already pops.
+                    //
+                    // #356 — wrap in SourceSection + StatementTag so
+                    // the debugger sees a breakpointable line boundary
+                    // pinned to the let's location.
+                    int[] range = debug ? toCharRange(currentSource, l.getSrc()) : null;
+                    if (range != null) b.beginSourceSection(range[0], range[1]);
+                    if (debug) b.beginTag(com.oracle.truffle.api.instrumentation.StandardTags.StatementTag.class);
                     b.beginStoreLocal(localMap[l.getSlot() - argCount]);
                     emitNode(l.getValue(), b, argCount, localMap);
                     b.endStoreLocal();
+                    if (debug) b.endTag(com.oracle.truffle.api.instrumentation.StandardTags.StatementTag.class);
+                    if (range != null) b.endSourceSection();
                 } else if (s instanceof StmtIR.Expr e) {
                     // Bare expression statement — evaluate for side
                     // effects, drop the result. BDSL doesn't expose an
@@ -1047,7 +1143,12 @@ public final class BytecodeCompiler {
                     // treated as a discarded expression by the DSL —
                     // its return value is popped implicitly at the
                     // next instruction.
+                    int[] range = debug ? toCharRange(currentSource, e.getSrc()) : null;
+                    if (range != null) b.beginSourceSection(range[0], range[1]);
+                    if (debug) b.beginTag(com.oracle.truffle.api.instrumentation.StandardTags.StatementTag.class);
                     emitNode(e.getNode(), b, argCount, localMap);
+                    if (debug) b.endTag(com.oracle.truffle.api.instrumentation.StandardTags.StatementTag.class);
+                    if (range != null) b.endSourceSection();
                 }
             }
             emitNode(blk.getResult(), b, argCount, localMap);

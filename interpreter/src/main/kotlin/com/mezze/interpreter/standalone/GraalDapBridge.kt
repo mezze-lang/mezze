@@ -41,15 +41,12 @@ class GraalDapBridge(
 ) : DapDebuggerBridge {
 
     init {
-        // #356 — BDSL bytecode has no debugger instrumentation
-        // (getScope / StatementTag / frame-slot names). Any DAP session
-        // built through this bridge — CLI, wire-runtime, or the test
-        // harness (DapEndToEndTest) — needs BDSL off so scopes /
-        // breakpoints / stepping keep working on the AST path.
-        // Flipping in the ctor covers every entry point; EmbeddedExec /
-        // RuntimeServer still flip explicitly before Engine build, but
-        // this is the belt to their suspenders.
-        com.mezze.interpreter.runtime.MezzeLanguage.disableBdslForDebugger()
+        // #356 — Signal to BDSL that a debugger is attached, so BDSL
+        // compile switches to BytecodeConfig.COMPLETE + source/tag/name
+        // annotations. Line breakpoints, stepping, scopes and setVariable
+        // then work on BDSL-compiled functions. BDSL still routes — the
+        // compile shape is what changes.
+        com.mezze.interpreter.runtime.MezzeLanguage.enableBdslDebugInstrumentation()
     }
 
     // Resolved lazily in start(): the "debugger" instrument may not be

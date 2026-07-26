@@ -244,8 +244,8 @@ object EmbeddedExec {
             if (inspectBrk) engineBuilder.option("inspect.Suspend", "true")
             // #356 — BDSL bytecode has no debugger instrumentation; force off
             // so scopes/breakpoints/stepping keep working on the AST path.
-            com.mezze.interpreter.runtime.MezzeLanguage.disableBdslForDebugger()
-            System.err.println("[mezze] devtools listening on chrome://inspect — port 4242 (BDSL disabled)")
+            com.mezze.interpreter.runtime.MezzeLanguage.enableBdslDebugInstrumentation()
+            System.err.println("[mezze] devtools listening on chrome://inspect — port 4242")
         }
         if (dap && !jitCapable) {
             System.err.println(
@@ -262,8 +262,8 @@ object EmbeddedExec {
             else engineBuilder.option("dap.Suspend", "false")
             // #356 — BDSL bytecode has no debugger instrumentation; force off
             // so scopes/breakpoints/stepping keep working on the AST path.
-            com.mezze.interpreter.runtime.MezzeLanguage.disableBdslForDebugger()
-            System.err.println("[mezze] DAP server listening on port $dapPort — attach a DAP client (VS Code) (BDSL disabled)")
+            com.mezze.interpreter.runtime.MezzeLanguage.enableBdslDebugInstrumentation()
+            System.err.println("[mezze] DAP server listening on port $dapPort — attach a DAP client (VS Code)")
         }
 
         val engine = engineBuilder.build()
