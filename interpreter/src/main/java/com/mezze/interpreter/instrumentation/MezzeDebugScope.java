@@ -37,19 +37,49 @@ public final class MezzeDebugScope implements TruffleObject {
     private final Frame frame;
     private final String[] memberNames;
     private final int[] memberSlots;
+    /** #356 — non-null for BDSL frames; used to read/write via BytecodeNode's API instead of FrameDescriptor slots. */
+    private final com.oracle.truffle.api.bytecode.BytecodeNode bytecodeNode;
+    private final int bci;
+    /** For BDSL frames, memberSlots[i] is the localOffset in the bytecodeNode; for AST frames, it's the FrameDescriptor slot index. */
+    private final boolean bdsl;
 
     public MezzeDebugScope(Frame frame) {
+        this(frame, null, -1);
+    }
+
+    /**
+     * #356 — BDSL scope constructor. When {@code bytecodeNode != null},
+     * local names / values are read via {@code bytecodeNode.getLocalName(bci, offset)}
+     * and {@code bytecodeNode.getLocalValue(bci, frame, offset)} rather
+     * than the FrameDescriptor slots (BDSL puts human names in the
+     * bytecode's own local table, not the frame descriptor).
+     */
+    public MezzeDebugScope(Frame frame,
+                           com.oracle.truffle.api.bytecode.BytecodeNode bytecodeNode,
+                           int bci) {
         this.frame = frame;
-        FrameDescriptor desc = frame.getFrameDescriptor();
-        // Filter to slots with a real string name; skip "" / null
-        // (those are compiler-temporaries that would clutter the panel).
+        this.bytecodeNode = bytecodeNode;
+        this.bci = bci;
+        this.bdsl = bytecodeNode != null && bci >= 0;
         List<String> names = new ArrayList<>();
         List<Integer> slots = new ArrayList<>();
-        for (int i = 0; i < desc.getNumberOfSlots(); i++) {
-            Object info = desc.getSlotName(i);
-            if (info instanceof String s && !s.isEmpty()) {
-                names.add(s);
-                slots.add(i);
+        if (bdsl) {
+            int count = bytecodeNode.getLocalCount(bci);
+            for (int i = 0; i < count; i++) {
+                Object nm = bytecodeNode.getLocalName(bci, i);
+                if (nm instanceof String s && !s.isEmpty()) {
+                    names.add(s);
+                    slots.add(i);
+                }
+            }
+        } else {
+            FrameDescriptor desc = frame.getFrameDescriptor();
+            for (int i = 0; i < desc.getNumberOfSlots(); i++) {
+                Object info = desc.getSlotName(i);
+                if (info instanceof String s && !s.isEmpty()) {
+                    names.add(s);
+                    slots.add(i);
+                }
             }
         }
         this.memberNames = names.toArray(new String[0]);
@@ -114,6 +144,10 @@ public final class MezzeDebugScope implements TruffleObject {
     }
 
     private void writeSlot(int slot, Object value) {
+        if (bdsl) {
+            bytecodeNode.setLocalValue(bci, frame, slot, value);
+            return;
+        }
         FrameSlotKind kind = frame.getFrameDescriptor().getSlotKind(slot);
         switch (kind) {
             case Long:    frame.setLong(slot, ((Number) value).longValue()); break;
@@ -124,6 +158,14 @@ public final class MezzeDebugScope implements TruffleObject {
     }
 
     private Object readSlot(int slot) {
+        if (bdsl) {
+            try {
+                Object v = bytecodeNode.getLocalValue(bci, frame, slot);
+                return v == null ? "<uninitialized>" : v;
+            } catch (Throwable t) {
+                return "<unreadable>";
+            }
+        }
         FrameDescriptor desc = frame.getFrameDescriptor();
         FrameSlotKind kind = desc.getSlotKind(slot);
         try {
