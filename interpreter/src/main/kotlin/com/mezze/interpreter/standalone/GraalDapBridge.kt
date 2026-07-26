@@ -40,14 +40,15 @@ class GraalDapBridge(
     private val log: (String) -> Unit = {},
 ) : DapDebuggerBridge {
 
-    init {
-        // #356 — Signal to BDSL that a debugger is attached, so BDSL
-        // compile switches to BytecodeConfig.COMPLETE + source/tag/name
-        // annotations. Line breakpoints, stepping, scopes and setVariable
-        // then work on BDSL-compiled functions. BDSL still routes — the
-        // compile shape is what changes.
-        com.mezze.interpreter.runtime.MezzeLanguage.enableBdslDebugInstrumentation()
-    }
+    // #356 — the debug-instrumentation flip lives at the CLI/wire
+    // callers (EmbeddedExec, RuntimeServer), NOT in this ctor. Flipping
+    // here caused a static-volatile leak across tests: any test suite
+    // that constructs GraalDapBridge (e.g. DapEndToEndTest) turns
+    // BDSL debug ON for every subsequent test in the same JVM,
+    // triggering ProbeNode.onReturnValue interop-type checks on
+    // internal values like PromiseTracker (which isn't a valid
+    // Truffle interop type). CLI + wire paths flip it explicitly
+    // before Engine.build so real DAP sessions are still covered.
 
     // Resolved lazily in start(): the "debugger" instrument may not be
     // registered on a bare Engine until a Context has been created from it, so
