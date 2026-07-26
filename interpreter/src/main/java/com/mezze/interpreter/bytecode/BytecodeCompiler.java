@@ -568,20 +568,16 @@ public final class BytecodeCompiler {
                 } else if (pat instanceof PatternIR.Literal lit) {
                     if (!supportsNode(lit.getValue(), argCount)) return false;
                 } else if (pat instanceof PatternIR.Record) {
-                    // Emit path for Record pattern ignores guard + iflet
-                    // (writes fields + emits body directly). If either
-                    // is present, reject — needs the guard/iflet-aware
-                    // emit shape used by Variant cases.
-                    if (c.getGuard() != null) { markReject(node, "record-with-guard"); return false; }
-                    if (!c.getIfLetBindings().isEmpty()) { markReject(node, "record-with-iflet"); return false; }
+                    // Record pattern is unconditional; if guarded or
+                    // iflet-bound, emit routes through
+                    // emitCaseGuardsAndBody which handles fallthrough
+                    // to cases[i+1] just like Variant.
                 } else if (pat instanceof PatternIR.Seq) {
                     // Fine — length check + element extract, optional rest.
                 } else if (pat instanceof PatternIR.Wildcard) {
-                    // Same guard/iflet gap as Record — emitMatchChain's
-                    // Wildcard branch emits the body directly, skipping
-                    // any guard test or iflet fallthrough.
-                    if (c.getGuard() != null) { markReject(node, "wildcard-with-guard"); return false; }
-                    if (!c.getIfLetBindings().isEmpty()) { markReject(node, "wildcard-with-iflet"); return false; }
+                    // Same as Record — emit delegates to
+                    // emitCaseGuardsAndBody after slot-binding, so
+                    // guard/iflet work identically.
                 } else {
                     markReject(node, "pat:" + pat.getClass().getSimpleName());
                     return false;
@@ -1807,8 +1803,12 @@ public final class BytecodeCompiler {
         CaseIR c = cases.get(idx);
         PatternIR pat = c.getPattern();
         if (pat instanceof PatternIR.Wildcard w) {
-            // Wildcard body IS the else. Bind the scrutinee to the
-            // wildcard slot if requested, then emit the body directly.
+            // Wildcard: bind scrutinee to the wildcard slot if requested,
+            // then delegate to emitCaseGuardsAndBody so guard + iflet
+            // (with fallthrough to cases[idx+1] on failure) work
+            // identically to the Variant path. Without a guard/iflet
+            // the pattern is truly unconditional and emitCase falls
+            // straight through to the body — same shape as before.
             b.beginBlock();
             if (w.getSlot() >= 0) {
                 BytecodeLocal target = localMap[w.getSlot() - argCount];
@@ -1816,14 +1816,16 @@ public final class BytecodeCompiler {
                 b.emitLoadLocal(scrutineeLocal);
                 b.endStoreLocal();
             }
-            emitNode(c.getBody(), b, argCount, localMap);
+            emitCaseGuardsAndBody(c, cases, idx, scrutineeLocal, b, argCount, localMap);
             b.endBlock();
             return;
         }
         if (pat instanceof PatternIR.Record rp) {
-            // Record patterns are unconditional given the typechecker
-            // guarantees shape compatibility — read each captured field
-            // from the scrutinee and bind, then emit the body.
+            // Record: extract captured fields, then delegate to
+            // emitCaseGuardsAndBody like Wildcard above. Typechecker
+            // guarantees shape compatibility so the field extraction
+            // is unconditional; guard + iflet still need the
+            // conditional / fallthrough wrap.
             b.beginBlock();
             for (int i = 0; i < rp.getFieldNames().size(); i++) {
                 int slot = rp.getFieldSlots().get(i);
@@ -1834,7 +1836,7 @@ public final class BytecodeCompiler {
                 b.endReadFieldByName();
                 b.endStoreLocal();
             }
-            emitNode(c.getBody(), b, argCount, localMap);
+            emitCaseGuardsAndBody(c, cases, idx, scrutineeLocal, b, argCount, localMap);
             b.endBlock();
             return;
         }
