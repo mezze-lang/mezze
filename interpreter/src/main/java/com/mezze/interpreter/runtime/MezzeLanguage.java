@@ -92,6 +92,23 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 && !"0".equals(System.getenv("MEZZE_BDSL"))
                 && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL"));
 
+    // #356 — BDSL bytecode has no debugger instrumentation (getScope /
+    // StatementTag / frame-slot names). GraalVM Debugger + MezzeDapServer only
+    // see the AST path (MezzeNode.hasScope). When DAP or Chrome Inspector is
+    // attached, force BDSL off so line breakpoints / scopes / stepping keep
+    // working. Callers (EmbeddedExec, WireRunner) flip this before building
+    // Engine when they see --dap / --inspect. Runtime cost is one volatile
+    // read per compile.
+    private static volatile boolean BDSL_DISABLED_FOR_DEBUGGER = false;
+
+    public static void disableBdslForDebugger() {
+        BDSL_DISABLED_FOR_DEBUGGER = true;
+    }
+
+    public static boolean isBdslDisabledForDebugger() {
+        return BDSL_DISABLED_FOR_DEBUGGER;
+    }
+
     // CPS routing (Path C, docs/perf/bdsl-effects-path-c-2026-07.md) — opt-in
     // via MEZZE_CPS env var. When on, CpsLowering runs on every FunctionIR
     // before Truffle/BDSL compilation and effect-related fibers pick the CPS
@@ -191,7 +208,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private com.oracle.truffle.api.nodes.RootNode compileOne(
             com.mezze.interpreter.compiler.TruffleCompiler astCompiler,
             com.mezze.language.truffleir.FunctionIR ir) {
-        if (BDSL_ENABLED) {
+        if (BDSL_ENABLED && !BDSL_DISABLED_FOR_DEBUGGER) {
             if (!isBdslSafeCallee(ir)) {
                 bdslMisses.incrementAndGet();
                 if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSAFE.incrementAndGet();
@@ -405,7 +422,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     /** Test/telemetry: how many functions hit BDSL vs fell back to AST. */
     public long getBdslHits() { return bdslHits.get(); }
     public long getBdslMisses() { return bdslMisses.get(); }
-    public boolean isBdslEnabled() { return BDSL_ENABLED; }
+    public boolean isBdslEnabled() { return BDSL_ENABLED && !BDSL_DISABLED_FOR_DEBUGGER; }
 
     /**
      * Public wrapper so Kotlin callers (PipelineRunner) can route their

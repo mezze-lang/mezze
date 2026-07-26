@@ -236,6 +236,9 @@ object RuntimeServer {
             )
         }
         if (devFlags.dap && jitCapable) {
+            // #356 — BDSL bytecode has no debugger instrumentation; force off
+            // so scopes/breakpoints/stepping keep working on the AST path.
+            com.mezze.interpreter.runtime.MezzeLanguage.disableBdslForDebugger()
             val bridge = GraalDapBridge(engine) { if (System.getenv("MEZZE_DEBUG") != null) originalStderr.println(it) }
             bridge.stopOnEntry = devFlags.dapBrk
             val attached = java.util.concurrent.CountDownLatch(1)
