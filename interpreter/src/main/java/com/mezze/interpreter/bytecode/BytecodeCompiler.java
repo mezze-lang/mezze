@@ -412,11 +412,12 @@ public final class BytecodeCompiler {
         if (node instanceof CallDirectIR c) {
             // Any arity accepted (variadic CallDirectN). Tail-call
             // variant throws TailCallException for the trampoline.
-            // Record-ABI CallDirectIR is rejected — the callee's arg
-            // layout collides with scalar-ABI for paramCount<=1 in
-            // non-trivial ways (needs marker suppression, needs the
-            // callee to know it's record). Handled via AST fallback.
-            if (!c.isScalarABI()) { markReject(node, "record-ABI"); return false; }
+            //
+            // Record-ABI: args has exactly one MezzeRecord element; the
+            // callee (AST fn) unpacks fields by name. BDSL emits it as
+            // a plain 1-arg CallDirectN without a scalar marker — the
+            // AST callee's normalizeArgs sees a single record and
+            // routes to the record-ABI path.
             if (resolveCallTarget(c.getTargetHash()) == null) {
                 markReject(node, "target-not-compiled"); return false;
             }
@@ -1178,7 +1179,13 @@ public final class BytecodeCompiler {
             // Also MUST NOT bypass for tail-calls emitted here (the caller
             // wants its own trampoline to catch, but the target still needs
             // its trampoline reachable if it's the resume point).
-            if (target instanceof com.oracle.truffle.api.RootCallTarget rct
+            // Record-ABI callers pass a single MezzeRecord that the
+            // callee's trampoline must unpack into positional slots via
+            // normalizeArgs. Bypassing the trampoline sends the raw
+            // record to LoadArgument(0), leaving other param slots
+            // uninitialized → runtime errors (e.g. Non-exhaustive match).
+            if (c.isScalarABI()
+                    && target instanceof com.oracle.truffle.api.RootCallTarget rct
                     && rct.getRootNode() instanceof BdslTrampolineRootNode tramp
                     && !tramp.hasTailCalls()
                     && !c.isTailCall()) {
@@ -1203,7 +1210,12 @@ public final class BytecodeCompiler {
             //
             // paramCount==0 (empty args) and paramCount>=2 (arity
             // distinct from record) never need the marker.
-            boolean needsScalarMarker = c.getArgs().size() == 1
+            // Scalar-ABI callers with arity==1 need the marker so the
+            // AST callee's normalizeArgs treats args[0] as scalar not
+            // record. Record-ABI callers already pass a record — the
+            // callee is expecting it, so no marker needed.
+            boolean needsScalarMarker = c.isScalarABI()
+                    && c.getArgs().size() == 1
                     && !isBdslCallee(target);
             if (c.isTailCall()) {
                 b.beginTailCallDirectN(target);
