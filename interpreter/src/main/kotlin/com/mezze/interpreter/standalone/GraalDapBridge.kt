@@ -109,7 +109,7 @@ class GraalDapBridge(
     )
     private class VarSnapshot(
         val name: String,
-        val value: String,
+        var value: String,   // mutable so setVariable can patch it in place
         /** 0 = leaf; else a variablesReference into `varsByRef` for expansion. */
         val variablesReference: Int,
     )
@@ -130,6 +130,12 @@ class GraalDapBridge(
             val expression: String,
             val result: java.util.concurrent.CompletableFuture<String>,
         ) : ParkCommand
+        /** Run a task ON the parked eval thread, given the live SuspendedEvent
+         *  (frame access is thread-bound). */
+        class Task(
+            val run: (SuspendedEvent) -> String,
+            val result: java.util.concurrent.CompletableFuture<String>,
+        ) : ParkCommand
     }
 
     /** Set by MezzeDapServer so the bridge can push `stopped`/`continued`/`output`. */
@@ -147,6 +153,9 @@ class GraalDapBridge(
 
     /** The currently-installed exception breakpoint (replaced on each request). */
     private var exceptionBreakpoint: Breakpoint? = null
+
+    /** Set by pause(); makes the next suspend report reason "pause". */
+    @Volatile private var pauseRequested: Boolean = false
 
     private var started = false
 
@@ -170,7 +179,7 @@ class GraalDapBridge(
 
     /** Start the debug session. Call once, before the program runs. */
     @Synchronized
-    fun start() {
+    override fun start() {
         if (started) return
         started = true
         val debugger = resolveDebugger()
@@ -199,9 +208,12 @@ class GraalDapBridge(
         // Reason: exception (a thrown error hit an exception breakpoint) vs
         // line breakpoint vs step.
         val exception = try { event.exception } catch (e: Exception) { null }
+        val wasPause = pauseRequested
+        pauseRequested = false
         val reason = when {
             exception != null -> "exception"
             event.breakpoints.isNotEmpty() -> "breakpoint"
+            wasPause -> "pause"
             else -> "step"
         }
         // Identify which JVM thread suspended (a spawned virtual thread gets its
@@ -239,7 +251,17 @@ class GraalDapBridge(
                     }
                     cmd.result.complete(out)
                 }
+                is ParkCommand.Task -> {
+                    val out = try { cmd.run(event) } catch (e: Exception) { "<error: ${e.message}>" }
+                    cmd.result.complete(out)
+                }
             }
+        }
+        // If this stop came from a pause (suspendAll), clear the global suspend
+        // arm before resuming — otherwise the very next statement re-suspends and
+        // the program can't make progress.
+        if (wasPause) {
+            try { session?.resumeAll() } catch (e: Exception) { log("[dap] resumeAll failed: ${e.message}") }
         }
         // Apply the step ON THE EVAL THREAD (here, inside the callback).
         when (kind) {
@@ -487,6 +509,71 @@ class GraalDapBridge(
             "<eval timeout>"
         }
         return mapOf("result" to result, "variablesReference" to 0)
+    }
+
+    override fun setVariable(args: Map<String, Any?>): Map<String, Any?> {
+        val name = args["name"] as? String ?: return mapOf("value" to "")
+        val valueStr = (args["value"] as? String)?.trim() ?: return mapOf("value" to "")
+        val ref = (args["variablesReference"] as? Number)?.toInt()
+        if (currentEvent.get() == null) return mapOf("value" to "<not paused>")
+        // Write ON the eval thread (DebugValue/scope are thread-bound): find the
+        // named value in the top frame's scope chain and set it. New value parsed
+        // as int / bool / else raw string.
+        val future = java.util.concurrent.CompletableFuture<String>()
+        cmdQueue.put(ParkCommand.Task({ event ->
+            val newVal: Any = valueStr.toLongOrNull()
+                ?: valueStr.toDoubleOrNull()
+                ?: when (valueStr) { "true", "True" -> true; "false", "False" -> false; else -> valueStr }
+            var scope: com.oracle.truffle.api.debug.DebugScope? = event.topStackFrame?.scope
+            var depth = 0
+            while (scope != null && depth < 8) {
+                for (v in scope.declaredValues) {
+                    if (v.name == name) {
+                        if (!v.isWritable) return@Task "<read-only>"
+                        v.set(newVal)
+                        val disp = v.toDisplayString()
+                        // Patch the existing snapshot entry IN PLACE so a follow-up
+                        // `variables` read (answered from the snapshot) sees the new
+                        // value — re-capturing would renumber the variablesReferences.
+                        if (ref != null) snapshot?.varsByRef?.get(ref)?.firstOrNull { it.name == name }?.value = disp
+                        return@Task disp
+                    }
+                }
+                scope = try { scope.parent } catch (e: Exception) { null }
+                depth++
+            }
+            "<not found>"
+        }, future))
+        val applied = try { future.get(5, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { "<timeout>" }
+        return mapOf("value" to applied)
+    }
+
+    override fun pause() {
+        // Interrupt a running program: suspend at the next executed statement.
+        // Only meaningful while running (not already parked).
+        if (currentEvent.get() == null) {
+            // The session is lazily started by setBreakpoints; a program with NO
+            // breakpoints (pause-only) may not have one yet. Ensure it exists so
+            // the suspend actually installs.
+            if (session == null) start()
+            pauseRequested = true
+            // suspendNextExecution() arms the CALLING thread (the DAP thread),
+            // which never runs guest code — so it never fires. suspendAll() arms
+            // every executing guest thread, so the running eval thread stops at
+            // its next statement. That's the correct "pause the program" action.
+            try { session?.suspendAll() } catch (e: Exception) { log("[dap] pause failed: ${e.message}") }
+        }
+    }
+
+    override fun setFunctionBreakpoints(args: Map<String, Any?>): Map<String, Any?> {
+        // Function breakpoints by name aren't directly expressible via the line-
+        // breakpoint API without a root-name filter, which Mezze's compiled
+        // functions don't uniformly expose yet. Accept the request so VS Code
+        // doesn't error, and report them unverified. (Line + exception + function-
+        // ENTRY-via-line breakpoints cover the common cases today.)
+        @Suppress("UNCHECKED_CAST")
+        val bps = (args["breakpoints"] as? List<Map<String, Any?>>) ?: emptyList()
+        return mapOf("breakpoints" to bps.map { mapOf("verified" to false) })
     }
 
     override fun resume(kind: DapDebuggerBridge.StepKind) {

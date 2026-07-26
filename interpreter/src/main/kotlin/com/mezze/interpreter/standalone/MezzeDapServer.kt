@@ -106,6 +106,10 @@ class MezzeDapServer(
             }
             "configurationDone" -> {
                 respond(command, reqSeq, null)
+                // Ensure a live debugger session BEFORE the program runs, so it
+                // instruments from the first statement. Without this, a pause-only
+                // run (no breakpoints) has no session and `pause` can't suspend.
+                bridge?.start()
                 // The program starts now (breakpoints are installed).
                 onLaunch()
             }
@@ -136,6 +140,17 @@ class MezzeDapServer(
             "next" -> { respond(command, reqSeq, null); bridge?.resume(DapDebuggerBridge.StepKind.OVER) }
             "stepIn" -> { respond(command, reqSeq, null); bridge?.resume(DapDebuggerBridge.StepKind.INTO) }
             "stepOut" -> { respond(command, reqSeq, null); bridge?.resume(DapDebuggerBridge.StepKind.OUT) }
+            "setVariable" -> respond(command, reqSeq, bridge?.setVariable(args) ?: mapOf("value" to ""))
+            "pause" -> { respond(command, reqSeq, null); bridge?.pause() }
+            "setFunctionBreakpoints" ->
+                respond(command, reqSeq, bridge?.setFunctionBreakpoints(args) ?: mapOf("breakpoints" to emptyList<Any>()))
+            "restart" -> {
+                // We can't re-run in-process (the program is driven by the host
+                // RuntimeServer). VS Code falls back to disconnect + re-launch
+                // when restart isn't supported, so reply unsuccessfully and let
+                // it do that — cleaner than a half-restart.
+                respondError(command, reqSeq, "restart not supported; relaunch instead")
+            }
             "disconnect", "terminate" -> {
                 respond(command, reqSeq, null)
                 bridge?.disconnect()
@@ -155,6 +170,7 @@ class MezzeDapServer(
         "supportsTerminateRequest" to true,
         "supportsConditionalBreakpoints" to true,
         "supportsLogPoints" to true,
+        "supportsSetVariable" to true,
         "supportsSingleThreadExecutionRequests" to false,
         // Exception breakpoints: the client can toggle "break on uncaught" and
         // "break on all thrown". Mezze failures surface here as guest exceptions.

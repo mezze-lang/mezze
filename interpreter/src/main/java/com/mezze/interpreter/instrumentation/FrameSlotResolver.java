@@ -5,139 +5,199 @@ import com.oracle.truffle.api.frame.Frame;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.FrameSlotKind;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * Resolves the small expression subset used by debugger watch expressions,
+ * Evaluates the expression subset used by debugger watch expressions,
  * conditional breakpoints, and logpoint interpolation — against a suspended
  * FRAME's named slots.
  *
- * The full parser can't help here: inline eval compiles a standalone module that
- * doesn't see the frame's locals. We handle what watch/conditions actually use:
+ * The full parser can't help: inline eval compiles a standalone module that
+ * can't see the frame's locals. This handles a useful arithmetic/comparison
+ * subset over frame variables + integer literals via a small recursive-descent
+ * parser:
  *
- *   <expr> ::= <atom>
- *            | <atom> <op> <atom>
- *   <atom> ::= IDENT            (read the frame slot of that name)
- *            | INT              (integer literal)
- *   <op>   ::= > | < | >= | <= | == | != | + | - | *
+ *   comparison ::= sum ( (> | < | >= | <= | == | !=) sum )?
+ *   sum        ::= product ( (+ | -) product )*
+ *   product    ::= unary ( (* | /) unary )*
+ *   unary      ::= - unary | atom
+ *   atom       ::= IDENT | INT | ( comparison )
  *
- * Anything outside this grammar → parse() returns null, and MezzeLanguage's
- * inline-parse override falls through to the regular module parse (which still
- * handles literals + globals), so nothing regresses.
+ * IDENT reads the frame slot of that name. Anything outside this grammar (field
+ * access, calls, strings, …) → parse() returns null, and MezzeLanguage's
+ * inline-parse override falls through to the module parse, so globals + literals
+ * still work and nothing regresses.
  *
- * Comparisons return a Boolean (so conditional breakpoints work); arithmetic
- * returns a Long. Values read from the frame are coerced to long where numeric.
+ * Comparisons yield Boolean (conditional breakpoints work); a bare atom yields
+ * its raw value (so watching a Str/record shows it); arithmetic yields Long.
  */
 public final class FrameSlotResolver {
 
     private FrameSlotResolver() {}
 
-    /** Parsed expression: either a single atom or `lhs op rhs`. */
-    public static final class Expr {
-        final Atom lhs;
-        final String op;   // null for a bare atom
-        final Atom rhs;    // null for a bare atom
-        Expr(Atom lhs, String op, Atom rhs) { this.lhs = lhs; this.op = op; this.rhs = rhs; }
+    // ─── AST ────────────────────────────────────────────────────────────
+
+    public interface Expr {}
+    private record Ident(String name) implements Expr {}
+    private record IntLit(long value) implements Expr {}
+    private record Bin(String op, Expr lhs, Expr rhs) implements Expr {}
+    private record Neg(Expr inner) implements Expr {}
+
+    // ─── Tokenizer ──────────────────────────────────────────────────────
+
+    private record Tok(String kind, String text) {}
+
+    @TruffleBoundary
+    private static List<Tok> tokenize(String s) {
+        List<Tok> out = new ArrayList<>();
+        int i = 0, n = s.length();
+        while (i < n) {
+            char c = s.charAt(i);
+            if (Character.isWhitespace(c)) { i++; continue; }
+            // Multi-char operators first.
+            if (i + 1 < n) {
+                String two = s.substring(i, i + 2);
+                if (two.equals(">=") || two.equals("<=") || two.equals("==") || two.equals("!=")) {
+                    out.add(new Tok("op", two)); i += 2; continue;
+                }
+            }
+            if ("+-*/<>()".indexOf(c) >= 0) {
+                out.add(new Tok(c == '(' ? "(" : c == ')' ? ")" : "op", String.valueOf(c))); i++; continue;
+            }
+            if (Character.isDigit(c)) {
+                int j = i; while (j < n && Character.isDigit(s.charAt(j))) j++;
+                out.add(new Tok("int", s.substring(i, j))); i = j; continue;
+            }
+            if (Character.isLetter(c) || c == '_') {
+                int j = i; while (j < n && (Character.isLetterOrDigit(s.charAt(j)) || s.charAt(j) == '_')) j++;
+                out.add(new Tok("ident", s.substring(i, j))); i = j; continue;
+            }
+            return null; // unrecognized char → not our subset
+        }
+        return out;
     }
 
-    private static final class Atom {
-        final String ident;    // non-null → read this frame slot
-        final long literal;    // used when ident == null
-        Atom(String ident, long literal) { this.ident = ident; this.literal = literal; }
-    }
+    // ─── Parser (recursive descent) ─────────────────────────────────────
 
-    private static final String[] OPS = { ">=", "<=", "==", "!=", ">", "<", "+", "-", "*" };
-
-    /** Parse the expression subset, or null if it doesn't match. */
     @TruffleBoundary
     public static Expr parse(String s) {
-        s = s.trim();
-        if (s.isEmpty()) return null;
-        // Try binary: find a top-level operator (no parens/precedence — the
-        // grammar is atom op atom, so the first matching op splits it).
-        for (String op : OPS) {
-            int idx = findOp(s, op);
-            if (idx > 0) {
-                Atom lhs = parseAtom(s.substring(0, idx));
-                Atom rhs = parseAtom(s.substring(idx + op.length()));
-                if (lhs != null && rhs != null) return new Expr(lhs, op, rhs);
+        List<Tok> toks = tokenize(s == null ? "" : s.trim());
+        if (toks == null || toks.isEmpty()) return null;
+        Parser p = new Parser(toks);
+        Expr e = p.comparison();
+        if (e == null || !p.atEnd()) return null;   // trailing junk → reject
+        return e;
+    }
+
+    private static final class Parser {
+        private final List<Tok> toks;
+        private int pos = 0;
+        Parser(List<Tok> toks) { this.toks = toks; }
+
+        boolean atEnd() { return pos >= toks.size(); }
+        private Tok peek() { return pos < toks.size() ? toks.get(pos) : null; }
+        private Tok next() { return toks.get(pos++); }
+        private boolean isOp(String op) { Tok t = peek(); return t != null && t.kind.equals("op") && t.text.equals(op); }
+
+        Expr comparison() {
+            Expr lhs = sum();
+            if (lhs == null) return null;
+            Tok t = peek();
+            if (t != null && t.kind.equals("op") &&
+                    (">".equals(t.text) || "<".equals(t.text) || ">=".equals(t.text)
+                            || "<=".equals(t.text) || "==".equals(t.text) || "!=".equals(t.text))) {
+                next();
+                Expr rhs = sum();
+                if (rhs == null) return null;
+                return new Bin(t.text, lhs, rhs);
+            }
+            return lhs;
+        }
+
+        Expr sum() {
+            Expr lhs = product();
+            if (lhs == null) return null;
+            while (isOp("+") || isOp("-")) {
+                String op = next().text;
+                Expr rhs = product();
+                if (rhs == null) return null;
+                lhs = new Bin(op, lhs, rhs);
+            }
+            return lhs;
+        }
+
+        Expr product() {
+            Expr lhs = unary();
+            if (lhs == null) return null;
+            while (isOp("*") || isOp("/")) {
+                String op = next().text;
+                Expr rhs = unary();
+                if (rhs == null) return null;
+                lhs = new Bin(op, lhs, rhs);
+            }
+            return lhs;
+        }
+
+        Expr unary() {
+            if (isOp("-")) { next(); Expr e = unary(); return e == null ? null : new Neg(e); }
+            return atom();
+        }
+
+        Expr atom() {
+            Tok t = peek();
+            if (t == null) return null;
+            switch (t.kind) {
+                case "int": next(); return new IntLit(Long.parseLong(t.text));
+                case "ident": next(); return new Ident(t.text);
+                case "(": {
+                    next();
+                    Expr e = comparison();
+                    if (e == null || peek() == null || !peek().kind.equals(")")) return null;
+                    next(); // consume ')'
+                    return e;
+                }
+                default: return null;
             }
         }
-        // Bare atom.
-        Atom atom = parseAtom(s);
-        return atom == null ? null : new Expr(atom, null, null);
     }
 
-    /** First index of `op` that isn't at position 0 (avoid a leading unary). */
-    private static int findOp(String s, String op) {
-        int from = 1;
-        while (true) {
-            int i = s.indexOf(op, from);
-            if (i < 0) return -1;
-            // For "-" don't split a negative literal like "x - 5" vs "-5":
-            // require a non-space char before it (an atom must precede).
-            if (!s.substring(0, i).trim().isEmpty()) return i;
-            from = i + 1;
-        }
-    }
-
-    private static Atom parseAtom(String s) {
-        s = s.trim();
-        if (s.isEmpty()) return null;
-        // Integer literal (optionally negative).
-        try {
-            return new Atom(null, Long.parseLong(s));
-        } catch (NumberFormatException ignored) {}
-        // Identifier: a simple name (letters, digits, _; not starting with digit).
-        if (isIdentifier(s)) return new Atom(s, 0);
-        return null;
-    }
-
-    private static boolean isIdentifier(String s) {
-        if (s.isEmpty()) return false;
-        char c0 = s.charAt(0);
-        if (!(Character.isLetter(c0) || c0 == '_')) return false;
-        for (int i = 1; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (!(Character.isLetterOrDigit(c) || c == '_')) return false;
-        }
-        return true;
-    }
+    // ─── Evaluation (on the debugger's materialized frame) ──────────────
 
     /**
-     * Evaluate against the frame. Idents resolve to their named frame slot;
-     * unknown idents / non-numeric values throw so the caller reports an error.
      * Called with the debugger's MATERIALIZED frame (already on a boundary), so
-     * no @TruffleBoundary here.
+     * NOT @TruffleBoundary (the DSL processor rejects a Frame param with it).
      */
-    public static Object evaluate(Expr expr, Frame frame) {
-        if (expr.op == null) {
-            // Bare atom — return the raw value (so watching a Str/record shows it).
-            return atomValue(expr.lhs, frame);
-        }
-        long l = toLong(atomValue(expr.lhs, frame));
-        long r = toLong(atomValue(expr.rhs, frame));
-        switch (expr.op) {
-            case ">":  return l > r;
-            case "<":  return l < r;
-            case ">=": return l >= r;
-            case "<=": return l <= r;
-            case "==": return l == r;
-            case "!=": return l != r;
-            case "+":  return l + r;
-            case "-":  return l - r;
-            case "*":  return l * r;
-            default:   throw new IllegalStateException("unsupported op " + expr.op);
-        }
-    }
-
-    private static Object atomValue(Atom a, Frame frame) {
-        if (a.ident == null) return a.literal;
-        FrameDescriptor desc = frame.getFrameDescriptor();
-        for (int i = 0; i < desc.getNumberOfSlots(); i++) {
-            if (a.ident.equals(desc.getSlotName(i))) {
-                return readSlot(frame, i);
+    public static Object evaluate(Expr e, Frame frame) {
+        if (e instanceof IntLit il) return il.value();
+        if (e instanceof Ident id) return slotValue(id.name(), frame);
+        if (e instanceof Neg neg) return -toLong(evaluate(neg.inner(), frame));
+        if (e instanceof Bin bin) {
+            long l = toLong(evaluate(bin.lhs(), frame));
+            long r = toLong(evaluate(bin.rhs(), frame));
+            switch (bin.op()) {
+                case ">":  return l > r;
+                case "<":  return l < r;
+                case ">=": return l >= r;
+                case "<=": return l <= r;
+                case "==": return l == r;
+                case "!=": return l != r;
+                case "+":  return l + r;
+                case "-":  return l - r;
+                case "*":  return l * r;
+                case "/":  if (r == 0) throw new IllegalArgumentException("division by zero"); return l / r;
+                default:   throw new IllegalStateException("unsupported op " + bin.op());
             }
         }
-        throw new IllegalArgumentException("Undefined variable: " + a.ident);
+        throw new IllegalStateException("unknown node");
+    }
+
+    private static Object slotValue(String name, Frame frame) {
+        FrameDescriptor desc = frame.getFrameDescriptor();
+        for (int i = 0; i < desc.getNumberOfSlots(); i++) {
+            if (name.equals(desc.getSlotName(i))) return readSlot(frame, i);
+        }
+        throw new IllegalArgumentException("Undefined variable: " + name);
     }
 
     private static Object readSlot(Frame frame, int slot) {

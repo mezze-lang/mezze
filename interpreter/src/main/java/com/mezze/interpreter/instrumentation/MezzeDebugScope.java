@@ -84,6 +84,45 @@ public final class MezzeDebugScope implements TruffleObject {
         throw UnknownIdentifierException.create(member);
     }
 
+    // ── Writing (the debugger's setVariable) ──
+    // Without isMemberModifiable/writeMember, DebugValue.isWritable() is false
+    // and setVariable can't change a local mid-debug.
+
+    @ExportMessage
+    boolean isMemberModifiable(String member) {
+        for (String name : memberNames) {
+            if (name.equals(member)) return true;
+        }
+        return false;
+    }
+
+    @ExportMessage
+    boolean isMemberInsertable(@SuppressWarnings("unused") String member) {
+        return false; // scopes have a fixed slot set; no new members
+    }
+
+    @ExportMessage
+    void writeMember(String member, Object value)
+            throws UnknownIdentifierException, com.oracle.truffle.api.interop.UnsupportedTypeException {
+        for (int i = 0; i < memberNames.length; i++) {
+            if (memberNames[i].equals(member)) {
+                writeSlot(memberSlots[i], value);
+                return;
+            }
+        }
+        throw UnknownIdentifierException.create(member);
+    }
+
+    private void writeSlot(int slot, Object value) {
+        FrameSlotKind kind = frame.getFrameDescriptor().getSlotKind(slot);
+        switch (kind) {
+            case Long:    frame.setLong(slot, ((Number) value).longValue()); break;
+            case Double:  frame.setDouble(slot, ((Number) value).doubleValue()); break;
+            case Boolean: frame.setBoolean(slot, (Boolean) value); break;
+            default:      frame.setObject(slot, value); break;
+        }
+    }
+
     private Object readSlot(int slot) {
         FrameDescriptor desc = frame.getFrameDescriptor();
         FrameSlotKind kind = desc.getSlotKind(slot);

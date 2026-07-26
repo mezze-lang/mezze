@@ -18,6 +18,13 @@ interface DapDebuggerBridge {
     enum class StepKind { CONTINUE, OVER, INTO, OUT }
 
     /**
+     * Start the debugger session (idempotent). Called at `configurationDone`, so
+     * the session instruments from the program's first statement — a precondition
+     * for `pause` to suspend a run that has no breakpoints.
+     */
+    fun start()
+
+    /**
      * `setBreakpoints`: install line breakpoints for one source. `args` carries
      * `source.path` (or `source.name`) and `breakpoints: [{line}]`. Returns a
      * DAP body `{ breakpoints: [{ verified, line }] }` — `verified` reflects
@@ -47,6 +54,19 @@ interface DapDebuggerBridge {
 
     /** `evaluate`: `{ result, variablesReference }` — `frame.eval(expr)`. */
     fun evaluate(args: Map<String, Any?>): Map<String, Any?>
+
+    /**
+     * `setVariable`: write a new value to a named variable in a scope while
+     * paused. `args` carries `name` + `value` (a literal string). Returns
+     * `{ value }` with the applied value, or an error map.
+     */
+    fun setVariable(args: Map<String, Any?>): Map<String, Any?>
+
+    /** `pause`: interrupt a running program and suspend at the next statement. */
+    fun pause()
+
+    /** `setFunctionBreakpoints`: break at the entry of the named functions. */
+    fun setFunctionBreakpoints(args: Map<String, Any?>): Map<String, Any?>
 
     /** `continue` / `next` / `stepIn` / `stepOut`: prepare the step + unpark the eval thread. */
     fun resume(kind: StepKind)

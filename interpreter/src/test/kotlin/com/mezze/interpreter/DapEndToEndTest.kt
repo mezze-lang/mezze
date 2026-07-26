@@ -158,6 +158,27 @@ class DapEndToEndTest {
             val evalResult2 = (evalResp2["body"] as Map<String, Any?>)["result"] as? String
             assertEquals("12", evalResult2, "watch `a + b` should be 12, got: $evalResult2")
 
+            // widened grammar: parens + chained ops. `(a + b) * a` = 12 * 5 = 60.
+            request(out, "evaluate", mapOf("expression" to "(a + b) * a", "context" to "watch"))
+            val evalResp3 = readUntil(input, "response") { (it["command"] as? String) == "evaluate" }
+            @Suppress("UNCHECKED_CAST")
+            val evalResult3 = (evalResp3["body"] as Map<String, Any?>)["result"] as? String
+            assertEquals("60", evalResult3, "watch `(a + b) * a` should be 60, got: $evalResult3")
+
+            // setVariable: change `a` to 99 while paused, then re-read to confirm.
+            request(out, "setVariable", mapOf("variablesReference" to ref, "name" to "a", "value" to "99"))
+            val setResp = readUntil(input, "response") { (it["command"] as? String) == "setVariable" }
+            assertEquals(true, setResp["success"], "setVariable should succeed")
+            @Suppress("UNCHECKED_CAST")
+            assertEquals("99", (setResp["body"] as Map<String, Any?>)["value"],
+                "setVariable should report the applied value 99, got: ${setResp["body"]}")
+            request(out, "variables", mapOf("variablesReference" to ref))
+            val vars2Resp = readUntil(input, "response") { (it["command"] as? String) == "variables" }
+            @Suppress("UNCHECKED_CAST")
+            val vars2 = (vars2Resp["body"] as Map<String, Any?>)["variables"] as List<Map<String, Any?>>
+            assertEquals("99", vars2.firstOrNull { it["name"] == "a" }?.get("value"),
+                "after setVariable, `a` should read 99, got: ${vars2.firstOrNull { it["name"] == "a" }}")
+
             // step over (`next`) → the debugger advances and re-suspends.
             request(out, "next", mapOf("threadId" to 1))
             readUntil(input, "response") { (it["command"] as? String) == "next" }
@@ -236,6 +257,72 @@ class DapEndToEndTest {
             assertTrue(done.await(10, TimeUnit.SECONDS),
                 "program should run to completion (local condition a>100 is false)")
             request(out, "disconnect", emptyMap()); readUntil(input, "response")
+        }
+        ctx.close(true)
+    }
+
+    @Test
+    @Timeout(40)
+    fun `pause interrupts a running program and stops with reason pause`() {
+        // The program spins in a TAIL-recursive guest-code loop (recursive call in
+        // tail position → trampolined, no stack overflow); while it's running, the
+        // client sends `pause`, which calls suspendAll() — the eval thread stops at
+        // its next STATEMENT node with reason "pause". Recursion in pure Mezze (not
+        // a native builtin loop, which has no guest statement tags) guarantees a
+        // statement node for the suspend to land on. No breakpoint involved.
+        val program = """
+            let spin = { n: Int, acc: Int } -> do
+              let keep = n > 0
+              if keep then spin { n = n - 1, acc = acc + 1 } else acc
+            let result = spin { n = 2000000000, acc = 0 }
+        """.trimIndent()
+        val tmp = java.io.File.createTempFile("dapp_", ".mz").apply { writeText(program); deleteOnExit() }
+        val ctx = Context.newBuilder("mezze").allowAllAccess(true)
+            .option("engine.WarnInterpreterOnly", "false").build()
+        val bridge = GraalDapBridge(ctx.engine)
+        val server = MezzeDapServer(port = 0, bridge = bridge)
+        bridge.server = server
+        Thread { server.serve() }.apply { isDaemon = true; start() }
+        val port = awaitPort(server)
+
+        val evalThread = Thread {
+            try { ctx.eval(Source.newBuilder("mezze", tmp).build()) } catch (_: Throwable) {}
+        }.apply { isDaemon = true }
+
+        Socket("127.0.0.1", port).use { socket ->
+            socket.soTimeout = 20000
+            val input = BufferedInputStream(socket.getInputStream())
+            val out = socket.getOutputStream()
+            request(out, "initialize", mapOf("adapterID" to "mezze"))
+            readUntil(input, "response"); readUntil(input, "event")
+            request(out, "launch", mapOf("program" to tmp.absolutePath)); readUntil(input, "response")
+            request(out, "configurationDone", emptyMap()); readUntil(input, "response")
+
+            evalThread.start()
+            // Let the recursion get going, then interrupt. pause() → suspendAll()
+            // arms every executing guest thread; the eval thread stops at its next
+            // statement node.
+            Thread.sleep(300)
+            request(out, "pause", mapOf("threadId" to 1))
+            readUntil(input, "response") { (it["command"] as? String) == "pause" }
+
+            val stopped = readUntil(input, "event") { (it["event"] as? String) == "stopped" }
+            @Suppress("UNCHECKED_CAST")
+            val stopBody = stopped["body"] as Map<String, Any?>
+            assertEquals("pause", stopBody["reason"],
+                "a pause-initiated stop should report reason 'pause', got: $stopBody")
+
+            // The program is genuinely mid-fold: a stack frame is available.
+            request(out, "stackTrace", mapOf("threadId" to 1))
+            val stackResp = readUntil(input, "response") { (it["command"] as? String) == "stackTrace" }
+            @Suppress("UNCHECKED_CAST")
+            val frames = (stackResp["body"] as Map<String, Any?>)["stackFrames"] as List<Map<String, Any?>>
+            assertTrue(frames.isNotEmpty(), "expected a stack frame after pause, got: $frames")
+
+            // Disconnect continues + closes the session so we don't await the
+            // (very long) fold to completion.
+            request(out, "disconnect", emptyMap())
+            readUntil(input, "response") { (it["command"] as? String) == "disconnect" }
         }
         ctx.close(true)
     }
