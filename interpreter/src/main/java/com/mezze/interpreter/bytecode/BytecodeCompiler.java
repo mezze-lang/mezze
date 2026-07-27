@@ -469,12 +469,24 @@ public final class BytecodeCompiler {
             return true;
         }
         if (node instanceof MakeLambdaIR ml) {
-            // Callee must already be compiled — same constraint as
-            // CallDirectN. Captures are just slot reads in the caller's
-            // frame; supports() lets them through unconditionally
-            // (they resolve to LoadArgument or LoadLocal at emit time).
+            // Captures are just slot reads in the caller's frame; they
+            // resolve to LoadArgument or LoadLocal at emit time.
+            //
+            // Emit-time-resolved target: fast path uses MakeLambda with
+            // CallTarget baked as constant operand.
+            //
+            // Target-not-compiled fallback (MakeLambdaByHash) tried but
+            // reverted — two blockers surfaced under full test:
+            //   1. Recursive-let `let f = {..} -> ... f {..}` captures
+            //      slot(f) BEFORE the WriteLocal populates it; emit
+            //      loads Illegal.
+            //   2. Under Async.spawn on a Loom thread,
+            //      getCurrentContext() returns null → MakeLambdaByHash
+            //      runtime resolve throws (same root cause as #304).
+            // Reject; AST fallback keeps these working.
             if (resolveCallTarget(ml.getFunctionHash()) == null) {
-                markReject(node, "target-not-compiled"); return false;
+                markReject(node, "target-not-compiled");
+                return false;
             }
             return true;
         }
@@ -1530,6 +1542,7 @@ public final class BytecodeCompiler {
         if (node instanceof MakeLambdaIR ml) {
             CallTarget target = resolveCallTarget(ml.getFunctionHash());
             if (target == null) {
+                // supports() should have rejected — defensive.
                 throw new IllegalStateException(
                     "MakeLambdaIR references unknown target hash "
                     + ml.getFunctionHash().getHex() + " — callee must be compiled first");
