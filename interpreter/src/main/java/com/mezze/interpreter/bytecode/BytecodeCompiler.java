@@ -582,17 +582,17 @@ public final class BytecodeCompiler {
                 }
             }
             // Trailing case (of the effective, dead-code-trimmed list):
-            // Wildcard/Record → truly unconditional. Variant/Literal/Seq
-            // → refutable, so we emit a NonExhaustiveMatch throw as the
-            // tail. StringInterp still rejected — needs its own
-            // fallthrough shape.
+            // Wildcard/Record → truly unconditional. Variant/Literal/Seq/
+            // StringInterp → refutable, so we emit a NonExhaustiveMatch
+            // throw as the tail.
             {
                 PatternIR lastPat = cases.get(effectiveEnd - 1).getPattern();
                 if (!(lastPat instanceof PatternIR.Wildcard)
                     && !(lastPat instanceof PatternIR.Record)
                     && !(lastPat instanceof PatternIR.Variant)
                     && !(lastPat instanceof PatternIR.Literal)
-                    && !(lastPat instanceof PatternIR.Seq)) {
+                    && !(lastPat instanceof PatternIR.Seq)
+                    && !(lastPat instanceof PatternIR.StringInterp)) {
                     markReject(node, "non-terminal-last:" + lastPat.getClass().getSimpleName());
                     return false;
                 }
@@ -635,6 +635,10 @@ public final class BytecodeCompiler {
                     // Same as Record — emit delegates to
                     // emitCaseGuardsAndBody after slot-binding, so
                     // guard/iflet work identically.
+                } else if (pat instanceof PatternIR.StringInterp) {
+                    // #360 — MatchStringInterp op runs the same
+                    // recursive matcher as AST's MatchBranchNode, emits
+                    // captures to their slots + falls through on null.
                 } else {
                     markReject(node, "pat:" + pat.getClass().getSimpleName());
                     return false;
@@ -1992,6 +1996,57 @@ public final class BytecodeCompiler {
             b.endBlock();
             emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
             b.endConditional();
+            return;
+        }
+        if (pat instanceof PatternIR.StringInterp sip) {
+            // #360 — MatchStringInterp op returns String[] captures or
+            // null. Store into a temp local; if non-null, write each
+            // capture into its target slot then run guards+body; else
+            // fall through to the next case.
+            //
+            // Layout (mirrors PatternIR.StringInterp): partTypes[i] is
+            // 0 for literal / 1 for capture; literals[i] is the string
+            // for literals; captureSlots[i] is the target slot (or -1
+            // for literal parts).
+            java.util.List<Integer> pt = sip.getPartTypes();
+            int[] partTypes = new int[pt.size()];
+            for (int i = 0; i < pt.size(); i++) partTypes[i] = pt.get(i);
+            java.util.List<String> lits = sip.getLiterals();
+            String[] literals = lits.toArray(new String[0]);
+            BytecodeLocal capturesLocal = b.createLocal();
+            b.beginBlock();
+            b.beginStoreLocal(capturesLocal);
+            b.beginMatchStringInterp(partTypes, literals);
+            b.emitLoadLocal(scrutineeLocal);
+            b.endMatchStringInterp();
+            b.endStoreLocal();
+            b.beginConditional();
+            b.beginPrimNotNull();
+            b.emitLoadLocal(capturesLocal);
+            b.endPrimNotNull();
+            b.beginBlock();
+            // Write each capture to its target slot. partTypes+captureSlots
+            // are parallel to parts; capture-type parts have a real slot,
+            // literal parts have -1 (skipped).
+            int captureIdx = 0;
+            java.util.List<Integer> capSlots = sip.getCaptureSlots();
+            for (int i = 0; i < partTypes.length; i++) {
+                if (partTypes[i] != 1) continue; // literal
+                int targetSlot = capSlots.get(i);
+                if (targetSlot < 0) { captureIdx++; continue; }
+                BytecodeLocal target = localMap[targetSlot - argCount];
+                b.beginStoreLocal(target);
+                b.beginArrayGetString(captureIdx);
+                b.emitLoadLocal(capturesLocal);
+                b.endArrayGetString();
+                b.endStoreLocal();
+                captureIdx++;
+            }
+            emitCaseGuardsAndBody(c, cases, idx, scrutineeLocal, b, argCount, localMap);
+            b.endBlock();
+            emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
+            b.endConditional();
+            b.endBlock();
             return;
         }
         if (pat instanceof PatternIR.Literal lit) {

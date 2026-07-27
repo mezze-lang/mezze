@@ -1050,6 +1050,33 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * True iff the operand is non-null. Used by MatchStringInterp
+     * emit (#360) to test whether the match succeeded (returns
+     * String[] on match, null on mismatch).
+     */
+    @Operation
+    public static final class PrimNotNull {
+        @Specialization
+        public static boolean doAny(Object value) {
+            return value != null;
+        }
+    }
+
+    /**
+     * Index a {@code String[]} by a compile-time constant index. Used
+     * by MatchStringInterp emit (#360) to pull captured substrings
+     * out of the returned captures array into per-slot locals.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    public static final class ArrayGetString {
+        @Specialization
+        public static String doGet(int index, String[] array) {
+            return array[index];
+        }
+    }
+
+    /**
      * Compare a variant's tag against a compile-time int tag. Returns
      * true iff the operand is a {@link MezzeVariant} with matching tag.
      *
@@ -1088,6 +1115,92 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static Object doVariant(MezzeVariant variant) {
             return variant.getPayloadValue();
+        }
+    }
+
+    /**
+     * String-interpolation pattern match: try to match {@code scrutinee}
+     * (a Str) against a template composed of alternating literal and
+     * capture parts (encoded via {@code partTypes} + {@code literals}
+     * arrays, baked as compile-time constants). On match, returns the
+     * captured substrings as a {@code String[]}; on mismatch, returns
+     * {@code null}. Caller emits {@code beginConditional} with a null
+     * check on the result to control fallthrough to the next case.
+     *
+     * <p>Mirrors AST's {@code MatchBranchNode.matchStringPattern}
+     * (interpreter/src/main/java/com/mezze/interpreter/nodes/variant/MatchBranchNode.java:886).
+     * {@code partTypes[i] == 0} → literal at {@code literals[i]},
+     * {@code partTypes[i] == 1} → capture (literal slot is null).
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.PatternIR.StringInterp}.
+     */
+    @Operation
+    @ConstantOperand(type = int[].class)
+    @ConstantOperand(type = String[].class)
+    public static final class MatchStringInterp {
+        @Specialization
+        @TruffleBoundary
+        public static Object doMatch(int[] partTypes, String[] literals, Object scrutinee) {
+            if (!(scrutinee instanceof String s)) return null;
+            int captureCount = 0;
+            for (int t : partTypes) if (t == 1) captureCount++;
+            String[] captures = new String[captureCount];
+            if (matchStringPattern(s, 0, 0, partTypes, literals, captures, 0)) {
+                return captures;
+            }
+            return null;
+        }
+
+        private static boolean matchStringPattern(
+                String input, int inputPos, int partIndex,
+                int[] partTypes, String[] literals,
+                String[] captures, int captureIndex) {
+            if (partIndex >= partTypes.length) {
+                return inputPos == input.length();
+            }
+            int partType = partTypes[partIndex];
+            if (partType == 0) {
+                String lit = literals[partIndex];
+                int len = lit.length();
+                if (inputPos + len > input.length()) return false;
+                if (!input.regionMatches(inputPos, lit, 0, len)) return false;
+                return matchStringPattern(input, inputPos + len, partIndex + 1,
+                        partTypes, literals, captures, captureIndex);
+            }
+            // CAPTURE
+            if (partIndex + 1 >= partTypes.length) {
+                captures[captureIndex] = input.substring(inputPos);
+                return true;
+            }
+            int nextPartType = partTypes[partIndex + 1];
+            if (nextPartType == 0) {
+                String nextLit = literals[partIndex + 1];
+                int searchPos = inputPos;
+                while (true) {
+                    int litPos = input.indexOf(nextLit, searchPos);
+                    if (litPos == -1) return false;
+                    String saved = captures[captureIndex];
+                    captures[captureIndex] = input.substring(inputPos, litPos);
+                    if (matchStringPattern(input, litPos, partIndex + 1,
+                            partTypes, literals, captures, captureIndex + 1)) {
+                        return true;
+                    }
+                    captures[captureIndex] = saved;
+                    searchPos = litPos + 1;
+                }
+            } else {
+                // Adjacent captures — try every split.
+                for (int splitPos = inputPos; splitPos <= input.length(); splitPos++) {
+                    String saved = captures[captureIndex];
+                    captures[captureIndex] = input.substring(inputPos, splitPos);
+                    if (matchStringPattern(input, splitPos, partIndex + 1,
+                            partTypes, literals, captures, captureIndex + 1)) {
+                        return true;
+                    }
+                    captures[captureIndex] = saved;
+                }
+                return false;
+            }
         }
     }
 
