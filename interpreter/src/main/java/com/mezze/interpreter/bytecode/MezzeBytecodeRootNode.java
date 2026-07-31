@@ -1475,6 +1475,75 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * #361 — Truffle exception carrying a {@link com.mezze.interpreter.values.MezzeSuspended}
+     * escaping a mid-block non-tail statement. Under Path E semantics
+     * (LAZY_EFFECTS on), an unhandled effect in the middle of a do-block
+     * must propagate as MezzeSuspended so the outer handler can compose
+     * it. AST's {@link com.mezze.interpreter.nodes.control.BlockNode}
+     * detects this by inspecting each stmt's return value; BDSL discards
+     * mid-block stmt values implicitly, so we insert a
+     * {@link CheckSuspendedThrow} after each non-tail Expr stmt that
+     * could yield suspended. If it fires, we unwind via this exception
+     * to the outer TryCatch wrapping the function body (see
+     * BytecodeCompiler emit at beginRoot), which returns the suspended
+     * value as the fn's result.
+     *
+     * <p>Extends AbstractTruffleException so beginTryCatch catches it.
+     */
+    public static final class SuspendedInBlockException
+            extends com.oracle.truffle.api.exception.AbstractTruffleException {
+        private static final long serialVersionUID = 1L;
+        public final com.mezze.interpreter.values.MezzeSuspended suspended;
+        public SuspendedInBlockException(com.mezze.interpreter.values.MezzeSuspended s) {
+            this.suspended = s;
+        }
+    }
+
+    /**
+     * #361 — Check top-of-stack for MezzeSuspended and either throw
+     * {@link SuspendedInBlockException} or drop the value. Emitted by
+     * {@link BytecodeCompiler} after every non-tail {@code StmtIR.Expr}
+     * in a BlockIR whose result could yield suspended (Perform, or
+     * transitive call whose callee could Perform).
+     *
+     * <p>Void return — matches the "bare expr as statement" slot in
+     * a BDSL block (implicit-pop shape).
+     */
+    @Operation
+    public static final class CheckSuspendedThrow {
+        @Specialization
+        public static void doCheck(Object value) {
+            if (value instanceof com.mezze.interpreter.values.MezzeSuspended susp) {
+                throw new SuspendedInBlockException(susp);
+            }
+            // Non-suspended: drop by returning (void).
+        }
+    }
+
+    /**
+     * #361 — Extract the MezzeSuspended from a caught
+     * {@link SuspendedInBlockException} on the exception stack. Consumes
+     * the exception (from {@code LoadException}), produces the
+     * suspended value. Used inside the outer function-root TryCatch.
+     *
+     * <p>Rethrows anything else — the outer catch is broad
+     * (AbstractTruffleException) so we must let non-suspended exceptions
+     * escape to the caller.
+     */
+    @Operation
+    public static final class UnwrapSuspendedInBlock {
+        @Specialization
+        public static Object doUnwrap(Object exception) {
+            if (exception instanceof SuspendedInBlockException sib) {
+                return sib.suspended;
+            }
+            if (exception instanceof RuntimeException re) throw re;
+            if (exception instanceof Error err) throw err;
+            throw new RuntimeException((Throwable) exception);
+        }
+    }
+
+    /**
      * Fast path for {@code perform Mut mutate { act = <lambda> }}: pop
      * the raw act lambda (no wrapper record on the operand stack). The
      * cached OpCallNode was built via

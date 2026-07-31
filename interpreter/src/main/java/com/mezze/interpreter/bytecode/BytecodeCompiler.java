@@ -394,18 +394,16 @@ public final class BytecodeCompiler {
                 NodeIR child = (s instanceof StmtIR.Let l) ? l.getValue()
                              : ((StmtIR.Expr) s).getNode();
                 if (!supportsNode(child, argCount)) return false;
-                // AST's BlockNode composes a ComposedBlockThunk when a
-                // stmt returns MezzeSuspended, wrapping the remaining
-                // stmts. BDSL blocks discard each Expr's value —
-                // MezzeSuspended propagation is lost. Reject blocks
-                // where a non-tail statement could produce a
-                // MezzeSuspended (i.e. contains a Perform or transitive
-                // effect call). Let statements are safe (their result
-                // is stored, not discarded).
-                if (s instanceof StmtIR.Expr && canYieldSuspended(child)) {
-                    markReject(node, "block-stmt-may-suspend");
-                    return false;
-                }
+                // #361 — non-tail Expr stmts that could yield MezzeSuspended
+                // are handled at runtime by CheckSuspendedThrow at emit time
+                // and an outer TryCatch(SuspendedInBlockException) wrapping
+                // the function body (see beginRoot emit). AST's BlockNode
+                // wraps remaining stmts in a ComposedBlockThunk on suspend;
+                // BDSL propagates the suspended value as the fn's return.
+                // Suspend-in-middle-of-block is rare in practice — Path E
+                // (LAZY_EFFECTS on) already installs a Handle over most
+                // effect uses, so unhandled Perform mid-block is the
+                // uncommon shape. No reject here anymore.
             }
             return supportsNode(blk.getResult(), argCount);
         }
@@ -810,9 +808,24 @@ public final class BytecodeCompiler {
                 localMap[i] = b.createLocal(name, null);
             }
 
+            // #361 — wrap body in TryCatch(SuspendedInBlockException).
+            // On catch, extract the MezzeSuspended via UnwrapSuspendedInBlock
+            // and return it as the fn's result. The exception is thrown by
+            // CheckSuspendedThrow emitted after non-tail block Expr stmts
+            // whose result could yield suspended (see BlockIR emit above).
+            // Non-suspended exceptions are rethrown by UnwrapSuspendedInBlock.
+            b.beginTryCatch();
+            //   try: normal return of the body
             b.beginReturn();
             emitNode(ir.getBody(), b, argCount, localMap);
             b.endReturn();
+            //   catch: extract MezzeSuspended and return it
+            b.beginReturn();
+            b.beginUnwrapSuspendedInBlock();
+            b.emitLoadException();
+            b.endUnwrapSuspendedInBlock();
+            b.endReturn();
+            b.endTryCatch();
 
             b.endRoot();
             if (source != null) {
@@ -1160,10 +1173,26 @@ public final class BytecodeCompiler {
                     // treated as a discarded expression by the DSL —
                     // its return value is popped implicitly at the
                     // next instruction.
+                    //
+                    // #361 — when the stmt could yield MezzeSuspended,
+                    // wrap the child in CheckSuspendedThrow so the
+                    // value is intercepted before it's dropped. If it's
+                    // a MezzeSuspended, CheckSuspendedThrow throws
+                    // SuspendedInBlockException, which unwinds to the
+                    // outer TryCatch at the function root (emitted at
+                    // beginRoot), returning the suspended value as the
+                    // fn's result. Non-suspended values are dropped as
+                    // before (op returns void).
                     int[] range = debug ? toCharRange(currentSource, e.getSrc()) : null;
                     if (range != null) b.beginSourceSection(range[0], range[1]);
                     if (debug) b.beginTag(com.oracle.truffle.api.instrumentation.StandardTags.StatementTag.class);
-                    emitNode(e.getNode(), b, argCount, localMap);
+                    if (canYieldSuspended(e.getNode())) {
+                        b.beginCheckSuspendedThrow();
+                        emitNode(e.getNode(), b, argCount, localMap);
+                        b.endCheckSuspendedThrow();
+                    } else {
+                        emitNode(e.getNode(), b, argCount, localMap);
+                    }
                     if (debug) b.endTag(com.oracle.truffle.api.instrumentation.StandardTags.StatementTag.class);
                     if (range != null) b.endSourceSection();
                 }
