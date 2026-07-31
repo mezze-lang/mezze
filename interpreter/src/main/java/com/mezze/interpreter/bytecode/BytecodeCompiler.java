@@ -453,11 +453,18 @@ public final class BytecodeCompiler {
             for (StringPartIR p : is.getParts()) {
                 if (p instanceof StringPartIR.Expr e) {
                     if (!supportsNode(e.getNode(), argCount)) return false;
-                    // AST's InterpolatedStringNode calls .to_dbg_str on
-                    // MezzeSuspended parts to render them. BDSL's
-                    // InterpolateString op just String.valueOfs — losing
-                    // the suspension. Reject bodies where any expr part
-                    // could return MezzeSuspended.
+                    // Interp with a suspend-capable part previously
+                    // rejected to preserve AST semantics (parts of
+                    // MezzeSuspended type are toString'd, losing the
+                    // effect). Fixing this via
+                    // CheckSuspendedPassThrough + root TryCatch (#361
+                    // pattern) surfaces a separate BDSL bug in
+                    // ability-method dispatch on scalar receivers
+                    // (Long.to_dbg_str{}) — task #346 territory. Keep
+                    // the reject until that lands so we don't break
+                    // LazyEffectsTest > suspended value in string
+                    // interpolation, which uses `id.to_dbg_str{}` on a
+                    // Long inside a Str interpolation.
                     if (canYieldSuspended(e.getNode())) {
                         markReject(node, "interp-expr-may-suspend");
                         return false;

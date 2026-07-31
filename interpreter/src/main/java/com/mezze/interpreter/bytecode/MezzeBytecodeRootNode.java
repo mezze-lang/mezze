@@ -1521,6 +1521,29 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * #361 — Value-preserving suspend check for inline positions like
+     * interpolated-string argument slots. Takes 1 input, returns it
+     * unchanged (no drop) but throws {@link SuspendedInBlockException}
+     * if it's a {@link com.mezze.interpreter.values.MezzeSuspended}.
+     *
+     * <p>Contrast with {@link CheckSuspendedThrow} which is void-return
+     * (drops the value) and used for bare-Expr slots in a Block.
+     * PassThrough is used when we need to keep the value on the stack
+     * for a downstream op that consumes it, e.g. a per-part suspend
+     * check on an {@code InterpolateString} argument.
+     */
+    @Operation
+    public static final class CheckSuspendedPassThrough {
+        @Specialization
+        public static Object doCheck(Object value) {
+            if (value instanceof com.mezze.interpreter.values.MezzeSuspended susp) {
+                throw new SuspendedInBlockException(susp);
+            }
+            return value;
+        }
+    }
+
+    /**
      * #361 — Extract the MezzeSuspended from a caught
      * {@link SuspendedInBlockException} on the exception stack. Consumes
      * the exception (from {@code LoadException}), produces the
