@@ -453,22 +453,15 @@ public final class BytecodeCompiler {
             for (StringPartIR p : is.getParts()) {
                 if (p instanceof StringPartIR.Expr e) {
                     if (!supportsNode(e.getNode(), argCount)) return false;
-                    // Interp with a suspend-capable part previously
-                    // rejected to preserve AST semantics (parts of
-                    // MezzeSuspended type are toString'd, losing the
-                    // effect). Fixing this via
-                    // CheckSuspendedPassThrough + root TryCatch (#361
-                    // pattern) surfaces a separate BDSL bug in
-                    // ability-method dispatch on scalar receivers
-                    // (Long.to_dbg_str{}) — task #346 territory. Keep
-                    // the reject until that lands so we don't break
-                    // LazyEffectsTest > suspended value in string
-                    // interpolation, which uses `id.to_dbg_str{}` on a
-                    // Long inside a Str interpolation.
-                    if (canYieldSuspended(e.getNode())) {
-                        markReject(node, "interp-expr-may-suspend");
-                        return false;
-                    }
+                    // Suspend-capable parts are wrapped in
+                    // CheckSuspendedPassThrough at emit time (see emit
+                    // path below), so a MezzeSuspended flowing through
+                    // an interp part escapes as SuspendedInBlockException
+                    // caught at the fn root's outer TryCatch (#361).
+                    // Group B scalar-receiver dispatch (Long.to_dbg_str{}
+                    // etc.) is now handled by tryFoldInspectMethod +
+                    // InlineScalarInspect (#346), so the previous blocker
+                    // is gone.
                 }
             }
             return true;
@@ -1412,7 +1405,18 @@ public final class BytecodeCompiler {
             b.beginInterpolateString(parts);
             for (StringPartIR p : is.getParts()) {
                 if (p instanceof StringPartIR.Expr e) {
-                    emitNode(e.getNode(), b, argCount, localMap);
+                    // Wrap suspend-capable parts so a MezzeSuspended flows
+                    // out as SuspendedInBlockException instead of being
+                    // toString'd into the assembled string. Caught at fn
+                    // root's outer TryCatch (#361). Non-suspending parts
+                    // (literals, ReadLocal, etc.) skip the check — cheap.
+                    if (canYieldSuspended(e.getNode())) {
+                        b.beginCheckSuspendedPassThrough();
+                        emitNode(e.getNode(), b, argCount, localMap);
+                        b.endCheckSuspendedPassThrough();
+                    } else {
+                        emitNode(e.getNode(), b, argCount, localMap);
+                    }
                 }
             }
             b.endInterpolateString();
