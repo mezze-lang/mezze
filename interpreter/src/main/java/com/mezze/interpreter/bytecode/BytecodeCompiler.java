@@ -416,6 +416,16 @@ public final class BytecodeCompiler {
             // a plain 1-arg CallDirectN without a scalar marker — the
             // AST callee's normalizeArgs sees a single record and
             // routes to the record-ABI path.
+            //
+            // Stub NOT applied here (unlike MakeLambda #304): CallDirect
+            // participates in effect dispatch (perform sites route through
+            // caller-side effect chain lookup keyed on the callee's
+            // CallTarget identity), and forwarding the call through
+            // LazyStubRootNode via IndirectCallNode breaks that identity
+            // enough to produce silently-wrong results (STM modifiers
+            // return stale values, effect handlers miss ops). Reject —
+            // this bucket stays until we route the stub's forward through
+            // a proper AST caller-side node instead of IndirectCallNode.
             if (resolveCallTarget(c.getTargetHash()) == null) {
                 markReject(node, "target-not-compiled"); return false;
             }
