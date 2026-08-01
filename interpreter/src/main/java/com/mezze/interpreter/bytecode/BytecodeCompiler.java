@@ -473,18 +473,37 @@ public final class BytecodeCompiler {
             // Emit-time-resolved target: fast path uses MakeLambda with
             // CallTarget baked as constant operand.
             //
-            // Target-not-compiled fallback (MakeLambdaByHash) tried but
-            // reverted — two blockers surfaced under full test:
-            //   1. Recursive-let `let f = {..} -> ... f {..}` captures
-            //      slot(f) BEFORE the WriteLocal populates it; emit
-            //      loads Illegal.
-            //   2. Under Async.spawn on a Loom thread,
-            //      getCurrentContext() returns null → MakeLambdaByHash
-            //      runtime resolve throws (same root cause as #304).
-            // Reject; AST fallback keeps these working.
+            // Target-not-compiled: mint a lazy stub via
+            // MezzeLanguage.getOrMintUserStub. The stub is a real
+            // CallTarget with stable identity — bake-as-constant works
+            // — that inflates on first execute (via the AST compile
+            // path, bypassing BDSL to avoid re-entering this compiler
+            // while it's mid-emit). #304.
+            //
+            // Recursive-let restriction: if ANY capture reads a local
+            // slot (>= argCount, i.e. not from the outer fn's args or
+            // its own captures), the outer function is a `let f = ...`
+            // definition and slot(f) may not be written yet at MakeLambda
+            // time. Reject to AST — the AST path uses a different
+            // closure init pattern (post-write patch) that BDSL doesn't
+            // model. Only mint stubs when captures are stable
+            // (args/captures of the outer fn), which covers top-level
+            // fn references and non-recursive nested lambdas.
             if (resolveCallTarget(ml.getFunctionHash()) == null) {
-                markReject(node, "target-not-compiled");
-                return false;
+                for (var cap : ml.getCaptures()) {
+                    if (cap.getSlot() >= argCount) {
+                        markReject(node, "target-not-compiled");
+                        return false;
+                    }
+                }
+                CallTarget stub = language.getOrMintUserStub(
+                        ml.getFunctionHash(), "lambda");
+                if (stub != null) {
+                    compiledCallTargets.put(ml.getFunctionHash(), stub);
+                } else {
+                    markReject(node, "target-not-compiled");
+                    return false;
+                }
             }
             return true;
         }

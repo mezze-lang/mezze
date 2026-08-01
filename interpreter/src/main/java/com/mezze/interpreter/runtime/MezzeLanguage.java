@@ -480,6 +480,82 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         getCurrentContext().registerUserFunctionIR(hash, ir);
     }
 
+    // #304 — per-hash lazy stubs. Minted on demand by BDSL emit when a
+    // callee CallTarget isn't yet cached; the stub itself is stable
+    // (baked as ConstantOperand into BDSL bytecode) and lazily inflates
+    // on first call via LazyStubRootNode.inflate.
+    private final java.util.concurrent.ConcurrentHashMap<Hash, CallTarget> userStubCache =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Return the shared lazy-inflating stub CallTarget for {@code hash}
+     * (mint on first request). The stub inflates on first execute via
+     * {@link #compileUserIRForStub}; callers get stable identity for
+     * emit-time constant baking. Returns null if the hash is not
+     * registered in any known IR source (per-context user registry,
+     * PrecompiledStdlib, or runtime MezzeStore).
+     */
+    public CallTarget getOrMintUserStub(Hash hash, String name) {
+        CallTarget existing = userStubCache.get(hash);
+        if (existing != null) return existing;
+        // Confirm the hash is at least resolvable before minting a stub —
+        // returning a dud stub would defer the "not found" error to a
+        // confusing runtime IllegalStateException.
+        if (!canResolveIR(hash)) return null;
+        return userStubCache.computeIfAbsent(hash, h ->
+            new com.mezze.interpreter.bytecode.LazyStubRootNode(this, h, name).getCallTarget());
+    }
+
+    private boolean canResolveIR(Hash hash) {
+        MezzeContext ctx;
+        try { ctx = getCurrentContext(); } catch (Exception e) { ctx = null; }
+        if (ctx != null && ctx.getUserFunctionIR(hash) != null) return true;
+        if (com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE
+                .getPreloweredFunctions().containsKey(hash)) return true;
+        var store = runtimeStore;
+        if (store != null && store.getIR(hash) != null) return true;
+        return false;
+    }
+
+    /**
+     * AST-only compile of a user/stdlib IR for lazy-stub inflation. Does
+     * NOT go through {@link #compileOne} — that would re-enter the
+     * singleton BDSL compiler, which may be mid-emit for another IR when
+     * we're called (BDSL emit itself is what created the stub in the
+     * first place).
+     */
+    public com.oracle.truffle.api.nodes.RootNode compileUserIRForStub(Hash hash) {
+        MezzeContext ctx;
+        try { ctx = getCurrentContext(); } catch (Exception e) { ctx = null; }
+        com.mezze.language.truffleir.FunctionIR ir = null;
+        if (ctx != null) ir = ctx.getUserFunctionIR(hash);
+        if (ir == null) {
+            ir = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE
+                .getPreloweredFunctions().get(hash);
+        }
+        if (ir == null) {
+            var store = runtimeStore;
+            if (store != null) {
+                byte[] bytes = store.getIR(hash);
+                if (bytes != null) {
+                    try {
+                        ir = com.mezze.language.store.StoreSerialization.INSTANCE
+                                .deserializeFunctionIR(bytes);
+                    } catch (Exception e) {
+                        return null;
+                    }
+                }
+            }
+        }
+        if (ir == null) return null;
+        var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
+        // For user IR, register the sibling functions so cross-fn refs resolve.
+        if (ctx != null) {
+            compiler.registerFunctions(new java.util.ArrayList<>(ctx.getAllUserFunctionIRs()));
+        }
+        return compiler.compile(ir);
+    }
+
     /**
      * Get a cached CallTarget by hash — checks stdlib cache first, then compiles user IR on demand.
      *
@@ -700,6 +776,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             throw new RuntimeException("MezzeLanguage.parse() called without a context");
         }
         ctx.clearUserState();
+        // #304 — user-hash stubs may hold CallTargets from a prior test's
+        // context. Clear them alongside per-context user state so the next
+        // test starts fresh.
+        userStubCache.clear();
 
         // Check for direct TruffleIR execution (from tests or CLI)
         List<FunctionIR> directFunctions = directExecutionFunctions.get();
