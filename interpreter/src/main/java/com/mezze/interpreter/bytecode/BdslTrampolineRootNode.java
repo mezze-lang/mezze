@@ -165,11 +165,15 @@ public final class BdslTrampolineRootNode extends RootNode {
     /**
      * Wire the BDSL inner root and set the {@link #hasTailCalls} flag
      * so callers can decide whether the trampoline is bypassable.
+     *
+     * <p>Idempotent under races: two threads may reach this concurrently
+     * for the same content-addressed IR (both entered compile() before
+     * either published). Since the IR is identical and BDSL emit is
+     * deterministic, the losing thread's inner is functionally equivalent
+     * — just discard it and keep the first.
      */
-    public void attachInner(RootNode inner, boolean hasTailCalls) {
-        if (this.innerTarget != null) {
-            throw new IllegalStateException("BdslTrampolineRootNode.attachInner already called");
-        }
+    public synchronized void attachInner(RootNode inner, boolean hasTailCalls) {
+        if (this.innerTarget != null) return;
         this.innerTarget = inner.getCallTarget();
         this.hasTailCalls = hasTailCalls;
         this.loop = insert(Truffle.getRuntime().createLoopNode(

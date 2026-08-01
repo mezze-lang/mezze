@@ -2174,7 +2174,9 @@ public final class BytecodeCompiler {
             }
             b.beginBlock();
             for (int i = 0; i < elemCount; i++) {
-                BytecodeLocal target = localMap[sp.getElementSlots().get(i) - argCount];
+                int slot = sp.getElementSlots().get(i);
+                if (slot < 0) continue;  // wildcard element (`_`) — no binding
+                BytecodeLocal target = localMap[slot - argCount];
                 b.beginStoreLocal(target);
                 b.beginSeqGetAt(i);
                 b.emitLoadLocal(scrutineeLocal);
