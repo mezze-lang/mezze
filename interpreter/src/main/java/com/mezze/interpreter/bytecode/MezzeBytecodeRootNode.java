@@ -506,6 +506,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // Ability-op chains where the receiver is a primitive Long/Double
         // that happens NOT to match a specific method (like the failing
         // `(x + y).add {...}` where AST also throws) hit this path.
+        //
+        // Group B (task #346): scalar-receiver `.to_dbg_str{}` /
+        // `.to_str{}` on Long/Double/Bool/Str/Char also lands here but
+        // AST's auto-derived Inspect impl produces a string. Fixing
+        // this requires either (1) a peephole in BytecodeCompiler that
+        // rewrites CallIndirect(ReadField(scalar, "to_dbg_str"), ...)
+        // to a direct inline stringify, or (2) a MezzeFunction wrapper
+        // returned from here. Both are nontrivial — parked. Users hit
+        // this path only when the hasReadField gate is dropped, and
+        // the gate stays on for now (see MezzeLanguage.isBdslSafeCallee).
         @Fallback
         public static Object doNotRecord(String fieldName, Object receiver) {
             throw new RuntimeException("Expected record for field '" + fieldName + "', got: " +
