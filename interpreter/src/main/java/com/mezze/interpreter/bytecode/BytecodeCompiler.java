@@ -207,15 +207,19 @@ public final class BytecodeCompiler {
     private final Map<Hash, CallTarget> compiledCallTargets = new HashMap<>();
 
     /**
-     * #304 — evict stub CallTargets (LazyStubRootNode) from the
-     * per-BDSL-compiler cache at parse() time. Called by
-     * MezzeLanguage.parse() alongside userStubCache.clear() so a stale
-     * stub from a disposed context can't be forwarded to on the next test.
+     * #304 — evict stub CallTargets (LazyStubRootNode) and orphan
+     * trampolines (attachInner never called) from the per-BDSL-compiler
+     * cache at parse() time. Called by MezzeLanguage.parse() alongside
+     * userStubCache.clear() so a stale stub/orphan from a disposed
+     * context can't be resolved to on the next test.
      */
     public void invalidateStubs() {
         compiledCallTargets.values().removeIf(ct -> {
             if (ct instanceof com.oracle.truffle.api.RootCallTarget rct) {
-                return rct.getRootNode() instanceof LazyStubRootNode;
+                var root = rct.getRootNode();
+                if (root instanceof LazyStubRootNode) return true;
+                if (root instanceof BdslTrampolineRootNode t
+                        && t.getInnerTarget() == null) return true;
             }
             return false;
         });
@@ -251,11 +255,7 @@ public final class BytecodeCompiler {
     /** Look up a callee CallTarget: local map first, then external resolver. */
     private CallTarget resolveCallTarget(Hash hash) {
         CallTarget ct = compiledCallTargets.get(hash);
-        if (ct != null && !isOrphanTrampoline(ct)) return ct;
-        // Orphan trampoline (pre-registered by compileWithCallees for a
-        // hash whose supports() later failed) — evict and fall through
-        // to the resolver so a fresh, fully-wired CT can replace it.
-        if (ct != null) compiledCallTargets.remove(hash);
+        if (ct != null) return ct;
         if (externalResolver != null) {
             ct = externalResolver.apply(hash);
             if (ct != null) {
@@ -265,32 +265,6 @@ public final class BytecodeCompiler {
             }
         }
         return ct;
-    }
-
-    /**
-     * True iff the FunctionIR for {@code hash} has captures — meaning
-     * calls to it are only correct via CallIndirect (which prepends
-     * closure values from the MezzeFunction); a raw CallDirect skips
-     * that step and misaligns args with the callee's frame slots.
-     * See #304 CallDirect stub reject reason.
-     */
-    private boolean calleeHasCaptures(Hash hash) {
-        var ir = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE
-                .getPreloweredFunctions().get(hash);
-        if (ir == null) {
-            try {
-                var ctx = language.getCurrentContext();
-                if (ctx != null) ir = ctx.getUserFunctionIR(hash);
-            } catch (Throwable ignored) {}
-        }
-        return ir != null && !ir.getCaptureSlots().isEmpty();
-    }
-
-    /** True iff ct is a BdslTrampolineRootNode without an inner attached. */
-    private static boolean isOrphanTrampoline(CallTarget ct) {
-        if (!(ct instanceof com.oracle.truffle.api.RootCallTarget rct)) return false;
-        if (!(rct.getRootNode() instanceof BdslTrampolineRootNode t)) return false;
-        return t.getInnerTarget() == null;
     }
 
     /**
@@ -462,18 +436,20 @@ public final class BytecodeCompiler {
             // AST callee's normalizeArgs sees a single record and
             // routes to the record-ABI path.
             //
-            // Stub NOT applied here (unlike MakeLambda #304): under full
-            // test with the stub enabled AND a hasCaptures guard, the
-            // LazyEffects "suspended in closure" test and STM tests
-            // still fail cross-test. Diagnosis via [STUB-CALL] println
-            // showed the closure body being called with wrong arg
-            // layout (record ABI marker missing) — suggesting the
-            // caller-side scalar/record ABI classification and the
-            // stub's forward semantics don't fully agree. Fix requires
-            // routing the stub's forward through a proper AST caller
-            // node (CallDirectScalarNode-style) that installs the
-            // right marker/closure prefix. Docs commit d0ee724a7 has
-            // fuller notes.
+            // Stub NOT applied here (unlike MakeLambda #304). Two
+            // attempts landed and reverted:
+            //   1. IndirectCallNode forward — 6 effect tests silently
+            //      produced wrong values (STM modify returned 10 vs 15).
+            //   2. DirectCallNode forward + closure-prepending stub —
+            //      LazyEffects "suspended in closure" fixed, but STM
+            //      and StateMachineExecution nested-handler tests still
+            //      fail. Root cause: the LazyStubRootNode inserts an
+            //      extra frame in the callstack that breaks Truffle's
+            //      frame-walking used by effect handler lookup (perform
+            //      → nearest matching Handle) and DAP breakpoint frame
+            //      identification. Fix requires eliminating the stub
+            //      from the runtime callstack (bytecode-level indirection
+            //      that self-modifies on first-call), not a wrapper node.
             if (resolveCallTarget(c.getTargetHash()) == null) {
                 markReject(node, "target-not-compiled"); return false;
             }
