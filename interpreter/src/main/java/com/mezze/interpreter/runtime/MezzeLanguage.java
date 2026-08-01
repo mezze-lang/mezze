@@ -780,6 +780,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // context. Clear them alongside per-context user state so the next
         // test starts fresh.
         userStubCache.clear();
+        // The BDSL compiler's per-instance compiledCallTargets cache also
+        // holds the stub CTs from prior emits; evict them too so a stale
+        // stub can't be resolved on the next test's supports() check.
+        var bc = bdslCompiler;
+        if (bc != null) bc.invalidateStubs();
 
         // Check for direct TruffleIR execution (from tests or CLI)
         List<FunctionIR> directFunctions = directExecutionFunctions.get();

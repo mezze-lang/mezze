@@ -7,6 +7,7 @@ import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.RootNode;
 
@@ -50,15 +51,23 @@ public final class LazyStubRootNode extends RootNode {
     @CompilerDirectives.CompilationFinal
     private volatile CallTarget inflated;
 
+    /**
+     * Once inflated, replace the forwarding node with a cached
+     * DirectCallNode on the concrete target. DirectCallNode lets Truffle
+     * inline the callee and profile arg shapes across the boundary —
+     * matching the semantics of BDSL's CallDirectN.doCached ({@code
+     * @Cached("create(target)")}). Using IndirectCallNode instead
+     * breaks per-CallTarget argument profiling that STM and lazy-effect
+     * force paths depend on.
+     */
     @Child
-    private IndirectCallNode forward;
+    private DirectCallNode forward;
 
     public LazyStubRootNode(MezzeLanguage lang, com.mezze.language.typedast.Hash hash, String name) {
         super(lang, FrameDescriptor.newBuilder().build());
         this.lang = lang;
         this.hash = hash;
         this.name = name;
-        this.forward = IndirectCallNode.create();
     }
 
     /** Package-visible for the language-level cache to detect that this is a stub. */
@@ -73,26 +82,37 @@ public final class LazyStubRootNode extends RootNode {
 
     @Override
     public Object execute(VirtualFrame frame) {
-        CallTarget ct = inflated;
-        if (ct == null) {
-            ct = inflate();
+        DirectCallNode fwd = forward;
+        if (fwd == null) {
+            fwd = inflate();
         }
-        return forward.call(ct, frame.getArguments());
+        return fwd.call(frame.getArguments());
     }
 
     @CompilerDirectives.TruffleBoundary
-    private synchronized CallTarget inflate() {
-        CallTarget ct = inflated;
-        if (ct != null) return ct;
-        RootNode real = lang.compileUserIRForStub(hash);
-        if (real == null) {
-            throw new IllegalStateException(
-                "LazyStubRootNode[" + name + " / " + hash.getHex() + "] "
-                + "cannot inflate: FunctionIR not registered on any context");
+    private synchronized DirectCallNode inflate() {
+        DirectCallNode fwd = forward;
+        if (fwd != null) return fwd;
+        // Prefer the pipeline-produced CallTarget if the runtime already
+        // has one for this hash — that's the canonical version everything
+        // else in the process uses. Only fall back to AST-only compile
+        // if no CT is available yet (which shouldn't happen at inflate
+        // time in practice because the pipeline compiles user fns before
+        // returning control to the caller).
+        CallTarget ct = lang.getCachedStdlibCallTarget(hash);
+        if (ct == null) {
+            RootNode real = lang.compileUserIRForStub(hash);
+            if (real == null) {
+                throw new IllegalStateException(
+                    "LazyStubRootNode[" + name + " / " + hash.getHex() + "] "
+                    + "cannot inflate: FunctionIR not registered on any context");
+            }
+            ct = real.getCallTarget();
         }
-        ct = real.getCallTarget();
         inflated = ct;
-        return ct;
+        fwd = insert(DirectCallNode.create(ct));
+        forward = fwd;
+        return fwd;
     }
 
     @Override
