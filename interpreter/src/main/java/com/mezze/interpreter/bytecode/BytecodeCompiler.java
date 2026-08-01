@@ -1949,8 +1949,49 @@ public final class BytecodeCompiler {
         b.beginStoreLocal(scrutineeLocal);
         emitNode(m.getScrutinee(), b, argCount, localMap);
         b.endStoreLocal();
+        // Zero-init every binding slot that any case in this match writes.
+        // Match arms only write bindings on the matching branch, but a
+        // ReadLocal after the match (or in a subsequent stmt) may run on
+        // any branch. AST's frame contract is "unset local reads as null";
+        // BDSL's LoadLocal throws FrameSlotTypeException. Without this,
+        // if-let with record pattern breaks: the else arm never writes the
+        // record-field slots, and a later reference to one Illegal-reads.
+        java.util.Set<Integer> bindingSlots = new java.util.HashSet<>();
+        collectBindingSlots(m.getCases(), bindingSlots);
+        for (Integer slot : bindingSlots) {
+            if (slot != null && slot >= argCount && slot - argCount < localMap.length) {
+                b.beginStoreLocal(localMap[slot - argCount]);
+                b.emitLoadNullConstant();
+                b.endStoreLocal();
+            }
+        }
         emitMatchChain(m.getCases(), 0, scrutineeLocal, b, argCount, localMap);
         b.endBlock();
+    }
+
+    /** Collect every slot any pattern in any case might bind. Recursive over nested records. */
+    private static void collectBindingSlots(java.util.List<CaseIR> cases,
+                                            java.util.Set<Integer> out) {
+        for (CaseIR c : cases) {
+            collectPatternBindingSlots(c.getPattern(), out);
+        }
+    }
+
+    private static void collectPatternBindingSlots(PatternIR pat, java.util.Set<Integer> out) {
+        if (pat == null) return;
+        if (pat instanceof PatternIR.Wildcard w) {
+            if (w.getSlot() >= 0) out.add(w.getSlot());
+        } else if (pat instanceof PatternIR.Record rp) {
+            for (int s : rp.getFieldSlots()) if (s >= 0) out.add(s);
+        } else if (pat instanceof PatternIR.Variant vp) {
+            for (int s : vp.getFieldSlots()) if (s >= 0) out.add(s);
+        } else if (pat instanceof PatternIR.Seq sp) {
+            for (int s : sp.getElementSlots()) if (s >= 0) out.add(s);
+            if (sp.getRestSlot() >= 0) out.add(sp.getRestSlot());
+        } else if (pat instanceof PatternIR.StringInterp si) {
+            for (int s : si.getCaptureSlots()) if (s >= 0) out.add(s);
+        }
+        // Literal has no bindings.
     }
 
     private void emitMatchChain(java.util.List<CaseIR> cases, int idx,

@@ -190,6 +190,21 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Push {@code null} onto the operand stack. Truffle DSL forbids null
+     * in {@code @ConstantOperand}, so this exists as a no-operand op
+     * dedicated to producing null (for zero-init match-binding slots so
+     * a LoadLocal after a non-matching arm reads null instead of
+     * throwing FrameSlotTypeException).
+     */
+    @Operation
+    public static final class LoadNullConstant {
+        @Specialization
+        public static Object doLoad() {
+            return null;
+        }
+    }
+
+    /**
      * Push a compile-time Object constant. Used for strings, chars, and
      * any other reference-typed literals — anything that isn't captured
      * by the boxing-elimination fast paths for long/double/boolean.
