@@ -1969,11 +1969,38 @@ public final class BytecodeCompiler {
         b.endBlock();
     }
 
-    /** Collect every slot any pattern in any case might bind. Recursive over nested records. */
+    /**
+     * Collect every slot any case in a match might write, INCLUDING
+     * pattern bindings, case-level `bindings`, if-let guard bindings,
+     * and (recursively) bindings introduced by nested MatchIRs anywhere
+     * in each case's body/guard.
+     *
+     * Why the body recursion is required: nested record patterns like
+     * `if let User {name, address: Address {city, zip}} = alice` desugar
+     * (in the typechecker's ExprControlFlowConstraints) into an OUTER
+     * MatchIR that binds `name`/`address`, and an INNER MatchIR inside
+     * the outer's case body that binds `city`/`zip`. The outer match's
+     * `else` arm skips the inner match, leaving `city`/`zip` slots
+     * Illegal — a later ReadLocal on those slots crashes with
+     * FrameSlotTypeException.
+     */
     private static void collectBindingSlots(java.util.List<CaseIR> cases,
                                             java.util.Set<Integer> out) {
         for (CaseIR c : cases) {
             collectPatternBindingSlots(c.getPattern(), out);
+            for (var b : c.getBindings()) {
+                if (b.getSlot() >= 0) out.add(b.getSlot());
+            }
+            for (var ilb : c.getIfLetBindings()) {
+                for (int s : ilb.getFieldSlots()) if (s >= 0) out.add(s);
+                // The nested if-let guard also runs an inner pattern.
+                collectPatternBindingSlots(ilb.getPattern(), out);
+                collectNestedMatchBindings(ilb.getExpr(), out);
+            }
+            if (c.getGuard() != null) {
+                collectNestedMatchBindings(c.getGuard(), out);
+            }
+            collectNestedMatchBindings(c.getBody(), out);
         }
     }
 
@@ -1992,6 +2019,41 @@ public final class BytecodeCompiler {
             for (int s : si.getCaptureSlots()) if (s >= 0) out.add(s);
         }
         // Literal has no bindings.
+    }
+
+    /** Walk a NodeIR subtree; when we find a nested MatchIR, recurse into its cases. */
+    private static void collectNestedMatchBindings(NodeIR node, java.util.Set<Integer> out) {
+        if (node == null) return;
+        if (node instanceof MatchIR m) {
+            collectBindingSlots(m.getCases(), out);
+            collectNestedMatchBindings(m.getScrutinee(), out);
+            return;
+        }
+        if (node instanceof BlockIR blk) {
+            for (StmtIR s : blk.getStmts()) {
+                if (s instanceof StmtIR.Let l) collectNestedMatchBindings(l.getValue(), out);
+                else if (s instanceof StmtIR.Expr e) collectNestedMatchBindings(e.getNode(), out);
+            }
+            collectNestedMatchBindings(blk.getResult(), out);
+            return;
+        }
+        if (node instanceof IfIR i) {
+            collectNestedMatchBindings(i.getCond(), out);
+            collectNestedMatchBindings(i.getThenBr(), out);
+            collectNestedMatchBindings(i.getElseBr(), out);
+            return;
+        }
+        if (node instanceof WriteLocalIR w) {
+            collectNestedMatchBindings(w.getValue(), out);
+            return;
+        }
+        // Every other NodeIR shape that can transitively contain a Match
+        // — CallDirect/CallIndirect/CallLocal/CallNative/DictMethodCall/
+        // InlineBinaryOp/RecordUpdate/MakeRecord/MakeSeq/InterpolatedString/
+        // PerformOp/HandleIR — the typechecker does not currently emit
+        // MatchIR as a subexpression of these in Mezze (matches are only
+        // in tail-of-block, if-branch, or let-value position). The three
+        // walkers above cover the reachable positions.
     }
 
     private void emitMatchChain(java.util.List<CaseIR> cases, int idx,
