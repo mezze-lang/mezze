@@ -2143,6 +2143,7 @@ public final class BytecodeCompiler {
             b.beginBlock();
             for (int i = 0; i < rp.getFieldNames().size(); i++) {
                 int slot = rp.getFieldSlots().get(i);
+                if (slot < 0) continue;  // wildcard field (`_`) — no binding
                 BytecodeLocal target = localMap[slot - argCount];
                 b.beginStoreLocal(target);
                 b.beginReadFieldByName(rp.getFieldNames().get(i));
@@ -2284,7 +2285,9 @@ public final class BytecodeCompiler {
             b.endUnwrapSinglePayload();
             b.endStoreLocal();
             for (int i = 0; i < names.size(); i++) {
-                BytecodeLocal target = localMap[slots.get(i) - argCount];
+                int slot = slots.get(i);
+                if (slot < 0) continue;  // wildcard field (`_`) — no binding
+                BytecodeLocal target = localMap[slot - argCount];
                 b.beginStoreLocal(target);
                 b.beginReadFieldByName(names.get(i));
                 b.emitLoadLocal(payloadLocal);
@@ -2379,7 +2382,9 @@ public final class BytecodeCompiler {
                 b.endUnwrapSinglePayload();
                 b.endStoreLocal();
                 for (int i = 0; i < names.size(); i++) {
-                    BytecodeLocal target = localMap[slots.get(i) - argCount];
+                    int slot = slots.get(i);
+                    if (slot < 0) continue;  // wildcard field (`_`) — no binding
+                    BytecodeLocal target = localMap[slot - argCount];
                     b.beginStoreLocal(target);
                     b.beginReadFieldByName(names.get(i));
                     b.emitLoadLocal(payloadLocal);
