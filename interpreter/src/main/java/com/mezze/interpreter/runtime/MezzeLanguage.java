@@ -298,7 +298,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * unaffected since they have no ReadFieldIR.
      */
     private static boolean isBdslSafeCallee(com.mezze.language.truffleir.FunctionIR ir) {
-        return !hasReadField(ir.getBody());
+        // hasReadField gate dropped after: (1) match-binding zero-init
+        // (cfd364caf, 7ea2bdc82) restores AST frame-contract for
+        // pattern arms; (2) guard-after-iflet ordering fix routes
+        // guard evaluation AFTER iflet bindings populate their slots
+        // (fixes "Expected record for field X, got null" on
+        // fall-through arms). Remaining regressions (if any) are Group
+        // B (scalar-receiver ability method dispatch, task #346).
+        return true;
     }
 
     /**

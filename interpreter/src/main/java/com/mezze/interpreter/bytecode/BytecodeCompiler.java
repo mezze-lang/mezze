@@ -2262,15 +2262,21 @@ public final class BytecodeCompiler {
                                        BytecodeLocal scrutineeLocal,
                                        MezzeBytecodeRootNodeGen.Builder b,
                                        int argCount, BytecodeLocal[] localMap) {
-        if (c.getGuard() != null) {
-            b.beginConditional();
-            emitNode(c.getGuard(), b, argCount, localMap);
-            emitIfLetChain(c, 0, cases, idx, scrutineeLocal, b, argCount, localMap);
-            emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
-            b.endConditional();
-        } else {
-            emitIfLetChain(c, 0, cases, idx, scrutineeLocal, b, argCount, localMap);
-        }
+        // Ordering rule: if-let bindings MUST populate their slots
+        // BEFORE the guard runs. Guards frequently reference iflet-bound
+        // slots (e.g. `match p is "..." if let Some {val = {name}} = f {..}
+        // when name.starts_with{...}`), and the typechecker sometimes
+        // desugars the whole `Some {val = {name}}` such that a nested
+        // ReadField(ReadLocal(val_slot), "name") appears in the GUARD
+        // block as a synthesized let-binding. Running the guard first
+        // reads the still-Illegal iflet slot and crashes with "Expected
+        // record for field 'name', got: null" on the fall-through arm.
+        //
+        // Fix: always emit the if-let chain first. The chain's leaf
+        // (emitIfLetChain when iletIdx >= size) emits the body; we
+        // interpose the guard there when one is present, wrapping the
+        // body in Conditional(guard, body, fall-through-to-next-case).
+        emitIfLetChain(c, 0, cases, idx, scrutineeLocal, b, argCount, localMap);
     }
 
     /**
@@ -2284,7 +2290,20 @@ public final class BytecodeCompiler {
                                 MezzeBytecodeRootNodeGen.Builder b,
                                 int argCount, BytecodeLocal[] localMap) {
         if (iletIdx >= c.getIfLetBindings().size()) {
-            emitNode(c.getBody(), b, argCount, localMap);
+            // All if-let bindings have populated their slots. If the
+            // case has a guard, it may reference any of those slots
+            // (via a synthesized nested Let(slot = ReadField(iflet_slot,
+            // "..."))). Run guard NOW and fall through to next case on
+            // false. If no guard, emit the body directly.
+            if (c.getGuard() != null) {
+                b.beginConditional();
+                emitNode(c.getGuard(), b, argCount, localMap);
+                emitNode(c.getBody(), b, argCount, localMap);
+                emitMatchChain(cases, caseIdx + 1, scrutineeLocal, b, argCount, localMap);
+                b.endConditional();
+            } else {
+                emitNode(c.getBody(), b, argCount, localMap);
+            }
             return;
         }
         var ilb = c.getIfLetBindings().get(iletIdx);
