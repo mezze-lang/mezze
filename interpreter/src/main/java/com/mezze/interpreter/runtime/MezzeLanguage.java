@@ -298,14 +298,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * unaffected since they have no ReadFieldIR.
      */
     private static boolean isBdslSafeCallee(com.mezze.language.truffleir.FunctionIR ir) {
-        // hasReadField gate is READY to drop — all Group A/C regressions
-        // (nested pattern desugar + guard-after-iflet ordering) fixed
-        // in ae7a0698a. Blocked ONLY on Group B (Long/newtype
-        // .to_dbg_str{} scalar-receiver ability method dispatch — 3
-        // remaining regressions, task #346). Once #346 lands, flip
-        // this to `return true;` for a +1.1% hit-rate + 598-reject
-        // bucket eliminated.
-        return !hasReadField(ir.getBody());
+        // hasReadField gate dropped:
+        //   - Group A/C (nested pattern + guard-after-iflet order): fixed
+        //     by cfd364caf, 7ea2bdc82, ae7a0698a.
+        //   - Group B (scalar .to_dbg_str{} / .to_str{}): fixed by
+        //     BytecodeCompiler.tryFoldInspectMethod peephole +
+        //     InlineScalarInspect @Operation.
+        return true;
     }
 
     /**

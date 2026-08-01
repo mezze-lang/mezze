@@ -219,6 +219,49 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * #346 Group B — inline auto-derived Inspect impl for a receiver.
+     * Rewrites the desugared shape
+     * {@code CallIndirect(ReadField(x, "to_dbg_str"|"to_str"),
+     * MakeRecord{it=x})} into a single stringify op. BDSL emits this
+     * via the peephole in {@code BytecodeCompiler.tryFoldInspectMethod};
+     * the operand is the receiver, the boolean constant is dbgStyle
+     * ("to_dbg_str" quotes strings + wraps chars; "to_str" is raw).
+     *
+     * Matches DirectInspectNode's shape so behaviour is identical to
+     * the AST auto-derive.
+     */
+    @Operation
+    @ConstantOperand(type = boolean.class)
+    public static final class InlineScalarInspect {
+        @Specialization
+        public static String doLong(boolean dbgStyle, long v) { return Long.toString(v); }
+        @Specialization
+        public static String doDouble(boolean dbgStyle, double v) { return Double.toString(v); }
+        @Specialization
+        public static String doBool(boolean dbgStyle, boolean v) { return v ? "True" : "False"; }
+        @Specialization(guards = "isChar(v)")
+        public static String doChar(boolean dbgStyle, Object v) {
+            char c = (Character) v;
+            return dbgStyle ? "'" + c + "'" : String.valueOf(c);
+        }
+        @Specialization(guards = "isString(v)")
+        public static String doString(boolean dbgStyle, Object v) {
+            String s = (String) v;
+            return dbgStyle ? "\"" + s + "\"" : s;
+        }
+        @Fallback
+        @TruffleBoundary
+        public static String doOther(boolean dbgStyle, Object v) {
+            if (v == null) return "null";
+            if (v instanceof com.mezze.interpreter.values.MezzeUnit) return "{}";
+            return v.toString();
+        }
+
+        static boolean isChar(Object o) { return o instanceof Character; }
+        static boolean isString(Object o) { return o instanceof String; }
+    }
+
+    /**
      * Read a global definition by content hash from the current
      * {@code MezzeContext}. Auto-evaluates zero-param zero-capture
      * "value thunks" (constants like {@code math::pi}, top-level
