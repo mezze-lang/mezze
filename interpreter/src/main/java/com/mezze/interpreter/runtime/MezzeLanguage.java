@@ -304,6 +304,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         //   - Group B (scalar .to_dbg_str{} / .to_str{}): fixed by
         //     BytecodeCompiler.tryFoldInspectMethod peephole +
         //     InlineScalarInspect @Operation.
+        // Known holdout (accepted): user newtype Eq impl bodies pattern-
+        // match `UserId {val = ...}` where the payload record was
+        // constructed with a differently-named field (typechecker
+        // renames "val"->"value" only in the AST-only path). The IR
+        // doesn't distinguish this shape from Option's `Some {val = ..}`
+        // (which is correct), so a narrow gate would over-reject 740
+        // legit fns. Left as a single-test regression
+        // (newtypeEqWithNeqViaNot) pending a typechecker-level fix.
         return true;
     }
 
