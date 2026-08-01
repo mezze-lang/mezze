@@ -282,8 +282,13 @@ public final class BytecodeCompiler {
     private static boolean isBdslCallee(CallTarget target) {
         if (!(target instanceof com.oracle.truffle.api.RootCallTarget rct)) return false;
         var root = rct.getRootNode();
+        // LazyStubRootNode acts as a BDSL callee for emit-time ABI
+        // decisions: the caller does not prepend closures or a scalar
+        // marker; the stub itself decides at inflate time based on
+        // whether the resolved callee is AST-shape or BDSL-shape.
         return root instanceof BdslTrampolineRootNode
-                || root instanceof MezzeBytecodeRootNode;
+                || root instanceof MezzeBytecodeRootNode
+                || root instanceof LazyStubRootNode;
     }
 
     /**
@@ -436,20 +441,18 @@ public final class BytecodeCompiler {
             // AST callee's normalizeArgs sees a single record and
             // routes to the record-ABI path.
             //
-            // Stub NOT applied here (unlike MakeLambda #304). Two
-            // attempts landed and reverted:
-            //   1. IndirectCallNode forward — 6 effect tests silently
-            //      produced wrong values (STM modify returned 10 vs 15).
-            //   2. DirectCallNode forward + closure-prepending stub —
-            //      LazyEffects "suspended in closure" fixed, but STM
-            //      and StateMachineExecution nested-handler tests still
-            //      fail. Root cause: the LazyStubRootNode inserts an
-            //      extra frame in the callstack that breaks Truffle's
-            //      frame-walking used by effect handler lookup (perform
-            //      → nearest matching Handle) and DAP breakpoint frame
-            //      identification. Fix requires eliminating the stub
-            //      from the runtime callstack (bytecode-level indirection
-            //      that self-modifies on first-call), not a wrapper node.
+            // Stub NOT applied here. Even after making the stub
+            // ABI-aware (BDSL-callee for emit, closure+marker
+            // prepending at inflate — see LazyStubRootNode), nested
+            // effect handlers in StateMachineExecutionTest still fail:
+            // the outer `perform OuterHandler in body` returns a
+            // MezzeSuspended instead of forcing when `body` contains
+            // `perform InnerHandler in ...` and both perform-ops go
+            // through the stub. Root cause is in Path E lazy-effect
+            // continuation building — the stub frame breaks something
+            // in how the outer suspended captures the inner. Diagnosis
+            // requires understanding HandleNode+MezzeSuspended.force
+            // interactions, beyond a stub-only fix. Keep the reject.
             if (resolveCallTarget(c.getTargetHash()) == null) {
                 markReject(node, "target-not-compiled"); return false;
             }

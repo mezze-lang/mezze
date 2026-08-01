@@ -1,5 +1,7 @@
 package com.mezze.interpreter.bytecode;
 
+import com.mezze.interpreter.nodes.function.MezzeFunctionRootNode;
+import com.mezze.interpreter.nodes.function.ScalarABIMarker;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeFunction;
@@ -19,22 +21,29 @@ import com.oracle.truffle.api.nodes.RootNode;
  * for {@code MakeLambda} / {@code CallDirect} sites that reference the
  * function before it's compiled.
  *
- * <p>On first {@link #execute}, the stub inflates: it looks up the
- * MezzeFunction via {@link MezzeContext#lookupGlobal(com.mezze.language.typedast.Hash)}
- * (or {@link MezzeLanguage#getCachedStdlibCallTarget}), captures its
- * closure values, and forwards through a cached {@link DirectCallNode}.
- * Subsequent executes bake in the closure prefix and forward.
+ * <p><b>Caller-side ABI</b>: the stub is treated as a BDSL callee at
+ * emit time (see {@code BytecodeCompiler.isBdslCallee}), so the caller
+ * does NOT prepend closure values or a scalar-ABI marker. The stub
+ * receives raw arg values.
  *
- * <p><b>ABI adjustment for CallDirect caller</b>: BDSL's CallDirectN op
- * passes args as {@code [marker?, arg0, ..., argN-1]} (marker present
- * only for scalar-1arg calls; see BytecodeCompiler.needsScalarMarker).
- * The AST callee expects {@code [closure0, ..., closureK-1, marker?,
- * arg0, ..., argN-1]}. The stub prepends its cached closure values so
- * the callee's frame layout matches. Without this, args land in
- * closure slots and closures are missing entirely — the root cause of
- * the earlier CallDirect stub attempts silently returning wrong values
- * (STM modify returning 10 instead of 15, LazyEffects closure returning
- * MezzeFunction instead of MezzeSuspended).
+ * <p><b>Stub-side ABI</b>: at inflate time the stub inspects the
+ * resolved callee's RootNode kind:
+ * <ul>
+ *   <li>AST callee ({@code MezzeFunctionRootNode}): the stub prepends
+ *       the closure values it captured from the MezzeFunction, and
+ *       inserts a {@link ScalarABIMarker} when the callee has exactly
+ *       one parameter (so {@code normalizeArgs} recognises the scalar
+ *       shape and doesn't try to unpack the value as a record).</li>
+ *   <li>BDSL callee (bare {@code MezzeBytecodeRootNode} or
+ *       {@code BdslTrampolineRootNode}): the stub still prepends the
+ *       closure values (BDSL callees also expect
+ *       {@code [closure..., args...]}), but no marker — BDSL callees
+ *       use flat scalar layout and would misread the marker as a
+ *       value.</li>
+ * </ul>
+ * This mirrors what {@code CallDirectScalarNode} does inline for AST
+ * callers, and what {@code CallDirectN.doCached} does inline for BDSL
+ * callers.
  */
 public final class LazyStubRootNode extends RootNode {
     private final MezzeLanguage lang;
@@ -46,19 +55,17 @@ public final class LazyStubRootNode extends RootNode {
 
     /**
      * Closure values captured at inflate time. Empty for top-level
-     * fns. Prepended to args on every call so the AST callee sees the
+     * fns. Prepended to args on every call so the callee sees the
      * ABI layout it expects.
      */
     @CompilerDirectives.CompilationFinal(dimensions = 1)
     private Object[] cachedClosures;
 
-    /**
-     * Cached DirectCallNode on the inflated CallTarget. DirectCallNode
-     * (rather than IndirectCallNode) lets Truffle inline the callee
-     * and profile arg shapes across the stub boundary — matches
-     * CallDirectN.doCached's {@code @Cached("create(target)")}
-     * pattern, which effect dispatch relies on.
-     */
+    /** True iff the inflated callee is AST-shape ({@link MezzeFunctionRootNode})
+     *  and has exactly one parameter — the marker case. */
+    @CompilerDirectives.CompilationFinal
+    private boolean needsScalarMarker;
+
     @Child
     private DirectCallNode forward;
 
@@ -85,19 +92,22 @@ public final class LazyStubRootNode extends RootNode {
         if (fwd == null) {
             fwd = inflate();
         }
-        Object[] rawArgs = frame.getArguments();
-        Object[] finalArgs = prependClosures(rawArgs);
-        return fwd.call(finalArgs);
+        return fwd.call(assembleArgs(frame.getArguments()));
     }
 
-    private Object[] prependClosures(Object[] rawArgs) {
+    private Object[] assembleArgs(Object[] rawArgs) {
         Object[] closures = cachedClosures;
-        if (closures == null || closures.length == 0) {
-            return rawArgs;
+        int closureLen = closures.length;
+        boolean marker = needsScalarMarker && rawArgs.length == 1;
+        if (closureLen == 0 && !marker) return rawArgs;
+        int totalLen = closureLen + (marker ? 1 : 0) + rawArgs.length;
+        Object[] combined = new Object[totalLen];
+        System.arraycopy(closures, 0, combined, 0, closureLen);
+        int valuesStart = closureLen;
+        if (marker) {
+            combined[valuesStart++] = ScalarABIMarker.INSTANCE;
         }
-        Object[] combined = new Object[closures.length + rawArgs.length];
-        System.arraycopy(closures, 0, combined, 0, closures.length);
-        System.arraycopy(rawArgs, 0, combined, closures.length, rawArgs.length);
+        System.arraycopy(rawArgs, 0, combined, valuesStart, rawArgs.length);
         return combined;
     }
 
@@ -106,12 +116,6 @@ public final class LazyStubRootNode extends RootNode {
         DirectCallNode fwd = forward;
         if (fwd != null) return fwd;
 
-        // Resolve the MezzeFunction — the runtime's canonical wrapper
-        // that holds both the CallTarget and the captured closure
-        // values. Try the per-context globals first (user let-bound
-        // fns register here); fall back to language-level stdlib CT
-        // cache (wrap as MezzeFunction for uniform closure handling —
-        // stdlib fns have no closures, so empty).
         MezzeFunction fn = resolveMezzeFunction();
         if (fn == null) {
             throw new IllegalStateException(
@@ -122,6 +126,13 @@ public final class LazyStubRootNode extends RootNode {
         CallTarget ct = fn.getCallTarget();
         Object[] closures = fn.getClosureValues();
         cachedClosures = closures != null ? closures : new Object[0];
+        // Detect AST-callee 1-arg case where we need to inject the
+        // scalar-ABI marker.
+        if (ct instanceof RootCallTarget rct
+                && rct.getRootNode() instanceof MezzeFunctionRootNode mrn
+                && mrn.getParameterCount() == 1) {
+            needsScalarMarker = true;
+        }
         inflated = ct;
         fwd = insert(DirectCallNode.create(ct));
         forward = fwd;
@@ -130,7 +141,7 @@ public final class LazyStubRootNode extends RootNode {
 
     @CompilerDirectives.TruffleBoundary
     private MezzeFunction resolveMezzeFunction() {
-        // 1. Per-context globals — user let-bound fns are here after
+        // 1. Per-context globals — user let-bound fns land here after
         //    PipelineRunner.compileFromIR walks the module.
         try {
             MezzeContext ctx = lang.getCurrentContext();
@@ -139,13 +150,13 @@ public final class LazyStubRootNode extends RootNode {
                 if (global instanceof MezzeFunction f) return f;
             }
         } catch (Throwable ignored) {}
-        // 2. Language-level stdlib CallTarget cache — stdlib fns bake in
-        //    with no closures.
+        // 2. Language-level stdlib CallTarget cache — stdlib fns have
+        //    no closures.
         CallTarget ct = lang.getCachedStdlibCallTarget(hash);
         if (ct != null) {
             return MezzeFunction.create(ct, hash.getHex());
         }
-        // 3. Compile from IR as last resort. Bare CallTarget, no closures.
+        // 3. Compile from IR as last resort — bare CT, no closures.
         RootNode real = lang.compileUserIRForStub(hash);
         if (real != null) {
             return MezzeFunction.create(real.getCallTarget(), hash.getHex());
