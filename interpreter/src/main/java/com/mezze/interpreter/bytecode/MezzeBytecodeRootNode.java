@@ -1496,23 +1496,46 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 return value;
             }
             if (s.isPathE()) {
-                // Path E full-body continuation: force() dispatches to
-                // forcePathE via isPathE() branch at its top.
-                return s.force(com.oracle.truffle.api.nodes.IndirectCallNode.getUncached());
+                // Path E full-body continuation. Only force if the current
+                // thread's live chain can discharge at least one of the
+                // unhandled effects — otherwise re-execution just re-suspends
+                // recursively (potential infinite loop) or leaks a wrong
+                // value. When none of our chain matches, pass the Suspend
+                // through unforced so the outer caller (which may install
+                // a wider chain later) sees a still-forceable lazy value.
+                // This mirrors legacy shape's "return unforced" fallback
+                // and unblocks migrating OpCallNode/BdslYieldDispatch to
+                // Path E — see Phase 3.5 audit.
+                if (canDischargeAny(s)) {
+                    return s.force(com.oracle.truffle.api.nodes.IndirectCallNode.getUncached());
+                }
+                return value;
             }
-            // Legacy single-op MezzeSuspend (from BdslYieldDispatch's
-            // makeUnhandledSuspended path). Cannot chain-dispatch here
-            // because upstream may have built the wrapped MezzeThunk with
-            // a null effectHash (e.g. ComposedBlockThunk from a do-block
-            // that leaks an effect), and dispatchOpOnChain requires a
-            // non-null hash for strict routing (#246). Returning the
-            // suspended value unforced preserves legacy behavior — the
-            // outer caller sees the MezzeSuspend just as it did before
-            // Path E existed. Fixing this requires either (a) making
-            // BdslYieldDispatch produce Path E continuations, or (b)
-            // threading effect hashes through ComposedBlockThunk. Both
-            // are Phase 5+ work.
+            // Legacy MezzeThunk shape — return unforced (Phase 3.5 migrates
+            // remaining legacy construction sites; once done this branch
+            // becomes dead code alongside MezzeThunk itself).
             return value;
+        }
+
+        /** True when at least one effect this Suspend needs is present on
+         *  the current thread's handler chain. Cheap: walk the chain once,
+         *  test each entry's effectHash against the Suspend's unhandled set.
+         */
+        private static boolean canDischargeAny(com.mezze.interpreter.values.MezzeSuspend s) {
+            java.util.Set<com.mezze.language.typedast.Hash> needed = s.getUnhandledEffects();
+            if (needed.isEmpty()) {
+                // Ground value wrapped as a MezzeSuspend (rare). Force to unwrap.
+                return true;
+            }
+            com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain =
+                com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChainEntries();
+            for (com.mezze.interpreter.nodes.continuation.HandlerChainEntry entry : chain) {
+                com.mezze.language.typedast.Hash eff = entry.effectHash();
+                if (eff != null && needed.contains(eff)) {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 
