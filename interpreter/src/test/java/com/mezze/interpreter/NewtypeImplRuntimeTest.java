@@ -453,6 +453,9 @@ class NewtypeImplRuntimeTest {
 
         @Test
         void newtypeEqWithNeqViaNot() {
+            // Field names must match — construct with the same field the
+            // pattern destructures (`val`). Prior source constructed with
+            // `value` and matched on `val`, which was a test-source bug.
             Object result = MezzeTestHelper.run("""
                 use std::abilities::compare::{Eq}
 
@@ -465,8 +468,8 @@ class NewtypeImplRuntimeTest {
                     neq = {it, r} -> it.eq {r = r}.not {}
                 }
 
-                let u1 = UserId {value = 42}
-                let u2 = UserId {value = 42}
+                let u1 = UserId {val = 42}
+                let u2 = UserId {val = 42}
                 u1 == u2
                 """);
             assertEquals(true, result);
