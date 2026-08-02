@@ -14,7 +14,23 @@ import com.mezze.language.typechecker.util.StringDistance
 
 class ConstraintSolver(
     private val context: TypingContext,
-    private val registry: DeclarationRegistry = DeclarationRegistry.EMPTY
+    private val registry: DeclarationRegistry = DeclarationRegistry.EMPTY,
+    /**
+     * Option B (#341/#370). When true, {@link solveEquality} refuses to
+     * silently strip a {@link MezzeType.SuspendedType} wrapper on either
+     * side of an equality when the wrapped effect row is non-empty.
+     *
+     * <p>The default keeps the pre-Option-B behavior (silent strip) so
+     * existing callers are unaffected while we ratchet toward strictness.
+     * BuildCommand/RunCommand can flip this to true incrementally as
+     * stdlib + tests are cleaned up (Phase 2 of the Option B plan).
+     *
+     * <p>Env override: MEZZE_STRICT_EFFECT_ROWS=1 forces true, =0 forces
+     * false. Used by the test harness to run the whole suite under
+     * strict mode and enumerate the failure surface.
+     */
+    private val strictEffectRows: Boolean =
+        System.getenv("MEZZE_STRICT_EFFECT_ROWS") == "1"
 ) {
     private fun constraintPriority(c: Constraint): Int = when (c) {
         is Constraint.Equality -> 0
@@ -786,8 +802,44 @@ class ConstraintSolver(
         // in ConstraintResult, not in the Equality constraint itself. The constraint
         // generation may wrap types in SuspendedType to carry effect info, but by the
         // time we unify, effect tracking has already been handled upstream.
-        val left = if (constraint.left is MezzeType.SuspendedType) (constraint.left as MezzeType.SuspendedType).valueType else constraint.left
-        val right = if (constraint.right is MezzeType.SuspendedType) (constraint.right as MezzeType.SuspendedType).valueType else constraint.right
+        //
+        // Option B / #341 / #370: under {@link #strictEffectRows}, refuse to
+        // silently strip a non-empty effect row. If one side is
+        // Suspended&lt;T, r&gt; with r non-empty and the other side is not the
+        // same Suspended shape (either plain T, or Suspended with a
+        // different row), reject the equality. This is the single
+        // fundamental leak (audit #370) that lets `Suspend&lt;T, effects&gt;`
+        // decay to `T`. The default (false) keeps pre-Option-B behavior
+        // so existing callers are unaffected while the fix is ratcheted in.
+        val rawLeft = constraint.left
+        val rawRight = constraint.right
+        if (strictEffectRows) {
+            val leftIsSusp = rawLeft is MezzeType.SuspendedType && rawLeft.effects.effects.isNotEmpty()
+            val rightIsSusp = rawRight is MezzeType.SuspendedType && rawRight.effects.effects.isNotEmpty()
+            if (leftIsSusp != rightIsSusp) {
+                val plainSide = if (leftIsSusp) rawRight else rawLeft
+                // Skip in-flight unifications against unresolved type vars.
+                // These fire while an enclosing `perform` is still typing its
+                // body — the outer perform's ExprPerformConstraints.generatePerform
+                // (line ~211, removeEffectsFromType) discharges the row at the
+                // perform boundary, so a mid-flight VarType is not a real leak.
+                // A ground consumer (Int, Str, concrete type) IS a leak because
+                // it names an actual type-shape without a discharging perform in
+                // scope. Investigation: fork aebf1e954452bf6bc / plan phase 2a.
+                if (plainSide !is MezzeType.VarType) {
+                    val suspendedSide = if (leftIsSusp) rawLeft as MezzeType.SuspendedType else rawRight as MezzeType.SuspendedType
+                    val effList = suspendedSide.effects.effects.joinToString(", ")
+                    return ConstraintResult.Failure(
+                        "Effect row leak: cannot use a value of type " +
+                        "${suspendedSide.valueType} with unhandled effects <$effList> " +
+                        "as plain $plainSide. Wrap in `perform HandlerFor<$effList> in ...` " +
+                        "to discharge the effect first."
+                    )
+                }
+            }
+        }
+        val left = if (rawLeft is MezzeType.SuspendedType) rawLeft.valueType else rawLeft
+        val right = if (rawRight is MezzeType.SuspendedType) rawRight.valueType else rawRight
 
         DebugLogger.debug(Category.ConstraintSolver) {
             "solveEquality: $left = $right (${constraint.context})"
