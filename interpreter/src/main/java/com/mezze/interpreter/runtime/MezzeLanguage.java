@@ -112,13 +112,41 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     // shape is what changes.
     private static volatile boolean BDSL_DEBUG_INSTRUMENTATION = false;
 
+    /**
+     * #359 — flag-flip epoch. Bumped when
+     * {@link #enableBdslDebugInstrumentation()} transitions the flag,
+     * so callers can invalidate CallTargets that were compiled under
+     * the previous debug shape. Each MezzeLanguage instance tracks its
+     * own last-observed epoch and drops its stdlib/imported caches +
+     * BDSL compiler state when it moves.
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger DEBUG_EPOCH =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+
     public static void enableBdslDebugInstrumentation() {
+        boolean was = BDSL_DEBUG_INSTRUMENTATION;
         BDSL_DEBUG_INSTRUMENTATION = true;
+        if (!was) DEBUG_EPOCH.incrementAndGet();
+    }
+
+    /** Test-only: turn debug back off AND bump the epoch, so a test
+     *  that enabled the flag doesn't leave debug-shape CallTargets in
+     *  the cache for subsequent tests. */
+    public static void disableBdslDebugInstrumentationForTest() {
+        boolean was = BDSL_DEBUG_INSTRUMENTATION;
+        BDSL_DEBUG_INSTRUMENTATION = false;
+        if (was) DEBUG_EPOCH.incrementAndGet();
     }
 
     public static boolean isBdslDebugInstrumentation() {
         return BDSL_DEBUG_INSTRUMENTATION;
     }
+
+    static int currentDebugEpoch() { return DEBUG_EPOCH.get(); }
+
+    // Per-instance last-observed epoch. When it lags DEBUG_EPOCH we
+    // invalidate our caches before the next compile.
+    private volatile int cachedDebugEpoch = 0;
 
     // CPS routing (Path C, docs/perf/bdsl-effects-path-c-2026-07.md) — opt-in
     // via MEZZE_CPS env var. When on, CpsLowering runs on every FunctionIR
@@ -223,6 +251,16 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private com.oracle.truffle.api.nodes.RootNode compileOne(
             com.mezze.interpreter.compiler.TruffleCompiler astCompiler,
             com.mezze.language.truffleir.FunctionIR ir) {
+        // #359 — flag-flip epoch check. When BDSL_DEBUG_INSTRUMENTATION
+        // was toggled after we last cached anything, drop caches so we
+        // recompile in the new shape (debug vs non-debug). Otherwise a
+        // test that enables debug for its own Context poisons subsequent
+        // tests with debug-shape CallTargets (ProbeNode.onReturnValue
+        // then rejects internal Mezze types on tag-instrumented ops).
+        int nowEpoch = DEBUG_EPOCH.get();
+        if (nowEpoch != cachedDebugEpoch) {
+            invalidateDebugShapeCaches(nowEpoch);
+        }
         if (BDSL_ENABLED) {
             if (!isBdslSafeCallee(ir)) {
                 bdslMisses.incrementAndGet();
@@ -268,6 +306,30 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             }
         }
         return c;
+    }
+
+    /**
+     * #359 — drop everything cached under the previous debug-shape flag
+     * so the next compile builds under the current shape. Called from
+     * compileOne when it detects DEBUG_EPOCH moved.
+     *
+     * <p>Also drops the BDSL compiler instance itself — its internal
+     * compiledCallTargets map has references to same-epoch CallTargets
+     * baked into its bytecode-node emit constants; the next
+     * getOrCreateBdslCompiler rebuilds it fresh.
+     *
+     * <p>Stdlib PrecompiledStdlib CallTargets are Language-static
+     * (initialized once) and remain — that's fine because those are
+     * compiled at build time in non-debug shape, and the debug shape
+     * only matters for user code the debugger stops in.
+     */
+    private synchronized void invalidateDebugShapeCaches(int newEpoch) {
+        if (cachedDebugEpoch == newEpoch) return;
+        stdlibCallTargetCache.clear();
+        importedCallTargetCache.clear();
+        userStubCache.clear();
+        bdslCompiler = null;
+        cachedDebugEpoch = newEpoch;
     }
 
     /**
@@ -770,25 +832,76 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         }
         @Override
         public Object execute(com.oracle.truffle.api.frame.VirtualFrame frame) {
-            // #359 — under BDSL, param and local shadow names live in the
-            // BytecodeNode's local table. Try to resolve it via parent-
-            // chain walk from this ExecutableNode's insertion point; fall
-            // back to AST-shape resolution if unavailable or if
-            // getBytecodeIndex isn't supported (requires the enclosing
-            // root to have been compiled with storeBytecodeIndexInFrame,
-            // which we haven't opted into by default — the extra frame
-            // slot is only worth it once we ship BDSL debug end-to-end).
-            com.oracle.truffle.api.bytecode.BytecodeNode bn =
-                com.oracle.truffle.api.bytecode.BytecodeNode.get(this);
+            // #359 — the debugger's inline eval passes us the SUSPENDED
+            // frame (materialized). We need the BytecodeNode of the
+            // suspended-in fn, plus the bci at the suspension point.
+            //
+            // Truffle's iterateFrames walks the actual runtime stack
+            // (bypassing our own ExecutableNode wrapper). The topmost
+            // Mezze BDSL frame is where the debugger stopped — that's
+            // where we look up locals + params.
+            // The debugger adopts our ExecutableNode under the suspended
+            // RootNode. When that RootNode is a MezzeBytecodeRootNode
+            // (BDSL), we get its BytecodeNode via BytecodeRootNode's
+            // getBytecodeNode() — BytecodeNode.get(Node) doesn't walk
+            // to the root, so we have to reach through the interface
+            // explicitly.
+            // The debugger's DebugStackFrame.eval hands us the paused
+            // frame. Our ExecutableNode is adopted under the debug
+            // frame's RootNode — for BDSL that's a MezzeBytecodeRootNode
+            // subclass. Find its BytecodeNode via the BytecodeRootNode
+            // interface, then look up the bci from the frame's stored
+            // slot (storeBytecodeIndexInFrame is enabled).
+            //
+            // getRootNode() on THIS gives the ExecutableNode's parent
+            // root. If that's a bytecode root, its getBytecodeNode()
+            // returns the executable bytecode instance. Note: earlier
+            // iterateFrames didn't work because the debug inline-eval
+            // doesn't put a real Mezze frame on the runtime stack —
+            // the paused frame is passed as our arg.
+            com.oracle.truffle.api.bytecode.BytecodeNode bn = null;
             int bci = -1;
-            if (bn != null) {
-                try {
-                    bci = bn.getBytecodeIndex(frame);
-                } catch (Throwable t) {
-                    bn = null;
+            com.oracle.truffle.api.nodes.RootNode rn = getRootNode();
+            if (rn instanceof com.oracle.truffle.api.bytecode.BytecodeRootNode brn) {
+                bn = brn.getBytecodeNode();
+                if (bn != null) {
+                    try {
+                        bci = bn.getBytecodeIndex(frame);
+                    } catch (Throwable t) {
+                        bn = null;
+                    }
+                }
+                // Sub-root fallback: our ExecutableNode may be adopted
+                // under a wrapper root that doesn't hold the executing
+                // bytecode. Walk the RootNodes collection and try each
+                // — the one whose bci resolves against our frame is
+                // the actual executing one.
+                if (bn == null) {
+                    try {
+                        var roots = brn.getRootNodes();
+                        if (roots != null) {
+                            for (int i = 0; i < roots.count(); i++) {
+                                var r2 = roots.getNode(i);
+                                if (r2 instanceof com.oracle.truffle.api.bytecode.BytecodeRootNode brn2) {
+                                    var candidate = brn2.getBytecodeNode();
+                                    if (candidate == null) continue;
+                                    int localBci;
+                                    try {
+                                        localBci = candidate.getBytecodeIndex(frame);
+                                    } catch (Throwable t) { continue; }
+                                    if (localBci >= 0) {
+                                        bn = candidate;
+                                        bci = localBci;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Throwable ignored) {}
                 }
             }
-            return FrameSlotResolver.evaluate(expr, frame, bn, bci);
+            final com.oracle.truffle.api.frame.Frame useFrame = frame;
+            return FrameSlotResolver.evaluate(expr, useFrame, bn, bci);
         }
     }
 
