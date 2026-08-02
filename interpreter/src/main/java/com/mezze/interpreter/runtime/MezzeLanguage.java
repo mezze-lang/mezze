@@ -84,13 +84,22 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private final java.util.concurrent.ConcurrentHashMap<Hash, CallTarget> stdlibCallTargetCache =
         new java.util.concurrent.ConcurrentHashMap<>();
 
-    // BDSL routing (#284) — opt-in via MEZZE_BDSL env var. When on, every
-    // per-function compile tries BytecodeCompiler first; failure ⇒ falls back
-    // to TruffleCompiler. Off by default so existing paths are unaffected.
-    private static final boolean BDSL_ENABLED =
-            System.getenv("MEZZE_BDSL") != null
-                && !"0".equals(System.getenv("MEZZE_BDSL"))
-                && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL"));
+    // BDSL routing (#284) — Phase 4 flipped to DEFAULT-ON (2026-08-02).
+    // Every per-function compile tries BytecodeCompiler first; failure ⇒
+    // falls back to TruffleCompiler AST path. BDSL coverage on the test
+    // suite is empirically 100% (per BDSL_STATS runs), so the fallback
+    // fires only in edge cases the AST path also handles safely.
+    //
+    // Opt out via MEZZE_BDSL=0 or MEZZE_BDSL=false — kept as an escape
+    // hatch while the AST interpreter still exists. Once Phase 5 deletes
+    // the AST path entirely, this flag goes away.
+    private static final boolean BDSL_ENABLED = computeBdslDefault();
+
+    private static boolean computeBdslDefault() {
+        String v = System.getenv("MEZZE_BDSL");
+        if ("0".equals(v) || "false".equalsIgnoreCase(v)) return false;
+        return true;  // default ON
+    }
 
     // #356 — When a debugger is attached (DAP, Chrome Inspector), BDSL
     // compilation switches to BytecodeConfig.COMPLETE + source/tag/name

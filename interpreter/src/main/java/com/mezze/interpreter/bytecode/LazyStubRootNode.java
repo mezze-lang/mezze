@@ -61,11 +61,6 @@ public final class LazyStubRootNode extends RootNode {
     @CompilerDirectives.CompilationFinal(dimensions = 1)
     private Object[] cachedClosures;
 
-    /** True iff the inflated callee is AST-shape ({@link MezzeFunctionRootNode})
-     *  and has exactly one parameter — the marker case. */
-    @CompilerDirectives.CompilationFinal
-    private boolean needsScalarMarker;
-
     @Child
     private DirectCallNode forward;
 
@@ -92,22 +87,21 @@ public final class LazyStubRootNode extends RootNode {
         if (fwd == null) {
             fwd = inflate();
         }
-        return fwd.call(assembleArgs(frame.getArguments()));
+        // Caller (BDSL CallDirectN) treats stub as an AST callee (because
+        // isBdslCallee returns false for LazyStubRootNode). So caller
+        // already prepended the marker for scalar-1arg. But it did NOT
+        // prepend closures — that's the caller-side node's job (which
+        // BDSL doesn't do for CallDirect). Prepend closures here.
+        return fwd.call(prependClosures(frame.getArguments()));
     }
 
-    private Object[] assembleArgs(Object[] rawArgs) {
+    private Object[] prependClosures(Object[] rawArgs) {
         Object[] closures = cachedClosures;
         int closureLen = closures.length;
-        boolean marker = needsScalarMarker && rawArgs.length == 1;
-        if (closureLen == 0 && !marker) return rawArgs;
-        int totalLen = closureLen + (marker ? 1 : 0) + rawArgs.length;
-        Object[] combined = new Object[totalLen];
+        if (closureLen == 0) return rawArgs;
+        Object[] combined = new Object[closureLen + rawArgs.length];
         System.arraycopy(closures, 0, combined, 0, closureLen);
-        int valuesStart = closureLen;
-        if (marker) {
-            combined[valuesStart++] = ScalarABIMarker.INSTANCE;
-        }
-        System.arraycopy(rawArgs, 0, combined, valuesStart, rawArgs.length);
+        System.arraycopy(rawArgs, 0, combined, closureLen, rawArgs.length);
         return combined;
     }
 
@@ -126,13 +120,6 @@ public final class LazyStubRootNode extends RootNode {
         CallTarget ct = fn.getCallTarget();
         Object[] closures = fn.getClosureValues();
         cachedClosures = closures != null ? closures : new Object[0];
-        // Detect AST-callee 1-arg case where we need to inject the
-        // scalar-ABI marker.
-        if (ct instanceof RootCallTarget rct
-                && rct.getRootNode() instanceof MezzeFunctionRootNode mrn
-                && mrn.getParameterCount() == 1) {
-            needsScalarMarker = true;
-        }
         inflated = ct;
         fwd = insert(DirectCallNode.create(ct));
         forward = fwd;

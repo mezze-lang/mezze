@@ -282,13 +282,8 @@ public final class BytecodeCompiler {
     private static boolean isBdslCallee(CallTarget target) {
         if (!(target instanceof com.oracle.truffle.api.RootCallTarget rct)) return false;
         var root = rct.getRootNode();
-        // LazyStubRootNode acts as a BDSL callee for emit-time ABI
-        // decisions: the caller does not prepend closures or a scalar
-        // marker; the stub itself decides at inflate time based on
-        // whether the resolved callee is AST-shape or BDSL-shape.
         return root instanceof BdslTrampolineRootNode
-                || root instanceof MezzeBytecodeRootNode
-                || root instanceof LazyStubRootNode;
+                || root instanceof MezzeBytecodeRootNode;
     }
 
     /**
@@ -378,7 +373,7 @@ public final class BytecodeCompiler {
             // Path E (#336) interop: when LAZY_EFFECTS is on AND this Handle
             // is partial-discharging, reject BDSL compilation so the whole
             // function falls back to AST. HandleNode.execute's lazy branch
-            // then builds a MezzeSuspended carrying the full body
+            // then builds a MezzeSuspend carrying the full body
             // continuation — force-able under a wider chain. BDSL's inline
             // pattern doesn't support that (would need a MakeSuspended op
             // capturing bodyNode as a sub-CallTarget). Fallback is small
@@ -418,7 +413,7 @@ public final class BytecodeCompiler {
                 NodeIR child = (s instanceof StmtIR.Let l) ? l.getValue()
                              : ((StmtIR.Expr) s).getNode();
                 if (!supportsNode(child, argCount)) return false;
-                // #361 — non-tail Expr stmts that could yield MezzeSuspended
+                // #361 — non-tail Expr stmts that could yield MezzeSuspend
                 // are handled at runtime by CheckSuspendedThrow at emit time
                 // and an outer TryCatch(SuspendedInBlockException) wrapping
                 // the function body (see beginRoot emit). AST's BlockNode
@@ -441,20 +436,15 @@ public final class BytecodeCompiler {
             // AST callee's normalizeArgs sees a single record and
             // routes to the record-ABI path.
             //
-            // Stub NOT applied here. Even after making the stub
-            // ABI-aware (BDSL-callee for emit, closure+marker
-            // prepending at inflate — see LazyStubRootNode), nested
-            // effect handlers in StateMachineExecutionTest still fail:
-            // the outer `perform OuterHandler in body` returns a
-            // MezzeSuspended instead of forcing when `body` contains
-            // `perform InnerHandler in ...` and both perform-ops go
-            // through the stub. Root cause is in Path E lazy-effect
-            // continuation building — the stub frame breaks something
-            // in how the outer suspended captures the inner. Diagnosis
-            // requires understanding HandleNode+MezzeSuspended.force
-            // interactions, beyond a stub-only fix. Keep the reject.
+            // #304: mint stub if not yet compiled.
             if (resolveCallTarget(c.getTargetHash()) == null) {
-                markReject(node, "target-not-compiled"); return false;
+                CallTarget stub = language.getOrMintUserStub(
+                        c.getTargetHash(), "callee");
+                if (stub != null) {
+                    compiledCallTargets.put(c.getTargetHash(), stub);
+                } else {
+                    markReject(node, "target-not-compiled"); return false;
+                }
             }
             for (NodeIR arg : c.getArgs()) {
                 if (!supportsNode(arg, argCount)) return false;
@@ -492,7 +482,7 @@ public final class BytecodeCompiler {
                     if (!supportsNode(e.getNode(), argCount)) return false;
                     // Suspend-capable parts are wrapped in
                     // CheckSuspendedPassThrough at emit time (see emit
-                    // path below), so a MezzeSuspended flowing through
+                    // path below), so a MezzeSuspend flowing through
                     // an interp part escapes as SuspendedInBlockException
                     // caught at the fn root's outer TryCatch (#361).
                     // Group B scalar-receiver dispatch (Long.to_dbg_str{}
@@ -865,7 +855,7 @@ public final class BytecodeCompiler {
             }
 
             // #361 — wrap body in TryCatch(SuspendedInBlockException).
-            // On catch, extract the MezzeSuspended via UnwrapSuspendedInBlock
+            // On catch, extract the MezzeSuspend via UnwrapSuspendedInBlock
             // and return it as the fn's result. The exception is thrown by
             // CheckSuspendedThrow emitted after non-tail block Expr stmts
             // whose result could yield suspended (see BlockIR emit above).
@@ -875,7 +865,7 @@ public final class BytecodeCompiler {
             b.beginReturn();
             emitNode(ir.getBody(), b, argCount, localMap);
             b.endReturn();
-            //   catch: extract MezzeSuspended and return it
+            //   catch: extract MezzeSuspend and return it
             b.beginReturn();
             b.beginUnwrapSuspendedInBlock();
             b.emitLoadException();
@@ -1230,10 +1220,10 @@ public final class BytecodeCompiler {
                     // its return value is popped implicitly at the
                     // next instruction.
                     //
-                    // #361 — when the stmt could yield MezzeSuspended,
+                    // #361 — when the stmt could yield MezzeSuspend,
                     // wrap the child in CheckSuspendedThrow so the
                     // value is intercepted before it's dropped. If it's
-                    // a MezzeSuspended, CheckSuspendedThrow throws
+                    // a MezzeSuspend, CheckSuspendedThrow throws
                     // SuspendedInBlockException, which unwinds to the
                     // outer TryCatch at the function root (emitted at
                     // beginRoot), returning the suspended value as the
@@ -1461,7 +1451,7 @@ public final class BytecodeCompiler {
             b.beginInterpolateString(parts);
             for (StringPartIR p : is.getParts()) {
                 if (p instanceof StringPartIR.Expr e) {
-                    // Wrap suspend-capable parts so a MezzeSuspended flows
+                    // Wrap suspend-capable parts so a MezzeSuspend flows
                     // out as SuspendedInBlockException instead of being
                     // toString'd into the assembled string. Caught at fn
                     // root's outer TryCatch (#361). Non-suspending parts
@@ -1880,7 +1870,7 @@ public final class BytecodeCompiler {
 
     /**
      * True iff evaluating {@code node} might return a
-     * {@link com.mezze.interpreter.values.MezzeSuspended} — the AST's
+     * {@link com.mezze.interpreter.values.MezzeSuspend} — the AST's
      * BlockNode uses this signal to wrap remaining statements in a
      * ComposedBlockThunk (see {@code BlockNode.handleSuspendedEffect}).
      * BDSL blocks discard bare Expr values, so a suspend on such a stmt
@@ -1910,7 +1900,7 @@ public final class BytecodeCompiler {
         // CallDirect/CallIndirect/CallLocal/DictMethod could evaluate a
         // callee whose body performs — but we can't see across function
         // boundaries here cheaply. AST's BlockNode handles the returned
-        // MezzeSuspended anyway, so a call-site whose value is dropped
+        // MezzeSuspend anyway, so a call-site whose value is dropped
         // is what matters. Be conservative: treat calls as
         // suspend-capable.
         if (node instanceof CallDirectIR) return true;
@@ -1919,7 +1909,7 @@ public final class BytecodeCompiler {
         if (node instanceof DictMethodCallIR) return true;
         if (node instanceof CallNativeIR) return true;
         // Everything else — literals, ReadArg/Local/Global, MakeRecord etc.
-        // — cannot produce MezzeSuspended.
+        // — cannot produce MezzeSuspend.
         return false;
     }
 
@@ -2004,7 +1994,7 @@ public final class BytecodeCompiler {
         b.endPushHandlerChain();
         // Body (recursing for next handler / final body). Path E (#336):
         // at the outermost Handle wrap body's result in AutoForceIfSuspended
-        // so a lazy MezzeSuspended flowing out of body — e.g. from a
+        // so a lazy MezzeSuspend flowing out of body — e.g. from a
         // top-level `let x = effectful{}` — is forced under this Handle's
         // installed chain before the Pop. supports() rejects partial-
         // discharging Handles under LAZY, so every BDSL Handle here IS
