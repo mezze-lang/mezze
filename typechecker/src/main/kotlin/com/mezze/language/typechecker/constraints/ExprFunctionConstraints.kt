@@ -348,9 +348,36 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         ConstraintResult.UnusedVariable(name = name, loc = expr.loc)
     }
 
+    // Option B / #377: when the lambda's expected type declares an effect
+    // row, the body is allowed to bind values-carrying-that-effect
+    // internally — the row promises those effects propagate up. Stamp the
+    // row onto body constraints so ConstraintSolver.solveEquality's
+    // strictEffectRows check can distinguish these legitimate in-body uses
+    // from real leaks. Mirrors ExprPerformConstraints.generatePerform's
+    // stamping; composes with it (each accumulator unions into the set).
+    // Effects seed for stamping body constraints (Option B / #377).
+    // Prefer the ambient expected row (annotated or ability-signature-derived).
+    // Fall back to what the body itself uses — since Mezze row-polymorphic
+    // inference will propagate the body's effects out to the enclosing
+    // function's declared row, using them here is equivalent for the
+    // "value with declared-effect is fine to bind inside body" scenario.
+    val annotatedEffects = expectedFunctionType?.effects?.allEffectNames ?: emptySet()
+    val declaredEffects = annotatedEffects + bodyResult.effects +
+        bodyResult.effectInstances.map { it.name }.toSet()
+    val stampedBodyConstraints = if (declaredEffects.isEmpty()) {
+        bodyResult.constraints
+    } else {
+        bodyResult.constraints.map { c ->
+            if (c is Constraint.Equality) {
+                c.copy(activeDischargedEffects = c.activeDischargedEffects + declaredEffects)
+            } else {
+                c
+            }
+        }
+    }
     return ConstraintResult(
         type = functionType,
-        constraints = bodyResult.constraints + effectAssociatedTypeConstraints + abilityAssociatedTypeConstraints + effectMergeConstraints,
+        constraints = stampedBodyConstraints + effectAssociatedTypeConstraints + abilityAssociatedTypeConstraints + effectMergeConstraints,
         abilityConstraints = bodyResult.abilityConstraints,
         undefinedVariables = bodyResult.undefinedVariables,
         tailCalls = bodyResult.tailCalls,
