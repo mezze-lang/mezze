@@ -59,7 +59,20 @@ sealed interface Constraint {
         override val context: String? = null,
         override val loc: Loc? = null,
         val isMatchCaseContext: Boolean = false,
-        val errorContext: ErrorContext? = null
+        val errorContext: ErrorContext? = null,
+        /**
+         * Option B / #341 / #376: effect names discharged by enclosing
+         * `perform` blocks at the point this constraint was generated.
+         * Under strictEffectRows, a `SuspendedType(T, r)` vs plain-T
+         * equality is allowed silently iff `r ⊆ activeDischargedEffects`
+         * — the enclosing perform's `removeEffectsFromType` will strip
+         * r at its boundary. Populated by
+         * `ExprPerformConstraints.generatePerform` via
+         * `stampActiveDischarge` after body generation returns.
+         * Default empty: outermost / non-body constraints have no
+         * enclosing perform.
+         */
+        val activeDischargedEffects: Set<String> = emptySet(),
     ) : Constraint {
         override fun mapTypes(f: (MezzeType) -> MezzeType) = copy(left = f(left), right = f(right))
     }

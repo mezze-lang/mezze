@@ -201,7 +201,23 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         }
     }
 
-    val allConstraints = exprResult.constraints + continuationConstraints
+    val rawConstraints = exprResult.constraints + continuationConstraints
+    // Option B / #376: stamp handledEffects onto every body Equality so
+    // strictEffectRows can distinguish "in-flight unification inside a
+    // perform body that discharges this effect at its boundary" from
+    // "real leak with no discharger in scope". Accumulate onto any
+    // effects already stamped by an enclosing perform (nested case).
+    val allConstraints = if (handledEffects.isEmpty()) {
+        rawConstraints
+    } else {
+        rawConstraints.map { c ->
+            if (c is Constraint.Equality) {
+                c.copy(activeDischargedEffects = c.activeDischargedEffects + handledEffects)
+            } else {
+                c
+            }
+        }
+    }
 
     val baseType = if (continuationConstraints.isNotEmpty()) {
         performResultType

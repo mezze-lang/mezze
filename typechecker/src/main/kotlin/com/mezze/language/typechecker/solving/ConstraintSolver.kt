@@ -818,23 +818,30 @@ class ConstraintSolver(
             val rightIsSusp = rawRight is MezzeType.SuspendedType && rawRight.effects.effects.isNotEmpty()
             if (leftIsSusp != rightIsSusp) {
                 val plainSide = if (leftIsSusp) rawRight else rawLeft
-                // Skip in-flight unifications against unresolved type vars.
-                // These fire while an enclosing `perform` is still typing its
-                // body — the outer perform's ExprPerformConstraints.generatePerform
-                // (line ~211, removeEffectsFromType) discharges the row at the
-                // perform boundary, so a mid-flight VarType is not a real leak.
-                // A ground consumer (Int, Str, concrete type) IS a leak because
-                // it names an actual type-shape without a discharging perform in
-                // scope. Investigation: fork aebf1e954452bf6bc / plan phase 2a.
-                if (plainSide !is MezzeType.VarType) {
-                    val suspendedSide = if (leftIsSusp) rawLeft as MezzeType.SuspendedType else rawRight as MezzeType.SuspendedType
-                    val effList = suspendedSide.effects.effects.joinToString(", ")
-                    return ConstraintResult.Failure(
-                        "Effect row leak: cannot use a value of type " +
-                        "${suspendedSide.valueType} with unhandled effects <$effList> " +
-                        "as plain $plainSide. Wrap in `perform HandlerFor<$effList> in ...` " +
-                        "to discharge the effect first."
-                    )
+                val suspendedSide = if (leftIsSusp) rawLeft as MezzeType.SuspendedType else rawRight as MezzeType.SuspendedType
+                val leakedEffects = suspendedSide.effects.effects
+                // Skip when an enclosing `perform` will discharge every leaked
+                // effect. ExprPerformConstraints.generatePerform stamps
+                // handledEffects onto every body Equality (via
+                // activeDischargedEffects) so we can distinguish an in-flight
+                // unification that WILL discharge (safe) from a real leak
+                // (fail). See #376.
+                val discharged = constraint.activeDischargedEffects
+                val undischargedLeaks = leakedEffects - discharged
+                if (undischargedLeaks.isNotEmpty()) {
+                    // Additional safety net: also skip in-flight unifications
+                    // against unresolved type vars — these fire before the
+                    // outer solve strips the wrapper, but any real leak against
+                    // a var will re-fire once the var resolves to a ground type.
+                    if (plainSide !is MezzeType.VarType) {
+                        val effList = undischargedLeaks.joinToString(", ")
+                        return ConstraintResult.Failure(
+                            "Effect row leak: cannot use a value of type " +
+                            "${suspendedSide.valueType} with unhandled effects <$effList> " +
+                            "as plain $plainSide. Wrap in `perform HandlerFor<$effList> in ...` " +
+                            "to discharge the effect first."
+                        )
+                    }
                 }
             }
         }
