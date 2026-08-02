@@ -469,7 +469,7 @@ public final class EffectHandlerDriver {
 
         Object performResult;
         try {
-            performResult = drive(handler, effectHash, fiberHolder[0], outerFiber, null, callNode, inheritedChain);
+            performResult = drive(handler, effectHash, fiberHolder[0], outerFiber, null, callNode, inheritedChain, bodyNode, bodyFrame);
         } catch (AbortPerformException abort) {
             performResult = abort.value;
         } finally {
@@ -546,7 +546,15 @@ public final class EffectHandlerDriver {
             EffectFiber outerFiber,
             Object resumeWith,
             IndirectCallNode callNode) {
-        return drive(handler, handlerEffectHash, fiber, outerFiber, resumeWith, callNode, null);
+        // Body/frame not available on this legacy entrypoint. Under Option B
+        // strict mode the makeUnhandledSuspended path this drive() variant
+        // eventually falls into shouldn't fire — the typechecker refuses
+        // configurations where an outer perform's driver needs to synthesize
+        // a lazy value it can't discharge. If it does fire (unstrict runs,
+        // or an as-yet-uncaught leak), the null bodyNode path in the
+        // makeUnhandledSuspended fallback below produces a legacy-shape
+        // MezzeSuspend as before.
+        return drive(handler, handlerEffectHash, fiber, outerFiber, resumeWith, callNode, null, null, null);
     }
 
     /**
@@ -568,7 +576,9 @@ public final class EffectHandlerDriver {
             EffectFiber outerFiber,
             Object resumeWith,
             IndirectCallNode callNode,
-            HandlerChainEntry[] inheritedChain) {
+            HandlerChainEntry[] inheritedChain,
+            MezzeNode bodyNode,
+            MaterializedFrame bodyFrame) {
         // Originally written recursively (every op-call dispatch tail-called
         // drive() with the next resume value). Java doesn't TCO so a body
         // with N op-calls in one perform grew the Java stack N deep — N=10K
@@ -636,11 +646,25 @@ public final class EffectHandlerDriver {
                         throw new TaskUnhandledOpException(opCall);
                     }
                     // Partial-handling: this perform handled some effects but
-                    // not this op. Bubble out as MezzeSuspend carrying the
-                    // unhandled effect; an outer perform can wrap this result
-                    // and force it, or top-level code can hold a deferred
-                    // computation. The driver short-circuits — body's fiber
-                    // never resumes from here.
+                    // not this op. Prefer Path E capture (bodyNode+bodyFrame
+                    // available on run() entry — Option B / #341 Phase 3.5)
+                    // so an outer force() can install a wider chain and
+                    // dispatch this op via re-execution. Fall back to legacy
+                    // MezzeThunk shape when bodyNode is null — the 6-arg
+                    // drive() wrapper path doesn't have it, and callers of
+                    // that wrapper (resume-continuation trampoline) don't
+                    // need Path E semantics because the resumed body
+                    // continues in the fiber, not the deferred consumer.
+                    if (bodyNode != null && bodyFrame != null) {
+                        java.util.Set<Hash> unhandled =
+                            opCall.effectHash() != null
+                                ? java.util.Collections.singleton(opCall.effectHash())
+                                : java.util.Collections.emptySet();
+                        HandlerChainEntry[] chainSnap =
+                            EffectFiber.snapshotHandlerChainEntries();
+                        return com.mezze.interpreter.values.MezzeSuspend.captureContinuation(
+                            bodyNode, bodyFrame, chainSnap, unhandled);
+                    }
                     return makeUnhandledSuspended(opCall);
                 }
                 // Outer handler eventually resumes us with a value. Continue
