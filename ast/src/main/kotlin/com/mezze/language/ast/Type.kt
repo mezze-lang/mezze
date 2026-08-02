@@ -62,7 +62,7 @@ sealed interface MezzeType {
         is SortedMapType -> predicate(keyType) || predicate(valueType)
         is SortedSetType -> predicate(elementType)
         is SeqType -> predicate(elementType)
-        is SuspendedType -> predicate(valueType)
+        is SuspendType -> predicate(valueType)
         is NewtypeType -> predicate(wrappedType)
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
         is NatType, is FracType, is OrderingType, is BytesType, is ByteBufferType,
@@ -81,7 +81,7 @@ sealed interface MezzeType {
         is SortedMapType -> copy(keyType = f(keyType), valueType = f(valueType))
         is SortedSetType -> copy(elementType = f(elementType))
         is SeqType -> copy(elementType = f(elementType))
-        is SuspendedType -> copy(valueType = f(valueType))
+        is SuspendType -> copy(valueType = f(valueType))
         is NewtypeType -> copy(wrappedType = f(wrappedType))
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
         is NatType, is FracType, is OrderingType, is BytesType, is ByteBufferType,
@@ -276,7 +276,7 @@ sealed interface MezzeType {
     // Unlike FunctionType, this is not a function - it's an already-computed value
     // that cannot be used until its effects are handled
     @Serializable
-    data class SuspendedType(
+    data class SuspendType(
         val valueType: MezzeType,
         val effects: EffectRow
     ) : MezzeType {
@@ -284,7 +284,7 @@ sealed interface MezzeType {
             val effectList = effects.effects.take(3).joinToString(", ")
             val suffix = if (effects.effects.size > 3) ", ..." else ""
             return safeToString(
-                "SuspendedType",
+                "SuspendType",
                 truncatedContent = { "${effects.effects.size} effects" },
                 fullContent = { "$effectList$suffix" }
             )

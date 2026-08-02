@@ -84,7 +84,7 @@ data class Substitution(
         is MezzeType.VarType, is MezzeType.FunctionType, is MezzeType.RecordType,
         is MezzeType.VariantType, is MezzeType.TypeApplication, is MezzeType.ListType,
         is MezzeType.MapType, is MezzeType.SetType, is MezzeType.SortedMapType,
-        is MezzeType.SortedSetType, is MezzeType.SeqType, is MezzeType.SuspendedType,
+        is MezzeType.SortedSetType, is MezzeType.SeqType, is MezzeType.SuspendType,
         is MezzeType.NewtypeType, is MezzeType.EffectRow -> false
     }
 
@@ -114,7 +114,7 @@ data class Substitution(
             is MezzeType.SortedSetType -> needsSubstitution(type.elementType)
             is MezzeType.SortedMapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
             is MezzeType.MapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
-            is MezzeType.SuspendedType -> needsSubstitution(type.valueType) || needsSubstitutionInEffectRow(type.effects)
+            is MezzeType.SuspendType -> needsSubstitution(type.valueType) || needsSubstitutionInEffectRow(type.effects)
 
             is MezzeType.NewtypeType -> needsSubstitution(type.wrappedType)
 
@@ -238,7 +238,7 @@ data class Substitution(
                 valueType = applyWithVisited(type.valueType, visitedVars, chainCache)
             )
 
-            is MezzeType.SuspendedType -> MezzeType.SuspendedType(
+            is MezzeType.SuspendType -> MezzeType.SuspendType(
                 valueType = applyWithVisited(type.valueType, visitedVars, chainCache),
                 effects = applyToEffectRowWithVisited(type.effects, visitedVars, chainCache)
             )
@@ -415,7 +415,7 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         args = type.args.map { closeGeneratedRowVars(it, mustBeOpenRowVars) },
         typeHash = type.typeHash
     )
-    is MezzeType.SuspendedType -> MezzeType.SuspendedType(
+    is MezzeType.SuspendType -> MezzeType.SuspendType(
         valueType = closeGeneratedRowVars(type.valueType, mustBeOpenRowVars),
         effects = type.effects
     )
@@ -467,7 +467,7 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
             occursCheck(typeVar, type.keyType) ||
             occursCheck(typeVar, type.valueType)
 
-        is MezzeType.SuspendedType ->
+        is MezzeType.SuspendType ->
             occursCheck(typeVar, type.valueType)
 
         is MezzeType.NewtypeType -> occursCheck(typeVar, type.wrappedType)
@@ -528,7 +528,7 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
         is MezzeType.MapType ->
             collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
 
-        is MezzeType.SuspendedType -> collectFreeTypeVars(type.valueType)
+        is MezzeType.SuspendType -> collectFreeTypeVars(type.valueType)
 
         is MezzeType.NewtypeType -> collectFreeTypeVars(type.wrappedType)
 

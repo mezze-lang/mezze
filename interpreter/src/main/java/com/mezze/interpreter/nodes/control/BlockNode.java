@@ -15,7 +15,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
  * - @ExplodeLoop unrolls the loop at compile time
  * - Hot path (normal execution) has zero overhead
  *
- * <p>Historical note: earlier versions detected a MezzeSuspended returned
+ * <p>Historical note: earlier versions detected a MezzeSuspend returned
  * by an intermediate statement and composed the remaining statements onto
  * it (ComposedBlockThunk). That path was dead code — empirical trace
  * across the full :interpreter:test suite showed zero hits — because the

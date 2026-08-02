@@ -308,7 +308,7 @@ sealed interface PatternIR {
  * present in `body`'s row — i.e. the row-after-this-Handle is empty. Used
  * by the Path E lazy runtime (#336) to choose between eager execution
  * (row empty → run body inline) and deferred capture (row non-empty →
- * build MezzeSuspended). Default false preserves legacy semantics for
+ * build MezzeSuspend). Default false preserves legacy semantics for
  * existing serialized IR and cache blobs.
  */
 @Serializable data class HandleIR(

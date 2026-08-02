@@ -149,7 +149,7 @@ class TryableAbilityTest {
     @Test
     fun `try works on Option from a Log-using function`() {
         // Receiver call has <Log>; bind it to a `let` first so the <Log> is discharged
-        // before `.try {}` is dispatched. Calling .try on a SuspendedType directly
+        // before `.try {}` is dispatched. Calling .try on a SuspendType directly
         // isn't currently supported (typechecker resolves as field access).
         val result = eval("""
             use std::effects::exception::{ExceptionToResult}

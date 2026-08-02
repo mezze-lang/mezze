@@ -15,12 +15,12 @@ import org.junit.jupiter.api.Test
  *    ability method arrows into the stored FunctionType.
  * 2. `tryGenerateMethodCall` / `generateInherentMethodCall` — propagate
  *    method-declared effects to the call's effect set, wrap result in
- *    SuspendedType when the method has effects.
+ *    SuspendType when the method has effects.
  * 3. `AbilityImplFactory.build` — use `forallVars` for `typeVars` so
  *    polymorphic quantifiers in `targetTypes` (not just `abilityTypeArgs`)
  *    are recognized for impl matching.
  * 4. `TypedASTCompiler.tryResolveAbilityOp` / `findAbilityOpBody` —
- *    unwrap SuspendedType when resolving ability impls at IR compilation
+ *    unwrap SuspendType when resolving ability impls at IR compilation
  *    time. Receivers that are results of effectful calls now dispatch.
  */
 class AbilityMethodEffectsRegressionTest {
@@ -78,7 +78,7 @@ class AbilityMethodEffectsRegressionTest {
 
     @Test
     fun `effect declared on ability method appears in call site effect row`() {
-        // If `tryGenerateMethodCall` doesn't wrap the result in SuspendedType
+        // If `tryGenerateMethodCall` doesn't wrap the result in SuspendType
         // when the method has effects, the surrounding `perform` complains
         // there are no effects to handle.
         val error = typeCheck("""
@@ -137,7 +137,7 @@ class AbilityMethodEffectsRegressionTest {
     }
 
     // ========================================================================
-    // Fix #4: SuspendedType receiver dispatches to ability impl correctly
+    // Fix #4: SuspendType receiver dispatches to ability impl correctly
     // ========================================================================
 
     @Test

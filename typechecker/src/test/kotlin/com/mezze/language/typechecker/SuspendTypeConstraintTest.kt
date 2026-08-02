@@ -11,17 +11,17 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 /**
- * Tests for SuspendedType handling in constraint solving.
+ * Tests for SuspendType handling in constraint solving.
  *
- * SuspendedType wraps a value type with unhandled effects. Constraint solving
- * operations (HasConstructor, HasField) need to properly unwrap SuspendedType
+ * SuspendType wraps a value type with unhandled effects. Constraint solving
+ * operations (HasConstructor, HasField) need to properly unwrap SuspendType
  * to access the inner value type for validation.
  *
  * These tests verify that:
- * 1. HasField correctly unwraps SuspendedType to access record fields
- * 2. HasConstructor correctly unwraps SuspendedType to access variant constructors
+ * 1. HasField correctly unwraps SuspendType to access record fields
+ * 2. HasConstructor correctly unwraps SuspendType to access variant constructors
  */
-class SuspendedTypeConstraintTest {
+class SuspendTypeConstraintTest {
     private lateinit var parser: MezzeParser
     private lateinit var typeChecker: TypeChecker
 
@@ -34,15 +34,15 @@ class SuspendedTypeConstraintTest {
     }
 
     // =========================================================================
-    // HasField with SuspendedType tests
+    // HasField with SuspendType tests
     // =========================================================================
 
     @Test
     fun `field access on effectful function result should work`() {
-        // This tests that HasField constraint properly unwraps SuspendedType
+        // This tests that HasField constraint properly unwraps SuspendType
         // When we call an effectful function that returns a record, the result
-        // is SuspendedType(RecordType, effects). Accessing a field should unwrap
-        // the SuspendedType and check the field on the inner RecordType.
+        // is SuspendType(RecordType, effects). Accessing a field should unwrap
+        // the SuspendType and check the field on the inner RecordType.
         val source = """
             effect State where {
                 get: {} -> {value: Int} <State>
@@ -81,7 +81,7 @@ class SuspendedTypeConstraintTest {
     @Test
     fun `field access on conditional with effectful branch should work`() {
         // This tests the if-then-else case where one branch is effectful
-        // The result unifies to SuspendedType, and field access should still work
+        // The result unifies to SuspendType, and field access should still work
         val source = """
             effect State where {
                 get: {} -> {name: Str, age: Int} <State>
@@ -178,7 +178,7 @@ class SuspendedTypeConstraintTest {
     }
 
     // =========================================================================
-    // HasConstructor with SuspendedType tests (verifying existing fix)
+    // HasConstructor with SuspendType tests (verifying existing fix)
     // =========================================================================
 
     @Test
@@ -203,15 +203,15 @@ class SuspendedTypeConstraintTest {
 
         val fnType = typedProgram.getVariableType("maybeThrow") as MezzeType.FunctionType
 
-        // Return type should be SuspendedType wrapping a variant (due to effectful throw)
+        // Return type should be SuspendType wrapping a variant (due to effectful throw)
         // or variant-like if effects are tracked differently
         val returnType = fnType.returnType
-        if (returnType is MezzeType.SuspendedType) {
-            // SuspendedType wrapping variant - this is valid
+        if (returnType is MezzeType.SuspendType) {
+            // SuspendType wrapping variant - this is valid
             val innerType = returnType.valueType
             assertTrue(
                 innerType is MezzeType.VariantType || innerType is MezzeType.TypeApplication,
-                "Expected SuspendedType wrapping variant but inner type is ${innerType::class.simpleName}"
+                "Expected SuspendType wrapping variant but inner type is ${innerType::class.simpleName}"
             )
         } else {
             // Direct variant type or function type with effects tracked in FunctionType.effects
@@ -225,7 +225,7 @@ class SuspendedTypeConstraintTest {
 
     @Test
     fun `match on variant returned from effectful function should work`() {
-        // Pattern matching on an effectful result should properly unwrap SuspendedType
+        // Pattern matching on an effectful result should properly unwrap SuspendType
         val source = """
             type Status = | Loading, Ready { data: Str }, Failed { error: Str } |
 
@@ -254,7 +254,7 @@ class SuspendedTypeConstraintTest {
     }
 
     // =========================================================================
-    // Combined HasField and HasConstructor with SuspendedType
+    // Combined HasField and HasConstructor with SuspendType
     // =========================================================================
 
     @Test

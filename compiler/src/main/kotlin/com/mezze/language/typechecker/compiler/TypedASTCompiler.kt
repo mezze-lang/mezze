@@ -1001,15 +1001,15 @@ class TypedASTCompiler(
             // Effects
             is TypedPerform -> {
                 // Path E (#336): "fully discharged" iff perform's result type
-                // is NOT a SuspendedType carrying any pending effect. If the
-                // typechecker gave us Foo directly (or SuspendedType with
+                // is NOT a SuspendType carrying any pending effect. If the
+                // typechecker gave us Foo directly (or SuspendType with
                 // effects.effects empty AND effectInstances empty AND
                 // rowVar null), body's row after this handler is empty and
                 // the runtime can execute the body eagerly. If pending
-                // effects remain, the runtime must build a MezzeSuspended
+                // effects remain, the runtime must build a MezzeSuspend
                 // holding the body continuation.
                 val fullyDischarged = when (val t = expr.type) {
-                    is MezzeType.SuspendedType ->
+                    is MezzeType.SuspendType ->
                         t.effects.effects.isEmpty() &&
                         t.effects.effectInstances.isEmpty() &&
                         t.effects.rowVar == null
@@ -2364,21 +2364,21 @@ class TypedASTCompiler(
     }
 
     /**
-     * Strip a SuspendedType wrapper from the receiver for ability dispatch.
+     * Strip a SuspendType wrapper from the receiver for ability dispatch.
      *
-     * Effectful expressions like `effectful {}` have type `SuspendedType<T,
+     * Effectful expressions like `effectful {}` have type `SuspendType<T,
      * effects>`. For method dispatch we want the underlying value type.
      *
      * Exception: inlineable primitive ops (`add`, `sub`, ...) must keep the
-     * SuspendedType so resolution fails here and the indirect-call path
+     * SuspendType so resolution fails here and the indirect-call path
      * pattern-matches into DirectAddNode etc. — those nodes have
-     * MezzeSuspended specializations that propagate suspension at runtime.
+     * MezzeSuspend specializations that propagate suspension at runtime.
      * Without this guard, `result + 1` for `result : Int <Log>` resolves to
-     * a direct call to Int.add and crashes when fed a MezzeSuspended `it`
+     * a direct call to Int.add and crashes when fed a MezzeSuspend `it`
      * (see RuntimeEffectValidationTest.testNestedEffectfulFunctionValidation).
      */
     private fun receiverTypeForDispatch(methodName: String, receiverType: MezzeType): MezzeType =
-        if (receiverType is SuspendedType && methodName !in inlineableOps) {
+        if (receiverType is SuspendType && methodName !in inlineableOps) {
             receiverType.valueType
         } else {
             receiverType

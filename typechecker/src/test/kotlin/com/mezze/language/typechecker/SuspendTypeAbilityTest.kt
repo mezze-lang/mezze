@@ -9,15 +9,15 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 /**
- * Tests for ability checking on SuspendedType values.
+ * Tests for ability checking on SuspendType values.
  *
- * CRITICAL: SuspendedType (e.g., Int <Log>) should have the same abilities as its value type.
+ * CRITICAL: SuspendType (e.g., Int <Log>) should have the same abilities as its value type.
  * Effects don't affect what operations can be performed on a value - they only track
  * which effects need to be handled before the value can be fully computed.
  *
  * Example: Int <Log> should support NumAdd, NumMul, Eq, etc. just like Int
  */
-class SuspendedTypeAbilityTest {
+class SuspendTypeAbilityTest {
 
     private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val parser = MezzeParser()
@@ -47,7 +47,7 @@ class SuspendedTypeAbilityTest {
         }
     }
 
-    // ===== Numeric Abilities on SuspendedType =====
+    // ===== Numeric Abilities on SuspendType =====
 
     @Test
     fun `test Int suspended type supports NumAdd`() {
@@ -201,7 +201,7 @@ class SuspendedTypeAbilityTest {
         )
     }
 
-    // ===== String Abilities on SuspendedType =====
+    // ===== String Abilities on SuspendType =====
 
     @Test
     fun `test String suspended type supports string interpolation`() {
@@ -253,7 +253,7 @@ class SuspendedTypeAbilityTest {
         )
     }
 
-    // ===== Boolean Abilities on SuspendedType =====
+    // ===== Boolean Abilities on SuspendType =====
 
     @Test
     fun `test Bool suspended type supports LogicalAnd`() {
@@ -303,7 +303,7 @@ class SuspendedTypeAbilityTest {
         )
     }
 
-    // ===== Eq Ability on Various SuspendedTypes =====
+    // ===== Eq Ability on Various SuspendTypes =====
 
     @Test
     fun `test Int suspended type supports Eq`() {
@@ -357,7 +357,7 @@ class SuspendedTypeAbilityTest {
         )
     }
 
-    // ===== Ord Ability on SuspendedTypes =====
+    // ===== Ord Ability on SuspendTypes =====
 
     @Test
     fun `test Int suspended type supports Ord`() {

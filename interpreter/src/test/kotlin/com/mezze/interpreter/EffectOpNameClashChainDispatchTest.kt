@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
  *     disambiguated by (effect_hash, op_name), not by op_name alone.
  *   - #285: on a spawned task thread, unhandled ops now chain-dispatch
  *     against the inherited parent handler chain via
- *     `OpCallNode.dispatchOpOnChain` (and `MezzeSuspended.forceWithoutFiber`).
+ *     `OpCallNode.dispatchOpOnChain` (and `MezzeSuspend.forceWithoutFiber`).
  *
  * The join of those two rules is what this file exercises: when the op
  * runs inside `Async.spawn { f = ... }`, resolution goes through the

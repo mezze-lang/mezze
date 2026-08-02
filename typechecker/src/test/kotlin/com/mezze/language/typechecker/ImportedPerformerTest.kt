@@ -494,9 +494,9 @@ class ImportedPerformerTest {
         )
     }
 
-    // ========== MINIMAL REPROS: SuspendedType leaking through match/if ==========
+    // ========== MINIMAL REPROS: SuspendType leaking through match/if ==========
 
-    /** Helper: assert main's return type is RecordType `{}` (no SuspendedType wrapper). */
+    /** Helper: assert main's return type is RecordType `{}` (no SuspendType wrapper). */
     private fun assertMainReturnsUnit(source: String) {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
@@ -560,7 +560,7 @@ class ImportedPerformerTest {
         // A seq containing effect-call results — like `[println{a}, println{b}]`
         // — same conflation potential as match: the seq's fresh element
         // TypeVar gets unified with each element's type, which is a
-        // SuspendedType wrapper if the element is an effect call.
+        // SuspendType wrapper if the element is an effect call.
         val source = """
             use std::effects::log::{println, Console}
 
@@ -577,7 +577,7 @@ class ImportedPerformerTest {
     @Test
     fun `nested perform Console and SystemStdin discharges both effects`() {
         // Regression: real-world `mez dev` test rejected this shape with
-        // "Entry 'main' must return {}, got: SuspendedType(Log)" even though
+        // "Entry 'main' must return {}, got: SuspendType(Log)" even though
         // Console handles Log and SystemStdin handles Stdin.
         val source = """
             use std::effects::log::{println, Console}
@@ -655,7 +655,7 @@ class ImportedPerformerTest {
         )
 
         // EntryPointCheck inspects returnType — it must be an empty closed
-        // record `{}`, NOT a SuspendedType. This is what `mez dev`/`mez exec`
+        // record `{}`, NOT a SuspendType. This is what `mez dev`/`mez exec`
         // require to accept the binding as an entry point.
         val ret = mainType.returnType
         assertTrue(

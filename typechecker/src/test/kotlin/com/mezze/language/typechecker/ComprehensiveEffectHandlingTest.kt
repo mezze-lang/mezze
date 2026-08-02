@@ -265,12 +265,12 @@ class ComprehensiveEffectHandlingTest {
     }
 
     // ===== Category 3: Call function THEN handle effects =====
-    // These tests verify calling an effectful function creates SuspendedType,
+    // These tests verify calling an effectful function creates SuspendType,
     // then performing handlers on the suspended value
 
     @Test
     fun `test 3a - call effectful function creates suspended type`() {
-        // CRITICAL: This verifies function calls with effects produce SuspendedType
+        // CRITICAL: This verifies function calls with effects produce SuspendType
         assertTypeChecks(
             """
             use std::effects::log::{Console, println}

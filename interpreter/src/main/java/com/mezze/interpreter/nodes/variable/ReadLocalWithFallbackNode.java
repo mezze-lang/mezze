@@ -2,7 +2,7 @@ package com.mezze.interpreter.nodes.variable;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
-import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.interpreter.values.MezzeSuspend;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -47,7 +47,7 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
     // Sentinel for "looked up but not found" case (avoids repeated lookups)
     private static final Object NOT_FOUND_SENTINEL = new Object();
 
-    // For forcing MezzeSuspended values
+    // For forcing MezzeSuspend values
     @Child
     private IndirectCallNode callNode;
 
@@ -78,19 +78,19 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
     }
 
     /**
-     * If the value is a MezzeSuspended and there are handlers in scope, force it.
+     * If the value is a MezzeSuspend and there are handlers in scope, force it.
      * This implements the lazy effect semantics where suspended computations
      * are evaluated when they're used within a perform block.
      */
     private Object maybeForce(Object value) {
-        if (value instanceof MezzeSuspended suspended) {
+        if (value instanceof MezzeSuspend suspended) {
             return forceSuspended(suspended);
         }
         return value;
     }
 
     @TruffleBoundary
-    private Object forceSuspended(MezzeSuspended suspended) {
+    private Object forceSuspended(MezzeSuspend suspended) {
         // Under the new dispatch design, forcing routes through the current
         // fiber rather than a context-wide handler map. force() returns the
         // suspension unchanged when no fiber is current.

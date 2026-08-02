@@ -395,7 +395,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     val extraEffects: Set<String>
     val extraEffectInstances: Set<MezzeType.EffectInstance>
     when (val rt = receiverResult.type) {
-        is MezzeType.SuspendedType -> {
+        is MezzeType.SuspendType -> {
             receiverType = rt.valueType
             extraEffects = rt.effects.effects
             extraEffectInstances = rt.effects.effectInstances
@@ -627,7 +627,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     val extraEffects: Set<String>
     val extraEffectInstances: Set<MezzeType.EffectInstance>
     when (val rt = receiverResult.type) {
-        is MezzeType.SuspendedType -> {
+        is MezzeType.SuspendType -> {
             receiverType = rt.valueType
             extraEffects = rt.effects.effects
             extraEffectInstances = rt.effects.effectInstances
@@ -790,7 +790,7 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
     val extraEffects: Set<String>
     val extraEffectInstances: Set<MezzeType.EffectInstance>
     when (val rt = receiverResult.type) {
-        is MezzeType.SuspendedType -> {
+        is MezzeType.SuspendType -> {
             receiverType = rt.valueType
             extraEffects = rt.effects.effects
             extraEffectInstances = rt.effects.effectInstances

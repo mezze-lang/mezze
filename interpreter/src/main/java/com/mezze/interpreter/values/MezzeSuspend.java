@@ -22,16 +22,16 @@ import java.util.Set;
  *
  * This implements the lazy effects model where:
  * - Inside perform: effects execute immediately (hot path)
- * - Outside perform: effects return MezzeSuspended (cold path)
+ * - Outside perform: effects return MezzeSuspend (cold path)
  *
  * The suspended computation can later be executed with perform,
  * which provides the missing handlers.
  *
  * Example:
- *   let result = myEffectfulFunc {}  // Returns MezzeSuspended with unhandled effects
+ *   let result = myEffectfulFunc {}  // Returns MezzeSuspend with unhandled effects
  *   perform Console in result        // Executes with Console handler
  */
-public final class MezzeSuspended implements TruffleObject {
+public final class MezzeSuspend implements TruffleObject {
 
     // ----- Legacy shape (pre-Path-E, still active when MEZZE_LAZY_EFFECTS is off).
     // Discriminator: `computation != null` → legacy shape. force() dispatches
@@ -60,11 +60,11 @@ public final class MezzeSuspended implements TruffleObject {
     // Handlers already captured (for partial handling — legacy shape only).
     private final Map<Hash, Object> capturedHandlers;
 
-    public MezzeSuspended(MezzeThunk computation, Set<Hash> unhandledEffects) {
+    public MezzeSuspend(MezzeThunk computation, Set<Hash> unhandledEffects) {
         this(computation, unhandledEffects, Collections.emptyMap());
     }
 
-    public MezzeSuspended(MezzeThunk computation, Set<Hash> unhandledEffects, Map<Hash, Object> capturedHandlers) {
+    public MezzeSuspend(MezzeThunk computation, Set<Hash> unhandledEffects, Map<Hash, Object> capturedHandlers) {
         this.computation = computation;
         this.bodyNode = null;
         this.bodyFrame = null;
@@ -83,15 +83,15 @@ public final class MezzeSuspended implements TruffleObject {
      * (the enclosing HandleNode's push). Force merges these with the chain
      * live at force time.
      */
-    public static MezzeSuspended captureContinuation(
+    public static MezzeSuspend captureContinuation(
             com.mezze.interpreter.nodes.MezzeNode bodyNode,
             com.oracle.truffle.api.frame.MaterializedFrame bodyFrame,
             com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chainSnapshot,
             Set<Hash> unhandledEffects) {
-        return new MezzeSuspended(bodyNode, bodyFrame, chainSnapshot, unhandledEffects);
+        return new MezzeSuspend(bodyNode, bodyFrame, chainSnapshot, unhandledEffects);
     }
 
-    private MezzeSuspended(
+    private MezzeSuspend(
             com.mezze.interpreter.nodes.MezzeNode bodyNode,
             com.oracle.truffle.api.frame.MaterializedFrame bodyFrame,
             com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chainSnapshot,
@@ -208,7 +208,7 @@ public final class MezzeSuspended implements TruffleObject {
             // a deferred effect call, try chain-dispatching it here, the
             // same way OpCallNode does its no-fiber fallback. Without
             // this, force() returns `this` unforced (#285) and the
-            // unevaluated MezzeSuspended leaks back to the caller.
+            // unevaluated MezzeSuspend leaks back to the caller.
             return forceWithoutFiber(callNode);
         }
         if (computation.isDeferredEffectCall()) {
@@ -238,8 +238,8 @@ public final class MezzeSuspended implements TruffleObject {
      *   <li>Fire {@code abort {val = X}} in a matched op impl →
      *       {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException}
      *       caught here, return the abort value.</li>
-     *   <li>Perform an op with no matching handler → nested MezzeSuspended
-     *       returned by the inner HandleNode (or MezzeSuspended propagated
+     *   <li>Perform an op with no matching handler → nested MezzeSuspend
+     *       returned by the inner HandleNode (or MezzeSuspend propagated
      *       up from OpCallNode's createSuspended). Force returns that,
      *       preserving lazy semantics for still-unhandled effects.</li>
      * </ul>
@@ -262,11 +262,11 @@ public final class MezzeSuspended implements TruffleObject {
         }
         try {
             Object out = bodyNode.execute(bodyFrame);
-            // Cascade: if body execution produced another lazy MezzeSuspended
+            // Cascade: if body execution produced another lazy MezzeSuspend
             // (from an inner nested Handle further down that also deferred),
             // force it now under the same installed chain. Loop rather than
             // recurse to avoid stack growth for deeply-nested `perform` chains.
-            while (out instanceof MezzeSuspended nested && nested.isPathE()) {
+            while (out instanceof MezzeSuspend nested && nested.isPathE()) {
                 out = nested.forcePathE(callNode);
             }
             return out;
@@ -304,7 +304,7 @@ public final class MezzeSuspended implements TruffleObject {
      * Check if a value is a suspended computation.
      */
     public static boolean isSuspended(Object value) {
-        return value instanceof MezzeSuspended;
+        return value instanceof MezzeSuspend;
     }
 
     @Override

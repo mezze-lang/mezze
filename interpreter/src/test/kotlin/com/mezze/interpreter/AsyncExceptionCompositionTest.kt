@@ -78,7 +78,7 @@ class AsyncExceptionCompositionTest {
         Exception propagation all now work correctly. This test still
         fails because the `let r = map { ... }` binding wraps `r` into an
         outer `Ok { val = r }` record before the outer perform driver
-        catches the abort — so eval sees `Ok { val = MezzeSuspended }`
+        catches the abort — so eval sees `Ok { val = MezzeSuspend }`
         instead of the abort's Err. The abort machinery races with record
         construction. Tracked in docs/PARALLEL_KNOWN_ISSUES.md; likely
         needs the outer perform driver to catch TaskUnhandledOpException

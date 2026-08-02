@@ -200,7 +200,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     is MezzeType.SetType -> "Set ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is MezzeType.SortedMapType -> "SortedMap ${prettyPrintTypeWithMapping(type.keyType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
     is MezzeType.SortedSetType -> "SortedSet ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
-    is MezzeType.SuspendedType -> {
+    is MezzeType.SuspendType -> {
         val valueTypeStr = prettyPrintTypeWithMapping(type.valueType, typeVarMapping)
         "$valueTypeStr ${prettyPrintEffectRow(type.effects, typeVarMapping)}"
     }
@@ -429,7 +429,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
 
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
-    is MezzeType.SuspendedType -> {
+    is MezzeType.SuspendType -> {
         val valueTypeStr = prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping)
         "$valueTypeStr ${prettyPrintEffectRow(type.effects, typeVarMapping)}"
     }

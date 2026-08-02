@@ -168,7 +168,7 @@ class TypeValidator(
 
         for (constraint in constraints) {
             val concreteType = when (val applied = substitution.apply(MezzeType.VarType(constraint.typeVar))) {
-                is MezzeType.SuspendedType -> applied.valueType
+                is MezzeType.SuspendType -> applied.valueType
                 else -> applied
             }
             if (concreteType is MezzeType.VarType) continue
@@ -276,7 +276,7 @@ class TypeValidator(
         }
 
     private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
-        var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
+        var unwrappedType = if (type is MezzeType.SuspendType) type.valueType else type
         (unwrappedType as? MezzeType.TypeApplication)?.let { expandTypeApplicationToVariant(it, registry)?.let { e -> unwrappedType = e } }
 
         return when {
@@ -328,7 +328,7 @@ class TypeValidator(
                 else -> ContentHashComputer.mezzeTypeToString(type)
             }
             is MezzeType.RecordType -> type.typeName ?: ContentHashComputer.mezzeTypeToString(type)
-            is MezzeType.SuspendedType -> getTypeNameForAbility(type.valueType)
+            is MezzeType.SuspendType -> getTypeNameForAbility(type.valueType)
             else -> ContentHashComputer.mezzeTypeToString(type)
         }
         typeNameCache[key] = result
@@ -361,15 +361,15 @@ class TypeValidator(
     ): List<ValidationError> {
         if (!decl.isSimpleBinding) return emptyList()
         val finalType = substitution.apply(constraintResults[decl.variableName]?.type ?: return emptyList())
-        if (finalType !is MezzeType.SuspendedType) return emptyList()
+        if (finalType !is MezzeType.SuspendType) return emptyList()
 
-        // A top-level `let` bound to a SuspendedType is always suspect: the RHS
+        // A top-level `let` bound to a SuspendType is always suspect: the RHS
         // is a lazy computation with pending effects. The question is whether we
         // allow it as an inspectable declarative value or reject it as a program-
         // level mistake (an effectful call that will never fire without a handler).
         //
         // Under strict mode (mez build / mez run — real program entry paths), any
-        // top-level SuspendedType is rejected. Fully-discharged (performed + empty
+        // top-level SuspendType is rejected. Fully-discharged (performed + empty
         // row) would execute at module load. Partially-discharged (residual row)
         // is a stranded effectful expression the entry point can't use.
         //

@@ -198,7 +198,7 @@ class VariantTagCollisionSoundnessTest {
     }
 
     /**
-     * Effect-op result coercion — #231 fixed SuspendedType leaks for effect
+     * Effect-op result coercion — #231 fixed SuspendType leaks for effect
      * op returns. This probe locks in that an effect op returning Tag2
      * cannot have its return annotated as Tag1.
      */

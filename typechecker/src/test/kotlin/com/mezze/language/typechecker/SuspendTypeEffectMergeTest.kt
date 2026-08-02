@@ -11,12 +11,12 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 /**
- * Tests for effect merging when unifying SuspendedType.
+ * Tests for effect merging when unifying SuspendType.
  *
  * When different branches of a match/if have different effects,
  * the overall type should include ALL effects from all branches.
  */
-class SuspendedTypeEffectMergeTest {
+class SuspendTypeEffectMergeTest {
     private lateinit var parser: MezzeParser
     private lateinit var typeChecker: TypeChecker
 
@@ -64,10 +64,10 @@ class SuspendedTypeEffectMergeTest {
 
         val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
-        // The return type may be SuspendedType wrapping Int if effects are propagated via SuspendedType
+        // The return type may be SuspendType wrapping Int if effects are propagated via SuspendType
         // OR plain Int with effects tracked in the function's effect row
         val valueType = when (val rt = fnType.returnType) {
-            is MezzeType.SuspendedType -> rt.valueType
+            is MezzeType.SuspendType -> rt.valueType
             else -> rt
         }
         assertTrue(valueType is MezzeType.IntType, "Expected IntType value but got ${valueType::class.simpleName}")

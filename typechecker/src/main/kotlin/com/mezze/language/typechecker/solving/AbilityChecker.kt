@@ -300,7 +300,7 @@ internal class AbilityChecker(
         }
 
         val unwrappedTypeArgs = typeArgs.map { arg ->
-            if (arg is MezzeType.SuspendedType) arg.valueType else arg
+            if (arg is MezzeType.SuspendType) arg.valueType else arg
         }
 
         val hasImpl = impls.any { implInfo ->
@@ -445,9 +445,9 @@ internal class AbilityChecker(
                     abilityConstraints = type.abilityConstraints
                 )
             }
-            is MezzeType.SuspendedType -> {
+            is MezzeType.SuspendType -> {
                 if (!needsClosingForCodec(type.valueType)) return type
-                MezzeType.SuspendedType(
+                MezzeType.SuspendType(
                     valueType = closeOpenRecordsForCodec(type.valueType),
                     effects = type.effects
                 )
@@ -478,7 +478,7 @@ internal class AbilityChecker(
 
     private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
         val resolvedHash = abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
-        var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
+        var unwrappedType = if (type is MezzeType.SuspendType) type.valueType else type
 
         var isNewtype = unwrappedType is MezzeType.NewtypeType
 

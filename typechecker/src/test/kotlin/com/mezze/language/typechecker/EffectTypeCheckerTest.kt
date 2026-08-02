@@ -115,9 +115,9 @@ class EffectTypeCheckerTest {
 
         val myProgramType = result.getVariableType("myProgram")
         assertNotNull(myProgramType)
-        // Effect call returns SuspendedType (value with unhandled effects): Int <Random>
-        assertTrue(myProgramType is MezzeType.SuspendedType)
-        val suspendedType = myProgramType as MezzeType.SuspendedType
+        // Effect call returns SuspendType (value with unhandled effects): Int <Random>
+        assertTrue(myProgramType is MezzeType.SuspendType)
+        val suspendedType = myProgramType as MezzeType.SuspendType
         assertEquals(MezzeType.IntType, suspendedType.valueType)
         assertEquals(setOf("Random"), suspendedType.effects.effects)
     }

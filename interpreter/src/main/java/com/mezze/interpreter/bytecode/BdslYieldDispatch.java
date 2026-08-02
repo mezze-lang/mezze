@@ -11,7 +11,7 @@ import com.mezze.interpreter.nodes.continuation.HandlerChainEntry;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.interpreter.values.MezzeSuspend;
 import com.mezze.interpreter.values.MezzeThunk;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -73,7 +73,7 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  * <h2>Unhandled ops</h2>
  *
  * <p>Currently throws {@link UnhandledPathDOp}. The Loom path wraps
- * these in {@code MezzeSuspended} for lazy evaluation — Path D catches
+ * these in {@code MezzeSuspend} for lazy evaluation — Path D catches
  * up in a later phase.
  */
 public final class BdslYieldDispatch {
@@ -105,7 +105,7 @@ public final class BdslYieldDispatch {
             + " chainDepth=" + currentChainDepth()
             + " handler=" + (handler == null ? "null" : "found"));
         if (handler == null) {
-            // No handler in scope — Path A wraps the op in a MezzeSuspended
+            // No handler in scope — Path A wraps the op in a MezzeSuspend
             // so an outer perform (installed later, e.g. `let x = do_stuff
             // {} ; perform Handler in force x`) can force it. Same shape.
             return makeUnhandledSuspended(effectHash, opName, arg);
@@ -213,23 +213,23 @@ public final class BdslYieldDispatch {
     }
 
     /**
-     * Build a lazy {@link MezzeSuspended} value carrying the unhandled
+     * Build a lazy {@link MezzeSuspend} value carrying the unhandled
      * op — same shape as {@link EffectHandlerDriver#makeUnhandledSuspended}.
      * Used when a perform fires with no matching handler in scope; an
      * outer handler installed later can force this and dispatch.
      */
     @TruffleBoundary
-    private static MezzeSuspended makeUnhandledSuspended(Hash effectHash, String opName, Object arg) {
+    private static MezzeSuspend makeUnhandledSuspended(Hash effectHash, String opName, Object arg) {
         var thunk = new MezzeThunk(/* effectName */ null, opName, arg, effectHash);
         java.util.Set<Hash> effects = effectHash != null
             ? java.util.Collections.singleton(effectHash)
             : java.util.Collections.emptySet();
-        return new MezzeSuspended(thunk, effects);
+        return new MezzeSuspend(thunk, effects);
     }
 
     /**
      * Legacy marker exception — kept for the {@link BdslYieldDriver}
-     * test harness which was written before we adopted MezzeSuspended
+     * test harness which was written before we adopted MezzeSuspend
      * wrapping. Not thrown by {@link #dispatch} anymore.
      */
     public static final class UnhandledPathDOp extends RuntimeException {

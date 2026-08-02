@@ -18,7 +18,7 @@ import kotlin.test.assertNull
  * correctly unify using row polymorphism:
  * - Pure branch (<>) + effectful branch (<E>) = <E>
  * - <E1> + <E2> = <E1, E2>
- * - SuspendedType unification with pure types
+ * - SuspendType unification with pure types
  */
 class MatchEffectUnificationTest {
 

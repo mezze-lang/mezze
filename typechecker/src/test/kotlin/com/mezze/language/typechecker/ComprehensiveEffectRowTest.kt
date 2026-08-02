@@ -36,9 +36,9 @@ class ComprehensiveEffectRowTest {
         val inferredType = result.getVariableType("program")
 
         assertNotNull(inferredType)
-        // Effect calls return SuspendedType (value with unhandled effects), not FunctionType
-        assertTrue(inferredType is MezzeType.SuspendedType)
-        val suspendedType = inferredType as MezzeType.SuspendedType
+        // Effect calls return SuspendType (value with unhandled effects), not FunctionType
+        assertTrue(inferredType is MezzeType.SuspendType)
+        val suspendedType = inferredType as MezzeType.SuspendType
         assertEquals(setOf("Log"), suspendedType.effects.effects)
         assertEquals(MezzeType.RecordType(emptyMap()), suspendedType.valueType) // {} return type
     }
@@ -61,9 +61,9 @@ class ComprehensiveEffectRowTest {
         val inferredType = result.getVariableType("program")
 
         assertNotNull(inferredType)
-        // Do blocks with effects return SuspendedType (value with unhandled effects)
-        assertTrue(inferredType is MezzeType.SuspendedType)
-        val suspendedType = inferredType as MezzeType.SuspendedType
+        // Do blocks with effects return SuspendType (value with unhandled effects)
+        assertTrue(inferredType is MezzeType.SuspendType)
+        val suspendedType = inferredType as MezzeType.SuspendType
         assertEquals(setOf("Log"), suspendedType.effects.effects)
         assertEquals(MezzeType.IntType, suspendedType.valueType) // Int return type from 42
     }
@@ -92,9 +92,9 @@ class ComprehensiveEffectRowTest {
         val inferredType = result.getVariableType("program")
 
         assertNotNull(inferredType)
-        // Do blocks with effects return SuspendedType
-        assertTrue(inferredType is MezzeType.SuspendedType)
-        val suspendedType = inferredType as MezzeType.SuspendedType
+        // Do blocks with effects return SuspendType
+        assertTrue(inferredType is MezzeType.SuspendType)
+        val suspendedType = inferredType as MezzeType.SuspendType
         assertEquals(setOf("Log", "Console"), suspendedType.effects.effects)
         assertEquals(MezzeType.StringType, suspendedType.valueType) // String return type from "completed"
     }
@@ -124,9 +124,9 @@ class ComprehensiveEffectRowTest {
         // Check nested program - should accumulate both Log and Error effects
         val nestedType = result.getVariableType("nestedProgram")
         assertNotNull(nestedType)
-        // Do blocks with effects return SuspendedType
-        assertTrue(nestedType is MezzeType.SuspendedType)
-        val suspendedType = nestedType as MezzeType.SuspendedType
+        // Do blocks with effects return SuspendType
+        assertTrue(nestedType is MezzeType.SuspendType)
+        val suspendedType = nestedType as MezzeType.SuspendType
         // The outer do block should accumulate effects from both the inner do block (Log) and its own effect call (Error)
         assertEquals(setOf("Log", "Error"), suspendedType.effects.effects)
     }
@@ -153,10 +153,10 @@ class ComprehensiveEffectRowTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check program has effectful type (SuspendedType)
+        // Check program has effectful type (SuspendType)
         val programType = result.getVariableType("program")
-        assertTrue(programType is MezzeType.SuspendedType)
-        val programSuspended = programType as MezzeType.SuspendedType
+        assertTrue(programType is MezzeType.SuspendType)
+        val programSuspended = programType as MezzeType.SuspendType
         assertEquals(setOf("Log"), programSuspended.effects.effects)
 
         // Check getResult - after perform, all effects are handled
@@ -293,10 +293,10 @@ class ComprehensiveEffectRowTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check program has Log effect (SuspendedType)
+        // Check program has Log effect (SuspendType)
         val programType = result.getVariableType("program")
-        assertTrue(programType is MezzeType.SuspendedType)
-        val programSuspended = programType as MezzeType.SuspendedType
+        assertTrue(programType is MezzeType.SuspendType)
+        val programSuspended = programType as MezzeType.SuspendType
         assertEquals(setOf("Log"), programSuspended.effects.effects)
 
         // Both results should be functions returning {} with <*> marker
@@ -398,9 +398,9 @@ class ComprehensiveEffectRowTest {
 
         val inferredType = result.getVariableType("mixedProgram")
 
-        // Do blocks with effects return SuspendedType
-        assertTrue(inferredType is MezzeType.SuspendedType)
-        val suspendedType = inferredType as MezzeType.SuspendedType
+        // Do blocks with effects return SuspendType
+        assertTrue(inferredType is MezzeType.SuspendType)
+        val suspendedType = inferredType as MezzeType.SuspendType
         assertEquals(setOf("Log"), suspendedType.effects.effects)
         assertEquals(MezzeType.IntType, suspendedType.valueType)
     }

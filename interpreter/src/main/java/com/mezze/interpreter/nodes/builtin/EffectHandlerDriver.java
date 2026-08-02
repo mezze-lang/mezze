@@ -10,7 +10,7 @@ import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.interpreter.values.MezzeSuspend;
 import com.mezze.interpreter.values.MezzeThunk;
 import com.mezze.language.ast.ScopedEffectConstants;
 import com.mezze.language.typedast.Hash;
@@ -86,20 +86,20 @@ public final class EffectHandlerDriver {
      * Path E (lazy-until-fully-discharged, task #336) sentinel: thrown by
      * {@link com.mezze.interpreter.nodes.effect.OpCallNode} when a perform
      * fires with no handler on the chain — signals "capture the enclosing
-     * body as a MezzeSuspended and defer execution until a matching handler
+     * body as a MezzeSuspend and defer execution until a matching handler
      * is provided."
      *
      * <p>Caught either at a top-level {@code HandleNode.execute} that chose
-     * the lazy path (builds MezzeSuspended holding the enclosing frame + this
-     * pending op) or inside {@code MezzeSuspended.force} when a resumed body
-     * re-suspends (builds a fresh MezzeSuspended for the next suspend point).
+     * the lazy path (builds MezzeSuspend holding the enclosing frame + this
+     * pending op) or inside {@code MezzeSuspend.force} when a resumed body
+     * re-suspends (builds a fresh MezzeSuspend for the next suspend point).
      *
      * <p>Extends AbstractTruffleException so BDSL's TryCatchOtherwise catches
      * it, mirroring how AbortPerformException works.
      *
      * <p>Gated by env var MEZZE_LAZY_EFFECTS — under the legacy runtime the
      * old {@link #makeUnhandledSuspended} path builds a MezzeThunk-wrapped
-     * single-op MezzeSuspended instead.
+     * single-op MezzeSuspend instead.
      */
     public static final class SuspensionRequested extends com.oracle.truffle.api.exception.AbstractTruffleException {
         public final com.mezze.language.typedast.Hash effectHash;
@@ -286,7 +286,7 @@ public final class EffectHandlerDriver {
      * <p>All production sites now thread a real hash:
      * <ul>
      *   <li>Op-call construction: {@code OpCallNode.execute},
-     *       {@code MezzeSuspended.force}, {@code SpawnSupport}.</li>
+     *       {@code MezzeSuspend.force}, {@code SpawnSupport}.</li>
      *   <li>Chain push: {@code TruffleCompiler} emitting {@code HandleIR}
      *       (Kotlin {@code Hash} is non-null), and driver replay via
      *       {@code runFunctionThroughChain}.</li>
@@ -459,7 +459,7 @@ public final class EffectHandlerDriver {
         // can chain-dispatch unhandled ops to handlers further down on this
         // thread. Without this, an unhandled op inside `perform Inner in body`
         // on a spawned task — where outerFiber is null — would bubble out as
-        // MezzeSuspended even though an outer handler is on the per-thread
+        // MezzeSuspend even though an outer handler is on the per-thread
         // chain (e.g. layer2's `perform WithReader in do { Async.spawn ... }`
         // calls Async.spawn that LoomAsync underneath should dispatch). #285.
         HandlerChainEntry[] inheritedChain = outerFiber == null
@@ -558,7 +558,7 @@ public final class EffectHandlerDriver {
      * inherited chain (e.g. a `perform WithReader in body` on a spawned
      * task where Async.spawn must reach LoomAsync further down). When
      * inheritedChain is null or empty, behavior matches the legacy
-     * "bubble as MezzeSuspended on no outer fiber" semantics. #285.
+     * "bubble as MezzeSuspend on no outer fiber" semantics. #285.
      */
     @TruffleBoundary
     private static Object drive(
@@ -636,7 +636,7 @@ public final class EffectHandlerDriver {
                         throw new TaskUnhandledOpException(opCall);
                     }
                     // Partial-handling: this perform handled some effects but
-                    // not this op. Bubble out as MezzeSuspended carrying the
+                    // not this op. Bubble out as MezzeSuspend carrying the
                     // unhandled effect; an outer perform can wrap this result
                     // and force it, or top-level code can hold a deferred
                     // computation. The driver short-circuits — body's fiber
@@ -902,13 +902,13 @@ public final class EffectHandlerDriver {
     }
 
     /**
-     * Build a {@link com.mezze.interpreter.values.MezzeSuspended} for an op
+     * Build a {@link com.mezze.interpreter.values.MezzeSuspend} for an op
      * the current handler doesn't have. Used when partial handling leaves
      * an effect dangling — the perform returns the suspended computation
      * to its caller, which may install another handler later.
      */
     @TruffleBoundary
-    private static MezzeSuspended makeUnhandledSuspended(OpCall opCall) {
+    private static MezzeSuspend makeUnhandledSuspended(OpCall opCall) {
         var thunk = new MezzeThunk(
             /* effectName */ null,
             opCall.opName(),
@@ -919,6 +919,6 @@ public final class EffectHandlerDriver {
             opCall.effectHash() != null
                 ? java.util.Collections.singleton(opCall.effectHash())
                 : java.util.Collections.emptySet();
-        return new MezzeSuspended(thunk, effects);
+        return new MezzeSuspend(thunk, effects);
     }
 }

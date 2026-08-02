@@ -228,9 +228,9 @@ class ConstraintGenerator(
                             val solvedBindingsWithEffects = if (hasEffectsOrPerformed) {
                                 solvedBindingsWithAbilities.mapValues { (_, solvedType) ->
                                     when (solvedType) {
-                                        is MezzeType.SuspendedType -> {
+                                        is MezzeType.SuspendType -> {
                                             if (result.performed && !solvedType.effects.performed) {
-                                                MezzeType.SuspendedType(
+                                                MezzeType.SuspendType(
                                                     valueType = solvedType.valueType,
                                                     effects = MezzeType.EffectRow(
                                                         effects = solvedType.effects.effects,
@@ -244,7 +244,7 @@ class ConstraintGenerator(
                                             }
                                         }
                                         is MezzeType.FunctionType -> solvedType
-                                        else -> MezzeType.SuspendedType(
+                                        else -> MezzeType.SuspendType(
                                             valueType = solvedType,
                                             effects = MezzeType.EffectRow(
                                                 effects = result.effects,
@@ -651,7 +651,7 @@ class ConstraintGenerator(
         )
 
         val bindingType = when (val t = exprResult.type) {
-            is MezzeType.SuspendedType -> t.valueType
+            is MezzeType.SuspendType -> t.valueType
             else -> t
         }
 

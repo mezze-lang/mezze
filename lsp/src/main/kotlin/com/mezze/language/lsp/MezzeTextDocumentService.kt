@@ -1717,7 +1717,7 @@ class MezzeTextDocumentService(
         // solved type is a fully-resolved FunctionType (no leftover tyvars) — a
         // still-polymorphic type means dispatch wasn't pinned yet, so fall back
         // to the generic decl signature below.
-        val specialized = (solvedType?.let { if (it is MezzeType.SuspendedType) it.valueType else it })
+        val specialized = (solvedType?.let { if (it is MezzeType.SuspendType) it.valueType else it })
             ?.takeIf { it is MezzeType.FunctionType && !typeHasVar(it) }
             ?.let { prettyPrintTypeWithAliases(it, state.typeAliases) }
 
@@ -1725,7 +1725,7 @@ class MezzeTextDocumentService(
         // chain, accessed before the call pins dispatch), we can still specialize
         // via the RECEIVER if it's concrete — substitute the ability's receiver
         // type param with the receiver in the generic op annotation.
-        val concreteReceiver = (receiverType?.let { if (it is MezzeType.SuspendedType) it.valueType else it })
+        val concreteReceiver = (receiverType?.let { if (it is MezzeType.SuspendType) it.valueType else it })
             ?.takeIf { it !is MezzeType.VarType && !typeHasVar(it) }
 
         // 1. User-defined / file-level abilities
@@ -3126,7 +3126,7 @@ class MezzeTextDocumentService(
             is MezzeType.OrderingType, is MezzeType.NewtypeType, is MezzeType.ListType,
             is MezzeType.SeqType, is MezzeType.MapType, is MezzeType.SetType,
             is MezzeType.SortedMapType, is MezzeType.SortedSetType,
-            is MezzeType.SuspendedType, is MezzeType.EffectRow -> {}
+            is MezzeType.SuspendType, is MezzeType.EffectRow -> {}
         }
         return out
     }
@@ -3767,7 +3767,7 @@ class MezzeTextDocumentService(
             is MezzeType.VarType,
             is MezzeType.FunctionType,
             is MezzeType.RecordType,
-            is MezzeType.SuspendedType,
+            is MezzeType.SuspendType,
             is MezzeType.EffectRow -> null
         }
     }
@@ -3972,9 +3972,9 @@ class MezzeTextDocumentService(
             server.logInfo("[dot-completion] receiver type lookup returned null — returning empty")
             return emptyList()
         }
-        // Unwrap SuspendedType
+        // Unwrap SuspendType
         val baseType = when (receiverType) {
-            is MezzeType.SuspendedType -> receiverType.valueType
+            is MezzeType.SuspendType -> receiverType.valueType
             else -> receiverType
         }
         server.logInfo("[dot-completion] receiverType=$baseType (typeName=${getTypeName(baseType) ?: "<none>"})")
@@ -4586,7 +4586,7 @@ class MezzeTextDocumentService(
             val useCol = dotIdx  // 1-based col of the receiver's last char (`x` ends just before the dot)
             (TypedAstLookup.findAtPosition(typed, useLine, useCol) as? TypedAstLookup.LookupResult.Expr)
                 ?.expr?.type
-                ?.let { if (it is MezzeType.SuspendedType) it.valueType else it }
+                ?.let { if (it is MezzeType.SuspendType) it.valueType else it }
                 ?.takeIf { it !is MezzeType.VarType }
                 ?.let { return it }
 
@@ -4653,7 +4653,7 @@ class MezzeTextDocumentService(
             val endCol = closerIdx + 1
             TypedAstLookup.findExprEndingAt(typed, endLine, endCol)
                 ?.type
-                ?.let { if (it is MezzeType.SuspendedType) it.valueType else it }
+                ?.let { if (it is MezzeType.SuspendType) it.valueType else it }
                 ?.takeIf { it !is MezzeType.VarType }
         } catch (_: Exception) {
             null
@@ -5307,11 +5307,11 @@ class MezzeTextDocumentService(
     }
 
     /**
-     * Unwrap wrapper types (like SuspendedType) to get the underlying type.
+     * Unwrap wrapper types (like SuspendType) to get the underlying type.
      */
     private fun unwrapType(type: MezzeType): MezzeType {
         return when (type) {
-            is MezzeType.SuspendedType -> unwrapType(type.valueType)
+            is MezzeType.SuspendType -> unwrapType(type.valueType)
             else -> type
         }
     }
@@ -8607,7 +8607,7 @@ class MezzeTextDocumentService(
     /**
      * Emit a `<Io, Exception>` effect-row inlay hint for an effectful top-level
      * function. The effect row lives on the function type (FunctionType.effects)
-     * — or on a SuspendedType-wrapped body. Pure functions (empty/closed row)
+     * — or on a SuspendType-wrapped body. Pure functions (empty/closed row)
      * get nothing. Anchored at the end of the decl's signature line, before the
      * body begins.
      */

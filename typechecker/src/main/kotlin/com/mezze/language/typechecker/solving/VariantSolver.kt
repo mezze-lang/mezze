@@ -192,7 +192,7 @@ internal class VariantSolver(
         val constructorName = constraint.constructorName
         val expectedPayloadType = constraint.payloadType
 
-        if (variantType is MezzeType.SuspendedType) {
+        if (variantType is MezzeType.SuspendType) {
             return solveHasConstructor(
                 constraint.copy(variantType = variantType.valueType),
                 currentSubst, originalConstraint ?: constraint
@@ -627,8 +627,8 @@ internal class VariantSolver(
                     typeHash = type.typeHash
                 )
             }
-            is MezzeType.SuspendedType -> {
-                MezzeType.SuspendedType(
+            is MezzeType.SuspendType -> {
+                MezzeType.SuspendType(
                     valueType = closeRowVarsInType(type.valueType, rowVarsToClose),
                     effects = type.effects
                 )

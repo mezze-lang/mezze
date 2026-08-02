@@ -5,7 +5,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
 import com.mezze.interpreter.values.MezzeVariant
 import com.mezze.interpreter.values.MezzeRecord
-import com.mezze.interpreter.values.MezzeSuspended
+import com.mezze.interpreter.values.MezzeSuspend
 
 /**
  * Exhaustive tests for the lazy effects feature.
@@ -16,9 +16,9 @@ import com.mezze.interpreter.values.MezzeSuspended
  * the appropriate handlers.
  *
  * Key semantics:
- * 1. Effect calls outside handlers create MezzeSuspended values
- * 2. MezzeSuspended values are stored in variables without being evaluated
- * 3. When read inside a perform block, MezzeSuspended values are forced
+ * 1. Effect calls outside handlers create MezzeSuspend values
+ * 2. MezzeSuspend values are stored in variables without being evaluated
+ * 3. When read inside a perform block, MezzeSuspend values are forced
  * 4. If forcing throws → the exception is caught by the handler
  * 5. If forcing succeeds → the result is used normally
  *

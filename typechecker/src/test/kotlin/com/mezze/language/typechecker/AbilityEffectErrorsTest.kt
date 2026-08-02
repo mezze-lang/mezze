@@ -389,7 +389,7 @@ class AbilityEffectErrorsTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0509/V0510 — wrong-handler for effect is a runtime no-op (op becomes MezzeSuspended), not a typecheck error.")
+    @org.junit.jupiter.api.Disabled("#274 relaxed V0509/V0510 — wrong-handler for effect is a runtime no-op (op becomes MezzeSuspend), not a typecheck error.")
     fun `test perform handler for wrong effect should error`() {
         val source = """
             effect Log where {

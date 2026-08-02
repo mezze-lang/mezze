@@ -338,7 +338,7 @@ object TypeAnnotationConverter {
             is MezzeType.MapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
             is MezzeType.SortedMapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
             is MezzeType.NewtypeType -> collectCaughtByAncestorInto(type.wrappedType, into)
-            is MezzeType.SuspendedType -> collectCaughtByAncestorInto(type.valueType, into)
+            is MezzeType.SuspendType -> collectCaughtByAncestorInto(type.valueType, into)
             is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
             is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
@@ -384,7 +384,7 @@ object TypeAnnotationConverter {
                 valueType = stampCaughtOnAllEffectRows(type.valueType, caught)
             )
             is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnAllEffectRows(type.wrappedType, caught))
-            is MezzeType.SuspendedType -> type
+            is MezzeType.SuspendType -> type
             is MezzeType.EffectRow -> type.copy(caughtByAncestor = type.caughtByAncestor + caught)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
             is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
@@ -443,7 +443,7 @@ object TypeAnnotationConverter {
             valueType = stampCaughtOnCallbackRows(type.valueType, outerReturnEffectNames)
         )
         is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnCallbackRows(type.wrappedType, outerReturnEffectNames))
-        is MezzeType.SuspendedType -> type // leave as-is
+        is MezzeType.SuspendType -> type // leave as-is
         is MezzeType.EffectRow, is MezzeType.VarType,
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
         is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,

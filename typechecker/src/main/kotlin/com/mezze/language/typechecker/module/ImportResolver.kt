@@ -644,7 +644,7 @@ class ImportResolver(
                 collectTypeApplicationConstructors(type.keyType, result)
                 collectTypeApplicationConstructors(type.valueType, result)
             }
-            is MezzeType.SuspendedType -> {
+            is MezzeType.SuspendType -> {
                 collectTypeApplicationConstructors(type.valueType, result)
             }
             is MezzeType.EffectRow -> {

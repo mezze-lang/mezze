@@ -19,7 +19,7 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  *   - demo is a function with <Log, FileSystem> effects
  *   - Console handles Log, but FileSystem is unhandled
  *   - Instead of executing demo{} immediately, we create MezzeThunk(demo, {})
- *   - The thunk is wrapped in MezzeSuspended with unhandledEffects={FileSystem}
+ *   - The thunk is wrapped in MezzeSuspend with unhandledEffects={FileSystem}
  *   - When FileSystem handler is provided, the thunk executes
  *
  * Thunks can also wrap deferred effect operations - when an effect operation

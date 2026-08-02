@@ -2,7 +2,7 @@ package com.mezze.interpreter.nodes.inline;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.interpreter.values.MezzeSuspend;
 import com.oracle.truffle.api.bytecode.OperationProxy;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
@@ -80,22 +80,22 @@ public abstract class DirectAddNode extends MezzeNode {
     }
 
     /**
-     * MezzeSuspended propagation: if either operand is suspended, propagate it.
-     * This handles the case where an unhandled effect returns MezzeSuspended
+     * MezzeSuspend propagation: if either operand is suspended, propagate it.
+     * This handles the case where an unhandled effect returns MezzeSuspend
      * and the result flows into arithmetic.
      */
     @Specialization(guards = "isSuspended(left)")
-    public static MezzeSuspended addLeftSuspended(MezzeSuspended left, Object right) {
+    public static MezzeSuspend addLeftSuspended(MezzeSuspend left, Object right) {
         return left;
     }
 
     @Specialization(guards = "isSuspended(right)")
-    public static MezzeSuspended addRightSuspended(Object left, MezzeSuspended right) {
+    public static MezzeSuspend addRightSuspended(Object left, MezzeSuspend right) {
         return right;
     }
 
     public static boolean isSuspended(Object value) {
-        return value instanceof MezzeSuspended;
+        return value instanceof MezzeSuspend;
     }
 
     /**

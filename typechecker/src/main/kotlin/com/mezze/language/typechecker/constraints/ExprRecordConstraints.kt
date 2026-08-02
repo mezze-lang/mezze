@@ -56,7 +56,7 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
                 val fieldResult = generateWithExpected(fieldValue, expectedFields?.get(entry.name), fieldContext)
 
                 val fieldType = when (val t = fieldResult.type) {
-                    is MezzeType.SuspendedType -> {
+                    is MezzeType.SuspendType -> {
                         collector.effects.addAll(t.effects.effects)
                         collector.effectInstances.addAll(t.effects.effectInstances)
                         t.valueType
@@ -346,7 +346,7 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
     val fieldType = MezzeType.VarType(TypeVar.fresh())
 
     val receiverValueType = when (val t = receiverResult.type) {
-        is MezzeType.SuspendedType -> t.valueType
+        is MezzeType.SuspendType -> t.valueType
         else -> t
     }
 

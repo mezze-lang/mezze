@@ -155,7 +155,7 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
 
 internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, context: ConstraintContext): ConstraintResult {
 
-    // unwrapExpected peels a SuspendedType wrapper so an effectful expected
+    // unwrapExpected peels a SuspendType wrapper so an effectful expected
     // function type still drives the param/return push (otherwise the cast below
     // would miss and silently fall back to bottom-up inference).
     val expectedFunctionType = unwrapExpected(context.expectedType) as? MezzeType.FunctionType
@@ -267,7 +267,7 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
     }
 
     val returnType = when (val bodyType = bodyResult.type) {
-        is MezzeType.SuspendedType -> bodyType.valueType
+        is MezzeType.SuspendType -> bodyType.valueType
         else -> bodyType
     }
 

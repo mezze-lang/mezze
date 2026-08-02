@@ -274,7 +274,7 @@ internal fun ExpressionConstraintGenerator.extractEffectsFromType(type: MezzeTyp
                 ExtractedEffects(emptySet(), false)
             }
         }
-        is MezzeType.SuspendedType -> {
+        is MezzeType.SuspendType -> {
             ExtractedEffects(type.effects.effects, type.effects.rowVar != null)
         }
         is MezzeType.VarType,
@@ -305,7 +305,7 @@ internal fun ExpressionConstraintGenerator.extractEffectsFromType(type: MezzeTyp
 internal fun ExpressionConstraintGenerator.hasPerformedMarkerInType(type: MezzeType): Boolean {
     return when (type) {
         is MezzeType.FunctionType -> type.effects?.performed == true
-        is MezzeType.SuspendedType -> type.effects.performed
+        is MezzeType.SuspendType -> type.effects.performed
         is MezzeType.VarType,
         is MezzeType.RecordType,
         is MezzeType.VariantType,
@@ -340,7 +340,7 @@ internal fun ExpressionConstraintGenerator.wrapCallResultWithEffects(
         effectRow.effectInstances.isNotEmpty() ||
         effectRow.rowVar != null
     val callType: MezzeType = if (hasUnhandled || effectRow.performed) {
-        MezzeType.SuspendedType(valueType = valueType, effects = effectRow)
+        MezzeType.SuspendType(valueType = valueType, effects = effectRow)
     } else {
         valueType
     }
@@ -371,13 +371,13 @@ internal fun ExpressionConstraintGenerator.removeEffectsFromType(
                 )
             }
         }
-        is MezzeType.SuspendedType -> {
+        is MezzeType.SuspendType -> {
             val remainingEffects = type.effects.effects - effectsToRemove
             val remainingInstances = type.effects.effectInstances.filter { it.name !in effectsToRemove }.toSet()
             if (remainingEffects.isEmpty() && remainingInstances.isEmpty()) {
                 type.valueType
             } else {
-                MezzeType.SuspendedType(
+                MezzeType.SuspendType(
                     valueType = type.valueType,
                     effects = MezzeType.EffectRow(
                         effects = remainingEffects,

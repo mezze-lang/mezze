@@ -176,7 +176,7 @@ internal class ImplValidator(
             is ConstraintSolver.SolveResult.Success -> {
                 val substitution = solveResult.substitution
                 val rawBodyType = substitution.apply(bodyResult.type)
-                val actualBodyType = if (rawBodyType is MezzeType.SuspendedType) rawBodyType.valueType else rawBodyType
+                val actualBodyType = if (rawBodyType is MezzeType.SuspendType) rawBodyType.valueType else rawBodyType
 
                 val unificationSolver = ConstraintSolver(bodyContext, registry)
                 val unificationResult = unificationSolver.solve(

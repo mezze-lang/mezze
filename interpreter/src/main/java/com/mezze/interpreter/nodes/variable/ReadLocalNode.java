@@ -2,7 +2,7 @@ package com.mezze.interpreter.nodes.variable;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
-import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.interpreter.values.MezzeSuspend;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -41,7 +41,7 @@ public final class ReadLocalNode extends MezzeNode {
     @CompilationFinal
     private final int kind;
 
-    // For forcing MezzeSuspended values (only used for KIND_OBJECT)
+    // For forcing MezzeSuspend values (only used for KIND_OBJECT)
     @Child
     private IndirectCallNode suspendedCallNode;
 
@@ -62,17 +62,17 @@ public final class ReadLocalNode extends MezzeNode {
                 case KIND_BOOLEAN -> frame.getBoolean(slot);
                 default -> readObjectOrPrimitive(frame);
             };
-            // Check for MezzeSuspended regardless of kind
+            // Check for MezzeSuspend regardless of kind
             // This handles the case where a capture's static type is Int but at runtime
-            // the value is a MezzeSuspended (from lazy effects)
-            if (rawValue instanceof MezzeSuspended suspended) {
+            // the value is a MezzeSuspend (from lazy effects)
+            if (rawValue instanceof MezzeSuspend suspended) {
                 return forceSuspended(suspended);
             }
             return rawValue;
         } catch (FrameSlotTypeException e) {
             // Slot type mismatch - fall back to generic read
             Object value = frame.getValue(slot);
-            if (value instanceof MezzeSuspended suspended) {
+            if (value instanceof MezzeSuspend suspended) {
                 return forceSuspended(suspended);
             }
             return value;
@@ -83,7 +83,7 @@ public final class ReadLocalNode extends MezzeNode {
      * Read as Object, with fallback to primitives if slot type doesn't match.
      * Uses frame.getValue() which returns the value regardless of slot type.
      *
-     * Also handles lazy effect forcing: if the value is a MezzeSuspended and
+     * Also handles lazy effect forcing: if the value is a MezzeSuspend and
      * there are active handlers in scope, force (evaluate) the suspended
      * computation so that any effect exceptions are raised here.
      */
@@ -91,17 +91,17 @@ public final class ReadLocalNode extends MezzeNode {
         // getValue() returns the value regardless of type (Object, Long, Double, Boolean)
         // It handles all slot types without throwing exceptions
         Object value = frame.getValue(slot);
-        if (value instanceof MezzeSuspended suspended) {
+        if (value instanceof MezzeSuspend suspended) {
             return forceSuspended(suspended);
         }
         return value;
     }
 
     @TruffleBoundary
-    private Object forceSuspended(MezzeSuspended suspended) {
+    private Object forceSuspended(MezzeSuspend suspended) {
         // Under the new dispatch design, forcing routes through the current
         // fiber rather than a context-wide handler map. If no fiber is
-        // current, MezzeSuspended.force returns itself (still suspended).
+        // current, MezzeSuspend.force returns itself (still suspended).
         if (suspendedCallNode == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             suspendedCallNode = insert(IndirectCallNode.create());

@@ -11,7 +11,7 @@ import com.mezze.interpreter.nodes.continuation.OpCall;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.interpreter.values.MezzeSuspend;
 import com.mezze.interpreter.values.MezzeThunk;
 import com.mezze.language.ast.ScopedEffectConstants;
 import com.mezze.language.typedast.Hash;
@@ -44,7 +44,7 @@ import java.util.Collections;
  *       that try to call {@code abort}/{@code resume} from here will
  *       fail loudly because no fiber is available.</li>
  *   <li><b>Lazy</b>: nothing matches — wrap the call as a
- *       {@link MezzeSuspended} thunk. Forced when read in a context
+ *       {@link MezzeSuspend} thunk. Forced when read in a context
  *       with handlers available.</li>
  * </ol>
  */
@@ -333,7 +333,7 @@ public final class OpCallNode extends MezzeNode {
      * <ul>
      *   <li>{@link OpCallNode#chainDispatch} — fiber-less op-call dispatch
      *       on spawned tasks</li>
-     *   <li>{@link com.mezze.interpreter.values.MezzeSuspended#force} —
+     *   <li>{@link com.mezze.interpreter.values.MezzeSuspend#force} —
      *       forcing a suspended op-call on a spawned task where a chain
      *       has been installed but no fiber is current (#285)</li>
      * </ul>
@@ -463,8 +463,8 @@ public final class OpCallNode extends MezzeNode {
     }
 
     @TruffleBoundary
-    private MezzeSuspended createSuspended(Object args) {
+    private MezzeSuspend createSuspended(Object args) {
         MezzeThunk thunk = new MezzeThunk(/* effectName */ null, operationName, args, effectHash);
-        return new MezzeSuspended(thunk, Collections.singleton(effectHash));
+        return new MezzeSuspend(thunk, Collections.singleton(effectHash));
     }
 }

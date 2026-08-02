@@ -73,7 +73,7 @@ class AliasStripperSoundnessTest {
     }
 
     @Test
-    fun `effect associated types inside SuspendedType are stripped`() {
+    fun `effect associated types inside SuspendType are stripped`() {
         val colorType = VariantType(
             constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),
             typeName = "Color",
@@ -87,15 +87,15 @@ class AliasStripperSoundnessTest {
             effects = emptySet(),
             effectInstances = setOf(effectInstance)
         )
-        val suspType = SuspendedType(
+        val suspType = SuspendType(
             valueType = IntType,
             effects = effectRow
         )
 
         val stripped = AliasStripper.strip(suspType, inScope, DeclarationRegistry.from(typeDecls, emptyMap(), emptyMap()))
 
-        assertTrue(stripped is SuspendedType)
-        val strippedSusp = stripped as SuspendedType
+        assertTrue(stripped is SuspendType)
+        val strippedSusp = stripped as SuspendType
         val strippedInstance = strippedSusp.effects.effectInstances.first()
         val strippedState = strippedInstance.associatedTypes["'state"]
         assertTrue(strippedState is VariantType)

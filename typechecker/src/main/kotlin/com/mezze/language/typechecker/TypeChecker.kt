@@ -45,7 +45,7 @@ class TypeChecker(
     /**
      * Option B (#341/#376/#377). When true, ConstraintSolver refuses to
      * silently strip a non-empty effect row on unification, catching
-     * "SuspendedType decays to plain T" leaks at compile time. See
+     * "SuspendType decays to plain T" leaks at compile time. See
      * ConstraintSolver.strictEffectRows for the full contract.
      *
      * Independent of strictTopLevel — that flag only enforces

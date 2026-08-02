@@ -75,7 +75,7 @@ public final class ParallelNatives {
     // Chain-snapshot cache (#67) was attempted but reverted: the FJP
     // worker's chain state depends on runBatchTask install timing, and
     // reusing the caller's snapshot broke handler dispatch on the fresh
-    // worker (MezzeSuspended leaks in "raise inside Parallel" tests).
+    // worker (MezzeSuspend leaks in "raise inside Parallel" tests).
     // The correct optimization needs finer-grained per-worker
     // installed-chain tracking, which the current runtime doesn't
     // expose cheaply. Filed as future work if perf ever demands it.

@@ -41,7 +41,7 @@ object TypeDiffPrinter {
             is MezzeType.SortedMapType -> "SortedMap ${formatType(type.keyType, indent, rename)} ${formatType(type.valueType, indent, rename)}"
             is MezzeType.SortedSetType -> "SortedSet ${formatType(type.elementType, indent, rename)}"
             is MezzeType.MapType -> "Map ${formatType(type.keyType, indent, rename)} ${formatType(type.valueType, indent, rename)}"
-            is MezzeType.SuspendedType -> "Suspended<${formatType(type.valueType, indent, rename)}>"
+            is MezzeType.SuspendType -> "Suspended<${formatType(type.valueType, indent, rename)}>"
             is MezzeType.EffectRow -> formatEffectRow(type)
             is MezzeType.NewtypeType -> "Newtype<${formatType(type.wrappedType, indent, rename)}>"
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,

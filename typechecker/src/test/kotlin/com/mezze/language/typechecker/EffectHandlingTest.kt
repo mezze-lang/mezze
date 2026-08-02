@@ -56,7 +56,7 @@ class EffectHandlingTest {
 
         // getHandledResult should be a function with performed marker (<*>)
         // Note: The return type is {} (empty record), and effects.performed=true in the function type
-        // because lambda unwraps SuspendedType into the function's effect row
+        // because lambda unwraps SuspendType into the function's effect row
         assertNotNull(getHandledResultType.effects)
         assertTrue(getHandledResultType.effects!!.performed, "Should have performed marker")
         assertTrue(getHandledResultType.effects!!.effects.isEmpty(), "Should have no concrete effects")

@@ -253,7 +253,7 @@ public final class HandleNode extends MezzeNode {
         // Path E (#336) lazy branch: when MEZZE_LAZY_EFFECTS=1 AND the
         // typechecker stamped this Handle as NOT fully-discharging, don't
         // run body. Capture (bodyNode, frame, chain-with-this-handler-pushed)
-        // as a MezzeSuspended. Force under a wider chain will resume execution.
+        // as a MezzeSuspend. Force under a wider chain will resume execution.
         //
         // pendingEffects is currently unknown at this level — the typechecker
         // knows but hasn't threaded it down. Use singleton(effectHash) as a
@@ -264,7 +264,7 @@ public final class HandleNode extends MezzeNode {
             com.oracle.truffle.api.frame.MaterializedFrame materialized = frame.materialize();
             // Snapshot chain BEFORE pushing this handler — the snapshot
             // represents "what was installed at the enclosing scope."
-            // This handler is installed lazily inside the MezzeSuspended.
+            // This handler is installed lazily inside the MezzeSuspend.
             com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chainSnapshot =
                 com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChainEntries();
             com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] mergedChain =
@@ -274,7 +274,7 @@ public final class HandleNode extends MezzeNode {
             System.arraycopy(chainSnapshot, 0, mergedChain, 1, chainSnapshot.length);
             java.util.Set<Hash> pending = new java.util.HashSet<>();
             pending.add(effectHash);  // placeholder — real set discovered on force
-            return com.mezze.interpreter.values.MezzeSuspended.captureContinuation(
+            return com.mezze.interpreter.values.MezzeSuspend.captureContinuation(
                 bodyNode, materialized, mergedChain, pending);
         }
 
@@ -283,7 +283,7 @@ public final class HandleNode extends MezzeNode {
         // survives the suspend/resume cycles.
         Object result = EffectHandlerDriver.run(
             handler, effectHash, bodyNode, frame.materialize(), callNode, this);
-        // Path E (#336): if body produced ANY MezzeSuspended (Path E from an
+        // Path E (#336): if body produced ANY MezzeSuspend (Path E from an
         // inner nested Handle that deferred, OR legacy single-op from a
         // top-level `let x = effectful{}` binding that flowed into body),
         // force it under this Handle's chain. `staticallyFullyDischarges`
@@ -293,7 +293,7 @@ public final class HandleNode extends MezzeNode {
         // on its own finally.
         if (com.mezze.interpreter.runtime.MezzeLanguage.LAZY_EFFECTS_ENABLED
                 && staticallyFullyDischarges
-                && result instanceof com.mezze.interpreter.values.MezzeSuspended s) {
+                && result instanceof com.mezze.interpreter.values.MezzeSuspend s) {
             com.mezze.interpreter.nodes.continuation.EffectFiber.pushHandlerOnChain(
                 handler, effectHash);
             try {

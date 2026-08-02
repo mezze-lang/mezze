@@ -169,7 +169,7 @@ public final class SpawnSupport {
      * an unhandled op, we need to route it to the chain — same fallback that
      * {@link com.mezze.interpreter.nodes.effect.OpCallNode} uses in its
      * "no fiber but chain exists" branch. Without this, the op leaks as a
-     * {@code MezzeSuspended} to user code even though a handler for it is
+     * {@code MezzeSuspend} to user code even though a handler for it is
      * clearly on the chain.
      *
      * <p>Note: {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException}
@@ -277,7 +277,7 @@ public final class SpawnSupport {
                     // Edge: a `let r = map { ... }` binding where r is
                     // then wrapped into a subsequent record — the TUE
                     // propagation appears to allow the outer expression
-                    // to construct with a MezzeSuspended r before the
+                    // to construct with a MezzeSuspend r before the
                     // outer perform driver catches the abort. Tracked
                     // in docs/PARALLEL_KNOWN_ISSUES.md.
                     throw new com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException(

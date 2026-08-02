@@ -2,7 +2,7 @@ package com.mezze.interpreter.nodes;
 
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeFunction;
-import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.interpreter.values.MezzeSuspend;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -28,7 +28,7 @@ public final class ReadGlobalByHashNode extends MezzeNode {
     @CompilationFinal
     private final Hash hash;
 
-    // For forcing MezzeSuspended values
+    // For forcing MezzeSuspend values
     @com.oracle.truffle.api.nodes.Node.Child
     private IndirectCallNode suspendedCallNode;
 
@@ -62,19 +62,19 @@ public final class ReadGlobalByHashNode extends MezzeNode {
         if (value instanceof MezzeFunction fn) {
             value = autoEvaluateThunk(fn, context);
         }
-        // Force MezzeSuspended values when inside an active handler scope.
+        // Force MezzeSuspend values when inside an active handler scope.
         // Lazy effects: suspended computations from outside a perform block
         // are evaluated when read inside one. force() returns the suspension
         // unchanged when no fiber is current, so this is safe to call
         // unconditionally.
-        if (value instanceof MezzeSuspended suspended) {
+        if (value instanceof MezzeSuspend suspended) {
             value = forceSuspended(suspended);
         }
         return value;
     }
 
     @TruffleBoundary
-    private Object forceSuspended(MezzeSuspended suspended) {
+    private Object forceSuspended(MezzeSuspend suspended) {
         if (suspendedCallNode == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             suspendedCallNode = insert(IndirectCallNode.create());

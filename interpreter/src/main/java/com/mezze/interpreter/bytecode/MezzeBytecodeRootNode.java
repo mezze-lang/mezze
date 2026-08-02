@@ -1278,7 +1278,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * cached {@link com.mezze.interpreter.nodes.effect.OpCallNode} via
      * {@code executeWith}. Same lifecycle as AST — Loom fiber suspend
      * when a driver is present, otherwise chain-dispatch or a
-     * MezzeSuspended thunk. See docs/perf/bdsl-effects-path-a-2026-07.md.
+     * MezzeSuspend thunk. See docs/perf/bdsl-effects-path-a-2026-07.md.
      *
      * <p>Lowers {@link com.mezze.language.truffleir.PerformOpIR} (default
      * path). The Mut fast path uses a separate op below.
@@ -1473,13 +1473,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
     /**
      * Path E (#336) auto-force: consumes the top of the operand stack.
-     * If it's a MezzeSuspended, force it under the current handler chain
+     * If it's a MezzeSuspend, force it under the current handler chain
      * (whatever handlers are pushed on this thread's chain right now).
      * Otherwise pass through unchanged.
      *
      * <p>Emitted at the OUTERMOST Handle of a nested `perform A, B, C in body`
      * chain when the outer Handle statically fully-discharges the effect
-     * row. If body returned any MezzeSuspended (legacy single-op from a
+     * row. If body returned any MezzeSuspend (legacy single-op from a
      * top-level `let` producing a lazy effect, or Path E from an inner
      * nested Handle that deferred), force it here so callers see a ground
      * value.
@@ -1492,7 +1492,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @TruffleBoundary
         @Specialization
         public static Object doForce(Object value) {
-            if (!(value instanceof com.mezze.interpreter.values.MezzeSuspended s)) {
+            if (!(value instanceof com.mezze.interpreter.values.MezzeSuspend s)) {
                 return value;
             }
             if (s.isPathE()) {
@@ -1500,14 +1500,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 // forcePathE via isPathE() branch at its top.
                 return s.force(com.oracle.truffle.api.nodes.IndirectCallNode.getUncached());
             }
-            // Legacy single-op MezzeSuspended (from BdslYieldDispatch's
+            // Legacy single-op MezzeSuspend (from BdslYieldDispatch's
             // makeUnhandledSuspended path). Cannot chain-dispatch here
             // because upstream may have built the wrapped MezzeThunk with
             // a null effectHash (e.g. ComposedBlockThunk from a do-block
             // that leaks an effect), and dispatchOpOnChain requires a
             // non-null hash for strict routing (#246). Returning the
             // suspended value unforced preserves legacy behavior — the
-            // outer caller sees the MezzeSuspended just as it did before
+            // outer caller sees the MezzeSuspend just as it did before
             // Path E existed. Fixing this requires either (a) making
             // BdslYieldDispatch produce Path E continuations, or (b)
             // threading effect hashes through ComposedBlockThunk. Both
@@ -1543,10 +1543,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
-     * #361 — Truffle exception carrying a {@link com.mezze.interpreter.values.MezzeSuspended}
+     * #361 — Truffle exception carrying a {@link com.mezze.interpreter.values.MezzeSuspend}
      * escaping a mid-block non-tail statement. Under Path E semantics
      * (LAZY_EFFECTS on), an unhandled effect in the middle of a do-block
-     * must propagate as MezzeSuspended so the outer handler can compose
+     * must propagate as MezzeSuspend so the outer handler can compose
      * it. AST's {@link com.mezze.interpreter.nodes.control.BlockNode}
      * detects this by inspecting each stmt's return value; BDSL discards
      * mid-block stmt values implicitly, so we insert a
@@ -1561,14 +1561,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     public static final class SuspendedInBlockException
             extends com.oracle.truffle.api.exception.AbstractTruffleException {
         private static final long serialVersionUID = 1L;
-        public final com.mezze.interpreter.values.MezzeSuspended suspended;
-        public SuspendedInBlockException(com.mezze.interpreter.values.MezzeSuspended s) {
+        public final com.mezze.interpreter.values.MezzeSuspend suspended;
+        public SuspendedInBlockException(com.mezze.interpreter.values.MezzeSuspend s) {
             this.suspended = s;
         }
     }
 
     /**
-     * #361 — Check top-of-stack for MezzeSuspended and either throw
+     * #361 — Check top-of-stack for MezzeSuspend and either throw
      * {@link SuspendedInBlockException} or drop the value. Emitted by
      * {@link BytecodeCompiler} after every non-tail {@code StmtIR.Expr}
      * in a BlockIR whose result could yield suspended (Perform, or
@@ -1581,7 +1581,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     public static final class CheckSuspendedThrow {
         @Specialization
         public static void doCheck(Object value) {
-            if (value instanceof com.mezze.interpreter.values.MezzeSuspended susp) {
+            if (value instanceof com.mezze.interpreter.values.MezzeSuspend susp) {
                 throw new SuspendedInBlockException(susp);
             }
             // Non-suspended: drop by returning (void).
@@ -1592,7 +1592,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * #361 — Value-preserving suspend check for inline positions like
      * interpolated-string argument slots. Takes 1 input, returns it
      * unchanged (no drop) but throws {@link SuspendedInBlockException}
-     * if it's a {@link com.mezze.interpreter.values.MezzeSuspended}.
+     * if it's a {@link com.mezze.interpreter.values.MezzeSuspend}.
      *
      * <p>Contrast with {@link CheckSuspendedThrow} which is void-return
      * (drops the value) and used for bare-Expr slots in a Block.
@@ -1604,7 +1604,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     public static final class CheckSuspendedPassThrough {
         @Specialization
         public static Object doCheck(Object value) {
-            if (value instanceof com.mezze.interpreter.values.MezzeSuspended susp) {
+            if (value instanceof com.mezze.interpreter.values.MezzeSuspend susp) {
                 throw new SuspendedInBlockException(susp);
             }
             return value;
@@ -1612,7 +1612,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
-     * #361 — Extract the MezzeSuspended from a caught
+     * #361 — Extract the MezzeSuspend from a caught
      * {@link SuspendedInBlockException} on the exception stack. Consumes
      * the exception (from {@code LoadException}), produces the
      * suspended value. Used inside the outer function-root TryCatch.

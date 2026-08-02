@@ -66,7 +66,7 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
             appendTypeInScope(b, type.keyType); appendTypeInScope(b, type.valueType)
         }
         is MezzeType.SortedSetType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x05)); appendTypeInScope(b, type.elementType) }
-        is MezzeType.SuspendedType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x06)); appendTypeInScope(b, type.valueType) }
+        is MezzeType.SuspendType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x06)); appendTypeInScope(b, type.valueType) }
         is MezzeType.NewtypeType -> {
             b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x10))
             b.append(type.name); b.append(type.constructor)

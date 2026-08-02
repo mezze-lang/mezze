@@ -3,13 +3,13 @@ package com.mezze.interpreter
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
-import com.mezze.interpreter.values.MezzeSuspended
+import com.mezze.interpreter.values.MezzeSuspend
 
 /**
  * Tests for runtime effect validation behavior.
  * Migrated from V1 to V2 with unboxed values.
  *
- * In V2, unhandled effects result in MezzeSuspended values that can be
+ * In V2, unhandled effects result in MezzeSuspend values that can be
  * checked for which effects are not yet handled.
  */
 class RuntimeEffectValidationTest {
@@ -37,8 +37,8 @@ class RuntimeEffectValidationTest {
         val result = eval(source)
 
         // Result should be a suspended computation
-        assertTrue(result is MezzeSuspended, "Result should be MezzeSuspended but was ${result::class.simpleName}")
-        val suspended = result as MezzeSuspended
+        assertTrue(result is MezzeSuspend, "Result should be MezzeSuspend but was ${result::class.simpleName}")
+        val suspended = result as MezzeSuspend
 
         // Should have exactly one unhandled effect (identified by content hash)
         assertEquals(1, suspended.unhandledEffects.size,
@@ -104,8 +104,8 @@ class RuntimeEffectValidationTest {
         val result = eval(source)
 
         // Result should be a suspended computation
-        assertTrue(result is MezzeSuspended, "Result should be MezzeSuspended but was ${result::class.simpleName}")
-        val suspended = result as MezzeSuspended
+        assertTrue(result is MezzeSuspend, "Result should be MezzeSuspend but was ${result::class.simpleName}")
+        val suspended = result as MezzeSuspend
 
         // Should have at least one unhandled effect (identified by content hash)
         assertTrue(suspended.unhandledEffects.isNotEmpty(),
@@ -148,8 +148,8 @@ class RuntimeEffectValidationTest {
         val result = eval(source)
 
         // Result should be a suspended computation with Random unhandled
-        assertTrue(result is MezzeSuspended, "Result should be MezzeSuspended but was ${result::class.simpleName}")
-        val suspended = result as MezzeSuspended
+        assertTrue(result is MezzeSuspend, "Result should be MezzeSuspend but was ${result::class.simpleName}")
+        val suspended = result as MezzeSuspend
 
         // Should have exactly one unhandled effect (Random's content hash - Log was handled)
         assertEquals(1, suspended.unhandledEffects.size,
@@ -230,8 +230,8 @@ class RuntimeEffectValidationTest {
         val result = eval(source)
 
         // Result should be a suspended computation
-        assertTrue(result is MezzeSuspended, "Result should be MezzeSuspended but was ${result::class.simpleName}")
-        val suspended = result as MezzeSuspended
+        assertTrue(result is MezzeSuspend, "Result should be MezzeSuspend but was ${result::class.simpleName}")
+        val suspended = result as MezzeSuspend
 
         // Should have exactly one unhandled effect (identified by content hash)
         assertEquals(1, suspended.unhandledEffects.size,
@@ -264,8 +264,8 @@ class RuntimeEffectValidationTest {
         val result = eval(source)
 
         // Result should be a suspended computation
-        assertTrue(result is MezzeSuspended, "Result should be MezzeSuspended but was ${result::class.simpleName}")
-        val suspended = result as MezzeSuspended
+        assertTrue(result is MezzeSuspend, "Result should be MezzeSuspend but was ${result::class.simpleName}")
+        val suspended = result as MezzeSuspend
 
         // Should have exactly one unhandled effect (identified by content hash)
         assertEquals(1, suspended.unhandledEffects.size,

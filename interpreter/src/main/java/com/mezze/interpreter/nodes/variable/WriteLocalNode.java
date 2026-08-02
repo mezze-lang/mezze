@@ -72,7 +72,7 @@ public abstract class WriteLocalNode extends MezzeNode {
 
     /**
      * Fallback: When a typed slot (Long/Double/Boolean) receives an unexpected type
-     * (e.g., MezzeSuspended from lazy effects), store as Object to prevent ClassCastException.
+     * (e.g., MezzeSuspend from lazy effects), store as Object to prevent ClassCastException.
      */
     @Specialization(replaces = {"writeLong", "writeDouble", "writeBoolean", "writeObject"})
     protected Object writeFallback(VirtualFrame frame, Object value) {

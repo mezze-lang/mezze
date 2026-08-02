@@ -892,7 +892,7 @@ public final class AsyncNatives {
             // outer perform's fiber (whose continuation is yielded
             // several layers deep on the driver stack). Without this,
             // nested op-calls in f — e.g. Async.spawn or a routed
-            // Time.sleep — bubble as MezzeSuspended from the outer
+            // Time.sleep — bubble as MezzeSuspend from the outer
             // driver instead of dispatching to the installed handler.
             // #274.
             Object result = EffectFiber.runDetached(() ->
@@ -1200,10 +1200,10 @@ public final class AsyncNatives {
             // Some other RuntimeException — re-throw.
             throw e;
         }
-        // Same propagation logic as loomAwaitPromise — MezzeSuspended forcing
+        // Same propagation logic as loomAwaitPromise — MezzeSuspend forcing
         // and unhandled-op re-raise still happen, those are NOT failure modes
         // but the body's effect propagation.
-        if (value instanceof MezzeSuspended suspended) {
+        if (value instanceof MezzeSuspend suspended) {
             Object forced = suspended.force(IndirectCallNode.getUncached());
             return MezzeVariant.ok(forced);
         }
@@ -1309,11 +1309,11 @@ public final class AsyncNatives {
         //
         // 1. If the spawned task's body invoked an effect-op with no fiber
         //    current on its thread, OpCallNode wrapped the call as a
-        //    MezzeSuspended thunk. When await retrieves it on the parent
+        //    MezzeSuspend thunk. When await retrieves it on the parent
         //    thread, the parent IS in a perform — force the thunk so the
         //    op-call dispatches on the parent fiber. This handles the
         //    common `perform ExceptionToResult in spawn (raise)` case.
-        if (result instanceof MezzeSuspended suspended) {
+        if (result instanceof MezzeSuspend suspended) {
             return suspended.force(IndirectCallNode.getUncached());
         }
         // 2. If the task ran via the captured handler chain and an op-call

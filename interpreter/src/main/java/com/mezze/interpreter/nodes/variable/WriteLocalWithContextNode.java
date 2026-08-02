@@ -3,7 +3,7 @@ package com.mezze.interpreter.nodes.variable;
 import com.mezze.interpreter.nodes.MezzeNode;
 // ContinuationSuspendedException is NOT caught here — must propagate to HandleNode
 import com.mezze.interpreter.runtime.MezzeContext;
-import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.interpreter.values.MezzeSuspend;
 import com.mezze.interpreter.values.MezzeUnit;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -70,17 +70,17 @@ public final class WriteLocalWithContextNode extends MezzeNode {
     public Object execute(VirtualFrame frame) {
         Object value = valueNode.execute(frame);
 
-        // If value is a MezzeSuspended and we have handlers, try to force it first.
+        // If value is a MezzeSuspend and we have handlers, try to force it first.
         // This prevents ClassCastException when storing suspended values in typed slots.
-        if (value instanceof MezzeSuspended && kind != KIND_OBJECT) {
-            value = forceSuspendedValue((MezzeSuspended) value);
+        if (value instanceof MezzeSuspend && kind != KIND_OBJECT) {
+            value = forceSuspendedValue((MezzeSuspend) value);
         }
 
         // Write to frame slot with correct type (fast path)
         // Switch order matches ReadLocalNode: 0=Long, 1=Double, 2=Boolean, 3=Object
-        // If value is still MezzeSuspended after forcing attempt, store as Object
+        // If value is still MezzeSuspend after forcing attempt, store as Object
         // to prevent ClassCastException on typed slots.
-        if (value instanceof MezzeSuspended) {
+        if (value instanceof MezzeSuspend) {
             frame.setObject(slot, value);
         } else {
             switch (kind) {
@@ -124,7 +124,7 @@ public final class WriteLocalWithContextNode extends MezzeNode {
         registerGlobal(value);
 
         // Return MezzeUnit for lazy suspended effects to prevent early return in BlockNode
-        if (value instanceof MezzeSuspended) {
+        if (value instanceof MezzeSuspend) {
             return MezzeUnit.INSTANCE;
         }
         return value;
@@ -132,10 +132,10 @@ public final class WriteLocalWithContextNode extends MezzeNode {
 
     /**
      * Try to force a suspended value by executing it with current handlers.
-     * Returns the forced result, or the original MezzeSuspended if forcing fails.
+     * Returns the forced result, or the original MezzeSuspend if forcing fails.
      */
     @TruffleBoundary
-    private Object forceSuspendedValue(MezzeSuspended suspended) {
+    private Object forceSuspendedValue(MezzeSuspend suspended) {
         // Under the new dispatch design, forcing routes through the current
         // fiber rather than a context-wide handler map. force() returns the
         // suspension unchanged when no fiber is current.

@@ -50,7 +50,7 @@ class AbilityEffectIntegrationTest {
 
     @Test
     fun `Sized_size on direct effectful Seq result runs end-to-end`() {
-        // Fix #4 integration: dispatch on SuspendedType receiver for a
+        // Fix #4 integration: dispatch on SuspendType receiver for a
         // non-Tryable ability (Sized). Confirms the unwrap fix in
         // tryResolveAbilityOp works generally, not just for Tryable.
         val result = eval("""

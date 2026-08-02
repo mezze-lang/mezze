@@ -143,7 +143,7 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
                     val type = binding.type
                     val referencedBinding = DefinitionRef.ByName(binding.sourceModule, lookupKeyString)
                     when (type) {
-                        is MezzeType.SuspendedType -> ConstraintResult(
+                        is MezzeType.SuspendType -> ConstraintResult(
                             type = type,
                             constraints = emptyList(),
                             effects = type.effects.effects,
@@ -176,11 +176,11 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
 
                     val type = instantiation.type
                     val effects = when (type) {
-                        is MezzeType.SuspendedType -> type.effects.effects
+                        is MezzeType.SuspendType -> type.effects.effects
                         else -> emptySet()
                     }
                     val effectInstances = when (type) {
-                        is MezzeType.SuspendedType -> type.effects.effectInstances
+                        is MezzeType.SuspendType -> type.effects.effectInstances
                         else -> emptySet()
                     }
 

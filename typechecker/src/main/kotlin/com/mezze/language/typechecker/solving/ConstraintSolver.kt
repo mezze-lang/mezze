@@ -17,7 +17,7 @@ class ConstraintSolver(
     private val registry: DeclarationRegistry = DeclarationRegistry.EMPTY,
     /**
      * Option B (#341/#370). When true, {@link solveEquality} refuses to
-     * silently strip a {@link MezzeType.SuspendedType} wrapper on either
+     * silently strip a {@link MezzeType.SuspendType} wrapper on either
      * side of an equality when the wrapped effect row is non-empty.
      *
      * <p>The default keeps the pre-Option-B behavior (silent strip) so
@@ -798,9 +798,9 @@ class ConstraintSolver(
     }
 
     private fun solveEquality(constraint: Constraint.Equality): ConstraintResult {
-        // SuspendedType wrappers are stripped because effects are tracked separately
+        // SuspendType wrappers are stripped because effects are tracked separately
         // in ConstraintResult, not in the Equality constraint itself. The constraint
-        // generation may wrap types in SuspendedType to carry effect info, but by the
+        // generation may wrap types in SuspendType to carry effect info, but by the
         // time we unify, effect tracking has already been handled upstream.
         //
         // Option B / #341 / #370: under {@link #strictEffectRows}, refuse to
@@ -814,11 +814,11 @@ class ConstraintSolver(
         val rawLeft = constraint.left
         val rawRight = constraint.right
         if (strictEffectRows) {
-            val leftIsSusp = rawLeft is MezzeType.SuspendedType && rawLeft.effects.effects.isNotEmpty()
-            val rightIsSusp = rawRight is MezzeType.SuspendedType && rawRight.effects.effects.isNotEmpty()
+            val leftIsSusp = rawLeft is MezzeType.SuspendType && rawLeft.effects.effects.isNotEmpty()
+            val rightIsSusp = rawRight is MezzeType.SuspendType && rawRight.effects.effects.isNotEmpty()
             if (leftIsSusp != rightIsSusp) {
                 val plainSide = if (leftIsSusp) rawRight else rawLeft
-                val suspendedSide = if (leftIsSusp) rawLeft as MezzeType.SuspendedType else rawRight as MezzeType.SuspendedType
+                val suspendedSide = if (leftIsSusp) rawLeft as MezzeType.SuspendType else rawRight as MezzeType.SuspendType
                 val leakedEffects = suspendedSide.effects.effects
                 // Skip when an enclosing `perform` will discharge every leaked
                 // effect. ExprPerformConstraints.generatePerform stamps
@@ -845,8 +845,8 @@ class ConstraintSolver(
                 }
             }
         }
-        val left = if (rawLeft is MezzeType.SuspendedType) rawLeft.valueType else rawLeft
-        val right = if (rawRight is MezzeType.SuspendedType) rawRight.valueType else rawRight
+        val left = if (rawLeft is MezzeType.SuspendType) rawLeft.valueType else rawLeft
+        val right = if (rawRight is MezzeType.SuspendType) rawRight.valueType else rawRight
 
         DebugLogger.debug(Category.ConstraintSolver) {
             "solveEquality: $left = $right (${constraint.context})"
@@ -943,7 +943,7 @@ class ConstraintSolver(
         val fieldName = constraint.fieldName
         val expectedFieldType = constraint.fieldType
 
-        if (recordType is MezzeType.SuspendedType) {
+        if (recordType is MezzeType.SuspendType) {
             return solveHasField(
                 constraint.copy(recordType = recordType.valueType),
                 currentSubst

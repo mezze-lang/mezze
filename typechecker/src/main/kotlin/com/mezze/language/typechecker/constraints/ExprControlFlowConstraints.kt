@@ -511,13 +511,13 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
 
     val resultType = if (collector.effects.isNotEmpty() || collector.performed) {
         when (val innerType = resultResult.type) {
-            is MezzeType.SuspendedType -> {
+            is MezzeType.SuspendType -> {
                 val mergedEffects = innerType.effects.effects + collector.effects
                 val mergedPerformed = innerType.effects.performed || collector.performed
-                MezzeType.SuspendedType(innerType.valueType, MezzeType.EffectRow.simple(mergedEffects, innerType.effects.rowVar, mergedPerformed))
+                MezzeType.SuspendType(innerType.valueType, MezzeType.EffectRow.simple(mergedEffects, innerType.effects.rowVar, mergedPerformed))
             }
             else -> {
-                MezzeType.SuspendedType(resultResult.type, MezzeType.EffectRow.simple(collector.effects, null, collector.performed))
+                MezzeType.SuspendType(resultResult.type, MezzeType.EffectRow.simple(collector.effects, null, collector.performed))
             }
         }
     } else {

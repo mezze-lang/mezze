@@ -132,7 +132,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL_YIELD"));
 
     // Path E — lazy-until-fully-discharged effect runtime (task #336).
-    // When on, HandleNode's lazy path builds a MezzeSuspended carrying the
+    // When on, HandleNode's lazy path builds a MezzeSuspend carrying the
     // whole body continuation (bodyNode + frame + chain snapshot) instead of
     // eagerly running the body and losing the continuation at first
     // unhandled op. Force is atomic — merges chains, runs body inline on
@@ -902,7 +902,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             Object result = bodyNode.execute(frame);
             // Force suspended computations — effects should have been handled
             // by the time we reach the top-level result
-            if (result instanceof com.mezze.interpreter.values.MezzeSuspended suspended) {
+            if (result instanceof com.mezze.interpreter.values.MezzeSuspend suspended) {
                 result = forceSuspended(suspended);
             }
             lastResultStore.set(result);
@@ -911,7 +911,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         }
 
         @CompilerDirectives.TruffleBoundary
-        private Object forceSuspended(com.mezze.interpreter.values.MezzeSuspended suspended) {
+        private Object forceSuspended(com.mezze.interpreter.values.MezzeSuspend suspended) {
             try {
                 if (forceCallNode == null) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();
@@ -923,7 +923,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 // return the suspension unchanged — which is fine, the user
                 // sees the suspension explicitly.
                 Object forced = suspended.force(forceCallNode);
-                if (!(forced instanceof com.mezze.interpreter.values.MezzeSuspended)) {
+                if (!(forced instanceof com.mezze.interpreter.values.MezzeSuspend)) {
                     return forced;
                 }
             } catch (Exception e) {

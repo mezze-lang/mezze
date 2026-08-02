@@ -2,7 +2,7 @@ package com.mezze.interpreter.nodes.inline;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.interpreter.values.MezzeSuspend;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -60,20 +60,20 @@ public abstract class DirectMultiplyNode extends MezzeNode {
     }
 
     /**
-     * MezzeSuspended propagation: if either operand is suspended, propagate it.
+     * MezzeSuspend propagation: if either operand is suspended, propagate it.
      */
     @Specialization(guards = "isSuspended(left)")
-    public static MezzeSuspended mulLeftSuspended(MezzeSuspended left, Object right) {
+    public static MezzeSuspend mulLeftSuspended(MezzeSuspend left, Object right) {
         return left;
     }
 
     @Specialization(guards = "isSuspended(right)")
-    public static MezzeSuspended mulRightSuspended(Object left, MezzeSuspended right) {
+    public static MezzeSuspend mulRightSuspended(Object left, MezzeSuspend right) {
         return right;
     }
 
     public static boolean isSuspended(Object value) {
-        return value instanceof MezzeSuspended;
+        return value instanceof MezzeSuspend;
     }
 
     @Fallback

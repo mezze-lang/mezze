@@ -55,7 +55,7 @@ class CodecGeneratorTest {
 
     @Test
     fun `suspended types should not be serializable`() {
-        val suspendedType = MezzeType.SuspendedType(
+        val suspendedType = MezzeType.SuspendType(
             valueType = MezzeType.IntType,
             effects = MezzeType.EffectRow(setOf("IO"))
         )

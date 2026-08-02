@@ -71,7 +71,7 @@ class BuiltinEffectsTest {
 
     @Test
     fun testSeqOfEffectCallsRunsBothArms() {
-        // Repro: if the seq-literal type rule conflates SuspendedType with
+        // Repro: if the seq-literal type rule conflates SuspendType with
         // value-shape (like match used to), the interpreter may either crash
         // when trying to construct the seq, OR silently drop one of the
         // effect calls. Either way, the captured stdout will be wrong.
@@ -93,7 +93,7 @@ class BuiltinEffectsTest {
         assertEquals(42L, result.value)
     }
 
-    // ========== SuspendedType-leak audit: other constructs ==========
+    // ========== SuspendType-leak audit: other constructs ==========
     //
     // Each test puts an effectful expression in a position where the typechecker
     // might be storing/unifying its type through a fresh TypeVar. If the bug
@@ -196,7 +196,7 @@ class BuiltinEffectsTest {
     @Test
     fun testMatchInsideLet() {
         // The match isn't terminal — it's the RHS of a `let`. Let unwraps
-        // SuspendedType so this should be fine.
+        // SuspendType so this should be fine.
         val source = """
             use std::effects::log::{Console, println}
 

@@ -186,7 +186,7 @@ public final class EffectFiber {
      * to be the thread's CURRENT at the time (often an outer perform's
      * fiber, whose continuation is yielded several layers deep — suspending
      * it strands the rest of the body and surfaces as a stray
-     * {@code MezzeSuspended} from the outer perform's driver).
+     * {@code MezzeSuspend} from the outer perform's driver).
      * Root cause of #255.
      */
     public static <T> T runDetached(java.util.function.Supplier<T> body) {

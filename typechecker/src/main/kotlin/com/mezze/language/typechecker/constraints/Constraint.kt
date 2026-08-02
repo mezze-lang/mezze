@@ -63,7 +63,7 @@ sealed interface Constraint {
         /**
          * Option B / #341 / #376: effect names discharged by enclosing
          * `perform` blocks at the point this constraint was generated.
-         * Under strictEffectRows, a `SuspendedType(T, r)` vs plain-T
+         * Under strictEffectRows, a `SuspendType(T, r)` vs plain-T
          * equality is allowed silently iff `r ⊆ activeDischargedEffects`
          * — the enclosing perform's `removeEffectsFromType` will strip
          * r at its boundary. Populated by
