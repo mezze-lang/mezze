@@ -219,6 +219,38 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Read a local slot as Object, returning null if the slot is
+     * uninitialized (FrameSlotKind.Illegal). Mirrors AST's
+     * {@code frame.getValue(slot)} semantics: catches the
+     * FrameSlotTypeException that plain {@code LoadLocal} throws when
+     * the slot has not yet been written on this control-flow path.
+     *
+     * <p>Used by {@code MakeLambdaIR} emit for local-slot captures
+     * (Phase 5): a recursive-let (`let f = {n} -> ... f {n=n-1}`)
+     * captures its own slot on the RHS, but slot(f) isn't written
+     * until AFTER the MakeLambda executes. The typechecker replaces
+     * body-side references to `f` with fresh MakeLambdas
+     * (recursiveLetLambdas in TypedASTCompiler.compileVar), so the
+     * captured null is a placeholder that's never read.
+     *
+     * <p>Constant operand: the LocalAccessor to read.
+     */
+    @Operation
+    @ConstantOperand(type = com.oracle.truffle.api.bytecode.LocalAccessor.class)
+    public static final class LoadLocalOrNull {
+        @Specialization
+        public static Object doLoad(VirtualFrame frame,
+                                    com.oracle.truffle.api.bytecode.LocalAccessor local,
+                                    @Bind com.oracle.truffle.api.bytecode.BytecodeNode bytecodeNode) {
+            try {
+                return local.getObject(bytecodeNode, frame);
+            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e) {
+                return null;
+            }
+        }
+    }
+
+    /**
      * #346 Group B — inline auto-derived Inspect impl for a receiver.
      * Rewrites the desugared shape
      * {@code CallIndirect(ReadField(x, "to_dbg_str"|"to_str"),

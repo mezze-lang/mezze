@@ -494,8 +494,9 @@ public final class BytecodeCompiler {
             return true;
         }
         if (node instanceof MakeLambdaIR ml) {
-            // Captures are just slot reads in the caller's frame; they
-            // resolve to LoadArgument or LoadLocal at emit time.
+            // Captures are slot reads in the caller's frame; they
+            // resolve to LoadArgument, LoadLocal, or LoadNullConstant
+            // at emit time (see the MakeLambdaIR branch in emitNode).
             //
             // Emit-time-resolved target: fast path uses MakeLambda with
             // CallTarget baked as constant operand.
@@ -507,22 +508,16 @@ public final class BytecodeCompiler {
             // path, bypassing BDSL to avoid re-entering this compiler
             // while it's mid-emit). #304.
             //
-            // Recursive-let restriction: if ANY capture reads a local
-            // slot (>= argCount, i.e. not from the outer fn's args or
-            // its own captures), the outer function is a `let f = ...`
-            // definition and slot(f) may not be written yet at MakeLambda
-            // time. Reject to AST — the AST path uses a different
-            // closure init pattern (post-write patch) that BDSL doesn't
-            // model. Only mint stubs when captures are stable
-            // (args/captures of the outer fn), which covers top-level
-            // fn references and non-recursive nested lambdas.
+            // Recursive-let captures: `let f = {n} -> ...` may capture
+            // `f` itself (slot >= argCount, slot for f not yet written
+            // when MakeLambda executes). AST handles this via
+            // frame.getValue returning null on an unwritten slot; BDSL's
+            // LoadLocal throws FrameSlotTypeException on Illegal. We
+            // emit LoadNullConstant for those captures — the lambda's
+            // captured f will be null, but recursive calls emit a fresh
+            // MakeLambda (see TypedASTCompiler.compileVar recursiveLet
+            // branch) so the null is never actually read.
             if (resolveCallTarget(ml.getFunctionHash()) == null) {
-                for (var cap : ml.getCaptures()) {
-                    if (cap.getSlot() >= argCount) {
-                        markReject(node, "target-not-compiled");
-                        return false;
-                    }
-                }
                 CallTarget stub = language.getOrMintUserStub(
                         ml.getFunctionHash(), "lambda");
                 if (stub != null) {
@@ -1656,7 +1651,20 @@ public final class BytecodeCompiler {
                 if (slot < argCount) {
                     b.emitLoadArgument(slot);
                 } else {
-                    b.emitLoadLocal(localMap[slot - argCount]);
+                    // Use LoadLocalOrNull — a null-tolerant read that
+                    // returns null on an Illegal (unwritten) slot,
+                    // matching AST's frame.getValue semantics. Needed
+                    // for recursive-let captures (`let f = {n} -> ... f
+                    // {n=n-1}`) where the outer let's slot may not be
+                    // written yet at MakeLambda-execute time. Emitted
+                    // uniformly for all local captures because BDSL
+                    // can't statically distinguish "written by now" from
+                    // "possibly unwritten" — the two cost the same at
+                    // runtime and the null-tolerant read is safe either
+                    // way (recursive-let re-emits a fresh MakeLambda at
+                    // the call site rather than reading the captured
+                    // slot; see TypedASTCompiler.compileVar).
+                    b.emitLoadLocalOrNull(localMap[slot - argCount]);
                 }
             }
             b.endMakeLambda();
