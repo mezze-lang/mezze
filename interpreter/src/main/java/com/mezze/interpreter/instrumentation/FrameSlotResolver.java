@@ -167,14 +167,22 @@ public final class FrameSlotResolver {
     /**
      * Called with the debugger's MATERIALIZED frame (already on a boundary), so
      * NOT @TruffleBoundary (the DSL processor rejects a Frame param with it).
+     *
+     * <p>{@code bytecodeNode} + {@code bci} are non-null when the enclosing
+     * fn was compiled via BDSL — those are the ONLY source of local + param
+     * shadow names under BDSL (the FrameDescriptor has slot indices only).
+     * Null under AST — the FrameDescriptor's slot names are authoritative
+     * there. See MezzeDebugScope for the analogous scope-enumeration split.
      */
-    public static Object evaluate(Expr e, Frame frame) {
+    public static Object evaluate(Expr e, Frame frame,
+                                  com.oracle.truffle.api.bytecode.BytecodeNode bytecodeNode,
+                                  int bci) {
         if (e instanceof IntLit il) return il.value();
-        if (e instanceof Ident id) return slotValue(id.name(), frame);
-        if (e instanceof Neg neg) return -toLong(evaluate(neg.inner(), frame));
+        if (e instanceof Ident id) return slotValue(id.name(), frame, bytecodeNode, bci);
+        if (e instanceof Neg neg) return -toLong(evaluate(neg.inner(), frame, bytecodeNode, bci));
         if (e instanceof Bin bin) {
-            long l = toLong(evaluate(bin.lhs(), frame));
-            long r = toLong(evaluate(bin.rhs(), frame));
+            long l = toLong(evaluate(bin.lhs(), frame, bytecodeNode, bci));
+            long r = toLong(evaluate(bin.rhs(), frame, bytecodeNode, bci));
             switch (bin.op()) {
                 case ">":  return l > r;
                 case "<":  return l < r;
@@ -192,7 +200,32 @@ public final class FrameSlotResolver {
         throw new IllegalStateException("unknown node");
     }
 
-    private static Object slotValue(String name, Frame frame) {
+    /** Two-argument overload for AST callers (no BDSL context). */
+    public static Object evaluate(Expr e, Frame frame) {
+        return evaluate(e, frame, null, -1);
+    }
+
+    private static Object slotValue(String name, Frame frame,
+                                    com.oracle.truffle.api.bytecode.BytecodeNode bytecodeNode,
+                                    int bci) {
+        // #359 — under BDSL, local names live in the bytecode's own local
+        // table (both real locals and the param-shadow entries emitted by
+        // BytecodeCompiler in debug mode). Consult it before falling back
+        // to the FrameDescriptor scan (AST path).
+        if (bytecodeNode != null && bci >= 0) {
+            int count = bytecodeNode.getLocalCount(bci);
+            for (int i = 0; i < count; i++) {
+                Object nm = bytecodeNode.getLocalName(bci, i);
+                if (nm instanceof String s && name.equals(s)) {
+                    try {
+                        Object v = bytecodeNode.getLocalValue(bci, frame, i);
+                        return v == null ? "<uninitialized>" : v;
+                    } catch (Throwable t) {
+                        // Fall through to FrameDescriptor scan.
+                    }
+                }
+            }
+        }
         FrameDescriptor desc = frame.getFrameDescriptor();
         for (int i = 0; i < desc.getNumberOfSlots(); i++) {
             if (name.equals(desc.getSlotName(i))) return readSlot(frame, i);

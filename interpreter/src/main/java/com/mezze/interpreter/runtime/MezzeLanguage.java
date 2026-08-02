@@ -756,7 +756,12 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         return new FrameEvalNode(this, parsed);
     }
 
-    /** Read locals from the frame + evaluate a small watch/condition expr. */
+    /** Read locals from the frame + evaluate a small watch/condition expr.
+     *  #359 — under BDSL, local + param shadow names live in the
+     *  BytecodeNode's local table, not the FrameDescriptor. Resolve the
+     *  BytecodeNode at eval time (via BytecodeNode.get walking the parent
+     *  chain from this ExecutableNode's insertion point) and pass it to
+     *  the resolver so it can search both sources. */
     private static final class FrameEvalNode extends ExecutableNode {
         private final FrameSlotResolver.Expr expr;
         FrameEvalNode(MezzeLanguage lang, FrameSlotResolver.Expr expr) {
@@ -765,7 +770,25 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         }
         @Override
         public Object execute(com.oracle.truffle.api.frame.VirtualFrame frame) {
-            return FrameSlotResolver.evaluate(expr, frame);
+            // #359 — under BDSL, param and local shadow names live in the
+            // BytecodeNode's local table. Try to resolve it via parent-
+            // chain walk from this ExecutableNode's insertion point; fall
+            // back to AST-shape resolution if unavailable or if
+            // getBytecodeIndex isn't supported (requires the enclosing
+            // root to have been compiled with storeBytecodeIndexInFrame,
+            // which we haven't opted into by default — the extra frame
+            // slot is only worth it once we ship BDSL debug end-to-end).
+            com.oracle.truffle.api.bytecode.BytecodeNode bn =
+                com.oracle.truffle.api.bytecode.BytecodeNode.get(this);
+            int bci = -1;
+            if (bn != null) {
+                try {
+                    bci = bn.getBytecodeIndex(frame);
+                } catch (Throwable t) {
+                    bn = null;
+                }
+            }
+            return FrameSlotResolver.evaluate(expr, frame, bn, bci);
         }
     }
 
