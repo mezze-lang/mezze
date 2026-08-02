@@ -211,9 +211,6 @@ public final class MezzeSuspended implements TruffleObject {
             // unevaluated MezzeSuspended leaks back to the caller.
             return forceWithoutFiber(callNode);
         }
-        if (computation instanceof BlockNode.ComposedBlockThunk composedThunk) {
-            return forceComposedBlock(composedThunk, fiber, callNode);
-        }
         if (computation.isDeferredEffectCall()) {
             // Forward the effect content hash so the dispatcher can
             // disambiguate when two effects in scope declare an op with
@@ -299,57 +296,6 @@ public final class MezzeSuspended implements TruffleObject {
         );
         if (result == com.mezze.interpreter.nodes.effect.OpCallNode.DISPATCH_NO_MATCH) {
             return this;
-        }
-        return result;
-    }
-
-    /**
-     * Force a composed block thunk under the current fiber: execute the
-     * original effect (which yields to the driver), then run the
-     * remaining statements that were closed over the original
-     * MaterializedFrame.
-     */
-    @TruffleBoundary
-    private Object forceComposedBlock(
-            BlockNode.ComposedBlockThunk composedThunk,
-            com.mezze.interpreter.nodes.continuation.EffectFiber fiber,
-            IndirectCallNode callNode) {
-        MezzeThunk originalThunk = composedThunk.getOriginalThunk();
-        MezzeNode[] remainingStatements = composedThunk.getRemainingStatements();
-        MaterializedFrame frame = composedThunk.getMaterializedFrame();
-
-        Object effectResult;
-        if (originalThunk instanceof BlockNode.ComposedBlockThunk nested) {
-            effectResult = forceComposedBlock(nested, fiber, callNode);
-        } else if (originalThunk.isDeferredEffectCall()) {
-            effectResult = fiber.suspend(new com.mezze.interpreter.nodes.continuation.OpCall(
-                originalThunk.getOperationName(),
-                originalThunk.getArguments(),
-                originalThunk.getEffectContentHash()
-            ));
-        } else {
-            effectResult = originalThunk.execute(callNode);
-        }
-
-        // If the effect result is still suspended (no fiber was current at
-        // the recursive force), preserve the composition for later.
-        if (effectResult instanceof MezzeSuspended ms) {
-            return new MezzeSuspended(
-                new BlockNode.ComposedBlockThunk(
-                    ms.getComputation(),
-                    remainingStatements,
-                    frame
-                ),
-                ms.getUnhandledEffects()
-            );
-        }
-
-        Object result = MezzeUnit.INSTANCE;
-        for (MezzeNode stmt : remainingStatements) {
-            result = stmt.execute(frame);
-            if (result instanceof MezzeSuspended) {
-                return result;
-            }
         }
         return result;
     }

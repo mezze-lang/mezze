@@ -1,31 +1,28 @@
 package com.mezze.interpreter.nodes.control;
 
 import com.mezze.interpreter.nodes.MezzeNode;
-import com.mezze.interpreter.values.MezzeFunction;
-import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeSuspended;
-import com.mezze.interpreter.values.MezzeThunk;
 import com.mezze.interpreter.values.MezzeUnit;
-import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.frame.MaterializedFrame;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
-
-import java.util.Arrays;
 
 /**
  * Block node - executes a sequence of statements.
  *
  * Returns the value of the last statement, or Unit if empty.
  *
- * NOTE: MezzeContinuationSuspended is treated as a NORMAL VALUE, not as early return.
- * Effect handlers (HandleNode) are responsible for detecting and handling suspensions.
- * This allows suspended continuations to be stored in variables and passed around.
- *
  * JIT Optimizations:
  * - @ExplodeLoop unrolls the loop at compile time
  * - Hot path (normal execution) has zero overhead
+ *
+ * <p>Historical note: earlier versions detected a MezzeSuspended returned
+ * by an intermediate statement and composed the remaining statements onto
+ * it (ComposedBlockThunk). That path was dead code — empirical trace
+ * across the full :interpreter:test suite showed zero hits — because the
+ * lazy-suspend model is being replaced by Option B (#341): the
+ * typechecker refuses to let a Suspend&lt;T, r&gt; value flow into a plain-
+ * consuming position, so intermediate-stmt leaks can't happen. Deleted
+ * in Phase 3 of the effect-runtime cleanup.
  */
 @NodeInfo(shortName = "block")
 public final class BlockNode extends MezzeNode {
@@ -42,119 +39,9 @@ public final class BlockNode extends MezzeNode {
         if (statements.length == 0) {
             return MezzeUnit.INSTANCE;
         }
-
-        // Execute all but the last statement
         for (int i = 0; i < statements.length - 1; i++) {
-            Object result = statements[i].execute(frame);
-
-            // LAZY EFFECTS: If a statement returns MezzeSuspended, compose a continuation
-            // with the remaining statements and return a new MezzeSuspended
-            if (result instanceof MezzeSuspended suspended) {
-                return handleSuspendedEffect(suspended, i, frame.materialize());
-            }
-
+            statements[i].execute(frame);
         }
-
-        // Return the value of the last statement
-        Object lastResult = statements[statements.length - 1].execute(frame);
-
-        // If the last statement is suspended, return it as-is
-        return lastResult;
-    }
-
-    /**
-     * Handle suspended effect computations with continuation composition.
-     * When an effect call returns MezzeSuspended, we create a composed
-     * continuation that will execute the remaining statements when
-     * the effect is resolved.
-     */
-    @TruffleBoundary
-    private MezzeSuspended handleSuspendedEffect(
-            MezzeSuspended suspended,
-            int index,
-            MaterializedFrame materializedFrame
-    ) {
-        // Capture remaining statements for the composed continuation
-        MezzeNode[] remainingStatements = Arrays.copyOfRange(
-            statements, index + 1, statements.length
-        );
-
-        // Create a composed thunk that will:
-        // 1. Execute the original suspended effect
-        // 2. Execute remaining statements
-        // 3. Return the final result
-        ComposedBlockThunk composedThunk = new ComposedBlockThunk(
-            suspended.getComputation(),
-            remainingStatements,
-            materializedFrame
-        );
-
-        // Return a new MezzeSuspended with the composed thunk
-        return new MezzeSuspended(
-            composedThunk,
-            suspended.getUnhandledEffects(),
-            suspended.getCapturedHandlers()
-        );
-    }
-
-    /**
-     * A thunk that composes the original suspended computation with remaining statements.
-     * This is a public static class so MezzeSuspended can detect and handle it.
-     */
-    public static final class ComposedBlockThunk extends MezzeThunk {
-        private final MezzeThunk originalThunk;
-        private final MezzeNode[] remainingStatements;
-        private final MaterializedFrame materializedFrame;
-
-        public ComposedBlockThunk(
-                MezzeThunk originalThunk,
-                MezzeNode[] remainingStatements,
-                MaterializedFrame materializedFrame
-        ) {
-            super();  // Use protected constructor
-            this.originalThunk = originalThunk;
-            this.remainingStatements = remainingStatements;
-            this.materializedFrame = materializedFrame;
-        }
-
-        @Override
-        public boolean isDeferredEffectCall() {
-            // Check the original thunk
-            return originalThunk.isDeferredEffectCall();
-        }
-
-        @Override
-        public String getEffectName() {
-            return originalThunk.getEffectName();
-        }
-
-        @Override
-        public String getOperationName() {
-            return originalThunk.getOperationName();
-        }
-
-        @Override
-        public Object getArguments() {
-            return originalThunk.getArguments();
-        }
-
-        public MezzeThunk getOriginalThunk() {
-            return originalThunk;
-        }
-
-        public MezzeNode[] getRemainingStatements() {
-            return remainingStatements;
-        }
-
-        public MaterializedFrame getMaterializedFrame() {
-            return materializedFrame;
-        }
-
-        /**
-         * Check if this is a composed block thunk.
-         */
-        public boolean isComposedBlockThunk() {
-            return true;
-        }
+        return statements[statements.length - 1].execute(frame);
     }
 }
