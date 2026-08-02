@@ -208,13 +208,17 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     /**
      * Compile one FunctionIR. When {@link #BDSL_ENABLED} is on, tries BDSL
      * first ({@link com.mezze.interpreter.bytecode.BytecodeCompiler#supports})
-     * and falls back to the AST TruffleCompiler when unsupported. Off by
-     * default — the four legacy call sites in this file still invoke
-     * {@code TruffleCompiler.compile} directly through this helper.
+     * and falls back to the AST TruffleCompiler when unsupported or emit
+     * crashes. Fallback is still needed pre-Phase-5 for edge cases:
+     * factorial-shape recursion crashes BDSL emit with a null-constant
+     * error; nested unresolved captures crash intermittently. These are
+     * real BDSL bugs, but AST-fallback keeps the suite green while they
+     * get fixed.
      *
-     * The BDSL compiler shares an external CallTarget resolver that looks
-     * into {@link #stdlibCallTargetCache} — so cross-fn calls to already-
-     * compiled targets resolve without duplicating them in BDSL's own map.
+     * <p>The BDSL compiler shares an external CallTarget resolver that
+     * looks into {@link #stdlibCallTargetCache} — so cross-fn calls to
+     * already-compiled targets resolve without duplicating them in BDSL's
+     * own map.
      */
     private com.oracle.truffle.api.nodes.RootNode compileOne(
             com.mezze.interpreter.compiler.TruffleCompiler astCompiler,
