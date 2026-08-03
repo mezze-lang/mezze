@@ -329,16 +329,57 @@ public final class BytecodeCompiler {
     private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>
             CRASH_COUNTS = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** Bucket an emit-time throwable by its simple class name so
-     *  MEZZE_BDSL_STATS shutdown-print can surface which crashes are
-     *  hitting the most functions. Called from MezzeLanguage.compileOne
-     *  when bdsl.compile(ir) throws. */
+    /** Bucket an emit-time throwable by exception type + Mezze caller of
+     *  the throwing frame + a short prefix of the exception message. The
+     *  first (top) frame is usually the generated Truffle Builder's
+     *  failArgument/failState — recording only that collapses all 48
+     *  distinct call sites into one bucket. What we want is the Mezze
+     *  emit method that CALLED into the Builder, plus enough of the
+     *  message to distinguish which Builder invariant it tripped. */
     public static void noteCrash(Throwable t) {
         if (!STATS_ENABLED || t == null) return;
-        String key = t.getClass().getSimpleName();
-        if (key == null || key.isEmpty()) key = t.getClass().getName();
-        CRASH_COUNTS.computeIfAbsent(key, k -> new java.util.concurrent.atomic.AtomicLong())
+        String type = t.getClass().getSimpleName();
+        if (type == null || type.isEmpty()) type = t.getClass().getName();
+        StackTraceElement frame = firstMezzeCallerFrame(t);
+        String msg = shortMessage(t.getMessage());
+        StringBuilder key = new StringBuilder(type);
+        if (frame != null) {
+            key.append(" @ ").append(shortClassName(frame.getClassName()))
+               .append(".").append(frame.getMethodName())
+               .append(":").append(frame.getLineNumber());
+        }
+        if (msg != null) key.append(" [").append(msg).append("]");
+        CRASH_COUNTS.computeIfAbsent(key.toString(),
+                k -> new java.util.concurrent.atomic.AtomicLong())
                 .incrementAndGet();
+    }
+
+    /** First stack frame in com.mezze.interpreter.bytecode.* other than the
+     *  auto-generated Truffle Builder itself — that is, the human-written
+     *  emit method that made the invalid Builder call. */
+    private static StackTraceElement firstMezzeCallerFrame(Throwable t) {
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            for (StackTraceElement f : cur.getStackTrace()) {
+                String cn = f.getClassName();
+                if (!cn.startsWith("com.mezze.")) continue;
+                if (cn.contains("Gen$") || cn.endsWith("Gen")) continue;
+                return f;
+            }
+        }
+        return null;
+    }
+
+    private static String shortMessage(String m) {
+        if (m == null) return null;
+        int nl = m.indexOf('\n');
+        if (nl >= 0) m = m.substring(0, nl);
+        int cap = 80;
+        return m.length() > cap ? m.substring(0, cap) + "…" : m;
+    }
+
+    private static String shortClassName(String fqcn) {
+        int i = fqcn.lastIndexOf('.');
+        return i < 0 ? fqcn : fqcn.substring(i + 1);
     }
 
     public static java.util.Map<String, Long> getCrashCounts() {
