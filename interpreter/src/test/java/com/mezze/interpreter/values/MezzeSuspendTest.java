@@ -6,22 +6,21 @@ import org.junit.jupiter.api.DisplayName;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 
 /**
  * Tests for MezzeSuspend and MezzeThunk - the lazy effects implementation.
  *
- * MezzeThunk: A deferred computation storing effect name, operation, and argument.
+ * MezzeThunk: A deferred op-call storing (opName, args, effectHash).
  * MezzeSuspend: A wrapper around MezzeThunk that tracks unhandled effects.
  *
  * The flow is:
  * 1. Effect call without handler → Creates MezzeThunk
- * 2. MezzeThunk wrapped in MezzeSuspend with unhandled effect names
+ * 2. MezzeThunk wrapped in MezzeSuspend with unhandled effect hashes
  * 3. MezzeSuspend propagates up the call stack
- * 4. When a handler is available, MezzeSuspend.executeWith(handlers) resolves it
+ * 4. When a handler is available, MezzeSuspend.force() dispatches on the fiber's
+ *    handler chain.
  */
 @DisplayName("MezzeSuspend Tests")
 class MezzeSuspendTest {
@@ -38,44 +37,42 @@ class MezzeSuspendTest {
     // ==================== MezzeThunk Tests ====================
 
     @Test
-    @DisplayName("MezzeThunk stores effect name, operation, and argument")
-    void testThunkStoresEffectInfo() {
+    @DisplayName("MezzeThunk stores operation name, argument, and effect hash")
+    void testThunkStoresOpInfo() {
         MezzeRecord args = MezzeRecord.fromFields(
             new String[]{"msg"},
             new Object[]{"hello"}
         );
-        MezzeThunk thunk = new MezzeThunk("Log", "print", args, hashOf("Log"));
+        Hash logHash = hashOf("Log");
+        MezzeThunk thunk = new MezzeThunk("print", args, logHash);
 
-        assertEquals("Log", thunk.getEffectName());
         assertEquals("print", thunk.getOperationName());
         assertEquals(args, thunk.getArguments());
+        assertEquals(logHash, thunk.getEffectContentHash());
     }
 
     @Test
     @DisplayName("MezzeThunk with different operations")
     void testThunkDifferentOperations() {
         MezzeRecord args1 = MezzeRecord.fromFields(new String[]{"max"}, new Object[]{100L});
-        MezzeThunk thunk1 = new MezzeThunk("Random", "nextInt", args1, hashOf("Random"));
+        MezzeThunk thunk1 = new MezzeThunk("nextInt", args1, hashOf("Random"));
 
         MezzeRecord args2 = MezzeRecord.fromFields(new String[]{"key", "value"}, new Object[]{"a", "b"});
-        MezzeThunk thunk2 = new MezzeThunk("State", "put", args2, hashOf("State"));
+        MezzeThunk thunk2 = new MezzeThunk("put", args2, hashOf("State"));
 
-        assertEquals("Random", thunk1.getEffectName());
         assertEquals("nextInt", thunk1.getOperationName());
-
-        assertEquals("State", thunk2.getEffectName());
         assertEquals("put", thunk2.getOperationName());
+        assertNotEquals(thunk1.getEffectContentHash(), thunk2.getEffectContentHash());
     }
 
     @Test
-    @DisplayName("MezzeThunk toString shows useful debug info")
+    @DisplayName("MezzeThunk toString shows the op name")
     void testThunkToString() {
         MezzeRecord args = MezzeRecord.empty();
-        MezzeThunk thunk = new MezzeThunk("Console", "log", args, hashOf("Console"));
+        MezzeThunk thunk = new MezzeThunk("log", args, hashOf("Console"));
 
         String str = thunk.toString();
-        assertTrue(str.contains("Console"), "Should contain effect name");
-        assertTrue(str.contains("log"), "Should contain operation name");
+        assertTrue(str.contains("log"), "Should contain op name, got: " + str);
     }
 
     // ==================== MezzeSuspend Tests ====================
@@ -83,7 +80,7 @@ class MezzeSuspendTest {
     @Test
     @DisplayName("MezzeSuspend wraps thunk with unhandled effects set")
     void testSuspendedWrapsThunk() {
-        MezzeThunk thunk = new MezzeThunk("Log", "print", MezzeRecord.empty(), hashOf("Log"));
+        MezzeThunk thunk = new MezzeThunk("print", MezzeRecord.empty(), hashOf("Log"));
         Set<Hash> effects = Collections.singleton(hashOf("Log"));
 
         MezzeSuspend suspended = new MezzeSuspend(thunk, effects);
@@ -95,7 +92,7 @@ class MezzeSuspendTest {
     @Test
     @DisplayName("MezzeSuspend with multiple unhandled effects")
     void testSuspendedMultipleEffects() {
-        MezzeThunk thunk = new MezzeThunk("Random", "nextInt", MezzeRecord.empty(), hashOf("Random"));
+        MezzeThunk thunk = new MezzeThunk("nextInt", MezzeRecord.empty(), hashOf("Random"));
         Set<Hash> effects = new HashSet<>();
         effects.add(hashOf("Random"));
         effects.add(hashOf("Log"));
@@ -112,7 +109,7 @@ class MezzeSuspendTest {
     @Test
     @DisplayName("MezzeSuspend isFullyHandled returns false when effects are unhandled")
     void testSuspendedNotFullyHandled() {
-        MezzeThunk thunk = new MezzeThunk("Log", "print", MezzeRecord.empty(), hashOf("Log"));
+        MezzeThunk thunk = new MezzeThunk("print", MezzeRecord.empty(), hashOf("Log"));
         MezzeSuspend suspended = new MezzeSuspend(thunk, Collections.singleton(hashOf("Log")));
 
         assertFalse(suspended.isFullyHandled());
@@ -121,7 +118,7 @@ class MezzeSuspendTest {
     @Test
     @DisplayName("MezzeSuspend with empty unhandled set is fully handled")
     void testSuspendedFullyHandled() {
-        MezzeThunk thunk = new MezzeThunk("Log", "print", MezzeRecord.empty(), hashOf("Log"));
+        MezzeThunk thunk = new MezzeThunk("print", MezzeRecord.empty(), hashOf("Log"));
         MezzeSuspend suspended = new MezzeSuspend(thunk, Collections.emptySet());
 
         assertTrue(suspended.isFullyHandled());
@@ -130,7 +127,7 @@ class MezzeSuspendTest {
     @Test
     @DisplayName("MezzeSuspend toString shows unhandled effects")
     void testSuspendedToString() {
-        MezzeThunk thunk = new MezzeThunk("Async", "spawn", MezzeRecord.empty(), hashOf("Async"));
+        MezzeThunk thunk = new MezzeThunk("spawn", MezzeRecord.empty(), hashOf("Async"));
         Hash asyncHash = hashOf("Async");
         MezzeSuspend suspended = new MezzeSuspend(thunk, Collections.singleton(asyncHash));
 
@@ -147,7 +144,7 @@ class MezzeSuspendTest {
     void testSuspendedEffectsImmutable() {
         Set<Hash> effects = new HashSet<>();
         effects.add(hashOf("Log"));
-        MezzeThunk thunk = new MezzeThunk("Log", "print", MezzeRecord.empty(), hashOf("Log"));
+        MezzeThunk thunk = new MezzeThunk("print", MezzeRecord.empty(), hashOf("Log"));
         MezzeSuspend suspended = new MezzeSuspend(thunk, effects);
 
         // Modifying original set shouldn't affect suspended
@@ -164,7 +161,7 @@ class MezzeSuspendTest {
         Set<Hash> effects = new HashSet<>();
         effects.add(hashOf("Log"));
         effects.add(hashOf("Random"));
-        MezzeThunk thunk = new MezzeThunk("Log", "print", MezzeRecord.empty(), hashOf("Log"));
+        MezzeThunk thunk = new MezzeThunk("print", MezzeRecord.empty(), hashOf("Log"));
         MezzeSuspend suspended = new MezzeSuspend(thunk, effects);
 
         assertTrue(suspended.getUnhandledEffects().contains(hashOf("Log")));
@@ -173,18 +170,9 @@ class MezzeSuspendTest {
     }
 
     @Test
-    @DisplayName("MezzeSuspend getEffectName returns the effect from thunk")
-    void testSuspendedGetEffectName() {
-        MezzeThunk thunk = new MezzeThunk("Database", "query", MezzeRecord.empty(), hashOf("Database"));
-        MezzeSuspend suspended = new MezzeSuspend(thunk, Collections.singleton(hashOf("Database")));
-
-        assertEquals("Database", suspended.getEffectName());
-    }
-
-    @Test
     @DisplayName("MezzeSuspend getOperationName returns the operation from thunk")
     void testSuspendedGetOperationName() {
-        MezzeThunk thunk = new MezzeThunk("HTTP", "get", MezzeRecord.empty(), hashOf("HTTP"));
+        MezzeThunk thunk = new MezzeThunk("get", MezzeRecord.empty(), hashOf("HTTP"));
         MezzeSuspend suspended = new MezzeSuspend(thunk, Collections.singleton(hashOf("HTTP")));
 
         assertEquals("get", suspended.getOperationName());
@@ -195,16 +183,18 @@ class MezzeSuspendTest {
     @Test
     @DisplayName("MezzeThunk with null argument")
     void testThunkNullArgument() {
-        MezzeThunk thunk = new MezzeThunk("Effect", "op", null, hashOf("Effect"));
+        Hash h = hashOf("Effect");
+        MezzeThunk thunk = new MezzeThunk("op", null, h);
 
         assertNull(thunk.getArguments());
-        assertEquals("Effect", thunk.getEffectName());
+        assertEquals("op", thunk.getOperationName());
+        assertEquals(h, thunk.getEffectContentHash());
     }
 
     @Test
     @DisplayName("MezzeSuspend with single effect")
     void testSuspendedSingleEffect() {
-        MezzeThunk thunk = new MezzeThunk("Timer", "sleep", MezzeRecord.empty(), hashOf("Timer"));
+        MezzeThunk thunk = new MezzeThunk("sleep", MezzeRecord.empty(), hashOf("Timer"));
         MezzeSuspend suspended = new MezzeSuspend(thunk, Collections.singleton(hashOf("Timer")));
 
         assertEquals(1, suspended.getUnhandledEffects().size());
@@ -215,8 +205,8 @@ class MezzeSuspendTest {
     @DisplayName("MezzeSuspend equality based on thunk and effects")
     void testSuspendedEquality() {
         MezzeRecord args = MezzeRecord.empty();
-        MezzeThunk thunk1 = new MezzeThunk("Log", "print", args, hashOf("Log"));
-        MezzeThunk thunk2 = new MezzeThunk("Log", "print", args, hashOf("Log"));
+        MezzeThunk thunk1 = new MezzeThunk("print", args, hashOf("Log"));
+        MezzeThunk thunk2 = new MezzeThunk("print", args, hashOf("Log"));
 
         MezzeSuspend s1 = new MezzeSuspend(thunk1, Collections.singleton(hashOf("Log")));
         MezzeSuspend s2 = new MezzeSuspend(thunk2, Collections.singleton(hashOf("Log")));

@@ -220,7 +220,7 @@ public final class BdslYieldDispatch {
      */
     @TruffleBoundary
     private static MezzeSuspend makeUnhandledSuspended(Hash effectHash, String opName, Object arg) {
-        var thunk = new MezzeThunk(/* effectName */ null, opName, arg, effectHash);
+        var thunk = new MezzeThunk(opName, arg, effectHash);
         java.util.Set<Hash> effects = effectHash != null
             ? java.util.Collections.singleton(effectHash)
             : java.util.Collections.emptySet();

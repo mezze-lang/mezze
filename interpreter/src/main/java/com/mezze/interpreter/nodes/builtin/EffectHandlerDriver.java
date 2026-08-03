@@ -931,7 +931,6 @@ public final class EffectHandlerDriver {
     @TruffleBoundary
     private static MezzeSuspend makeUnhandledSuspended(OpCall opCall) {
         var thunk = new MezzeThunk(
-            /* effectName */ null,
             opCall.opName(),
             opCall.args(),
             opCall.effectHash()

@@ -1,20 +1,14 @@
 package com.mezze.interpreter.values;
 
-import com.mezze.interpreter.nodes.MezzeNode;
-import com.mezze.interpreter.nodes.control.BlockNode;
-import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.frame.MaterializedFrame;
 import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -33,12 +27,12 @@ import java.util.Set;
  */
 public final class MezzeSuspend implements TruffleObject {
 
-    // ----- Legacy shape (pre-Path-E). Discriminator: `computation != null` →
-    // legacy shape. force() dispatches via MezzeThunk (single-op deferred
-    // call or ComposedBlockThunk). Slated for deletion under #341 once
-    // remaining callers (OpCallNode, EffectHandlerDriver, BdslYieldDispatch)
-    // are migrated to captureContinuation.
-
+    // ----- Op-defer shape (legacy). Discriminator: `computation != null`.
+    // force() dispatches the deferred op-call on the current fiber (or
+    // walks the handler chain if there is no fiber). Slated for deletion
+    // under #341 once the remaining producers (OpCallNode,
+    // EffectHandlerDriver, BdslYieldDispatch) are rewired to a
+    // continuation-capturing shape.
     @CompilationFinal
     private final MezzeThunk computation;
 
@@ -59,20 +53,12 @@ public final class MezzeSuspend implements TruffleObject {
     @CompilationFinal
     private Set<Hash> unhandledEffectsSet;
 
-    // Handlers already captured (for partial handling — legacy shape only).
-    private final Map<Hash, Object> capturedHandlers;
-
     public MezzeSuspend(MezzeThunk computation, Set<Hash> unhandledEffects) {
-        this(computation, unhandledEffects, Collections.emptyMap());
-    }
-
-    public MezzeSuspend(MezzeThunk computation, Set<Hash> unhandledEffects, Map<Hash, Object> capturedHandlers) {
         this.computation = computation;
         this.bodyNode = null;
         this.bodyFrame = null;
         this.chainSnapshot = null;
         this.unhandledEffects = unhandledEffects.toArray(new Hash[0]);
-        this.capturedHandlers = capturedHandlers;
     }
 
     /**
@@ -103,7 +89,6 @@ public final class MezzeSuspend implements TruffleObject {
         this.bodyFrame = bodyFrame;
         this.chainSnapshot = chainSnapshot;
         this.unhandledEffects = unhandledEffects.toArray(new Hash[0]);
-        this.capturedHandlers = Collections.emptyMap();
     }
 
     /** True when this value carries a Path E full-body continuation
@@ -140,10 +125,6 @@ public final class MezzeSuspend implements TruffleObject {
         return unhandledEffectsSet;
     }
 
-    public Map<Hash, Object> getCapturedHandlers() {
-        return capturedHandlers;
-    }
-
     public boolean hasUnhandledEffect(Hash effectHash) {
         for (Hash effect : unhandledEffects) {
             if (effect.equals(effectHash)) {
@@ -158,13 +139,6 @@ public final class MezzeSuspend implements TruffleObject {
      */
     public boolean isFullyHandled() {
         return unhandledEffects.length == 0;
-    }
-
-    /**
-     * Get the effect name from the underlying thunk.
-     */
-    public String getEffectName() {
-        return computation.getEffectName();
     }
 
     /**
@@ -213,20 +187,17 @@ public final class MezzeSuspend implements TruffleObject {
             // unevaluated MezzeSuspend leaks back to the caller.
             return forceWithoutFiber(callNode);
         }
-        if (computation.isDeferredEffectCall()) {
-            // Forward the effect content hash so the dispatcher can
-            // disambiguate when two effects in scope declare an op with
-            // the same simple name (#246). Dropping it here would silently
-            // misroute on force, reintroducing the bug for any op that
-            // was deferred outside a perform and forced inside one.
-            return fiber.suspend(new com.mezze.interpreter.nodes.continuation.OpCall(
-                computation.getOperationName(),
-                computation.getArguments(),
-                computation.getEffectContentHash()
-            ));
-        }
-        // Regular function thunk — no effect to dispatch, just execute.
-        return computation.execute(callNode);
+        // MezzeThunk always represents a deferred op-call now.
+        // Forward the effect content hash so the dispatcher can
+        // disambiguate when two effects in scope declare an op with
+        // the same simple name (#246). Dropping it here would silently
+        // misroute on force, reintroducing the bug for any op that
+        // was deferred outside a perform and forced inside one.
+        return fiber.suspend(new com.mezze.interpreter.nodes.continuation.OpCall(
+            computation.getOperationName(),
+            computation.getArguments(),
+            computation.getEffectContentHash()
+        ));
     }
 
     /**
@@ -281,9 +252,6 @@ public final class MezzeSuspend implements TruffleObject {
 
     @TruffleBoundary
     private Object forceWithoutFiber(IndirectCallNode callNode) {
-        if (!computation.isDeferredEffectCall()) {
-            return this;
-        }
         com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain =
             com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChainEntries();
         if (chain.length == 0) {

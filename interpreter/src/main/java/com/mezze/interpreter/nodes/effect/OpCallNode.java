@@ -464,7 +464,7 @@ public final class OpCallNode extends MezzeNode {
 
     @TruffleBoundary
     private MezzeSuspend createSuspended(Object args) {
-        MezzeThunk thunk = new MezzeThunk(/* effectName */ null, operationName, args, effectHash);
+        MezzeThunk thunk = new MezzeThunk(operationName, args, effectHash);
         return new MezzeSuspend(thunk, Collections.singleton(effectHash));
     }
 }
