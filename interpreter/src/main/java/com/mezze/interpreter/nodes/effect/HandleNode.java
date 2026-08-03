@@ -250,17 +250,16 @@ public final class HandleNode extends MezzeNode {
             return runMarker(handler, frame);
         }
 
-        // Path E (#336) lazy branch: when MEZZE_LAZY_EFFECTS=1 AND the
-        // typechecker stamped this Handle as NOT fully-discharging, don't
-        // run body. Capture (bodyNode, frame, chain-with-this-handler-pushed)
-        // as a MezzeSuspend. Force under a wider chain will resume execution.
+        // Path E (#336) lazy branch: when the typechecker stamped this
+        // Handle as NOT fully-discharging, don't run body. Capture
+        // (bodyNode, frame, chain-with-this-handler-pushed) as a
+        // MezzeSuspend. Force under a wider chain will resume execution.
         //
         // pendingEffects is currently unknown at this level — the typechecker
         // knows but hasn't threaded it down. Use singleton(effectHash) as a
-        // conservative marker "at least this Handle contributes"; Phase 2's
-        // force() will discover actual pending effects when body re-runs.
-        if (com.mezze.interpreter.runtime.MezzeLanguage.LAZY_EFFECTS_ENABLED
-                && !staticallyFullyDischarges) {
+        // conservative marker "at least this Handle contributes"; force()
+        // will discover actual pending effects when body re-runs.
+        if (!staticallyFullyDischarges) {
             com.oracle.truffle.api.frame.MaterializedFrame materialized = frame.materialize();
             // Snapshot chain BEFORE pushing this handler — the snapshot
             // represents "what was installed at the enclosing scope."
@@ -291,8 +290,7 @@ public final class HandleNode extends MezzeNode {
         // must complete to a ground value. The chain must be re-installed
         // around the force call because EffectHandlerDriver.run popped it
         // on its own finally.
-        if (com.mezze.interpreter.runtime.MezzeLanguage.LAZY_EFFECTS_ENABLED
-                && staticallyFullyDischarges
+        if (staticallyFullyDischarges
                 && result instanceof com.mezze.interpreter.values.MezzeSuspend s) {
             com.mezze.interpreter.nodes.continuation.EffectFiber.pushHandlerOnChain(
                 handler, effectHash);

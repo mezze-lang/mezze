@@ -169,31 +169,12 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL_YIELD"));
 
     // Path E — lazy-until-fully-discharged effect runtime (task #336).
-    // When on, HandleNode's lazy path builds a MezzeSuspend carrying the
-    // whole body continuation (bodyNode + frame + chain snapshot) instead of
-    // eagerly running the body and losing the continuation at first
-    // unhandled op. Force is atomic — merges chains, runs body inline on
-    // caller thread, no fiber. Independent of BDSL flags: the Path E runtime
-    // is language-level, not codegen-level.
-    //
-    // Phase 4 (2026-07-23) flipped default ON. Opt-out via MEZZE_LAZY_EFFECTS=0
-    // or MEZZE_LEGACY_SUSPENDED=1 for one release cycle while any surprising
-    // interactions are debugged. Full test matrix at flip time:
-    //   - baseline / no gates:                5302/5302 pass
-    //   - MEZZE_LAZY_EFFECTS=1 alone:         5302/5302 pass (Path E on AST path)
-    //   - MEZZE_BDSL + MEZZE_BDSL_YIELD:      5299/5302 (D8 known-3 unchanged; BDSL codegen bypasses HandleNode)
-    //   - all three gates:                    5299/5302 (Path E orthogonal to BDSL D8)
-    public static final boolean LAZY_EFFECTS_ENABLED = computeLazyEffectsDefault();
-
-    private static boolean computeLazyEffectsDefault() {
-        // Explicit off wins: MEZZE_LAZY_EFFECTS=0/false OR MEZZE_LEGACY_SUSPENDED=1.
-        String off = System.getenv("MEZZE_LAZY_EFFECTS");
-        if ("0".equals(off) || "false".equalsIgnoreCase(off)) return false;
-        String legacy = System.getenv("MEZZE_LEGACY_SUSPENDED");
-        if (legacy != null && !"0".equals(legacy) && !"false".equalsIgnoreCase(legacy)) return false;
-        // Default: on.
-        return true;
-    }
+    // HandleNode's lazy path builds a MezzeSuspend carrying the whole body
+    // continuation (bodyNode + frame + chain snapshot) instead of eagerly
+    // running the body and losing the continuation at first unhandled op.
+    // Force is atomic — merges chains, runs body inline on caller thread,
+    // no fiber. Landed 2026-07-23 as always-on; #341 will delete the
+    // remaining legacy MezzeSuspend shape.
     private static final boolean BDSL_STATS =
             System.getenv("MEZZE_BDSL_STATS") != null
                 && !"0".equals(System.getenv("MEZZE_BDSL_STATS"))

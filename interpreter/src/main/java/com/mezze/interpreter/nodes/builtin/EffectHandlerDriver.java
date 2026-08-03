@@ -97,9 +97,6 @@ public final class EffectHandlerDriver {
      * <p>Extends AbstractTruffleException so BDSL's TryCatchOtherwise catches
      * it, mirroring how AbortPerformException works.
      *
-     * <p>Gated by env var MEZZE_LAZY_EFFECTS — under the legacy runtime the
-     * old {@link #makeUnhandledSuspended} path builds a MezzeThunk-wrapped
-     * single-op MezzeSuspend instead.
      */
     public static final class SuspensionRequested extends com.oracle.truffle.api.exception.AbstractTruffleException {
         public final com.mezze.language.typedast.Hash effectHash;

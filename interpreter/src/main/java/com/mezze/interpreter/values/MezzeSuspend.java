@@ -33,9 +33,11 @@ import java.util.Set;
  */
 public final class MezzeSuspend implements TruffleObject {
 
-    // ----- Legacy shape (pre-Path-E, still active when MEZZE_LAZY_EFFECTS is off).
-    // Discriminator: `computation != null` → legacy shape. force() dispatches
-    // via MezzeThunk (single-op deferred call or ComposedBlockThunk).
+    // ----- Legacy shape (pre-Path-E). Discriminator: `computation != null` →
+    // legacy shape. force() dispatches via MezzeThunk (single-op deferred
+    // call or ComposedBlockThunk). Slated for deletion under #341 once
+    // remaining callers (OpCallNode, EffectHandlerDriver, BdslYieldDispatch)
+    // are migrated to captureContinuation.
 
     @CompilationFinal
     private final MezzeThunk computation;

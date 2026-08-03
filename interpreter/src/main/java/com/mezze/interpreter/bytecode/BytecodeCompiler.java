@@ -378,8 +378,7 @@ public final class BytecodeCompiler {
             // pattern doesn't support that (would need a MakeSuspended op
             // capturing bodyNode as a sub-CallTarget). Fallback is small
             // perf loss, correct semantics.
-            if (com.mezze.interpreter.runtime.MezzeLanguage.LAZY_EFFECTS_ENABLED
-                    && !h.getStaticallyFullyDischarges()) {
+            if (!h.getStaticallyFullyDischarges()) {
                 markReject(node, "partial-handle-under-lazy-effects");
                 return false;
             }
@@ -2043,10 +2042,10 @@ public final class BytecodeCompiler {
         // so a lazy MezzeSuspend flowing out of body — e.g. from a
         // top-level `let x = effectful{}` — is forced under this Handle's
         // installed chain before the Pop. supports() rejects partial-
-        // discharging Handles under LAZY, so every BDSL Handle here IS
-        // fully-discharging and safe to force unconditionally.
+        // discharging Handles, so every BDSL Handle here IS fully-
+        // discharging and safe to force unconditionally.
         b.beginStoreLocal(resultSlot);
-        if (isOutermost && com.mezze.interpreter.runtime.MezzeLanguage.LAZY_EFFECTS_ENABLED) {
+        if (isOutermost) {
             b.beginAutoForceIfSuspended();
             emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
             b.endAutoForceIfSuspended();
