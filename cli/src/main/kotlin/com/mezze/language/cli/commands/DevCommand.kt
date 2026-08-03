@@ -22,7 +22,7 @@ class DevCommand {
          * Dev instrumentation flags forwarded to RuntimeServer as args.
          * It parses them via DevFlags.parse before building the Engine.
          */
-        private val DEV_FLAGS_BOOLEAN = setOf(
+        internal val DEV_FLAGS_BOOLEAN = setOf(
             "--inspect", "--inspect-brk",
             "--dap", "--dap-brk",
             "--profile", "--coverage", "--allocations", "--trace-jit",

@@ -3,23 +3,29 @@ package com.mezze.language.cli.commands
 import java.io.File
 
 /**
- * `mez exec [app_name]` — one-shot execution of the project's app.
+ * `mez exec [app_name | script.mz]` — one-shot execution.
  *
- * Same fast execution path as `mez dev` (JIT-on Truffle, in-process),
- * but exits after a single run instead of starting the file watcher.
- * No `dist/` artifacts are produced.
+ * Two modes:
  *
- * App selection mirrors `mez dev`:
- * - default: first `[[app]]` entry in `Mezze.toml`
- * - positional: `mez exec foo`
- * - flag form: `mez exec --app foo` or `mez exec --app=foo`
+ * 1. **Project mode** — `Mezze.toml` present in cwd. Same fast execution
+ *    path as `mez dev` (JIT-on Truffle, in-process), but exits after a
+ *    single run instead of starting the file watcher. No `dist/` output.
+ *    App selection:
+ *      - default: first `[[app]]` entry in `Mezze.toml`
+ *      - positional: `mez exec foo`
+ *      - flag form: `mez exec --app foo` or `mez exec --app=foo`
  *
- * Implementation note: we forward to `DevCommand` with `--no-watch`
- * forced on. The wire-protocol path inside `DevCommand` does exactly
- * what `exec` needs (load → typecheck → lower → execute → exit), so
- * `ExecCommand` is a thin shell that normalises the app-name argument.
+ * 2. **Standalone script mode** (#276) — positional is a path to a
+ *    `.mz` file. Runs that file directly with no project setup: entry
+ *    `main`, module name derived from the file stem. Works from any
+ *    directory, including with an absolute path. Skips manifest loading
+ *    entirely.
  *
- * #213
+ * The project-mode path forwards to `DevCommand` with `--no-watch`.
+ * Standalone-script mode calls `WireRunner.execOnce` directly since
+ * `DevCommand` requires a `Mezze.toml`.
+ *
+ * #213, #276
  */
 class ExecCommand {
 
@@ -32,15 +38,22 @@ class ExecCommand {
         val mezArgs = if (sepIdx >= 0) args.subList(0, sepIdx) else args
         val userArgs = if (sepIdx >= 0) args.subList(sepIdx + 1, args.size) else emptyList()
 
-        // Dev-only flags (--inspect, --profile, etc.) are rejected by
-        // DevCommand; no need to filter them here.
-        //
-        // Normalise the bare positional `mez exec foo` into the `--app=foo`
-        // form DevCommand already understands. A positional is anything
-        // that isn't a flag and isn't already consumed by `--app`.
         val hasAppFlag = mezArgs.any { it == "--app" || it.startsWith("--app=") }
         val positional = if (!hasAppFlag) mezArgs.firstOrNull { !it.startsWith("-") } else null
 
+        // Standalone-script mode: positional refers to an existing .mz
+        // file. Resolve relative to cwd. This wins over project mode
+        // even if a Mezze.toml is present — an explicit script path is
+        // an explicit intent to run that file.
+        if (positional != null) {
+            val scriptFile = resolveScript(positional, currentDir)
+            if (scriptFile != null) {
+                runStandalone(scriptFile, mezArgs, userArgs)
+                return
+            }
+        }
+
+        // Project mode: forward to DevCommand.
         val forwarded = buildList {
             if (positional != null) add("--app=$positional")
             for (a in mezArgs) {
@@ -51,5 +64,38 @@ class ExecCommand {
         }
 
         DevCommand().execute(forwarded, currentDir, appArgs = userArgs)
+    }
+
+    /** Return the file iff [arg] names an existing `.mz` file we can run
+     *  as a standalone script. Absolute paths pass through unchanged;
+     *  bare paths resolve against [currentDir]. */
+    private fun resolveScript(arg: String, currentDir: File): File? {
+        if (!arg.endsWith(".mz")) return null
+        val f = if (File(arg).isAbsolute) File(arg) else File(currentDir, arg)
+        return if (f.isFile) f.canonicalFile else null
+    }
+
+    private fun runStandalone(scriptFile: File, mezArgs: List<String>, userArgs: List<String>) {
+        val devFlags = mezArgs.filter {
+            it in DevCommand.DEV_FLAGS_BOOLEAN
+                || it.startsWith("--insight=")
+                || it.startsWith("--dap=")
+        }
+        // Synthesize project fields: use the parent dir as project root
+        // (that's where any `.mz/` cache directory will live) and the
+        // file stem as both module path and app name. `entry` is always
+        // `main` — a standalone script has no way to declare otherwise.
+        val projectDir = scriptFile.parentFile ?: File(".")
+        val stem = scriptFile.nameWithoutExtension
+        val exit = WireRunner.execOnce(
+            currentDir = projectDir,
+            appFile = scriptFile,
+            entryName = "main",
+            modulePath = stem,
+            appName = stem,
+            devFlags = devFlags,
+            appArgs = userArgs,
+        )
+        kotlin.system.exitProcess(exit)
     }
 }
