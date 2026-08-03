@@ -1,7 +1,5 @@
 package com.mezze.interpreter.runtime;
 
-import com.mezze.interpreter.effects.EffectRegistry;
-import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.TruffleLanguage.Env;
@@ -11,7 +9,6 @@ import com.oracle.truffle.api.nodes.Node;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -331,134 +328,6 @@ public final class MezzeContext {
     @TruffleBoundary
     public Object lookupScopeVar(String name) {
         return scopeVars.get(name);
-    }
-
-    // ========================
-    // Ability Implementations
-    // ========================
-
-    // Content hash → impl record (for O(1) lookup by hash)
-    private final ConcurrentHashMap<Hash, Object> abilityImplsByHash = new ConcurrentHashMap<>();
-
-    /**
-     * Register an ability implementation by content hash.
-     */
-    @TruffleBoundary
-    public void registerAbilityImplByHash(Hash contentHash, Object implRecord) {
-        abilityImplsByHash.put(contentHash, implRecord);
-    }
-
-    /**
-     * Look up an ability implementation by content hash.
-     * Returns null if not found.
-     */
-    @TruffleBoundary
-    public Object getAbilityImplByHash(Hash contentHash) {
-        return abilityImplsByHash.get(contentHash);
-    }
-
-    // ========================
-    // Effect Performer Registry
-    // ========================
-
-    // Effect name → set of performer names that handle it
-    // e.g., "Log" → {"Console", "FileLogger"}
-    private final ConcurrentHashMap<String, Set<String>> effectToPerformers = new ConcurrentHashMap<>();
-
-    // Performer name → effect name (bidirectional mapping)
-    // e.g., "Console" → "Log", "ToResult" → "Exception"
-    private final ConcurrentHashMap<String, String> performerToEffect = new ConcurrentHashMap<>();
-
-    // Global effects registry (effect name → effect record)
-    private final ConcurrentHashMap<String, Object> globalEffects = new ConcurrentHashMap<>();
-
-    /**
-     * Get the global effect registry for bidirectional performer-effect lookups.
-     * This is the centralized registry that provides O(1) lookups in both directions.
-     */
-    public EffectRegistry getEffectRegistry() {
-        return EffectRegistry.getInstance();
-    }
-
-    /**
-     * Register a performer as handling an effect.
-     * Updates both forward and inverted indexes for O(1) bidirectional lookup.
-     * e.g., registerPerformer("Console", "Log") means Console implements Log
-     */
-    @TruffleBoundary
-    public void registerPerformer(String performerName, String effectName) {
-        // Update forward mapping (performer -> effect)
-        performerToEffect.put(performerName, effectName);
-
-        // Update inverted index (effect -> performers)
-        effectToPerformers.computeIfAbsent(effectName, k -> ConcurrentHashMap.newKeySet())
-            .add(performerName);
-
-        // Also register in global EffectRegistry
-        getEffectRegistry().registerPerformer(performerName, effectName);
-    }
-
-    /**
-     * Get the effect that a performer implements.
-     * O(1) lookup via forward mapping.
-     *
-     * @param performerName The performer name (e.g., "Console")
-     * @return The effect name (e.g., "Log"), or null if performer not registered
-     */
-    @TruffleBoundary
-    public String getEffectForPerformer(String performerName) {
-        return performerToEffect.get(performerName);
-    }
-
-    /**
-     * Get all performers that implement a given effect.
-     * O(1) lookup via inverted index.
-     *
-     * @param effectName The effect name (e.g., "Log")
-     * @return Set of performer names (never null, may be empty)
-     */
-    @TruffleBoundary
-    public Set<String> getPerformersForEffect(String effectName) {
-        Set<String> performers = effectToPerformers.get(effectName);
-        return performers != null ? performers : Set.of();
-    }
-
-    /**
-     * Check if a performer handles a specific effect.
-     */
-    @TruffleBoundary
-    public boolean performerHandlesEffect(String performerName, String effectName) {
-        String effect = performerToEffect.get(performerName);
-        return effect != null && effect.equals(effectName);
-    }
-
-    /**
-     * Register a global effect declaration.
-     */
-    @TruffleBoundary
-    public void registerEffect(String effectName, Object effectRecord) {
-        globalEffects.put(effectName, effectRecord);
-
-        // Also register in global EffectRegistry if it's a MezzeRecord
-        if (effectRecord instanceof MezzeRecord record) {
-            getEffectRegistry().registerEffect(effectName, record);
-        }
-    }
-
-    /**
-     * Get a global effect declaration.
-     */
-    @TruffleBoundary
-    public Object getEffect(String effectName) {
-        return globalEffects.get(effectName);
-    }
-
-    /**
-     * Check if an effect is registered.
-     */
-    @TruffleBoundary
-    public boolean hasEffect(String effectName) {
-        return globalEffects.containsKey(effectName);
     }
 
     // ========================
