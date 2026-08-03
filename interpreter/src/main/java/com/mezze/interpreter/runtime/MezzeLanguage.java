@@ -212,6 +212,17 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                         }
                         System.err.println();
                     }
+                    if (crash > 0) {
+                        var top = com.mezze.interpreter.bytecode.BytecodeCompiler.getCrashCounts();
+                        int i = 0;
+                        System.err.print("[BDSL] top emit-crash reasons: ");
+                        for (var e : top.entrySet()) {
+                            if (i++ >= 10) break;
+                            if (i > 1) System.err.print(", ");
+                            System.err.print(e.getKey() + "=" + e.getValue());
+                        }
+                        System.err.println();
+                    }
                 }
             }, "bdsl-stats"));
         }
@@ -270,7 +281,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                     System.err.println("[BDSL] emit failed for " + ir.getName() + ": " + t);
                 }
                 bdslMisses.incrementAndGet();
-                if (BDSL_STATS) GLOBAL_BDSL_MISS_CRASH.incrementAndGet();
+                if (BDSL_STATS) {
+                    GLOBAL_BDSL_MISS_CRASH.incrementAndGet();
+                    com.mezze.interpreter.bytecode.BytecodeCompiler.noteCrash(t);
+                }
             }
         }
         return astCompiler.compile(ir);

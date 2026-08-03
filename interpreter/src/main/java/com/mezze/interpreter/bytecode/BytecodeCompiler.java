@@ -326,6 +326,29 @@ public final class BytecodeCompiler {
         return out;
     }
 
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>
+            CRASH_COUNTS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Bucket an emit-time throwable by its simple class name so
+     *  MEZZE_BDSL_STATS shutdown-print can surface which crashes are
+     *  hitting the most functions. Called from MezzeLanguage.compileOne
+     *  when bdsl.compile(ir) throws. */
+    public static void noteCrash(Throwable t) {
+        if (!STATS_ENABLED || t == null) return;
+        String key = t.getClass().getSimpleName();
+        if (key == null || key.isEmpty()) key = t.getClass().getName();
+        CRASH_COUNTS.computeIfAbsent(key, k -> new java.util.concurrent.atomic.AtomicLong())
+                .incrementAndGet();
+    }
+
+    public static java.util.Map<String, Long> getCrashCounts() {
+        var out = new java.util.LinkedHashMap<String, Long>();
+        CRASH_COUNTS.entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue().get(), a.getValue().get()))
+                .forEach(e -> out.put(e.getKey(), e.getValue().get()));
+        return out;
+    }
+
     private static void markReject(NodeIR node, String extra) {
         if (!STATS_ENABLED) return;
         // Only capture the FIRST (deepest) rejection so we know the actual
