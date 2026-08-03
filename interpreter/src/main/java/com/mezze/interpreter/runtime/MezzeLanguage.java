@@ -158,15 +158,21 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 && !"0".equals(System.getenv("MEZZE_CPS"))
                 && !"false".equalsIgnoreCase(System.getenv("MEZZE_CPS"));
 
-    // Path D routing (docs/perf/bdsl-effects-path-d-2026-07.md) — opt-in
-    // via MEZZE_BDSL_YIELD env var. When on, BytecodeCompiler emits a BDSL
-    // Yield op at every PerformOpIR site (bytecode-native suspend), and the
-    // driver catches ContinuationResult on return. Requires MEZZE_BDSL=1
-    // to have any effect. Off by default; will flip in Phase D5.
-    public static final boolean BDSL_YIELD_ENABLED =
-            System.getenv("MEZZE_BDSL_YIELD") != null
-                && !"0".equals(System.getenv("MEZZE_BDSL_YIELD"))
-                && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL_YIELD"));
+    // Path D routing (docs/perf/bdsl-effects-path-d-2026-07.md) — default-on
+    // 2026-08-03 (empirical 5372/5373 tests pass; the one failure is the
+    // pre-existing DAP pause socket-timeout flake, unchanged from yield-off).
+    // When on, BytecodeCompiler emits a BDSL PerformD op that dispatches
+    // the effect directly against the thread's handler chain — no Loom
+    // fiber, no reflection. Requires MEZZE_BDSL=1 to have any effect
+    // (which is default-on too). Opt out via MEZZE_BDSL_YIELD=0/false —
+    // kept as an escape hatch until #333 deletes the Loom EffectFiber path.
+    public static final boolean BDSL_YIELD_ENABLED = computeBdslYieldDefault();
+
+    private static boolean computeBdslYieldDefault() {
+        String v = System.getenv("MEZZE_BDSL_YIELD");
+        if ("0".equals(v) || "false".equalsIgnoreCase(v)) return false;
+        return true;
+    }
 
     // Path E — lazy-until-fully-discharged effect runtime (task #336).
     // HandleNode's lazy path builds a MezzeSuspend carrying the whole body
