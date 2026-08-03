@@ -212,16 +212,35 @@ public final class FrameSlotResolver {
         // table (both real locals and the param-shadow entries emitted by
         // BytecodeCompiler in debug mode). Consult it before falling back
         // to the FrameDescriptor scan (AST path).
-        if (bytecodeNode != null && bci >= 0) {
-            int count = bytecodeNode.getLocalCount(bci);
-            for (int i = 0; i < count; i++) {
-                Object nm = bytecodeNode.getLocalName(bci, i);
-                if (nm instanceof String s && name.equals(s)) {
-                    try {
-                        Object v = bytecodeNode.getLocalValue(bci, frame, i);
-                        return v == null ? "<uninitialized>" : v;
-                    } catch (Throwable t) {
-                        // Fall through to FrameDescriptor scan.
+        if (bytecodeNode != null) {
+            // #359 — Use the STATIC local list (getLocals()); each entry
+            // reports the (start, end) bci range where it is live. Read
+            // the value at ANY bci within that range — the frame slot
+            // holds the same value regardless of which live bci we read
+            // from, and the debugger's paused frame keeps it valid.
+            // We can't rely on `bci` being valid (the stored-bci frame
+            // slot is often uninitialized when the debugger materializes
+            // the frame), so we pick a bci from the local's own range.
+            var locals = bytecodeNode.getLocals();
+            if (locals != null) {
+                for (int i = 0; i < locals.size(); i++) {
+                    var lv = locals.get(i);
+                    Object nm = lv.getName();
+                    if (nm instanceof String s && name.equals(s)) {
+                        int offset = lv.getLocalOffset();
+                        int start = lv.getStartIndex();
+                        int end = lv.getEndIndex();
+                        // Use the caller's bci if it's inside this local's
+                        // live range; otherwise fall back to the local's
+                        // own start bci (frame slot holds the same value
+                        // regardless of which live bci we read from).
+                        int useBci = (bci >= start && bci < end) ? bci : start;
+                        try {
+                            Object v = bytecodeNode.getLocalValue(useBci, frame, offset);
+                            if (v != null) return v;
+                        } catch (Throwable t) {
+                            // Try other entries with the same name (shadowed).
+                        }
                     }
                 }
             }

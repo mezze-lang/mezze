@@ -849,6 +849,44 @@ public final class BytecodeCompiler {
                 localMap[i] = b.createLocal(name, null);
             }
 
+            // #359 — when a debugger is attached (debug=true), allocate
+            // shadow named BDSL locals for each capture + param and
+            // copy the arg into the shadow at function entry. BDSL body
+            // emit still reads LoadArgument(i) for these — the shadow
+            // is write-only from body's perspective, so no runtime cost
+            // after entry. Makes params/captures visible in the DAP
+            // Locals scope alongside the user's `let` locals.
+            //
+            // Safe under the DEBUG_EPOCH cache-invalidation machinery
+            // in MezzeLanguage.compileOne — flag flips clear all
+            // caches so we never mix debug/non-debug CallTargets.
+            java.util.List<String> paramNamesIR = ir.getParamNames();
+            java.util.List<String> captureNamesIR = ir.getCaptureNames();
+            if (debug) {
+                BytecodeLocal[] captureShadows = new BytecodeLocal[captureCount];
+                for (int i = 0; i < captureCount; i++) {
+                    String name = (i < captureNamesIR.size())
+                            ? captureNamesIR.get(i) : ("_capture_" + i);
+                    captureShadows[i] = b.createLocal(name, null);
+                }
+                BytecodeLocal[] paramShadows = new BytecodeLocal[paramCount];
+                for (int i = 0; i < paramCount; i++) {
+                    String name = (i < paramNamesIR.size())
+                            ? paramNamesIR.get(i) : ("_param_" + i);
+                    paramShadows[i] = b.createLocal(name, null);
+                }
+                for (int i = 0; i < captureCount; i++) {
+                    b.beginStoreLocal(captureShadows[i]);
+                    b.emitLoadArgument(i);
+                    b.endStoreLocal();
+                }
+                for (int i = 0; i < paramCount; i++) {
+                    b.beginStoreLocal(paramShadows[i]);
+                    b.emitLoadArgument(captureCount + i);
+                    b.endStoreLocal();
+                }
+            }
+
             // #361 — wrap body in TryCatch(SuspendedInBlockException).
             // On catch, extract the MezzeSuspend via UnwrapSuspendedInBlock
             // and return it as the fn's result. The exception is thrown by

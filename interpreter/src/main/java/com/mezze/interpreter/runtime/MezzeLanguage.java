@@ -859,6 +859,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             // iterateFrames didn't work because the debug inline-eval
             // doesn't put a real Mezze frame on the runtime stack —
             // the paused frame is passed as our arg.
+            // #359 — resolve the BytecodeNode of the enclosing BDSL
+            // root. getBytecodeIndex(frame) reads the bci from a
+            // frame slot (storeBytecodeIndexInFrame=true stores it
+            // at safe points), but the debugger-materialized frame
+            // may not populate that slot — pass bci=-1 to
+            // FrameSlotResolver, which then reads locals via the
+            // static getLocals() list and each local's own liveness
+            // start bci (invariant within a scope).
             com.oracle.truffle.api.bytecode.BytecodeNode bn = null;
             int bci = -1;
             com.oracle.truffle.api.nodes.RootNode rn = getRootNode();
@@ -868,14 +876,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                     try {
                         bci = bn.getBytecodeIndex(frame);
                     } catch (Throwable t) {
-                        bn = null;
+                        bci = -1; // no valid bci; FrameSlotResolver falls
+                                  // back to the local's own startIndex
                     }
                 }
                 // Sub-root fallback: our ExecutableNode may be adopted
                 // under a wrapper root that doesn't hold the executing
-                // bytecode. Walk the RootNodes collection and try each
-                // — the one whose bci resolves against our frame is
-                // the actual executing one.
+                // bytecode. Walk the RootNodes collection and try each.
                 if (bn == null) {
                     try {
                         var roots = brn.getRootNodes();
@@ -888,7 +895,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                                     int localBci;
                                     try {
                                         localBci = candidate.getBytecodeIndex(frame);
-                                    } catch (Throwable t) { continue; }
+                                    } catch (Throwable t) { localBci = 0; }
                                     if (localBci >= 0) {
                                         bn = candidate;
                                         bci = localBci;

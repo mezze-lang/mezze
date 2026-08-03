@@ -1,10 +1,13 @@
 package com.mezze.interpreter
 
+import com.mezze.interpreter.runtime.MezzeLanguage
 import com.mezze.interpreter.standalone.DapWire
 import com.mezze.interpreter.standalone.GraalDapBridge
 import com.mezze.interpreter.standalone.MezzeDapServer
 import org.graalvm.polyglot.Context
 import org.graalvm.polyglot.Source
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import java.io.BufferedInputStream
@@ -27,6 +30,20 @@ import kotlin.test.assertTrue
 class DapEndToEndTest {
 
     private val clientSeq = AtomicInteger(1)
+
+    // #359 — enable BDSL debug shape per-test. The DEBUG_EPOCH mechanism
+    // in MezzeLanguage (9e6ac18f6) clears CallTarget caches on flag flip
+    // so this doesn't poison subsequent tests. Companion @AfterEach
+    // disables + bumps back so non-debug tests get non-debug shape.
+    @BeforeEach
+    fun enableBdslDebug() {
+        MezzeLanguage.enableBdslDebugInstrumentation()
+    }
+
+    @AfterEach
+    fun disableBdslDebug() {
+        MezzeLanguage.disableBdslDebugInstrumentationForTest()
+    }
 
     @Test
     @Timeout(60)

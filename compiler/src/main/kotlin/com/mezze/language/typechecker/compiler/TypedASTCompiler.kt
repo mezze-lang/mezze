@@ -71,6 +71,16 @@ class TypedASTCompiler(
     /** Local variable name → slot index (current scope) */
     private val localsByName = mutableMapOf<String, Int>()
 
+    /** #359 — persistent slot → name map for the currently-compiling
+     *  FunctionIR. Populated by allocLocal/forceAllocLocal every time a
+     *  slot is minted. Unlike localsByName (which gets cleared as
+     *  block/match scopes exit), this survives to compileFunctionBody's
+     *  localNames construction so BDSL emit can pass real source names
+     *  (`t1`, `t2`) to createLocal instead of `local_$i` placeholders.
+     *  Reset at compileFunctionBody entry.
+     */
+    private val slotToNameForCurrentFn = mutableMapOf<Int, String>()
+
     /** Scope stack for nested match bindings: each entry maps name → slot */
     private val scopeStack = ArrayDeque<MutableMap<String, Int>>()
 
@@ -722,6 +732,8 @@ class TypedASTCompiler(
         currentCaptureCount = captureCount
         nextLocalSlot = captureCount + allParamNames.size
         localsByName.clear()
+        val prevSlotToName = slotToNameForCurrentFn.toMap()
+        slotToNameForCurrentFn.clear()
         currentParamNames = allParamNames
         // Note: currentCaptureNames is set by compileLambda BEFORE calling this.
         // For non-lambda functions (called from compileLetDecl), it should be empty.
@@ -734,9 +746,20 @@ class TypedASTCompiler(
         val paramNames = allParamNames
         val localCount = nextLocalSlot - captureCount - allParamNames.size
         val localSlots = (0 until localCount).map { SlotKind.OBJECT }
+        // #359 — pull names from slotToNameForCurrentFn (populated by
+        // allocLocal at slot mint time, persists across block-scope
+        // clears of localsByName). Falls through to localsByName if
+        // some path bypasses allocLocal, then final fallback to
+        // local_$i placeholder.
         val localNames = (0 until localCount).map { i ->
-            localsByName.entries.find { it.value == captureCount + allParamNames.size + i }?.key ?: "local_$i"
+            val slot = captureCount + allParamNames.size + i
+            slotToNameForCurrentFn[slot]
+                ?: localsByName.entries.find { it.value == slot }?.key
+                ?: "local_$i"
         }
+        // Restore parent fn's slot-name map (nested lambdas save/restore).
+        slotToNameForCurrentFn.clear()
+        slotToNameForCurrentFn.putAll(prevSlotToName)
 
         // Restore state
         currentParamCount = prevParamCount
@@ -2515,6 +2538,7 @@ class TypedASTCompiler(
         localsByName[name]?.let { return it }
         val slot = nextLocalSlot++
         localsByName[name] = slot
+        slotToNameForCurrentFn.putIfAbsent(slot, name)
         return slot
     }
 
@@ -2522,6 +2546,7 @@ class TypedASTCompiler(
     private fun forceAllocLocal(name: String): Int {
         val slot = nextLocalSlot++
         localsByName[name] = slot  // overwrites existing entry
+        slotToNameForCurrentFn.putIfAbsent(slot, name)
         return slot
     }
 

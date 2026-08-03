@@ -113,7 +113,13 @@ import com.oracle.truffle.api.nodes.RootNode;
     enableUncachedInterpreter = true,
     enableYield = true,
     enableSerialization = true,
-    enableTagInstrumentation = true
+    enableTagInstrumentation = true,
+    // #359 — store bci in frame so debug-mode inline-eval executable
+    // nodes (FrameEvalNode) can call bytecodeNode.getBytecodeIndex(frame)
+    // to reach the enclosing bytecode's local table. Runtime cost is
+    // one extra frame slot per fn invocation (JIT specializes the write
+    // away in hot loops).
+    storeBytecodeIndexInFrame = true
 )
 /**
  * PROXY PROBE (Phase 0 finding follow-up): {@code DirectAddNode} is
