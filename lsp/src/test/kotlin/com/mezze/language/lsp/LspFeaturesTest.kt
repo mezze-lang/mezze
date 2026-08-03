@@ -276,10 +276,12 @@ class LspFeaturesTest {
     // Disabled for the same reason as the cross-module go-to-definition
     // test below: the LSP test JVM has no stdlib.sqlite on the classpath,
     // and any cross-module `use` chains through prelude setup which fails
-    // without stdlib. Verified manually against ~/.mezze/bin/mez (see
-    // /tmp/lsp-probe.py) — `use std::int::{min}` hover correctly shows
-    // "Return the smaller of two integers." (Int's doc) instead of Seq's
-    // "Returns the minimum element..." which was the buggy behavior.
+    // without stdlib. Verified manually against ~/.mezze/bin/mez —
+    // last re-verified 2026-08-03 with a Node-based LSP client against a
+    // scratch project doing `use std::int::{ add }`; hover on the `add`
+    // call returned the `Add two integers.` doc plus the type signature,
+    // confirming the 3-tier resolveDoc chain (parsedModule → cached
+    // imported module → on-disk store) still works. Task #182.
     @org.junit.jupiter.api.Disabled("requires stdlib on test classpath")
     @Test
     fun `hover on cross-module import resolves doc via cached parsed module`() {
