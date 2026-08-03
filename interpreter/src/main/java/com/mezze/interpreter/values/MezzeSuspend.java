@@ -109,10 +109,6 @@ public final class MezzeSuspend implements TruffleObject {
         return chainSnapshot;
     }
 
-    public MezzeThunk getComputation() {
-        return computation;
-    }
-
     public Set<Hash> getUnhandledEffects() {
         if (unhandledEffectsSet == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
@@ -139,13 +135,6 @@ public final class MezzeSuspend implements TruffleObject {
      */
     public boolean isFullyHandled() {
         return unhandledEffects.length == 0;
-    }
-
-    /**
-     * Get the operation name from the underlying thunk.
-     */
-    public String getOperationName() {
-        return computation.getOperationName();
     }
 
     /**

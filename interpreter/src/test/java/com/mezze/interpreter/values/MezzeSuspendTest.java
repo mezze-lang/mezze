@@ -85,7 +85,6 @@ class MezzeSuspendTest {
 
         MezzeSuspend suspended = new MezzeSuspend(thunk, effects);
 
-        assertEquals(thunk, suspended.getComputation());
         assertTrue(suspended.getUnhandledEffects().contains(hashOf("Log")));
     }
 
@@ -167,15 +166,6 @@ class MezzeSuspendTest {
         assertTrue(suspended.getUnhandledEffects().contains(hashOf("Log")));
         assertTrue(suspended.getUnhandledEffects().contains(hashOf("Random")));
         assertFalse(suspended.getUnhandledEffects().contains(hashOf("State")));
-    }
-
-    @Test
-    @DisplayName("MezzeSuspend getOperationName returns the operation from thunk")
-    void testSuspendedGetOperationName() {
-        MezzeThunk thunk = new MezzeThunk("get", MezzeRecord.empty(), hashOf("HTTP"));
-        MezzeSuspend suspended = new MezzeSuspend(thunk, Collections.singleton(hashOf("HTTP")));
-
-        assertEquals("get", suspended.getOperationName());
     }
 
     // ==================== Edge Cases ====================
