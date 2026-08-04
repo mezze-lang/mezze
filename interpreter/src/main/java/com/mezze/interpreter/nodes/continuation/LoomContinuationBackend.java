@@ -3,7 +3,7 @@ package com.mezze.interpreter.nodes.continuation;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 /**
- * {@link ContinuationBackend} implementation backed by
+ * Effect-suspend/resume primitive backed by
  * {@code jdk.internal.vm.Continuation} via {@link LoomSupport}.
  *
  * <p>Owns a {@code ContinuationScope} and a {@code Continuation}, both
@@ -11,13 +11,15 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
  * name the internal types at compile time.
  *
  * <p>Behaviour is a direct pass-through — no logic added over
- * {@link LoomSupport}. Task #333 tracks deleting this file together
+ * {@link LoomSupport}. Task #341 tracks deleting this file together
  * with {@link LoomSupport} once BDSL Yield covers 100% of the effect
- * surface (blocked on #384).
+ * surface.
  *
- * <p>Not thread-safe. See {@link ContinuationBackend}.
+ * <p>Not thread-safe. An instance is owned by the thread that created
+ * it; effect-fiber snapshots-and-reinstalls on spawn use a fresh
+ * instance on the child.
  */
-public final class LoomContinuationBackend implements ContinuationBackend {
+public final class LoomContinuationBackend {
 
     private final Object scope;
     private final Object continuation;
@@ -43,25 +45,17 @@ public final class LoomContinuationBackend implements ContinuationBackend {
         return scope;
     }
 
-    @Override
     @TruffleBoundary
     public void run() {
         LoomSupport.run(continuation);
     }
 
-    @Override
     @TruffleBoundary
     public boolean yield() {
         return LoomSupport.yield(scope);
     }
 
-    @Override
     public boolean isDone() {
         return LoomSupport.isDone(continuation);
-    }
-
-    @Override
-    public void close() {
-        // JVM handles Continuation cleanup on GC. Nothing to do.
     }
 }

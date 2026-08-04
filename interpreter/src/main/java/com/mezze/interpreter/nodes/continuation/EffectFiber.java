@@ -86,10 +86,13 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class EffectFiber {
 
-    // Continuation state — routed through the {@link ContinuationBackend}
-    // seam, whose sole implementation is {@link LoomContinuationBackend}.
-    // Null on dispatch-only fibers, which never suspend or resume.
-    @CompilationFinal final ContinuationBackend backend;
+    // Continuation state — Loom's jdk.internal.vm.Continuation via the
+    // {@link LoomContinuationBackend} reflective bridge. Null on
+    // dispatch-only fibers, which never suspend or resume. Task #341
+    // tracks removing Loom entirely once BDSL Yield covers all effect
+    // sites — the seam-interface {@code ContinuationBackend} was
+    // collapsed once Path C (its other implementer) was deleted.
+    @CompilationFinal final LoomContinuationBackend backend;
 
     private volatile Object suspendedValue;     // set by suspend(), read by runner
     private volatile Object resumeValue;        // set by runner, returned by suspend()
@@ -433,7 +436,7 @@ public final class EffectFiber {
         }
     }
 
-    private EffectFiber(ContinuationBackend backend) {
+    private EffectFiber(LoomContinuationBackend backend) {
         this.backend = backend;
     }
 
@@ -441,9 +444,10 @@ public final class EffectFiber {
      * Build a fiber whose body is the given Runnable. The body does not
      * execute until {@link #run()} is called.
      *
-     * <p>Backend is always the Loom-based one. The CPS backend (Path C)
-     * was superseded by Path D (BDSL Yield) and its code was deleted;
-     * see task #385.
+     * <p>Backend is Loom's jdk.internal.vm.Continuation. The CPS backend
+     * (Path C) was superseded by Path D (BDSL Yield) and deleted (#385);
+     * #341 tracks removing Loom entirely once BDSL Yield covers all
+     * effect sites.
      */
     @TruffleBoundary
     public static EffectFiber create(String name, Runnable body) {
