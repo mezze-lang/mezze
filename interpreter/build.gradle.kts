@@ -118,6 +118,10 @@ fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
     System.getenv("MEZZE_DEBUG_INLINE")?.let { environment("MEZZE_DEBUG_INLINE", it) }
     System.getenv("MEZZE_DISABLE_INLINE")?.let { environment("MEZZE_DISABLE_INLINE", it) }
     System.getenv("MEZZE_DISABLE_DSWIRE")?.let { environment("MEZZE_DISABLE_DSWIRE", it) }
+    // Diagnostic traces (task #384 investigation).
+    System.getenv("MEZZE_TRAMPOLINE_TRACE")?.let { environment("MEZZE_TRAMPOLINE_TRACE", it) }
+    System.getenv("MEZZE_INDIRECT_TRACE")?.let { environment("MEZZE_INDIRECT_TRACE", it) }
+    System.getenv("MEZZE_CALL_TRACE")?.let { environment("MEZZE_CALL_TRACE", it) }
     // Allow opt-in to Truffle JIT for perf measurement (bench task).
     System.getenv("MEZZE_JIT")?.let { environment("MEZZE_JIT", it) }
 
