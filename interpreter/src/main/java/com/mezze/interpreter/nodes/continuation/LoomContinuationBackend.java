@@ -11,8 +11,9 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
  * name the internal types at compile time.
  *
  * <p>Behaviour is a direct pass-through — no logic added over
- * {@link LoomSupport}. Path C Phase 3 deletes this file together with
- * {@link LoomSupport} once the CPS backend is the default.
+ * {@link LoomSupport}. Task #333 tracks deleting this file together
+ * with {@link LoomSupport} once BDSL Yield covers 100% of the effect
+ * surface (blocked on #384).
  *
  * <p>Not thread-safe. See {@link ContinuationBackend}.
  */

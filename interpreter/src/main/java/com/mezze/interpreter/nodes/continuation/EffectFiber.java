@@ -86,9 +86,9 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class EffectFiber {
 
-    // Continuation state — routed through a swappable backend since Phase 0
-    // of Path C (docs/perf/bdsl-effects-path-c-2026-07.md). Null on
-    // dispatch-only fibers, which never suspend or resume.
+    // Continuation state — routed through the {@link ContinuationBackend}
+    // seam, whose sole implementation is {@link LoomContinuationBackend}.
+    // Null on dispatch-only fibers, which never suspend or resume.
     @CompilationFinal final ContinuationBackend backend;
 
     private volatile Object suspendedValue;     // set by suspend(), read by runner
