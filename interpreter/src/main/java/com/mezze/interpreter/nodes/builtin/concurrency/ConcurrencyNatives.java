@@ -90,6 +90,26 @@ public final class ConcurrencyNatives {
     private static final AtomicLong globalVersion = new AtomicLong(0);
     private static final ReentrantLock commitLock = new ReentrantLock();
 
+    /**
+     * Clear this thread's STM ThreadLocals. Called from
+     * {@code MezzeLanguage.disposeThread} / {@code disposeContext} so
+     * residue from one Context can't corrupt the next one on the same
+     * JVM thread. #380: an interrupted STM transaction (test failure,
+     * uncaught exception, forced Context close) leaves
+     * {@code transactionNestingDepth &gt; 0} and a live
+     * {@code currentTransaction}; the next Context's stmBeginTransaction
+     * then treats itself as a nested no-op, and its commit skips the
+     * commit-lock path — writes silently drop. Reset per-thread on
+     * dispose keeps the process-wide JVM safe for sequential Mezze
+     * runs (mez dev watch, multi-test JVM, any host embedding).
+     */
+    public static void resetPerThreadStmState() {
+        currentTransaction.remove();
+        transactionNestingDepth.remove();
+        stmRetryPending.remove();
+        stmRetryReadSet.remove();
+    }
+
     @TruffleBoundary
     public static MezzeTVar tvarNew(MezzeRecord args) {
         Object init = getField(args, "init");

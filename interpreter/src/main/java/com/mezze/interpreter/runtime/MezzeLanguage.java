@@ -799,6 +799,33 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
+     * Truffle calls this when a thread leaves this context (Context.close
+     * or the thread's implicit leave). STM state is per-thread but stored
+     * in static ThreadLocals — without cleanup, ThreadLocal residue from
+     * one Context leaks into the next Context that reuses the same JVM
+     * thread. #380: an interrupted STM txn leaves nesting-depth &gt; 0, and
+     * the next Context's stmBegin then no-ops itself as "nested" while
+     * writes silently drop. Reset on leave, always.
+     */
+    @Override
+    protected void disposeThread(MezzeContext context, Thread thread) {
+        com.mezze.interpreter.nodes.builtin.concurrency.ConcurrencyNatives
+                .resetPerThreadStmState();
+    }
+
+    /**
+     * Belt-and-braces: also clear on context close for the calling
+     * thread. Truffle guarantees disposeThread is called for every
+     * thread that entered, but this is a cheap idempotent op and covers
+     * embedders that call close() without unwinding an aborted txn.
+     */
+    @Override
+    protected void disposeContext(MezzeContext context) {
+        com.mezze.interpreter.nodes.builtin.concurrency.ConcurrencyNatives
+                .resetPerThreadStmState();
+    }
+
+    /**
      * Inline eval in a suspended frame — the debugger's watch / conditional
      * breakpoint / logpoint path (DebugStackFrame.eval → parse(InlineParsingRequest)).
      * The regular parse() compiles a whole standalone module and can't see the
