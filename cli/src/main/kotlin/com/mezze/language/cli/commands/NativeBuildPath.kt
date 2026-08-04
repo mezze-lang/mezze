@@ -483,7 +483,7 @@ object NativeBuildPath {
         relativeTime: () -> Long,
     ): File {
         val out = File(stagingDir, "user-no-modpath-directives.jar")
-        stripJarEntries(jarFile, out, FAT_JAR_DIRECTIVES_TO_STRIP)
+        stripJarEntries(jarFile, out, FAT_JAR_DIRECTIVES_TO_STRIP, BUILDER_CLASS_PREFIXES_TO_STRIP)
         if (timing) System.err.println("[${relativeTime()}ms] native: user jar sanitised")
         return out
     }
@@ -593,11 +593,6 @@ object NativeBuildPath {
         // and runtime invocations both fail with InaccessibleObjectException.
         "-J--add-opens=java.base/jdk.internal.vm=ALL-UNNAMED",
         "--enable-native-access=ALL-UNNAMED",
-        // The Mezze runtime jar transitively pulls in graal-sdk +
-        // truffle-compiler classes that native-image considers
-        // "builder-only". Proper fix is to split the runtime (still
-        // pending); for now downgrade to a warning so the build proceeds.
-        "-H:+AllowDeprecatedBuilderClassesOnImageClasspath",
         // native-image's macOS toolchain probe doesn't recognise Nix's
         // wrapped clang. The wrapped binary is still used for linking;
         // we just skip the probe.
@@ -661,6 +656,23 @@ object NativeBuildPath {
         "META-INF/native-image/org.xerial/sqlite-jdbc/native-image.properties",
     )
 
+    /**
+     * Package prefixes for graal-sdk "builder" classes that belong INSIDE
+     * native-image, not on the user classpath. shadowJar pulls them in
+     * transitively via graal-sdk 25 → 200+ warnings of the form
+     * "Class-path entry ... contains class org.graalvm.nativeimage.hosted.X
+     * ... must not be passed via -cp". Dropping them from the sanitised
+     * fat-jar clears the warnings AND lets us delete the deprecated
+     * -H:+AllowDeprecatedBuilderClassesOnImageClasspath flag. #189.
+     *
+     * Prefix match, not exact — the packages have many classes and grow
+     * with each graal-sdk release.
+     */
+    private val BUILDER_CLASS_PREFIXES_TO_STRIP = listOf(
+        "org/graalvm/nativeimage/hosted/",
+        "com/oracle/svm/core/annotate/",
+    )
+
     // ─── helpers ─────────────────────────────────────────────────────────────
 
     /**
@@ -722,8 +734,14 @@ object NativeBuildPath {
         return found.toList()
     }
 
-    /** Copy [source] to [target], dropping entries whose name is in [excludePaths]. */
-    private fun stripJarEntries(source: File, target: File, excludePaths: Set<String>) {
+    /** Copy [source] to [target], dropping entries whose name is in
+     *  [excludePaths] OR starts with any entry in [excludePrefixes]. */
+    private fun stripJarEntries(
+        source: File,
+        target: File,
+        excludePaths: Set<String>,
+        excludePrefixes: List<String> = emptyList(),
+    ) {
         java.util.jar.JarInputStream(source.inputStream().buffered()).use { jin ->
             val manifest = jin.manifest
             val out: java.util.jar.JarOutputStream = if (manifest != null) {
@@ -734,8 +752,11 @@ object NativeBuildPath {
             out.use {
                 while (true) {
                     val entry = jin.nextJarEntry ?: break
-                    if (entry.name in excludePaths) { jin.closeEntry(); continue }
-                    val newEntry = java.util.jar.JarEntry(entry.name).apply { time = entry.time }
+                    val name = entry.name
+                    val excluded = name in excludePaths
+                            || excludePrefixes.any { name.startsWith(it) }
+                    if (excluded) { jin.closeEntry(); continue }
+                    val newEntry = java.util.jar.JarEntry(name).apply { time = entry.time }
                     it.putNextEntry(newEntry)
                     jin.copyTo(it)
                     it.closeEntry()
