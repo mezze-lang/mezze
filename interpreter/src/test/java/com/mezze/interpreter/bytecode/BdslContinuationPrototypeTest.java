@@ -23,10 +23,11 @@ import static org.junit.jupiter.api.Assertions.*;
  * {@link ContinuationResult#continueWith}, verify the returned value
  * came back through the yield.
  *
- * <p>Everything Path C needed a whole thread + lock/condition dance for
- * ({@code CpsContinuationBackend}), BDSL gives us as a first-class
- * bytecode operation — PE-friendly, no reflection, no {@code --add-opens},
+ * <p>Everything Path C's CpsContinuationBackend needed a whole thread +
+ * lock/condition dance for, BDSL gives us as a first-class bytecode
+ * operation — PE-friendly, no reflection, no {@code --add-opens},
  * multi-shot capable via {@link ContinuationResult#getContinuationCallTarget}.
+ * (Path C was superseded and its code deleted, see #385.)
  */
 class BdslContinuationPrototypeTest {
 

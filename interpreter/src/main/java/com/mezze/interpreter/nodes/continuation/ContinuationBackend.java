@@ -1,31 +1,22 @@
 package com.mezze.interpreter.nodes.continuation;
 
 /**
- * Abstraction over the effect-suspend/resume primitive. Introduced as
- * Phase 0 of Path C (see docs/perf/bdsl-effects-path-c-2026-07.md) —
- * isolates the seam between {@link EffectFiber} and the underlying
- * continuation mechanism so future phases can swap the implementation
- * without touching call sites.
+ * Abstraction over the effect-suspend/resume primitive. Isolates the
+ * seam between {@link EffectFiber} and the underlying continuation
+ * mechanism.
  *
- * <p>Today's sole implementation is
- * {@link LoomContinuationBackend}, which wraps the reflective
- * {@link LoomSupport} bridge to {@code jdk.internal.vm.Continuation}.
- * Path C Phase 1 will add {@link com.mezze.interpreter.nodes.continuation.CpsContinuationBackend}
- * (name subject to change); Phase 3 deletes the Loom impl.
+ * <p>Today's sole implementation is {@link LoomContinuationBackend},
+ * which wraps the reflective {@link LoomSupport} bridge to
+ * {@code jdk.internal.vm.Continuation}. Path C's CPS-based
+ * implementation was superseded by Path D (BDSL Yield) and deleted;
+ * see task #385.
  *
  * <p>An instance represents a single fiber's continuation state. It is
  * created lazily (fibers can start life without one — see
- * {@code EffectFiber.acquireDispatchOnly}) and, once created, owns:
- * <ul>
- *   <li>The "scope" — an opaque handle keyed to the backend
- *       (a {@code ContinuationScope} for the Loom impl)</li>
- *   <li>The paused body — the {@link Runnable} handed at creation
- *       that will run to completion or the next {@link #yield()}</li>
- * </ul>
+ * {@code EffectFiber.acquireDispatchOnly}) and, once created, owns
+ * the Loom scope handle plus the paused body.
  *
- * <p>Instances are single-shot on the Loom backend (JVM constraint) and
- * multi-shot on the CPS backend (Phase 1+). Callers today assume
- * single-shot semantics; Phase 4 will surface the multi-shot capability.
+ * <p>Instances are single-shot on the Loom backend (JVM constraint).
  *
  * <p>Not thread-safe. A backend instance is owned by the thread that
  * created it; effect-fiber snapshots-and-reinstalls on spawn use a
@@ -37,10 +28,6 @@ public interface ContinuationBackend {
      * Run/resume the body. Returns when the body either yields (via
      * {@link #yield()}) or completes. Callers check {@link #isDone()}
      * after this returns to distinguish.
-     *
-     * <p>The Loom backend enters
-     * {@code jdk.internal.vm.Continuation.run}. The CPS backend
-     * (Phase 1+) will invoke the current continuation closure.
      */
     void run();
 

@@ -148,16 +148,6 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     // invalidate our caches before the next compile.
     private volatile int cachedDebugEpoch = 0;
 
-    // CPS routing (Path C, docs/perf/bdsl-effects-path-c-2026-07.md) — opt-in
-    // via MEZZE_CPS env var. When on, CpsLowering runs on every FunctionIR
-    // before Truffle/BDSL compilation and effect-related fibers pick the CPS
-    // backend. Off by default until Phase 3 when we flip the default and
-    // delete the Loom Continuation path.
-    public static final boolean CPS_ENABLED =
-            System.getenv("MEZZE_CPS") != null
-                && !"0".equals(System.getenv("MEZZE_CPS"))
-                && !"false".equalsIgnoreCase(System.getenv("MEZZE_CPS"));
-
     // Path D routing (docs/perf/bdsl-effects-path-d-2026-07.md) — default-on
     // 2026-08-03 (empirical 5372/5373 tests pass; the one failure is the
     // pre-existing DAP pause socket-timeout flake, unchanged from yield-off).

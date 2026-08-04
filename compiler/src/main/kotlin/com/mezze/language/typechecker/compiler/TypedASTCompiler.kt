@@ -640,14 +640,7 @@ class TypedASTCompiler(
         val cleanedMap = if (System.getenv("MEZZE_DEAD_LET_ELIMINATION") == "1")
             com.mezze.language.truffleir.DeadLetEliminator.eliminate(inlinedMap)
             else inlinedMap
-        // CPS lowering (Path C Phase 1). Off by default via MEZZE_CPS=0.
-        // Also honours the `mezze.cps` system property so tests can toggle
-        // the pipeline per-run without mutating the process env.
-        // Identity transform until Phase 1.4 lands the real rewrite.
-        val cpsMap = if (cpsEnabled())
-            cleanedMap.mapValues { (_, fn) -> com.mezze.language.truffleir.CpsLowering.lower(fn) }
-            else cleanedMap
-        val final = deduped.map { cpsMap[it.hash] ?: it }
+        val final = deduped.map { cleanedMap[it.hash] ?: it }
         return CompileResult(final, performerRecords.toList())
     }
 
@@ -2561,21 +2554,6 @@ class TypedASTCompiler(
     companion object {
         @JvmStatic
         fun computeOpHash(implHash: Hash, opName: String): Hash = Hash.computeOpHash(implHash, opName)
-
-        /**
-         * Path C Phase 1: MEZZE_CPS env var (process-scoped) or mezze.cps
-         * system property (test-scoped override). Off unless either is
-         * truthy — accepting "1"/"true" and rejecting "0"/"false".
-         */
-        internal fun cpsEnabled(): Boolean {
-            val sys = System.getProperty("mezze.cps")
-            if (sys != null) return truthy(sys)
-            val env = System.getenv("MEZZE_CPS") ?: return false
-            return truthy(env)
-        }
-
-        private fun truthy(v: String): Boolean =
-            v != "0" && !v.equals("false", ignoreCase = true)
     }
 
     private fun locToSourceInfo(loc: Loc): SourceInfo {
