@@ -1371,11 +1371,19 @@ public final class BytecodeCompiler {
             // normalizeArgs. Bypassing the trampoline sends the raw
             // record to LoadArgument(0), leaving other param slots
             // uninitialized → runtime errors (e.g. Non-exhaustive match).
+            // #384: guard `tramp.getInnerTarget() != null`. Forward
+            // references reserve a trampoline CallTarget before the
+            // callee's inner is built; if inner is null we can't retarget
+            // to it or we'd emit beginCallDirectN(null). Fall through and
+            // target the trampoline itself — correctness is preserved
+            // (the trampoline handles both ABIs via normalizeArgs), we
+            // just lose the ~13-15 ns bypass on this specific edge case.
             if (c.isScalarABI()
                     && target instanceof com.oracle.truffle.api.RootCallTarget rct
                     && rct.getRootNode() instanceof BdslTrampolineRootNode tramp
                     && !tramp.hasTailCalls()
-                    && !c.isTailCall()) {
+                    && !c.isTailCall()
+                    && tramp.getInnerTarget() != null) {
                 target = tramp.getInnerTarget();
             }
             // Scalar-ABI callee-shape rule: paramCount==1 collides with
@@ -2419,7 +2427,7 @@ public final class BytecodeCompiler {
         PatternIR.Variant v = (PatternIR.Variant) pat;
         b.beginConditional();
         // Condition.
-        b.beginVariantTagEquals(v.getTag());
+        b.beginVariantTagEquals(v.getTag(), v.getTagName());
         b.emitLoadLocal(scrutineeLocal);
         b.endVariantTagEquals();
         // Then-branch. Bind each captured field of the payload record:
@@ -2522,7 +2530,7 @@ public final class BytecodeCompiler {
             emitNode(ilb.getExpr(), b, argCount, localMap);
             b.endStoreLocal();
             b.beginConditional();
-            b.beginVariantTagEquals(iv.getTag());
+            b.beginVariantTagEquals(iv.getTag(), iv.getTagName());
             b.emitLoadLocal(tmp);
             b.endVariantTagEquals();
             // Then: bind captured fields (via payload record) and continue.

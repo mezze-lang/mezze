@@ -1195,19 +1195,38 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     @ConstantOperand(type = int.class)
+    @ConstantOperand(type = String.class)
     public static final class VariantTagEquals {
         @Specialization
-        public static boolean doVariant(int expectedTag, MezzeVariant variant) {
+        public static boolean doVariant(int expectedTag, String tagName, MezzeVariant variant) {
             return variant.getTag() == expectedTag;
         }
 
-        @Specialization(guards = "!isVariant(other)")
-        public static boolean doNonVariant(int expectedTag, Object other) {
+        // #384: mirror AST's MatchNode.executeListAsVariantMatchFast — native
+        // MezzeList optimizations (MezzeLongCons, MezzeDoubleCons, MezzeCons,
+        // MezzeNil) are pattern-matched AS the "Nil"/"Cons" variants of the
+        // list ADT. Without these specializations, matching a native list
+        // against `Nil -> ...` or `Cons { head, tail } -> ...` would always
+        // return false and fall through to a non-exhaustive-match crash.
+        @Specialization
+        public static boolean doList(int expectedTag, String tagName,
+                                     com.mezze.datastructures.list.MezzeList<?> list) {
+            if ("Nil".equals(tagName)) return list.isEmpty();
+            if ("Cons".equals(tagName)) return !list.isEmpty();
+            return false;
+        }
+
+        @Specialization(guards = {"!isVariant(other)", "!isList(other)"})
+        public static boolean doNonVariant(int expectedTag, String tagName, Object other) {
             return false;
         }
 
         protected static boolean isVariant(Object obj) {
             return obj instanceof MezzeVariant;
+        }
+
+        protected static boolean isList(Object obj) {
+            return obj instanceof com.mezze.datastructures.list.MezzeList<?>;
         }
     }
 
@@ -1223,7 +1242,20 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static Object doVariant(MezzeVariant variant) {
             return variant.getPayloadValue();
         }
+
+        // #384: native MezzeList Cons acts as a variant with payload
+        // {head, tail}. Called after a successful VariantTagEquals("Cons")
+        // — so this only runs on non-empty lists. Materialize the payload
+        // record; the caller's ReadField "head" / "tail" pulls the parts.
+        @com.oracle.truffle.api.dsl.Specialization
+        public static Object doList(com.mezze.datastructures.list.MezzeList<?> list) {
+            return com.mezze.interpreter.values.MezzeRecord.fromFields(
+                    LIST_CONS_FIELDS,
+                    new Object[]{list.get(0), list.tail()});
+        }
     }
+
+    private static final String[] LIST_CONS_FIELDS = new String[]{"head", "tail"};
 
     /**
      * String-interpolation pattern match: try to match {@code scrutinee}
