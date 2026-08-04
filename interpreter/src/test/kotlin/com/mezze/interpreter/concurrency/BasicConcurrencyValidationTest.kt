@@ -94,48 +94,22 @@ class BasicConcurrencyValidationTest {
 
         val scopeResults = mutableListOf<Int>()
 
-        // Using Java's StructuredTaskScope for structured concurrency
-        try {
-            java.util.concurrent.StructuredTaskScope.ShutdownOnFailure().use { scope ->
-                val futures = (1..5).map { i ->
-                    scope.fork {
-                        Thread.sleep(50)
-                        synchronized(results) {
-                            results.add(i)
-                        }
-                        latch.countDown()
-                        i * 2
-                    }
-                }
-
-                scope.join()
-                scope.throwIfFailed()
-
-                futures.forEach { future ->
-                    scopeResults.add(future.get())
-                }
+        // JDK 25 restructured StructuredTaskScope: the ShutdownOn* subclasses
+        // were replaced with a Joiner-based `open()` factory. Default open()
+        // (no joiner) shuts down on the first failure, waits for the rest,
+        // and rethrows on join(). Subtask.get() reads a completed value.
+        // #254.
+        java.util.concurrent.StructuredTaskScope.open<Int>().use { scope ->
+            val subtasks = (1..5).map { i ->
+                scope.fork(Callable {
+                    Thread.sleep(50)
+                    synchronized(results) { results.add(i) }
+                    latch.countDown()
+                    i * 2
+                })
             }
-        } catch (e: Exception) {
-            // StructuredTaskScope might not be available in all JVM versions
-            // Fall back to simple virtual threads
-            val executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()
-            try {
-                val futures = (1..5).map { i ->
-                    executor.submit(Callable {
-                        Thread.sleep(50)
-                        synchronized(results) {
-                            results.add(i)
-                        }
-                        latch.countDown()
-                        i * 2
-                    })
-                }
-                futures.forEach { future ->
-                    scopeResults.add(future.get())
-                }
-            } finally {
-                executor.shutdown()
-            }
+            scope.join()
+            subtasks.forEach { st -> scopeResults.add(st.get()) }
         }
 
         assertTrue(latch.await(5, TimeUnit.SECONDS))
