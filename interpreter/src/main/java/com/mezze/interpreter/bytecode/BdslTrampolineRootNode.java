@@ -230,6 +230,10 @@ public final class BdslTrampolineRootNode extends RootNode {
 
     private boolean hasAllParameters(com.mezze.interpreter.values.MezzeRecord rec) {
         for (String p : parameterNames) {
+            // Skip hidden dictionary params — the compiler injects these for
+            // dictionary passing and they're not present in user-visible
+            // records. Matches MezzeFunction.hasAllParameters.
+            if (com.mezze.language.ast.MagicParams.INSTANCE.isMagic(p)) continue;
             if (rec.getFieldIndex(p) < 0) return false;
         }
         return true;
