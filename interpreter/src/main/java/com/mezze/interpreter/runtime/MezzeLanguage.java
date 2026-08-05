@@ -259,12 +259,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             if (!isBdslSafeCallee(ir)) {
                 bdslMisses.incrementAndGet();
                 if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSAFE.incrementAndGet();
+                if (BDSL_STRICT) throw bdslStrictError(ir, "unsafe-callee", null);
                 return astCompiler.compile(ir);
             }
             com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
             if (!bdsl.supports(ir)) {
                 bdslMisses.incrementAndGet();
                 if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSUPPORTED.incrementAndGet();
+                if (BDSL_STRICT) throw bdslStrictError(ir, "unsupported", null);
                 return astCompiler.compile(ir);
             }
             try {
@@ -281,9 +283,24 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                     GLOBAL_BDSL_MISS_CRASH.incrementAndGet();
                     com.mezze.interpreter.bytecode.BytecodeCompiler.noteCrash(t);
                 }
+                if (BDSL_STRICT) throw bdslStrictError(ir, "emit-crash", t);
             }
         }
         return astCompiler.compile(ir);
+    }
+
+    /** #374 debug: with MEZZE_BDSL_STRICT=1, refuse the AST fallback and
+     *  surface the reason so we can measure exactly which fns still can't
+     *  compile through BDSL. */
+    private static final boolean BDSL_STRICT =
+            System.getenv("MEZZE_BDSL_STRICT") != null
+                && !"0".equals(System.getenv("MEZZE_BDSL_STRICT"));
+
+    private static RuntimeException bdslStrictError(
+            com.mezze.language.truffleir.FunctionIR ir, String reason, Throwable cause) {
+        String msg = "[BDSL_STRICT] fallback rejected for " + ir.getName()
+                + " (hash=" + ir.getHash().getHex().substring(0, 8) + ") reason=" + reason;
+        return cause == null ? new RuntimeException(msg) : new RuntimeException(msg, cause);
     }
 
     private com.mezze.interpreter.bytecode.BytecodeCompiler getOrCreateBdslCompiler() {
