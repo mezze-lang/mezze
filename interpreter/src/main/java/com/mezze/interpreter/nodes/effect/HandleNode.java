@@ -267,31 +267,38 @@ public final class HandleNode extends MezzeNode {
             return runMarker(handler, frame);
         }
 
-        // #341: force EVERY handle through the marker path — no Loom fiber.
-        // Only enabled when MEZZE_HANDLE_NO_FIBER=1 for now, so we can A/B
-        // test before flipping the default. Same shape as the Mut path
-        // (push handler on chain, clear CURRENT, run body, catch abort)
-        // BUT with scope hooks — many handlers (LoomAsync in particular)
-        // rely on initialize_scope installing a `scope` var that op impls
-        // read via ReadScopeNode.
+        // #341 default path: no Loom fiber. Push handler on chain, clear
+        // CURRENT via runDetached, execute body, catch abort in finally.
+        // Scope hooks (initialize_scope / installScope / restore / finalize)
+        // run around body — many handlers (LoomAsync etc.) rely on a `scope`
+        // var installed by initialize_scope. Op-calls inside body dispatch
+        // via the per-thread handler chain (see OpCallNode.dispatchOpOnChain).
+        //
+        // MEZZE_HANDLE_LOOM=1 flips back to the legacy fiber-based path
+        // (EffectHandlerDriver.run + a lazy MezzeSuspend branch for the
+        // non-fully-discharged case). Kept only for regression triage;
+        // slated for deletion with the rest of the fiber machinery (#333).
         if (HANDLE_NO_FIBER && staticallyFullyDischarges) {
             return runNoFiber(handler, frame);
         }
+        return runLegacyLoomPath(handler, frame);
+    }
 
+    /**
+     * Legacy Loom-fiber path. Only reachable when either the escape hatch
+     * {@code MEZZE_HANDLE_LOOM=1} is set OR the typechecker stamped this
+     * Handle as not-fully-discharging (Path E). Slated for deletion with
+     * #333 (delete EffectFiber/LoomSupport) — the {@code MezzeSuspend}
+     * capture path here is the only remaining reason this can run under
+     * default settings.
+     */
+    private Object runLegacyLoomPath(MezzeRecord handler, VirtualFrame frame) {
         // Path E (#336) lazy branch: when the typechecker stamped this
         // Handle as NOT fully-discharging, don't run body. Capture
         // (bodyNode, frame, chain-with-this-handler-pushed) as a
         // MezzeSuspend. Force under a wider chain will resume execution.
-        //
-        // pendingEffects is currently unknown at this level — the typechecker
-        // knows but hasn't threaded it down. Use singleton(effectHash) as a
-        // conservative marker "at least this Handle contributes"; force()
-        // will discover actual pending effects when body re-runs.
         if (!staticallyFullyDischarges) {
             com.oracle.truffle.api.frame.MaterializedFrame materialized = frame.materialize();
-            // Snapshot chain BEFORE pushing this handler — the snapshot
-            // represents "what was installed at the enclosing scope."
-            // This handler is installed lazily inside the MezzeSuspend.
             com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chainSnapshot =
                 com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChainEntries();
             com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] mergedChain =
@@ -300,26 +307,13 @@ public final class HandleNode extends MezzeNode {
                 new com.mezze.interpreter.nodes.continuation.HandlerChainEntry(handler, effectHash);
             System.arraycopy(chainSnapshot, 0, mergedChain, 1, chainSnapshot.length);
             java.util.Set<Hash> pending = new java.util.HashSet<>();
-            pending.add(effectHash);  // placeholder — real set discovered on force
+            pending.add(effectHash);
             return com.mezze.interpreter.values.MezzeSuspend.captureContinuation(
                 bodyNode, materialized, mergedChain, pending);
         }
-
-        // Body executes inside a Loom continuation, which may yield back to
-        // the driver across the frame boundary. Materialize so body's frame
-        // survives the suspend/resume cycles.
         Object result = EffectHandlerDriver.run(
             handler, effectHash, bodyNode, frame.materialize(), callNode, this);
-        // Path E (#336): if body produced ANY MezzeSuspend (Path E from an
-        // inner nested Handle that deferred, OR legacy single-op from a
-        // top-level `let x = effectful{}` binding that flowed into body),
-        // force it under this Handle's chain. `staticallyFullyDischarges`
-        // being true here means the row is empty at this scope, so force
-        // must complete to a ground value. The chain must be re-installed
-        // around the force call because EffectHandlerDriver.run popped it
-        // on its own finally.
-        if (staticallyFullyDischarges
-                && result instanceof com.mezze.interpreter.values.MezzeSuspend s) {
+        if (result instanceof com.mezze.interpreter.values.MezzeSuspend s) {
             com.mezze.interpreter.nodes.continuation.EffectFiber.pushHandlerOnChain(
                 handler, effectHash);
             try {
