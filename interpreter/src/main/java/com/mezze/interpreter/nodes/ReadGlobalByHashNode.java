@@ -104,14 +104,18 @@ public final class ReadGlobalByHashNode extends MezzeNode {
         boolean isThunk = false;
         if (root instanceof MezzeRootNode mrn) {
             isThunk = mrn.getClosureCount() == 0 && mrn.getParameterCount() == 0;
-        } else if (root instanceof com.mezze.interpreter.bytecode.BdslTrampolineRootNode
-                || root instanceof com.mezze.interpreter.bytecode.MezzeBytecodeRootNode) {
-            // BDSL callTargets reach this path when a zero-param FunctionIR
-            // is compiled through BytecodeCompiler. Zero-param BDSL bodies
-            // ignore their args, so ct.call() with any placeholder returns
-            // the thunk's value. (The FunctionIR's parameter list determined
-            // the BDSL frame layout; this callTarget was built with an empty
-            // one, so calling it here is safe regardless of what we pass.)
+        } else if (root instanceof com.mezze.interpreter.bytecode.BdslTrampolineRootNode t) {
+            // #374 — must check paramCount, not assume zero. A top-level
+            // `let f = {} -> ...` lambda has paramCount == 1 (empty record
+            // slot); auto-evaluating it here would blindly invoke the
+            // lambda every time a caller looked it up, causing infinite
+            // recursion for `perform H in f {}`-shaped programs.
+            isThunk = t.getClosureCount() == 0 && t.getParameterCount() == 0;
+        } else if (root instanceof com.mezze.interpreter.bytecode.MezzeBytecodeRootNode) {
+            // Bare BDSL bytecode roots (no trampoline wrapper) are only
+            // produced by BytecodeCompiler when paramCount == 0 AND there
+            // are no tail-calls (see needsTrampoline gate in
+            // BytecodeCompiler.compile). Safe to treat as a thunk.
             isThunk = true;
         }
         if (isThunk) {

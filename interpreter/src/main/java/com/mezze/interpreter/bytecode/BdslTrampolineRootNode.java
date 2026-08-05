@@ -185,6 +185,20 @@ public final class BdslTrampolineRootNode extends RootNode {
         return hasTailCalls;
     }
 
+    /** #374 — user-visible parameter count. Same value stored at construction
+     *  ({@code paramSlots.size()} from the FunctionIR). Used by callers who
+     *  need to distinguish a zero-param BDSL thunk from an arg-taking lambda
+     *  (e.g. {@code ReadGlobalByHashNode.autoEvaluateThunk}, which must NOT
+     *  auto-invoke a lambda). */
+    public int getParameterCount() {
+        return parameterCount;
+    }
+
+    /** #374 — captured-values count baked at construction. */
+    public int getClosureCount() {
+        return closureCount;
+    }
+
     @Override
     public Object execute(VirtualFrame frame) {
         if (innerTarget == null) {
