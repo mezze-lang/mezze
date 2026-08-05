@@ -45,7 +45,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * fiber's continuation frame on the same thread. The outer fiber's
  * Java-side try/finally blocks DO NOT fire during this yield — control
  * goes straight back to whoever last called {@link #run()} on the outer
- * fiber. {@code EffectHandlerDriver.run} works around this with
+ * fiber. Callers (historically {@code EffectHandlerDriver.run}, now
+ * {@code HandleNode.runNoFiber}) work around this with
  * {@link #handlerChainDepth()} + {@link #truncateHandlerChainTo(int)} in
  * an outer finally that fires only when control finally returns.
  *
@@ -307,7 +308,7 @@ public final class EffectFiber {
 
     /**
      * Force the per-thread handler chain back to the given depth by
-     * popping until size == depth. Used by {@code EffectHandlerDriver.run}'s
+     * popping until size == depth. Used by {@code HandleNode.runNoFiber}'s
      * outer {@code finally} to recover from cross-scope continuation yields
      * (e.g. outer perform aborts while an inner perform's chain push is
      * still on the stack): inner's {@code popHandlerOffChain} never fires

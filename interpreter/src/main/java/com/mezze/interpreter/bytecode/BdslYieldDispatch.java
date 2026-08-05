@@ -137,8 +137,9 @@ public final class BdslYieldDispatch {
         } catch (AbortPerformException abort) {
             // Decide whether abort should propagate as AbortPerformException
             // or convert to TaskUnhandledOpException. Rules:
-            //   - If a live outer fiber's driver is on this thread, rethrow
-            //     abort — the driver catches at EffectHandlerDriver.run:157.
+            //   - If an outer AST HandleNode.runNoFiber frame is on this
+            //     thread, rethrow abort — its outer try/catch converts
+            //     it into the perform's overall result.
             //   - If the abort would land inside a BDSL Handle's
             //     TryCatchOtherwise catch branch (D8), rethrow — the catch
             //     branch reads it via UnwrapAbortValue. We detect this by
