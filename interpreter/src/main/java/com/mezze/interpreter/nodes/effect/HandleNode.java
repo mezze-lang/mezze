@@ -230,22 +230,6 @@ public final class HandleNode extends MezzeNode {
     private static final boolean MARKER_MUT_ENABLED =
         !"0".equals(System.getenv("MEZZE_MARKER_MUT"));
 
-    /**
-     * #341: run every handle through the marker-style Loom-free path.
-     * On by default. Escape hatch: MEZZE_HANDLE_LOOM=1 to revert to the
-     * fiber path (for regression triage only; the fiber path is on borrowed
-     * time — {@code EffectHandlerDriver.run} + {@code EffectFiber.create}
-     * exist only until this flag is removed).
-     *
-     * <p>Safety: handlers that call resume after doing work (multi-shot,
-     * or capture-and-defer like Generator.AsStream) will regress from
-     * "full resume semantics" to "fall-through only" — see
-     * {@link com.mezze.interpreter.bytecode.BdslYieldDispatch}. The BDSL
-     * path has this narrowing today and only Generator.AsStream is
-     * affected in stdlib (its tests skip under BDSL default-on).
-     */
-    private static final boolean HANDLE_NO_FIBER =
-        !"1".equals(System.getenv("MEZZE_HANDLE_LOOM"));
 
     @Override
     public Object execute(VirtualFrame frame) {
@@ -267,62 +251,38 @@ public final class HandleNode extends MezzeNode {
             return runMarker(handler, frame);
         }
 
-        // #341 default path: no Loom fiber. Push handler on chain, clear
-        // CURRENT via runDetached, execute body, catch abort in finally.
-        // Scope hooks (initialize_scope / installScope / restore / finalize)
-        // run around body — many handlers (LoomAsync etc.) rely on a `scope`
-        // var installed by initialize_scope. Op-calls inside body dispatch
-        // via the per-thread handler chain (see OpCallNode.dispatchOpOnChain).
-        //
-        // MEZZE_HANDLE_LOOM=1 flips back to the legacy fiber-based path
-        // (EffectHandlerDriver.run + a lazy MezzeSuspend branch for the
-        // non-fully-discharged case). Kept only for regression triage;
-        // slated for deletion with the rest of the fiber machinery (#333).
-        if (HANDLE_NO_FIBER && staticallyFullyDischarges) {
+        // #341 fully-discharged fast path: no Loom fiber. Push handler on
+        // chain, clear CURRENT via runDetached, execute body, catch abort
+        // in finally. Scope hooks (initialize_scope / installScope /
+        // restore / finalize) run around body — many handlers (LoomAsync
+        // etc.) rely on a `scope` var installed by initialize_scope. Op-
+        // calls inside body dispatch via the per-thread handler chain
+        // (see OpCallNode.dispatchOpOnChain).
+        if (staticallyFullyDischarges) {
             return runNoFiber(handler, frame);
         }
-        return runLegacyLoomPath(handler, frame);
-    }
-
-    /**
-     * Legacy Loom-fiber path. Only reachable when either the escape hatch
-     * {@code MEZZE_HANDLE_LOOM=1} is set OR the typechecker stamped this
-     * Handle as not-fully-discharging (Path E). Slated for deletion with
-     * #333 (delete EffectFiber/LoomSupport) — the {@code MezzeSuspend}
-     * capture path here is the only remaining reason this can run under
-     * default settings.
-     */
-    private Object runLegacyLoomPath(MezzeRecord handler, VirtualFrame frame) {
         // Path E (#336) lazy branch: when the typechecker stamped this
-        // Handle as NOT fully-discharging, don't run body. Capture
-        // (bodyNode, frame, chain-with-this-handler-pushed) as a
-        // MezzeSuspend. Force under a wider chain will resume execution.
-        if (!staticallyFullyDischarges) {
-            com.oracle.truffle.api.frame.MaterializedFrame materialized = frame.materialize();
-            com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chainSnapshot =
-                com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChainEntries();
-            com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] mergedChain =
-                new com.mezze.interpreter.nodes.continuation.HandlerChainEntry[chainSnapshot.length + 1];
-            mergedChain[0] =
-                new com.mezze.interpreter.nodes.continuation.HandlerChainEntry(handler, effectHash);
-            System.arraycopy(chainSnapshot, 0, mergedChain, 1, chainSnapshot.length);
-            java.util.Set<Hash> pending = new java.util.HashSet<>();
-            pending.add(effectHash);
-            return com.mezze.interpreter.values.MezzeSuspend.captureContinuation(
-                bodyNode, materialized, mergedChain, pending);
-        }
-        Object result = EffectHandlerDriver.run(
-            handler, effectHash, bodyNode, frame.materialize(), callNode, this);
-        if (result instanceof com.mezze.interpreter.values.MezzeSuspend s) {
-            com.mezze.interpreter.nodes.continuation.EffectFiber.pushHandlerOnChain(
-                handler, effectHash);
-            try {
-                result = s.force(callNode);
-            } finally {
-                com.mezze.interpreter.nodes.continuation.EffectFiber.popHandlerOffChain();
-            }
-        }
-        return result;
+        // Handle as NOT fully-discharging (e.g. multi-handler `perform A, B in ...`
+        // desugar produces an outer handle whose body still has an inner
+        // effect pending), don't run body. Capture (bodyNode, frame,
+        // chain-with-this-handler-pushed) as a MezzeSuspend. Force under a
+        // wider chain will resume execution.
+        //
+        // Note: EffectFiber.snapshotHandlerChainEntries is a pure ThreadLocal
+        // read of HANDLER_CHAIN — no Loom Continuation involved. Survives
+        // the #333 fiber deletion.
+        com.oracle.truffle.api.frame.MaterializedFrame materialized = frame.materialize();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chainSnapshot =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChainEntries();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] mergedChain =
+            new com.mezze.interpreter.nodes.continuation.HandlerChainEntry[chainSnapshot.length + 1];
+        mergedChain[0] =
+            new com.mezze.interpreter.nodes.continuation.HandlerChainEntry(handler, effectHash);
+        System.arraycopy(chainSnapshot, 0, mergedChain, 1, chainSnapshot.length);
+        java.util.Set<Hash> pending = new java.util.HashSet<>();
+        pending.add(effectHash);
+        return com.mezze.interpreter.values.MezzeSuspend.captureContinuation(
+            bodyNode, materialized, mergedChain, pending);
     }
 
     /**
