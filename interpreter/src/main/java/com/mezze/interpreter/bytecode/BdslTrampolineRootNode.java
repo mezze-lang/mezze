@@ -207,6 +207,18 @@ public final class BdslTrampolineRootNode extends RootNode {
                     "BdslTrampolineRootNode[" + name + "] executed before attachInner");
         }
         Object[] rawArgs = frame.getArguments();
+        // #374 partial-application: if the caller passed a single MezzeRecord
+        // (record ABI) and it doesn't contain values for every declared
+        // parameter, return a partial-applied MezzeFunction instead of
+        // padding missing params with null and running the body. Mirrors
+        // MezzeFunctionRootNode / InvokeNode.callWithPartialAppCheck.
+        if (parameterCount >= 1
+                && rawArgs.length == closureCount + 1
+                && rawArgs[closureCount] instanceof com.mezze.interpreter.values.MezzeRecord rec
+                && !hasAllParameters(rec)
+                && parameterNames.length > 0) {
+            return buildPartial(rec, rawArgs);
+        }
         Object[] flatArgs = parameterCount == 0
                 ? rawArgs
                 : normalizeArgs(rawArgs);
@@ -214,6 +226,29 @@ public final class BdslTrampolineRootNode extends RootNode {
         frame.setObject(targetSlot, innerTarget);
         loop.execute(frame);
         return frame.getObject(resultSlot);
+    }
+
+    private boolean hasAllParameters(com.mezze.interpreter.values.MezzeRecord rec) {
+        for (String p : parameterNames) {
+            if (rec.getFieldIndex(p) < 0) return false;
+        }
+        return true;
+    }
+
+    @CompilerDirectives.TruffleBoundary
+    private com.mezze.interpreter.values.MezzeFunction buildPartial(
+            com.mezze.interpreter.values.MezzeRecord rec, Object[] rawArgs) {
+        Object[] closures;
+        if (closureCount == 0) {
+            closures = new Object[0];
+        } else {
+            closures = new Object[closureCount];
+            System.arraycopy(rawArgs, 0, closures, 0, closureCount);
+        }
+        com.mezze.interpreter.values.MezzeFunction fn =
+                new com.mezze.interpreter.values.MezzeFunction(
+                        this.getCallTarget(), name, closures, parameterNames);
+        return fn.withPartialArgs(rec);
     }
 
     /** Package-private hook for the repeating node to re-normalise args on tail-call resume. */

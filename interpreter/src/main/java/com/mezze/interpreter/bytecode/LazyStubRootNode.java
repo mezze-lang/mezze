@@ -61,6 +61,15 @@ public final class LazyStubRootNode extends RootNode {
     @CompilerDirectives.CompilationFinal(dimensions = 1)
     private Object[] cachedClosures;
 
+    /**
+     * The resolved MezzeFunction — cached so we can consult its
+     * {@code partialArgs} / {@code parameterNames} on every call
+     * without re-resolving. Used by the partial-application path in
+     * {@link #execute}. Set at inflate time by {@link #inflate}.
+     */
+    @CompilerDirectives.CompilationFinal
+    private com.mezze.interpreter.values.MezzeFunction cachedFn;
+
     @Child
     private DirectCallNode forward;
 
@@ -87,12 +96,51 @@ public final class LazyStubRootNode extends RootNode {
         if (fwd == null) {
             fwd = inflate();
         }
+        Object[] rawArgs = frame.getArguments();
+        // #374 partial-application: if the resolved MezzeFunction is
+        // partially applied (its {@code partialArgs} is non-empty), or
+        // if the caller passed an incomplete record, we can't simply
+        // forward — the callee's trampoline sees only the new record
+        // and would either return another partial ignoring our partial
+        // args, or pad missing params with null. Merge here.
+        com.mezze.interpreter.values.MezzeFunction fn = cachedFn;
+        if (fn != null && fn.getParameterNames().length > 0
+                && rawArgs.length == 1
+                && rawArgs[0] instanceof com.mezze.interpreter.values.MezzeRecord rec) {
+            return handlePartial(fn, rec, fwd);
+        }
         // Caller (BDSL CallDirectN) treats stub as an AST callee (because
         // isBdslCallee returns false for LazyStubRootNode). So caller
         // already prepended the marker for scalar-1arg. But it did NOT
         // prepend closures — that's the caller-side node's job (which
         // BDSL doesn't do for CallDirect). Prepend closures here.
-        return fwd.call(prependClosures(frame.getArguments()));
+        return fwd.call(prependClosures(rawArgs));
+    }
+
+    @CompilerDirectives.TruffleBoundary
+    private Object handlePartial(com.mezze.interpreter.values.MezzeFunction fn,
+                                 com.mezze.interpreter.values.MezzeRecord rec,
+                                 DirectCallNode fwd) {
+        if (!fn.hasAllParameters(rec)) {
+            return fn.withPartialArgs(rec);
+        }
+        Object callArg;
+        if (fn.hasPartialArgs()) {
+            callArg = fn.buildCompleteRecord(rec);
+        } else {
+            callArg = rec;
+        }
+        Object[] closures = fn.getClosureValues();
+        int closureLen = closures == null ? 0 : closures.length;
+        Object[] combined;
+        if (closureLen == 0) {
+            combined = new Object[] { callArg };
+        } else {
+            combined = new Object[closureLen + 1];
+            System.arraycopy(closures, 0, combined, 0, closureLen);
+            combined[closureLen] = callArg;
+        }
+        return fwd.call(combined);
     }
 
     private Object[] prependClosures(Object[] rawArgs) {
@@ -120,6 +168,7 @@ public final class LazyStubRootNode extends RootNode {
         CallTarget ct = fn.getCallTarget();
         Object[] closures = fn.getClosureValues();
         cachedClosures = closures != null ? closures : new Object[0];
+        cachedFn = fn;
         inflated = ct;
         fwd = insert(DirectCallNode.create(ct));
         forward = fwd;
