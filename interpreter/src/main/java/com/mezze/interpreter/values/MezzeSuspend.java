@@ -163,30 +163,12 @@ public final class MezzeSuspend implements TruffleObject {
         if (bodyNode != null) {
             return forcePathE(callNode);
         }
-        com.mezze.interpreter.nodes.continuation.EffectFiber fiber =
-            com.mezze.interpreter.nodes.continuation.EffectFiber.current();
-        if (fiber == null) {
-            // No fiber, but a chain may be installed on this thread (e.g.
-            // we're inside the body of an Async.spawn that inherited the
-            // parent's handler chain, where chain-dispatch — not fiber
-            // suspend — is the dispatch path). If the suspended thunk is
-            // a deferred effect call, try chain-dispatching it here, the
-            // same way OpCallNode does its no-fiber fallback. Without
-            // this, force() returns `this` unforced (#285) and the
-            // unevaluated MezzeSuspend leaks back to the caller.
-            return forceWithoutFiber(callNode);
-        }
-        // MezzeThunk always represents a deferred op-call now.
-        // Forward the effect content hash so the dispatcher can
-        // disambiguate when two effects in scope declare an op with
-        // the same simple name (#246). Dropping it here would silently
-        // misroute on force, reintroducing the bug for any op that
-        // was deferred outside a perform and forced inside one.
-        return fiber.suspend(new com.mezze.interpreter.nodes.continuation.OpCall(
-            computation.getOperationName(),
-            computation.getArguments(),
-            computation.getEffectContentHash()
-        ));
+        // No Loom fiber remains post-#333: MezzeThunk force always goes
+        // through the chain-dispatch path. If the thunk is a deferred
+        // effect call and a chain is installed on this thread (e.g. an
+        // Async.spawn body inherited the parent's chain), the dispatcher
+        // routes it there; otherwise `this` bubbles back unforced.
+        return forceWithoutFiber(callNode);
     }
 
     /**

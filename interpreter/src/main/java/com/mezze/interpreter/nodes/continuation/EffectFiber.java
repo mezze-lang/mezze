@@ -8,142 +8,59 @@ import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Loom-backed fiber used by the effect-handler runtime.
+ * Per-thread state holder for the effect-handler runtime.
  *
- * <p>Wraps a body Runnable in a {@code jdk.internal.vm.Continuation}.
- * The body runs inside {@link #run()}; when the body wants to suspend
- * (e.g. an effect operation has been called and the handler decided to
- * escape or stash), it calls {@link #suspend(Object)}, which freezes the
- * stack and returns to the {@link #run()} call site. The runner reads
- * what was suspended via {@link #takeSuspendedValue()}, decides what to
- * do (stash, drop, eventually call run again), etc.
+ * <p>Historically wrapped a {@code jdk.internal.vm.Continuation} to
+ * implement suspend/resume of an in-Mezze perform body across a driver
+ * loop. That fiber-continuation surface (create/run/suspend/resume,
+ * plus the Loom bridge in {@code LoomContinuationBackend}) was deleted
+ * in #333 once BDSL Yield became the sole path for effect suspension.
+ * What survives here is:
  *
- * <h2>Lifecycle invariants</h2>
+ * <ul>
+ *   <li>{@link #HANDLER_CHAIN} — per-thread stack of
+ *       {@link HandlerChainEntry} pairs (handler record + effect hash),
+ *       pushed by every {@code perform Handler in body} while body runs.
+ *       Spawned tasks inherit the parent's chain at spawn time
+ *       ({@link #snapshotHandlerChainEntries()} +
+ *       {@link #installHandlerChainEntries(HandlerChainEntry[])}).</li>
+ *   <li>{@link #D8_HANDLE_STACK} — BDSL Handle depth counter, distinct
+ *       from HANDLER_CHAIN so a Path A snapshot install on a spawned
+ *       thread doesn't fool BdslYieldDispatch into treating a chain
+ *       push as a live catch boundary.</li>
+ *   <li>Dispatch-only fibers ({@link #acquireDispatchOnly()}) — carry
+ *       the per-op-invocation effect-handle stack so chain-dispatched
+ *       op handlers can bind {@code resume}/{@code abort} via
+ *       {@code EffectBindingNode}. No continuation involved.</li>
+ * </ul>
  *
- * <p><b>One-shot.</b> HotSpot's {@code Continuation} is one-shot: once
- * the body returns naturally, the fiber is closed and any further
- * {@link #run()} call throws {@link IllegalStateException}. The driver
- * marks completion by stashing a {@code BodyResult} via
- * {@link #setSuspendedValue(Object)}; subsequent {@code run()} would
- * crash, so the driver checks {@link #isDone()} or the suspend payload
- * type before recursing.
- *
- * <p><b>Thread-locals.</b> Two distinct ThreadLocals track fiber state.
- * {@link #CURRENT} points to the fiber whose continuation is on top of
- * the current thread's stack — the one {@link #suspend(Object)} would
- * yield from. {@link #DISPATCH} points to the fiber whose op handler
- * the driver is invoking on its own stack — set during
- * {@link #enterDispatch()}/{@link #exitDispatch(EffectFiber)} so the op
- * handler body can read this fiber's resume/abort handles via
- * {@code EffectBindingNode}, while NOT pretending its continuation is
- * suspendable. They are always disjoint: a fiber is either running or
- * being dispatched-into, never both at the same time on the same thread.
- *
- * <p><b>Cross-scope yields.</b> When an inner perform's body performs an
- * op that propagates past the inner handler, the driver's
- * {@link #suspend(Object)} on the inner fiber bypasses the outer
- * fiber's continuation frame on the same thread. The outer fiber's
- * Java-side try/finally blocks DO NOT fire during this yield — control
- * goes straight back to whoever last called {@link #run()} on the outer
- * fiber. Callers (historically {@code EffectHandlerDriver.run}, now
- * {@code HandleNode.runNoFiber}) work around this with
- * {@link #handlerChainDepth()} + {@link #truncateHandlerChainTo(int)} in
- * an outer finally that fires only when control finally returns.
- *
- * <p><b>Handler chain.</b> Independent of fiber state, every thread has
- * a {@link #HANDLER_CHAIN} stack of {@link HandlerChainEntry} pairs
- * (handler record + the content hash of the effect it implements) that
- * spawned tasks inherit at spawn time
- * ({@link #snapshotHandlerChainEntries()} +
- * {@link #installHandlerChainEntries(HandlerChainEntry[])}). The chain
- * participates in {@link com.mezze.interpreter.nodes.effect.OpCallNode}'s
- * fiber-less dispatch path: when there's no current fiber but a chain
- * is installed, the op-call walks the chain to find a matching handler
- * and invokes it directly. Matching is by (effect_hash, op_name) so two
- * in-scope effects with the same op simple name don't collide (#246).
- * Unhandled ops at the chain bottom are surfaced as
- * {@code TaskUnhandledOpException} for the spawning code to re-issue on
- * the parent fiber at await time. See
- * {@link com.mezze.interpreter.nodes.continuation.SpawnSupport}.
- *
- * <p><b>Late resume.</b> A {@code resume} reference captured inside an
- * abort payload (the OCaml-5 style "captured continuation" pattern,
- * e.g. Generator's Stream consumer) outlives the original op-handler
- * body. Re-entering the cached resume CallTarget calls back into
- * {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver#drive
- * drive}, which catches {@link
- * com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException
- * AbortPerformException} so later aborts during the deferred resume
- * surface as resume's return value rather than escaping past the
- * resume call site.
- *
- * <p><b>Dispatch-only fibers.</b>
- * {@link #createDispatchOnly()} produces a fiber with no continuation —
- * useful when {@code OpCallNode}'s chain-dispatch path wants to invoke
- * an inherited op handler that calls {@code abort}/{@code resume}. The
- * handler body needs a dispatch fiber to bind those handles to, but
- * there's no surrounding {@code perform} to suspend back into. The
- * dispatch-only fiber's {@code resume {val = X}} just returns X.
+ * <p>Matching in chain dispatch is by (effect_hash, op_name) so two
+ * in-scope effects with the same simple op name don't collide (#246).
+ * Unhandled ops at the chain bottom surface as
+ * {@code TaskUnhandledOpException} for the spawning code to re-dispatch
+ * against the parent's chain at await time (see {@link SpawnSupport}).
  */
 public final class EffectFiber {
 
-    // Continuation state — Loom's jdk.internal.vm.Continuation via the
-    // {@link LoomContinuationBackend} reflective bridge. Null on
-    // dispatch-only fibers, which never suspend or resume. Task #341
-    // tracks removing Loom entirely once BDSL Yield covers all effect
-    // sites — the seam-interface {@code ContinuationBackend} was
-    // collapsed once Path C (its other implementer) was deleted.
-    @CompilationFinal final LoomContinuationBackend backend;
-
-    private volatile Object suspendedValue;     // set by suspend(), read by runner
-    private volatile Object resumeValue;        // set by runner, returned by suspend()
-
     // Per-op-invocation effect-handler control-flow handles, populated by
-    // the driver right before it dispatches an op handler. Read by
+    // chain dispatch right before it invokes an op handler. Read by
     // ReadEffectHandleNode inside the op handler body. Stacked across
     // nested op calls so an inner op's invocation doesn't clobber the
     // outer op's handles.
     private Object[] effectHandleStack = new Object[8]; // [resume0, abort0, resume1, abort1, ...]
     private int effectHandleDepth = 0;
 
-    private volatile boolean closed;
-
     private static final AtomicLong ID_GEN = new AtomicLong();
     @CompilationFinal final long id = ID_GEN.incrementAndGet();
 
     /**
-     * Per-thread pointer to the fiber whose body is <b>actually running</b>
-     * inside its continuation on this thread. Set by {@link #run()} before
-     * entering the continuation; cleared when the continuation yields or
-     * completes. Read by {@code OpCallNode} to decide whether to
-     * {@link #suspend(Object) suspend} (yield the running continuation)
-     * versus fall through to chain dispatch.
-     *
-     * <p>Critically this is NOT set while the driver is dispatching an op
-     * handler on its own stack — during dispatch, no continuation is on the
-     * current thread's stack, so {@code suspend} would fail. See
-     * {@link #DISPATCH} for the dispatch-pinned slot.
-     */
-    private static final ThreadLocal<EffectFiber> CURRENT = new ThreadLocal<>();
-
-    /**
      * Per-thread pointer to the fiber whose op handler is currently being
-     * invoked by the driver. The op handler body needs to find the fiber to
-     * read its resume/abort handles via {@code EffectBindingNode}, but ops
-     * performed inside that body must NOT try to suspend this fiber (its
-     * continuation is yielded — nothing to yield from). Pinned by
-     * {@link #enterDispatch()} / cleared by {@link #exitDispatch(EffectFiber)}.
+     * invoked by chain dispatch. The op handler body needs to find the
+     * carrier fiber to read its resume/abort handles via
+     * {@code EffectBindingNode}. Pinned by {@link #enterDispatch()} /
+     * cleared by {@link #exitDispatch(EffectFiber)}.
      */
     private static final ThreadLocal<EffectFiber> DISPATCH = new ThreadLocal<>();
-
-    /**
-     * The fiber whose body is currently running on the thread inside its
-     * continuation, or {@code null} when no body is running. This is the
-     * fiber that {@link #suspend(Object)} would yield from.
-     */
-    public static EffectFiber current() {
-        return CURRENT.get();
-    }
 
     /**
      * The fiber whose op handler is currently being dispatched on the
@@ -157,18 +74,6 @@ public final class EffectFiber {
     /**
      * Mark this fiber as the one being dispatched. Returns the previously
      * pinned fiber so the caller can restore it via {@link #exitDispatch}.
-     * Does NOT touch {@link #CURRENT}: the fiber's continuation is not
-     * actually running while its op handler executes on the driver's stack,
-     * and nested op-calls inside that handler must fall through to chain
-     * dispatch rather than attempt to yield.
-     *
-     * <p>Caveat: under nested performs (outer then inner), CURRENT during
-     * an Inner-op dispatch still points at the Outer fiber. Native handlers
-     * that <i>call back into Mezze code</i> (e.g. {@code __native_mutation_loop}
-     * invoking {@code cond}/{@code body}) must clear CURRENT around the
-     * callback themselves so the callback's op-calls route through chain
-     * dispatch instead of suspending the wrong fiber. See
-     * {@link #runDetached(java.util.function.Supplier)}.
      */
     public EffectFiber enterDispatch() {
         EffectFiber prev = DISPATCH.get();
@@ -182,25 +87,16 @@ public final class EffectFiber {
     }
 
     /**
-     * Run {@code body} with {@link #CURRENT} cleared on this thread and
-     * restored on return. Used by native handlers (e.g. the
-     * {@code __native_mutation_loop} while loop) that re-enter Mezze code
-     * which may perform effect ops: clearing CURRENT routes those ops
-     * through chain dispatch instead of suspending whichever fiber happens
-     * to be the thread's CURRENT at the time (often an outer perform's
-     * fiber, whose continuation is yielded several layers deep — suspending
-     * it strands the rest of the body and surfaces as a stray
-     * {@code MezzeSuspend} from the outer perform's driver).
-     * Root cause of #255.
+     * Historical no-op preserved as a call-site hook. Before #333 this
+     * cleared {@code CURRENT} around body so native handlers (e.g.
+     * {@code __native_mutation_loop}) that re-entered Mezze code wouldn't
+     * suspend an outer perform's Loom continuation. With Loom gone
+     * CURRENT no longer exists, so this just runs body directly. Callers
+     * remain untouched to avoid churn; if #333 follow-up wants to inline
+     * every call, this method can be removed. Root cause of #255.
      */
     public static <T> T runDetached(java.util.function.Supplier<T> body) {
-        EffectFiber prev = CURRENT.get();
-        CURRENT.set(null);
-        try {
-            return body.get();
-        } finally {
-            CURRENT.set(prev);
-        }
+        return body.get();
     }
 
     // ----------------------------------------------------------------
@@ -437,37 +333,20 @@ public final class EffectFiber {
         }
     }
 
-    private EffectFiber(LoomContinuationBackend backend) {
-        this.backend = backend;
-    }
+    private EffectFiber() {}
 
     /**
-     * Build a fiber whose body is the given Runnable. The body does not
-     * execute until {@link #run()} is called.
-     *
-     * <p>Backend is Loom's jdk.internal.vm.Continuation. The CPS backend
-     * (Path C) was superseded by Path D (BDSL Yield) and deleted (#385);
-     * #341 tracks removing Loom entirely once BDSL Yield covers all
-     * effect sites.
-     */
-    @TruffleBoundary
-    public static EffectFiber create(String name, Runnable body) {
-        return new EffectFiber(new LoomContinuationBackend(name, body));
-    }
-
-    /**
-     * Build a "dispatch-only" fiber with no Loom continuation. Cannot be
-     * {@link #run()} or {@link #suspend(Object) suspended}; serves only as
-     * a carrier for the effect-handle stack ({@link #pushEffectHandles},
-     * {@link #currentResume}, {@link #currentAbort}) so chain-dispatch on
-     * spawned threads can give op handlers a valid dispatch context for
-     * reading {@code resume}/{@code abort} via {@code EffectBindingNode}.
+     * Acquire a dispatch-only fiber — a carrier for the effect-handle
+     * stack ({@link #pushEffectHandles}, {@link #currentResume},
+     * {@link #currentAbort}) so chain-dispatched op handlers can bind
+     * {@code resume}/{@code abort} via {@code EffectBindingNode}. No
+     * continuation involved.
      *
      * <p>Acquires from a thread-local 1-slot pool when available — every
      * chain-dispatch entry allocates and discards one dispatch fiber,
      * so reusing a single per-thread slot saves an allocation per
-     * op-call on the chain-dispatch path. The fiber is in clean state
-     * when reused (popEffectHandles already clears its slots).
+     * op-call. The fiber is in clean state when reused
+     * (popEffectHandles already clears its slots).
      *
      * <p>Callers MUST pair this with {@link #releaseDispatchOnly(EffectFiber)}
      * after use. The pool is best-effort: nested dispatch fibers allocate
@@ -479,7 +358,7 @@ public final class EffectFiber {
             DISPATCH_POOL.set(null);
             return cached;
         }
-        return new EffectFiber(/* backend */ null);
+        return new EffectFiber();
     }
 
     /** Return a dispatch fiber to the per-thread cache (best-effort). */
@@ -501,148 +380,19 @@ public final class EffectFiber {
     private static final ThreadLocal<EffectFiber> DISPATCH_POOL =
         ThreadLocal.withInitial(() -> null);
 
-    /**
-     * Run/resume the body. Returns when body either suspends or completes.
-     * After this returns, check {@link #isDone()} to distinguish.
-     */
-    @TruffleBoundary
-    public void run() {
-        if (closed) {
-            throw new IllegalStateException(
-                "EffectFiber@" + id + " is closed; cannot run");
-        }
-        EffectFiber previous = CURRENT.get();
-        CURRENT.set(this);
-        try {
-            backend.run();
-        } finally {
-            CURRENT.set(previous);
-        }
-    }
-
-    /**
-     * Run the body without setting {@link #CURRENT}. Used by the coop
-     * scheduler: the body should dispatch effect ops via the snapshot
-     * handler chain (chain-dispatch path in {@code OpCallNode}), not by
-     * suspending the fiber for every op-call. The fiber is still
-     * suspendable — call {@link #suspendUnscoped(Object)} from inside
-     * the body when you do want to yield (e.g. for park).
-     */
-    @TruffleBoundary
-    public void runUnscoped() {
-        if (closed) {
-            throw new IllegalStateException(
-                "EffectFiber@" + id + " is closed; cannot run");
-        }
-        EffectFiber previous = CURRENT.get();
-        CURRENT.set(null);
-        try {
-            backend.run();
-        } finally {
-            CURRENT.set(previous);
-        }
-    }
-
-    /**
-     * Suspend this fiber regardless of whether it is the current fiber.
-     * Companion to {@link #runUnscoped()} for the coop scheduler.
-     */
-    @TruffleBoundary
-    public Object suspendUnscoped(Object value) {
-        if (closed) {
-            throw new IllegalStateException(
-                "EffectFiber@" + id + " is closed; cannot suspend");
-        }
-        this.suspendedValue = value;
-        boolean ok = backend.yield();
-        if (!ok) {
-            throw new IllegalStateException(
-                "EffectFiber yield failed (likely native frames pinning)");
-        }
-        Object resumed = this.resumeValue;
-        this.resumeValue = null;
-        return resumed;
-    }
-
-    public boolean isDone() {
-        return backend.isDone();
-    }
-
-    /**
-     * Called from inside the body to suspend with a value. The runner
-     * reads it via {@link #takeSuspendedValue()}.
-     *
-     * <p>When {@link #run()} is called again later, this method returns
-     * whatever the runner placed via {@link #setResumeValue(Object)}.
-     */
-    @TruffleBoundary
-    public Object suspend(Object value) {
-        if (closed) {
-            throw new IllegalStateException(
-                "EffectFiber@" + id + " is closed; cannot suspend");
-        }
-        this.suspendedValue = value;
-        boolean ok = backend.yield();
-        if (!ok) {
-            throw new IllegalStateException(
-                "EffectFiber yield failed (likely native frames pinning)");
-        }
-        Object resumed = this.resumeValue;
-        this.resumeValue = null;
-        return resumed;
-    }
-
-    /** Read what the body most recently suspended with, then clear the slot. */
-    public Object takeSuspendedValue() {
-        Object v = suspendedValue;
-        suspendedValue = null;
-        return v;
-    }
-
-    /** Set the value the next {@link #suspend(Object)} call will return. */
-    public void setResumeValue(Object value) {
-        this.resumeValue = value;
-    }
-
-    /**
-     * Stash a value as the "suspended value" without actually suspending.
-     * Used by the runtime to expose body's return value when body completes
-     * without calling suspend(): the runner can read it via
-     * {@link #takeSuspendedValue()} the same way it reads explicit suspends.
-     */
-    public void setSuspendedValue(Object value) {
-        this.suspendedValue = value;
-    }
-
-    /** Mark the fiber's region closed. Subsequent run/suspend throw. */
-    public void close() {
-        this.closed = true;
-    }
-
-    public boolean isClosed() {
-        return closed;
-    }
-
     public long getId() { return id; }
 
     // ----------------------------------------------------------------
     // Per-op-invocation effect-handler control-flow handles.
     //
-    // The driver pushes a frame {resume, abort} before invoking an op
+    // Chain dispatch pushes a frame {resume, abort} before invoking an op
     // handler's lambda and pops it after the lambda returns. Op handler
     // body code reads them via ReadEffectHandleNode, which calls
-    // currentResume() / currentAbort() on whichever fiber is current.
+    // currentResume() / currentAbort() on the dispatch fiber.
     //
     // Nested op calls each push their own frame, so inner ops don't
     // clobber outer ops' handles.
     // ----------------------------------------------------------------
-
-    // Parallel stack of "did this op invocation call resume?" booleans,
-    // one per frame on the effect-handle stack. The driver checks the top
-    // of this stack after the op handler returns to distinguish:
-    //   - fall-through (no resume call) → drive with return value
-    //   - explicit resume during op body → return value is perform's result
-    private boolean[] resumedStack = new boolean[8];
 
     public void pushEffectHandles(Object resume, Object abort) {
         int needed = (effectHandleDepth + 1) * 2;
@@ -651,14 +401,8 @@ public final class EffectFiber {
             System.arraycopy(effectHandleStack, 0, grown, 0, effectHandleStack.length);
             effectHandleStack = grown;
         }
-        if (effectHandleDepth + 1 > resumedStack.length) {
-            boolean[] grown = new boolean[resumedStack.length * 2];
-            System.arraycopy(resumedStack, 0, grown, 0, resumedStack.length);
-            resumedStack = grown;
-        }
         effectHandleStack[effectHandleDepth * 2] = resume;
         effectHandleStack[effectHandleDepth * 2 + 1] = abort;
-        resumedStack[effectHandleDepth] = false;
         effectHandleDepth++;
     }
 
@@ -670,26 +414,6 @@ public final class EffectFiber {
         effectHandleDepth--;
         effectHandleStack[effectHandleDepth * 2] = null;
         effectHandleStack[effectHandleDepth * 2 + 1] = null;
-        resumedStack[effectHandleDepth] = false;
-    }
-
-    /**
-     * Mark that {@code resume} was invoked at the current op-handler
-     * frame. Called by the driver's resume closure before recursing.
-     */
-    public void markResumedAtCurrentFrame() {
-        if (effectHandleDepth > 0) {
-            resumedStack[effectHandleDepth - 1] = true;
-        }
-    }
-
-    /**
-     * Whether {@code resume} was invoked at the current op-handler frame.
-     * Read by the driver after the op handler returns to decide fall-through
-     * vs explicit-resume semantics.
-     */
-    public boolean wasResumedAtCurrentFrame() {
-        return effectHandleDepth > 0 && resumedStack[effectHandleDepth - 1];
     }
 
     public Object currentResume() {
@@ -704,7 +428,6 @@ public final class EffectFiber {
 
     @Override
     public String toString() {
-        return "EffectFiber@" + id
-            + (closed ? "[closed]" : isDone() ? "[done]" : "[live]");
+        return "EffectFiber@" + id + "[dispatch]";
     }
 }

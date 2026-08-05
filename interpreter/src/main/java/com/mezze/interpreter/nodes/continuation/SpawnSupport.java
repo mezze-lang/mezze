@@ -71,10 +71,11 @@ public final class SpawnSupport {
     public static Object propagateJoinFailure(ExecutionException e, String opLabel) {
         Throwable cause = e.getCause();
         if (cause instanceof TaskUnhandledOpException tue) {
-            EffectFiber parent = EffectFiber.current();
-            if (parent != null) {
-                return parent.suspend(tue.opCall);
-            }
+            // No Loom fiber remains post-#333: the surviving path is chain-
+            // dispatch. If a chain is installed on this thread (e.g. we're
+            // inside a spawned task that inherited the parent's chain),
+            // rethrow the TUE so the outer runPromiseTask/runBatchTask
+            // stashes it one level up.
             if (EffectFiber.handlerChainDepth() > 0) {
                 throw new TaskUnhandledOpException(tue.opCall);
             }
@@ -185,16 +186,12 @@ public final class SpawnSupport {
     ) {
         TaskUnhandledOpException tue = opSink.get();
         if (tue != null) {
-            EffectFiber parent = EffectFiber.current();
-            if (parent != null) {
-                return parent.suspend(tue.opCall);
-            }
-            // No active fiber, but there may be a handler chain installed
-            // on this thread (the classic case for chain-dispatch on the
-            // main thread inside nested performs). Dispatch directly through
-            // the chain; if the handler aborts, let AbortPerformException
-            // propagate up to the outer perform driver which will complete
-            // its perform with the abort value.
+            // No Loom fiber remains post-#333: chain-dispatch is the only
+            // path back to the outer perform. If a chain is installed on
+            // this thread (the classic case for chain-dispatch inside
+            // nested performs), dispatch directly through it; if the
+            // handler aborts, AbortPerformException propagates up to the
+            // outer perform driver which completes with the abort value.
             if (callNode != null) {
                 HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
                 if (chain.length > 0) {

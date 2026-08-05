@@ -101,7 +101,6 @@ public final class BdslYieldDispatch {
     public static Object dispatch(Hash effectHash, String opName, Object arg) {
         MezzeRecord handler = EffectFiber.peekHandlerForEffect(effectHash);
         if (TRACE) trace("dispatch " + opName + " effectHash=" + effectHash
-            + " outerFiber=" + (EffectFiber.current() == null ? "null" : "present")
             + " chainDepth=" + currentChainDepth()
             + " handler=" + (handler == null ? "null" : "found"));
         if (handler == null) {
@@ -136,28 +135,18 @@ public final class BdslYieldDispatch {
             return result;
         } catch (AbortPerformException abort) {
             // Decide whether abort should propagate as AbortPerformException
-            // or convert to TaskUnhandledOpException. Rules:
-            //   - If an outer AST HandleNode.runNoFiber frame is on this
-            //     thread, rethrow abort — its outer try/catch converts
-            //     it into the perform's overall result.
-            //   - If the abort would land inside a BDSL Handle's
-            //     TryCatchOtherwise catch branch (D8), rethrow — the catch
-            //     branch reads it via UnwrapAbortValue. We detect this by
-            //     checking the per-thread handler-chain depth: our chain
-            //     entry (pushed by PushHandlerChain) is still on the stack
-            //     until the finally-generator pops it, so depth > 0 here
-            //     means at least one Handle boundary is between us and the
-            //     thread top.
-            //   - Otherwise (no fiber, empty chain) we're at top level or on
-            //     a spawned thread with no enclosing handler — convert to
-            //     TUE so SpawnSupport catches and stashes on the promise.
-            EffectFiber outerFiber = EffectFiber.current();
+            // or convert to TaskUnhandledOpException. Post-#333 there are no
+            // Loom fibers; the only enclosing catch site is a BDSL Handle's
+            // TryCatchOtherwise catch branch (D8) or an AST HandleNode.
+            // runNoFiber frame — both register on D8_HANDLE_STACK via
+            // enterBdslHandle. If insideBdslHandle() is true we rethrow the
+            // abort for that catch to read via UnwrapAbortValue; otherwise
+            // convert to TUE so SpawnSupport stashes on the promise.
             boolean insideD8 = EffectFiber.insideBdslHandle();
             if (TRACE) trace("  impl aborted with val=" + summarize(abort.value)
-                + " (outerFiber=" + (outerFiber == null ? "null" : "present")
-                + " insideD8=" + insideD8
-                + " → " + (outerFiber == null && !insideD8 ? "throw TUE" : "rethrow abort") + ")");
-            if (outerFiber == null && !insideD8) {
+                + " (insideD8=" + insideD8
+                + " → " + (!insideD8 ? "throw TUE" : "rethrow abort") + ")");
+            if (!insideD8) {
                 throw new TaskUnhandledOpException(new OpCall(opName, arg, effectHash));
             }
             throw abort;

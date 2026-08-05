@@ -204,12 +204,8 @@ public final class OpCallNode extends MezzeNode {
      * {@link #executeMutMutateActFast} once the argument value is in hand.
      */
     private Object dispatchWith(Object args) {
-        EffectFiber fiber = EffectFiber.current();
-        if (fiber != null) {
-            return fiber.suspend(new OpCall(operationName, args, effectHash));
-        }
-        // #257 marker fast path. Inside a marker-Mut region CURRENT is null
-        // (set up by HandleNode.runMarker), so we reach here. If our
+        // #257 marker fast path. CURRENT is always null now that the Loom
+        // fiber-drive path is gone (#333). If our
         // inline cache holds the same handler that's currently on the
         // chain, dispatch direct through markerCallNode — no chain walk,
         // no dispatch fiber, no resume/abort plumbing.
