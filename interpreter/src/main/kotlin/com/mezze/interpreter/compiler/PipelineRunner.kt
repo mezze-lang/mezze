@@ -180,6 +180,34 @@ object PipelineRunner {
         val source: com.oracle.truffle.api.source.Source
         val bodyNode: com.mezze.interpreter.nodes.MezzeNode
 
+        // #374 — helper: compile a FunctionIR's body. Prefer BDSL (via the
+        // dedicated entry path that emits RegisterGlobal for top-level lets)
+        // so the AST TruffleCompiler.compileNode path becomes unreachable
+        // for real programs. Falls back to AST when BDSL rejects the shape
+        // (returns null) so tests / edge cases still compile.
+        fun bodyOf(fn: com.mezze.language.truffleir.FunctionIR): com.mezze.interpreter.nodes.MezzeNode {
+            val entryTarget = language.compileEntryFn(fn)
+            if (entryTarget != null) {
+                // Wrap CallTarget in a tiny MezzeNode adapter: on execute,
+                // calls the entry with a single empty record arg (matches
+                // the closure calling convention BdslTrampolineRootNode
+                // expects: [captures..., params...]; entry has neither
+                // captures nor params, so passing an empty record is a
+                // no-op arg that BDSL ignores).
+                return object : com.mezze.interpreter.nodes.MezzeNode() {
+                    @Child
+                    private var callNode: com.oracle.truffle.api.nodes.DirectCallNode =
+                        com.oracle.truffle.api.nodes.DirectCallNode.create(entryTarget)
+                    override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): Any {
+                        return callNode.call(com.mezze.interpreter.values.MezzeRecord.empty())
+                    }
+                }
+            }
+            // BDSL rejected — fall back to AST compileNode (legacy path).
+            val src = compiler.getOrCreateSourcePublic(fn.sourceFile)
+            return compiler.compileNode(fn.body, src)
+        }
+
         if (namedEntry != null) {
             // Named entry function exists (mez dev / exec / build path).
             //
@@ -195,10 +223,10 @@ object PipelineRunner {
             mainFn = wrapperFn ?: namedEntry
             source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
 
-            // Run __entry__'s body (binds all globals). Its return value — the
-            // last decl's closure — is discarded because it's not the last
-            // statement of the enclosing BlockNode.
-            val bindGlobalsNode = compiler.compileNode(mainFn.body, source)
+            // Run __entry__ (binds all globals via RegisterGlobal). Its return
+            // value — the last decl's closure — is discarded by the enclosing
+            // BlockNode; only the side effect (global registration) matters.
+            val bindGlobalsNode = bodyOf(mainFn)
 
             // Read the entry function by hash (no auto-eval), then invoke with {}.
             val entryFnNode = com.mezze.interpreter.nodes.ReadGlobalFnByHashNode(namedEntry.hash)
@@ -217,7 +245,7 @@ object PipelineRunner {
             // No named entry — fall back to __entry__ (tests/REPL) or last function
             mainFn = functions.find { it.name == "__entry__" } ?: functions.last()
             source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
-            bodyNode = compiler.compileNode(mainFn.body, source)
+            bodyNode = bodyOf(mainFn)
         }
 
         // Build hash→name map for performer/handler lookup by name

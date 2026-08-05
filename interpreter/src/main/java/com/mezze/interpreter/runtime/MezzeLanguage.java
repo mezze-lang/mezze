@@ -540,6 +540,44 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
+     * #374 — compile {@code __entry__} through the BDSL entry path so its
+     * top-level {@code let x = ...} statements publish {@code x} to
+     * {@link MezzeContext#defineGlobal} + {@link MezzeContext#recordTestInspectionVar}
+     * via the {@code RegisterGlobal} op (mirrors the AST
+     * {@code WriteLocalWithContextNode} semantics).
+     *
+     * <p>Returns the entry's {@link com.oracle.truffle.api.CallTarget}, which
+     * takes an empty record argument and returns the module body's result.
+     * Caller (PipelineRunner) wraps a small adapter around this call to slot
+     * back into {@code HashModuleLoaderNode} / {@code createResultCapturingNode}.
+     *
+     * <p>Falls back to the AST body path when BDSL is disabled or doesn't
+     * support the entry IR — returns {@code null} then, and the caller keeps
+     * using {@code TruffleCompiler.compileNode(entry.body)}.
+     */
+    public com.oracle.truffle.api.CallTarget compileEntryFn(
+            com.mezze.language.truffleir.FunctionIR entryIR) {
+        if (!BDSL_ENABLED) return null;
+        // #374 opt-in gate: default OFF while the top-level-through-BDSL path
+        // has known regressions (stack overflow when a top-level lambda is
+        // stored as a global then invoked in the same __entry__ body — see
+        // ReadGlobalByHashNode.autoEvaluateThunk mis-shape for BDSL roots).
+        // Flip via MEZZE_BDSL_ENTRY=1 to bisect.
+        if (!"1".equals(System.getenv("MEZZE_BDSL_ENTRY"))) return null;
+        com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
+        if (!bdsl.supports(entryIR)) return null;
+        try {
+            com.oracle.truffle.api.nodes.RootNode root = bdsl.compileEntryFn(entryIR);
+            return root.getCallTarget();
+        } catch (Throwable t) {
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println("[BDSL entry] compile failed for " + entryIR.getName() + ": " + t);
+            }
+            return null;
+        }
+    }
+
+    /**
      * Optional content-addressed store for resolving stdlib (and eventually
      * remote) hashes at runtime. When set, `getCachedStdlibCallTarget`
      * checks the store before falling back to PrecompiledStdlib's
