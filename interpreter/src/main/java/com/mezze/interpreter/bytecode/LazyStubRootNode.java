@@ -128,24 +128,33 @@ public final class LazyStubRootNode extends RootNode {
 
     @CompilerDirectives.TruffleBoundary
     private MezzeFunction resolveMezzeFunction() {
+        CallTarget selfCT = this.getCallTarget();
         // 1. Per-context globals — user let-bound fns land here after
         //    PipelineRunner.compileFromIR walks the module.
+        //    #374 fix: SKIP if the global's CallTarget IS this very stub.
+        //    That happens when RegisterGlobal published a MezzeFunction
+        //    wrapping the stub CT (because MakeLambda under compileEntryFn
+        //    uses the stub CT baked as its ConstantOperand — the stub
+        //    is what compiledCallTargets held at emit time). Inflating
+        //    to that would forward-call ourselves = infinite recursion.
         try {
             MezzeContext ctx = lang.getCurrentContext();
             if (ctx != null) {
                 Object global = ctx.lookupGlobal(hash);
-                if (global instanceof MezzeFunction f) return f;
+                if (global instanceof MezzeFunction f && f.getCallTarget() != selfCT) {
+                    return f;
+                }
             }
         } catch (Throwable ignored) {}
         // 2. Language-level stdlib CallTarget cache — stdlib fns have
         //    no closures.
         CallTarget ct = lang.getCachedStdlibCallTarget(hash);
-        if (ct != null) {
+        if (ct != null && ct != selfCT) {
             return MezzeFunction.create(ct, hash.getHex());
         }
         // 3. Compile from IR as last resort — bare CT, no closures.
         RootNode real = lang.compileUserIRForStub(hash);
-        if (real != null) {
+        if (real != null && real.getCallTarget() != selfCT) {
             return MezzeFunction.create(real.getCallTarget(), hash.getHex());
         }
         return null;
