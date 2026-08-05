@@ -845,6 +845,25 @@ public final class EffectHandlerDriver {
         return invokeHookWithEmptyArg(initFn, callNode);
     }
 
+    // #341: expose scope hooks so the Loom-free HandleNode.runNoFiber path
+    // gets initialize_scope / finalize_scope / installScope / restoreScope
+    // for free — otherwise perform blocks whose op impls read `scope` (e.g.
+    // Async's LoomAsync installing its StructuredTaskScope) fail with
+    // "Scope variable 'scope' not found". Same wire-in as run(), just
+    // callable from outside EffectHandlerDriver.
+    public static Object initializeScopePublic(MezzeRecord handler, IndirectCallNode callNode) {
+        return invokeInitializeScope(handler, callNode);
+    }
+    public static void finalizeScopePublic(MezzeRecord handler, Object scope, IndirectCallNode callNode) {
+        invokeFinalizeScope(handler, scope, callNode);
+    }
+    public static Object installScopePublic(MezzeNode dispatchNode, Object scope) {
+        return installScope(dispatchNode, scope);
+    }
+    public static void restoreScopePublic(MezzeNode dispatchNode, Object prev) {
+        restoreScope(dispatchNode, prev);
+    }
+
     @TruffleBoundary
     private static void invokeFinalizeScope(
             MezzeRecord handler, Object scope, IndirectCallNode callNode) {

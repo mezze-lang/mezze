@@ -230,6 +230,23 @@ public final class HandleNode extends MezzeNode {
     private static final boolean MARKER_MUT_ENABLED =
         !"0".equals(System.getenv("MEZZE_MARKER_MUT"));
 
+    /**
+     * #341: run every handle through the marker-style Loom-free path.
+     * On by default. Escape hatch: MEZZE_HANDLE_LOOM=1 to revert to the
+     * fiber path (for regression triage only; the fiber path is on borrowed
+     * time — {@code EffectHandlerDriver.run} + {@code EffectFiber.create}
+     * exist only until this flag is removed).
+     *
+     * <p>Safety: handlers that call resume after doing work (multi-shot,
+     * or capture-and-defer like Generator.AsStream) will regress from
+     * "full resume semantics" to "fall-through only" — see
+     * {@link com.mezze.interpreter.bytecode.BdslYieldDispatch}. The BDSL
+     * path has this narrowing today and only Generator.AsStream is
+     * affected in stdlib (its tests skip under BDSL default-on).
+     */
+    private static final boolean HANDLE_NO_FIBER =
+        !"1".equals(System.getenv("MEZZE_HANDLE_LOOM"));
+
     @Override
     public Object execute(VirtualFrame frame) {
         Object handlerValue = handlerNode.execute(frame);
@@ -248,6 +265,17 @@ public final class HandleNode extends MezzeNode {
         // resume round-trip per op.
         if (MARKER_MUT_ENABLED && MarkerEffects.isMutEffect(effectHash)) {
             return runMarker(handler, frame);
+        }
+
+        // #341: force EVERY handle through the marker path — no Loom fiber.
+        // Only enabled when MEZZE_HANDLE_NO_FIBER=1 for now, so we can A/B
+        // test before flipping the default. Same shape as the Mut path
+        // (push handler on chain, clear CURRENT, run body, catch abort)
+        // BUT with scope hooks — many handlers (LoomAsync in particular)
+        // rely on initialize_scope installing a `scope` var that op impls
+        // read via ReadScopeNode.
+        if (HANDLE_NO_FIBER && staticallyFullyDischarges) {
+            return runNoFiber(handler, frame);
         }
 
         // Path E (#336) lazy branch: when the typechecker stamped this
@@ -332,6 +360,49 @@ public final class HandleNode extends MezzeNode {
         } finally {
             com.mezze.interpreter.nodes.continuation.EffectFiber.truncateHandlerChainTo(
                 chainDepthBefore);
+        }
+    }
+
+    /**
+     * #341: Loom-free general handle path. Same shape as {@link #runMarker}
+     * but with the scope-hook wiring lifted from
+     * {@link EffectHandlerDriver#run}. Push handler on chain, run body
+     * inline (CURRENT cleared so op dispatch goes through chain-walk),
+     * catch abort. Body's op-calls dispatch via
+     * {@link com.mezze.interpreter.nodes.effect.OpCallNode#chainDispatch}
+     * (fall-through only — same semantic narrowing as BDSL Path D).
+     *
+     * <p>Only correct for {@code staticallyFullyDischarges = true}. The
+     * lazy branch upstream still builds a MezzeSuspend.
+     */
+    private Object runNoFiber(MezzeRecord handler, VirtualFrame frame) {
+        Object scope = EffectHandlerDriver.initializeScopePublic(handler, callNode);
+        boolean installedScope = scope != null;
+        Object prevScope = installedScope
+            ? EffectHandlerDriver.installScopePublic(this, scope)
+            : null;
+        int chainDepthBefore =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.handlerChainDepth();
+        com.mezze.interpreter.nodes.continuation.EffectFiber.pushHandlerOnChain(
+            handler, effectHash);
+        // Push a "handle frame" marker so OpCallNode.dispatchOpOnChain
+        // preserves AbortPerformException (instead of converting to
+        // TaskUnhandledOpException). Same guard the BDSL Handle op uses —
+        // we're a real Handle frame that will catch the abort.
+        com.mezze.interpreter.nodes.continuation.EffectFiber.enterBdslHandle();
+        try {
+            return com.mezze.interpreter.nodes.continuation.EffectFiber.runDetached(
+                () -> bodyNode.execute(frame));
+        } catch (EffectHandlerDriver.AbortPerformException abort) {
+            return abort.value;
+        } finally {
+            com.mezze.interpreter.nodes.continuation.EffectFiber.exitBdslHandle();
+            com.mezze.interpreter.nodes.continuation.EffectFiber.truncateHandlerChainTo(
+                chainDepthBefore);
+            if (installedScope) {
+                EffectHandlerDriver.finalizeScopePublic(handler, scope, callNode);
+                EffectHandlerDriver.restoreScopePublic(this, prevScope);
+            }
         }
     }
 

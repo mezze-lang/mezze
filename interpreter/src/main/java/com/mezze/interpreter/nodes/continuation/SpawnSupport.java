@@ -271,15 +271,19 @@ public final class SpawnSupport {
                 try {
                     return callNode.call(op.getCallTarget(), callArgs);
                 } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
-                    // Convert to TaskUnhandledOpException. Empirically
-                    // this covers most cases (for_each, both, spawn'd
-                    // Exception all resolve to the correct outer Err).
-                    // Edge: a `let r = map { ... }` binding where r is
-                    // then wrapped into a subsequent record — the TUE
-                    // propagation appears to allow the outer expression
-                    // to construct with a MezzeSuspend r before the
-                    // outer perform driver catches the abort. Tracked
-                    // in docs/PARALLEL_KNOWN_ISSUES.md.
+                    // Same rule as OpCallNode.dispatchOpOnChain:
+                    //   - Inside a BDSL Handle (or Loom-free runNoFiber that
+                    //     set the same enterBdslHandle marker): rethrow so
+                    //     the enclosing Handle catches abort and finishes
+                    //     the perform with abort.value.
+                    //   - Otherwise: convert to TaskUnhandledOpException so
+                    //     the surrounding batch/task machinery stashes it
+                    //     for parent await re-issue.
+                    // Diverging from OpCallNode here is the exact bug that
+                    // lets abort escape as TUE past a Loom-free Handle frame.
+                    if (EffectFiber.insideBdslHandle()) {
+                        throw abort;
+                    }
                     throw new com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException(
                         new OpCall(opName, args, effectHash));
                 } finally {

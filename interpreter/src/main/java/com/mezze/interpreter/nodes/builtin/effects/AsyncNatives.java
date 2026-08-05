@@ -1215,6 +1215,16 @@ public final class AsyncNatives {
                 return MezzeVariant.ok(forced);
             }
             if (EffectFiber.handlerChainDepth() > 0) {
+                Object dispatched = com.mezze.interpreter.nodes.effect.OpCallNode
+                    .dispatchOpOnChain(
+                        EffectFiber.snapshotHandlerChainEntries(),
+                        pending.opName(),
+                        pending.args(),
+                        pending.effectHash(),
+                        IndirectCallNode.getUncached());
+                if (dispatched != com.mezze.interpreter.nodes.effect.OpCallNode.DISPATCH_NO_MATCH) {
+                    return MezzeVariant.ok(dispatched);
+                }
                 throw new EffectHandlerDriver.TaskUnhandledOpException(pending);
             }
             // No handler — surface as AsyncFailed so caller sees Result Err.
@@ -1334,6 +1344,21 @@ public final class AsyncNatives {
                 return parentFiber.suspend(pending);
             }
             if (EffectFiber.handlerChainDepth() > 0) {
+                // Loom-free Handle path (MEZZE_HANDLE_NO_FIBER=1): no parent
+                // fiber, but the outer Handle installed its handler on the
+                // chain. Dispatch directly through the chain — under
+                // insideBdslHandle() this preserves AbortPerformException up
+                // to the outer runNoFiber catch, matching the BDSL Handle op.
+                Object dispatched = com.mezze.interpreter.nodes.effect.OpCallNode
+                    .dispatchOpOnChain(
+                        EffectFiber.snapshotHandlerChainEntries(),
+                        pending.opName(),
+                        pending.args(),
+                        pending.effectHash(),
+                        IndirectCallNode.getUncached());
+                if (dispatched != com.mezze.interpreter.nodes.effect.OpCallNode.DISPATCH_NO_MATCH) {
+                    return dispatched;
+                }
                 throw new EffectHandlerDriver.TaskUnhandledOpException(pending);
             }
             throw new RuntimeException(
