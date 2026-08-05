@@ -1822,13 +1822,12 @@ public final class BytecodeCompiler {
             // incomplete args → null slots. Falls back to empty on lookup
             // miss (rare — the FunctionIR was registered by the pipeline
             // before compile).
-            var calleeIR = language.lookupFunctionIR(ml.getFunctionHash());
-            String[] paramNames;
-            if (calleeIR != null) {
-                var pn = calleeIR.getParamNames();
-                paramNames = pn.toArray(new String[0]);
-            } else {
-                paramNames = new String[0];
+            String[] paramNames = new String[0];
+            if (language != null) {
+                var calleeIR = language.lookupFunctionIR(ml.getFunctionHash());
+                if (calleeIR != null) {
+                    paramNames = calleeIR.getParamNames().toArray(new String[0]);
+                }
             }
             b.beginMakeLambda(target, "lambda", paramNames);
             for (var cap : ml.getCaptures()) {
