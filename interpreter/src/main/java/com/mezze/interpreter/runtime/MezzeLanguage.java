@@ -50,7 +50,13 @@ import java.util.concurrent.atomic.AtomicReference;
     StandardTags.ExpressionTag.class,
     StandardTags.CallTag.class,
     StandardTags.ReadVariableTag.class,
-    StandardTags.WriteVariableTag.class
+    StandardTags.WriteVariableTag.class,
+    // #356: DebuggerSession.suspendAll() / suspendNextExecution() install
+    // an AlwaysHalt probe on the running roots. Without this tag declared,
+    // the guest execution throws IllegalArgumentException the moment a
+    // pause request lands on any root — and pause silently no-ops
+    // (evalThread dies with "Invalid tag specified" before it can suspend).
+    com.oracle.truffle.api.debug.DebuggerTags.AlwaysHalt.class
 })
 public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 

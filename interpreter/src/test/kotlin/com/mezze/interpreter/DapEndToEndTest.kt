@@ -281,18 +281,6 @@ class DapEndToEndTest {
 
     @Test
     @Timeout(40)
-    @Disabled(
-        "#356: pause on a BDSL tail-recursive loop never receives a `stopped` " +
-        "event in full-suite context. Investigated 2026-08-05: not a cache " +
-        "invalidation race (fresh Engine per test didn't help) and not a " +
-        "warmup timing race (bumping pre-pause sleep 300ms → 1500ms didn't " +
-        "help). The trampoline+LoopNode driving BDSL tail recursion appears " +
-        "to swallow Debugger.suspendAll() at LoopNode iteration boundaries — " +
-        "no statement node ever fires. Passes in isolation only because in " +
-        "that case Truffle takes a different code path (interpreter, no " +
-        "LoopNode OSR yet). Re-enable when #356 finishes the BDSL debugger " +
-        "port with a LoopNode-visible statement checkpoint."
-    )
     fun `pause interrupts a running program and stops with reason pause`() {
         // The program spins in a TAIL-recursive guest-code loop (recursive call in
         // tail position → trampolined, no stack overflow); while it's running, the
