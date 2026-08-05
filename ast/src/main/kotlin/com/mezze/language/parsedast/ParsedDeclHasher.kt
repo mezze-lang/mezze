@@ -223,6 +223,11 @@ object ParsedDeclHasher {
                     b.appendInt(c.patterns.size)
                     for (p in c.patterns) appendPattern(b, p)
                     c.guard?.let { b.appendBoolean(true); appendExpr(b, it) } ?: b.appendBoolean(false)
+                    b.appendInt(c.ifLetBindings.size)
+                    for (ilb in c.ifLetBindings) {
+                        appendPattern(b, ilb.pattern)
+                        appendExpr(b, ilb.expr)
+                    }
                     appendExpr(b, c.body)
                 }
             }

@@ -256,6 +256,11 @@ object TypedASTHasher {
                         b.appendBoolean(true)
                         appendExpr(b, guard)
                     } ?: b.appendBoolean(false)
+                    b.appendInt(case_.ifLetBindings.size)
+                    for (ilb in case_.ifLetBindings) {
+                        appendPattern(b, ilb.pattern)
+                        appendExpr(b, ilb.expr)
+                    }
                     appendExpr(b, case_.body)
                 }
             }
