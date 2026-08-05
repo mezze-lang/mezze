@@ -1814,7 +1814,23 @@ public final class BytecodeCompiler {
                     "MakeLambdaIR references unknown target hash "
                     + ml.getFunctionHash().getHex() + " — callee must be compiled first");
             }
-            b.beginMakeLambda(target, "lambda");
+            // #374 — thread paramNames from the callee's FunctionIR so
+            // MezzeFunction knows its own param list. Without this, partial
+            // application (`f {a=1}` returning a curried fn) silently
+            // corrupts under BDSL_ENTRY: MezzeFunction.parameterNames stays
+            // EMPTY, hasAllParameters trivially true, target called with
+            // incomplete args → null slots. Falls back to empty on lookup
+            // miss (rare — the FunctionIR was registered by the pipeline
+            // before compile).
+            var calleeIR = language.lookupFunctionIR(ml.getFunctionHash());
+            String[] paramNames;
+            if (calleeIR != null) {
+                var pn = calleeIR.getParamNames();
+                paramNames = pn.toArray(new String[0]);
+            } else {
+                paramNames = new String[0];
+            }
+            b.beginMakeLambda(target, "lambda", paramNames);
             for (var cap : ml.getCaptures()) {
                 int slot = cap.getSlot();
                 if (slot < argCount) {

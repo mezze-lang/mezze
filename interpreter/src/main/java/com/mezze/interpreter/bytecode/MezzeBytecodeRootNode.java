@@ -694,6 +694,33 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     public static final class TailCallIndirect {
         @Specialization
         public static Object doThrow(MezzeFunction fn, @Variadic Object[] args) {
+            // Same partial-application slow path as CallIndirect. A tail
+            // call to a partially-applied MezzeFunction still needs to
+            // merge/complete the partial args before firing.
+            if (args.length == 1 && args[0] instanceof MezzeRecord record
+                    && fn.getParameterNames().length > 0) {
+                if (!fn.hasAllParameters(record)) {
+                    // Returning the partial as the tail result is
+                    // semantically correct — the caller frame receives it
+                    // as its return value (i.e. the outer function
+                    // evaluates to a curried MezzeFunction).
+                    return fn.withPartialArgs(record);
+                }
+                if (fn.hasPartialArgs()) {
+                    MezzeRecord complete = fn.buildCompleteRecord(record);
+                    Object[] closureValues = fn.getClosureValues();
+                    int closureLen = closureValues.length;
+                    Object[] combined;
+                    if (closureLen == 0) {
+                        combined = new Object[] { complete };
+                    } else {
+                        combined = new Object[closureLen + 1];
+                        System.arraycopy(closureValues, 0, combined, 0, closureLen);
+                        combined[closureLen] = complete;
+                    }
+                    throw new TailCallException(fn.getCallTarget(), combined);
+                }
+            }
             Object[] closureValues = fn.getClosureValues();
             int closureLen = closureValues.length;
             Object[] combined;
@@ -726,6 +753,22 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 MezzeFunction fn,
                 @Variadic Object[] args,
                 @Cached IndirectCallNode callNode) {
+            // Partial-application slow path: mirrors
+            // InvokeScalarNNode.slowGenericInvoke — when the fn has named
+            // params and the single record arg doesn't fill all of them
+            // (or completes a prior partial), route through
+            // withPartialArgs/buildCompleteRecord. Called from BDSL when a
+            // local slot holds a MezzeFunction that we're re-applying.
+            if (args.length == 1 && args[0] instanceof MezzeRecord record
+                    && fn.getParameterNames().length > 0) {
+                if (!fn.hasAllParameters(record)) {
+                    return fn.withPartialArgs(record);
+                }
+                if (fn.hasPartialArgs()) {
+                    MezzeRecord complete = fn.buildCompleteRecord(record);
+                    return invokeWithClosure(fn, complete, callNode);
+                }
+            }
             Object[] closureValues = fn.getClosureValues();
             int closureLen = closureValues.length;
             if (closureLen == 0) {
@@ -734,6 +777,19 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             Object[] combined = new Object[closureLen + args.length];
             System.arraycopy(closureValues, 0, combined, 0, closureLen);
             System.arraycopy(args, 0, combined, closureLen, args.length);
+            return callNode.call(fn.getCallTarget(), combined);
+        }
+
+        private static Object invokeWithClosure(MezzeFunction fn, Object arg,
+                                                IndirectCallNode callNode) {
+            Object[] closureValues = fn.getClosureValues();
+            int closureLen = closureValues.length;
+            if (closureLen == 0) {
+                return callNode.call(fn.getCallTarget(), new Object[] { arg });
+            }
+            Object[] combined = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, combined, 0, closureLen);
+            combined[closureLen] = arg;
             return callNode.call(fn.getCallTarget(), combined);
         }
     }
@@ -751,10 +807,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = CallTarget.class)
     @ConstantOperand(type = String.class)
+    @ConstantOperand(type = String[].class)
     public static final class MakeLambda {
         @Specialization
-        public static MezzeFunction doMake(CallTarget target, String name, @Variadic Object[] captures) {
-            return new MezzeFunction(target, name, captures);
+        public static MezzeFunction doMake(CallTarget target, String name, String[] paramNames,
+                                            @Variadic Object[] captures) {
+            // #374 — must thread paramNames through so partial application
+            // works. Without them, MezzeFunction.parameterNames is EMPTY
+            // and CallIndirect/MonomorphicCall skip the partial-app slow
+            // path (hasAllParameters trivially true over empty list),
+            // silently calling the target with incomplete args.
+            return new MezzeFunction(target, name, captures, paramNames);
         }
     }
 

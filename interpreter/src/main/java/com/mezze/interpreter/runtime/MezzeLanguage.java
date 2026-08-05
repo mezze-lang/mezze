@@ -607,6 +607,35 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         getCurrentContext().registerUserFunctionIR(hash, ir);
     }
 
+    /**
+     * Look up a FunctionIR by content hash. Searches per-context user
+     * registry, then stdlib pre-lowered map, then runtime store.
+     * Returns null if not found. Used by BDSL emit to inspect callee
+     * metadata (e.g. paramNames for {@code MakeLambda}).
+     */
+    public com.mezze.language.truffleir.FunctionIR lookupFunctionIR(Hash hash) {
+        MezzeContext ctx;
+        try { ctx = getCurrentContext(); } catch (Exception e) { ctx = null; }
+        if (ctx != null) {
+            var ir = ctx.getUserFunctionIR(hash);
+            if (ir != null) return ir;
+        }
+        var stdlibIr = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE
+                .getPreloweredFunctions().get(hash);
+        if (stdlibIr != null) return stdlibIr;
+        var store = runtimeStore;
+        if (store != null) {
+            byte[] bytes = store.getIR(hash);
+            if (bytes != null) {
+                try {
+                    return com.mezze.language.store.StoreSerialization.INSTANCE
+                            .deserializeFunctionIR(bytes);
+                } catch (Exception ignored) { return null; }
+            }
+        }
+        return null;
+    }
+
     // #304 — per-hash lazy stubs. Minted on demand by BDSL emit when a
     // callee CallTarget isn't yet cached; the stub itself is stable
     // (baked as ConstantOperand into BDSL bytecode) and lazily inflates
