@@ -383,6 +383,42 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Register a value in the current {@link com.mezze.interpreter.runtime.MezzeContext}
+     * globals (by content hash) AND in the test-inspection map (by name),
+     * then return the value unchanged so the surrounding StoreLocal can
+     * still fill the frame slot.
+     *
+     * <p>Emitted by {@link BytecodeCompiler#compileEntryFn} as a wrapper
+     * around the value of each top-level {@code StmtIR.Let} — mirrors what
+     * the AST {@code WriteLocalWithContextNode} did. Only used for the
+     * immediate top-level {@code BlockIR} of {@code __entry__}; nested
+     * blocks inside handlers, lambdas, etc. still write frame slots only.
+     *
+     * <p>Note: the surrounding StoreLocal consumes the value we return —
+     * this op is transparent from the stack's perspective (1 in, 1 out).
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    @ConstantOperand(type = String.class)
+    public static final class RegisterGlobal {
+        @TruffleBoundary
+        @Specialization
+        public static Object doRegister(Hash contentHash, String name, Object value, @Bind Node node) {
+            // Match WriteLocalWithContextNode.registerGlobal semantics: null
+            // values legitimately arrive from lazy-effect edge cases
+            // (suspended value resolving to no result). Skip both maps then.
+            if (value == null) return null;
+            com.mezze.interpreter.runtime.MezzeContext ctx =
+                com.mezze.interpreter.runtime.MezzeContext.get(node);
+            if (contentHash != null) {
+                ctx.defineGlobal(contentHash, value);
+            }
+            ctx.recordTestInspectionVar(name, value);
+            return value;
+        }
+    }
+
+    /**
      * Pop two longs, push their overflow-checked sum.
      *
      * <p>Used to lower {@code InlineBinaryOpIR} with op = ADD when

@@ -234,6 +234,22 @@ public final class BytecodeCompiler {
     private com.oracle.truffle.api.source.Source currentSource;
 
     /**
+     * #374 — set by {@link #compileEntryFn} while emitting the outermost
+     * {@code BlockIR} of {@code __entry__}. Non-empty means "for these
+     * StmtIR.Let object identities, wrap the value in a RegisterGlobal op
+     * so top-level {@code let x = ...} publishes {@code x} into the
+     * enclosing MezzeContext's globals + test-inspection maps".
+     * Empty set (the default) leaves normal function-body emit unchanged
+     * — every StmtIR.Let stays a pure StoreLocal.
+     *
+     * <p>Identity map, not by (slot, name), because a nested block inside
+     * {@code __entry__.body} may legitimately re-use a slot and we only
+     * want the semantic to fire on the outermost statement level.
+     */
+    private java.util.IdentityHashMap<StmtIR.Let, Boolean> entryTopLevelLets =
+            new java.util.IdentityHashMap<>();
+
+    /**
      * Optional external CallTarget resolver — used when this compiler
      * is invoked from the runtime path where callee CallTargets already
      * live in {@link MezzeLanguage}'s shared stdlib cache rather than
@@ -806,6 +822,34 @@ public final class BytecodeCompiler {
     }
 
     /**
+     * #374 entry-point compile. Same as {@link #compile} but marks the
+     * immediate {@code BlockIR} statements as "top-level" — every
+     * {@code StmtIR.Let} in {@code __entry__.body}'s outermost block
+     * publishes to MezzeContext globals + test-inspection maps via the
+     * BDSL RegisterGlobal op (mirrors the AST
+     * {@code WriteLocalWithContextNode} semantics).
+     *
+     * <p>Nested blocks inside handlers, lambdas, match arms, etc. still
+     * write frame slots only — RegisterGlobal fires only for the very
+     * top-level lets recorded here by identity.
+     */
+    public RootNode compileEntryFn(FunctionIR ir) {
+        entryTopLevelLets.clear();
+        if (ir.getBody() instanceof BlockIR blk) {
+            for (StmtIR s : blk.getStmts()) {
+                if (s instanceof StmtIR.Let l) {
+                    entryTopLevelLets.put(l, Boolean.TRUE);
+                }
+            }
+        }
+        try {
+            return compile(ir);
+        } finally {
+            entryTopLevelLets.clear();
+        }
+    }
+
+    /**
      * Lower {@code ir} to a BDSL root node. Precondition:
      * {@link #supports} returned true and any callees are already in
      * {@link #compiledCallTargets}. Violating either throws.
@@ -1299,11 +1343,27 @@ public final class BytecodeCompiler {
                     // #356 — wrap in SourceSection + StatementTag so
                     // the debugger sees a breakpointable line boundary
                     // pinned to the let's location.
+                    //
+                    // #374 — top-level lets in `__entry__.body` also
+                    // publish to MezzeContext globals so later
+                    // ReadGlobalByHash and test-inspection can see them.
+                    // Detected via entryTopLevelLets (populated by
+                    // compileEntryFn); empty for ordinary function bodies.
+                    final boolean topLevel = entryTopLevelLets.containsKey(l);
                     int[] range = debug ? toCharRange(currentSource, l.getSrc()) : null;
                     if (range != null) b.beginSourceSection(range[0], range[1]);
                     if (debug) b.beginTag(com.oracle.truffle.api.instrumentation.StandardTags.StatementTag.class);
                     b.beginStoreLocal(localMap[l.getSlot() - argCount]);
-                    emitNode(l.getValue(), b, argCount, localMap);
+                    if (topLevel) {
+                        // Wrap: StoreLocal(RegisterGlobal(hash, name, value)).
+                        // RegisterGlobal is transparent (1 in → 1 out) so the
+                        // outer StoreLocal still fills the frame slot.
+                        b.beginRegisterGlobal(l.getContentHash(), l.getName());
+                        emitNode(l.getValue(), b, argCount, localMap);
+                        b.endRegisterGlobal();
+                    } else {
+                        emitNode(l.getValue(), b, argCount, localMap);
+                    }
                     b.endStoreLocal();
                     if (debug) b.endTag(com.oracle.truffle.api.instrumentation.StandardTags.StatementTag.class);
                     if (range != null) b.endSourceSection();
