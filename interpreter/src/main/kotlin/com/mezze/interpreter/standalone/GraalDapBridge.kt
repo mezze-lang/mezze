@@ -199,6 +199,16 @@ class GraalDapBridge(
     }
 
     private fun onSuspend(event: SuspendedEvent) {
+        // #374 — under BDSL_ENTRY, tag-instrumented bytecode roots can fire
+        // stale Breakpoints left over on the shared Truffle Engine from a
+        // prior test's DapEndToEndTest run. Without a live DAP client the
+        // cmdQueue.take() below would park the fiber forever. If there's no
+        // connected server, treat this like an unhandled suspension and
+        // continue instead of parking.
+        if (server == null) {
+            event.prepareContinue()
+            return
+        }
         val line = event.sourceSection?.startLine ?: -1
         // Logpoint: emit the (interpolated) message and continue WITHOUT
         // stopping. `{expr}` segments are evaluated in the top frame.
