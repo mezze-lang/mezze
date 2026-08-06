@@ -36,7 +36,6 @@ class WireProtocolIntegrationTest {
             "--enable-native-access=ALL-UNNAMED",
             "--add-opens=java.base/java.lang=ALL-UNNAMED",
             "--add-opens=java.base/sun.misc=ALL-UNNAMED",
-            "--add-opens=java.base/jdk.internal.vm=ALL-UNNAMED",
             "--add-modules=jdk.incubator.vector",
             "-cp", runtimeJar.absolutePath,
             "com.mezze.interpreter.standalone.RuntimeServer",

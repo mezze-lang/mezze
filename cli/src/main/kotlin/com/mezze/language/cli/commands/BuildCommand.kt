@@ -480,10 +480,6 @@ class BuildCommand {
             fi
 
             JAVA="${'$'}{MEZZE_JAVA:-java}"
-            # --add-opens=java.base/jdk.internal.vm=ALL-UNNAMED: required for
-            # EffectFiber, which wraps jdk.internal.vm.Continuation for the
-            # Loom-backed effect handler runtime. Without it the JVM refuses
-            # to load the wrapping class.
             # --add-modules=jdk.incubator.vector: required by VectorOps,
             # which SIMD-optimizes LongSeqStorage.sum/min/max/indexOf and
             # is class-loaded eagerly. Without it, the first call to
@@ -492,7 +488,7 @@ class BuildCommand {
             # G1 (default GC) is used here instead of ZGC so the AppCDS
             # class-data-sharing archive is honored — ZGC and CDS are
             # incompatible.
-            DEFAULT_OPTS="-Xmx4g $cdsFlag--enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-opens=java.base/jdk.internal.vm=ALL-UNNAMED --add-modules=jdk.incubator.vector"
+            DEFAULT_OPTS="-Xmx4g $cdsFlag--enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector"
             OPTS="${'$'}{MEZZE_JAVA_OPTS:-${'$'}DEFAULT_OPTS}"
 
             exec "${'$'}JAVA" ${'$'}OPTS -jar "${'$'}JAR" "${'$'}@"
@@ -520,7 +516,7 @@ class BuildCommand {
                 exit /b 1
             )
             if "%MEZZE_JAVA%"=="" set "MEZZE_JAVA=java"
-            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-Xmx4g $cdsFlag--enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-opens=java.base/jdk.internal.vm=ALL-UNNAMED --add-modules=jdk.incubator.vector"
+            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-Xmx4g $cdsFlag--enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector"
             "%MEZZE_JAVA%" %MEZZE_JAVA_OPTS% -jar "%JAR%" %*
         """.trimIndent() + "\r\n"
         launcher.writeText(script)
@@ -544,15 +540,14 @@ class BuildCommand {
     ): Boolean {
         val javaBin = System.getenv("MEZZE_JAVA") ?: "java"
         // G1 is required for AppCDS (ZGC and CDS are incompatible). We
-        // also pass the same enable-native-access / add-opens flags the
-        // launcher uses; otherwise the dry-run hits an UnsupportedOpException
-        // mid-classload and the archive is incomplete.
+        // also pass the same enable-native-access flag the launcher uses;
+        // otherwise the dry-run hits an UnsupportedOpException mid-classload
+        // and the archive is incomplete.
         val cmd = listOf(
             javaBin,
             "-XX:ArchiveClassesAtExit=${jsaFile.absolutePath}",
             "--enable-native-access=ALL-UNNAMED",
             "--sun-misc-unsafe-memory-access=allow",
-            "--add-opens=java.base/jdk.internal.vm=ALL-UNNAMED",
             "--add-modules=jdk.incubator.vector",
             "-jar", jarFile.absolutePath,
         )

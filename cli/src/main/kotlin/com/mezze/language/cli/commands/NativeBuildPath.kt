@@ -586,12 +586,6 @@ object NativeBuildPath {
      * `META-INF/mezze/native-image-flags.txt`.
      */
     private val USER_BUILD_SPECIFIC_FLAGS = listOf(
-        // EffectFiber (the Loom-backed effect handler runtime) wraps
-        // jdk.internal.vm.Continuation. Without these add-opens passed
-        // both to the builder JVM (-J prefix) and into the resulting
-        // image (--enable-native-access), the image-build's class-init
-        // and runtime invocations both fail with InaccessibleObjectException.
-        "-J--add-opens=java.base/jdk.internal.vm=ALL-UNNAMED",
         "--enable-native-access=ALL-UNNAMED",
         // native-image's macOS toolchain probe doesn't recognise Nix's
         // wrapped clang. The wrapped binary is still used for linking;
