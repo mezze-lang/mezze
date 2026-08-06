@@ -649,12 +649,19 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             }
         }
         if (System.getenv("MEZZE_DEBUG") != null || "1".equals(System.getenv("MEZZE_EAGER_STATS"))) {
+            long mlTotal = com.mezze.interpreter.bytecode.BytecodeCompiler.getMakeLambdaTotal();
+            long mlCless = com.mezze.interpreter.bytecode.BytecodeCompiler.getMakeLambdaClosureless();
+            long mlPct = mlTotal == 0 ? 0 : (mlCless * 100 / mlTotal);
+            long cbFallbacks = com.mezze.interpreter.bytecode.BytecodeCompiler.getEagerClosureBearingFallbacks();
             System.err.println("[eager #391] reachable=" + reachable.size()
                     + " emitted=" + emitted
                     + " skippedUnsupported=" + skippedUnsupported
                     + " skippedMissing=" + (skippedMissing + missing.size())
                     + " failed=" + failed
-                    + " slotTable=" + slotTable.size());
+                    + " slotTable=" + slotTable.size()
+                    + " makeLambda closureless=" + mlCless + "/" + mlTotal
+                    + " (" + mlPct + "%)"
+                    + " closureBearingFallbacks=" + cbFallbacks);
         }
     }
 

@@ -287,6 +287,24 @@ public final class BytecodeCompiler {
                         && !ir.getCaptureSlots().isEmpty()) {
                     closureBearing = true;
                     EAGER_CLOSURE_BEARING_FALLBACK.incrementAndGet();
+                    // #391 Step 4b Commit 4 — Q2 answered empirically by
+                    // e4fd9c21b: zero closure-bearing fallback hits on the
+                    // full test suite. The invariant "no legitimate
+                    // CallDirect / MakeLambda targets a closure-bearing
+                    // hash" holds. Under MEZZE_EAGER_STRICT=1 the fallback
+                    // becomes a hard error, so any future violation gets
+                    // caught at emit time rather than silently degrading
+                    // to the LazyStub path. Default gate keeps the debug
+                    // log as before.
+                    if ("1".equals(System.getenv("MEZZE_EAGER_STRICT"))) {
+                        throw new IllegalStateException(
+                            "[eager #391] closure-bearing callee hit CallDirect/MakeLambda "
+                            + "resolveCallTarget — invariant violation. hash=" + hash.getHex()
+                            + " captures=" + ir.getCaptureSlots().size()
+                            + ". See docs/effects/bdsl-eager-call-abi.md §5. If this fires,"
+                            + " the closure-bearing MakeLambda case needs a real flip"
+                            + " (Path 1 in the deferred plan).");
+                    }
                     if ("1".equals(System.getenv("MEZZE_EAGER_DEBUG"))) {
                         System.err.println("[eager #391] fall-through: closure-bearing hash "
                                 + hash.getHex() + " (captures=" + ir.getCaptureSlots().size() + ")");
