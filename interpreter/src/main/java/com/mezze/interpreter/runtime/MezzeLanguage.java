@@ -90,6 +90,16 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private final java.util.concurrent.ConcurrentHashMap<Hash, CallTarget> stdlibCallTargetCache =
         new java.util.concurrent.ConcurrentHashMap<>();
 
+    // #391 — Scaffold for eager whole-program BDSL compilation. Sits
+    // alongside the three existing caches (globals / userStubCache /
+    // stdlibCallTargetCache) that later migration steps will collapse
+    // into it. No callers yet.
+    private final SlotTable slotTable = new SlotTable();
+
+    public SlotTable getSlotTable() {
+        return slotTable;
+    }
+
     // BDSL routing (#284) — Phase 4 flipped to DEFAULT-ON (2026-08-02).
     // Every per-function compile tries BytecodeCompiler first; failure ⇒
     // falls back to TruffleCompiler AST path. BDSL coverage on the test
