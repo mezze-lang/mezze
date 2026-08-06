@@ -135,6 +135,15 @@ public final class ReadGlobalByHashNode extends MezzeNode {
             isThunk = true;
         }
         if (isThunk) {
+            // #392 — under MEZZE_EAGER, the SlotTable short-circuit above may
+            // return a raw MezzeFunction (via SlotEntry.resolveValue) BEFORE
+            // __entry__'s RegisterGlobal has stored the auto-evaluated value
+            // in MezzeContext.globals. If a value IS already in globals for
+            // this hash, prefer it — otherwise we re-evaluate under the wrong
+            // (empty top-level) handler chain instead of using the value
+            // computed under the intended chain.
+            Object existing = context.lookupGlobal(hash);
+            if (existing != null) return existing;
             try {
                 Object result = ct.call(com.mezze.interpreter.values.MezzeUnit.INSTANCE);
                 // Cache the evaluated value so we don't re-evaluate on every access
