@@ -171,7 +171,7 @@ object PipelineRunner {
         // Gated by MEZZE_EAGER=1 (default off). Populates language.slotTable
         // in parallel; today's lazy path still runs and is authoritative.
         // Step 4 flips callers to read from the slot table.
-        if ("1".equals(System.getenv("MEZZE_EAGER"))) {
+        if (!"0".equals(System.getenv("MEZZE_EAGER"))) {
             // Seed roots: entrypoints we can identify by name. FunctionIR has
             // no `pub` marker, so we can't reachability-prune at the module
             // level — we seed every top-level user function whose name

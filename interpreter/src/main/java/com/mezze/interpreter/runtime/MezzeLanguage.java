@@ -604,7 +604,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     public void eagerCompileReachable(
             java.util.Set<Hash> roots,
             java.util.List<com.mezze.language.truffleir.FunctionIR> userFunctions) {
-        if (!"1".equals(System.getenv("MEZZE_EAGER"))) return;
+        if ("0".equals(System.getenv("MEZZE_EAGER"))) return;
         if (roots.isEmpty()) return;
         // Build a lookup that prefers the fresh user-function list, then
         // falls back to the language's consolidated lookupFunctionIR (per-

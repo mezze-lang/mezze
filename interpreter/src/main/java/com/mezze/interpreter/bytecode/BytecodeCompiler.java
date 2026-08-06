@@ -278,7 +278,7 @@ public final class BytecodeCompiler {
         // LazyStubRootNode; baking the raw eager trampoline CT skips that
         // adaptation and produces wrong args at call time (regressed
         // testClosureCapture in prior Step-4b attempts).
-        if ("1".equals(System.getenv("MEZZE_EAGER")) && language != null) {
+        if (!"0".equals(System.getenv("MEZZE_EAGER")) && language != null) {
             var slot = language.getSlotTable().get(hash);
             if (slot != null && slot.isPublished()) {
                 boolean closureBearing = false;

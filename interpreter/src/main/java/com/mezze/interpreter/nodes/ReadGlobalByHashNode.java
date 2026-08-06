@@ -51,7 +51,7 @@ public final class ReadGlobalByHashNode extends MezzeNode {
         // #392 — SlotEntry.resolveValue must NOT auto-evaluate; the thunk's
         // result is handler-context-sensitive and belongs in per-Context
         // caching, not per-Engine.
-        if ("1".equals(System.getenv("MEZZE_EAGER"))) {
+        if (!"0".equals(System.getenv("MEZZE_EAGER"))) {
             var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
             var slot = lang.getSlotTable().get(hash);
             if (slot != null && slot.isPublished()) {
