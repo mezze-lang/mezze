@@ -272,50 +272,31 @@ public final class BytecodeCompiler {
     private CallTarget resolveCallTarget(Hash hash) {
         CallTarget ct = compiledCallTargets.get(hash);
         if (ct != null) return ct;
-        // #391 Step 4b (call-ABI-unification doc §5) — under MEZZE_EAGER,
-        // prefer the SlotTable ONLY when the callee is closureless. Callees
-        // with captureSlots > 0 have their closure-prepend adaptation done by
-        // LazyStubRootNode; baking the raw eager trampoline CT skips that
-        // adaptation and produces wrong args at call time (regressed
-        // testClosureCapture in prior Step-4b attempts).
+        // #391 Step 4b Commit 4 — Option A empirical probe. Design in
+        // docs/effects/bdsl-eager-closure-makelambda.md §3–§5. Reframing:
+        // closure-adaptation is done inline by CallIndirect via
+        // MezzeFunction.getClosureValues() — NOT by the baked CT itself.
+        // MakeLambda's ConstantOperand CT is never invoked directly by
+        // BDSL; only through the MezzeFunction wrapper (which carries the
+        // correct closureValues from the Variadic captures). So baking the
+        // eager trampoline CT for BOTH closureless AND closure-bearing is
+        // safe. Q2 already proved zero closure-bearing hits at CallDirect
+        // sites; the fallback branch was defensive scaffolding.
         if (!"0".equals(System.getenv("MEZZE_EAGER")) && language != null) {
             var slot = language.getSlotTable().get(hash);
             if (slot != null && slot.isPublished()) {
-                boolean closureBearing = false;
-                var ir = language.lookupFunctionIR(hash);
-                if (ir != null && ir.getCaptureSlots() != null
-                        && !ir.getCaptureSlots().isEmpty()) {
-                    closureBearing = true;
-                    EAGER_CLOSURE_BEARING_FALLBACK.incrementAndGet();
-                    // #391 Step 4b Commit 4 — Q2 answered empirically by
-                    // e4fd9c21b: zero closure-bearing fallback hits on the
-                    // full test suite. The invariant "no legitimate
-                    // CallDirect / MakeLambda targets a closure-bearing
-                    // hash" holds. Under MEZZE_EAGER_STRICT=1 the fallback
-                    // becomes a hard error, so any future violation gets
-                    // caught at emit time rather than silently degrading
-                    // to the LazyStub path. Default gate keeps the debug
-                    // log as before.
-                    if ("1".equals(System.getenv("MEZZE_EAGER_STRICT"))) {
-                        throw new IllegalStateException(
-                            "[eager #391] closure-bearing callee hit CallDirect/MakeLambda "
-                            + "resolveCallTarget — invariant violation. hash=" + hash.getHex()
-                            + " captures=" + ir.getCaptureSlots().size()
-                            + ". See docs/effects/bdsl-eager-call-abi.md §5. If this fires,"
-                            + " the closure-bearing MakeLambda case needs a real flip"
-                            + " (Path 1 in the deferred plan).");
-                    }
-                    if ("1".equals(System.getenv("MEZZE_EAGER_DEBUG"))) {
-                        System.err.println("[eager #391] fall-through: closure-bearing hash "
-                                + hash.getHex() + " (captures=" + ir.getCaptureSlots().size() + ")");
+                if ("1".equals(System.getenv("MEZZE_EAGER_DEBUG"))) {
+                    var ir = language.lookupFunctionIR(hash);
+                    if (ir != null && ir.getCaptureSlots() != null
+                            && !ir.getCaptureSlots().isEmpty()) {
+                        EAGER_CLOSURE_BEARING_FALLBACK.incrementAndGet();
+                        System.err.println("[eager #391] closure-bearing eager CT hash="
+                                + hash.getHex() + " captures=" + ir.getCaptureSlots().size());
                     }
                 }
-                if (!closureBearing) {
-                    ct = slot.getCallTarget();
-                    compiledCallTargets.put(hash, ct);
-                    return ct;
-                }
-                // else fall through to externalResolver → LazyStub
+                ct = slot.getCallTarget();
+                compiledCallTargets.put(hash, ct);
+                return ct;
             }
         }
         if (externalResolver != null) {
