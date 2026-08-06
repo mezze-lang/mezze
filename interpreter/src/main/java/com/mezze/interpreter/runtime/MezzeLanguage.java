@@ -558,12 +558,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     public com.oracle.truffle.api.CallTarget compileEntryFn(
             com.mezze.language.truffleir.FunctionIR entryIR) {
         if (!BDSL_ENABLED) return null;
-        // #374 opt-in gate: default OFF while the top-level-through-BDSL path
-        // has known regressions (stack overflow when a top-level lambda is
-        // stored as a global then invoked in the same __entry__ body — see
-        // ReadGlobalByHashNode.autoEvaluateThunk mis-shape for BDSL roots).
-        // Flip via MEZZE_BDSL_ENTRY=1 to bisect.
-        if (!"1".equals(System.getenv("MEZZE_BDSL_ENTRY"))) return null;
+        // #374 default ON: __entry__ compiles through BDSL. Opt out with
+        // MEZZE_BDSL_ENTRY=0 to route through the legacy AST fallback while
+        // bisecting a regression.
+        if ("0".equals(System.getenv("MEZZE_BDSL_ENTRY"))) return null;
         com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
         if (!bdsl.supports(entryIR)) return null;
         try {
