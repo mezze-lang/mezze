@@ -272,16 +272,32 @@ public final class BytecodeCompiler {
     private CallTarget resolveCallTarget(Hash hash) {
         CallTarget ct = compiledCallTargets.get(hash);
         if (ct != null) return ct;
-        // #391 Step 4 — under MEZZE_EAGER, prefer the SlotTable. Only used
-        // for direct-call emit (CallDirectIR sites); MakeLambda's ConstantOperand
-        // still resolves via getOrMintUserStub because its LazyStub wrapper
-        // carries closure-arg prepending semantics beyond just CT identity.
+        // #391 Step 4b (call-ABI-unification doc §5) — under MEZZE_EAGER,
+        // prefer the SlotTable ONLY when the callee is closureless. Callees
+        // with captureSlots > 0 have their closure-prepend adaptation done by
+        // LazyStubRootNode; baking the raw eager trampoline CT skips that
+        // adaptation and produces wrong args at call time (regressed
+        // testClosureCapture in prior Step-4b attempts).
         if ("1".equals(System.getenv("MEZZE_EAGER")) && language != null) {
             var slot = language.getSlotTable().get(hash);
             if (slot != null && slot.isPublished()) {
-                ct = slot.getCallTarget();
-                compiledCallTargets.put(hash, ct);
-                return ct;
+                boolean closureBearing = false;
+                var ir = language.lookupFunctionIR(hash);
+                if (ir != null && ir.getCaptureSlots() != null
+                        && !ir.getCaptureSlots().isEmpty()) {
+                    closureBearing = true;
+                    EAGER_CLOSURE_BEARING_FALLBACK.incrementAndGet();
+                    if ("1".equals(System.getenv("MEZZE_EAGER_DEBUG"))) {
+                        System.err.println("[eager #391] fall-through: closure-bearing hash "
+                                + hash.getHex() + " (captures=" + ir.getCaptureSlots().size() + ")");
+                    }
+                }
+                if (!closureBearing) {
+                    ct = slot.getCallTarget();
+                    compiledCallTargets.put(hash, ct);
+                    return ct;
+                }
+                // else fall through to externalResolver → LazyStub
             }
         }
         if (externalResolver != null) {
@@ -294,6 +310,18 @@ public final class BytecodeCompiler {
         }
         return ct;
     }
+
+    // #391 Step 4b counters (doc §6 Q1/Q2 data-gathering).
+    private static final java.util.concurrent.atomic.AtomicLong
+            EAGER_CLOSURE_BEARING_FALLBACK = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong
+            MAKELAMBDA_CLOSURELESS = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong
+            MAKELAMBDA_TOTAL = new java.util.concurrent.atomic.AtomicLong();
+
+    public static long getEagerClosureBearingFallbacks() { return EAGER_CLOSURE_BEARING_FALLBACK.get(); }
+    public static long getMakeLambdaClosureless() { return MAKELAMBDA_CLOSURELESS.get(); }
+    public static long getMakeLambdaTotal() { return MAKELAMBDA_TOTAL.get(); }
 
     /**
      * True iff {@code target} is a BDSL-compiled callee. AST callees use
@@ -1819,6 +1847,9 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof MakeLambdaIR ml) {
+            // #391 Step 4b Q1 — count closureless vs total MakeLambda sites.
+            MAKELAMBDA_TOTAL.incrementAndGet();
+            if (ml.getCaptures().isEmpty()) MAKELAMBDA_CLOSURELESS.incrementAndGet();
             CallTarget target = resolveCallTarget(ml.getFunctionHash());
             if (target == null) {
                 // supports() should have rejected — defensive.
