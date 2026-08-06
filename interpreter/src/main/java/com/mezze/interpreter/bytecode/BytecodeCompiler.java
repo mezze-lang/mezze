@@ -554,12 +554,24 @@ public final class BytecodeCompiler {
             // AST callee's normalizeArgs sees a single record and
             // routes to the record-ABI path.
             //
-            // #304: mint stub if not yet compiled.
+            // #304 / #391 Step 6: prefer eager SlotTable CT before minting
+            // LazyStub. Under MEZZE_EAGER (default on), most callees are
+            // pre-published; falling back to LazyStub only for the residual
+            // few not yet in the slot table when supportsNode fires.
             if (resolveCallTarget(c.getTargetHash()) == null) {
-                CallTarget stub = language.getOrMintUserStub(
-                        c.getTargetHash(), "callee");
-                if (stub != null) {
-                    compiledCallTargets.put(c.getTargetHash(), stub);
+                CallTarget ct = null;
+                if (language != null) {
+                    com.mezze.interpreter.runtime.SlotEntry slot =
+                            language.getSlotTable().get(c.getTargetHash());
+                    if (slot != null && slot.isPublished()) {
+                        ct = slot.getCallTarget();
+                    }
+                }
+                if (ct == null) {
+                    ct = language.getOrMintUserStub(c.getTargetHash(), "callee");
+                }
+                if (ct != null) {
+                    compiledCallTargets.put(c.getTargetHash(), ct);
                 } else {
                     markReject(node, "target-not-compiled"); return false;
                 }
@@ -635,11 +647,22 @@ public final class BytecodeCompiler {
             // captured f will be null, but recursive calls emit a fresh
             // MakeLambda (see TypedASTCompiler.compileVar recursiveLet
             // branch) so the null is never actually read.
+            // #391 Step 6: prefer eager SlotTable CT before minting LazyStub
+            // (same pattern as CallDirect above).
             if (resolveCallTarget(ml.getFunctionHash()) == null) {
-                CallTarget stub = language.getOrMintUserStub(
-                        ml.getFunctionHash(), "lambda");
-                if (stub != null) {
-                    compiledCallTargets.put(ml.getFunctionHash(), stub);
+                CallTarget ct = null;
+                if (language != null) {
+                    com.mezze.interpreter.runtime.SlotEntry slot =
+                            language.getSlotTable().get(ml.getFunctionHash());
+                    if (slot != null && slot.isPublished()) {
+                        ct = slot.getCallTarget();
+                    }
+                }
+                if (ct == null) {
+                    ct = language.getOrMintUserStub(ml.getFunctionHash(), "lambda");
+                }
+                if (ct != null) {
+                    compiledCallTargets.put(ml.getFunctionHash(), ct);
                 } else {
                     markReject(node, "target-not-compiled");
                     return false;
