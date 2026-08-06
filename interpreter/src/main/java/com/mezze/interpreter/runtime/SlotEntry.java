@@ -107,4 +107,45 @@ public final class SlotEntry {
         thunkStableAssumption.invalidate();
         return result;
     }
+
+    /**
+     * Read the slot's value the way {@code ReadGlobalByHashNode} would:
+     * force zero-arg thunks (top-level {@code let x = expr}) on first read
+     * and cache the result; otherwise return a {@link
+     * com.mezze.interpreter.values.MezzeFunction} wrapping the call target.
+     *
+     * <p>Mirrors {@code ReadGlobalByHashNode.autoEvaluateThunk} — same
+     * isThunk detection across {@code MezzeRootNode}, {@code
+     * BdslTrampolineRootNode}, and bare {@code MezzeBytecodeRootNode}.
+     */
+    @CompilerDirectives.TruffleBoundary
+    public Object resolveValue(String nameHint) {
+        if (thunkEvaluated) {
+            return cachedThunkValue;
+        }
+        if (ct == null) {
+            throw new IllegalStateException("slot " + hash.getHex() + " not published");
+        }
+        var root = ct.getRootNode();
+        boolean isThunk = false;
+        if (root instanceof com.mezze.interpreter.nodes.MezzeRootNode mrn) {
+            isThunk = mrn.getClosureCount() == 0 && mrn.getParameterCount() == 0;
+        } else if (root instanceof com.mezze.interpreter.bytecode.BdslTrampolineRootNode t) {
+            isThunk = t.getClosureCount() == 0 && t.getParameterCount() == 0;
+        } else if (root instanceof com.mezze.interpreter.bytecode.MezzeBytecodeRootNode) {
+            isThunk = true;
+        }
+        if (isThunk) {
+            try {
+                Object result = ct.call(MezzeUnit.INSTANCE);
+                cachedThunkValue = result;
+                thunkEvaluated = true;
+                thunkStableAssumption.invalidate();
+                return result;
+            } catch (Exception e) {
+                // Not really a thunk (side effects, wrong shape); fall through.
+            }
+        }
+        return com.mezze.interpreter.values.MezzeFunction.create(ct, nameHint);
+    }
 }

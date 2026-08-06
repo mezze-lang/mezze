@@ -272,6 +272,18 @@ public final class BytecodeCompiler {
     private CallTarget resolveCallTarget(Hash hash) {
         CallTarget ct = compiledCallTargets.get(hash);
         if (ct != null) return ct;
+        // #391 Step 4 — under MEZZE_EAGER, prefer the SlotTable. Only used
+        // for direct-call emit (CallDirectIR sites); MakeLambda's ConstantOperand
+        // still resolves via getOrMintUserStub because its LazyStub wrapper
+        // carries closure-arg prepending semantics beyond just CT identity.
+        if ("1".equals(System.getenv("MEZZE_EAGER")) && language != null) {
+            var slot = language.getSlotTable().get(hash);
+            if (slot != null && slot.isPublished()) {
+                ct = slot.getCallTarget();
+                compiledCallTargets.put(hash, ct);
+                return ct;
+            }
+        }
         if (externalResolver != null) {
             ct = externalResolver.apply(hash);
             if (ct != null) {

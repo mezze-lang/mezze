@@ -44,6 +44,19 @@ public final class ReadGlobalByHashNode extends MezzeNode {
     @TruffleBoundary
     private Object lookupInContext() {
         MezzeContext context = MezzeContext.get(this);
+        // #391 Step 4 — under MEZZE_EAGER, prefer the SlotTable. Published
+        // slots know how to force thunks via SlotEntry.resolveValue.
+        if ("1".equals(System.getenv("MEZZE_EAGER"))) {
+            var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
+            var slot = lang.getSlotTable().get(hash);
+            if (slot != null && slot.isPublished()) {
+                Object slotValue = slot.resolveValue(hash.getHex());
+                if (slotValue instanceof MezzeSuspend suspended) {
+                    slotValue = forceSuspended(suspended);
+                }
+                return slotValue;
+            }
+        }
         Object value = context.lookupGlobal(hash);
         // Fall back to Language-level lazy compilation (for functions referenced by hash)
         if (value == null) {
