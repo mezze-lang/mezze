@@ -138,10 +138,26 @@ public final class SlotEntry {
         if (isThunk) {
             try {
                 Object result = ct.call(MezzeUnit.INSTANCE);
+                // #392 — do NOT cache when result is a MezzeSuspend: the
+                // suspended value is handler-context-sensitive; caching it
+                // would freeze the outer handler chain at first read and
+                // give wrong answers to later reads under a different
+                // perform block. Same for MezzeThunk. Return without
+                // setting thunkEvaluated so the next read re-evaluates.
+                if (result instanceof com.mezze.interpreter.values.MezzeSuspend
+                        || result instanceof com.mezze.interpreter.values.MezzeThunk) {
+                    return result;
+                }
                 cachedThunkValue = result;
                 thunkEvaluated = true;
                 thunkStableAssumption.invalidate();
                 return result;
+            } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
+                // #392 — abort is a handler-unwind signal. If we swallow it,
+                // the abort's payload never reaches the perform's handler.
+                // Let it propagate; the currently-active perform will catch
+                // it and produce the correct Result value.
+                throw abort;
             } catch (Exception e) {
                 // Not really a thunk (side effects, wrong shape); fall through.
             }
