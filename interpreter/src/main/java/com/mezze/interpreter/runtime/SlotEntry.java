@@ -109,58 +109,22 @@ public final class SlotEntry {
     }
 
     /**
-     * Read the slot's value the way {@code ReadGlobalByHashNode} would:
-     * force zero-arg thunks (top-level {@code let x = expr}) on first read
-     * and cache the result; otherwise return a {@link
-     * com.mezze.interpreter.values.MezzeFunction} wrapping the call target.
+     * Read the slot's value as a {@link com.mezze.interpreter.values.MezzeFunction}
+     * wrapping the compiled call target. Does NOT auto-evaluate zero-arg thunks —
+     * that is the caller's responsibility, via {@code ReadGlobalByHashNode.autoEvaluateThunk}
+     * with its per-Context caching through {@code MezzeContext.defineGlobal}.
      *
-     * <p>Mirrors {@code ReadGlobalByHashNode.autoEvaluateThunk} — same
-     * isThunk detection across {@code MezzeRootNode}, {@code
-     * BdslTrampolineRootNode}, and bare {@code MezzeBytecodeRootNode}.
+     * <p>#392 — earlier revisions of this method tried to force thunks here and
+     * cache the result on the SlotEntry (per-Engine). That broke effect
+     * handler tests: a thunk's result can depend on the active handler chain,
+     * which is per-Context. Caching per-Engine froze the outer handler at
+     * first read across all subsequent tests. Per-Engine holds function
+     * CallTargets only; per-Context state owns evaluated values.
      */
     @CompilerDirectives.TruffleBoundary
     public Object resolveValue(String nameHint) {
-        if (thunkEvaluated) {
-            return cachedThunkValue;
-        }
         if (ct == null) {
             throw new IllegalStateException("slot " + hash.getHex() + " not published");
-        }
-        var root = ct.getRootNode();
-        boolean isThunk = false;
-        if (root instanceof com.mezze.interpreter.nodes.MezzeRootNode mrn) {
-            isThunk = mrn.getClosureCount() == 0 && mrn.getParameterCount() == 0;
-        } else if (root instanceof com.mezze.interpreter.bytecode.BdslTrampolineRootNode t) {
-            isThunk = t.getClosureCount() == 0 && t.getParameterCount() == 0;
-        } else if (root instanceof com.mezze.interpreter.bytecode.MezzeBytecodeRootNode) {
-            isThunk = true;
-        }
-        if (isThunk) {
-            try {
-                Object result = ct.call(MezzeUnit.INSTANCE);
-                // #392 — do NOT cache when result is a MezzeSuspend: the
-                // suspended value is handler-context-sensitive; caching it
-                // would freeze the outer handler chain at first read and
-                // give wrong answers to later reads under a different
-                // perform block. Same for MezzeThunk. Return without
-                // setting thunkEvaluated so the next read re-evaluates.
-                if (result instanceof com.mezze.interpreter.values.MezzeSuspend
-                        || result instanceof com.mezze.interpreter.values.MezzeThunk) {
-                    return result;
-                }
-                cachedThunkValue = result;
-                thunkEvaluated = true;
-                thunkStableAssumption.invalidate();
-                return result;
-            } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
-                // #392 — abort is a handler-unwind signal. If we swallow it,
-                // the abort's payload never reaches the perform's handler.
-                // Let it propagate; the currently-active perform will catch
-                // it and produce the correct Result value.
-                throw abort;
-            } catch (Exception e) {
-                // Not really a thunk (side effects, wrong shape); fall through.
-            }
         }
         return com.mezze.interpreter.values.MezzeFunction.create(ct, nameHint);
     }

@@ -44,20 +44,23 @@ public final class ReadGlobalByHashNode extends MezzeNode {
     @TruffleBoundary
     private Object lookupInContext() {
         MezzeContext context = MezzeContext.get(this);
-        // #391 Step 4 — under MEZZE_EAGER, prefer the SlotTable. Published
-        // slots know how to force thunks via SlotEntry.resolveValue.
+        Object value = null;
+        // #391 Step 4 — under MEZZE_EAGER, prefer the SlotTable for the
+        // callable-target lookup. autoEvaluateThunk + forceSuspended below
+        // still run with per-Context caching, matching non-eager semantics.
+        // #392 — SlotEntry.resolveValue must NOT auto-evaluate; the thunk's
+        // result is handler-context-sensitive and belongs in per-Context
+        // caching, not per-Engine.
         if ("1".equals(System.getenv("MEZZE_EAGER"))) {
             var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
             var slot = lang.getSlotTable().get(hash);
             if (slot != null && slot.isPublished()) {
-                Object slotValue = slot.resolveValue(hash.getHex());
-                if (slotValue instanceof MezzeSuspend suspended) {
-                    slotValue = forceSuspended(suspended);
-                }
-                return slotValue;
+                value = slot.resolveValue(hash.getHex());
             }
         }
-        Object value = context.lookupGlobal(hash);
+        if (value == null) {
+            value = context.lookupGlobal(hash);
+        }
         // Fall back to Language-level lazy compilation (for functions referenced by hash)
         if (value == null) {
             var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
