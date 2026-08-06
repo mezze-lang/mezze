@@ -53,4 +53,13 @@ public final class SlotTable {
     public Set<Hash> reachableHashes() {
         return slots.keySet();
     }
+
+    /**
+     * Drop every slot. Called from {@code MezzeLanguage.disposeContext} so
+     * eager slots don't leak across Contexts sharing a Language instance
+     * (e.g. the test suite's sharedEngine — see #392).
+     */
+    public void clear() {
+        slots.clear();
+    }
 }

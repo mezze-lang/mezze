@@ -991,6 +991,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     protected void disposeContext(MezzeContext context) {
         com.mezze.interpreter.nodes.builtin.concurrency.ConcurrencyNatives
                 .resetPerThreadStmState();
+        // #392 — SlotTable is per-Engine but its entries are populated by
+        // per-Context eagerCompileReachable, so stale entries from a
+        // disposed Context can leak into the next Context sharing this
+        // Language (e.g. the test suite's sharedEngine). Clear on
+        // disposeContext to keep eager slots Context-scoped in effect,
+        // while still amortizing the SlotTable Map allocation.
+        if (slotTable != null) slotTable.clear();
     }
 
     /**
