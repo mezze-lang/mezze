@@ -167,6 +167,34 @@ object PipelineRunner {
         }
         mark("performer factories compiled (${compiledFunctions.size})")
 
+        // #391 Step 3 — eager whole-program compilation into the SlotTable.
+        // Gated by MEZZE_EAGER=1 (default off). Populates language.slotTable
+        // in parallel; today's lazy path still runs and is authoritative.
+        // Step 4 flips callers to read from the slot table.
+        if ("1".equals(System.getenv("MEZZE_EAGER"))) {
+            // Seed roots: entrypoints we can identify by name. FunctionIR has
+            // no `pub` marker, so we can't reachability-prune at the module
+            // level — we seed every top-level user function whose name
+            // suggests it's an entry (main / __entry__ / __toplevel* /
+            // Mezze.toml-configured entry). The walker still transitively
+            // catches everything they reach.
+            val roots = mutableSetOf<com.mezze.language.typedast.Hash>()
+            for (fn in functions) {
+                if (fn.name == "__entry__" || fn.name == "main" || fn.name.startsWith("__toplevel")) {
+                    roots.add(fn.hash)
+                }
+                if (entryName != null && fn.name == entryName) roots.add(fn.hash)
+            }
+            // Include performer factories/ops as reachable roots — they're
+            // installed dynamically by handler chain lookup, not called
+            // syntactically, so the walker won't otherwise reach them.
+            roots.addAll(performerFactoryHashes)
+            roots.addAll(performerOpHashes)
+            if (roots.isEmpty() && functions.isNotEmpty()) roots.add(functions.last().hash)
+            language.eagerCompileReachable(roots, functions)
+            mark("eager BDSL emitted into SlotTable (slotTable.size=${language.getSlotTable().size()})")
+        }
+
         // Find the entry point and compile it.
         //
         // If a named entry function exists (from Mezze.toml entryName), compile a call

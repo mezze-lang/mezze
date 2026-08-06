@@ -586,6 +586,79 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
+     * #391 Step 3 — eager whole-program BDSL compilation, gated by
+     * {@code MEZZE_EAGER=1}. Phase 1: walk reachability from the given
+     * roots (via {@link ReachabilityWalker}) and pre-allocate a slot per
+     * hash. Phase 2: emit each reachable {@code FunctionIR} through BDSL
+     * and publish the resulting {@code RootCallTarget} into its slot.
+     *
+     * <p>No caller-visible behavior change this step: today's lazy stub /
+     * autoInflate paths still run. The slot table is populated in parallel
+     * so Step 4 can flip callers to read from it.
+     *
+     * <p>Emit failures (unsupported IR, transient BDSL crash) are caught
+     * and logged when {@code MEZZE_DEBUG} is set — the slot stays
+     * unpublished, and today's lazy path fills the gap. Step 4 makes the
+     * slot table authoritative and turns these into hard errors.
+     */
+    public void eagerCompileReachable(
+            java.util.Set<Hash> roots,
+            java.util.List<com.mezze.language.truffleir.FunctionIR> userFunctions) {
+        if (!"1".equals(System.getenv("MEZZE_EAGER"))) return;
+        if (roots.isEmpty()) return;
+        // Build a lookup that prefers the fresh user-function list, then
+        // falls back to the language's consolidated lookupFunctionIR (per-
+        // context user IR → stdlib pre-lowered → runtime store).
+        java.util.Map<Hash, com.mezze.language.truffleir.FunctionIR> byHash =
+                new java.util.HashMap<>();
+        for (var fn : userFunctions) byHash.put(fn.getHash(), fn);
+        kotlin.jvm.functions.Function1<Hash, com.mezze.language.truffleir.FunctionIR> lookup =
+                h -> {
+                    var ir = byHash.get(h);
+                    if (ir != null) return ir;
+                    return lookupFunctionIR(h);
+                };
+        java.util.Set<Hash> missing = new java.util.LinkedHashSet<>();
+        com.mezze.interpreter.runtime.ReachabilityWalker.MissingHashLogger missLogger =
+                missing::add;
+        java.util.Set<Hash> reachable =
+                com.mezze.interpreter.runtime.ReachabilityWalker.INSTANCE
+                        .walk(roots, lookup, missLogger);
+        // Phase 1 — allocate every slot up front so Phase 2 emit can
+        // resolve cross-refs via slot lookup.
+        for (Hash h : reachable) slotTable.allocate(h);
+        // Phase 2 — emit each function through BDSL, publish its CT.
+        com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
+        int emitted = 0, skippedUnsupported = 0, skippedMissing = 0, failed = 0;
+        for (Hash h : reachable) {
+            SlotEntry slot = slotTable.get(h);
+            if (slot == null || slot.isPublished()) continue;
+            var ir = lookup.invoke(h);
+            if (ir == null) { skippedMissing++; continue; }
+            if (!bdsl.supports(ir)) { skippedUnsupported++; continue; }
+            try {
+                com.oracle.truffle.api.nodes.RootNode root = bdsl.compile(ir);
+                slot.publish((com.oracle.truffle.api.RootCallTarget) root.getCallTarget());
+                emitted++;
+            } catch (Throwable t) {
+                failed++;
+                if (System.getenv("MEZZE_DEBUG") != null) {
+                    System.err.println("[eager #391] emit failed for "
+                            + ir.getName() + " " + h.getHex() + ": " + t);
+                }
+            }
+        }
+        if (System.getenv("MEZZE_DEBUG") != null || "1".equals(System.getenv("MEZZE_EAGER_STATS"))) {
+            System.err.println("[eager #391] reachable=" + reachable.size()
+                    + " emitted=" + emitted
+                    + " skippedUnsupported=" + skippedUnsupported
+                    + " skippedMissing=" + (skippedMissing + missing.size())
+                    + " failed=" + failed
+                    + " slotTable=" + slotTable.size());
+        }
+    }
+
+    /**
      * Optional content-addressed store for resolving stdlib (and eventually
      * remote) hashes at runtime. When set, `getCachedStdlibCallTarget`
      * checks the store before falling back to PrecompiledStdlib's
