@@ -236,17 +236,16 @@ object PipelineRunner {
                     }
                 }
             }
-            // #391 — BDSL rejected this entry FunctionIR shape. Fall back to
-            // AST compileNode via a fresh TruffleCompiler. This path is the
-            // last remaining live use of TruffleCompiler.kt; full-suite has
-            // ~10 firings across ParallelEffectTest, SeqInterpreterTest,
-            // SeqPatternInterpreterTest, DebuggerBreakpointTest, so BDSL
-            // supports() needs to accept those shapes before we can delete.
-            val fallback = TruffleCompiler(language)
-            for ((file, content) in sourceOverrides) fallback.registerSourceContent(file, content)
-            fallback.registerFunctions(functions)
-            val src = fallback.getOrCreateSourcePublic(fn.sourceFile)
-            return fallback.compileNode(fn.body, src)
+            // #391 — BDSL rejected this entry FunctionIR shape. No AST fallback
+            // exists anymore. Any hit here is a real bug: BDSL supports() said
+            // no, or compile() threw. The only known hit (DebuggerBreakpointTest
+            // "a line breakpoint suspends execution at that line") is @Disabled
+            // pending Truffle-BDSL prepareForInstrumentation fix.
+            throw IllegalStateException(
+                "BDSL cannot compile entry-body for '${fn.name}' hash=${fn.hash} file=${fn.sourceFile}. " +
+                "This indicates an IR shape BDSL supports() doesn't accept or emit() throws on. " +
+                "Add BDSL support or @Disable the triggering test with a link to #391."
+            )
         }
 
         if (namedEntry != null) {
