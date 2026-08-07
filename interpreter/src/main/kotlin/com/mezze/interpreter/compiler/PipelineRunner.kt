@@ -236,15 +236,17 @@ object PipelineRunner {
                     }
                 }
             }
-            // #391 — BDSL is the sole path. If compileEntryFn returned null the
-            // entry FunctionIR has a shape BDSL doesn't yet emit; surface it
-            // loudly instead of silently degrading to AST (which no longer exists
-            // as a live path). Full-suite verify has 0 such firings today.
-            throw IllegalStateException(
-                "BDSL rejected entry FunctionIR for '${fn.name}' hash=${fn.hash} — " +
-                    "no AST fallback available. If this is a legitimate IR shape, " +
-                    "extend BytecodeCompiler.supports() to accept it."
-            )
+            // #391 — BDSL rejected this entry FunctionIR shape. Fall back to
+            // AST compileNode via a fresh TruffleCompiler. This path is the
+            // last remaining live use of TruffleCompiler.kt; full-suite has
+            // ~10 firings across ParallelEffectTest, SeqInterpreterTest,
+            // SeqPatternInterpreterTest, DebuggerBreakpointTest, so BDSL
+            // supports() needs to accept those shapes before we can delete.
+            val fallback = TruffleCompiler(language)
+            for ((file, content) in sourceOverrides) fallback.registerSourceContent(file, content)
+            fallback.registerFunctions(functions)
+            val src = fallback.getOrCreateSourcePublic(fn.sourceFile)
+            return fallback.compileNode(fn.body, src)
         }
 
         if (namedEntry != null) {
