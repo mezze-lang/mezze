@@ -24,7 +24,7 @@ public abstract class DirectDivideNode extends MezzeNode {
     @Specialization
     public static long divLongs(long left, long right) {
         if (right == 0) {
-            throw new ArithmeticException("Division by zero");
+            throw new com.mezze.interpreter.values.MezzeGuestException("Division by zero");
         }
         return left / right;
     }
@@ -48,7 +48,7 @@ public abstract class DirectDivideNode extends MezzeNode {
 
     @Fallback
     public static Object typeError(Object left, Object right) {
-        throw new RuntimeException(
+        throw new com.mezze.interpreter.values.MezzeGuestException(
             "Cannot divide " + (left == null ? "null" : left.getClass().getSimpleName()) +
             " by " + (right == null ? "null" : right.getClass().getSimpleName())
         );
