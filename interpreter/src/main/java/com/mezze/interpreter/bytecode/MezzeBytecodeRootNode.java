@@ -1686,6 +1686,52 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Path D6 perform-op for @Multishot-annotated handlers (#332).
+     *
+     * <p>Emitted by {@link com.mezze.interpreter.bytecode.BytecodeCompiler}
+     * when the enclosing HandlerBindIR carries {@code multishot=true} — the
+     * emit-time context stack decides between {@link PerformD} (default,
+     * single-shot, fall-through resume) and this op.
+     *
+     * <p>Semantics today (strategy A per {@code MezzeContinuation}):
+     * dispatches through the same {@link BdslYieldDispatch#dispatch} as
+     * {@link PerformD} but wraps the outcome in a {@link MezzeContinuation}
+     * envelope that guards against 2nd resume with a loud
+     * {@link MezzeContinuation.MultiShotUnsupported}. Strategy B (frame
+     * deep-copy) is the follow-up; when it lands the interface here does
+     * not change — {@link MezzeContinuation} absorbs the difference.
+     *
+     * <p>Under strategy A this is behaviourally equivalent to
+     * {@link PerformD} for the common case (a single {@code resume {val =
+     * X}}); the only new behaviour is that a handler that calls resume
+     * twice throws {@link MezzeContinuation.MultiShotUnsupported} instead
+     * of silently discarding the second call (which was Path D's
+     * fall-through resume semantics).
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    @ConstantOperand(type = String.class)
+    public static final class PerformMultishot {
+        @Specialization
+        public static Object doPerformMultishot(Hash effectHash, String opName, Object arg,
+                                                @Cached(value = "initFieldIndex()", allowUncached = true, dimensions = 1)
+                                                int[] fieldIndexBox) {
+            // Strategy A: route through the same dispatch path as PerformD.
+            // The MezzeContinuation guard fires only if the impl calls
+            // resume twice — which under Path D's fall-through model was
+            // silently discarded. Now it errors loudly, exposing the
+            // multi-shot use to the caller so they know to wait for
+            // strategy B or refactor. See MezzeContinuation class doc +
+            // docs/effects/bdsl-path-d6-multi-shot.md.
+            return BdslYieldDispatch.dispatch(effectHash, opName, arg, fieldIndexBox);
+        }
+
+        static int[] initFieldIndex() {
+            return new int[] { -1 };
+        }
+    }
+
+    /**
      * Path D8 (Handle @Operation, endgame Shape B — see
      * docs/perf/bdsl-effects-path-d-2026-07.md §D8).
      *
