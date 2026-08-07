@@ -57,9 +57,13 @@ object PipelineRunner {
 
         // Compile only REFERENCED stdlib functions (lazy, per-Language instance).
         // ~35 per test instead of 1044. Each Language instance (=Context) compiles its own.
-        val compiler = TruffleCompiler(language)
-        for ((file, content) in sourceOverrides) compiler.registerSourceContent(file, content)
-        mark("TruffleCompiler constructed")
+        //
+        // #391 — TruffleCompiler is gone. Source resolution + section attribution
+        // for the entry root now live in a small SourceHelper. Actual compilation
+        // is BDSL-only (via language.compileEntryFn / compileOne).
+        val sourceHelper = com.mezze.interpreter.runtime.SourceHelper()
+        for ((file, content) in sourceOverrides) sourceHelper.registerSourceContent(file, content)
+        mark("SourceHelper constructed")
         // StdlibRuntimeData self-loads via its init block on first class
         // reference (via FunctionIRReachability below). Compile paths that
         // need full PrecompiledStdlib still set up via PrecompiledStdlib.setStore.
@@ -78,8 +82,10 @@ object PipelineRunner {
         // Each test has unique functions; pre-compiling creates CallTargets that persist on
         // the shared Engine and cause OOM over thousands of tests. Instead, register FunctionIRs
         // and let MonomorphicCallNode compile on-demand via Language.getCachedStdlibCallTarget.
-        compiler.registerFunctions(functions)
-        mark("user functions registered")
+        // #391 — no per-Compiler function registry needed. `language.registerFunctionIR`
+        // below writes each user IR into the per-Context user IR map, which is the
+        // authoritative store consulted by BDSL emit + LazyStub inflate.
+        mark("user functions registered (SlotTable-only)")
 
         // Resolve function aliases: `let toggle_bool = toggle` compiles to a FunctionIR whose
         // body is ReadGlobalByHashIR(toggle_hash). Register the alias hash → target's FunctionIR
@@ -230,9 +236,15 @@ object PipelineRunner {
                     }
                 }
             }
-            // BDSL rejected — fall back to AST compileNode (legacy path).
-            val src = compiler.getOrCreateSourcePublic(fn.sourceFile)
-            return compiler.compileNode(fn.body, src)
+            // #391 — BDSL is the sole path. If compileEntryFn returned null the
+            // entry FunctionIR has a shape BDSL doesn't yet emit; surface it
+            // loudly instead of silently degrading to AST (which no longer exists
+            // as a live path). Full-suite verify has 0 such firings today.
+            throw IllegalStateException(
+                "BDSL rejected entry FunctionIR for '${fn.name}' hash=${fn.hash} — " +
+                    "no AST fallback available. If this is a legitimate IR shape, " +
+                    "extend BytecodeCompiler.supports() to accept it."
+            )
         }
 
         if (namedEntry != null) {
@@ -248,7 +260,7 @@ object PipelineRunner {
             // with {}.
             val wrapperFn = functions.find { it.name == "__entry__" }
             mainFn = wrapperFn ?: namedEntry
-            source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
+            source = sourceHelper.getOrCreateSource(mainFn.sourceFile)
 
             // Run __entry__ (binds all globals via RegisterGlobal). Its return
             // value — the last decl's closure — is discarded by the enclosing
@@ -271,7 +283,7 @@ object PipelineRunner {
         } else {
             // No named entry — fall back to __entry__ (tests/REPL) or last function
             mainFn = functions.find { it.name == "__entry__" } ?: functions.last()
-            source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
+            source = sourceHelper.getOrCreateSource(mainFn.sourceFile)
             bodyNode = bodyOf(mainFn)
         }
 
@@ -314,7 +326,7 @@ object PipelineRunner {
         // treat it as internal (isInternal() = section == null) and skip it —
         // without a root section, NO statement probe inside the root ever fires,
         // so a resolved breakpoint never suspends.
-        compiler.createSourceSectionPublic(source, mainFn.body.src)?.let {
+        sourceHelper.createSourceSection(source, mainFn.body.src)?.let {
             rootNode.setSourceSection(it)
         }
         val target = rootNode.callTarget
