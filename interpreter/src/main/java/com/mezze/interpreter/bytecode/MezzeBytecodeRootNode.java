@@ -571,6 +571,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     public static final class ReadFieldByName {
         // Records: shape-cached PIC (up to 6 shapes) with location index
         // pre-resolved. Common hot path — matches CachedFieldAccessNode.
+        // Under JIT-warmed steady state, this specialization runs with all
+        // three @Cached values constant-folded — zero string lookup, zero
+        // hashmap access. The name is used only at PIC-miss time to seed
+        // the cache. See #348.
         @Specialization(guards = "record.getShape() == cachedShape", limit = "6")
         public static Object doRecordCached(
                 String fieldName,
@@ -584,14 +588,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return record.getObjectField(locationIndex);
         }
 
-        // Fallback for records with unfamiliar shapes.
+        // Megamorphic fallback (>6 distinct shapes at one site).
+        // Uses getField(int) after a single findFieldIndex — one string
+        // hash-lookup then array access. Documented as cold-path per #348.
         @Specialization(replaces = "doRecordCached")
         public static Object doRecordGeneric(String fieldName, MezzeRecord record) {
-            Object v = record.getField(fieldName);
-            if (v == null) {
+            int fieldIndex = record.getShape().findFieldIndex(fieldName);
+            if (fieldIndex < 0) {
                 return fallbackNotFound(record, fieldName);
             }
-            return v;
+            return record.getField(fieldIndex);
         }
 
         // Boolean.not/.and/.or — ability method shortcut. Matches
