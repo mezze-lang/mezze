@@ -801,19 +801,24 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             return getCachedStdlibCallTarget(h);
         };
         var bdsl = new com.mezze.interpreter.bytecode.BytecodeCompiler(this, resolver);
-        if (bdsl.supports(ir)) {
+        // Force telemetry so LAST_REJECTION captures the reason even without MEZZE_BDSL_STATS.
+        System.setProperty("mezze.bdsl.rejection.probe", "1");
+        boolean supported = bdsl.supports(ir);
+        if (supported) {
             try {
                 return bdsl.compile(ir);
             } catch (Throwable t) {
-                // Fall through to AST fallback on BDSL emit crash.
+                throw new IllegalStateException(
+                    "BDSL rejected IR for hash " + hash + " name=" + ir.getName()
+                    + " — emit crash: " + t.getClass().getSimpleName() + ": " + t.getMessage(), t);
             }
         }
-        // AST fallback for IR shapes BDSL doesn't yet support.
-        var ast = new com.mezze.interpreter.compiler.TruffleCompiler(this);
-        if (ctx != null) {
-            ast.registerFunctions(new java.util.ArrayList<>(ctx.getAllUserFunctionIRs()));
-        }
-        return ast.compile(ir);
+        var counts = com.mezze.interpreter.bytecode.BytecodeCompiler.getRejectionCounts();
+        String lastRej = counts.isEmpty() ? "<no telemetry — set MEZZE_BDSL_STATS=1>"
+            : counts.keySet().iterator().next();
+        throw new IllegalStateException(
+            "BDSL rejected IR for hash " + hash + " name=" + ir.getName()
+            + " — rejection shape: " + lastRej);
     }
 
     /**
