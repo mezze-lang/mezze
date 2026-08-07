@@ -1937,10 +1937,29 @@ public final class BytecodeCompiler {
             // path (still allocs a MezzeRecord in the caller) but routes
             // the surrounding function through BDSL.
             if (!cn.isScalarABI()) {
-                b.beginCallNativeRecord(cn.getName());
-                emitNode(cn.getArg(), b, argCount, localMap);
-                b.endCallNativeRecord();
-                return;
+                // #350: resolve the handler at emit time (no string dispatch
+                // at runtime). supports() has already verified one of the
+                // two record-ABI handler maps has this name.
+                String recName = cn.getName();
+                var withNode = com.mezze.interpreter.nodes.builtin.NativeDispatch
+                        .recordHandlerWithNodeOf(recName);
+                if (withNode != null) {
+                    b.beginCallNativeRecordWithNode(withNode);
+                    emitNode(cn.getArg(), b, argCount, localMap);
+                    b.endCallNativeRecordWithNode();
+                    return;
+                }
+                var plain = com.mezze.interpreter.nodes.builtin.NativeDispatch
+                        .recordHandlerOf(recName);
+                if (plain != null) {
+                    b.beginCallNativeRecord(plain);
+                    emitNode(cn.getArg(), b, argCount, localMap);
+                    b.endCallNativeRecord();
+                    return;
+                }
+                throw new IllegalStateException(
+                    "CallNativeIR:record-ABI references unregistered native '"
+                    + recName + "' — supports() should have rejected this");
             }
             // Typed fast paths — bypass Object[] alloc + PositionalArgs
             // + NativeHandler indirection when the signature matches

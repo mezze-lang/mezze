@@ -991,7 +991,12 @@ class TypedASTCompiler(
 
             // Variant
             is TypedVariantConstruct -> {
-                val tag = expr.tag.hashCode() and 0x7FFFFFFF
+                // #349 — mix ADT typeHash into the tag to avoid cross-ADT collisions.
+                // Built-in ctors (Some/None/Ok/Err/…/LT/GT/EQ) keep old hashCode-only
+                // tagging so they collide with runtime-native MezzeVariant.some/ok/…
+                // by design.
+                val adtHashHex = (expr.type as? VariantType)?.typeHash?.hex
+                val tag = com.mezze.language.ast.BuiltinTypes.computeVariantTag(expr.tag, adtHashHex)
                 MakeVariantIR(tag, expr.tag, expr.payload?.let { compileExpr(it) }, src)
             }
 
@@ -2278,7 +2283,11 @@ class TypedASTCompiler(
             }
             is TypedLiteralPattern -> PatternIR.Literal(compileExpr(pattern.value))
             is TypedVariantPattern -> {
-                val tag = pattern.tag.hashCode() and 0x7FFFFFFF
+                // #349 — match must use the same tag formula as construction.
+                // pattern.type is the scrutinee type at this arm (VariantType with
+                // typeHash for user ADTs, or missing typeHash for built-ins / open).
+                val adtHashHex = (pattern.type as? VariantType)?.typeHash?.hex
+                val tag = com.mezze.language.ast.BuiltinTypes.computeVariantTag(pattern.tag, adtHashHex)
                 val fieldNames = mutableListOf<String>()
                 val fieldSlots = mutableListOf<Int>()
                 val payload = pattern.payload

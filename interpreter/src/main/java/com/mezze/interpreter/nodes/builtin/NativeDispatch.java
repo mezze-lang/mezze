@@ -53,7 +53,7 @@ public final class NativeDispatch extends MezzeNode {
     private NativeHandler cachedHandler;
 
     @FunctionalInterface
-    interface NativeHandler {
+    public interface NativeHandler {
         Object handle(MezzeRecord args, IndirectCallNode callNode);
     }
 
@@ -62,7 +62,7 @@ public final class NativeDispatch extends MezzeNode {
      * Used by async handlers that need TruffleLanguage.Env for thread creation.
      */
     @FunctionalInterface
-    interface NativeHandlerWithNode {
+    public interface NativeHandlerWithNode {
         Object handle(MezzeRecord args, IndirectCallNode callNode, MezzeNode node);
     }
 
@@ -142,6 +142,26 @@ public final class NativeDispatch extends MezzeNode {
         if (h != null) return h.handle(record, callNode);
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("Unknown native function: " + name);
+    }
+
+    /**
+     * Resolve a plain (no-node) record-ABI native handler at emit time.
+     * Returns null if the native has a with-node handler or is unknown.
+     * #350: lets BDSL bake the handler as a ConstantOperand — no runtime
+     * HashMap lookup, no string in the hot path.
+     */
+    public static NativeHandler recordHandlerOf(String name) {
+        return HANDLERS.get(name);
+    }
+
+    /**
+     * Resolve a with-node record-ABI native handler at emit time.
+     * Returns null if the native has only a plain handler or is unknown.
+     * #350: sibling of {@link #recordHandlerOf} for async / HOF-callback
+     * handlers that read TruffleLanguage.Env from a Node argument.
+     */
+    public static NativeHandlerWithNode recordHandlerWithNodeOf(String name) {
+        return HANDLERS_WITH_NODE.get(name);
     }
 
     // ==================== Handler Registration ====================

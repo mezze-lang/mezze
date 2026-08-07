@@ -856,36 +856,65 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
-     * Legacy record-ABI native call: takes the native name as a constant
-     * operand and a MezzeRecord arg on the stack, delegates to
-     * {@link com.mezze.interpreter.nodes.builtin.NativeDispatch#dispatchByName}
-     * with a fresh IndirectCallNode + the surrounding
-     * {@link com.oracle.truffle.api.nodes.Node} passed in as {@code $node}
-     * (for async handlers that need TruffleLanguage.Env).
+     * Legacy record-ABI native call: takes the pre-resolved
+     * {@link com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler}
+     * as a constant operand and a MezzeRecord arg on the stack, calls
+     * the handler with a fresh IndirectCallNode.
      *
-     * Unlocks the 89% of misses that were CallNativeIR:record-ABI. Not
-     * as fast as CallNativeScalar (still allocates/unpacks a record per
-     * call) but routes the surrounding function through BDSL.
+     * <p>#350: handler is resolved at emit time (via
+     * {@link com.mezze.interpreter.nodes.builtin.NativeDispatch#recordHandlerOf})
+     * so the hot path has no HashMap lookup and no string keys — mirrors
+     * the pattern {@link CallNativeScalar} already uses.
+     *
+     * <p>Still allocates/unpacks a MezzeRecord per call (that's what
+     * separates record-ABI from scalar-ABI); the win here is only
+     * eliminating the string-keyed dispatch tax.
      */
     @Operation
-    @ConstantOperand(type = String.class)
+    @ConstantOperand(type = com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler.class)
     public static final class CallNativeRecord {
         @Specialization
-        public static Object doInvoke(String name, Object arg,
+        public static Object doInvoke(
+                com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler handler,
+                Object arg,
+                @Cached(value = "createIndirect()", allowUncached = true)
+                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+            if (!(arg instanceof com.mezze.interpreter.values.MezzeRecord record)) {
+                com.oracle.truffle.api.CompilerDirectives.transferToInterpreterAndInvalidate();
+                throw new RuntimeException("native handler expects record argument, got: "
+                        + (arg == null ? "null" : arg.getClass().getName()));
+            }
+            return handler.handle(record, callNode);
+        }
+        static com.oracle.truffle.api.nodes.IndirectCallNode createIndirect() {
+            return com.oracle.truffle.api.nodes.IndirectCallNode.create();
+        }
+    }
+
+    /**
+     * Sibling of {@link CallNativeRecord} for handlers that need a
+     * {@link com.mezze.interpreter.nodes.MezzeNode} — typically async /
+     * HOF-callback handlers that read {@code TruffleLanguage.Env}.
+     * BDSL doesn't wrap ops in MezzeNodes so we pass null; those
+     * handlers can reach the Env via {@code TruffleLanguage.get(node)}
+     * using the {@code @Bind} node argument.
+     */
+    @Operation
+    @ConstantOperand(type = com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandlerWithNode.class)
+    public static final class CallNativeRecordWithNode {
+        @Specialization
+        public static Object doInvoke(
+                com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandlerWithNode handler,
+                Object arg,
                 @Cached(value = "createIndirect()", allowUncached = true)
                     com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                 @Bind com.oracle.truffle.api.nodes.Node node) {
             if (!(arg instanceof com.mezze.interpreter.values.MezzeRecord record)) {
                 com.oracle.truffle.api.CompilerDirectives.transferToInterpreterAndInvalidate();
-                throw new RuntimeException(name + " expects record argument, got: "
+                throw new RuntimeException("native handler expects record argument, got: "
                         + (arg == null ? "null" : arg.getClass().getName()));
             }
-            // The BDSL node has no "MezzeNode" wrapper — pass null; the
-            // async handlers only use it to read the Env, which they can
-            // reach via TruffleLanguage.get(Node).
-            com.mezze.interpreter.nodes.MezzeNode mezzeNode = null;
-            return com.mezze.interpreter.nodes.builtin.NativeDispatch
-                    .dispatchByName(name, record, callNode, mezzeNode);
+            return handler.handle(record, callNode, null);
         }
         static com.oracle.truffle.api.nodes.IndirectCallNode createIndirect() {
             return com.oracle.truffle.api.nodes.IndirectCallNode.create();
@@ -1498,9 +1527,25 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = Hash.class)
     @ConstantOperand(type = String.class)
     public static final class PerformD {
+        // #347 — per-site inline cache of the handler's fieldIndex for opName.
+        // Warm path: skip the HashMap probe in MezzeRecord.getField(String)
+        // and index directly. Shape-validated inside BdslYieldDispatch by
+        // comparing the cached name at that slot to the incoming opName.
+        // Uncached path passes -1 which forces the string lookup.
         @Specialization
-        public static Object doPerformD(Hash effectHash, String opName, Object arg) {
-            return BdslYieldDispatch.dispatch(effectHash, opName, arg);
+        public static Object doPerformD(Hash effectHash, String opName, Object arg,
+                                        @Cached(value = "initFieldIndex()", allowUncached = true, dimensions = 1)
+                                        int[] fieldIndexBox) {
+            return BdslYieldDispatch.dispatch(effectHash, opName, arg, fieldIndexBox);
+        }
+
+        // A 1-element mutable box so BdslYieldDispatch can update the cached
+        // index after a successful uncached lookup (poor man's per-site cache
+        // — Truffle's @Cached wants a value, not a reference to write, so we
+        // use a heap-allocated box). Alloc cost is amortized: one per emit
+        // site, held for the lifetime of the bytecode root.
+        static int[] initFieldIndex() {
+            return new int[] { -1 };
         }
     }
 

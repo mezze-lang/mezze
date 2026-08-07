@@ -99,6 +99,23 @@ public final class BdslYieldDispatch {
      */
     @TruffleBoundary
     public static Object dispatch(Hash effectHash, String opName, Object arg) {
+        return dispatch(effectHash, opName, arg, /*fieldIndexBox*/ null);
+    }
+
+    /**
+     * Same as {@link #dispatch(Hash, String, Object)} but uses a
+     * per-site cached fieldIndex when the handler's shape matches.
+     * A {@code cachedFieldIndex} of -1 means "no cache; fall back to
+     * hash-map lookup by name" (used for uncached / first call).
+     *
+     * <p>Callers that can amortize a per-site cache (BDSL {@code PerformD}
+     * @Operation via {@code @Cached}) get index-based field access instead
+     * of {@link MezzeRecord#getField(String)}'s hash-map probe — eliminates
+     * the string dispatch from the perform hot path per #347.
+     */
+    @TruffleBoundary
+    public static Object dispatch(Hash effectHash, String opName, Object arg,
+                                  int[] fieldIndexBox) {
         MezzeRecord handler = EffectFiber.peekHandlerForEffect(effectHash);
         if (TRACE) trace("dispatch " + opName + " effectHash=" + effectHash
             + " chainDepth=" + currentChainDepth()
@@ -109,7 +126,21 @@ public final class BdslYieldDispatch {
             // {} ; perform Handler in force x`) can force it. Same shape.
             return makeUnhandledSuspended(effectHash, opName, arg);
         }
-        Object opImplRaw = handler.getField(opName);
+        Object opImplRaw;
+        // Try the cached fieldIndex first — hot path when the handler's
+        // shape matches the one we saw last time. Otherwise fall through to
+        // name-based lookup and update the cache for next call at this site.
+        int cachedFieldIndex = fieldIndexBox == null ? -1 : fieldIndexBox[0];
+        if (cachedFieldIndex >= 0 && cachedFieldIndex < handler.getFieldCount()
+                && opName.equals(handler.getFieldName(cachedFieldIndex))) {
+            opImplRaw = handler.getField(cachedFieldIndex);
+        } else {
+            int idx = handler.getFieldIndex(opName);
+            opImplRaw = (idx >= 0) ? handler.getField(idx) : null;
+            if (idx >= 0 && fieldIndexBox != null) {
+                fieldIndexBox[0] = idx;
+            }
+        }
         if (!(opImplRaw instanceof MezzeFunction opImpl)) {
             throw new IllegalStateException(
                 "Path D dispatch: handler for " + effectHash + "." + opName

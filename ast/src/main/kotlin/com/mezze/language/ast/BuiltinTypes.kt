@@ -44,12 +44,44 @@ object BuiltinTypes {
      */
     val coreVariantConstructors = setOf(SOME, NONE, OK, ERR, TRUE, FALSE, CONS, NIL)
 
+    // Ordering constructors used by Ord ability (returned from Ord.compare + created via
+    // MezzeVariant.lt/gt/eq). These share the same runtime "collide across ADTs" contract
+    // as coreVariantConstructors — the ordering ADT is nominally shared with native code.
+    private val orderingConstructors = setOf("LT", "GT", "EQ")
+
     // Standard record field names for built-in types
     const val VAL_FIELD = "val"      // Used in Option.Some and Result.Ok
     const val ERROR_FIELD = "error"  // Used in Result.Err
 
     fun isBuiltinTypeName(typeName: String): Boolean {
         return typeName in allBuiltinTypeNames
+    }
+
+    /**
+     * #349 — compute a stable integer tag for a variant constructor.
+     *
+     * Historically variants used `ctorName.hashCode() & 0x7FFFFFFF` as the tag,
+     * which silently collides when two DIFFERENT user-defined ADTs both declare
+     * a constructor called (e.g.) `Foo`. Match dispatch is `switch(tag)`, so
+     * collisions mean one ADT's match branch fires on another ADT's value.
+     *
+     * Fix: mix the ADT's [typeHash] into the tag when available. Keep the
+     * old formula for constructors that MUST collide with runtime-native
+     * values ({@link coreVariantConstructors} + LT/GT/EQ), and for open /
+     * anonymous variants without a typeHash.
+     *
+     * The returned tag is deterministic and stable across compilations of
+     * the same source (typeHash is content-addressed).
+     */
+    fun computeVariantTag(ctorName: String, typeHashHex: String?): Int {
+        val useAdtHash =
+            typeHashHex != null &&
+            ctorName !in coreVariantConstructors &&
+            ctorName !in orderingConstructors
+        val raw =
+            if (useAdtHash) (typeHashHex + "::" + ctorName).hashCode()
+            else ctorName.hashCode()
+        return raw and 0x7FFFFFFF
     }
 
     /** Delegates to PrimitiveTypes.isBoolVariant -- single canonical location. */
