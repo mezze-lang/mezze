@@ -642,7 +642,7 @@ class LazyEffectsTest {
     }
 
     @Test
-    @Disabled("#392 — residual under MEZZE_EAGER=1; expected: true but was: false on lazy-effect success debug-string assertion. All other cross-Context regressions fixed by 942f300df (SlotTable.clear on disposeContext).")
+    @Disabled("#392 — residual under MEZZE_EAGER=1; passes in isolation, fails after prior `test Inspect to_dbg_str on result of lazy effect` in same class. Cross-Context sharedEngine leak (test creates fresh Context but per-Engine caches — likely stdlibCallTargetCache or importedCallTargetCache — retain a MezzeFunction wrapping the safe_div CT with Err-path state from the prior test). SlotTable.clear on disposeContext is not enough; needs Engine-scoped cache invalidation on Context death OR a per-Context sub-cache overlay.")
     fun `test Inspect to_dbg_str on success path of lazy effect`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
