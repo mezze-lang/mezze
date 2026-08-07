@@ -828,6 +828,142 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * MakeLambda by content hash — for the case where the callee
+     * CallTarget isn't yet in this compiler's local cache at emit
+     * time. Resolves the target lazily via
+     * {@link MezzeLanguage#getCachedStdlibCallTarget} on first execute
+     * and caches it as an inline-cache slot (PIC).
+     *
+     * <p>After #304's per-Language cache-every-fn change, this is
+     * safe across threads — every compiled fn (including user
+     * lambdas) lands in the per-Language map keyed by hash.
+     */
+    @Operation
+    @ConstantOperand(type = String.class)
+    @ConstantOperand(type = String.class)
+    public static final class MakeLambdaByHash {
+        @Specialization
+        public static MezzeFunction doMake(
+                String hashHex, String name, @Variadic Object[] captures,
+                @Cached(value = "resolveByHash(hashHex)", allowUncached = true) CallTarget cachedTarget) {
+            return new MezzeFunction(cachedTarget, name, captures);
+        }
+
+        @TruffleBoundary
+        static CallTarget resolveByHash(String hashHex) {
+            CallTarget ct = MezzeLanguage.get(null)
+                    .getCachedStdlibCallTarget(new Hash(hashHex));
+            if (ct == null) {
+                throw new IllegalStateException(
+                        "MakeLambdaByHash: no function registered for hash "
+                        + new Hash(hashHex).getHex());
+            }
+            return ct;
+        }
+    }
+
+    /**
+     * Call by content hash — for CallDirectIR whose callee CallTarget
+     * isn't in this compiler's local cache at emit time. Same lazy
+     * PIC-cached shape as {@link MakeLambdaByHash}; matches the ABI
+     * of {@link CallDirectN} once warm (variadic Object[] args).
+     *
+     * <p>After #304's per-Language cache-every-fn change, every
+     * compiled fn is resolvable by hash from any thread.
+     */
+    @Operation
+    @ConstantOperand(type = String.class)
+    public static final class CallByHash {
+        @Specialization(guards = "callNode.getCallTarget() == cachedTarget")
+        public static Object doCached(
+                String hashHex,
+                @Variadic Object[] args,
+                @Cached(value = "resolveByHash(hashHex)", allowUncached = true) CallTarget cachedTarget,
+                @Cached(value = "callByHashNeedsMarker(cachedTarget, args.length)", allowUncached = true, neverDefault = false) boolean needsMarker,
+                @Cached("create(cachedTarget)") DirectCallNode callNode) {
+            return callNode.call(needsMarker ? callByHashPrependMarker(args) : args);
+        }
+
+        @Specialization(replaces = "doCached")
+        public static Object doIndirect(
+                String hashHex,
+                @Variadic Object[] args,
+                @Cached IndirectCallNode indirectCallNode) {
+            CallTarget target = resolveByHash(hashHex);
+            Object[] finalArgs = callByHashNeedsMarker(target, args.length)
+                    ? callByHashPrependMarker(args)
+                    : args;
+            return indirectCallNode.call(target, finalArgs);
+        }
+
+        @TruffleBoundary
+        static CallTarget resolveByHash(String hashHex) {
+            CallTarget ct = MezzeLanguage.get(null)
+                    .getCachedStdlibCallTarget(new Hash(hashHex));
+            if (ct == null) {
+                throw new IllegalStateException(
+                        "CallByHash: no function registered for hash "
+                        + new Hash(hashHex).getHex());
+            }
+            return ct;
+        }
+
+        /**
+         * ABI discrimination for CallByHash / TailCallByHash:
+         * AST callees at arity==1 need ScalarABIMarker prepended so
+         * MezzeFunctionRootNode's normalizeArgs treats the arg as scalar
+         * not record. BDSL trampolines strip markers themselves — marker
+         * optional. Native record-ABI callees expect the raw record —
+         * must NOT prepend.
+         */
+        public static boolean callByHashNeedsMarker(CallTarget target, int argsLen) {
+            if (argsLen != 1) return false;
+            if (!(target instanceof com.oracle.truffle.api.RootCallTarget rct)) return false;
+            var root = rct.getRootNode();
+            return root instanceof com.mezze.interpreter.nodes.function.MezzeFunctionRootNode;
+        }
+
+        public static Object[] callByHashPrependMarker(Object[] args) {
+            Object[] out = new Object[args.length + 1];
+            out[0] = com.mezze.interpreter.nodes.function.ScalarABIMarker.INSTANCE;
+            System.arraycopy(args, 0, out, 1, args.length);
+            return out;
+        }
+    }
+
+    /**
+     * Tail-call variant of {@link CallByHash}. Resolves the target
+     * lazily by hash, then throws a {@link TailCallException} for
+     * the enclosing trampoline to re-drive.
+     */
+    @Operation
+    @ConstantOperand(type = String.class)
+    public static final class TailCallByHash {
+        @Specialization
+        public static Object doThrow(
+                String hashHex,
+                @Variadic Object[] args,
+                @Cached(value = "resolveByHash(hashHex)", allowUncached = true) CallTarget cachedTarget,
+                @Cached(value = "needsMarkerFor(cachedTarget, args.length)", allowUncached = true, neverDefault = false) boolean needsMarker) {
+            Object[] finalArgs = needsMarker ? prependMarkerFor(args) : args;
+            throw new TailCallException(cachedTarget, finalArgs);
+        }
+
+        @TruffleBoundary
+        static CallTarget resolveByHash(String hashHex) {
+            return CallByHash.resolveByHash(hashHex);
+        }
+
+        static boolean needsMarkerFor(CallTarget target, int argsLen) {
+            return CallByHash.callByHashNeedsMarker(target, argsLen);
+        }
+
+        static Object[] prependMarkerFor(Object[] args) {
+            return CallByHash.callByHashPrependMarker(args);
+        }
+    }
+
 
     /**
      * Call a scalar-ABI native op by name. Args are positional, packed
