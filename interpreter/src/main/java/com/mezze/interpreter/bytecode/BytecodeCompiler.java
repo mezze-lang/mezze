@@ -1791,36 +1791,14 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof PerformOpIR p) {
-            // Path D (docs/perf/bdsl-effects-path-d-2026-07.md): when the
-            // MEZZE_BDSL_YIELD gate is on, lower every perform to a BDSL
-            // PerformD op — a direct chain-dispatch native call, no
-            // Loom fiber, no reflection. resume is fall-through (single-
-            // return); abort throws AbortPerformException as usual. See
-            // BdslYieldDispatch for semantics.
-            if (com.mezze.interpreter.runtime.MezzeLanguage.BDSL_YIELD_ENABLED) {
-                b.beginPerformD(p.getEffectHash(), p.getOperationName());
-                emitNode(p.getArg(), b, argCount, localMap);
-                b.endPerformD();
-                return;
-            }
-
-            // Path A (default): fiber-yield via OpCallNode (same node used
-            // by AST). See docs/perf/bdsl-effects-path-a-2026-07.md.
-            // Mut fast path: emit the raw `act` value directly and use
-            // PerformMutMutateAct so the OpCallNode wraps it into the
-            // one-field {act = ...} record locally — preserves the
-            // marker fast path.
-            if (isMutMutateWithActLambda(p)) {
-                com.mezze.language.truffleir.MakeRecordIR arg =
-                        (com.mezze.language.truffleir.MakeRecordIR) p.getArg();
-                b.beginPerformMutMutateAct(p.getEffectHash());
-                emitNode(arg.getFields().get(0).getValue(), b, argCount, localMap);
-                b.endPerformMutMutateAct();
-                return;
-            }
-            b.beginPerform(p.getEffectHash(), p.getOperationName());
+            // Path D (docs/perf/bdsl-effects-path-d-2026-07.md): every
+            // perform lowers to a BDSL PerformD op — a direct
+            // chain-dispatch native call, no Loom fiber, no reflection.
+            // resume is fall-through (single-return); abort throws
+            // AbortPerformException. See BdslYieldDispatch for semantics.
+            b.beginPerformD(p.getEffectHash(), p.getOperationName());
             emitNode(p.getArg(), b, argCount, localMap);
-            b.endPerform();
+            b.endPerformD();
             return;
         }
         if (node instanceof HandleIR h) {

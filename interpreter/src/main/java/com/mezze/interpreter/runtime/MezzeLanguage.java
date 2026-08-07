@@ -164,21 +164,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     // invalidate our caches before the next compile.
     private volatile int cachedDebugEpoch = 0;
 
-    // Path D routing (docs/perf/bdsl-effects-path-d-2026-07.md) — default-on
-    // 2026-08-03 (empirical 5372/5373 tests pass; the one failure is the
-    // pre-existing DAP pause socket-timeout flake, unchanged from yield-off).
-    // When on, BytecodeCompiler emits a BDSL PerformD op that dispatches
-    // the effect directly against the thread's handler chain — no Loom
-    // fiber, no reflection. Requires MEZZE_BDSL=1 to have any effect
-    // (which is default-on too). Opt out via MEZZE_BDSL_YIELD=0/false —
-    // kept as an escape hatch until #333 deletes the Loom EffectFiber path.
-    public static final boolean BDSL_YIELD_ENABLED = computeBdslYieldDefault();
-
-    private static boolean computeBdslYieldDefault() {
-        String v = System.getenv("MEZZE_BDSL_YIELD");
-        if ("0".equals(v) || "false".equalsIgnoreCase(v)) return false;
-        return true;
-    }
+    // Path D routing (docs/perf/bdsl-effects-path-d-2026-07.md): every
+    // perform lowers to a BDSL PerformD op that dispatches the effect
+    // directly against the thread's handler chain — no Loom fiber, no
+    // reflection. Path A (fiber-yield via OpCallNode) is deleted along
+    // with the Loom EffectFiber path (#333).
 
     // Path E — lazy-until-fully-discharged effect runtime (task #336).
     // HandleNode's lazy path builds a MezzeSuspend carrying the whole body
@@ -263,13 +253,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         if (!isBdslSafeCallee(ir)) {
             bdslMisses.incrementAndGet();
             if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSAFE.incrementAndGet();
-            throw bdslStrictError(ir, "unsafe-callee", null);
+            throw bdslCompileError(ir, "unsafe-callee", null);
         }
         com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
         if (!bdsl.supports(ir)) {
             bdslMisses.incrementAndGet();
             if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSUPPORTED.incrementAndGet();
-            throw bdslStrictError(ir, "unsupported", null);
+            throw bdslCompileError(ir, "unsupported", null);
         }
         try {
             var root = bdsl.compile(ir);
@@ -285,20 +275,15 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 GLOBAL_BDSL_MISS_CRASH.incrementAndGet();
                 com.mezze.interpreter.bytecode.BytecodeCompiler.noteCrash(t);
             }
-            throw bdslStrictError(ir, "emit-crash", t);
+            throw bdslCompileError(ir, "emit-crash", t);
         }
     }
 
-    /** #374 debug: with MEZZE_BDSL_STRICT=1, refuse the AST fallback and
-     *  surface the reason so we can measure exactly which fns still can't
-     *  compile through BDSL. */
-    private static final boolean BDSL_STRICT =
-            System.getenv("MEZZE_BDSL_STRICT") != null
-                && !"0".equals(System.getenv("MEZZE_BDSL_STRICT"));
-
-    private static RuntimeException bdslStrictError(
+    /** BDSL compile failure — surfaced instead of falling back to AST
+     *  (the AST tree is deleted; there is nothing to fall back to). */
+    private static RuntimeException bdslCompileError(
             com.mezze.language.truffleir.FunctionIR ir, String reason, Throwable cause) {
-        String msg = "[BDSL_STRICT] fallback rejected for " + ir.getName()
+        String msg = "[BDSL] compile failed for " + ir.getName()
                 + " (hash=" + ir.getHash().getHex().substring(0, 8) + ") reason=" + reason;
         return cause == null ? new RuntimeException(msg) : new RuntimeException(msg, cause);
     }
@@ -557,10 +542,6 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     public com.oracle.truffle.api.CallTarget compileEntryFn(
             com.mezze.language.truffleir.FunctionIR entryIR) {
         if (!BDSL_ENABLED) return null;
-        // #374 default ON: __entry__ compiles through BDSL. Opt out with
-        // MEZZE_BDSL_ENTRY=0 to route through the legacy AST fallback while
-        // bisecting a regression.
-        if ("0".equals(System.getenv("MEZZE_BDSL_ENTRY"))) return null;
         com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
         if (!bdsl.supports(entryIR)) return null;
         try {
