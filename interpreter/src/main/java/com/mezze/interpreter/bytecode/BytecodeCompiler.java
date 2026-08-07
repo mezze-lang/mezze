@@ -251,6 +251,32 @@ public final class BytecodeCompiler {
             new java.util.IdentityHashMap<>();
 
     /**
+     * #332 Path D6 — emit-time context stack of enclosing HandlerBind
+     * multishot flags. Pushed by {@link #emitHandleNested} before entering
+     * an inner handler body; popped after. Read by PerformOpIR emit to
+     * decide whether the enclosing handler was declared {@code @Multishot}
+     * (and therefore the perform should route through the Yield+driver
+     * path with MezzeContinuation) or stay on the D5 direct-dispatch
+     * fast path.
+     *
+     * <p>Empty (or peek == false) means "no @Multishot handler on the
+     * enclosing chain" — 99.9% of program sites take this path.
+     */
+    private final java.util.ArrayDeque<Boolean> enclosingMultishotStack =
+            new java.util.ArrayDeque<>();
+
+    /**
+     * Whether the innermost enclosing HandlerBind seen so far during
+     * emit was declared {@code @Multishot}. Reads a peek off
+     * {@link #enclosingMultishotStack}; false when the stack is empty
+     * (top-level, no handler installed yet).
+     */
+    private boolean currentEnclosingIsMultishot() {
+        Boolean top = enclosingMultishotStack.peek();
+        return top != null && top;
+    }
+
+    /**
      * Optional external CallTarget resolver — used when this compiler
      * is invoked from the runtime path where callee CallTargets already
      * live in {@link MezzeLanguage}'s shared stdlib cache rather than
@@ -2287,13 +2313,23 @@ public final class BytecodeCompiler {
         // installed chain before the Pop. supports() rejects partial-
         // discharging Handles, so every BDSL Handle here IS fully-
         // discharging and safe to force unconditionally.
+        //
+        // #332 Path D6 — push this handler's multishot flag before
+        // emitting the body so nested PerformOpIR sites can see it via
+        // {@link #currentEnclosingIsMultishot()}. Pop on both paths
+        // (normal + exception) — this is emit-time state, not runtime.
         b.beginStoreLocal(resultSlot);
-        if (isOutermost) {
-            b.beginAutoForceIfSuspended();
-            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
-            b.endAutoForceIfSuspended();
-        } else {
-            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
+        enclosingMultishotStack.push(hb.getMultishot());
+        try {
+            if (isOutermost) {
+                b.beginAutoForceIfSuspended();
+                emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
+                b.endAutoForceIfSuspended();
+            } else {
+                emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
+            }
+        } finally {
+            enclosingMultishotStack.pop();
         }
         b.endStoreLocal();
         b.endBlock();
