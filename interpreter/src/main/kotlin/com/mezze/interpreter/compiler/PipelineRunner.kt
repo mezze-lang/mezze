@@ -230,9 +230,14 @@ object PipelineRunner {
                     }
                 }
             }
-            // BDSL rejected — fall back to AST compileNode (legacy path).
-            val src = compiler.getOrCreateSourcePublic(fn.sourceFile)
-            return compiler.compileNode(fn.body, src)
+            // BDSL rejected — under eager-default no known IR shape reaches
+            // here. Throw loud so a future regression surfaces at emit time
+            // instead of silently degrading to AST. (#391 delete cascade.)
+            throw IllegalStateException(
+                "BDSL rejected entry body for ${fn.name} hash=${fn.hash} — " +
+                "expected all IR shapes to be BDSL-supported under eager-default. " +
+                "If this fires, add BDSL support for the rejecting IR node."
+            )
         }
 
         if (namedEntry != null) {
