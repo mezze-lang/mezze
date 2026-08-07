@@ -3,11 +3,14 @@ package com.mezze.interpreter.nodes.seq;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.datastructures.list.MezzeList;
+import com.oracle.truffle.api.bytecode.OperationProxy;
+import com.oracle.truffle.api.dsl.Bind;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Cached.Shared;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
 import com.oracle.truffle.api.profiles.InlinedBranchProfile;
@@ -18,25 +21,32 @@ import com.oracle.truffle.api.profiles.InlinedBranchProfile;
  * Type-specialized for MezzeSeq (persistent vector — typed-storage stack
  * with Long/Double/Object/Boolean specializations and COW ownership) and
  * MezzeList (persistent cons list).
+ *
+ * Specializations are static so this node can be used both as an AST node
+ * (via {@link #create}) AND as a BDSL {@code @OperationProxy} target on
+ * {@code MezzeBytecodeRootNode} (BDSL requires static specializations
+ * with {@code @Bind Node} for receiver access).
  */
 @NodeChild("seqNode")
 @NodeChild("indexNode")
 @NodeInfo(shortName = "seq-get")
+@OperationProxy.Proxyable(allowUncached = true)
 public abstract class SeqAccessNode extends MezzeNode {
 
     /**
      * MezzeSeq (persistent vector) access - O(log32 n) ≈ O(1)
      */
     @Specialization
-    protected Object accessSeq(
+    public static Object accessSeq(
             VirtualFrame frame,
             MezzeSeq seq,
             long index,
+            @Bind Node node,
             @Cached @Shared("boundsError") InlinedBranchProfile boundsErrorProfile
     ) {
         int idx = (int) index;
         if (idx < 0 || idx >= seq.size()) {
-            boundsErrorProfile.enter(this);
+            boundsErrorProfile.enter(node);
             throw new ArrayIndexOutOfBoundsException("Index " + index + " out of bounds for sequence of length " + seq.size());
         }
         return seq.get(idx);
@@ -46,15 +56,16 @@ public abstract class SeqAccessNode extends MezzeNode {
      * MezzeList (persistent cons list) access - O(n)
      */
     @Specialization
-    protected Object accessList(
+    public static Object accessList(
             VirtualFrame frame,
             MezzeList list,
             long index,
+            @Bind Node node,
             @Cached @Shared("boundsError") InlinedBranchProfile boundsErrorProfile
     ) {
         int idx = (int) index;
         if (idx < 0 || idx >= list.size()) {
-            boundsErrorProfile.enter(this);
+            boundsErrorProfile.enter(node);
             throw new ArrayIndexOutOfBoundsException("Index " + index + " out of bounds for list of length " + list.size());
         }
         return list.get(idx);
@@ -64,15 +75,16 @@ public abstract class SeqAccessNode extends MezzeNode {
      * Generic path: Object array.
      */
     @Specialization
-    protected Object accessObjectArray(
+    public static Object accessObjectArray(
             VirtualFrame frame,
             Object[] array,
             long index,
+            @Bind Node node,
             @Cached @Shared("boundsError") InlinedBranchProfile boundsErrorProfile
     ) {
         int idx = (int) index;
         if (idx < 0 || idx >= array.length) {
-            boundsErrorProfile.enter(this);
+            boundsErrorProfile.enter(node);
             throw new ArrayIndexOutOfBoundsException("Index " + index + " out of bounds for array of length " + array.length);
         }
         return array[idx];

@@ -24,6 +24,7 @@ import com.mezze.language.truffleir.CaseIR;
 import com.mezze.language.truffleir.MakeLambdaIR;
 import com.mezze.language.truffleir.MakeRecordIR;
 import com.mezze.language.truffleir.MakeSeqIR;
+import com.mezze.language.truffleir.SeqGetIR;
 import com.mezze.language.truffleir.MakeVariantIR;
 import com.mezze.language.truffleir.SeqElementIR;
 import com.mezze.language.truffleir.MatchIR;
@@ -684,6 +685,10 @@ public final class BytecodeCompiler {
                 if (!supportsNode(reg.getNode(), argCount)) return false;
             }
             return true;
+        }
+        if (node instanceof SeqGetIR sg) {
+            return supportsNode(sg.getSeq(), argCount)
+                && supportsNode(sg.getIndex(), argCount);
         }
         if (node instanceof CallIndirectIR ci) {
             return supportsNode(ci.getFunction(), argCount)
@@ -1640,6 +1645,13 @@ public final class BytecodeCompiler {
         }
         if (node instanceof MatchIR m) {
             emitMatch(m, b, argCount, localMap);
+            return;
+        }
+        if (node instanceof SeqGetIR sg) {
+            b.beginSeqGet();
+            emitNode(sg.getSeq(), b, argCount, localMap);
+            emitNode(sg.getIndex(), b, argCount, localMap);
+            b.endSeqGet();
             return;
         }
         if (node instanceof MakeSeqIR ms) {
