@@ -1824,9 +1824,20 @@ public final class BytecodeCompiler {
             // return); abort throws AbortPerformException as usual. See
             // BdslYieldDispatch for semantics.
             if (com.mezze.interpreter.runtime.MezzeLanguage.BDSL_YIELD_ENABLED) {
-                b.beginPerformD(p.getEffectHash(), p.getOperationName());
-                emitNode(p.getArg(), b, argCount, localMap);
-                b.endPerformD();
+                // #332 Path D6 — under @Multishot-annotated enclosing handler,
+                // route through PerformMultishot which sits in front of the
+                // MezzeContinuation contract (strategy-A guard today, deep-copy
+                // frame snapshot on strategy-B upgrade). Fast path preserved
+                // verbatim for the non-multishot 99.9% case.
+                if (currentEnclosingIsMultishot()) {
+                    b.beginPerformMultishot(p.getEffectHash(), p.getOperationName());
+                    emitNode(p.getArg(), b, argCount, localMap);
+                    b.endPerformMultishot();
+                } else {
+                    b.beginPerformD(p.getEffectHash(), p.getOperationName());
+                    emitNode(p.getArg(), b, argCount, localMap);
+                    b.endPerformD();
+                }
                 return;
             }
 
