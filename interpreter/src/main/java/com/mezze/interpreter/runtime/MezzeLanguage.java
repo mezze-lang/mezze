@@ -238,14 +238,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private final java.util.concurrent.atomic.AtomicLong bdslMisses = new java.util.concurrent.atomic.AtomicLong();
 
     /**
-     * Compile one FunctionIR. When {@link #BDSL_ENABLED} is on, tries BDSL
-     * first ({@link com.mezze.interpreter.bytecode.BytecodeCompiler#supports})
-     * and falls back to the AST TruffleCompiler when unsupported or emit
-     * crashes. Fallback is still needed pre-Phase-5 for edge cases:
-     * factorial-shape recursion crashes BDSL emit with a null-constant
-     * error; nested unresolved captures crash intermittently. These are
-     * real BDSL bugs, but AST-fallback keeps the suite green while they
-     * get fixed.
+     * Compile one FunctionIR through BDSL. Under gate-ON default, BDSL is
+     * the sole compilation path — no AST fallback. Audit `docs/effects/
+     * bdsl-eager-steps-7-13-audit.md` proved 0 fallback firings across
+     * the full test suite under gate-ON. #391 Step 7 c1.
      *
      * <p>The BDSL compiler shares an external CallTarget resolver that
      * looks into {@link #stdlibCallTargetCache} — so cross-fn calls to
@@ -253,7 +249,6 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * own map.
      */
     private com.oracle.truffle.api.nodes.RootNode compileOne(
-            com.mezze.interpreter.compiler.TruffleCompiler astCompiler,
             com.mezze.language.truffleir.FunctionIR ir) {
         // #359 — flag-flip epoch check. When BDSL_DEBUG_INSTRUMENTATION
         // was toggled after we last cached anything, drop caches so we
@@ -265,38 +260,33 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         if (nowEpoch != cachedDebugEpoch) {
             invalidateDebugShapeCaches(nowEpoch);
         }
-        if (BDSL_ENABLED) {
-            if (!isBdslSafeCallee(ir)) {
-                bdslMisses.incrementAndGet();
-                if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSAFE.incrementAndGet();
-                if (BDSL_STRICT) throw bdslStrictError(ir, "unsafe-callee", null);
-                return astCompiler.compile(ir);
-            }
-            com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
-            if (!bdsl.supports(ir)) {
-                bdslMisses.incrementAndGet();
-                if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSUPPORTED.incrementAndGet();
-                if (BDSL_STRICT) throw bdslStrictError(ir, "unsupported", null);
-                return astCompiler.compile(ir);
-            }
-            try {
-                var root = bdsl.compile(ir);
-                bdslHits.incrementAndGet();
-                if (BDSL_STATS) GLOBAL_BDSL_HITS.incrementAndGet();
-                return root;
-            } catch (Throwable t) {
-                if (System.getenv("MEZZE_DEBUG") != null) {
-                    System.err.println("[BDSL] emit failed for " + ir.getName() + ": " + t);
-                }
-                bdslMisses.incrementAndGet();
-                if (BDSL_STATS) {
-                    GLOBAL_BDSL_MISS_CRASH.incrementAndGet();
-                    com.mezze.interpreter.bytecode.BytecodeCompiler.noteCrash(t);
-                }
-                if (BDSL_STRICT) throw bdslStrictError(ir, "emit-crash", t);
-            }
+        if (!isBdslSafeCallee(ir)) {
+            bdslMisses.incrementAndGet();
+            if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSAFE.incrementAndGet();
+            throw bdslStrictError(ir, "unsafe-callee", null);
         }
-        return astCompiler.compile(ir);
+        com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
+        if (!bdsl.supports(ir)) {
+            bdslMisses.incrementAndGet();
+            if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSUPPORTED.incrementAndGet();
+            throw bdslStrictError(ir, "unsupported", null);
+        }
+        try {
+            var root = bdsl.compile(ir);
+            bdslHits.incrementAndGet();
+            if (BDSL_STATS) GLOBAL_BDSL_HITS.incrementAndGet();
+            return root;
+        } catch (Throwable t) {
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println("[BDSL] emit failed for " + ir.getName() + ": " + t);
+            }
+            bdslMisses.incrementAndGet();
+            if (BDSL_STATS) {
+                GLOBAL_BDSL_MISS_CRASH.incrementAndGet();
+                com.mezze.interpreter.bytecode.BytecodeCompiler.noteCrash(t);
+            }
+            throw bdslStrictError(ir, "emit-crash", t);
+        }
     }
 
     /** #374 debug: with MEZZE_BDSL_STRICT=1, refuse the AST fallback and
@@ -544,9 +534,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * eager per-function compilations through the BDSL fast path.
      */
     public com.oracle.truffle.api.nodes.RootNode compileOneJava(
-            com.mezze.interpreter.compiler.TruffleCompiler astCompiler,
             com.mezze.language.truffleir.FunctionIR ir) {
-        return compileOne(astCompiler, ir);
+        return compileOne(ir);
     }
 
     /**
@@ -824,9 +813,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             if (ct != null) return ct;
             var ir = ctx.getUserFunctionIR(hash);
             if (ir != null) {
-                var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
-                compiler.registerFunctions(new java.util.ArrayList<>(ctx.getAllUserFunctionIRs()));
-                var rootNode = compileOne(compiler, ir);
+                var rootNode = compileOne(ir);
                 ct = rootNode.getCallTarget();
                 ctx.cacheUserCallTarget(hash, ct);
                 return ct;
@@ -836,8 +823,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // 3. Compile from stdlib FunctionIR on demand (in-memory map)
         var stdlibIR = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE.getPreloweredFunctions().get(hash);
         if (stdlibIR != null) {
-            var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
-            var rootNode = compileOne(compiler, stdlibIR);
+            var rootNode = compileOne(stdlibIR);
             ct = rootNode.getCallTarget();
             stdlibCallTargetCache.put(hash, ct);
             return ct;
@@ -854,8 +840,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             if (irBytes != null) {
                 try {
                     var fnIR = com.mezze.language.store.StoreSerialization.INSTANCE.deserializeFunctionIR(irBytes);
-                    var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
-                    var rootNode = compileOne(compiler, fnIR);
+                    var rootNode = compileOne(fnIR);
                     ct = rootNode.getCallTarget();
                     stdlibCallTargetCache.put(hash, ct);
                     return ct;
@@ -873,7 +858,6 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * Only compiles functions not already cached. Idempotent.
      */
     public void compileReferencedStdlib(
-            com.mezze.interpreter.compiler.TruffleCompiler compiler,
             java.util.Set<Hash> referencedHashes,
             java.util.Set<Hash> userHashes) {
         var runtimeData = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE;
@@ -897,7 +881,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             if (!userHashes.contains(hash) && !stdlibCallTargetCache.containsKey(hash)) {
                 var ir = allFunctions.get(hash);
                 if (ir != null) {
-                    var rootNode = compileOne(compiler, ir);
+                    var rootNode = compileOne(ir);
                     stdlibCallTargetCache.put(hash, rootNode.getCallTarget());
                 }
             }

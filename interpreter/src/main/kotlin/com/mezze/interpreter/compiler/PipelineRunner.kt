@@ -69,7 +69,6 @@ object PipelineRunner {
         val referencedHashes = com.mezze.language.stdlib.FunctionIRReachability.collectReferencedHashes(functions)
         mark("referenced hashes collected (${referencedHashes.size})")
         language.compileReferencedStdlib(
-            compiler,
             referencedHashes,
             userHashes
         )
@@ -148,7 +147,7 @@ object PipelineRunner {
             // Parameterized performer factories — compile eagerly + cache the
             // CallTarget so ParameterizedHandlerLookupNode finds it.
             if (fn.hash in performerFactoryHashes && fn.paramSlots.isNotEmpty()) {
-                val rootNode = language.compileOneJava(compiler, fn)
+                val rootNode = language.compileOneJava(fn)
                 compiledFunctions[fn.hash] = rootNode.callTarget
                 language.getCachedStdlibCallTargetCache()[fn.hash] = rootNode.callTarget
             }
@@ -160,7 +159,7 @@ object PipelineRunner {
             // (or constructPerformerRecord skips publishing entirely under
             // our "write-once" rule).
             if (fn.hash in performerOpHashes) {
-                val rootNode = language.compileOneJava(compiler, fn)
+                val rootNode = language.compileOneJava(fn)
                 compiledFunctions[fn.hash] = rootNode.callTarget
                 language.getCachedStdlibCallTargetCache()[fn.hash] = rootNode.callTarget
             }
