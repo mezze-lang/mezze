@@ -751,11 +751,17 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
-     * AST-only compile of a user/stdlib IR for lazy-stub inflation. Does
-     * NOT go through {@link #compileOne} — that would re-enter the
-     * singleton BDSL compiler, which may be mid-emit for another IR when
-     * we're called (BDSL emit itself is what created the stub in the
-     * first place).
+     * BDSL compile of a user/stdlib IR for lazy-stub inflation. Uses a
+     * FRESH {@link com.mezze.interpreter.bytecode.BytecodeCompiler}
+     * instance (not the shared singleton), so it doesn't re-enter a
+     * mid-emit compiler. Cross-fn refs resolve via SlotTable-first
+     * external resolver, falling back to the existing user-CT cache /
+     * stdlib CT cache — mirrors the pattern used by callers of the
+     * singleton in {@link #compileOne}.
+     *
+     * Falls back to AST compilation via {@link com.mezze.interpreter.compiler.TruffleCompiler}
+     * if BDSL {@link com.mezze.interpreter.bytecode.BytecodeCompiler#supports}
+     * rejects the IR — needed until every IR shape is BDSL-supported.
      */
     public com.oracle.truffle.api.nodes.RootNode compileUserIRForStub(Hash hash) {
         MezzeContext ctx;
@@ -781,12 +787,33 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             }
         }
         if (ir == null) return null;
-        var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
-        // For user IR, register the sibling functions so cross-fn refs resolve.
-        if (ctx != null) {
-            compiler.registerFunctions(new java.util.ArrayList<>(ctx.getAllUserFunctionIRs()));
+        // Try BDSL first with a fresh instance (avoids singleton re-entry).
+        // Resolver: prefer SlotTable-published CTs, then user CT cache,
+        // then stdlib CT cache — matches the compileOne resolver order.
+        final MezzeContext ctxFinal = ctx;
+        java.util.function.Function<Hash, com.oracle.truffle.api.CallTarget> resolver = h -> {
+            SlotEntry slot = slotTable.get(h);
+            if (slot != null && slot.isPublished()) return slot.getCallTarget();
+            if (ctxFinal != null) {
+                var userCT = ctxFinal.getUserCallTarget(h);
+                if (userCT != null) return userCT;
+            }
+            return getCachedStdlibCallTarget(h);
+        };
+        var bdsl = new com.mezze.interpreter.bytecode.BytecodeCompiler(this, resolver);
+        if (bdsl.supports(ir)) {
+            try {
+                return bdsl.compile(ir);
+            } catch (Throwable t) {
+                // Fall through to AST fallback on BDSL emit crash.
+            }
         }
-        return compiler.compile(ir);
+        // AST fallback for IR shapes BDSL doesn't yet support.
+        var ast = new com.mezze.interpreter.compiler.TruffleCompiler(this);
+        if (ctx != null) {
+            ast.registerFunctions(new java.util.ArrayList<>(ctx.getAllUserFunctionIRs()));
+        }
+        return ast.compile(ir);
     }
 
     /**
