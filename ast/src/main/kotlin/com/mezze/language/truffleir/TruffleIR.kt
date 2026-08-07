@@ -317,7 +317,22 @@ sealed interface PatternIR {
     override val src: SourceInfo,
     val staticallyFullyDischarges: Boolean = false
 ) : NodeIR
-@Serializable data class HandlerBindIR(val handlerHash: Hash, val effectHash: Hash, val performerName: String, val params: NodeIR?)
+/**
+ * A single handler binding inside a [HandleIR].
+ *
+ * `multishot` (default false, additive for legacy serialised IR): when
+ * true, downstream BDSL emit routes this handler's `PerformOpIR` sites
+ * through the Yield / [com.mezze.interpreter.bytecode.MezzeContinuation]
+ * driver instead of D5 direct dispatch. That's the slow-but-safe path
+ * for handlers that call `resume` more than once (nondeterminism,
+ * backtracking, generators). Path D6 — see
+ * `docs/effects/bdsl-path-d6-multi-shot.md`.
+ *
+ * Typechecker only sets `multishot = true` when the surface language
+ * marks the handler explicitly (Commit 2 wires the marker; Commit 3
+ * consumes the flag at emit).
+ */
+@Serializable data class HandlerBindIR(val handlerHash: Hash, val effectHash: Hash, val performerName: String, val params: NodeIR?, val multishot: Boolean = false)
 /** Effect operation call — runtime dispatch via handler stack.
  *  Can't be CallDirect because the performer isn't known at compile time
  *  (different perform blocks can use different performers).
