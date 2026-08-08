@@ -1,13 +1,13 @@
 package com.mezze.interpreter.bench
 
-import com.mezze.interpreter.nodes.continuation.EffectFiber
+import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
 import com.mezze.interpreter.values.MezzeRecord
 import com.mezze.language.typedast.Hash
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
 /**
- * Direct measurement of EffectFiber.snapshotHandlerChainEntries() at
+ * Direct measurement of HandlerChainRegistry.snapshotHandlerChainEntries() at
  * different chain depths. Used to decide whether it's worth caching /
  * versioning the per-thread handler chain to skip the array copy on
  * scopeSpawn (spawn-under-handlers hot path).
@@ -40,7 +40,7 @@ class HandlerChainSnapshotMeasurementTest {
     fun clearChain() {
         // Defensive: reset the ThreadLocal chain between tests so state
         // from one bench doesn't leak into the next.
-        EffectFiber.truncateHandlerChainTo(0)
+        HandlerChainRegistry.truncateHandlerChainTo(0)
     }
 
     private fun measure(label: String, depth: Int) {
@@ -48,14 +48,14 @@ class HandlerChainSnapshotMeasurementTest {
         val iters = 200_000
         val runs = 5
 
-        repeat(warmup) { EffectFiber.snapshotHandlerChainEntries() }
+        repeat(warmup) { HandlerChainRegistry.snapshotHandlerChainEntries() }
 
         val samples = LongArray(runs)
         for (r in 0 until runs) {
             var sink = 0L
             val t0 = System.nanoTime()
             for (i in 0 until iters) {
-                val chain = EffectFiber.snapshotHandlerChainEntries()
+                val chain = HandlerChainRegistry.snapshotHandlerChainEntries()
                 sink = sink xor chain.size.toLong()
             }
             val t1 = System.nanoTime()
@@ -102,11 +102,11 @@ class HandlerChainSnapshotMeasurementTest {
     }
 
     private inline fun withChainDepth(depth: Int, block: () -> Unit) {
-        repeat(depth) { EffectFiber.pushHandlerOnChain(handler, effectHash) }
+        repeat(depth) { HandlerChainRegistry.pushHandlerOnChain(handler, effectHash) }
         try {
             block()
         } finally {
-            repeat(depth) { EffectFiber.popHandlerOffChain() }
+            repeat(depth) { HandlerChainRegistry.popHandlerOffChain() }
         }
     }
 }

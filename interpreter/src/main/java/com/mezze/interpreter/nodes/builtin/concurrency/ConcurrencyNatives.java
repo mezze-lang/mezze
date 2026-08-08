@@ -4,7 +4,7 @@ import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.builtin.BuiltinFieldNames;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
-import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry;
 import com.mezze.interpreter.nodes.continuation.SpawnSupport;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.datastructures.seq.MezzeSeq;
@@ -1096,7 +1096,7 @@ public final class ConcurrencyNatives {
                 throw new RuntimeException("Agent is in error state: " + error.get());
             }
 
-            actionQueue.add(new AgentAction(func, env, EffectFiber.snapshotHandlerChainEntries()));
+            actionQueue.add(new AgentAction(func, env, HandlerChainRegistry.snapshotHandlerChainEntries()));
             processQueue();
         }
 
@@ -1138,7 +1138,7 @@ public final class ConcurrencyNatives {
                             callArgs[closureValues.length] = argRecord;
 
                             Object[] newStateHolder = new Object[1];
-                            EffectFiber.runWithHandlerChain(action.chain, () ->
+                            HandlerChainRegistry.runWithHandlerChain(action.chain, () ->
                                 newStateHolder[0] = func.getCallTarget().call(callArgs));
                             state.set(newStateHolder[0]);
                         } catch (Throwable e) {

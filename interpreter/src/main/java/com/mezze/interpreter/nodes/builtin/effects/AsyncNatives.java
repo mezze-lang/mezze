@@ -5,7 +5,7 @@ import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
-import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry;
 import com.mezze.interpreter.nodes.continuation.HandlerChainEntry;
 import com.mezze.interpreter.nodes.continuation.OpCall;
 import com.mezze.interpreter.nodes.continuation.SpawnSupport;
@@ -606,7 +606,7 @@ public final class AsyncNatives {
         // Capture the parent's effect-handler chain at spawn time so the
         // spawned task's OpCallNode (fiber-less dispatch path) can find
         // the same handlers that were in scope at the spawn site.
-        HandlerChainEntry[] handlerChain = EffectFiber.snapshotHandlerChainEntries();
+        HandlerChainEntry[] handlerChain = HandlerChainRegistry.snapshotHandlerChainEntries();
 
         // Single promise: body completes it, parent awaits it. Thread
         // reference is patched in after construction (single writer:
@@ -678,7 +678,7 @@ public final class AsyncNatives {
         // Capture the parent's effect-handler chain at spawn time so the
         // spawned task's OpCallNode (fiber-less dispatch path) can find
         // the same handlers that were in scope at the spawn site.
-        HandlerChainEntry[] handlerChain = EffectFiber.snapshotHandlerChainEntries();
+        HandlerChainEntry[] handlerChain = HandlerChainRegistry.snapshotHandlerChainEntries();
 
         MezzePromise promise = new MezzePromise(null, null);
 
@@ -774,7 +774,7 @@ public final class AsyncNatives {
         // Capture the parent's effect-handler chain at spawn time so the
         // spawned task dispatches op-calls through the same handlers that
         // were in scope here. Snapshot copy is safe to ship across threads.
-        HandlerChainEntry[] handlerChain = EffectFiber.snapshotHandlerChainEntries();
+        HandlerChainEntry[] handlerChain = HandlerChainRegistry.snapshotHandlerChainEntries();
 
         // Single promise: body completes it, parent awaits it. Thread
         // reference is patched in after construction (single writer:
@@ -895,7 +895,7 @@ public final class AsyncNatives {
             // Time.sleep — bubble as MezzeSuspend from the outer
             // driver instead of dispatching to the installed handler.
             // #274.
-            Object result = EffectFiber.runDetached(() ->
+            Object result = HandlerChainRegistry.runDetached(() ->
                 callNode.call(f.getCallTarget(), appendArg(f.getClosureValues(), scopeArg))
             );
 
@@ -940,7 +940,7 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = scope.env != null ? scope.env : context.getEnv();
 
-        HandlerChainEntry[] handlerChain = EffectFiber.snapshotHandlerChainEntries();
+        HandlerChainEntry[] handlerChain = HandlerChainRegistry.snapshotHandlerChainEntries();
 
         MezzePromise promise = new MezzePromise(null, null);
         scope.addChild(promise);
@@ -951,7 +951,7 @@ public final class AsyncNatives {
             // `scope` (#252 transitive cancellation linkage).
             CURRENT_SCOPE.set(scope);
             try {
-                EffectFiber.runWithHandlerChain(handlerChain, () -> {
+                HandlerChainRegistry.runWithHandlerChain(handlerChain, () -> {
                     if (scope.isCancelled()) {
                         promise.cancel();
                         return;
@@ -1211,10 +1211,10 @@ public final class AsyncNatives {
         if (pending != null) {
             // Chain-dispatch is the only path from an unhandled spawn-side
             // op back to the outer perform on this thread.
-            if (EffectFiber.handlerChainDepth() > 0) {
+            if (HandlerChainRegistry.handlerChainDepth() > 0) {
                 Object dispatched = com.mezze.interpreter.nodes.effect.OpCallNode
                     .dispatchOpOnChain(
-                        EffectFiber.snapshotHandlerChainEntries(),
+                        HandlerChainRegistry.snapshotHandlerChainEntries(),
                         pending.opName(),
                         pending.args(),
                         pending.effectHash(),
@@ -1271,13 +1271,13 @@ public final class AsyncNatives {
      * promise.
      */
     private static void runPromiseTask(HandlerChainEntry[] chain, MezzePromise promise, TaskBody body) {
-        // Inlined EffectFiber.runWithHandlerChain so we don't allocate a
+        // Inlined HandlerChainRegistry.runWithHandlerChain so we don't allocate a
         // second lambda per spawn. The chain.length == 0 fast path matches
         // the common case (top-level Async.spawn outside any perform).
         boolean installed = false;
         try {
             if (chain.length > 0) {
-                EffectFiber.installHandlerChainEntries(chain);
+                HandlerChainRegistry.installHandlerChainEntries(chain);
                 installed = true;
             }
             Object result = body.run();
@@ -1296,7 +1296,7 @@ public final class AsyncNatives {
         } catch (Throwable e) {
             promise.fail(e);
         } finally {
-            if (installed) EffectFiber.clearHandlerChain();
+            if (installed) HandlerChainRegistry.clearHandlerChain();
         }
     }
 
@@ -1336,14 +1336,14 @@ public final class AsyncNatives {
         //    c) Neither: nowhere to send the op. Wrap as RuntimeException.
         OpCall pending = promise.getUnhandledOpCall();
         if (pending != null) {
-            if (EffectFiber.handlerChainDepth() > 0) {
+            if (HandlerChainRegistry.handlerChainDepth() > 0) {
                 // The outer BDSL Handle @Operation installed its handler
                 // on the per-thread chain; dispatch directly through the
                 // chain — under insideBdslHandle() this preserves
                 // AbortPerformException up to the outer Handle catch.
                 Object dispatched = com.mezze.interpreter.nodes.effect.OpCallNode
                     .dispatchOpOnChain(
-                        EffectFiber.snapshotHandlerChainEntries(),
+                        HandlerChainRegistry.snapshotHandlerChainEntries(),
                         pending.opName(),
                         pending.args(),
                         pending.effectHash(),

@@ -5,7 +5,7 @@ import com.mezze.interpreter.nodes.MezzeRootNode;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
-import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry;
 import com.mezze.interpreter.nodes.continuation.OpCall;
 import com.mezze.interpreter.nodes.continuation.HandlerChainEntry;
 import com.mezze.interpreter.runtime.MezzeLanguage;
@@ -25,7 +25,7 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  * Perform-op runtime — dispatches a BDSL-lowered
  * {@link com.mezze.language.truffleir.PerformOpIR} against the current
  * thread's effect handler chain
- * ({@link EffectFiber#peekHandlerForEffect}) — no fiber, no reflection.
+ * ({@link HandlerChainRegistry#peekHandlerForEffect}) — no fiber, no reflection.
  *
  * <h2>How it works</h2>
  * <ol>
@@ -38,7 +38,7 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  *       {@code EffectBindingIR("resume")} / {@code ("abort")} reads
  *       inside the op impl body pick these up unchanged.</li>
  *   <li>Enter dispatch mode (sets
- *       {@link EffectFiber#DISPATCH DISPATCH} thread-local so nested
+ *       {@link HandlerChainRegistry#DISPATCH DISPATCH} thread-local so nested
  *       reads work).</li>
  *   <li>Call the op impl with {@code arg}.</li>
  *   <li>Catch {@link AbortPerformException}. If a BDSL Handle boundary
@@ -110,7 +110,7 @@ public final class YieldDispatch {
     @TruffleBoundary
     public static Object dispatch(Hash effectHash, String opName, Object arg,
                                   int[] fieldIndexBox) {
-        MezzeRecord handler = EffectFiber.peekHandlerForEffect(effectHash);
+        MezzeRecord handler = HandlerChainRegistry.peekHandlerForEffect(effectHash);
         if (TRACE) trace("dispatch " + opName + " effectHash=" + effectHash
             + " chainDepth=" + currentChainDepth()
             + " handler=" + (handler == null ? "null" : "found"));
@@ -144,11 +144,11 @@ public final class YieldDispatch {
 
         // Set up a dispatch-only fiber that carries resume/abort as
         // top-of-stack effect-handles for EffectBindingIR to find.
-        EffectFiber dispatchFiber = EffectFiber.acquireDispatchOnly();
+        HandlerChainRegistry dispatchFiber = HandlerChainRegistry.acquireDispatchOnly();
         MezzeFunction resumeFn = fallThroughResumeFn();
         MezzeFunction abortFn = EffectHandlerDriver.makeAbortFunction();
         dispatchFiber.pushEffectHandles(resumeFn, abortFn);
-        EffectFiber prevDispatch = dispatchFiber.enterDispatch();
+        HandlerChainRegistry prevDispatch = dispatchFiber.enterDispatch();
 
         try {
             Object[] cv = opImpl.getClosureValues();
@@ -166,7 +166,7 @@ public final class YieldDispatch {
             // enterBdslHandle. If insideBdslHandle() is true we rethrow the
             // abort for that catch to read via UnwrapAbortValue; otherwise
             // convert to TUE so SpawnSupport stashes on the promise.
-            boolean insideD8 = EffectFiber.insideBdslHandle();
+            boolean insideD8 = HandlerChainRegistry.insideBdslHandle();
             if (TRACE) trace("  impl aborted with val=" + summarize(abort.value)
                 + " (insideD8=" + insideD8
                 + " → " + (!insideD8 ? "throw TUE" : "rethrow abort") + ")");
@@ -175,9 +175,9 @@ public final class YieldDispatch {
             }
             throw abort;
         } finally {
-            EffectFiber.exitDispatch(prevDispatch);
+            HandlerChainRegistry.exitDispatch(prevDispatch);
             dispatchFiber.popEffectHandles();
-            EffectFiber.releaseDispatchOnly(dispatchFiber);
+            HandlerChainRegistry.releaseDispatchOnly(dispatchFiber);
         }
     }
 
@@ -265,7 +265,7 @@ public final class YieldDispatch {
 
     /** Debug helper — number of handlers on this thread's chain. */
     public static int currentChainDepth() {
-        HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
+        HandlerChainEntry[] chain = HandlerChainRegistry.snapshotHandlerChainEntries();
         return chain.length;
     }
 

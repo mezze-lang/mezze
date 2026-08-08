@@ -1722,9 +1722,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 scope = D8ScopeHooks.invokeInitializeScope(fn);
                 prevScope = D8ScopeHooks.installScope(node, scope);
             }
-            com.mezze.interpreter.nodes.continuation.EffectFiber
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .pushHandlerOnChain(rec, effectHash);
-            com.mezze.interpreter.nodes.continuation.EffectFiber
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .enterBdslHandleWithScope(scope, prevScope);
         }
     }
@@ -1744,13 +1744,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // Read scope hook state from the D8 stack BEFORE popping the
             // chain (the chain entry still points at the handler whose
             // finalize_scope we want to invoke).
-            var handler = com.mezze.interpreter.nodes.continuation.EffectFiber
+            var handler = com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .peekTopHandlerRecord();
-            var frame = com.mezze.interpreter.nodes.continuation.EffectFiber
+            var frame = com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .peekBdslHandleScope();
-            com.mezze.interpreter.nodes.continuation.EffectFiber
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .popHandlerOffChain();
-            com.mezze.interpreter.nodes.continuation.EffectFiber
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .exitBdslHandle();
             if (frame != null && handler != null) {
                 Object finFn = handler.getField(
@@ -1884,7 +1884,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 return true;
             }
             com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain =
-                com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChainEntries();
+                com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.snapshotHandlerChainEntries();
             for (com.mezze.interpreter.nodes.continuation.HandlerChainEntry entry : chain) {
                 com.mezze.language.typedast.Hash eff = entry.effectHash();
                 if (eff != null && needed.contains(eff)) {
@@ -2047,7 +2047,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * Read a name contributed by the effect-handler runtime (one of
      * {@code resume}, {@code abort}, {@code scope}). Delegates to a
      * cached {@link com.mezze.interpreter.nodes.effect.EffectBindingNode}
-     * whose {@code execute} reads {@link com.mezze.interpreter.nodes.continuation.EffectFiber#dispatching}
+     * whose {@code execute} reads {@link com.mezze.interpreter.nodes.continuation.HandlerChainRegistry#dispatching}
      * for resume/abort, or {@link com.mezze.interpreter.runtime.MezzeContext}
      * for scope.
      *

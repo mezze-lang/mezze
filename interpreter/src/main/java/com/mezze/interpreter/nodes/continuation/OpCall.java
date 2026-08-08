@@ -3,13 +3,13 @@ package com.mezze.interpreter.nodes.continuation;
 import com.mezze.language.typedast.Hash;
 
 /**
- * Payload an op call site passes to {@link EffectFiber#suspend(Object)}
+ * Payload an op call site passes to {@link HandlerChainRegistry#suspend(Object)}
  * when invoking an effect operation.
  *
- * <p>The driver reads this from {@link EffectFiber#takeSuspendedValue()},
+ * <p>The driver reads this from {@link HandlerChainRegistry#takeSuspendedValue()},
  * looks up {@code handler.<opName>}, and calls it with
  * {@code {args, resume}}. Whatever the op handler returns becomes the
- * value the fiber's suspend returns when {@link EffectFiber#run()} is
+ * value the fiber's suspend returns when {@link HandlerChainRegistry#run()} is
  * called again.
  *
  * <p>The 3-arg constructor is the ONLY constructor by design (#246,

@@ -1782,7 +1782,7 @@ public final class BytecodeCompiler {
         }
         if (node instanceof EffectBindingIR eb) {
             // Delegate to a cached EffectBindingNode via the EffectBinding
-            // op — reads resume/abort/scope from EffectFiber.dispatching()
+            // op — reads resume/abort/scope from HandlerChainRegistry.dispatching()
             // or MezzeContext. Zero stack input.
             b.emitEffectBinding(eb.getName());
             return;

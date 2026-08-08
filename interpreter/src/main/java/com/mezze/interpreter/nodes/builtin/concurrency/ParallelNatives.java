@@ -2,7 +2,7 @@ package com.mezze.interpreter.nodes.builtin.concurrency;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
-import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry;
 import com.mezze.interpreter.nodes.continuation.HandlerChainEntry;
 import com.mezze.interpreter.nodes.continuation.SpawnSupport;
 import com.mezze.interpreter.runtime.MezzeContext;
@@ -220,7 +220,7 @@ public final class ParallelNatives {
         MezzeFunction leftFn = getFunction(args, "l");
         MezzeFunction rightFn = getFunction(args, "r");
 
-        HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
+        HandlerChainEntry[] chain = HandlerChainRegistry.snapshotHandlerChainEntries();
 
         // Already on a pool worker → fast path (real work-stealing fork/join).
         if (Thread.currentThread() instanceof TruffleFJPWorker) {
@@ -274,7 +274,7 @@ public final class ParallelNatives {
         // pool.invoke on a fresh FJP worker), the chain is empty and
         // we still need to install. #62.
         boolean chainAlreadyInstalled =
-            EffectFiber.handlerChainDepth() == chain.length;
+            HandlerChainRegistry.handlerChainDepth() == chain.length;
         Object[] leftResultHolder = new Object[1];
         SpawnSupport.runBatchTask(
             chain, opSink, errSink,
@@ -486,7 +486,7 @@ public final class ParallelNatives {
         MezzeFunction leftFn = getFunction(args, "l");
         MezzeFunction rightFn = getFunction(args, "r");
 
-        HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
+        HandlerChainEntry[] chain = HandlerChainRegistry.snapshotHandlerChainEntries();
         Semaphore sem = VTHREAD_SEMAPHORE.get();
         boolean callerIsPlatform = !Thread.currentThread().isVirtual();
 

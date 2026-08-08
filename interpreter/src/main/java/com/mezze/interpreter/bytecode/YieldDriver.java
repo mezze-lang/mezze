@@ -20,7 +20,7 @@ import com.oracle.truffle.api.bytecode.ContinuationResult;
  * it can even yield again; we just keep looping).
  *
  * <p>Zero fibers, zero Loom, zero reflection. Runs on the calling
- * thread. Compare {@link com.mezze.interpreter.nodes.continuation.EffectFiber}
+ * thread. Compare {@link com.mezze.interpreter.nodes.continuation.HandlerChainRegistry}
  * for the Loom-shaped equivalent.
  */
 public final class YieldDriver {

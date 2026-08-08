@@ -5,7 +5,7 @@ import com.mezze.interpreter.nodes.MezzeRootNode;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
-import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry;
 import com.mezze.interpreter.nodes.continuation.HandlerChainEntry;
 import com.mezze.interpreter.nodes.continuation.OpCall;
 import com.mezze.interpreter.runtime.MezzeLanguage;
@@ -211,7 +211,7 @@ public final class OpCallNode extends MezzeNode {
         // no dispatch fiber, no resume/abort plumbing.
         if (isMutOp && markerCallNode != null) {
             com.mezze.interpreter.values.MezzeRecord top =
-                EffectFiber.peekHandlerForEffect(effectHash);
+                HandlerChainRegistry.peekHandlerForEffect(effectHash);
             if (top == cachedMarkerHandler) {
                 return invokeMarker(args);
             }
@@ -220,7 +220,7 @@ public final class OpCallNode extends MezzeNode {
         }
         if (isMutOp) {
             com.mezze.interpreter.values.MezzeRecord top =
-                EffectFiber.peekHandlerForEffect(effectHash);
+                HandlerChainRegistry.peekHandlerForEffect(effectHash);
             if (top != null) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 if (initializeMarkerCache(top)) {
@@ -228,7 +228,7 @@ public final class OpCallNode extends MezzeNode {
                 }
             }
         }
-        HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
+        HandlerChainEntry[] chain = HandlerChainRegistry.snapshotHandlerChainEntries();
         if (chain.length > 0) {
             return chainDispatch(chain, args);
         }
@@ -282,7 +282,7 @@ public final class OpCallNode extends MezzeNode {
      *
      * <p>Inherited handlers' op-handler bodies may reference {@code abort}
      * and {@code resume} via {@link com.mezze.interpreter.nodes.effect.EffectBindingNode}.
-     * Those reads consult {@link EffectFiber#dispatching()}, so we set up
+     * Those reads consult {@link HandlerChainRegistry#dispatching()}, so we set up
      * a dispatch context here: a synthetic dispatch-only fiber that
      * carries the effect-handle stack while the handler body runs.
      *
@@ -369,7 +369,7 @@ public final class OpCallNode extends MezzeNode {
                 // resume/abort via EffectBindingNode. Acquire from a
                 // per-thread 1-slot pool to avoid allocating a fresh
                 // dispatch fiber per op-call.
-                EffectFiber dispatchFiber = EffectFiber.acquireDispatchOnly();
+                HandlerChainRegistry dispatchFiber = HandlerChainRegistry.acquireDispatchOnly();
                 MezzeFunction resumeFn = makeChainResumeFunction();
                 MezzeFunction abortFn = EffectHandlerDriver.makeAbortFunction();
                 dispatchFiber.pushEffectHandles(resumeFn, abortFn);
@@ -379,7 +379,7 @@ public final class OpCallNode extends MezzeNode {
                 System.arraycopy(closure, 0, callArgs, 0, closure.length);
                 callArgs[closure.length] = args;
 
-                EffectFiber prev = dispatchFiber.enterDispatch();
+                HandlerChainRegistry prev = dispatchFiber.enterDispatch();
                 try {
                     return callNode.call(op.getCallTarget(), callArgs);
                 } catch (AbortPerformException abort) {
@@ -392,15 +392,15 @@ public final class OpCallNode extends MezzeNode {
                     //     on the promise for parent await re-issue. Same
                     //     rule as YieldDispatch — the two dispatch
                     //     paths must agree on when to convert.
-                    if (EffectFiber.insideBdslHandle()) {
+                    if (HandlerChainRegistry.insideBdslHandle()) {
                         throw abort;
                     }
                     throw new TaskUnhandledOpException(
                         new OpCall(operationName, args, effectHash));
                 } finally {
-                    EffectFiber.exitDispatch(prev);
+                    HandlerChainRegistry.exitDispatch(prev);
                     dispatchFiber.popEffectHandles();
-                    EffectFiber.releaseDispatchOnly(dispatchFiber);
+                    HandlerChainRegistry.releaseDispatchOnly(dispatchFiber);
                 }
             }
         }

@@ -142,7 +142,7 @@ public final class MezzeSuspend implements TruffleObject {
      * handler chain, if any.
      *
      * <p>Effect-handler lookup happens via the per-thread handler chain
-     * ({@link EffectFiber#peekHandlerForEffect}), not via a context-wide
+     * ({@link HandlerChainRegistry#peekHandlerForEffect}), not via a context-wide
      * handler map. Forcing a deferred effect call re-issues the op
      * through {@link com.mezze.interpreter.bytecode.YieldDispatch};
      * an enclosing BDSL Handle @Operation catches abort as usual.
@@ -196,13 +196,13 @@ public final class MezzeSuspend implements TruffleObject {
     @TruffleBoundary
     private Object forcePathE(IndirectCallNode callNode) {
         int depthBefore =
-            com.mezze.interpreter.nodes.continuation.EffectFiber.handlerChainDepth();
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.handlerChainDepth();
         // Push captured chain entries in reverse — chainSnapshot[0] was
         // the innermost at capture, so we want it pushed LAST so it ends
         // up on top of the deque.
         for (int i = chainSnapshot.length - 1; i >= 0; i--) {
             com.mezze.interpreter.nodes.continuation.HandlerChainEntry entry = chainSnapshot[i];
-            com.mezze.interpreter.nodes.continuation.EffectFiber.pushHandlerOnChain(
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.pushHandlerOnChain(
                 entry.handler(), entry.effectHash());
         }
         try {
@@ -218,14 +218,14 @@ public final class MezzeSuspend implements TruffleObject {
         } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
             return abort.value;
         } finally {
-            com.mezze.interpreter.nodes.continuation.EffectFiber.truncateHandlerChainTo(depthBefore);
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.truncateHandlerChainTo(depthBefore);
         }
     }
 
     @TruffleBoundary
     private Object forceWithoutFiber(IndirectCallNode callNode) {
         com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain =
-            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChainEntries();
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.snapshotHandlerChainEntries();
         if (chain.length == 0) {
             return this;
         }

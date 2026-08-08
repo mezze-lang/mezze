@@ -1,7 +1,7 @@
 package com.mezze.interpreter.nodes.effect;
 
 import com.mezze.interpreter.nodes.MezzeNode;
-import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.language.ast.EffectBindingKind;
 import com.mezze.language.ast.ScopedEffectConstants;
@@ -67,7 +67,7 @@ public final class EffectBindingNode extends MezzeNode {
         // dispatched right now (driver pins it via enterDispatch). The
         // running fiber, if any, is a different concept and has a separate
         // (or empty) handle stack.
-        EffectFiber fiber = EffectFiber.dispatching();
+        HandlerChainRegistry fiber = HandlerChainRegistry.dispatching();
         if (fiber == null) {
             throw new RuntimeException(
                 "'" + which.displayName() + "' referenced outside any op handler body. "

@@ -64,7 +64,7 @@ class GraalDapBridge(
      * stable DAP id per Thread (id 1 = the main/first thread) and remember the
      * name so `threads` can enumerate them.
      *
-     * (Pure-continuation effect fibers — EffectFiber — are NOT threads and stay
+     * (Pure-continuation effect fibers — HandlerChainRegistry — are NOT threads and stay
      * invisible; that's the BDSL-gated follow-up #166.)
      */
     private val threadIds = java.util.concurrent.ConcurrentHashMap<Long, Int>()

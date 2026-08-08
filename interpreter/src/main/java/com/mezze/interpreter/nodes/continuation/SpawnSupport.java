@@ -53,7 +53,7 @@ public final class SpawnSupport {
      */
     public static void runJoinTask(HandlerChainEntry[] chain, CompletableFuture<Object> future, Supplier<Object> body) {
         try {
-            EffectFiber.runWithHandlerChain(chain, () -> future.complete(body.get()));
+            HandlerChainRegistry.runWithHandlerChain(chain, () -> future.complete(body.get()));
         } catch (Throwable e) {
             future.completeExceptionally(e);
         }
@@ -76,7 +76,7 @@ public final class SpawnSupport {
             // spawned task that inherited the parent's chain), rethrow the
             // TUE so the outer runPromiseTask/runBatchTask stashes it one
             // level up.
-            if (EffectFiber.handlerChainDepth() > 0) {
+            if (HandlerChainRegistry.handlerChainDepth() > 0) {
                 throw new TaskUnhandledOpException(tue.opCall);
             }
             throw new RuntimeException(
@@ -131,7 +131,7 @@ public final class SpawnSupport {
             if (sameThreadChain) {
                 body.run();
             } else {
-                EffectFiber.runWithHandlerChain(chain, body);
+                HandlerChainRegistry.runWithHandlerChain(chain, body);
             }
         } catch (TaskUnhandledOpException tue) {
             opSink.compareAndSet(null, tue);
@@ -165,7 +165,7 @@ public final class SpawnSupport {
      * <p>This is the case that Parallel primitives hit on the main thread:
      * inside {@code perform ExceptionToResult in perform Parallel in do ...},
      * the main thread has handler chain entries but no active
-     * {@link EffectFiber} (chain-dispatch is the fast path; the fiber only
+     * {@link HandlerChainRegistry} (chain-dispatch is the fast path; the fiber only
      * exists during a real suspend cycle). When a batch task's body raises
      * an unhandled op, we need to route it to the chain — same fallback that
      * {@link com.mezze.interpreter.nodes.effect.OpCallNode} uses in its
@@ -193,7 +193,7 @@ public final class SpawnSupport {
             // propagates up to the outer perform driver which completes
             // with the abort value.
             if (callNode != null) {
-                HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
+                HandlerChainEntry[] chain = HandlerChainRegistry.snapshotHandlerChainEntries();
                 if (chain.length > 0) {
                     Object result = dispatchOpOnChainWithAbortPropagation(
                         chain,
@@ -252,7 +252,7 @@ public final class SpawnSupport {
             }
             Object f = chain[i].handler().getField(opName);
             if (f instanceof com.mezze.interpreter.values.MezzeFunction op) {
-                EffectFiber dispatchFiber = EffectFiber.acquireDispatchOnly();
+                HandlerChainRegistry dispatchFiber = HandlerChainRegistry.acquireDispatchOnly();
                 com.mezze.interpreter.values.MezzeFunction resumeFn =
                     com.mezze.interpreter.nodes.effect.OpCallNode.makeChainResumeFunction();
                 com.mezze.interpreter.values.MezzeFunction abortFn =
@@ -264,7 +264,7 @@ public final class SpawnSupport {
                 System.arraycopy(closure, 0, callArgs, 0, closure.length);
                 callArgs[closure.length] = args;
 
-                EffectFiber prev = dispatchFiber.enterDispatch();
+                HandlerChainRegistry prev = dispatchFiber.enterDispatch();
                 try {
                     return callNode.call(op.getCallTarget(), callArgs);
                 } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
@@ -277,15 +277,15 @@ public final class SpawnSupport {
                     //     for parent await re-issue.
                     // Diverging from YieldDispatch here would let abort
                     // escape as TUE past a Handle boundary.
-                    if (EffectFiber.insideBdslHandle()) {
+                    if (HandlerChainRegistry.insideBdslHandle()) {
                         throw abort;
                     }
                     throw new com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException(
                         new OpCall(opName, args, effectHash));
                 } finally {
-                    EffectFiber.exitDispatch(prev);
+                    HandlerChainRegistry.exitDispatch(prev);
                     dispatchFiber.popEffectHandles();
-                    EffectFiber.releaseDispatchOnly(dispatchFiber);
+                    HandlerChainRegistry.releaseDispatchOnly(dispatchFiber);
                 }
             }
         }

@@ -4193,8 +4193,8 @@ public final class NativeDispatch extends MezzeNode {
         // per-thread handler chain instead of suspending whichever fiber
         // happens to be CURRENT (an outer perform's, under nested
         // performs — strands the rest of the body). See #255 and
-        // EffectFiber.runDetached.
-        com.mezze.interpreter.nodes.continuation.EffectFiber.runDetached(() -> {
+        // HandlerChainRegistry.runDetached.
+        com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.runDetached(() -> {
             while (true) {
                 Object condResult = callNode.call(cond.getCallTarget(), condCallArgs);
                 if (!(condResult instanceof Boolean b) || !b) {
@@ -4221,7 +4221,7 @@ public final class NativeDispatch extends MezzeNode {
         bodyCallArgs[bodyClosureLen] = MezzeRecord.empty();
 
         // Same detach reason as whileLoop — see #255.
-        com.mezze.interpreter.nodes.continuation.EffectFiber.runDetached(() -> {
+        com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.runDetached(() -> {
             int iteration = 0;
             while (true) {
                 debugMutationLoop(iteration);

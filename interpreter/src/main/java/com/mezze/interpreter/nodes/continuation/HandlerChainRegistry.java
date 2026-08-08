@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@code TaskUnhandledOpException} for the spawning code to re-dispatch
  * against the parent's chain at await time (see {@link SpawnSupport}).
  */
-public final class EffectFiber {
+public final class HandlerChainRegistry {
 
     // Per-op-invocation effect-handler control-flow handles, populated by
     // chain dispatch right before it invokes an op handler. Read by the
@@ -59,16 +59,16 @@ public final class EffectFiber {
      * invoked by chain dispatch. The op handler body needs to find the
      * carrier fiber to read its resume/abort handles via
      * {@code EffectBindingNode}. Pinned by {@link #enterDispatch()} /
-     * cleared by {@link #exitDispatch(EffectFiber)}.
+     * cleared by {@link #exitDispatch(HandlerChainRegistry)}.
      */
-    private static final ThreadLocal<EffectFiber> DISPATCH = new ThreadLocal<>();
+    private static final ThreadLocal<HandlerChainRegistry> DISPATCH = new ThreadLocal<>();
 
     /**
      * The fiber whose op handler is currently being dispatched on the
      * driver's stack, or {@code null}. Used by {@code EffectBindingNode} to
      * locate the fiber that owns the resume/abort handle stack.
      */
-    public static EffectFiber dispatching() {
+    public static HandlerChainRegistry dispatching() {
         return DISPATCH.get();
     }
 
@@ -76,14 +76,14 @@ public final class EffectFiber {
      * Mark this fiber as the one being dispatched. Returns the previously
      * pinned fiber so the caller can restore it via {@link #exitDispatch}.
      */
-    public EffectFiber enterDispatch() {
-        EffectFiber prev = DISPATCH.get();
+    public HandlerChainRegistry enterDispatch() {
+        HandlerChainRegistry prev = DISPATCH.get();
         DISPATCH.set(this);
         return prev;
     }
 
     /** Counterpart to {@link #enterDispatch()}. */
-    public static void exitDispatch(EffectFiber previous) {
+    public static void exitDispatch(HandlerChainRegistry previous) {
         DISPATCH.set(previous);
     }
 
@@ -334,7 +334,7 @@ public final class EffectFiber {
         }
     }
 
-    private EffectFiber() {}
+    private HandlerChainRegistry() {}
 
     /**
      * Acquire a dispatch-only fiber — a carrier for the effect-handle
@@ -349,21 +349,21 @@ public final class EffectFiber {
      * op-call. The fiber is in clean state when reused
      * (popEffectHandles already clears its slots).
      *
-     * <p>Callers MUST pair this with {@link #releaseDispatchOnly(EffectFiber)}
+     * <p>Callers MUST pair this with {@link #releaseDispatchOnly(HandlerChainRegistry)}
      * after use. The pool is best-effort: nested dispatch fibers allocate
      * fresh (no recursive pool).
      */
-    public static EffectFiber acquireDispatchOnly() {
-        EffectFiber cached = DISPATCH_POOL.get();
+    public static HandlerChainRegistry acquireDispatchOnly() {
+        HandlerChainRegistry cached = DISPATCH_POOL.get();
         if (cached != null) {
             DISPATCH_POOL.set(null);
             return cached;
         }
-        return new EffectFiber();
+        return new HandlerChainRegistry();
     }
 
     /** Return a dispatch fiber to the per-thread cache (best-effort). */
-    public static void releaseDispatchOnly(EffectFiber fiber) {
+    public static void releaseDispatchOnly(HandlerChainRegistry fiber) {
         if (fiber.effectHandleDepth != 0) {
             // Caller didn't pop their pushes — don't pool a dirty fiber.
             return;
@@ -374,11 +374,11 @@ public final class EffectFiber {
 
     /** Back-compat wrapper. New callers should use acquire/release. */
     @TruffleBoundary
-    public static EffectFiber createDispatchOnly() {
+    public static HandlerChainRegistry createDispatchOnly() {
         return acquireDispatchOnly();
     }
 
-    private static final ThreadLocal<EffectFiber> DISPATCH_POOL =
+    private static final ThreadLocal<HandlerChainRegistry> DISPATCH_POOL =
         ThreadLocal.withInitial(() -> null);
 
     public long getId() { return id; }
@@ -410,7 +410,7 @@ public final class EffectFiber {
     public void popEffectHandles() {
         if (effectHandleDepth == 0) {
             throw new IllegalStateException(
-                "EffectFiber@" + id + ": effect-handle stack underflow");
+                "HandlerChainRegistry@" + id + ": effect-handle stack underflow");
         }
         effectHandleDepth--;
         effectHandleStack[effectHandleDepth * 2] = null;
@@ -429,6 +429,6 @@ public final class EffectFiber {
 
     @Override
     public String toString() {
-        return "EffectFiber@" + id + "[dispatch]";
+        return "HandlerChainRegistry@" + id + "[dispatch]";
     }
 }

@@ -1,6 +1,6 @@
 package com.mezze.interpreter.bytecode;
 
-import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.language.typedast.Hash;
@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Path D3 acceptance: prove {@link YieldDispatch} bridges a
- * BDSL-yielded op to the existing {@link EffectFiber} handler chain
+ * BDSL-yielded op to the existing {@link HandlerChainRegistry} handler chain
  * and drives execution to completion.
  *
  * <p>Hand-builds:
@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *       {@link MezzeFunction} that reads {@code arg} and returns
  *       {@code arg * 2}</li>
  *   <li>installs the handler on the current thread's chain via
- *       {@link EffectFiber#pushHandlerOnChain}</li>
+ *       {@link HandlerChainRegistry#pushHandlerOnChain}</li>
  * </ul>
  *
  * <p>Drives via {@link YieldDispatch#driveWithChainDispatch} and
@@ -67,13 +67,13 @@ class BdslYieldDispatchTest {
                     com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(new String[] { "double" }),
                     new Object[] { doubleImpl }
                 );
-                EffectFiber.pushHandlerOnChain(handler, TEST_EFFECT);
+                HandlerChainRegistry.pushHandlerOnChain(handler, TEST_EFFECT);
                 try {
                     Object initial = root.getCallTarget().call(new Object[] { 0L });
                     Object driven = YieldDispatch.driveWithChainDispatch(initial);
                     assertEquals(42L, driven);
                 } finally {
-                    EffectFiber.popHandlerOffChain();
+                    HandlerChainRegistry.popHandlerOffChain();
                 }
             } finally {
                 context.leave();

@@ -4,7 +4,7 @@ import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.language.typedast.Hash;
 
 /**
- * One handler installed on {@link EffectFiber}'s per-thread handler chain,
+ * One handler installed on {@link HandlerChainRegistry}'s per-thread handler chain,
  * tagged with the content hash of the effect declaration it implements.
  *
  * <p>The effect hash is essential for correct dispatch when two effects in
