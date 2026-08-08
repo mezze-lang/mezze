@@ -1,0 +1,9 @@
+# Compiled reference binaries (recreated by scripts/run.sh)
+build/
+
+# Mezze per-case build output
+cases/*/.build/
+cases/*/.mez/
+
+# Java .class from reference/*.java (compiled next to sources or into build/)
+reference/*.class
