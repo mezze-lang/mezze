@@ -58,30 +58,28 @@ object BuiltinTypes {
     }
 
     /**
-     * #349 — compute a stable integer tag for a variant constructor.
+     * Compute a stable integer tag for a variant constructor.
      *
-     * Historically variants used `ctorName.hashCode() & 0x7FFFFFFF` as the tag,
-     * which silently collides when two DIFFERENT user-defined ADTs both declare
-     * a constructor called (e.g.) `Foo`. Match dispatch is `switch(tag)`, so
-     * collisions mean one ADT's match branch fires on another ADT's value.
+     * The tag is derived from the constructor's simple name only. Cross-ADT
+     * constructor collisions (two user ADTs both declaring `Foo`) are
+     * prevented by three typechecker layers exercised in
+     * `VariantTagCollisionSoundnessTest`:
      *
-     * Fix: mix the ADT's [typeHash] into the tag when available. Keep the
-     * old formula for constructors that MUST collide with runtime-native
-     * values ({@link coreVariantConstructors} + LT/GT/EQ), and for open /
-     * anonymous variants without a typeHash.
+     *  1. Named-type duplicate-constructor rejection (type A / type B can't
+     *     both declare `Ping`).
+     *  2. Stdlib constructor protection (can't shadow `Some`/`Ok`/…).
+     *  3. Row-poly closure at match sites (a match arm's row fixes the set
+     *     of admissible constructors).
      *
-     * The returned tag is deterministic and stable across compilations of
-     * the same source (typeHash is content-addressed).
+     * The [typeHashHex] parameter is kept for source compatibility but is
+     * intentionally ignored — construction and pattern sites do not always
+     * see the same substituted `VariantType` (constructions at top-level
+     * `let x = Foo` and patterns whose type is a fresh solver TyVar both
+     * lose the ADT hash), which produced tag mismatches when the mixed
+     * form was in use.
      */
     fun computeVariantTag(ctorName: String, typeHashHex: String?): Int {
-        val useAdtHash =
-            typeHashHex != null &&
-            ctorName !in coreVariantConstructors &&
-            ctorName !in orderingConstructors
-        val raw =
-            if (useAdtHash) (typeHashHex + "::" + ctorName).hashCode()
-            else ctorName.hashCode()
-        return raw and 0x7FFFFFFF
+        return ctorName.hashCode() and 0x7FFFFFFF
     }
 
     /** Delegates to PrimitiveTypes.isBoolVariant -- single canonical location. */

@@ -2305,9 +2305,6 @@ class TypedASTCompiler(
             }
             is TypedLiteralPattern -> PatternIR.Literal(compileExpr(pattern.value))
             is TypedVariantPattern -> {
-                // #349 — match must use the same tag formula as construction.
-                // pattern.type is the scrutinee type at this arm (VariantType with
-                // typeHash for user ADTs, or missing typeHash for built-ins / open).
                 val adtHashHex = (pattern.type as? VariantType)?.typeHash?.hex
                 val tag = com.mezze.language.ast.BuiltinTypes.computeVariantTag(pattern.tag, adtHashHex)
                 val fieldNames = mutableListOf<String>()
