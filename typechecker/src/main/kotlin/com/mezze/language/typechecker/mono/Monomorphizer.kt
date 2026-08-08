@@ -180,11 +180,24 @@ class Monomorphizer(
                 System.err.println("[mono-trace] transitive refs from ${decl.name}: total=${refs.size}")
                 for ((ref, inst) in refs) {
                     val target = resolveDecl(ref.hash)
-                    System.err.println("[mono-trace]   ref=${ref.hash.getHex().take(8)} target=${target?.name ?: "<unresolved>"} typeParams=${target?.typeParams?.size ?: 0} inst=$inst")
+                    System.err.println("[mono-trace]   ref=${ref.hash} target=${target?.name ?: "<unresolved>"} typeParams=${target?.typeParams?.size ?: 0} inst=$inst")
                 }
             }
+            // #409: bail on transitive refs where the target's typeParams
+            // count doesn't match the instantiation's typeArgs count. The
+            // mismatch happens for ability-method impls where the impl's
+            // target-type is a container (Seq) but the mono req wraps that
+            // as a single typeArg. Handling this properly requires threading
+            // the impl's actual forallVars — a separate task.
             for ((ref, inst) in refs) {
                 if (inst == null || inst.typeArgs.isEmpty()) continue
+                // Arity mismatch guard: skip transitive enqueue when the
+                // target's typeParams count doesn't match the ref's
+                // typeArgs count. Otherwise buildSubstitution below hits
+                // the same mismatch and fallbacks — but we've already
+                // wasted a worklist iteration. Cheaper to skip here.
+                val targetDecl = resolveDecl(ref.hash)
+                if (targetDecl == null || targetDecl.typeParams.size != inst.typeArgs.size) continue
                 worklist.addLast(
                     SpecRequest(ref.hash, inst.typeArgs, inst.abilityImpls) to (depth + 1)
                 )
