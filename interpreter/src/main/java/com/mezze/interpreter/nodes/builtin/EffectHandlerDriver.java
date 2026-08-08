@@ -17,7 +17,7 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
 
 /**
  * Effect-handler support utilities used by the BDSL Yield dispatch path
- * (see {@code BdslYieldDispatch}). The AST HandleNode was deleted with
+ * (see {@code YieldDispatch}). The AST HandleNode was deleted with
  * the rest of the AST tree; every Handle now emits a BDSL {@code Handle}
  * @Operation which uses these helpers.
  *

@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Path D3 acceptance: prove {@link BdslYieldDispatch} bridges a
+ * Path D3 acceptance: prove {@link YieldDispatch} bridges a
  * BDSL-yielded op to the existing {@link EffectFiber} handler chain
  * and drives execution to completion.
  *
@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *       {@link EffectFiber#pushHandlerOnChain}</li>
  * </ul>
  *
- * <p>Drives via {@link BdslYieldDispatch#driveWithChainDispatch} and
+ * <p>Drives via {@link YieldDispatch#driveWithChainDispatch} and
  * expects {@code 42} — the handler doubled {@code 21}, the root added
  * 0.
  *
@@ -70,7 +70,7 @@ class BdslYieldDispatchTest {
                 EffectFiber.pushHandlerOnChain(handler, TEST_EFFECT);
                 try {
                     Object initial = root.getCallTarget().call(new Object[] { 0L });
-                    Object driven = BdslYieldDispatch.driveWithChainDispatch(initial);
+                    Object driven = YieldDispatch.driveWithChainDispatch(initial);
                     assertEquals(42L, driven);
                 } finally {
                     EffectFiber.popHandlerOffChain();
@@ -92,7 +92,7 @@ class BdslYieldDispatchTest {
                 // just verify the unhandled-op MezzeSuspend-wrap behavior
                 // in isolation. Path A does the same via
                 // EffectHandlerDriver.makeUnhandledSuspended.
-                Object result = BdslYieldDispatch.dispatch(
+                Object result = YieldDispatch.dispatch(
                     TEST_EFFECT, "double", 21L);
                 assertInstanceOf(
                     com.mezze.interpreter.values.MezzeSuspend.class, result,

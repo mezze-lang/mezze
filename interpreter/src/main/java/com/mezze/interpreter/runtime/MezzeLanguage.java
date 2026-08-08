@@ -354,10 +354,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * roots as thunk-eligible.
      *
      * <p>Non-zero-param callees are safe because
-     * {@link com.mezze.interpreter.bytecode.BdslTrampolineRootNode#execute}
+     * {@link com.mezze.interpreter.bytecode.TrampolineRootNode#execute}
      * normalises record ABI into the flat scalar layout BDSL's
      * {@code LoadArgument(i)} expects (see
-     * {@link com.mezze.interpreter.bytecode.BdslTrampolineRootNode#normalizeArgs}).
+     * {@link com.mezze.interpreter.bytecode.TrampolineRootNode#normalizeArgs}).
      *
      * <p>Excluded: bodies that contain a {@code ReadFieldIR} on any
      * subtree. BDSL's ReadFieldByName op currently mishandles records

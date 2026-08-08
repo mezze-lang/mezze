@@ -275,7 +275,7 @@ public final class SpawnSupport {
                     //   - Otherwise: convert to TaskUnhandledOpException so
                     //     the surrounding batch/task machinery stashes it
                     //     for parent await re-issue.
-                    // Diverging from BdslYieldDispatch here would let abort
+                    // Diverging from YieldDispatch here would let abort
                     // escape as TUE past a Handle boundary.
                     if (EffectFiber.insideBdslHandle()) {
                         throw abort;

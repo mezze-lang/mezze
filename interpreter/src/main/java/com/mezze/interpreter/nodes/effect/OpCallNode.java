@@ -390,7 +390,7 @@ public final class OpCallNode extends MezzeNode {
                     //   - Otherwise (spawned task, top level): convert to
                     //     TaskUnhandledOpException so SpawnSupport stashes it
                     //     on the promise for parent await re-issue. Same
-                    //     rule as BdslYieldDispatch — the two dispatch
+                    //     rule as YieldDispatch — the two dispatch
                     //     paths must agree on when to convert.
                     if (EffectFiber.insideBdslHandle()) {
                         throw abort;

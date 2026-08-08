@@ -70,9 +70,9 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  * later (e.g. {@code let x = do_stuff {} ; perform Handler in force x})
  * can force and dispatch it.
  */
-public final class BdslYieldDispatch {
+public final class YieldDispatch {
 
-    private BdslYieldDispatch() {}
+    private YieldDispatch() {}
 
     /** Path D5 debug: set MEZZE_PATHD_TRACE=1 to log dispatch decisions. */
     private static final boolean TRACE =
@@ -241,7 +241,7 @@ public final class BdslYieldDispatch {
     }
 
     /**
-     * Legacy marker exception — kept for the {@link BdslYieldDriver}
+     * Legacy marker exception — kept for the {@link YieldDriver}
      * test harness which was written before we adopted MezzeSuspend
      * wrapping. Not thrown by {@link #dispatch} anymore.
      */
@@ -253,14 +253,14 @@ public final class BdslYieldDispatch {
     }
 
     /**
-     * Legacy entry point for {@link BdslYieldDriver} — walks a
+     * Legacy entry point for {@link YieldDriver} — walks a
      * ContinuationResult chain if one flows out (which no longer happens
      * after D4 since the emit switched from Yield to a straight call,
      * but kept for the D2 test harness).
      */
     @TruffleBoundary
     public static Object driveWithChainDispatch(Object initial) {
-        return BdslYieldDriver.drive(initial, BdslYieldDispatch::dispatch);
+        return YieldDriver.drive(initial, YieldDispatch::dispatch);
     }
 
     /** Debug helper — number of handlers on this thread's chain. */

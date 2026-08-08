@@ -223,7 +223,7 @@ object PipelineRunner {
             if (entryTarget != null) {
                 // Wrap CallTarget in a tiny MezzeNode adapter: on execute,
                 // calls the entry with a single empty record arg (matches
-                // the closure calling convention BdslTrampolineRootNode
+                // the closure calling convention TrampolineRootNode
                 // expects: [captures..., params...]; entry has neither
                 // captures nor params, so passing an empty record is a
                 // no-op arg that BDSL ignores).

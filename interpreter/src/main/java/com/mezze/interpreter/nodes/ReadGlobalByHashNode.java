@@ -105,7 +105,7 @@ public final class ReadGlobalByHashNode extends MezzeNode {
      *
      * <p>Handles both AST-compiled thunks ({@link MezzeRootNode}) and BDSL-
      * compiled thunks ({@link com.mezze.interpreter.bytecode.MezzeBytecodeRootNode}
-     * / {@link com.mezze.interpreter.bytecode.BdslTrampolineRootNode}).
+     * / {@link com.mezze.interpreter.bytecode.TrampolineRootNode}).
      * BDSL roots don't carry paramCount/closureCount metadata, so we lean
      * on the closure-values check + MezzeFunction's name and trust the
      * FunctionIR pipeline to have shaped these consistently — a BDSL-
@@ -120,7 +120,7 @@ public final class ReadGlobalByHashNode extends MezzeNode {
         boolean isThunk = false;
         if (root instanceof MezzeRootNode mrn) {
             isThunk = mrn.getClosureCount() == 0 && mrn.getParameterCount() == 0;
-        } else if (root instanceof com.mezze.interpreter.bytecode.BdslTrampolineRootNode t) {
+        } else if (root instanceof com.mezze.interpreter.bytecode.TrampolineRootNode t) {
             // #374 — must check paramCount, not assume zero. A top-level
             // `let f = {} -> ...` lambda has paramCount == 1 (empty record
             // slot); auto-evaluating it here would blindly invoke the

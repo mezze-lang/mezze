@@ -453,7 +453,7 @@ public final class MezzeRecord implements TruffleObject {
 
     /**
      * Get field name by index. Used by hot-path inline caches (e.g.
-     * BdslYieldDispatch) that cache a per-site fieldIndex and validate
+     * YieldDispatch) that cache a per-site fieldIndex and validate
      * shape identity by comparing the cached opName against the current
      * record's name at that slot.
      */

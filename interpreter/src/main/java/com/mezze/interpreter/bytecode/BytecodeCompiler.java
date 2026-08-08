@@ -219,7 +219,7 @@ public final class BytecodeCompiler {
             if (ct instanceof com.oracle.truffle.api.RootCallTarget rct) {
                 var root = rct.getRootNode();
                 if (root instanceof LazyStubRootNode) return true;
-                if (root instanceof BdslTrampolineRootNode t
+                if (root instanceof TrampolineRootNode t
                         && t.getInnerTarget() == null) return true;
             }
             return false;
@@ -326,19 +326,19 @@ public final class BytecodeCompiler {
     /**
      * True iff {@code target} is a BDSL-compiled callee. AST callees use
      * {@code MezzeFunctionRootNode}; BDSL callees are either a
-     * {@link BdslTrampolineRootNode} wrapper (paramCount &gt; 0 or has
+     * {@link TrampolineRootNode} wrapper (paramCount &gt; 0 or has
      * tail-calls) or a bare {@link MezzeBytecodeRootNode}-generated
      * root (paramCount == 0 non-tail).
      *
      * <p>Used at emit time to skip caller-side scalar-marker prepend
      * when the callee is BDSL — the marker would be dead weight because
-     * {@link BdslTrampolineRootNode#normalizeArgs} strips it anyway.
+     * {@link TrampolineRootNode#normalizeArgs} strips it anyway.
      * Skipping saves ~5-10 ns per hot arity-1 call.
      */
     private static boolean isBdslCallee(CallTarget target) {
         if (!(target instanceof com.oracle.truffle.api.RootCallTarget rct)) return false;
         var root = rct.getRootNode();
-        return root instanceof BdslTrampolineRootNode
+        return root instanceof TrampolineRootNode
                 || root instanceof MezzeBytecodeRootNode;
     }
 
@@ -869,7 +869,7 @@ public final class BytecodeCompiler {
                 final int pc = ir.getParamSlots().size();
                 final String[] pn = ir.getParamNames().toArray(new String[0]);
                 compiledCallTargets.computeIfAbsent(ir.getHash(),
-                        h -> new BdslTrampolineRootNode(
+                        h -> new TrampolineRootNode(
                                 language, ir.getName(), cc, pc, pn).getCallTarget());
             }
             if (!supports(ir)) {
@@ -931,7 +931,7 @@ public final class BytecodeCompiler {
         //   OR
         //   (b) the function has parameters (need the outer node to
         //       normalise record ABI into the flat scalar layout BDSL
-        //       expects — see BdslTrampolineRootNode.normalizeArgs).
+        //       expects — see TrampolineRootNode.normalizeArgs).
         // Zero-param zero-tail-call bodies skip the wrapper entirely.
         final boolean hasTail = hasTailCall(ir.getBody());
         final int captureCount = ir.getCaptureSlots().size();
@@ -964,12 +964,12 @@ public final class BytecodeCompiler {
         // trampoline. So the "no tail call in body" fast path is safe —
         // the caller's trampoline handles the cross-fn case regardless of
         // whether the callee is trampolined.
-        BdslTrampolineRootNode trampoline = null;
+        TrampolineRootNode trampoline = null;
         if (needsTrampoline) {
             CallTarget registered = compiledCallTargets.get(ir.getHash());
-            BdslTrampolineRootNode existing = null;
+            TrampolineRootNode existing = null;
             if (registered instanceof com.oracle.truffle.api.RootCallTarget rct
-                    && rct.getRootNode() instanceof BdslTrampolineRootNode t
+                    && rct.getRootNode() instanceof TrampolineRootNode t
                     && t.getInnerTarget() == null) {
                 existing = t;
             }
@@ -977,7 +977,7 @@ public final class BytecodeCompiler {
             if (existing != null) {
                 trampoline = existing;
             } else {
-                trampoline = new BdslTrampolineRootNode(
+                trampoline = new TrampolineRootNode(
                         language, ir.getName(), captureCount, paramCount, paramNames);
                 compiledCallTargets.put(ir.getHash(), trampoline.getCallTarget());
             }
@@ -1504,7 +1504,7 @@ public final class BytecodeCompiler {
             // just lose the ~13-15 ns bypass on this specific edge case.
             if (c.isScalarABI()
                     && target instanceof com.oracle.truffle.api.RootCallTarget rct
-                    && rct.getRootNode() instanceof BdslTrampolineRootNode tramp
+                    && rct.getRootNode() instanceof TrampolineRootNode tramp
                     && !tramp.hasTailCalls()
                     && !c.isTailCall()
                     && tramp.getInnerTarget() != null) {
@@ -1522,7 +1522,7 @@ public final class BytecodeCompiler {
             // trampoline strips markers anyway, so the marker is dead
             // weight (~5-10ns per hot call from the extra emit + stack
             // push). Skip it, save the round-trip. Check by inspecting
-            // the target's RootNode class — BdslTrampolineRootNode
+            // the target's RootNode class — TrampolineRootNode
             // (paramCount > 0) or MezzeBytecodeRootNode-generated root
             // (paramCount == 0, no wrap). AST callees use
             // MezzeFunctionRootNode.
@@ -1792,7 +1792,7 @@ public final class BytecodeCompiler {
             // perform lowers to a BDSL PerformD op — a direct
             // chain-dispatch native call, no Loom fiber, no reflection.
             // resume is fall-through (single-return); abort throws
-            // AbortPerformException. See BdslYieldDispatch for semantics.
+            // AbortPerformException. See YieldDispatch for semantics.
             b.beginPerformD(p.getEffectHash(), p.getOperationName());
             emitNode(p.getArg(), b, argCount, localMap);
             b.endPerformD();

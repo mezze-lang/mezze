@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *       {@link #installHandlerChainEntries(HandlerChainEntry[])}).</li>
  *   <li>{@link #D8_HANDLE_STACK} — BDSL Handle depth counter, distinct
  *       from HANDLER_CHAIN so a snapshot install on a spawned thread
- *       doesn't fool BdslYieldDispatch into treating a chain push as a
+ *       doesn't fool YieldDispatch into treating a chain push as a
  *       live catch boundary.</li>
  *   <li>Dispatch-only fibers ({@link #acquireDispatchOnly()}) — carry
  *       the per-op-invocation effect-handle stack so chain-dispatched
@@ -141,7 +141,7 @@ public final class EffectFiber {
     // MezzeBytecodeRootNode.PushHandlerChain / PopHandlerChain.
     // Distinct from the general HANDLER_CHAIN depth so a snapshot install
     // on a spawned thread (which populates HANDLER_CHAIN without
-    // establishing a catch site on this frame) doesn't fool BdslYieldDispatch
+    // establishing a catch site on this frame) doesn't fool YieldDispatch
     // into thinking a BDSL Handle boundary is live. See project_d8_handleir_design.
     // ----------------------------------------------------------------
 

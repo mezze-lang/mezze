@@ -300,7 +300,7 @@ public final class MezzeContext {
 
     // Handler / impl-record registrations keyed by content hash.
     // Populated by HashModuleLoaderNode at module-load time so BDSL
-    // perform dispatch can find them via BdslYieldDispatch.
+    // perform dispatch can find them via YieldDispatch.
     private final ConcurrentHashMap<com.mezze.language.typedast.Hash, Object> handlersByHash =
         new ConcurrentHashMap<>();
 

@@ -19,7 +19,7 @@ import kotlin.test.assertEquals
  * Phase 2 acceptance test for tail-call variants. The BDSL root
  * throws a TailCallException from TailCallDirectN / TailCallIndirect
  * ops; BytecodeCompiler wraps every compiled BDSL root in a
- * BdslTrampolineRootNode that catches and re-drives, so the tail
+ * TrampolineRootNode that catches and re-drives, so the tail
  * call is transparent to callers.
  */
 class BytecodeCompilerPhase2TailCallTest {
@@ -85,7 +85,7 @@ class BytecodeCompilerPhase2TailCallTest {
                 val compiler = BytecodeCompiler(language)
                 val roots = compiler.compileWithCallees(listOf(buildAdd(), buildMain()))
                 val mainRoot = roots[1]
-                // Direct call — trampoline in BdslTrampolineRootNode catches
+                // Direct call — trampoline in TrampolineRootNode catches
                 // the TailCallException from TailCallDirectN and re-invokes
                 // add with [10, 20], returning 30.
                 val result = mainRoot.callTarget.call()
@@ -103,7 +103,7 @@ class BytecodeCompilerPhase2TailCallTest {
      *
      * With the trampoline in place, invoking loop(100_000, 0) must not
      * grow the JVM stack — proves TailCallException is absorbed by
-     * BdslTrampolineRootNode instead of unwinding through each frame.
+     * TrampolineRootNode instead of unwinding through each frame.
      */
     private fun buildLoop(): FunctionIR = FunctionIR(
         hash = Hash("93".repeat(32)),

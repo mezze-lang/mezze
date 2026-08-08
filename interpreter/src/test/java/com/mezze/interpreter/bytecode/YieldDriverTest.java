@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Path D2 acceptance: exercise {@link BdslYieldDriver} against a BDSL
+ * Path D2 acceptance: exercise {@link YieldDriver} against a BDSL
  * root that yields the same three-field record shape
  * {@link BytecodeCompiler} emits at PerformOpIR sites when
  * {@code MEZZE_BDSL_YIELD=1}.
@@ -52,7 +52,7 @@ class BdslYieldDriverTest {
                 AtomicReference<String> seenName = new AtomicReference<>();
                 AtomicReference<Object> seenArg = new AtomicReference<>();
 
-                Object result = BdslYieldDriver.drive(
+                Object result = YieldDriver.drive(
                     root.getCallTarget().call(new Object[] { 0L }),
                     (h, n, a) -> {
                         seenHash.set(h);
@@ -75,7 +75,7 @@ class BdslYieldDriverTest {
     @Test
     @Timeout(value = 10, unit = TimeUnit.SECONDS)
     void driverPassesThroughNonContinuationResult() {
-        Object result = BdslYieldDriver.drive(99L, (h, n, a) -> {
+        Object result = YieldDriver.drive(99L, (h, n, a) -> {
             throw new AssertionError("dispatcher should not be called");
         });
         assertEquals(99L, result);
@@ -91,7 +91,7 @@ class BdslYieldDriverTest {
                 MezzeBytecodeRootNode root = buildTwoYieldRoot();
 
                 List<String> names = new ArrayList<>();
-                Object result = BdslYieldDriver.drive(
+                Object result = YieldDriver.drive(
                     root.getCallTarget().call(new Object[] { 0L }),
                     (h, n, a) -> {
                         names.add(n);
@@ -118,7 +118,7 @@ class BdslYieldDriverTest {
                 MezzeBytecodeRootNode root = buildYieldingRoot();
 
                 RuntimeException thrown = assertThrows(RuntimeException.class,
-                    () -> BdslYieldDriver.drive(
+                    () -> YieldDriver.drive(
                         root.getCallTarget().call(new Object[] { 0L }),
                         (h, n, a) -> { throw new RuntimeException("handler aborted"); }
                     ));

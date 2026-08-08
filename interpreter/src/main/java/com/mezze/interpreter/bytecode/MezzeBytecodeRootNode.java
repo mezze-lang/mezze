@@ -1647,11 +1647,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
     /**
      * Path D perform-op: pop the arg and dispatch directly against the
-     * current thread's handler chain via {@link BdslYieldDispatch#dispatch}.
+     * current thread's handler chain via {@link YieldDispatch#dispatch}.
      * No fiber, no Loom continuation, no reflection — the dispatch pushes
      * a lightweight per-thread dispatch-only fiber with resume/abort
      * handles so existing {@code EffectBindingIR} reads in the impl body
-     * work unchanged. See {@link BdslYieldDispatch} for semantics
+     * work unchanged. See {@link YieldDispatch} for semantics
      * (including the fall-through-only resume caveat) and
      * docs/perf/bdsl-effects-path-d-2026-07.md for the design.
      *
@@ -1664,17 +1664,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     public static final class PerformD {
         // #347 — per-site inline cache of the handler's fieldIndex for opName.
         // Warm path: skip the HashMap probe in MezzeRecord.getField(String)
-        // and index directly. Shape-validated inside BdslYieldDispatch by
+        // and index directly. Shape-validated inside YieldDispatch by
         // comparing the cached name at that slot to the incoming opName.
         // Uncached path passes -1 which forces the string lookup.
         @Specialization
         public static Object doPerformD(Hash effectHash, String opName, Object arg,
                                         @Cached(value = "initFieldIndex()", allowUncached = true, dimensions = 1)
                                         int[] fieldIndexBox) {
-            return BdslYieldDispatch.dispatch(effectHash, opName, arg, fieldIndexBox);
+            return YieldDispatch.dispatch(effectHash, opName, arg, fieldIndexBox);
         }
 
-        // A 1-element mutable box so BdslYieldDispatch can update the cached
+        // A 1-element mutable box so YieldDispatch can update the cached
         // index after a successful uncached lookup (poor man's per-site cache
         // — Truffle's @Cached wants a value, not a reference to write, so we
         // use a heap-allocated box). Alloc cost is amortized: one per emit
@@ -1690,7 +1690,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      *
      * <p>Push the handler value (popped from the operand stack) onto the
      * per-thread handler chain, tagged with {@code effectHash} so
-     * {@link BdslYieldDispatch#dispatch} finds it by (effectHash, opName).
+     * {@link YieldDispatch#dispatch} finds it by (effectHash, opName).
      * Pairs with {@link PopHandlerChain}. The emit-site brackets the body
      * with these two ops inside a {@code TryCatchOtherwise} so both normal
      * and abort exits pop the chain — no fiber, no lambda, no dispatch
@@ -1860,7 +1860,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 // through unforced so the outer caller (which may install
                 // a wider chain later) sees a still-forceable lazy value.
                 // This mirrors legacy shape's "return unforced" fallback
-                // and unblocks migrating OpCallNode/BdslYieldDispatch to
+                // and unblocks migrating OpCallNode/YieldDispatch to
                 // Path E — see Phase 3.5 audit.
                 if (canDischargeAny(s)) {
                     return s.force(com.oracle.truffle.api.nodes.IndirectCallNode.getUncached());

@@ -23,9 +23,9 @@ import com.oracle.truffle.api.bytecode.ContinuationResult;
  * thread. Compare {@link com.mezze.interpreter.nodes.continuation.EffectFiber}
  * for the Loom-shaped equivalent.
  */
-public final class BdslYieldDriver {
+public final class YieldDriver {
 
-    private BdslYieldDriver() {}
+    private YieldDriver() {}
 
     /**
      * Handler-chain lookup callback. Given the (effect_hash, op_name,

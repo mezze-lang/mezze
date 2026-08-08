@@ -61,7 +61,7 @@ import com.oracle.truffle.api.nodes.RootNode;
  * to the inner via a {@link DirectCallNode} — otherwise every
  * self-tail-call would re-enter the outer wrapper and grow the stack.
  */
-public final class BdslTrampolineRootNode extends RootNode {
+public final class TrampolineRootNode extends RootNode {
 
     private RootCallTarget innerTarget;
     private final String name;
@@ -115,13 +115,13 @@ public final class BdslTrampolineRootNode extends RootNode {
     private final int resultSlot;
 
     /** Single-phase constructor: used when the inner is already compiled. */
-    public BdslTrampolineRootNode(MezzeLanguage language, RootNode inner, String name) {
+    public TrampolineRootNode(MezzeLanguage language, RootNode inner, String name) {
         this(language, name);
         attachInner(inner);
     }
 
     /** Legacy two-phase constructor used by pre-registration paths that don't yet know ABI metadata. */
-    public BdslTrampolineRootNode(MezzeLanguage language, String name) {
+    public TrampolineRootNode(MezzeLanguage language, String name) {
         this(language, name, 0, 0, EMPTY_STRINGS);
     }
 
@@ -131,7 +131,7 @@ public final class BdslTrampolineRootNode extends RootNode {
      * compile the inner BDSL root (which sees this trampoline as its
      * own callee for self-tail-calls), then call {@link #attachInner}.
      */
-    public BdslTrampolineRootNode(MezzeLanguage language, String name,
+    public TrampolineRootNode(MezzeLanguage language, String name,
                                   int closureCount, int parameterCount,
                                   String[] parameterNames) {
         super(language, makeDescriptor());
@@ -204,7 +204,7 @@ public final class BdslTrampolineRootNode extends RootNode {
         if (innerTarget == null) {
             CompilerDirectives.transferToInterpreter();
             throw new IllegalStateException(
-                    "BdslTrampolineRootNode[" + name + "] executed before attachInner");
+                    "TrampolineRootNode[" + name + "] executed before attachInner");
         }
         Object[] rawArgs = frame.getArguments();
         // #389 — partial application entry check: when a caller invokes
@@ -342,7 +342,7 @@ public final class BdslTrampolineRootNode extends RootNode {
 
     @Override
     public String toString() {
-        return "BdslTrampolineRootNode[" + name + "]";
+        return "TrampolineRootNode[" + name + "]";
     }
 
     /** The wrapped BDSL root's CallTarget. Exposed for tests + debugging only. */
@@ -359,7 +359,7 @@ public final class BdslTrampolineRootNode extends RootNode {
      */
     private static final class TrampolineRepeatingNode extends Node implements RepeatingNode {
 
-        private final BdslTrampolineRootNode owner;
+        private final TrampolineRootNode owner;
         private final CallTarget outerTarget;
         private final RootCallTarget innerTarget;
         private final int argsSlot;
@@ -372,7 +372,7 @@ public final class BdslTrampolineRootNode extends RootNode {
         @Child
         private IndirectCallNode crossCall;
 
-        TrampolineRepeatingNode(BdslTrampolineRootNode owner) {
+        TrampolineRepeatingNode(TrampolineRootNode owner) {
             this.owner = owner;
             this.outerTarget = owner.getCallTarget();
             this.innerTarget = owner.innerTarget;

@@ -31,7 +31,7 @@ public final class MezzeSuspend implements TruffleObject {
     // force() dispatches the deferred op-call on the current fiber (or
     // walks the handler chain if there is no fiber). Slated for deletion
     // under #341 once the remaining producers (OpCallNode,
-    // EffectHandlerDriver, BdslYieldDispatch) are rewired to a
+    // EffectHandlerDriver, YieldDispatch) are rewired to a
     // continuation-capturing shape.
     @CompilationFinal
     private final MezzeThunk computation;
@@ -144,7 +144,7 @@ public final class MezzeSuspend implements TruffleObject {
      * <p>Effect-handler lookup happens via the per-thread handler chain
      * ({@link EffectFiber#peekHandlerForEffect}), not via a context-wide
      * handler map. Forcing a deferred effect call re-issues the op
-     * through {@link com.mezze.interpreter.bytecode.BdslYieldDispatch};
+     * through {@link com.mezze.interpreter.bytecode.YieldDispatch};
      * an enclosing BDSL Handle @Operation catches abort as usual.
      *
      * <p>If no fiber is current (we're still outside any {@code perform}),
@@ -184,7 +184,7 @@ public final class MezzeSuspend implements TruffleObject {
      *       caught here, return the abort value.</li>
      *   <li>Perform an op with no matching handler → nested MezzeSuspend
      *       returned by an inner BDSL Handle @Operation (or MezzeSuspend
-     *       propagated up from BdslYieldDispatch's makeUnhandledSuspended).
+     *       propagated up from YieldDispatch's makeUnhandledSuspended).
      *       Force returns that, preserving lazy semantics for still-
      *       unhandled effects.</li>
      * </ul>

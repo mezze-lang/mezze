@@ -35,7 +35,7 @@ import com.oracle.truffle.api.nodes.RootNode;
  *       one parameter (so {@code normalizeArgs} recognises the scalar
  *       shape and doesn't try to unpack the value as a record).</li>
  *   <li>BDSL callee (bare {@code MezzeBytecodeRootNode} or
- *       {@code BdslTrampolineRootNode}): the stub still prepends the
+ *       {@code TrampolineRootNode}): the stub still prepends the
  *       closure values (BDSL callees also expect
  *       {@code [closure..., args...]}), but no marker — BDSL callees
  *       use flat scalar layout and would misread the marker as a
