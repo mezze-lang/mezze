@@ -21,7 +21,7 @@ import java.util.function.Supplier;
  *   <li><b>Promise-returning spawn</b> — body's result completes a
  *     promise; unhandled-op stashes on the promise so {@code await}
  *     re-issues it on the parent fiber. See callers in
- *     {@code AsyncNatives.loomSpawn} et al.</li>
+ *     {@code AsyncNatives.spawn} et al.</li>
  *   <li><b>Join-style spawn</b> — body's result completes a
  *     {@link java.util.concurrent.CompletableFuture}; unhandled-op
  *     surfaces as the future's failure cause. Used by {@code loomJoin}

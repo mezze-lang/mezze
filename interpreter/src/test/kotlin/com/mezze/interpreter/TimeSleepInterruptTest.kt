@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Assertions.*
  * nothing happened. That made SIGINT/SIGTERM during a long `Time.sleep`
  * silently no-op — the program kept running with no visible signal.
  *
- * Behaviour now matches `AsyncNatives.loomSleep`: restore the flag AND
+ * Behaviour now matches `AsyncNatives.sleep`: restore the flag AND
  * surface the interrupt as a `RuntimeException` so user code observes it.
  */
 class TimeSleepInterruptTest {

@@ -448,7 +448,7 @@ public final class AsyncNatives {
      * walks `childScopes` so cancelling a parent reaches grandchildren even
      * when the descendant task is uninterruptibly blocked (e.g., parked on a
      * non-Thread.interrupt-aware primitive). Parent linkage is established via
-     * the CURRENT_SCOPE ThreadLocal in loomScoped.
+     * the CURRENT_SCOPE ThreadLocal in scoped.
      */
     public static final class MezzeScope {
         // OPTIMIZATION: ConcurrentLinkedQueue has O(1) add vs CopyOnWriteArrayList's O(n)
@@ -508,7 +508,7 @@ public final class AsyncNatives {
 
     /**
      * Tracks the innermost MezzeScope currently executing on this thread (if
-     * any). Used by loomScoped to wire up parent→child linkage for transitive
+     * any). Used by scoped to wire up parent→child linkage for transitive
      * cancellation (#252). A scope opened by a task that is itself a child of
      * an outer scope adopts that outer scope as parent.
      */
@@ -565,7 +565,7 @@ public final class AsyncNatives {
      * Initialize scope - creates a promise tracker for this handler.
      */
     @TruffleBoundary
-    public static PromiseTracker loomInitScope(MezzeRecord args) {
+    public static PromiseTracker initScope(MezzeRecord args) {
         return new PromiseTracker();
     }
 
@@ -577,7 +577,7 @@ public final class AsyncNatives {
      * If user wants to wait for all tasks, they should use await/all/race.
      */
     @TruffleBoundary
-    public static MezzeUnit loomFinalizeScope(MezzeRecord args) {
+    public static MezzeUnit finalizeScopeNative(MezzeRecord args) {
         Object trackerObj = getFieldValue(args, "tracker");
         if (trackerObj instanceof PromiseTracker tracker) {
             tracker.clear();
@@ -589,7 +589,7 @@ public final class AsyncNatives {
      * Spawn with tracking - registers promise with tracker for cleanup.
      */
     @TruffleBoundary
-    public static MezzePromise loomSpawnTracked(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static MezzePromise spawnTracked(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeFunction f = getFunction(args, "f");
         long maxConcurrent = getLong(args, "max_concurrent");
         Object trackerObj = getFieldValue(args, "tracker");
@@ -648,7 +648,7 @@ public final class AsyncNatives {
 
     /**
      * Finalize OS thread scope - clean up the tracker.
-     * Same semantics as loomFinalizeScope - unawaited tasks continue running.
+     * Same semantics as finalizeScopeNative - unawaited tasks continue running.
      */
     @TruffleBoundary
     public static MezzeUnit osFinalizeScope(MezzeRecord args) {
@@ -758,7 +758,7 @@ public final class AsyncNatives {
      * Simple spawn without concurrency limit - for backward compatibility.
      */
     @TruffleBoundary
-    public static MezzePromise loomSpawn(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static MezzePromise spawn(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeFunction f = getFunction(args, "f");
 
         Object[] closureValues = f.getClosureValues();
@@ -792,9 +792,9 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static Object loomAwait(MezzeRecord args) {
+    public static Object awaitOp(MezzeRecord args) {
         MezzePromise promise = getPromise(args, "p");
-        return loomAwaitPromise(promise);
+        return awaitPromise(promise);
     }
 
     /**
@@ -813,7 +813,7 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeUnit loomSleep(MezzeRecord args) {
+    public static MezzeUnit sleep(MezzeRecord args) {
         long ms = getLong(args, "ms");
         try {
             Thread.sleep(ms);
@@ -832,7 +832,7 @@ public final class AsyncNatives {
      * single-threaded scheduler and want to give cancel-delivery a
      * chance to land under Loom.
      */
-    public static MezzeUnit loomYieldNow(MezzeRecord args) {
+    public static MezzeUnit yieldNow(MezzeRecord args) {
         Thread.yield();
         return MezzeUnit.INSTANCE;
     }
@@ -845,7 +845,7 @@ public final class AsyncNatives {
      * rarely; can land later if profile demands.
      */
     @TruffleBoundary
-    public static MezzeUnit loomParkUntil(MezzeRecord args, IndirectCallNode callNode) {
+    public static MezzeUnit parkUntil(MezzeRecord args, IndirectCallNode callNode) {
         MezzeFunction predicate = getFunction(args, "predicate");
         long backoffNanos = 1_000L; // 1µs to start
         final long maxBackoffNanos = 1_000_000L; // 1ms cap
@@ -862,7 +862,7 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static Object loomScoped(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static Object scoped(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeFunction f = getFunction(args, "f");
         MezzeScope scope = new MezzeScope();
 
@@ -923,7 +923,7 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzePromise loomScopeSpawn(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static MezzePromise scopeSpawn(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeScope scope = getScope(args, "sc");
         MezzeFunction f = getFunction(args, "f");
 
@@ -987,18 +987,18 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeUnit loomScopeCancelAll(MezzeRecord args) {
+    public static MezzeUnit scopeCancelAll(MezzeRecord args) {
         getScope(args, "sc").cancelAll();
         return MezzeUnit.INSTANCE;
     }
 
     @TruffleBoundary
-    public static boolean loomScopeIsCancelled(MezzeRecord args) {
+    public static boolean scopeIsCancelled(MezzeRecord args) {
         return getScope(args, "sc").isCancelled();
     }
 
     @TruffleBoundary
-    public static MezzeRecord loomScopeGetToken(MezzeRecord args) {
+    public static MezzeRecord scopeGetToken(MezzeRecord args) {
         MezzeScope scope = getScope(args, "sc");
         return MezzeRecord.fromFields(
             new String[]{"_scope_ref"},
@@ -1177,7 +1177,7 @@ public final class AsyncNatives {
     }
 
     /** Block until the promise resolves; return a `Result 'a AsyncError`
-     *  variant. Replaces the throw-on-failure behavior of loomAwait. */
+     *  variant. Replaces the throw-on-failure behavior of awaitOp. */
     @TruffleBoundary
     public static Object promiseAwaitResult(MezzeRecord args) {
         MezzePromise p = getPromise(args, "p");
@@ -1200,7 +1200,7 @@ public final class AsyncNatives {
             // Some other RuntimeException — re-throw.
             throw e;
         }
-        // Same propagation logic as loomAwaitPromise — MezzeSuspend forcing
+        // Same propagation logic as awaitPromise — MezzeSuspend forcing
         // and unhandled-op re-raise still happen, those are NOT failure modes
         // but the body's effect propagation.
         if (value instanceof MezzeSuspend suspended) {
@@ -1301,7 +1301,7 @@ public final class AsyncNatives {
     }
 
 
-    private static Object loomAwaitPromise(MezzePromise promise) {
+    private static Object awaitPromise(MezzePromise promise) {
         Object result;
         try {
             result = promise.await();

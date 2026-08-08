@@ -2750,23 +2750,23 @@ public final class NativeDispatch extends MezzeNode {
     private static void registerAsyncHandlers() {
         // === Loom (Virtual Threads) - scales to millions ===
         // Operations that need TruffleContext for cross-thread execution use HANDLERS_WITH_NODE
-        HANDLERS_WITH_NODE.put("__native_async_spawn", (r, c, n) -> AsyncNatives.loomSpawn(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_async_spawn_tracked", (r, c, n) -> AsyncNatives.loomSpawnTracked(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_async_scoped", (r, c, n) -> AsyncNatives.loomScoped(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_async_scope_spawn", (r, c, n) -> AsyncNatives.loomScopeSpawn(r, c, n));
+        HANDLERS_WITH_NODE.put("__native_async_spawn", (r, c, n) -> AsyncNatives.spawn(r, c, n));
+        HANDLERS_WITH_NODE.put("__native_async_spawn_tracked", (r, c, n) -> AsyncNatives.spawnTracked(r, c, n));
+        HANDLERS_WITH_NODE.put("__native_async_scoped", (r, c, n) -> AsyncNatives.scoped(r, c, n));
+        HANDLERS_WITH_NODE.put("__native_async_scope_spawn", (r, c, n) -> AsyncNatives.scopeSpawn(r, c, n));
 
         // Loom scope lifecycle (scoped effects)
-        HANDLERS.put("__native_async_init_scope", (r, c) -> AsyncNatives.loomInitScope(r));
-        HANDLERS.put("__native_async_finalize_scope", (r, c) -> AsyncNatives.loomFinalizeScope(r));
+        HANDLERS.put("__native_async_init_scope", (r, c) -> AsyncNatives.initScope(r));
+        HANDLERS.put("__native_async_finalize_scope", (r, c) -> AsyncNatives.finalizeScopeNative(r));
 
         // Simple operations that don't spawn threads use regular HANDLERS
-        HANDLERS.put("__native_promise_await", (r, c) -> AsyncNatives.loomAwait(r));
-        HANDLERS.put("__native_async_sleep", (r, c) -> AsyncNatives.loomSleep(r));
-        HANDLERS.put("__native_async_yield_now", (r, c) -> AsyncNatives.loomYieldNow(r));
-        HANDLERS.put("__native_async_park_until", (r, c) -> AsyncNatives.loomParkUntil(r, c));
-        HANDLERS.put("__native_async_scope_cancel_all", (r, c) -> AsyncNatives.loomScopeCancelAll(r));
-        HANDLERS.put("__native_async_scope_is_cancelled", (r, c) -> AsyncNatives.loomScopeIsCancelled(r));
-        HANDLERS.put("__native_async_scope_get_token", (r, c) -> AsyncNatives.loomScopeGetToken(r));
+        HANDLERS.put("__native_promise_await", (r, c) -> AsyncNatives.awaitOp(r));
+        HANDLERS.put("__native_async_sleep", (r, c) -> AsyncNatives.sleep(r));
+        HANDLERS.put("__native_async_yield_now", (r, c) -> AsyncNatives.yieldNow(r));
+        HANDLERS.put("__native_async_park_until", (r, c) -> AsyncNatives.parkUntil(r, c));
+        HANDLERS.put("__native_async_scope_cancel_all", (r, c) -> AsyncNatives.scopeCancelAll(r));
+        HANDLERS.put("__native_async_scope_is_cancelled", (r, c) -> AsyncNatives.scopeIsCancelled(r));
+        HANDLERS.put("__native_async_scope_get_token", (r, c) -> AsyncNatives.scopeGetToken(r));
 
         // === Promise-value operations (#117/#118/#123) ===
         // Promise is the user-facing newtype; these natives operate on the

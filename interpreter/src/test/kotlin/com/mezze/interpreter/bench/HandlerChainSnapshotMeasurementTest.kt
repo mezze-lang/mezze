@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test
  * Direct measurement of EffectFiber.snapshotHandlerChainEntries() at
  * different chain depths. Used to decide whether it's worth caching /
  * versioning the per-thread handler chain to skip the array copy on
- * loomScopeSpawn (spawn-under-handlers hot path).
+ * scopeSpawn (spawn-under-handlers hot path).
  *
  * Empty chain returns a singleton EMPTY_ENTRY_CHAIN — allocation-free.
  * Non-empty chains allocate an Object[] of the current chain size and
