@@ -207,6 +207,33 @@ public final class BdslTrampolineRootNode extends RootNode {
                     "BdslTrampolineRootNode[" + name + "] executed before attachInner");
         }
         Object[] rawArgs = frame.getArguments();
+        // #389 — partial application entry check: when a caller invokes
+        // this trampoline with a record missing some param fields (e.g.
+        // `multiply {x=2}` on a 3-param `multiply`), return a partial
+        // MezzeFunction instead of executing with nulls. Downstream calls
+        // on the returned MezzeFunction go through CallIndirect, which
+        // has the merge/complete slow path.
+        if (parameterCount >= 2
+                && rawArgs.length == closureCount + 1
+                && closureCount < rawArgs.length
+                && rawArgs[closureCount] instanceof com.mezze.interpreter.values.MezzeRecord rec) {
+            for (int i = 0; i < parameterCount; i++) {
+                if (rec.getFieldIndex(parameterNames[i]) < 0) {
+                    CompilerDirectives.transferToInterpreter();
+                    Object[] closures;
+                    if (closureCount == 0) {
+                        closures = null;
+                    } else {
+                        closures = new Object[closureCount];
+                        System.arraycopy(rawArgs, 0, closures, 0, closureCount);
+                    }
+                    com.mezze.interpreter.values.MezzeFunction fn =
+                            new com.mezze.interpreter.values.MezzeFunction(
+                                    this.getCallTarget(), name, closures, parameterNames);
+                    return fn.withPartialArgs(rec);
+                }
+            }
+        }
         Object[] flatArgs = parameterCount == 0
                 ? rawArgs
                 : normalizeArgs(rawArgs);

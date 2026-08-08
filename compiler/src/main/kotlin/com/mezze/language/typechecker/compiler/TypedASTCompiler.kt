@@ -1455,6 +1455,21 @@ class TypedASTCompiler(
                         val enrichedArgIR = injectDictFields(argIR, expr.arg, calleeDictMethods, src)
                         census.byHashDictInject++
                         emitCallDirect(calleeHash, enrichedArgIR, expr.isTailCall, src)
+                    } else if (isNonLambdaUserLet(calleeHash)) {
+                        // #389 — a top-level user let whose value is NOT a
+                        // lambda (e.g. `let partialMul = multiply {x=2}`) is a
+                        // thunk that evaluates to a MezzeFunction, possibly
+                        // partial-applied. CallDirect'ing on the thunk hash
+                        // and passing the new arg record discards the
+                        // accumulated partialArgs from the returned
+                        // MezzeFunction — multi-step currying silently
+                        // corrupts. Fall through to CallIndirect so runtime
+                        // dispatch goes through the MezzeFunction's
+                        // withPartialArgs/buildCompleteRecord slow path.
+                        // Only user-let thunks trigger this — ability ops and
+                        // other ByHash refs still get the CallDirect fast path.
+                        census.indirect++
+                        emitCallIndirect(fnIR, argIR, expr.isTailCall, src)
                     } else {
                         // Always use CallDirectIR for hash-based bindings.
                         // DO NOT check localsByName — a user variable with the same name
@@ -1510,9 +1525,16 @@ class TypedASTCompiler(
                     } else {
                         // If depth > 0 and not found locally, check if it's a top-level
                         // declaration. Use CallDirectIR for better performance.
+                        //
+                        // #389 — but skip CallDirect when the top-level is a
+                        // non-lambda `let X = expr` thunk. Its runtime value
+                        // may be a partial-applied MezzeFunction; CallDirect
+                        // on the thunk hash discards the accumulated partial
+                        // args. Fall through to CallIndirect so runtime
+                        // dispatch goes through the MezzeFunction.
                         if (binding.depth > 0) {
                             val topDecl = declIndex?.values?.find { it.name == fn.name }
-                            if (topDecl != null) {
+                            if (topDecl != null && !isNonLambdaUserLet(topDecl.hash)) {
                                 census.byHashPlain++
                                 return emitCallDirect(topDecl.hash, argIR, expr.isTailCall, src)
                             }
@@ -2583,19 +2605,40 @@ class TypedASTCompiler(
         return hashToParamNames[hash]
     }
 
+    /** #389 — hashes of top-level user `let X = expr` decls whose `expr` is
+     *  NOT a TypedLambda. These are thunks that evaluate to some value at
+     *  runtime — often a MezzeFunction produced by a partial application
+     *  (`let partialMul = multiply {x=2}`). Callers must NOT CallDirect on
+     *  such a hash with a fresh arg record: doing so throws away any
+     *  accumulated partialArgs held on the returned MezzeFunction. Populated
+     *  by populateHashToParamNames. */
+    private val nonLambdaUserLetHashes: MutableSet<Hash> = HashSet()
+
+    private fun isNonLambdaUserLet(hash: Hash): Boolean =
+        nonLambdaUserLetHashes.contains(hash)
+
     /** Populate hashToParamNames from user decls (lambdas only) and PrecompiledStdlib.
      *  Each entry pairs a callee hash with its full paramNames list — regular params
      *  in source order followed by dict params (sorted method names) for callees that
      *  need them. This mirrors the layout of FunctionIR.paramNames for those decls. */
     private fun populateHashToParamNames(modules: List<TypedModule>) {
         hashToParamNames.clear()
+        nonLambdaUserLetHashes.clear()
 
         // User decls — only TypedLetDecl whose value is a TypedLambda has a callable
         // shape that scalar-ABI can target. Non-lambda lets are zero-param thunks.
         for (mod in modules) {
             for (decl in mod.decls) {
                 if (decl !is TypedLetDecl) continue
-                val lambda = decl.value as? TypedLambda ?: continue
+                val lambda = decl.value as? TypedLambda
+                if (lambda == null) {
+                    // #389 — a top-level `let X = expr` where expr is not a
+                    // lambda is a thunk. Track it so call sites don't
+                    // CallDirect on its hash (which would discard partial-args
+                    // when the thunk returns a MezzeFunction).
+                    nonLambdaUserLetHashes.add(decl.hash)
+                    continue
+                }
                 val regular = lambda.params.map { it.name }
                 val dict = (dictMethodsForHash[decl.hash] ?: emptySet())
                     .sorted()
