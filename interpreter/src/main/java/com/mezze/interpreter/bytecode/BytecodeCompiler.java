@@ -2240,7 +2240,7 @@ public final class BytecodeCompiler {
         b.beginBlock();
         BytecodeLocal resultSlot = b.createLocal();
         b.beginTryCatchOtherwise(() -> {
-            // otherwise (normal exit): pop the chain
+            // otherwise (normal exit): pop the chain (runs finalize_scope)
             b.emitPopHandlerChain();
         });
         // === try branch ===
@@ -2273,13 +2273,22 @@ public final class BytecodeCompiler {
         b.endStoreLocal();
         b.endBlock();
         // === catch branch ===
+        //
+        // Popping the chain (which invokes finalize_scope) is unconditional
+        // on any exit from the Handle body. UnwrapAbortValue rethrows
+        // anything that isn't an AbortPerformException, so if we ordered
+        // PopHandlerChain *after* Unwrap, a body that throws (e.g.
+        // MezzeGuestException from division-by-zero) would escape without
+        // finalize_scope ever running — leaking scoped resources like
+        // Parallel's per-scope ForkJoinPool. Pop first, then let Unwrap
+        // decide whether to yield the abort value or rethrow.
         b.beginBlock();
+        b.emitPopHandlerChain();
         b.beginStoreLocal(resultSlot);
         b.beginUnwrapAbortValue();
         b.emitLoadException();
         b.endUnwrapAbortValue();
         b.endStoreLocal();
-        b.emitPopHandlerChain();
         b.endBlock();
         b.endTryCatchOtherwise();
         b.emitLoadLocal(resultSlot);
