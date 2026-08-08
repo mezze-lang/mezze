@@ -15,6 +15,7 @@ import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.util.WellKnownTypeApp
+import com.mezze.language.typechecker.util.receiverTypeName
 import com.mezze.language.ast.hashing.HashTags
 import com.mezze.language.ast.solving.closeGeneratedRowVars
 
@@ -764,7 +765,7 @@ class TypedAstBuilder(
         val resolvedImplHash: Hash? = run {
             if (methodInfo.candidateImpls.isEmpty()) return@run methodInfo.implContentHash
             val solvedReceiver = substitution.apply(receiverExpr.type)
-            val name = solvedTypeName(solvedReceiver)
+            val name = receiverTypeName(solvedReceiver)
             methodInfo.candidateImpls.firstOrNull { it.targetTypeName == name }?.implContentHash
                 ?: methodInfo.implContentHash
         }
@@ -865,33 +866,6 @@ class TypedAstBuilder(
             type = callReturnType,
             loc = loc
         )
-    }
-
-    /**
-     * #160: nominal type name of a solved receiver type, for picking a deferred
-     * inherent-impl candidate by its `targetTypeName`. Mirrors
-     * ExprMethodConstraints.getReceiverTypeName; returns null for unresolved /
-     * structural types (the caller then keeps the recorded fallback impl).
-     */
-    private fun solvedTypeName(type: MezzeType): String? = when (type) {
-        is MezzeType.IntType -> "Int"
-        is MezzeType.FloatType -> "Float"
-        is MezzeType.StringType -> "Str"
-        is MezzeType.BoolType -> "Bool"
-        is MezzeType.NatType -> "Nat"
-        is MezzeType.FracType -> "Frac"
-        is MezzeType.CharType -> "Char"
-        is MezzeType.BytesType -> "Bytes"
-        is MezzeType.OrderingType -> "Ordering"
-        is MezzeType.SeqType -> "Seq"
-        is MezzeType.ListType -> "List"
-        is MezzeType.SetType -> "Set"
-        is MezzeType.MapType -> "Map"
-        is MezzeType.TypeApplication -> type.constructor
-        is MezzeType.RecordType -> type.typeName
-        is MezzeType.VariantType -> type.typeName
-            ?: if (type.constructors.size == 1) type.constructors.keys.first() else null
-        else -> null
     }
 
     private fun buildDoBlock(expr: ParsedDo, file: String, contextType: MezzeType): TypedBlock {

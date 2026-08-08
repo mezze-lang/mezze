@@ -11,6 +11,7 @@ import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.printing.ErrorMessageBuilder
 import com.mezze.language.typechecker.util.StringDistance
+import com.mezze.language.typechecker.util.receiverTypeName
 
 class ConstraintSolver(
     private val context: TypingContext,
@@ -731,7 +732,7 @@ class ConstraintSolver(
             return ConstraintResult.Deferred("Waiting for receiver type of .${constraint.methodName} to resolve")
         }
 
-        val typeName = inherentReceiverTypeName(receiver)
+        val typeName = receiverTypeName(receiver)
         val picked = typeName?.let { name -> constraint.candidates.firstOrNull { it.targetTypeName == name } }
         if (picked == null) {
             val shown = typeName ?: prettyPrintType(receiver)
@@ -769,32 +770,6 @@ class ConstraintSolver(
             )
         }
         return ConstraintResult.Success(subst)
-    }
-
-    /**
-     * #160: nominal type name of a solved receiver, mirroring
-     * ExprMethodConstraints.getReceiverTypeName. Used to pick a deferred
-     * inherent-method candidate by `targetTypeName`.
-     */
-    private fun inherentReceiverTypeName(type: MezzeType): String? = when (type) {
-        is MezzeType.IntType -> "Int"
-        is MezzeType.FloatType -> "Float"
-        is MezzeType.StringType -> "Str"
-        is MezzeType.BoolType -> "Bool"
-        is MezzeType.NatType -> "Nat"
-        is MezzeType.FracType -> "Frac"
-        is MezzeType.CharType -> "Char"
-        is MezzeType.BytesType -> "Bytes"
-        is MezzeType.OrderingType -> "Ordering"
-        is MezzeType.SeqType -> "Seq"
-        is MezzeType.ListType -> "List"
-        is MezzeType.SetType -> "Set"
-        is MezzeType.MapType -> "Map"
-        is MezzeType.TypeApplication -> type.constructor
-        is MezzeType.RecordType -> type.typeName
-        is MezzeType.VariantType -> type.typeName
-            ?: if (type.constructors.size == 1) type.constructors.keys.first() else null
-        else -> null
     }
 
     private fun solveEquality(constraint: Constraint.Equality): ConstraintResult {

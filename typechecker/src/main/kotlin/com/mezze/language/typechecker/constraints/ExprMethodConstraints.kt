@@ -7,6 +7,7 @@ import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.typechecker.util.receiverTypeName as resolveReceiverTypeName
 
 internal fun ExpressionConstraintGenerator.stripReceiverFromMethodType(methodType: MezzeType, receiverTypeVar: MezzeType.VarType): MezzeType {
     if (methodType !is MezzeType.FunctionType) return methodType
@@ -171,8 +172,8 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             // is null, the matching filter drops to empty, and the
             // wrong impl wins.
             val receiverTypeNames: Set<String> = when {
-                getReceiverTypeName(concreteReceiver) != null ->
-                    setOf(getReceiverTypeName(concreteReceiver)!!)
+                resolveReceiverTypeName(concreteReceiver) != null ->
+                    setOf(resolveReceiverTypeName(concreteReceiver)!!)
                 concreteReceiver is MezzeType.RecordType && concreteReceiver.typeName == null ->
                     findMatchingRecordTypeAliases(concreteReceiver, context).toSet()
                 concreteReceiver is MezzeType.VariantType && concreteReceiver.typeName == null ->
@@ -643,7 +644,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     val constraints = mutableListOf<Constraint>()
     constraints.addAll(receiverResult.constraints)
 
-    val receiverTypeName = getReceiverTypeName(receiverType)
+    val receiverTypeName = resolveReceiverTypeName(receiverType)
         ?: lookupConstructorTypeName(memberAccess.receiver, context)
     val methodInfo = if (deferImplByReceiver) {
         // Homogeneous candidates — any is a valid signature representative; the
@@ -927,7 +928,7 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
             .filter { it.targetTypeName == innerTypeName }
         val method = candidates.singleOrNull() ?: return null
         val ret = (method.methodType as? MezzeType.FunctionType)?.returnType ?: return null
-        return getReceiverTypeName(ret)
+        return resolveReceiverTypeName(ret)
     }
     val fnExpr: ParsedExpr? = when (receiver) {
         is ParsedFunctionCall -> receiver.function
@@ -954,7 +955,7 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
         bindingType != null && receiver !is ParsedFunctionCall -> bindingType
         else -> null
     } ?: return null
-    return getReceiverTypeName(resultType)
+    return resolveReceiverTypeName(resultType)
 }
 
 /**
@@ -999,26 +1000,5 @@ internal fun ExpressionConstraintGenerator.findMatchingVariantTypeAliases(
         }
     }
     return matches
-}
-
-internal fun ExpressionConstraintGenerator.getReceiverTypeName(type: MezzeType): String? = when (type) {
-    is MezzeType.IntType -> "Int"
-    is MezzeType.FloatType -> "Float"
-    is MezzeType.StringType -> "Str"
-    is MezzeType.BoolType -> "Bool"
-    is MezzeType.NatType -> "Nat"
-    is MezzeType.FracType -> "Frac"
-    is MezzeType.CharType -> "Char"
-    is MezzeType.BytesType -> "Bytes"
-    is MezzeType.OrderingType -> "Ordering"
-    is MezzeType.SeqType -> "Seq"
-    is MezzeType.ListType -> "List"
-    is MezzeType.SetType -> "Set"
-    is MezzeType.MapType -> "Map"
-    is MezzeType.TypeApplication -> type.constructor
-    is MezzeType.RecordType -> type.typeName
-    is MezzeType.VariantType -> type.typeName
-        ?: if (type.constructors.size == 1) type.constructors.keys.first() else null
-    else -> null
 }
 
