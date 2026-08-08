@@ -284,36 +284,40 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(results.toArray());
     }
 
-    @TruffleBoundary
+    /**
+     * #403: fold hot loop. Two wins over the previous impl:
+     *
+     * <ol>
+     *  <li>Scalar-ABI: when folder is a 2-arg lambda (`{acc, x} -> ...`),
+     *      pass acc and x as positional args instead of wrapping in a
+     *      {@code MezzeRecord{acc, x}}. MezzeFunctionRootNode disambiguates
+     *      scalar vs record for {@code parameterCount == 2} purely by arity
+     *      — no folder-side change needed. Kills ~1 MezzeRecord alloc per
+     *      iteration (~10M records / ~200 MB for a range(0, 10_000_000).fold).
+     *  <li>No {@code @TruffleBoundary}: the outer call to fold IS on a JIT
+     *      hot path — leaving it opaque forced every fold to be a real
+     *      Java call with no PE across the callback. Removing the boundary
+     *      lets Truffle PE trace the loop, and IndirectCallNode PIC lets
+     *      it inline the folder body per callsite. Truffle's own loop
+     *      unrolling stops at a small threshold so we don't compile-explode
+     *      even for large N — the interpreter runs the tail iterations.
+     * </ol>
+     *
+     * <p>Fallback to record ABI when parameterCount != 2 (partial-app / arity
+     * mismatch could surface a folder with a different shape).
+     */
     public static Object fold(MezzeSeq seq, Object init, MezzeFunction folder,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        // Hoist closure + CallTarget outside the loop. fold runs N
-        // iterations with the same folder — no point re-reading per element.
-        Object[] closureValues = folder.getClosureValues();
-        int closureLen = closureValues.length;
-        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
-        int size = seq.size();
-        Object acc = init;
-        for (int i = 0; i < size; i++) {
-            Object[] args = new Object[closureLen + 1];
-            System.arraycopy(closureValues, 0, args, 0, closureLen);
-            args[closureLen] = MezzeRecord.wrapAccX(acc, seq.get(i));
-            acc = callNode.call(target, args);
-        }
-        return acc;
+        return foldTwoArg(seq, init, folder, callNode, /*startIndex=*/0, /*scanOut=*/null);
     }
 
-    @TruffleBoundary
     public static MezzeVariant reduce(MezzeSeq seq, MezzeFunction reducer,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) {
             return MezzeVariant.none();
         }
-        Object acc = seq.get(0);
-        for (int i = 1; i < seq.size(); i++) {
-            acc = callNode.call(reducer.getCallTarget(),
-                prepareArgsTwo(reducer, acc, seq.get(i)));
-        }
+        Object acc = foldTwoArg(seq, seq.get(0), reducer, callNode,
+                                /*startIndex=*/1, /*scanOut=*/null);
         return MezzeVariant.some(acc);
     }
 
@@ -783,16 +787,11 @@ public final class SeqNatives {
         return MezzeRecord.empty();  // Returns unit
     }
 
-    @TruffleBoundary
     public static MezzeSeq scan(MezzeSeq seq, Object init, MezzeFunction fn,
                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] result = new Object[seq.size() + 1];
         result[0] = init;
-        Object acc = init;
-        for (int i = 0; i < seq.size(); i++) {
-            acc = callNode.call(fn.getCallTarget(), prepareArgsTwo(fn, acc, seq.get(i)));
-            result[i + 1] = acc;
-        }
+        foldTwoArg(seq, init, fn, callNode, /*startIndex=*/0, result);
         return MezzeSeq.fromArray(result);
     }
 
@@ -1180,6 +1179,46 @@ public final class SeqNatives {
         // Use fast wrapper - no @TruffleBoundary
         args[closureValues.length] = MezzeRecord.wrapX(arg);
         return args;
+    }
+
+    /**
+     * #403: shared 2-arg fold loop used by {@link #fold}, {@link #reduce},
+     * and {@link #scan}. See the doc on {@link #fold} for why we skip
+     * {@code @TruffleBoundary} and prefer the scalar ABI.
+     *
+     * <p>When {@code scanOut != null}, writes each step's acc into
+     * {@code scanOut[startIndex + i + 1]} — the scan variant.
+     *
+     * @param startIndex first seq index to fold in (0 for fold/scan, 1 for reduce).
+     */
+    private static Object foldTwoArg(MezzeSeq seq, Object init, MezzeFunction folder,
+                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode,
+                                     int startIndex, Object[] scanOut) {
+        Object[] closureValues = folder.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
+        int size = seq.size();
+        Object acc = init;
+        boolean scalarAbi = folder.getParameterNames().length == 2;
+        if (scalarAbi) {
+            for (int i = startIndex; i < size; i++) {
+                Object[] args = new Object[closureLen + 2];
+                System.arraycopy(closureValues, 0, args, 0, closureLen);
+                args[closureLen] = acc;
+                args[closureLen + 1] = seq.get(i);
+                acc = callNode.call(target, args);
+                if (scanOut != null) scanOut[i + 1] = acc;
+            }
+        } else {
+            for (int i = startIndex; i < size; i++) {
+                Object[] args = new Object[closureLen + 1];
+                System.arraycopy(closureValues, 0, args, 0, closureLen);
+                args[closureLen] = MezzeRecord.wrapAccX(acc, seq.get(i));
+                acc = callNode.call(target, args);
+                if (scanOut != null) scanOut[i + 1] = acc;
+            }
+        }
+        return acc;
     }
 
     private static Object[] prepareArgsTwo(MezzeFunction fn, Object arg1, Object arg2) {
