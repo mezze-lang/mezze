@@ -286,6 +286,13 @@ object MonoDriver {
                         counters.byHashSeeded++
                     } else {
                         counters.byHashUnifyFail++
+                        if (System.getenv("MEZZE_MONO_TRACE") != null) {
+                            System.err.println("[mono-trace] byHash-fail callee=${callee.name} " +
+                                "typeParams=${callee.typeParams} " +
+                                "callee.scheme=${callee.scheme.type} " +
+                                "fn.type=${fn.type} " +
+                                "arg.type=${expr.arg.type}")
+                        }
                     }
                 }
             }
@@ -449,9 +456,33 @@ object MonoDriver {
         if (!unify(genericType, siteType, nameToBinding)) return null
         val args = ArrayList<MezzeType>(typeParams.size)
         for (tp in typeParams) {
-            args.add(nameToBinding[tp.name] ?: return null)
+            val binding = nameToBinding[tp.name]
+            if (binding != null) {
+                args.add(binding)
+            } else if (isEffectVarName(tp.name)) {
+                // Effect-var type params (named 'eNNN by generalize) don't
+                // appear in the value-type signature — they live only in
+                // EffectRow.rowVar. When the caller doesn't add extra
+                // effects, safely default to the empty effect row so mono
+                // can still specialize. This unlocks specialization for
+                // any user-defined helper that internally calls an
+                // effect-polymorphic stdlib function (very common: `sum_to
+                // = {n} -> range.fold {...}` inherits `<'e>` from fold).
+                args.add(MezzeType.EffectRow.simple(emptySet()))
+            } else {
+                return null
+            }
         }
         return args
+    }
+
+    /** Effect-var type params are named `'eNNN` by generalization —
+     *  the leading `e` after the tick is the convention. Value-type
+     *  params start with `'a`, `'b`, ..., `'x`, etc. */
+    private fun isEffectVarName(name: String): Boolean {
+        // Names arrive with the tick, e.g. "'e271".
+        val stripped = name.removePrefix("'")
+        return stripped.length >= 2 && stripped.startsWith("e") && stripped[1].isDigit()
     }
 
     /** Fallback: derive type args by unifying the callee's declared param

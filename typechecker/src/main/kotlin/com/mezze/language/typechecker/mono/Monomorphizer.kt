@@ -176,6 +176,13 @@ class Monomorphizer(
             // `typeArgs` list are the polymorphic transitive references.
             val refs = mutableListOf<Pair<BindingRef.ByHash, TypeInstantiation?>>()
             TypeSubstitution.collectByHashRefs(newBody, refs)
+            if (System.getenv("MEZZE_MONO_TRACE") != null) {
+                System.err.println("[mono-trace] transitive refs from ${decl.name}: total=${refs.size}")
+                for ((ref, inst) in refs) {
+                    val target = resolveDecl(ref.hash)
+                    System.err.println("[mono-trace]   ref=${ref.hash.getHex().take(8)} target=${target?.name ?: "<unresolved>"} typeParams=${target?.typeParams?.size ?: 0} inst=$inst")
+                }
+            }
             for ((ref, inst) in refs) {
                 if (inst == null || inst.typeArgs.isEmpty()) continue
                 worklist.addLast(
