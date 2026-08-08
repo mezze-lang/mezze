@@ -4,6 +4,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeSuspend;
 import com.oracle.truffle.api.bytecode.OperationProxy;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -60,9 +61,13 @@ public abstract class DirectAddNode extends MezzeNode {
     }
 
     /**
-     * String concatenation.
+     * String concatenation. `@TruffleBoundary` — `String + String` in JDK 24+
+     * lowers to `StringConcatHelper.simpleConcat`, a blocklisted method under
+     * native-image SVM runtime compilation. Boundary keeps the PE reachability
+     * clean; string concat is inherently allocating so the boundary is free. #402.
      */
     @Specialization
+    @TruffleBoundary
     public static String addStrings(String left, String right) {
         return left + right;
     }
@@ -102,6 +107,7 @@ public abstract class DirectAddNode extends MezzeNode {
      * Fallback: Type error.
      */
     @Fallback
+    @TruffleBoundary
     public static Object typeError(Object left, Object right) {
         throw new RuntimeException(
             "Cannot add " + (left == null ? "null" : left.getClass().getSimpleName()) +

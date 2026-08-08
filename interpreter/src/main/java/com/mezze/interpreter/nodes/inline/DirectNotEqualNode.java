@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes.inline;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeVariant;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -49,7 +50,10 @@ public abstract class DirectNotEqualNode extends MezzeNode {
         return !FractionHelper.equalFractions(left, right);
     }
 
+    /** `@TruffleBoundary` — see {@link DirectEqualNode#eqRecords} for the
+     *  identity-hashCode blocklist rationale. #402. */
     @Specialization(replaces = "neqFractions")
+    @TruffleBoundary
     public static boolean neqRecords(MezzeRecord left, MezzeRecord right) {
         if (FractionHelper.isFraction(left) && FractionHelper.isFraction(right)) {
             return !FractionHelper.equalFractions(left, right);
@@ -61,12 +65,16 @@ public abstract class DirectNotEqualNode extends MezzeNode {
         return FractionHelper.isFraction(value);
     }
 
+    /** `@TruffleBoundary` — see {@link DirectEqualNode#eqVariants}. #402. */
     @Specialization
+    @TruffleBoundary
     public static boolean neqVariants(MezzeVariant left, MezzeVariant right) {
         return !left.equals(right);
     }
 
+    /** `@TruffleBoundary` — see {@link DirectEqualNode#eqGeneric}. #402. */
     @Fallback
+    @TruffleBoundary
     public static boolean neqGeneric(Object left, Object right) {
         return !Objects.equals(left, right);
     }

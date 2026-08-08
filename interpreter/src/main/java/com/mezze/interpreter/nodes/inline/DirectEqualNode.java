@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes.inline;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeVariant;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -49,7 +50,16 @@ public abstract class DirectEqualNode extends MezzeNode {
         return FractionHelper.equalFractions(left, right);
     }
 
+    /**
+     * `@TruffleBoundary` on the record-eq fallback: {@link MezzeRecord#equals}
+     * reaches user data-structure equals implementations (MezzeMap, MezzeSet)
+     * whose hashCode paths call {@link System#identityHashCode}, which is
+     * blocklisted from runtime compilation in native-image. Without the
+     * boundary, {@code mez build --native} fails with "Blocklisted methods
+     * are reachable for runtime compilation". See #402.
+     */
     @Specialization(replaces = "eqFractions")
+    @TruffleBoundary
     public static boolean eqRecords(MezzeRecord left, MezzeRecord right) {
         // Check for fractions even in generic path
         if (FractionHelper.isFraction(left) && FractionHelper.isFraction(right)) {
@@ -62,12 +72,25 @@ public abstract class DirectEqualNode extends MezzeNode {
         return FractionHelper.isFraction(value);
     }
 
+    /**
+     * `@TruffleBoundary` for the same reason as {@link #eqRecords} —
+     * {@link MezzeVariant#equals} can reach payload records whose eq
+     * chains hit blocklisted identity-hashCode methods. See #402.
+     */
     @Specialization
+    @TruffleBoundary
     public static boolean eqVariants(MezzeVariant left, MezzeVariant right) {
         return left.equals(right);
     }
 
+    /**
+     * Generic-object fallback — reaches arbitrary {@code .equals} through
+     * {@link Objects#equals}. Boundary keeps native-image build valid; the
+     * fallback is cold anyway (the specialised paths above handle every
+     * common shape). See #402.
+     */
     @Fallback
+    @TruffleBoundary
     public static boolean eqGeneric(Object left, Object right) {
         return Objects.equals(left, right);
     }

@@ -272,12 +272,24 @@ val bundleNativeClasspath by tasks.registering(Zip::class) {
     // under a META-INF prefix so it doesn't collide with other top-level
     // resources.
     destinationDirectory.set(layout.buildDirectory.dir("generated/resources/META-INF/mezze"))
-    // Use Gradle's resolved runtimeClasspath rather than the shadowJar
-    // output. shadowJar already merged everything into one fat-jar; we
-    // need the originals.
+    // Use `precompileOnly` (which pulls :interpreter's full runtime
+    // classpath including `truffle-runtime`) rather than :cli's own
+    // `runtimeClasspath` — the CLI only declares `truffle-api` directly
+    // to keep its own compile classpath slim, but the user native binary
+    // needs the full Truffle runtime jar on-cp for `--macro:truffle-svm`
+    // to install SubstrateTruffleRuntime. Without truffle-runtime present
+    // at native-image build time, the SVM Truffle Feature detects only
+    // truffle-api and refuses to substitute in SubstrateTruffleRuntime,
+    // so the resulting binary silently falls back to DefaultTruffleRuntime
+    // (interpreter-only, no JIT). See #402.
     from(configurations.runtimeClasspath)
+    from(configurations.named("precompileOnly"))
     // Drop directory entries — we only need the jar files themselves.
     includeEmptyDirs = false
+    // The two configurations resolve some jars in common
+    // (kotlin-stdlib, truffle-api, ...); dedupe by jar name at zip
+    // time so we don't error on the merge.
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 // processResources picks up `generated/resources/` via the srcDir above,

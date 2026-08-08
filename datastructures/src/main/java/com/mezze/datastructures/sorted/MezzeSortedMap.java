@@ -621,21 +621,25 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     // ===== INTEROP LIBRARY =====
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean hasHashEntries() {
         return true;
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     long getHashSize() {
         return length;
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean isHashEntryReadable(Object key) {
         return containsKeyObject(key);
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     @SuppressWarnings("unchecked")
     Object readHashValue(Object key) throws UnknownKeyException {
         try {
@@ -650,31 +654,37 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean isHashEntryModifiable(@SuppressWarnings("unused") Object key) {
         return false;
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean isHashEntryInsertable(@SuppressWarnings("unused") Object key) {
         return false;
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     void writeHashEntry(@SuppressWarnings("unused") Object key, @SuppressWarnings("unused") Object value) throws UnsupportedMessageException {
         throw UnsupportedMessageException.create();
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean hasIterator() {
         return true;
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     Object getIterator() {
         return new SortedMapIterator(iterator());
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     Object getHashEntriesIterator() {
         return new SortedMapIterator(iterator());
     }
@@ -688,16 +698,19 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         boolean isIterator() {
             return true;
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         boolean hasIteratorNextElement() {
             return iterator.hasNext();
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
             if (!iterator.hasNext()) {
                 throw UnsupportedMessageException.create();

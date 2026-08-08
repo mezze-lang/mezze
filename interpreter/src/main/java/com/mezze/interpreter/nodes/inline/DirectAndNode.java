@@ -1,6 +1,7 @@
 package com.mezze.interpreter.nodes.inline;
 
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -23,6 +24,7 @@ public abstract class DirectAndNode extends MezzeNode {
     }
 
     @Fallback
+    @TruffleBoundary
     public static Object typeError(Object left, Object right) {
         throw new RuntimeException(
             "Cannot apply && to " + (left == null ? "null" : left.getClass().getSimpleName()) +

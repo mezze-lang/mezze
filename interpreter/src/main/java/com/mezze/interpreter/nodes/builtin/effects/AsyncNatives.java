@@ -321,6 +321,10 @@ public final class AsyncNatives {
             return null;
         }
 
+        /** `@TruffleBoundary` — LockSupport.unpark reaches Pthread.pthread_mutex_lock,
+         *  a blocklisted native call under SVM Truffle runtime compilation. Called
+         *  from Promise.complete on async completion — cold path. #402. */
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         private void unparkWaiter() {
             Thread w = (Thread) WAITER.getAcquire(this);
             if (w != null) {

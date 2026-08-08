@@ -610,46 +610,55 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     // ===== INTEROP LIBRARY =====
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean hasArrayElements() {
         return true;
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     long getArraySize() {
         return storage.size();
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean isArrayElementReadable(long index) {
         return index >= 0 && index < storage.size();
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     Object readArrayElement(long index) {
         return storage.toArray()[(int) index];
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean isArrayElementModifiable(@SuppressWarnings("unused") long index) {
         return false;
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean isArrayElementInsertable(@SuppressWarnings("unused") long index) {
         return false;
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     void writeArrayElement(@SuppressWarnings("unused") long index, @SuppressWarnings("unused") Object value) throws UnsupportedMessageException {
         throw UnsupportedMessageException.create();
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean hasIterator() {
         return true;
     }
 
     @ExportMessage
+   @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     Object getIterator() {
         return new SetIterator(iterator());
     }
@@ -663,16 +672,19 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         boolean isIterator() {
             return true;
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         boolean hasIteratorNextElement() {
             return iterator.hasNext();
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
             if (!iterator.hasNext()) {
                 throw UnsupportedMessageException.create();

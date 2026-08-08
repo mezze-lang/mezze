@@ -272,18 +272,36 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = boolean.class)
     public static final class InlineScalarInspect {
+        /**
+         * `@TruffleBoundary` on `doLong` and `doDouble`: {@link Long#toString(long)}
+         * and {@link Double#toString(double)} reach {@link String#String(char[], int, int)}
+         * → {@code Preconditions.checkFromIndexSize} → {@code String.format} →
+         * blocklisted {@link java.util.AbstractCollection#toString} chain. Under
+         * native-image runtime compilation this reachability trips
+         * SVM TruffleFeature's blocklist. Boundaries keep PE from following into
+         * the JDK number-formatting closure. See #402.
+         */
         @Specialization
+        @TruffleBoundary
         public static String doLong(boolean dbgStyle, long v) { return Long.toString(v); }
         @Specialization
+        @TruffleBoundary
         public static String doDouble(boolean dbgStyle, double v) { return Double.toString(v); }
         @Specialization
         public static String doBool(boolean dbgStyle, boolean v) { return v ? "True" : "False"; }
+        /**
+         * `@TruffleBoundary` on doChar/doString: string concat via `+` lowers
+         * to StringConcatHelper.stringCoder, blocklisted under SVM runtime
+         * compilation. `to_dbg_str` on scalars is cold — boundary is free. #402.
+         */
         @Specialization(guards = "isChar(v)")
+        @TruffleBoundary
         public static String doChar(boolean dbgStyle, Object v) {
             char c = (Character) v;
             return dbgStyle ? "'" + c + "'" : String.valueOf(c);
         }
         @Specialization(guards = "isString(v)")
+        @TruffleBoundary
         public static String doString(boolean dbgStyle, Object v) {
             String s = (String) v;
             return dbgStyle ? "\"" + s + "\"" : s;
@@ -326,6 +344,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return reader.execute(null);
         }
 
+        /** `@TruffleBoundary` — Node.<init> is neverPartOfCompilation. #402. */
+        @TruffleBoundary
         static ReadGlobalByHashNode createReader(Hash hash) {
             return new ReadGlobalByHashNode(hash);
         }
@@ -349,6 +369,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return reader.execute(null);
         }
 
+        /** `@TruffleBoundary` — Node.<init> is neverPartOfCompilation. #402. */
+        @TruffleBoundary
         static ReadGlobalFnByHashNode createReader(Hash hash) {
             return new ReadGlobalFnByHashNode(hash);
         }
@@ -376,6 +398,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return callNode.executeWith(arg);
         }
 
+        /** `@TruffleBoundary` — Node.<init> is neverPartOfCompilation-tagged;
+         *  Uncached BDSL path must not reach it from a PE root. #402. */
+        @TruffleBoundary
         static com.mezze.interpreter.nodes.function.MonomorphicCallNode createCall(Hash hash) {
             return com.mezze.interpreter.nodes.function.MonomorphicCallNode.create(
                     hash, hash.getHex(),
@@ -640,7 +665,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // returned from here. Both are nontrivial — parked. Users hit
         // this path only when the hasReadField gate is dropped, and
         // the gate stays on for now (see MezzeLanguage.isBdslSafeCallee).
+        /** `@TruffleBoundary` — the string-concat error-message path drags
+         *  Throwable+Formatter reachability that hits native-image blocklist.
+         *  Cold fallback (type error). See #402. */
         @Fallback
+        @TruffleBoundary
         public static Object doNotRecord(String fieldName, Object receiver) {
             throw new RuntimeException("Expected record for field '" + fieldName + "', got: " +
                 (receiver == null ? "null" : receiver.getClass().getSimpleName()));
@@ -816,7 +845,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = String.class)
     @ConstantOperand(type = String[].class)
     public static final class MakeLambda {
+        /** `@TruffleBoundary` — MezzeFunction ctor may init a HashMap for
+         *  partialArgs (blocklisted under SVM). Called on every lambda
+         *  construction but is inherently allocating; boundary is free. #402. */
         @Specialization
+        @TruffleBoundary
         public static MezzeFunction doMake(CallTarget target, String name, String[] paramNames,
                                             @Variadic Object[] captures) {
             // #374 — must thread paramNames through so partial application
@@ -843,7 +876,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = String.class)
     @ConstantOperand(type = String.class)
     public static final class MakeLambdaByHash {
+        /** `@TruffleBoundary` — see {@link MakeLambda#doMake}. #402. */
         @Specialization
+        @TruffleBoundary
         public static MezzeFunction doMake(
                 String hashHex, String name, @Variadic Object[] captures,
                 @Cached(value = "resolveByHash(hashHex)", allowUncached = true) CallTarget cachedTarget) {
@@ -985,7 +1020,24 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = NativeHandler.class)
     public static final class CallNativeScalar {
+        /**
+         * `@TruffleBoundary` on the scalar native dispatch — the handler lambda
+         * is opaque to PE (its impl body can reach anything the JDK exposes:
+         * String.replace, Pattern.quote, Math libs, allocating collections, ...).
+         * SVM TruffleFeature's blocklist check follows that reachability and
+         * bails on native-image build.
+         *
+         * <p>Perf-critical numeric ops (+, -, *, /, %, comparisons on Int/Float/Bool)
+         * do NOT go through CallNativeScalar — they lower to {@link InlineBinaryOp}
+         * which stays PE-inline. This dispatch is only for names that lack an
+         * inline IR shortcut (String ops, math like sqrt/pow, allocating seq
+         * builtins). Those are inherently allocating / heavier so the boundary
+         * has no measurable impact.
+         *
+         * <p>See #402.
+         */
         @Specialization
+        @TruffleBoundary
         public static Object doInvoke(NativeHandler handler, @Variadic Object[] args) {
             return handler.invoke(new PositionalArgs(args, null, null));
         }
@@ -1009,7 +1061,19 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler.class)
     public static final class CallNativeRecord {
+        /**
+         * `@TruffleBoundary` — legacy record-ABI native dispatch. The handler
+         * lambda is opaque to PE (it's stored in a static Map and can reach
+         * any JDK utility). Under native-image SVM's runtime compilation the
+         * reachability closure lands on blocklisted methods (List.of, Vector,
+         * Map.remove, String.format, ...). Boundaries here match the sibling
+         * {@link CallNativeScalar} #402 fix; the record-ABI path is inherently
+         * allocating (unpacks a MezzeRecord) so it was never a JIT hot path.
+         *
+         * <p>See #402.
+         */
         @Specialization
+        @TruffleBoundary
         public static Object doInvoke(
                 com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler handler,
                 Object arg,
@@ -1022,6 +1086,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             }
             return handler.handle(record, callNode);
         }
+        /** `@TruffleBoundary` — IndirectCallNode.create → Node.<init>. #402. */
+        @TruffleBoundary
         static com.oracle.truffle.api.nodes.IndirectCallNode createIndirect() {
             return com.oracle.truffle.api.nodes.IndirectCallNode.create();
         }
@@ -1052,6 +1118,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             }
             return handler.handle(record, callNode, null);
         }
+        /** `@TruffleBoundary` — IndirectCallNode.create → Node.<init>. #402. */
+        @TruffleBoundary
         static com.oracle.truffle.api.nodes.IndirectCallNode createIndirect() {
             return com.oracle.truffle.api.nodes.IndirectCallNode.create();
         }
@@ -1203,7 +1271,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = NativeHandler.class)
     public static final class CallNativeScalarWithNode {
+        /**
+         * `@TruffleBoundary` — this variant is used only by "needs-node"
+         * handlers (Async spawn/await/park, HOF-callback consumers, and
+         * stringy allocating ops). Their lambda bodies reach String.replace,
+         * Pattern.quote, and other JDK utilities whose reachability closure
+         * hits blocklisted native-image runtime methods. The plain scalar
+         * variant {@link CallNativeScalar} stays PE-inline for numeric/bool
+         * primitives (the actual hot path). See #402.
+         */
         @Specialization
+        @TruffleBoundary
         public static Object doInvoke(
                 NativeHandler handler,
                 @Variadic Object[] args,
@@ -1421,7 +1499,23 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return left == right;
         }
 
+        /**
+         * Object-eq fallback for the primitive-eq operation. `@TruffleBoundary`
+         * gates PE at this method, which is required for
+         * {@code mez build --native}: without it, the SubstrateVM Truffle
+         * feature's blocklist check follows the reachability chain
+         * {@code Objects.equals → left.equals(right)} into user-defined
+         * .equals implementations ({@link com.mezze.datastructures.set.MezzeSet},
+         * {@link java.util.List}, etc.) that transitively reach blocklisted
+         * methods like identity hashCode and HashMap.hashCode. Build fails
+         * with "Blocklisted methods are reachable for runtime compilation".
+         *
+         * The eq compare is only used by literal-pattern match (int/str/char/unit),
+         * so the object-fallback path is cold — the boundary has zero perf
+         * cost on the hot paths (doLong/doDouble/doBoolean). See #402.
+         */
         @Specialization(replaces = {"doLong", "doDouble", "doBoolean"})
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         public static boolean doObject(Object left, Object right) {
             return java.util.Objects.equals(left, right);
         }
@@ -1637,6 +1731,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return opCall.executeWith(arg);
         }
 
+        /** `@TruffleBoundary` — see PerformMutMutateAct.createOpCall. #402. */
+        @TruffleBoundary
         static com.mezze.interpreter.nodes.effect.OpCallNode createOpCall(
                 String opName, Hash effectHash) {
             return com.mezze.interpreter.nodes.effect.OpCallNode.create(
@@ -1774,7 +1870,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = Hash.class)
     public static final class LookupHandlerByHash {
+        /** `@TruffleBoundary` — MezzeContext.lookupHandler dispatches through
+         *  a hash-keyed map + throws a String-formatted RuntimeException on miss;
+         *  both reach blocklisted methods under SVM. Handler lookup happens
+         *  once per handle-block install, not per op-call. #402. */
         @Specialization
+        @TruffleBoundary
         public static Object doLookup(Hash contentHash, @Bind Node node) {
             com.mezze.interpreter.runtime.MezzeContext ctx =
                 com.mezze.interpreter.runtime.MezzeContext.get(node);
@@ -1906,7 +2007,19 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     public static final class UnwrapAbortValue {
+        /**
+         * `@TruffleBoundary` — {@code throw new RuntimeException((Throwable) exception)}
+         * (the non-abort fallthrough) drags the entire Throwable-init closure
+         * (getMessage, Formatter.format, ...) into PE reachability, which
+         * hits ~100 blocklisted methods (java.util.List.of, HashMap.remove,
+         * Sched.sched_yield, StringConcatHelper, ...). The boundary cuts
+         * that closure at this method: PE treats doUnwrap as opaque, so
+         * only the direct callees matter. The boundary is free — the
+         * common path (abort → return value) is one branch, and rethrow is
+         * a cold error path. See #402.
+         */
         @Specialization
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         public static Object doUnwrap(Object exception) {
             if (exception instanceof com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
                 return abort.value;
@@ -2002,7 +2115,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     public static final class UnwrapSuspendedInBlock {
+        /** `@TruffleBoundary` — same rationale as {@link UnwrapAbortValue#doUnwrap}:
+         *  the rethrow through {@code new RuntimeException(Throwable)} makes PE
+         *  reach the full Throwable init closure (Formatter, List.of, ...) and
+         *  hits ~150 blocklisted methods. Cold path — boundary is free. #402. */
         @Specialization
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         public static Object doUnwrap(Object exception) {
             if (exception instanceof SuspendedInBlockException sib) {
                 return sib.suspended;
@@ -2036,6 +2154,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return opCall.executeMutMutateActFast(actFn);
         }
 
+        /** `@TruffleBoundary` — OpCallNode.createMutMutateActFast contains
+         *  CompilerAsserts.neverPartOfCompilation() (build-time-only node
+         *  creation). The uncached BDSL variant would otherwise reach it
+         *  from a PE root. #402. */
+        @TruffleBoundary
         static com.mezze.interpreter.nodes.effect.OpCallNode createOpCall(Hash effectHash) {
             return com.mezze.interpreter.nodes.effect.OpCallNode.createMutMutateActFast(
                     effectHash,
@@ -2065,6 +2188,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return binding.execute(null);
         }
 
+        /** `@TruffleBoundary` — Node.<init> is neverPartOfCompilation. #402. */
+        @TruffleBoundary
         static com.mezze.interpreter.nodes.effect.EffectBindingNode createBinding(String name) {
             return new com.mezze.interpreter.nodes.effect.EffectBindingNode(name);
         }

@@ -121,6 +121,10 @@ public final class MezzeFunction implements TruffleObject {
         return partialArgs;
     }
 
+    /** `@TruffleBoundary` — Map.isEmpty is blocklisted for SVM runtime
+     *  compilation; partial-app check runs in indirect-call slow path,
+     *  not JIT-critical. #402. */
+    @TruffleBoundary
     public boolean hasPartialArgs() {
         return partialArgs != null && !partialArgs.isEmpty();
     }

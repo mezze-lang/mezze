@@ -112,6 +112,18 @@ object NativeBuildPath {
 
         if (timing) System.err.println("[${relativeTime()}ms] invoking native-image (${cmd.size} args)")
 
+        val debugCmd = System.getenv("MEZZE_NATIVE_DEBUG_CMD")?.let {
+            it == "1" || it.equals("true", ignoreCase = true)
+        } ?: false
+        if (debugCmd) {
+            System.err.println("--- MEZZE_NATIVE_DEBUG_CMD: full native-image invocation ---")
+            cmd.forEach { System.err.println("  $it") }
+            System.err.println("--- end ---")
+            System.err.println("--- classpath jars (${classpathJars.size}) ---")
+            classpathJars.forEach { System.err.println("  ${it.name} (${it.length()} bytes)") }
+            System.err.println("--- staged in ${stagingDir.absolutePath} ---")
+        }
+
         // Quiet-by-default native-image output (#191).
         // native-image is loud: pages of warnings, deprecation notes, build
         // progress, and image-info banners. Useful when debugging, but noise
@@ -416,7 +428,11 @@ object NativeBuildPath {
             "Did you build this `mez` with `./gradlew :cli:installNative`?"
         )
         val drop = listOf(
-            "truffle-runtime-",
+            // #401: truffle-runtime-* used to be dropped here to force the
+            // interpreter-only DefaultTruffleRuntime, since --macro:truffle-svm
+            // was off for user builds. Both are now on by default; keeping
+            // the jar on the classpath is required for the macro's PE hooks
+            // to resolve at build time.
             "sqlite-jdbc-",
             "chromeinspector-tool-",
             "dap-tool-",
@@ -648,6 +664,17 @@ object NativeBuildPath {
         // sqlite-jdbc's Feature class lives in the jar we no longer
         // ship — the directive would resolve to nothing.
         "META-INF/native-image/org.xerial/sqlite-jdbc/native-image.properties",
+        // #402: mezze-runtime.jar ships the shaded org.graalvm.truffle:
+        // truffle-runtime jar, which registers HotSpotTruffleRuntimeAccess
+        // as the com.oracle.truffle.api.TruffleRuntimeAccess service.
+        // On JVM that's what we want (real HotSpot Graal JIT). On native-
+        // image builds, --macro:truffle-svm installs SubstrateTruffleRuntime
+        // via a build-time Feature; but if this ServiceLoader entry survives
+        // into the image, HotSpot wins at Truffle.getRuntime() init and the
+        // native binary falls back to DefaultTruffleRuntime (interpreter
+        // only, no JIT). Drop the service registration from the sanitised
+        // user fat-jar so the SVM runtime installed by the macro wins.
+        "META-INF/services/com.oracle.truffle.api.TruffleRuntimeAccess",
     )
 
     /**
@@ -679,6 +706,15 @@ object NativeBuildPath {
         // in the builder module jrt:/org.graalvm.truffle.compiler and are
         // rejected on -cp with the same hard error. #400.
         "com/oracle/truffle/compiler/",
+        // #402: shaded HotSpot Truffle runtime classes from mezze-runtime.jar.
+        // Companion to the TruffleRuntimeAccess service strip above:
+        // dropping just the service isn't enough — if any code (e.g. via
+        // reachability analysis of Class.forName strings) resolves these
+        // classes, the SVM feature refuses to install SubstrateTruffleRuntime
+        // and we still end up on the interpreter. The user native binary
+        // gets its Truffle runtime from SubstrateTruffleCompilationSupport
+        // installed by --macro:truffle-svm; the HotSpot copy is dead code.
+        "com/oracle/truffle/runtime/hotspot/",
     )
 
     // ─── helpers ─────────────────────────────────────────────────────────────

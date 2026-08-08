@@ -2,6 +2,7 @@ package com.mezze.interpreter.nodes.inline;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -45,6 +46,7 @@ public abstract class DirectNegateNode extends MezzeNode {
     }
 
     @Fallback
+    @TruffleBoundary
     public static Object typeError(Object value) {
         throw new RuntimeException(
             "Cannot negate " + (value == null ? "null" : value.getClass().getSimpleName())

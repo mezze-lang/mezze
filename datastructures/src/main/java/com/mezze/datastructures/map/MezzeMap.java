@@ -577,11 +577,13 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     boolean isHashEntryReadable(Object key) {
         return storage.containsKey(key);
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     Object readHashValue(Object key) throws UnknownKeyException {
         Object value = storage.get(key);
         if (value == null && !storage.containsKey(key)) {

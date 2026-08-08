@@ -133,7 +133,22 @@ public final class NativeDispatch extends MezzeNode {
      * {@link #execute}: prefers with-node handlers, then plain handlers.
      * The {@code node} parameter is the surrounding BDSL root — needed
      * by async handlers that consult TruffleLanguage.Env.
+     *
+     * <p>`@TruffleBoundary` — the record-ABI dispatch resolves the handler
+     * lambda via a HashMap lookup, and the lambda impls can reach anything
+     * in the JDK (String.replaceFirst → Pattern.quote → Formatter etc.).
+     * PE would need to trace every possible handler; native-image's SVM
+     * TruffleFeature bails on the resulting blocklisted-method reachability.
+     * Making record-ABI dispatch opaque lets PE stop here.
+     *
+     * <p>The scalar-ABI path (CallNativeScalar / DirectNativeOp*) is the
+     * hot path for numeric/bool primitives (#266-268) and is unaffected —
+     * those specialise on primitive types and inline through PE. Record-ABI
+     * is legacy for stringy/allocating ops, which have to boundary anyway.
+     *
+     * <p>See #402.
      */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     public static Object dispatchByName(String name, MezzeRecord record,
             IndirectCallNode callNode, MezzeNode node) {
         NativeHandlerWithNode wn = HANDLERS_WITH_NODE.get(name);

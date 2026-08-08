@@ -232,6 +232,9 @@ public final class HandlerChainRegistry {
      * disambiguate when two effects in scope declare an op with the same
      * simple name (#246).
      */
+    /** `@TruffleBoundary` — same rationale as {@link #peekHandlerForEffect}:
+     *  ThreadLocal.get closure reaches blocklisted methods under SVM. #402. */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     public static HandlerChainEntry[] snapshotHandlerChainEntries() {
         ArrayDeque<HandlerChainEntry> chain = HANDLER_CHAIN.get();
         int size = chain.size();
@@ -249,6 +252,13 @@ public final class HandlerChainRegistry {
      * still allocation-free because ArrayDeque's Iterator is an inner
      * non-static class reused via cursor state. #257.
      */
+    // `@TruffleBoundary` — ThreadLocal.get() reachability closure in
+    // native-image drags in every ThreadLocal supplier on the classpath
+    // (including Helidon's ValueResolvingFilter → HashMap.<init>, which is
+    // blocklisted for runtime compilation). The perform hot path calls
+    // peekHandlerForEffect once per op-call; the boundary loses some inlining
+    // but keeps SVM Truffle compilation valid. See #402.
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     public static com.mezze.interpreter.values.MezzeRecord peekHandlerForEffect(
             com.mezze.language.typedast.Hash effectHash) {
         ArrayDeque<HandlerChainEntry> chain = HANDLER_CHAIN.get();

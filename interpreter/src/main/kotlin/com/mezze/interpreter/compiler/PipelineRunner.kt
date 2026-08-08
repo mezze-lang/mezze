@@ -227,10 +227,18 @@ object PipelineRunner {
                 // expects: [captures..., params...]; entry has neither
                 // captures nor params, so passing an empty record is a
                 // no-op arg that BDSL ignores).
+                //
+                // `@TruffleBoundary` on execute: Kotlin generates
+                // Intrinsics.throwParameterIsNullNPE for method dispatch,
+                // whose Throwable.getStackTrace path reaches blocklisted
+                // native-image runtime methods (StackTraceUtils, ...). This
+                // wrapper is on the entry path (called ONCE per program
+                // start), never a hot loop — boundary is free. See #402.
                 return object : com.mezze.interpreter.nodes.MezzeNode() {
                     @Child
                     private var callNode: com.oracle.truffle.api.nodes.DirectCallNode =
                         com.oracle.truffle.api.nodes.DirectCallNode.create(entryTarget)
+                    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
                     override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): Any {
                         return callNode.call(com.mezze.interpreter.values.MezzeRecord.empty())
                     }
@@ -271,6 +279,11 @@ object PipelineRunner {
             // Read the entry function by hash (no auto-eval), then invoke with {}.
             val entryFnNode = com.mezze.interpreter.nodes.ReadGlobalFnByHashNode(namedEntry.hash)
             val emptyRecordNode = object : com.mezze.interpreter.nodes.MezzeNode() {
+                // `@TruffleBoundary` — Kotlin object-expression execute
+                // pulls Intrinsics.throwParameterIsNullNPE into PE
+                // reachability, hitting native-image blocklisted methods.
+                // Called ONCE per program entry (never hot). See #402.
+                @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
                 override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): Any {
                     return com.mezze.interpreter.values.MezzeRecord.empty()
                 }

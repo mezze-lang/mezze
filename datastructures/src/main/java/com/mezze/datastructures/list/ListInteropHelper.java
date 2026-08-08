@@ -25,16 +25,19 @@ public final class ListInteropHelper {
     public static final class EmptyIterator implements TruffleObject {
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         boolean isIterator() {
             return true;
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         boolean hasIteratorNextElement() {
             return false;
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
             throw UnsupportedMessageException.create();
         }
@@ -49,16 +52,19 @@ public final class ListInteropHelper {
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         boolean isIterator() {
             return true;
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         boolean hasIteratorNextElement() {
             return iterator.hasNext();
         }
 
         @ExportMessage
+       @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
             if (!iterator.hasNext()) {
                 throw UnsupportedMessageException.create();
