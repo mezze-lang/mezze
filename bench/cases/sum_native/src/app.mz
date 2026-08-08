@@ -1,0 +1,12 @@
+use std::effects::log::{println, Console}
+use std::collections::seq
+
+## Uses seq::sum — typed native op, no user folder.
+## Should hit the LongSeqStorage SIMD path.
+let sum_to = {n: Int} -> seq::range { start = 0, end = n }.sum {}
+
+let main = {} -> perform Console in do
+    let c = sum_to {n = 1000000}
+    println { msg = "sum 0..1M = $(c.to_str{})" }
+    let d = sum_to {n = 10000000}
+    println { msg = "sum 0..10M = $(d.to_str{})" }

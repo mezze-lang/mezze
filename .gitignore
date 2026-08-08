@@ -54,6 +54,7 @@ devenv.local.nix
 
 # tests
 interpreter/result.txt
+build-logs/
 
 # debug files
 debug_*.txt
