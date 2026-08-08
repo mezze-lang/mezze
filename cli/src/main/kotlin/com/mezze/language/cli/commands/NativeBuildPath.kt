@@ -661,10 +661,24 @@ object NativeBuildPath {
      *
      * Prefix match, not exact — the packages have many classes and grow
      * with each graal-sdk release.
+     *
+     * graal-sdk 25 update (#400): in graal-sdk 25 the entire
+     * org.graalvm.nativeimage module lives inside the image builder JVM
+     * (jrt:/org.graalvm.nativeimage), including the top-level classes,
+     * the c/ subtree (WordPointer, etc.), impl/, hosted/, and their
+     * clinit tracking. Any of them appearing on the -cp is rejected
+     * with a hard error by NativeImageClassLoaderSupport.
+     * reportBuilderClassesInApplication. Strip the whole org/graalvm/
+     * nativeimage/ tree from the user fat-jar — native-image supplies
+     * all of it from the builder module.
      */
     private val BUILDER_CLASS_PREFIXES_TO_STRIP = listOf(
-        "org/graalvm/nativeimage/hosted/",
+        "org/graalvm/nativeimage/",
         "com/oracle/svm/core/annotate/",
+        // graal-sdk 25: Truffle compiler classes (Utilities, etc.) also live
+        // in the builder module jrt:/org.graalvm.truffle.compiler and are
+        // rejected on -cp with the same hard error. #400.
+        "com/oracle/truffle/compiler/",
     )
 
     // ─── helpers ─────────────────────────────────────────────────────────────
