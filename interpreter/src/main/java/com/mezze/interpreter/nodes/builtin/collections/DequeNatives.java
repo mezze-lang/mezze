@@ -142,13 +142,21 @@ public final class DequeNatives {
         return result;
     }
 
-    @TruffleBoundary
+    /**
+     * #403: drop {@code @TruffleBoundary} so PE can trace the loop.
+     * See {@link SeqNatives}'s foldTwoArg for why we keep the record wrap.
+     */
     public static Object fold(MezzeDeque deque, Object init, MezzeFunction folder,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] closureValues = folder.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
         Object acc = init;
         for (Object element : deque) {
-            acc = callNode.call(folder.getCallTarget(),
-                prepareArgsTwo(folder, acc, element));
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            args[closureLen] = MezzeRecord.wrapAccX(acc, element);
+            acc = callNode.call(target, args);
         }
         return acc;
     }

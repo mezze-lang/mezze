@@ -218,42 +218,25 @@ public final class ListNatives {
         return MezzeList.of(filtered);
     }
 
-    @TruffleBoundary
     public static Object foldLeft(MezzeList list, Object init, MezzeFunction folder,
-                                   
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object acc = init;
-        for (int i = 0; i < list.size(); i++) {
-            acc = callNode.call(folder.getCallTarget(),
-                prepareArgsTwo(folder, acc, list.get(i)));
-        }
-        return acc;
+        return foldTwoArg(list, init, folder, callNode,
+                          /*reverse=*/false, /*startIndex=*/0, /*scanOut=*/null);
     }
 
-    @TruffleBoundary
     public static Object foldRight(MezzeList list, Object init, MezzeFunction folder,
-
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object acc = init;
-        for (int i = list.size() - 1; i >= 0; i--) {
-            acc = callNode.call(folder.getCallTarget(),
-                prepareArgsTwo(folder, acc, list.get(i)));
-        }
-        return acc;
+        return foldTwoArg(list, init, folder, callNode,
+                          /*reverse=*/true, /*startIndex=*/0, /*scanOut=*/null);
     }
 
-    @TruffleBoundary
     public static MezzeVariant reduce(MezzeList list, MezzeFunction reducer,
-                                       
                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) {
             return MezzeVariant.none();
         }
-        Object acc = list.head();
-        for (int i = 1; i < list.size(); i++) {
-            acc = callNode.call(reducer.getCallTarget(),
-                prepareArgsTwo(reducer, acc, list.get(i)));
-        }
+        Object acc = foldTwoArg(list, list.head(), reducer, callNode,
+                                /*reverse=*/false, /*startIndex=*/1, /*scanOut=*/null);
         return MezzeVariant.some(acc);
     }
 
@@ -501,6 +484,35 @@ public final class ListNatives {
         return args;
     }
 
+    /**
+     * #403: shared 2-arg fold loop for foldLeft/foldRight/reduce/scan.
+     * See {@link SeqNatives}'s foldTwoArg for design notes. We drop
+     * {@code @TruffleBoundary} so PE can trace and inline the folder;
+     * we do NOT skip the {@code MezzeRecord{acc, x}} wrap because the
+     * folder's param naming is user-chosen and disambiguating positional
+     * slots at runtime would require name-based dispatch.
+     */
+    private static Object foldTwoArg(MezzeList list, Object init, MezzeFunction folder,
+                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode,
+                                     boolean reverse, int startIndex, Object[] scanOut) {
+        Object[] closureValues = folder.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
+        int size = list.size();
+        int from = reverse ? size - 1 - startIndex : startIndex;
+        int step = reverse ? -1 : 1;
+        int end = reverse ? -1 : size;
+        Object acc = init;
+        for (int i = from; i != end; i += step) {
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            args[closureLen] = MezzeRecord.wrapAccX(acc, list.get(i));
+            acc = callNode.call(target, args);
+            if (scanOut != null) scanOut[i + 1] = acc;
+        }
+        return acc;
+    }
+
     private static Object[] prepareArgsTwo(MezzeFunction fn, Object arg1, Object arg2) {
         Object[] closureValues = fn.getClosureValues();
         Object[] args = new Object[closureValues.length + 1];
@@ -700,16 +712,11 @@ public final class ListNatives {
         return MezzeRecord.empty();
     }
 
-    @TruffleBoundary
     public static MezzeList scan(MezzeList list, Object init, MezzeFunction fn,
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] result = new Object[list.size() + 1];
         result[0] = init;
-        Object acc = init;
-        for (int i = 0; i < list.size(); i++) {
-            acc = callNode.call(fn.getCallTarget(), prepareArgsTwo(fn, acc, list.get(i)));
-            result[i + 1] = acc;
-        }
+        foldTwoArg(list, init, fn, callNode, /*reverse=*/false, /*startIndex=*/0, result);
         return MezzeList.of(result);
     }
 

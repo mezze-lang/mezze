@@ -137,13 +137,23 @@ public final class SetNatives {
         return result;
     }
 
-    @TruffleBoundary
+    /**
+     * #403: drop {@code @TruffleBoundary} so Truffle PE can trace across
+     * the loop and IndirectCallNode PIC can inline the folder body.
+     * See {@link SeqNatives}'s foldTwoArg for why we do not skip the
+     * {@code MezzeRecord{acc, x}} wrap at runtime.
+     */
     public static Object fold(MezzeSet set, Object init, MezzeFunction folder,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] closureValues = folder.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
         Object acc = init;
         for (Object element : set) {
-            acc = callNode.call(folder.getCallTarget(),
-                prepareArgsTwo(folder, acc, element));
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            args[closureLen] = MezzeRecord.wrapAccX(acc, element);
+            acc = callNode.call(target, args);
         }
         return acc;
     }
