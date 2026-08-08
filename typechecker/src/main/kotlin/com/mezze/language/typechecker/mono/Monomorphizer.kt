@@ -171,40 +171,99 @@ class Monomorphizer(
             )
 
             // Scan the substituted body for further generic call sites and
-            // enqueue them. `collectByHashRefs` returns `(ByHash,
-            // TypeInstantiation?)` pairs — the ones with a non-empty
-            // `typeArgs` list are the polymorphic transitive references.
-            val refs = mutableListOf<Pair<BindingRef.ByHash, TypeInstantiation?>>()
-            TypeSubstitution.collectByHashRefs(newBody, refs)
+            // enqueue them. `collectByHashRefsWithSite` yields
+            // `(ByHash, TypeInstantiation?, siteType?)` triples — the site
+            // type is the substituted `fn.type` at each call, which lets us
+            // recover concrete type-args via unification when the AST-
+            // stamped instantiation is missing or wrong-arity.
+            val refs = mutableListOf<Triple<BindingRef.ByHash, TypeInstantiation?, MezzeType?>>()
+            TypeSubstitution.collectByHashRefsWithSite(newBody) { ref, inst, siteType ->
+                refs.add(Triple(ref, inst, siteType))
+            }
             if (System.getenv("MEZZE_MONO_TRACE") != null) {
                 System.err.println("[mono-trace] transitive refs from ${decl.name}: total=${refs.size}")
-                for ((ref, inst) in refs) {
+                for ((ref, inst, siteType) in refs) {
                     val target = resolveDecl(ref.hash)
-                    System.err.println("[mono-trace]   ref=${ref.hash} target=${target?.name ?: "<unresolved>"} typeParams=${target?.typeParams?.size ?: 0} inst=$inst")
+                    System.err.println("[mono-trace]   ref=${ref.hash} target=${target?.name ?: "<unresolved>"} typeParams=${target?.typeParams?.size ?: 0} inst=$inst siteType=$siteType")
                 }
             }
-            // #409: bail on transitive refs where the target's typeParams
-            // count doesn't match the instantiation's typeArgs count. The
-            // mismatch happens for ability-method impls where the impl's
-            // target-type is a container (Seq) but the mono req wraps that
-            // as a single typeArg. Handling this properly requires threading
-            // the impl's actual forallVars — a separate task.
-            for ((ref, inst) in refs) {
-                if (inst == null || inst.typeArgs.isEmpty()) continue
-                // Arity mismatch guard: skip transitive enqueue when the
-                // target's typeParams count doesn't match the ref's
-                // typeArgs count. Otherwise buildSubstitution below hits
-                // the same mismatch and fallbacks — but we've already
-                // wasted a worklist iteration. Cheaper to skip here.
-                val targetDecl = resolveDecl(ref.hash)
-                if (targetDecl == null || targetDecl.typeParams.size != inst.typeArgs.size) continue
+            // #409: for each transitive ref, derive typeArgs by unifying
+            // the callee's declared generic type against the substituted
+            // call-site's fn type. This is more reliable than trusting
+            // `TypedCall.instantiation`, which for ability/impl-wrapper
+            // methods stamps the wrong shape (impl target-type instead of
+            // each declared typeParam).
+            for ((ref, inst, siteType) in refs) {
+                val targetDecl = resolveDecl(ref.hash) ?: continue
+                if (targetDecl.typeParams.isEmpty()) continue
+                val derived = deriveTransitiveTypeArgs(targetDecl, inst, siteType)
+                    ?: continue
                 worklist.addLast(
-                    SpecRequest(ref.hash, inst.typeArgs, inst.abilityImpls) to (depth + 1)
+                    SpecRequest(ref.hash, derived, inst?.abilityImpls ?: emptyList()) to (depth + 1)
                 )
             }
         }
 
         return Result(specializations, rewrites, fallbacks)
+    }
+
+    /**
+     * Derive concrete type-args for a transitive callee reference.
+     *
+     * The AST-stamped `TypeInstantiation.typeArgs` is trustworthy for plain
+     * generic calls but wrong-arity for ability/inherent-method impls:
+     * `impl Seq 'a where { fold = ... }` produces a wrapper `fold` whose
+     * typeParams include the underlying fold's `'b` accumulator, but the
+     * typechecker stamps only `[Seq Int]` (the whole receiver type). We
+     * ignore the stamped instantiation when its arity mismatches and fall
+     * back to unifying the callee's declared function type against the
+     * substituted call-site fn type — after the caller's own substitution
+     * ran, that site type is concrete enough to bind every typeParam.
+     *
+     * Returns args in callee-typeParam order, or null if we can't
+     * confidently derive a full set (upstream falls back to dict-passing).
+     */
+    private fun deriveTransitiveTypeArgs(
+        callee: TypedLetDecl,
+        inst: TypeInstantiation?,
+        siteType: MezzeType?
+    ): List<MezzeType>? {
+        val typeParams = callee.typeParams
+        if (typeParams.isEmpty()) return null
+
+        if (inst != null && inst.typeArgs.size == typeParams.size &&
+            inst.typeArgs.all { isConcreteEnough(it) }
+        ) {
+            return inst.typeArgs
+        }
+
+        if (siteType == null) return null
+        val bindings = HashMap<String, MezzeType>()
+        if (!unify(callee.scheme.type, siteType, bindings)) return null
+        val args = ArrayList<MezzeType>(typeParams.size)
+        for (tp in typeParams) {
+            val b = bindings[tp.name]
+            if (b != null) {
+                args.add(b)
+            } else if (isEffectVarNameLocal(tp.name)) {
+                args.add(MezzeType.EffectRow.simple(emptySet()))
+            } else {
+                return null
+            }
+        }
+        return args
+    }
+
+    /** True when a type has no free VarType — safe to feed into buildSubstitution. */
+    private fun isConcreteEnough(t: MezzeType): Boolean {
+        var ok = true
+        for (tv in collectTypeVarsInOrder(t, sortFields = false)) { ok = false; break }
+        return ok
+    }
+
+    private fun isEffectVarNameLocal(name: String): Boolean {
+        val stripped = name.removePrefix("'")
+        return stripped.length >= 2 && stripped.startsWith("e") && stripped[1].isDigit()
     }
 
     /**

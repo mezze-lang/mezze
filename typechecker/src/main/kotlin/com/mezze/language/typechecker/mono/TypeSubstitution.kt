@@ -214,18 +214,31 @@ object TypeSubstitution {
      * the dependent specializations have been resolved.
      */
     fun collectByHashRefs(expr: TypedExpr, into: MutableList<Pair<BindingRef.ByHash, TypeInstantiation?>>) {
+        collectByHashRefsWithSite(expr) { ref, inst, _ -> into.add(ref to inst) }
+    }
+
+    /**
+     * Like [collectByHashRefs], but also exposes the site's substituted
+     * function type at each `TypedCall`. Callers that need to derive
+     * type-args via unification (rather than trusting the AST-stamped
+     * instantiation) use this to unify the callee's declared signature
+     * against the concrete call-site fn type after body substitution.
+     */
+    fun collectByHashRefsWithSite(
+        expr: TypedExpr,
+        into: (BindingRef.ByHash, TypeInstantiation?, MezzeType?) -> Unit
+    ) {
         when {
             expr is TypedVar -> {
                 val b = expr.binding
-                if (b is BindingRef.ByHash) into.add(b to null)
+                if (b is BindingRef.ByHash) into(b, null, expr.type)
             }
             expr is TypedCall && expr.function is TypedVar && (expr.function as TypedVar).binding is BindingRef.ByHash -> {
-                // The function expression carries the ByHash; the call's
-                // instantiation tells us the type args at this site.
-                into.add((expr.function as TypedVar).binding as BindingRef.ByHash to expr.instantiation)
-                collectByHashRefs(expr.arg, into)
+                val fn = expr.function as TypedVar
+                into(fn.binding as BindingRef.ByHash, expr.instantiation, fn.type)
+                collectByHashRefsWithSite(expr.arg, into)
             }
-            else -> expr.forEachChild { collectByHashRefs(it, into) }
+            else -> expr.forEachChild { collectByHashRefsWithSite(it, into) }
         }
     }
 
