@@ -11,6 +11,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.SpreadSyntaxError
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typechecker.mono.unwrapSuspended
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.typechecker.util.StringDistance
@@ -479,7 +480,7 @@ class ExpressionConstraintGenerator {
      * so discarding the wrapper here is safe.
      */
     internal fun unwrapExpected(type: MezzeType?): MezzeType? =
-        if (type is MezzeType.SuspendType) type.valueType else type
+        type?.let(::unwrapSuspended)
 
     /**
      * Bidirectional helper: resolve an expected type to its record field→type

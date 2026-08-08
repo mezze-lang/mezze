@@ -10,6 +10,7 @@ import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.hashing.ContentHashComputer
+import com.mezze.language.typechecker.mono.unwrapSuspended
 import com.mezze.language.typechecker.util.StringDistance
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import com.mezze.language.typechecker.util.TypeAnnotationMatcher
@@ -276,7 +277,7 @@ class TypeValidator(
         }
 
     private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
-        var unwrappedType = if (type is MezzeType.SuspendType) type.valueType else type
+        var unwrappedType = unwrapSuspended(type)
         (unwrappedType as? MezzeType.TypeApplication)?.let { expandTypeApplicationToVariant(it, registry)?.let { e -> unwrappedType = e } }
 
         return when {

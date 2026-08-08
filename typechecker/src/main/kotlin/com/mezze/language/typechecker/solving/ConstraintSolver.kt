@@ -7,6 +7,7 @@ import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typechecker.mono.unwrapSuspended
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.printing.ErrorMessageBuilder
@@ -820,8 +821,8 @@ class ConstraintSolver(
                 }
             }
         }
-        val left = if (rawLeft is MezzeType.SuspendType) rawLeft.valueType else rawLeft
-        val right = if (rawRight is MezzeType.SuspendType) rawRight.valueType else rawRight
+        val left = unwrapSuspended(rawLeft)
+        val right = unwrapSuspended(rawRight)
 
         DebugLogger.debug(Category.ConstraintSolver) {
             "solveEquality: $left = $right (${constraint.context})"

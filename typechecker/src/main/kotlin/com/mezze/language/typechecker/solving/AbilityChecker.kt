@@ -14,6 +14,7 @@ import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.hashing.ContentHashComputer
+import com.mezze.language.typechecker.mono.unwrapSuspended
 import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.typedast.Hash
@@ -299,9 +300,7 @@ internal class AbilityChecker(
             context.getAbilityImpls(abilityName)
         }
 
-        val unwrappedTypeArgs = typeArgs.map { arg ->
-            if (arg is MezzeType.SuspendType) arg.valueType else arg
-        }
+        val unwrappedTypeArgs = typeArgs.map(::unwrapSuspended)
 
         val hasImpl = impls.any { implInfo ->
             val annotations = implInfo.targetTypeAnnotations ?: return@any false
@@ -478,7 +477,7 @@ internal class AbilityChecker(
 
     private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
         val resolvedHash = abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
-        var unwrappedType = if (type is MezzeType.SuspendType) type.valueType else type
+        var unwrappedType = unwrapSuspended(type)
 
         var isNewtype = unwrappedType is MezzeType.NewtypeType
 
