@@ -46,6 +46,7 @@ import com.mezze.language.typedast.TypedVariantConstruct
 import com.mezze.language.typedast.TypedVariantPattern
 import com.mezze.language.typedast.TypedVarPattern
 import com.mezze.language.typedast.TypedWildcardPattern
+import com.mezze.language.typedast.forEachChild
 
 /**
  * Type-variable substitution over TypedExpr / TypedPattern.
@@ -213,75 +214,18 @@ object TypeSubstitution {
      * the dependent specializations have been resolved.
      */
     fun collectByHashRefs(expr: TypedExpr, into: MutableList<Pair<BindingRef.ByHash, TypeInstantiation?>>) {
-        when (expr) {
-            is TypedVar -> {
+        when {
+            expr is TypedVar -> {
                 val b = expr.binding
                 if (b is BindingRef.ByHash) into.add(b to null)
             }
-            is TypedCall -> {
+            expr is TypedCall && expr.function is TypedVar && (expr.function as TypedVar).binding is BindingRef.ByHash -> {
                 // The function expression carries the ByHash; the call's
                 // instantiation tells us the type args at this site.
-                val fn = expr.function
-                if (fn is TypedVar) {
-                    val b = fn.binding
-                    if (b is BindingRef.ByHash) into.add(b to expr.instantiation)
-                    else collectByHashRefs(fn, into)
-                } else {
-                    collectByHashRefs(fn, into)
-                }
+                into.add((expr.function as TypedVar).binding as BindingRef.ByHash to expr.instantiation)
                 collectByHashRefs(expr.arg, into)
             }
-            is TypedLambda -> collectByHashRefs(expr.body, into)
-            is TypedRecord -> for (e in expr.entries) when (e) {
-                is TypedRecordEntry.Field -> collectByHashRefs(e.value, into)
-                is TypedRecordEntry.Spread -> collectByHashRefs(e.expr, into)
-            }
-            is TypedFieldAccess -> collectByHashRefs(expr.record, into)
-            is TypedRecordUpdate -> {
-                collectByHashRefs(expr.record, into)
-                for (e in expr.updates) when (e) {
-                    is TypedRecordEntry.Field -> collectByHashRefs(e.value, into)
-                    is TypedRecordEntry.Spread -> collectByHashRefs(e.expr, into)
-                }
-            }
-            is TypedVariantConstruct -> expr.payload?.let { collectByHashRefs(it, into) }
-            is TypedMatch -> {
-                collectByHashRefs(expr.scrutinee, into)
-                for (c in expr.cases) {
-                    c.guard?.let { collectByHashRefs(it, into) }
-                    collectByHashRefs(c.body, into)
-                    for (b in c.ifLetBindings) collectByHashRefs(b.expr, into)
-                }
-            }
-            is TypedIf -> {
-                collectByHashRefs(expr.condition, into)
-                collectByHashRefs(expr.thenBranch, into)
-                collectByHashRefs(expr.elseBranch, into)
-            }
-            is TypedBlock -> {
-                for (s in expr.statements) when (s) {
-                    is TypedStatement.Let -> collectByHashRefs(s.value, into)
-                    is TypedStatement.Expr -> collectByHashRefs(s.expr, into)
-                }
-                collectByHashRefs(expr.result, into)
-            }
-            is TypedSeq -> for (e in expr.elements) when (e) {
-                is TypedSeqElement.Regular -> collectByHashRefs(e.expr, into)
-                is TypedSeqElement.Spread -> collectByHashRefs(e.expr, into)
-            }
-            is TypedPerform -> {
-                for (h in expr.handlers) h.params?.let { collectByHashRefs(it, into) }
-                collectByHashRefs(expr.body, into)
-            }
-            is TypedPerformOp -> collectByHashRefs(expr.arg, into)
-            is TypedPipe -> {
-                collectByHashRefs(expr.left, into)
-                collectByHashRefs(expr.right, into)
-            }
-            is TypedStringLit -> for (p in expr.parts) if (p is TypedStringPart.Interpolation) collectByHashRefs(p.expr, into)
-            // Literals carry no refs.
-            is TypedIntLit, is TypedNatLit, is TypedFloatLit, is TypedFracLit,
-            is TypedBoolLit, is TypedCharLit -> Unit
+            else -> expr.forEachChild { collectByHashRefs(it, into) }
         }
     }
 
