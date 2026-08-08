@@ -3,6 +3,7 @@ package com.mezze.language.typechecker
 import com.mezze.language.typechecker.module.ModuleImportContext
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedAbilityImpl
+import com.mezze.language.typedast.TypedModule
 import com.mezze.language.truffleir.FunctionIR
 
 object StdlibSnapshotData {
@@ -14,6 +15,7 @@ object StdlibSnapshotData {
     val abilityImpls: List<TypedAbilityImpl>
     val declHashes: Set<Hash>
     val moduleHashes: Set<Hash>
+    val typedModules: Map<Hash, TypedModule>
 
     init {
         //     stacktrace stays gated. See task #203 + #201.
@@ -48,6 +50,7 @@ object StdlibSnapshotData {
             abilityImpls = decoded.abilityImpls
             declHashes = decoded.declHashes
             moduleHashes = decoded.moduleHashes
+            typedModules = decoded.typedModules
         } else {
             present = false
             importContext = null
@@ -57,6 +60,7 @@ object StdlibSnapshotData {
             abilityImpls = emptyList()
             declHashes = emptySet()
             moduleHashes = emptySet()
+            typedModules = emptyMap()
         }
     }
 }

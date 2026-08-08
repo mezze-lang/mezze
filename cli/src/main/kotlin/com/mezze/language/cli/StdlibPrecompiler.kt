@@ -298,6 +298,9 @@ fun main(args: Array<String>) {
         abilityImpls = precompiled.stdlibAbilityImpls,
         declHashes = precompiled.stdlibDeclHashes,
         moduleHashes = precompiled.stdlibModuleHashes,
+        // #415: ship TypedModules so mono can specialize any callsite
+        // that flows through a polymorphic stdlib decl.
+        typedModules = precompiled.stdlibTypedModules,
     )
     snapshotFile.writeBytes(com.mezze.language.typechecker.StdlibSnapshot.encode(snapshot))
     println("Wrote ${snapshotFile.name} (${snapshotFile.length() / 1024}KB) — SQLite-free snapshot")

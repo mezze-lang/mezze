@@ -3,6 +3,7 @@ package com.mezze.language.typechecker
 import com.mezze.language.typechecker.module.ModuleImportContext
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedAbilityImpl
+import com.mezze.language.typedast.TypedModule
 import com.mezze.language.truffleir.FunctionIR
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -20,6 +21,10 @@ data class StdlibSnapshot(
     val abilityImpls: List<TypedAbilityImpl>,
     val declHashes: Set<Hash>,
     val moduleHashes: Set<Hash>,
+    // #415: mono's declIndex needs stdlib TypedModules to specialize any
+    // callsite that flows through a stdlib polymorphic decl (fold, map, …).
+    // Optional so pre-v2 snapshots keep decoding via ignoreUnknownKeys.
+    val typedModules: Map<Hash, TypedModule> = emptyMap(),
 ) {
     companion object {
         const val CURRENT_VERSION = 1

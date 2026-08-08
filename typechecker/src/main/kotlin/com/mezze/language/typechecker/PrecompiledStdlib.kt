@@ -156,7 +156,10 @@ object PrecompiledStdlib {
             stdlibAbilityImpls = fullCache.abilityImpls
             stdlibDeclHashes = fullCache.declHashes
             stdlibModuleHashes = fullCache.moduleHashes
-            stdlibTypedModules = emptyMap()
+            // #415: honor the snapshot's typedModules so mono can see
+            // stdlib decls in the fast-load path. Old snapshots default
+            // to an empty map, preserving the pre-#415 behavior.
+            stdlibTypedModules = fullCache.typedModules
             loadedModules = emptyMap()
 
             moduleLoader = ModuleLoader.fromPath(projectRoot.toString())
@@ -341,6 +344,7 @@ object PrecompiledStdlib {
             abilityImpls = StdlibSnapshotData.abilityImpls,
             declHashes = StdlibSnapshotData.declHashes,
             moduleHashes = StdlibSnapshotData.moduleHashes,
+            typedModules = StdlibSnapshotData.typedModules,
         )
     }
 
@@ -525,7 +529,10 @@ object PrecompiledStdlib {
         val dependencyGraph: Map<Hash, Set<Hash>>,
         val abilityImpls: List<TypedAbilityImpl>,
         val declHashes: Set<Hash>,
-        val moduleHashes: Set<Hash>
+        val moduleHashes: Set<Hash>,
+        // #415: TypedModules for mono. Empty on old snapshots (loader-side
+        // default) — mono then behaves as before (skips stdlib specialization).
+        val typedModules: Map<Hash, TypedAstModule> = emptyMap()
     )
 
     private data class PreloweredData(
