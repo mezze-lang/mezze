@@ -22,59 +22,53 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 
 /**
- * Path D perform-op runtime — dispatches a BDSL-lowered
+ * Perform-op runtime — dispatches a BDSL-lowered
  * {@link com.mezze.language.truffleir.PerformOpIR} against the current
  * thread's effect handler chain
- * ({@link EffectFiber#peekHandlerForEffect}) without spinning up a
- * Loom-backed fiber.
+ * ({@link EffectFiber#peekHandlerForEffect}) — no fiber, no reflection.
  *
  * <h2>How it works</h2>
  * <ol>
  *   <li>Find the innermost handler for {@code effectHash} on the
  *       thread's chain.</li>
  *   <li>Look up the op impl by name in the handler record.</li>
- *   <li>Acquire a dispatch-only {@link EffectFiber} (recycled from a
+ *   <li>Acquire a dispatch-only registry entry (recycled from a
  *       per-thread pool) and push a fresh {@code (resume, abort)} pair
  *       onto its per-op effect-handle stack. Existing
  *       {@code EffectBindingIR("resume")} / {@code ("abort")} reads
  *       inside the op impl body pick these up unchanged.</li>
- *   <li>Enter dispatch mode on the fiber (sets
+ *   <li>Enter dispatch mode (sets
  *       {@link EffectFiber#DISPATCH DISPATCH} thread-local so nested
  *       reads work).</li>
  *   <li>Call the op impl with {@code arg}.</li>
- *   <li>Catch {@link AbortPerformException}. If there's an outer
- *       {@link EffectFiber#current() live fiber}, rethrow so its driver
- *       catches at the outer {@code perform ... in body} boundary. If
- *       there's no fiber (top level, or spawned task thread), convert
- *       to {@link TaskUnhandledOpException} — {@code SpawnSupport}
+ *   <li>Catch {@link AbortPerformException}. If a BDSL Handle boundary
+ *       is on the D8 stack, rethrow so its TryCatchOtherwise catch
+ *       branch reads the value via UnwrapAbortValue. Otherwise (top
+ *       level, or spawned task thread with no Handle in scope),
+ *       convert to {@link TaskUnhandledOpException} — {@code SpawnSupport}
  *       stashes it on the promise and {@code Async.await} re-issues on
- *       the parent. Same criterion as
- *       {@link OpCallNode#chainDispatch}'s fiber-vs-chain decision.</li>
+ *       the parent.</li>
  * </ol>
  *
- * <h2>What resume does under Path D</h2>
+ * <h2>What resume does</h2>
  *
- * <p>Path A's {@code resume {val = X}} re-enters the fiber's
- * {@code drive} loop with X as the yielded value's answer and runs the
- * body forward. Path D has no suspended fiber — the perform is a
- * straight-line call. So Path D's {@code resume} is <b>fall-through
- * only</b>: calling {@code resume {val = X}} returns X, and any code
- * the impl runs AFTER {@code resume} is discarded. This is a
- * behavioural narrowing from Path A.
+ * <p>{@code resume} here is <b>fall-through only</b>: calling
+ * {@code resume {val = X}} returns X, and any code the impl runs AFTER
+ * {@code resume} is discarded. There is no suspended continuation to
+ * re-enter — the perform is a straight-line call.
  *
- * <p>All existing stdlib effect handlers except one work under Path D:
+ * <p>All existing stdlib effect handlers work under this model:
  * Exception, Return, Log, Mut, Time, Random, FileSystem, etc. use only
- * {@code abort} or fall-through. The one exception is
- * {@code Generator.AsStream}, which captures {@code resume} inside an
- * abort payload and calls it lazily — that pattern requires a real
- * continuation. Generator stays on Path A for now (Path D6+ picks it up
- * via the BDSL Yield primitive).
+ * {@code abort} or fall-through. Patterns that would require capturing
+ * {@code resume} inside an abort payload and calling it lazily need a
+ * real continuation — those go through the BDSL Yield primitive
+ * (Generator.AsStream is the historical example).
  *
  * <h2>Unhandled ops</h2>
  *
- * <p>Currently throws {@link UnhandledPathDOp}. The Loom path wraps
- * these in {@code MezzeSuspend} for lazy evaluation — Path D catches
- * up in a later phase.
+ * <p>Wrapped in a {@link MezzeSuspend} so an outer perform installed
+ * later (e.g. {@code let x = do_stuff {} ; perform Handler in force x})
+ * can force and dispatch it.
  */
 public final class BdslYieldDispatch {
 
@@ -121,9 +115,9 @@ public final class BdslYieldDispatch {
             + " chainDepth=" + currentChainDepth()
             + " handler=" + (handler == null ? "null" : "found"));
         if (handler == null) {
-            // No handler in scope — Path A wraps the op in a MezzeSuspend
-            // so an outer perform (installed later, e.g. `let x = do_stuff
-            // {} ; perform Handler in force x`) can force it. Same shape.
+            // No handler in scope — wrap the op in a MezzeSuspend so an
+            // outer perform (installed later, e.g. `let x = do_stuff {} ;
+            // perform Handler in force x`) can force it.
             return makeUnhandledSuspended(effectHash, opName, arg);
         }
         Object opImplRaw;
@@ -166,10 +160,9 @@ public final class BdslYieldDispatch {
             return result;
         } catch (AbortPerformException abort) {
             // Decide whether abort should propagate as AbortPerformException
-            // or convert to TaskUnhandledOpException. Post-#333 there are no
-            // Loom fibers; the only enclosing catch site is a BDSL Handle's
-            // TryCatchOtherwise catch branch (D8) or an AST HandleNode.
-            // runNoFiber frame — both register on D8_HANDLE_STACK via
+            // or convert to TaskUnhandledOpException. The only enclosing
+            // catch site is a BDSL Handle @Operation's TryCatchOtherwise
+            // catch branch, which registers on D8_HANDLE_STACK via
             // enterBdslHandle. If insideBdslHandle() is true we rethrow the
             // abort for that catch to read via UnwrapAbortValue; otherwise
             // convert to TUE so SpawnSupport stashes on the promise.
@@ -190,10 +183,9 @@ public final class BdslYieldDispatch {
 
     // ── resume: fall-through semantics ──────────────────────────────────
     //
-    // Path A's resume re-enters the fiber's drive loop. Path D has no
-    // fiber, so resume is fall-through: calling resume {val = X} returns
-    // X. Anything the impl does AFTER calling resume is discarded. See
-    // class-doc "What resume does under Path D" for the caveat.
+    // resume is fall-through: calling resume {val = X} returns X. Anything
+    // the impl does AFTER calling resume is discarded. See class-doc
+    // "What resume does" for the caveat.
 
     private static volatile MezzeFunction CACHED_FALLTHROUGH_RESUME_FN = null;
 

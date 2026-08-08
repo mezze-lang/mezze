@@ -16,13 +16,10 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 
 /**
- * Effect-handler support utilities shared between the Loom-free
- * {@code HandleNode.runNoFiber} path (#341) and BDSL Yield dispatch
- * (Path D). Historically this file also hosted a Loom-fiber–backed
- * {@code run} driver, but that path is gone as of #333 — every AST
- * Handle now runs on the marker-style Loom-free path, and BDSL emits
- * the Handle via {@code BdslYieldDispatch} directly. What remains
- * here is only the shared machinery both paths still need:
+ * Effect-handler support utilities used by the BDSL Yield dispatch path
+ * (see {@code BdslYieldDispatch}). The AST HandleNode was deleted with
+ * the rest of the AST tree; every Handle now emits a BDSL {@code Handle}
+ * @Operation which uses these helpers.
  *
  * <ul>
  *   <li>Control-flow sentinels: {@link AbortPerformException},
@@ -30,9 +27,8 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  *   <li>The cached {@code abort} function op-handlers can call
  *       ({@link #makeAbortFunction()}).</li>
  *   <li>Scope hook plumbing for handlers whose op impls need a
- *       {@code scope} var (LoomAsync installing a StructuredTaskScope,
- *       STM installing its transaction context, …) — invoked from
- *       {@code HandleNode.runNoFiber} via the {@code *Public} shims.</li>
+ *       {@code scope} var (Async installing a StructuredTaskScope, STM
+ *       installing its transaction context, …).</li>
  *   <li>The {@code warnNullEffectHash} shared warning site used by
  *       chain-dispatch paths.</li>
  * </ul>
@@ -40,12 +36,10 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
 public final class EffectHandlerDriver {
 
     // Sentinel thrown by an op handler's `abort` to skip body and return
-    // a value as the perform's result. Caught by
-    // {@link com.mezze.interpreter.nodes.effect.HandleNode#runNoFiber}
-    // (main-thread AST path), by
-    // {@link com.mezze.interpreter.nodes.effect.OpCallNode} (spawned-
-    // thread chain dispatch), and by BDSL Handle's TryCatchOtherwise
-    // catch branch (Path D). Extends AbstractTruffleException so BDSL's
+    // a value as the perform's result. Caught by the BDSL Handle
+    // @Operation's TryCatchOtherwise catch branch, and by
+    // {@link com.mezze.interpreter.nodes.effect.OpCallNode} on spawned-
+    // thread chain dispatch. Extends AbstractTruffleException so BDSL's
     // TryCatch catches it (BDSL filters out non-Truffle exceptions — a
     // plain RuntimeException would escape the catch branch entirely).
     public static final class AbortPerformException extends com.oracle.truffle.api.exception.AbstractTruffleException {
@@ -63,8 +57,8 @@ public final class EffectHandlerDriver {
      * body as a MezzeSuspend and defer execution until a matching handler
      * is provided."
      *
-     * <p>Caught either at a top-level {@code HandleNode.execute} that chose
-     * the lazy path (builds MezzeSuspend holding the enclosing frame + this
+     * <p>Caught either at a top-level BDSL Handle @Operation that chose the
+     * lazy path (builds MezzeSuspend holding the enclosing frame + this
      * pending op) or inside {@code MezzeSuspend.force} when a resumed body
      * re-suspends (builds a fresh MezzeSuspend for the next suspend point).
      *
@@ -142,8 +136,8 @@ public final class EffectHandlerDriver {
      * Get the (cached) {@code abort} function for op handler bodies.
      * Calling {@code abort {val = X}} terminates the surrounding perform
      * with X as its overall result, discarding body. Implemented by
-     * throwing {@link AbortPerformException}, which the enclosing Handle
-     * (AST {@code runNoFiber} or BDSL {@code Handle} @Operation) catches.
+     * throwing {@link AbortPerformException}, which the enclosing BDSL
+     * {@code Handle} @Operation catches.
      */
     public static MezzeFunction makeAbortFunction() {
         MezzeFunction cached = CACHED_ABORT_FN;
@@ -187,8 +181,8 @@ public final class EffectHandlerDriver {
     //
     // Handlers may declare initialize_scope / finalize_scope fields whose
     // return value becomes a `scope` var read by op impls via ReadScopeNode.
-    // Exposed to HandleNode.runNoFiber via the *Public shims so the Loom-
-    // free path runs the same setup/teardown the deleted fiber driver did.
+    // Exposed via the *Public shims so the BDSL Handle @Operation can run
+    // the same setup/teardown sequence.
     // ----------------------------------------------------------------
 
     @TruffleBoundary

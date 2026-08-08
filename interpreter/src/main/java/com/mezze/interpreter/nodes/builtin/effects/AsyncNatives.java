@@ -1209,9 +1209,8 @@ public final class AsyncNatives {
         }
         OpCall pending = p.getUnhandledOpCall();
         if (pending != null) {
-            // No Loom fiber remains post-#333: chain-dispatch is the only
-            // path from an unhandled spawn-side op back to the outer
-            // perform on this thread.
+            // Chain-dispatch is the only path from an unhandled spawn-side
+            // op back to the outer perform on this thread.
             if (EffectFiber.handlerChainDepth() > 0) {
                 Object dispatched = com.mezze.interpreter.nodes.effect.OpCallNode
                     .dispatchOpOnChain(
@@ -1338,12 +1337,10 @@ public final class AsyncNatives {
         OpCall pending = promise.getUnhandledOpCall();
         if (pending != null) {
             if (EffectFiber.handlerChainDepth() > 0) {
-                // Loom-free Handle path (post-#333): no fibers exist. The
-                // outer Handle installed its handler on the per-thread
-                // chain; dispatch directly through the chain — under
-                // insideBdslHandle() this preserves AbortPerformException
-                // up to the outer runNoFiber catch, matching the BDSL
-                // Handle op.
+                // The outer BDSL Handle @Operation installed its handler
+                // on the per-thread chain; dispatch directly through the
+                // chain — under insideBdslHandle() this preserves
+                // AbortPerformException up to the outer Handle catch.
                 Object dispatched = com.mezze.interpreter.nodes.effect.OpCallNode
                     .dispatchOpOnChain(
                         EffectFiber.snapshotHandlerChainEntries(),

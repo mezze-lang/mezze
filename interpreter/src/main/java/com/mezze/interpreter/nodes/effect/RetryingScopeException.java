@@ -6,9 +6,9 @@ import com.oracle.truffle.api.exception.AbstractTruffleException;
  * Thrown by STM transactions on optimistic-concurrency conflict to trigger
  * automatic retry of the surrounding {@code perform} block.
  *
- * <p>Caught by {@link HandleNode} so the body re-executes against fresh
- * scope state. Not related to the effect-handler op-call dispatch path —
- * this is STM-specific retry signaling.
+ * <p>Caught by the BDSL Handle @Operation so the body re-executes against
+ * fresh scope state. Not related to the effect-handler op-call dispatch
+ * path — this is STM-specific retry signaling.
  */
 public final class RetryingScopeException extends AbstractTruffleException {
 

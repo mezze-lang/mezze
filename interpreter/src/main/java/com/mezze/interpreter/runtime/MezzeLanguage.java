@@ -164,19 +164,17 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     // invalidate our caches before the next compile.
     private volatile int cachedDebugEpoch = 0;
 
-    // Path D routing (docs/perf/bdsl-effects-path-d-2026-07.md): every
-    // perform lowers to a BDSL PerformD op that dispatches the effect
-    // directly against the thread's handler chain — no Loom fiber, no
-    // reflection. Path A (fiber-yield via OpCallNode) is deleted along
-    // with the Loom EffectFiber path (#333).
+    // Effect dispatch (Path D, docs/perf/bdsl-effects-path-d-2026-07.md):
+    // every perform lowers to a BDSL PerformD op that dispatches the
+    // effect directly against the thread's handler chain — no Loom fiber,
+    // no reflection. Loom-fiber routing was deleted in #333.
 
-    // Path E — lazy-until-fully-discharged effect runtime (task #336).
-    // HandleNode's lazy path builds a MezzeSuspend carrying the whole body
+    // Lazy-until-fully-discharged effect runtime (task #336). The BDSL
+    // Handle @Operation builds a MezzeSuspend carrying the whole body
     // continuation (bodyNode + frame + chain snapshot) instead of eagerly
     // running the body and losing the continuation at first unhandled op.
     // Force is atomic — merges chains, runs body inline on caller thread,
-    // no fiber. Landed 2026-07-23 as always-on; #341 will delete the
-    // remaining legacy MezzeSuspend shape.
+    // no fiber.
     private static final boolean BDSL_STATS =
             System.getenv("MEZZE_BDSL_STATS") != null
                 && !"0".equals(System.getenv("MEZZE_BDSL_STATS"))

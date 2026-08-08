@@ -25,9 +25,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *       ({@link #snapshotHandlerChainEntries()} +
  *       {@link #installHandlerChainEntries(HandlerChainEntry[])}).</li>
  *   <li>{@link #D8_HANDLE_STACK} — BDSL Handle depth counter, distinct
- *       from HANDLER_CHAIN so a Path A snapshot install on a spawned
- *       thread doesn't fool BdslYieldDispatch into treating a chain
- *       push as a live catch boundary.</li>
+ *       from HANDLER_CHAIN so a snapshot install on a spawned thread
+ *       doesn't fool BdslYieldDispatch into treating a chain push as a
+ *       live catch boundary.</li>
  *   <li>Dispatch-only fibers ({@link #acquireDispatchOnly()}) — carry
  *       the per-op-invocation effect-handle stack so chain-dispatched
  *       op handlers can bind {@code resume}/{@code abort} via
@@ -43,10 +43,11 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class EffectFiber {
 
     // Per-op-invocation effect-handler control-flow handles, populated by
-    // chain dispatch right before it invokes an op handler. Read by
-    // ReadEffectHandleNode inside the op handler body. Stacked across
-    // nested op calls so an inner op's invocation doesn't clobber the
-    // outer op's handles.
+    // chain dispatch right before it invokes an op handler. Read by the
+    // EffectBindingIR (kind=RESUME/ABORT) lowering inside the op handler
+    // body, which calls currentResume() / currentAbort() on the dispatch
+    // fiber. Stacked across nested op calls so an inner op's invocation
+    // doesn't clobber the outer op's handles.
     private Object[] effectHandleStack = new Object[8]; // [resume0, abort0, resume1, abort1, ...]
     private int effectHandleDepth = 0;
 
@@ -138,8 +139,8 @@ public final class EffectFiber {
     // ----------------------------------------------------------------
     // D8 BDSL Handle depth counter — only touched by
     // MezzeBytecodeRootNode.PushHandlerChain / PopHandlerChain.
-    // Distinct from the general HANDLER_CHAIN depth so a Path A snapshot-
-    // install on a spawned thread (which populates HANDLER_CHAIN without
+    // Distinct from the general HANDLER_CHAIN depth so a snapshot install
+    // on a spawned thread (which populates HANDLER_CHAIN without
     // establishing a catch site on this frame) doesn't fool BdslYieldDispatch
     // into thinking a BDSL Handle boundary is live. See project_d8_handleir_design.
     // ----------------------------------------------------------------
@@ -204,7 +205,7 @@ public final class EffectFiber {
 
     /**
      * Force the per-thread handler chain back to the given depth by
-     * popping until size == depth. Used by {@code HandleNode.runNoFiber}'s
+     * popping until size == depth. Used by the BDSL Handle @Operation's
      * outer {@code finally} to recover from cross-scope continuation yields
      * (e.g. outer perform aborts while an inner perform's chain push is
      * still on the stack): inner's {@code popHandlerOffChain} never fires
@@ -387,8 +388,8 @@ public final class EffectFiber {
     //
     // Chain dispatch pushes a frame {resume, abort} before invoking an op
     // handler's lambda and pops it after the lambda returns. Op handler
-    // body code reads them via ReadEffectHandleNode, which calls
-    // currentResume() / currentAbort() on the dispatch fiber.
+    // body code reads them via EffectBindingIR (kind=RESUME/ABORT), which
+    // calls currentResume() / currentAbort() on the dispatch fiber.
     //
     // Nested op calls each push their own frame, so inner ops don't
     // clobber outer ops' handles.

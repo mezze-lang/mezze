@@ -12,8 +12,7 @@ import com.mezze.language.typedast.Hash;
  * nothing for the fiber/Continuation machinery to do: dispatch is just
  * "look up the handler record's op field and call it." This holder
  * carries the single hex constant the runtime needs to recognise the
- * Mut effect; {@link HandleNode} and {@link OpCallNode} both consult
- * it.
+ * Mut effect; the BDSL Handle @Operation consults it.
  *
  * <p>The interpreter module does not depend on the typechecker (the
  * runtime jar stays slim), so we can't import the generated

@@ -71,11 +71,11 @@ public final class SpawnSupport {
     public static Object propagateJoinFailure(ExecutionException e, String opLabel) {
         Throwable cause = e.getCause();
         if (cause instanceof TaskUnhandledOpException tue) {
-            // No Loom fiber remains post-#333: the surviving path is chain-
-            // dispatch. If a chain is installed on this thread (e.g. we're
-            // inside a spawned task that inherited the parent's chain),
-            // rethrow the TUE so the outer runPromiseTask/runBatchTask
-            // stashes it one level up.
+            // Chain-dispatch is the only path back to the outer perform.
+            // If a chain is installed on this thread (e.g. we're inside a
+            // spawned task that inherited the parent's chain), rethrow the
+            // TUE so the outer runPromiseTask/runBatchTask stashes it one
+            // level up.
             if (EffectFiber.handlerChainDepth() > 0) {
                 throw new TaskUnhandledOpException(tue.opCall);
             }
@@ -186,12 +186,12 @@ public final class SpawnSupport {
     ) {
         TaskUnhandledOpException tue = opSink.get();
         if (tue != null) {
-            // No Loom fiber remains post-#333: chain-dispatch is the only
-            // path back to the outer perform. If a chain is installed on
-            // this thread (the classic case for chain-dispatch inside
-            // nested performs), dispatch directly through it; if the
-            // handler aborts, AbortPerformException propagates up to the
-            // outer perform driver which completes with the abort value.
+            // Chain-dispatch is the only path back to the outer perform.
+            // If a chain is installed on this thread (the classic case for
+            // chain-dispatch inside nested performs), dispatch directly
+            // through it; if the handler aborts, AbortPerformException
+            // propagates up to the outer perform driver which completes
+            // with the abort value.
             if (callNode != null) {
                 HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
                 if (chain.length > 0) {
@@ -268,16 +268,15 @@ public final class SpawnSupport {
                 try {
                     return callNode.call(op.getCallTarget(), callArgs);
                 } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
-                    // Same rule as OpCallNode.dispatchOpOnChain:
-                    //   - Inside a BDSL Handle (or Loom-free runNoFiber that
-                    //     set the same enterBdslHandle marker): rethrow so
-                    //     the enclosing Handle catches abort and finishes
-                    //     the perform with abort.value.
+                    //   - Inside a BDSL Handle @Operation (registered on
+                    //     D8_HANDLE_STACK): rethrow so the enclosing Handle
+                    //     catches abort and finishes the perform with
+                    //     abort.value.
                     //   - Otherwise: convert to TaskUnhandledOpException so
                     //     the surrounding batch/task machinery stashes it
                     //     for parent await re-issue.
-                    // Diverging from OpCallNode here is the exact bug that
-                    // lets abort escape as TUE past a Loom-free Handle frame.
+                    // Diverging from BdslYieldDispatch here would let abort
+                    // escape as TUE past a Handle boundary.
                     if (EffectFiber.insideBdslHandle()) {
                         throw abort;
                     }

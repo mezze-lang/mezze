@@ -299,8 +299,8 @@ public final class MezzeContext {
     // ========================
 
     // Handler / impl-record registrations keyed by content hash.
-    // Populated by HandleNode when a `with` block installs a handler so
-    // PerformNode / DynamicEffectCallNode can find it by hash.
+    // Populated by HashModuleLoaderNode at module-load time so BDSL
+    // perform dispatch can find them via BdslYieldDispatch.
     private final ConcurrentHashMap<com.mezze.language.typedast.Hash, Object> handlersByHash =
         new ConcurrentHashMap<>();
 

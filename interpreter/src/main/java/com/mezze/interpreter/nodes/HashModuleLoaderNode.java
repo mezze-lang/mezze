@@ -182,7 +182,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
         //
         // Performer records live in MezzeContext.handlersByHash, NOT in
         // globals. This is the single source of truth for `perform Handler in
-        // body` to resolve handlers — HandleNode.lookupInContext goes there
+        // body` to resolve handlers — the BDSL Handle @Operation goes there
         // and nowhere else. Keeping them out of `globals` means a later
         // re-load can't overwrite a good handler record with a worse one if
         // op-function resolution flakes between context resets.
@@ -253,7 +253,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
         var shape = new com.mezze.interpreter.values.MezzeRecord.Shape(opNames, locations);
         var record = com.mezze.interpreter.values.MezzeRecord.withAllObjects(shape, opValues);
         // Publish under performer hash AND effect hash in handlersByHash.
-        // This is the single source HandleNode consults.
+        // This is the single source the BDSL Handle @Operation consults.
         context.defineHandler(info.performerHash, record);
         if (info.effectHash != null) {
             context.defineHandler(info.effectHash, record);

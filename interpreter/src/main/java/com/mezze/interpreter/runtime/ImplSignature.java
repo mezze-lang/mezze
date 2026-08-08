@@ -8,7 +8,7 @@ import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
  * Stores metadata about an effect implementation, including scope information
  * for scoped effects.
  *
- * This is used by HandleNode to properly manage the scope lifecycle:
+ * Used by the BDSL Handle @Operation to manage the scope lifecycle:
  * 1. Call initializeScopeTarget at the start of perform
  * 2. Store the scope result for operations to access
  * 3. Call finalizeScopeTarget in a finally block when perform completes

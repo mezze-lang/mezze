@@ -1617,9 +1617,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     /**
      * Effect perform-op call: pop the argument value and delegate to a
      * cached {@link com.mezze.interpreter.nodes.effect.OpCallNode} via
-     * {@code executeWith}. Same lifecycle as AST — Loom fiber suspend
-     * when a driver is present, otherwise chain-dispatch or a
-     * MezzeSuspend thunk. See docs/perf/bdsl-effects-path-a-2026-07.md.
+     * {@code executeWith}. Chain-dispatch is the only path; on no
+     * handler in scope the op is wrapped in a MezzeSuspend thunk.
      *
      * <p>Lowers {@link com.mezze.language.truffleir.PerformOpIR} (default
      * path). The Mut fast path uses a separate op below.

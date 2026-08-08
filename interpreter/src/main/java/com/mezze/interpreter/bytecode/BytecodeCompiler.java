@@ -473,30 +473,27 @@ public final class BytecodeCompiler {
         if (node instanceof ReadCaptureIR) return true;
         if (node instanceof EffectBindingIR) return true;
         if (node instanceof PerformOpIR p) {
-            // Path A: arg is evaluated then handed to a cached
-            // OpCallNode.executeWith. The Mut fast path lowers the raw
-            // `act` lambda directly (no wrapper record on the stack)
-            // to preserve the marker fast path.
+            // arg is evaluated then handed to PerformD chain-dispatch.
+            // The Mut fast path lowers the raw `act` lambda directly (no
+            // wrapper record on the stack) to preserve the marker fast
+            // path.
             return supportsNode(p.getArg(), argCount);
         }
         if (node instanceof HandleIR h) {
-            // Path D8 (endgame): every HandleIR compiles to inline BDSL
-            // ops (PushHandlerChain / body / PopHandlerChain wrapped in
+            // Every HandleIR compiles to inline BDSL ops
+            // (PushHandlerChain / body / PopHandlerChain wrapped in
             // TryCatchOtherwise with UnwrapAbortValue in the catch branch).
-            // See emit for shape. Path D single-shot semantics apply — the
-            // handler impls that use multi-shot resume (Generator.AsStream)
-            // won't behave correctly, but those live in stdlib functions
-            // that already carry their own effect-safety story; if a user
+            // See emit for shape. Single-shot semantics apply — handler
+            // impls that use multi-shot resume (Generator.AsStream) won't
+            // behave correctly, but those live in stdlib functions that
+            // already carry their own effect-safety story; if a user
             // writes a multi-shot handler in a BDSL-compiled fn they get
             // fall-through-only semantics (same as PerformD).
             //
-            // Path E (#336) interop: when LAZY_EFFECTS is on AND this Handle
-            // is partial-discharging, reject BDSL compilation so the whole
-            // function falls back to AST. HandleNode.execute's lazy branch
-            // then builds a MezzeSuspend carrying the full body
-            // continuation — force-able under a wider chain. BDSL's inline
-            // pattern doesn't support that (would need a MakeSuspended op
-            // capturing bodyNode as a sub-CallTarget). Fallback is small
+            // Partial-discharge Handles that need a MezzeSuspend built
+            // around the body continuation — force-able under a wider
+            // chain — don't fit this inline pattern (would need a
+            // MakeSuspended op capturing bodyNode as a sub-CallTarget).
             // perf loss, correct semantics.
             if (!h.getStaticallyFullyDischarges()) {
                 markReject(node, "partial-handle-under-lazy-effects");
