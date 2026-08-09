@@ -26,6 +26,67 @@ object DuplicateDeclarationValidator {
         validateModule(syntheticModule)
     }
 
+    /**
+     * Cross-module coherence for GENERIC impls only:
+     *   - If an imported module has a generic `impl X for 'a`, the local
+     *     module cannot add a concrete `impl X for T` for any T.
+     *   - If the local module has a generic `impl X for 'a`, no concrete
+     *     imported impl of X should exist (rare — would be flagged locally
+     *     by the same rule on the imported side).
+     *
+     * This complements the Rust-style orphan rule (V0406) — orphan blocks
+     * "foreign ability + foreign type" but does NOT block "foreign generic
+     * + local newtype" — which would silently break the coherence invariant
+     * that generic impls block all specialization forever.
+     *
+     * Non-generic overlap (concrete + concrete for same T) is already
+     * caught by the orphan rule.
+     */
+    fun validateGenericAgainstImportedImpls(
+        localImpls: List<ParsedImplAbilityDecl>,
+        importedImpls: Map<com.mezze.language.typedast.Hash, ParsedImplAbilityDecl>
+    ) {
+        val importedGenericByAbility = mutableMapOf<String, ParsedImplAbilityDecl>()
+        val importedConcreteByAbility = mutableMapOf<String, MutableList<ParsedImplAbilityDecl>>()
+        for ((_, imp) in importedImpls) {
+            if (imp.abilityName == null || imp.isInherent) continue
+            if (isGenericReceiver(imp)) {
+                importedGenericByAbility[imp.abilityName!!] = imp
+            } else {
+                importedConcreteByAbility.getOrPut(imp.abilityName!!) { mutableListOf() }.add(imp)
+            }
+        }
+
+        for (local in localImpls) {
+            if (local.abilityName == null || local.isInherent) continue
+            val abilityName = local.abilityName!!
+            val importedGeneric = importedGenericByAbility[abilityName]
+
+            when {
+                // local concrete vs imported generic → conflict
+                importedGeneric != null && !isGenericReceiver(local) -> {
+                    throw genericVsConcreteOverlapError(abilityName, importedGeneric, local)
+                }
+                // local generic vs imported concrete → conflict
+                isGenericReceiver(local) -> {
+                    val importedConcrete = importedConcreteByAbility[abilityName]?.firstOrNull()
+                    if (importedConcrete != null) {
+                        throw genericVsConcreteOverlapError(abilityName, local, importedConcrete)
+                    }
+                    // local generic vs imported generic → duplicate generic
+                    if (importedGeneric != null) {
+                        throw TypeCheckError(
+                            "Duplicate generic impl: `impl $abilityName for 'a` is already declared at ${locString(importedGeneric.loc)} (imported into this module). " +
+                            "Only one generic impl per ability is allowed reachable in a compilation.",
+                            local.loc,
+                            code = ErrorCode.V0407_OVERLAPPING_INSTANCE,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun validateDuplicateTypes(module: ParsedModule) =
         validateNoDuplicates(
             module.decls.filterIsInstance<ParsedTypeDecl>(),
@@ -266,7 +327,7 @@ object DuplicateDeclarationValidator {
         ) { "Duplicate ability declaration: ability '$it' is already defined" }
 
         private fun validateDuplicateAbilityImpls(module: ParsedModule) {
-        val abilityImplKeys = mutableSetOf<String>()
+        val firstImplByKey = mutableMapOf<String, ParsedImplAbilityDecl>()
 
         for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
             val targetTypeNames = impl.targetTypes.map { parsedTypeAnnotationToString(it) }
@@ -284,16 +345,110 @@ object DuplicateDeclarationValidator {
                 impl.abilityTypeArgs.joinToString(",") { structuralTypeKey(it) } + "|" +
                 impl.targetTypes.joinToString(",") { structuralTypeKey(it) }
 
-            if (key in abilityImplKeys) {
+            val firstOccurrence = firstImplByKey[key]
+            if (firstOccurrence != null) {
+                if (!impl.isInherent && isGenericReceiver(impl) && isGenericReceiver(firstOccurrence)) {
+                    throw TypeCheckError(
+                        "Duplicate generic impl: `impl $implLabel for 'a` is already declared at ${locString(firstOccurrence.loc)}. " +
+                        "Only one generic impl per ability is allowed — a generic impl already covers every type.",
+                        impl.loc,
+                        code = ErrorCode.V0407_OVERLAPPING_INSTANCE,
+                    )
+                }
                 throw TypeCheckError(
-                    "Duplicate ${if (impl.isInherent) "inherent" else "ability"} implementation: '${implLabel}' is already implemented " +
-                    "for type(s) ${targetTypeNames.joinToString(", ")}",
+                    "Duplicate ${if (impl.isInherent) "inherent" else "ability"} impl: `$implLabel` is already implemented " +
+                    "for ${targetTypeNames.joinToString(" ")} at ${locString(firstOccurrence.loc)}.",
                     impl.loc,
                     code = ErrorCode.V0407_OVERLAPPING_INSTANCE,
                 )
             }
-            abilityImplKeys.add(key)
+            firstImplByKey[key] = impl
         }
+
+        validateGenericVsConcrete(module)
+    }
+
+    /**
+     * Strict coherence for generic impls: within a single module, a generic
+     * `impl X for 'a` and any concrete `impl X for T` cannot coexist. This
+     * matches Rust's non-overlapping-instances rule — dispatch would be
+     * ambiguous otherwise.
+     *
+     * Only same-module conflicts are checked here; cross-module coherence
+     * (generic in std::option + user's concrete `impl Somable for MyType`)
+     * belongs in ContextBuilder where cross-module impls converge.
+     */
+    private fun validateGenericVsConcrete(module: ParsedModule) {
+        val implsByAbility: Map<String, List<ParsedImplAbilityDecl>> = module.decls
+            .filterIsInstance<ParsedImplAbilityDecl>()
+            .filterNot { it.isInherent }
+            .filter { it.abilityName != null }
+            .groupBy { it.abilityName!! }
+
+        for ((abilityName, impls) in implsByAbility) {
+            val generic = impls.firstOrNull { isGenericReceiver(it) }
+            if (generic == null) continue
+
+            val concrete = impls.firstOrNull { it !== generic && !isGenericReceiver(it) }
+            if (concrete != null) {
+                throw genericVsConcreteOverlapError(abilityName, generic, concrete)
+            }
+        }
+    }
+
+    private fun genericVsConcreteOverlapError(
+        abilityName: String,
+        generic: ParsedImplAbilityDecl,
+        concrete: ParsedImplAbilityDecl,
+    ): TypeCheckError {
+        // Anchor the error on whichever impl comes second in the file — that's
+        // typically the "newly-added" one from the user's perspective.
+        val (first, second) = if (concrete.loc.startLine < generic.loc.startLine) {
+            concrete to generic
+        } else {
+            generic to concrete
+        }
+        val secondIsGeneric = second === generic
+
+        val genericSig = "impl $abilityName for 'a"
+        val concreteReceiver = concrete.targetTypes.joinToString(" ") { parsedTypeAnnotationToString(it) }
+        val concreteSig = "impl $abilityName for $concreteReceiver"
+
+        val secondSig = if (secondIsGeneric) genericSig else concreteSig
+        val firstSig = if (secondIsGeneric) concreteSig else genericSig
+
+        val msg = buildString {
+            append("Overlapping impl: `$secondSig` conflicts with `$firstSig` ")
+            append("(declared at ${locString(first.loc)}).")
+            appendLine()
+            appendLine()
+            append("A generic impl (`$genericSig`) already covers every type, ")
+            append("including `$concreteReceiver`. Only one of the two is allowed — Mezze does not support impl specialization.")
+            appendLine()
+            appendLine()
+            append("Fixes:")
+            appendLine()
+            append("  • If you want a custom `$abilityName` for `$concreteReceiver` only: wrap it in a newtype")
+            appendLine()
+            append("      `newtype My$concreteReceiver = My$concreteReceiver $concreteReceiver`")
+            appendLine()
+            append("      `impl $abilityName for My$concreteReceiver where { ... }`")
+            appendLine()
+            append("  • If you want the same behavior everywhere: remove `$concreteSig` and keep the generic.")
+            appendLine()
+            append("  • If you want per-type behavior for all types: remove `$genericSig` and add concrete impls one-by-one.")
+        }
+
+        return TypeCheckError(msg, second.loc, code = ErrorCode.V0407_OVERLAPPING_INSTANCE)
+    }
+
+    private fun locString(loc: Loc): String = "${loc.file}:${loc.startLine}:${loc.startCol}"
+
+    private fun isGenericReceiver(impl: ParsedImplAbilityDecl): Boolean {
+        val targets = impl.targetTypes
+        if (targets.size != 1) return false
+        val target = targets.first()
+        return target is ParsedNamedType && target.name.startsWith("'")
     }
 
     /**

@@ -455,3 +455,13 @@ impl Sized 'a for List 'a where {
   size = { it } -> size { xs = it },
   is_empty = { it } -> is_empty { xs = it },
 }
+
+## Wrap any value in a one-element linked List via method syntax:
+## `x.list {}` → `cons { head = x, tail = empty {} }`. Generic — covers every type.
+ability Listable for 'a where {
+  list : { it: 'a } -> List 'a
+}
+
+impl Listable for 'a where {
+  list = { it } -> singleton { x = it }
+}

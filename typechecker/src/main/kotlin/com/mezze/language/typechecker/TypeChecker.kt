@@ -263,6 +263,17 @@ class TypeChecker(
         val context = buildResult.context
         val parsedModule = buildResult.resolvedModule ?: module
 
+        // Cross-module generic-impl coherence: orphan rule (V0406) covers
+        // "foreign ability + foreign type" but not "foreign generic +
+        // local newtype". Per project_generic_impls_permanent, once a
+        // generic impl exists in the dep tree, no concrete specialization
+        // is allowed anywhere.
+        importContext?.importedAbilityImpls?.let { imported ->
+            val localImpls = parsedModule.decls.filterIsInstance<ParsedImplAbilityDecl>()
+            com.mezze.language.typechecker.validation.DuplicateDeclarationValidator
+                .validateGenericAgainstImportedImpls(localImpls, imported)
+        }
+
         cachedTypeAliases = buildTypeAliasesFromParsedModule(parsedModule, contextBuilder, importContext)
 
         val abilityNames = buildResult.registry.abilityNames +

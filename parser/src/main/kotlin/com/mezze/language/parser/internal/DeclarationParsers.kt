@@ -1823,13 +1823,13 @@ internal val MezzeParser.importItemParser: Parser<ParsedImportItem> get() = { st
  * surface syntax doesn't list quantifiers explicitly; whatever type vars
  * appear in the abilityTypeArgs / targetTypes ARE the quantifiers.
  */
-private fun collectTypeVarNames(annotations: List<ParsedTypeAnnotation>): List<String> {
+internal fun collectTypeVarNames(annotations: List<ParsedTypeAnnotation>): List<String> {
     val seen = LinkedHashSet<String>()
     for (ann in annotations) collectTypeVarNamesInto(ann, seen)
     return seen.toList()
 }
 
-private fun collectTypeVarNamesInto(ann: ParsedTypeAnnotation, out: MutableSet<String>) {
+internal fun collectTypeVarNamesInto(ann: ParsedTypeAnnotation, out: MutableSet<String>) {
     when (ann) {
         is ParsedNamedType -> if (ann.name.startsWith("'")) out.add(ann.name)
         is ParsedQualifiedType -> Unit

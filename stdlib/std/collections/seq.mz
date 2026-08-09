@@ -485,3 +485,13 @@ impl Sized 'a for ['a] where {
   size = { it } -> size { xs = it },
   is_empty = { it } -> is_empty { xs = it },
 }
+
+## Wrap any value in a one-element Seq via method syntax:
+## `x.seq {}` → `[x]`. Generic — covers every type.
+ability Seqable for 'a where {
+  seq : { it: 'a } -> ['a]
+}
+
+impl Seqable for 'a where {
+  seq = { it } -> singleton { x = it }
+}

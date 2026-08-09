@@ -121,7 +121,7 @@ internal fun resolveParsedImplDeclarations(module: ParsedModule): ParsedModule {
                 target = ParsedImplTarget.Named(decl.effect),
                 targetTypes = targetTypes,
                 abilityTypeArgs = emptyList(),
-                forallVars = emptyList(),
+                forallVars = collectTypeVarNames(targetTypes),
                 associatedTypeBindings = decl.associatedTypeBindings,
                 operations = decl.operations.map { op ->
                     ParsedImplOp(

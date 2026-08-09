@@ -193,3 +193,13 @@ impl Option 'a where {
   to_result = { it, error } -> to_result { opt = it, error = error },
   to_list = { it } -> to_list { opt = it },
 }
+
+## Wrap any value in Some via method syntax: `x.some {}` → `Some { val = x }`.
+## Generic impl — covers every type. Cannot be specialized per-type.
+ability Somable for 'a where {
+  some : { it: 'a } -> Option 'a
+}
+
+impl Somable for 'a where {
+  some = { it } -> Some { val = it }
+}
