@@ -23,6 +23,17 @@ data class NativeSignature(
     val name: String,
     val params: List<NativeParam>,
     val returns: SlotKind,
+    /** True when the runtime handler has no observable side effects and no
+     *  MezzeSuspend production — the compiler can duplicate or elide the
+     *  call. Declared at the NativeOp registration site; default false
+     *  (conservative). */
+    val pure: Boolean = false,
+    /** If set, this native has a same-shape [InlineOp] equivalent that
+     *  BDSL emits as a Truffle DSL DirectXxx node. The compiler's
+     *  post-substitution peephole collapses a CallNativeIR to
+     *  InlineBinaryOpIR when this is present, unlocking the JIT fast
+     *  path. Declared at the NativeOp registration site. */
+    val inlineOp: InlineOp? = null,
 ) {
     /** Returns the positional index of [fieldName], or -1 if absent. */
     fun indexOf(fieldName: String): Int {

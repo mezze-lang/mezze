@@ -2944,6 +2944,18 @@ class TypedASTCompiler(
      *  {a, b} -> if a > b then a else b, accessor wrappers, etc. */
     private val inlineNodeBudget = 8
 
+    /** Recursion cap for chained inlining. Depth counts inliner invocations
+     *  along the call chain (fold → folder → Int.add → __native_int_add is
+     *  depth 3). Beyond this, remaining CallDirect stays as an ordinary
+     *  direct call — no correctness cost, just less inlining. */
+    private val inlineDepthBudget = 4
+
+    /** Purity is declared once, at the [com.mezze.interpreter.nodes.builtin.dsl.NativeOp]
+     *  registration site. The signature carries it — no per-name string
+     *  switch in the compiler. */
+    private fun isPureNative(name: String): Boolean =
+        NativeSignatures.signatureOf(name)?.pure == true
+
     /** Try to inline a direct call into the caller's IR. Returns the inlined
      *  expression, or null if any constraint is violated.
      *
@@ -2951,12 +2963,17 @@ class TypedASTCompiler(
      *    - Callee FunctionIR is registered (compiled before this site).
      *    - Callee has 0 captures (no closures to materialize at call site).
      *    - Callee has 0 locals (body uses only args + literals + arithmetic + If).
-     *    - Callee body is "pure" — no calls, no mutation, no effects, no records.
+     *    - Callee body is "pure" — no effects, no mutation.
      *    - Callee body fits in inlineNodeBudget.
      *    - Caller args are side-effect-free (Read* / literals) so we can
      *      duplicate them via param substitution without binding to fresh slots. */
     private fun tryInlineDirectCall(targetHash: Hash, args: List<NodeIR>): NodeIR? {
+        return tryInlineDirectCall(targetHash, args, depth = 0)
+    }
+
+    private fun tryInlineDirectCall(targetHash: Hash, args: List<NodeIR>, depth: Int): NodeIR? {
         if (System.getenv("MEZZE_DISABLE_INLINE") == "true") return null
+        if (depth > inlineDepthBudget) return null
 
         val callee = hashToFunctionIR[targetHash] ?: return null
         if (callee.captureSlots.isNotEmpty()) return null
@@ -2969,9 +2986,10 @@ class TypedASTCompiler(
         if (countNodes(callee.body, max = inlineNodeBudget + 1) > inlineNodeBudget) return null
 
         if (System.getenv("MEZZE_DEBUG_INLINE") == "true") {
-            System.err.println("[inline] HIT: ${callee.name} (hash=${targetHash.hex.take(8)}) args=${args.size}")
+            System.err.println("[inline] HIT depth=$depth: ${callee.name} (hash=${targetHash.hex.take(8)}) args=${args.size}")
         }
-        return substituteArgs(callee.body, args)
+        val substituted = substituteArgs(callee.body, args, depth)
+        return maybeCollapseInlineOp(substituted)
     }
 
     /** A NodeIR is "side-effect-free" if duplicating it in multiple positions
@@ -2983,8 +3001,11 @@ class TypedASTCompiler(
         else -> false
     }
 
-    /** Body shapes that can be safely substituted: no calls, no allocations,
-     *  no mutation, no effects. Only pure expressions over args + arithmetic.
+    /** Body shapes that can be safely substituted: no allocations, no
+     *  mutation, no effects. Allows pure primitive calls (CallNativeIR
+     *  to an allowlisted name, CallDirectIR to a small pure callee) so
+     *  ability-op wrappers like `Int.add = {it,r} -> __native_int_add {...}`
+     *  and short helper functions can chain-inline into a caller.
      *
      *  Param reads in Mezze are emitted as ReadLocalIR(slot=closureCount+paramIdx).
      *  We accept ReadLocalIR if its slot is within the callee's param range
@@ -2998,6 +3019,10 @@ class TypedASTCompiler(
         is ReadLocalIR -> node.slot in 0 until paramCount
         is InlineBinaryOpIR -> isInlinable(node.left, paramCount) && isInlinable(node.right, paramCount)
         is IfIR -> isInlinable(node.cond, paramCount) && isInlinable(node.thenBr, paramCount) && isInlinable(node.elseBr, paramCount)
+        is MakeRecordIR -> node.fields.all { it is FieldIR && isInlinable(it.value, paramCount) }
+        is CallNativeIR -> isPureNative(node.name) && isInlinable(node.arg, paramCount) &&
+            node.args.all { isInlinable(it, paramCount) }
+        is CallDirectIR -> !node.isTailCall && node.args.all { isInlinable(it, paramCount) }
         else -> false
     }
 
@@ -3016,26 +3041,104 @@ class TypedASTCompiler(
                 if (c + t >= max) return c + t + 1
                 1 + c + t + countNodes(node.elseBr, max - 1 - c - t)
             }
+            is MakeRecordIR -> {
+                var used = 1
+                for (f in node.fields) {
+                    if (f !is FieldIR) return Int.MAX_VALUE
+                    used += countNodes(f.value, max - used)
+                    if (used >= max) return used + 1
+                }
+                used
+            }
+            is CallNativeIR -> {
+                var used = 1 + countNodes(node.arg, max - 1)
+                for (a in node.args) {
+                    used += countNodes(a, max - used)
+                    if (used >= max) return used + 1
+                }
+                used
+            }
+            is CallDirectIR -> {
+                var used = 1
+                for (a in node.args) {
+                    used += countNodes(a, max - used)
+                    if (used >= max) return used + 1
+                }
+                used
+            }
             else -> 1
         }
     }
 
     /** Substitute callee's param reads with caller's arg expressions.
      *  Params are at ReadLocalIR(slot=0..paramCount-1) since we required
-     *  the callee to have 0 captures and 0 locals. */
-    private fun substituteArgs(node: NodeIR, args: List<NodeIR>): NodeIR = when (node) {
+     *  the callee to have 0 captures and 0 locals.
+     *
+     *  Recursively attempts inlining on any CallDirectIR after substitution —
+     *  a nested `add(acc, x)` inside the folder body should collapse to
+     *  __native_int_add, which the InlineOps peephole then folds to
+     *  InlineBinaryOpIR. */
+    private fun substituteArgs(node: NodeIR, args: List<NodeIR>, depth: Int = 0): NodeIR = when (node) {
         is ReadArgIR -> args.getOrNull(node.index) ?: node
         is ReadLocalIR -> if (node.slot < args.size) args[node.slot] else node
         is InlineBinaryOpIR -> InlineBinaryOpIR(
-            node.op, substituteArgs(node.left, args), substituteArgs(node.right, args), node.src
+            node.op, substituteArgs(node.left, args, depth), substituteArgs(node.right, args, depth), node.src
         )
         is IfIR -> IfIR(
-            substituteArgs(node.cond, args),
-            substituteArgs(node.thenBr, args),
-            substituteArgs(node.elseBr, args),
+            substituteArgs(node.cond, args, depth),
+            substituteArgs(node.thenBr, args, depth),
+            substituteArgs(node.elseBr, args, depth),
             node.src
         )
+        is MakeRecordIR -> MakeRecordIR(
+            node.fields.map { f ->
+                when (f) {
+                    is FieldIR -> FieldIR(f.name, substituteArgs(f.value, args, depth))
+                    else -> f
+                }
+            },
+            node.src, node.typeTag
+        )
+        is CallNativeIR -> {
+            val newArg = substituteArgs(node.arg, args, depth)
+            val newArgs = node.args.map { substituteArgs(it, args, depth) }
+            maybeCollapseInlineOp(
+                node.copy(arg = newArg, args = newArgs)
+            )
+        }
+        is CallDirectIR -> {
+            val newArgs = node.args.map { substituteArgs(it, args, depth) }
+            val recursed = tryInlineDirectCall(node.targetHash, newArgs, depth + 1)
+            recursed ?: node.copy(args = newArgs)
+        }
         else -> node
+    }
+
+    /** After substitution, if we produce a CallNativeIR whose signature
+     *  declares an equivalent [InlineOp], collapse it to an
+     *  [InlineBinaryOpIR] so the BDSL emit + PE fast path fires. The
+     *  mapping lives on the NativeSignature (declared once at each
+     *  NativeOp site) — no per-name string switch here.
+     */
+    private fun maybeCollapseInlineOp(node: NodeIR): NodeIR {
+        if (node !is CallNativeIR) return node
+        val sig = NativeSignatures.signatureOf(node.name) ?: return node
+        val op = sig.inlineOp ?: return node
+        // Fetch positional args uniformly. Scalar-ABI already has them in
+        // `args`; record-ABI needs unpacking via the signature's param
+        // order so we don't hardcode "l"/"r" here.
+        val positional: List<NodeIR>? = when {
+            node.isScalarABI && node.args.size == sig.params.size -> node.args
+            node.arg is MakeRecordIR -> {
+                val record = node.arg as MakeRecordIR
+                val fields = record.fields.filterIsInstance<FieldIR>()
+                if (fields.size != sig.params.size) null
+                else sig.params.map { p -> fields.find { it.name == p.name }?.value ?: return node }
+            }
+            else -> null
+        }
+        if (positional == null || positional.size != 2) return node
+        return InlineBinaryOpIR(op, positional[0], positional[1], node.src)
     }
 
     /** Build a CallIndirectIR or CallIndirectScalarIR based on arg shape.

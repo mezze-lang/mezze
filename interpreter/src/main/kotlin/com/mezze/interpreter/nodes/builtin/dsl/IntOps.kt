@@ -2,6 +2,7 @@ package com.mezze.interpreter.nodes.builtin.dsl
 
 import com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
 import com.mezze.interpreter.values.MezzeVariant
+import com.mezze.language.truffleir.InlineOp
 import com.mezze.language.truffleir.SlotKind
 
 /**
@@ -34,23 +35,28 @@ object IntOps {
 
     // ==================== binary Int, Int -> Int ====================
     private val ADD = NativeOp("__native_int_add",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG,
+        pure = true, inlineOp = InlineOp.ADD,
     ) { args -> PrimitiveNatives.intAdd(args.long(0), args.long(1)) }
 
     private val SUBTRACT = NativeOp("__native_int_subtract",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG,
+        pure = true, inlineOp = InlineOp.SUB,
     ) { args -> PrimitiveNatives.intSubtract(args.long(0), args.long(1)) }
 
     private val MULTIPLY = NativeOp("__native_int_multiply",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG,
+        pure = true, inlineOp = InlineOp.MUL,
     ) { args -> PrimitiveNatives.intMultiply(args.long(0), args.long(1)) }
 
     private val DIVIDE = NativeOp("__native_int_divide",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG,
+        pure = true, inlineOp = InlineOp.DIV,
     ) { args -> PrimitiveNatives.intDivide(args.long(0), args.long(1)) }
 
     private val MODULO = NativeOp("__native_int_modulo",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG,
+        pure = true, inlineOp = InlineOp.MOD,
     ) { args -> PrimitiveNatives.intModulo(args.long(0), args.long(1)) }
 
     private val MIN = NativeOp("__native_int_min",
@@ -90,27 +96,33 @@ object IntOps {
 
     // ==================== Int, Int -> Bool comparisons ====================
     private val EQ = NativeOp("__native_int_eq",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN,
+        pure = true, inlineOp = InlineOp.EQ,
     ) { args -> PrimitiveNatives.intEq(args.long(0), args.long(1)) }
 
     private val NEQ = NativeOp("__native_int_neq",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN,
+        pure = true, inlineOp = InlineOp.NEQ,
     ) { args -> PrimitiveNatives.intNeq(args.long(0), args.long(1)) }
 
     private val LT = NativeOp("__native_int_lt",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN,
+        pure = true, inlineOp = InlineOp.LT,
     ) { args -> PrimitiveNatives.intLt(args.long(0), args.long(1)) }
 
     private val LE = NativeOp("__native_int_le",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN,
+        pure = true, inlineOp = InlineOp.LE,
     ) { args -> PrimitiveNatives.intLte(args.long(0), args.long(1)) }
 
     private val GT = NativeOp("__native_int_gt",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN,
+        pure = true, inlineOp = InlineOp.GT,
     ) { args -> PrimitiveNatives.intGt(args.long(0), args.long(1)) }
 
     private val GE = NativeOp("__native_int_ge",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.BOOLEAN,
+        pure = true, inlineOp = InlineOp.GE,
     ) { args -> PrimitiveNatives.intGte(args.long(0), args.long(1)) }
 
     // ==================== conversions ====================

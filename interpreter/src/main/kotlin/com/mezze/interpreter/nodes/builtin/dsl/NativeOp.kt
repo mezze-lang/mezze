@@ -101,9 +101,20 @@ class NativeOp(
     name: String,
     params: List<NativeParam>,
     returns: SlotKind,
+    /** True iff the handler has no observable side effects (no I/O, no
+     *  mutation, no MezzeSuspend). The compiler-side inliner uses this
+     *  to decide whether it's safe to duplicate the call across
+     *  substitution positions and to elide dead calls. */
+    pure: Boolean = false,
+    /** Optional [InlineOp] equivalent. Set on primitive arith / comparison
+     *  natives so the inliner's post-substitution peephole can collapse
+     *  them to InlineBinaryOpIR — the BDSL emit path then compiles the
+     *  call as a straight DirectXxx op, which PE folds to the primitive
+     *  machine op. */
+    inlineOp: com.mezze.language.truffleir.InlineOp? = null,
     private val handler: NativeHandler,
 ) {
-    val signature: NativeSignature = NativeSignature(name, params, returns)
+    val signature: NativeSignature = NativeSignature(name, params, returns, pure, inlineOp)
 
     init {
         // Publish to both registries from a single declaration site.
