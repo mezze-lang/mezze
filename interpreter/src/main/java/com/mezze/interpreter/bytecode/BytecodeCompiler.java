@@ -1468,6 +1468,11 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CallDirectIR c) {
+            // #407: HOF fusion — if this is a call to a known HOF (seq::fold,
+            // etc.) with a statically-visible folder MakeLambda, emit an
+            // inlined counted loop instead of the CallDirect. See
+            // tryEmitFusedFold for supported shapes.
+            if (tryEmitFusedFold(c, b, argCount, localMap)) return;
             CallTarget target = resolveCallTarget(c.getTargetHash());
             if (target == null) {
                 throw new IllegalStateException(
@@ -2174,6 +2179,298 @@ public final class BytecodeCompiler {
         // Everything else — literals, ReadArg/Local/Global, MakeRecord etc.
         // — cannot produce MezzeSuspend.
         return false;
+    }
+
+    /**
+     * #407 MVP: fuse a native seq-fold callsite with an inline folder
+     * lambda into an unrolled counted loop. Skips the MezzeRecord{acc,x}
+     * alloc AND the IndirectCallNode.call dispatch per iteration —
+     * folder body is emitted inline in the same BDSL frame.
+     *
+     * <p>Handled shape (very narrow for MVP; extend later):
+     * <pre>
+     *   CallNativeIR(name="__native_seq_fold", arg=MakeRecord[xs=Exs, init=Einit,
+     *                                                          f=MakeLambda(hash)])
+     * </pre>
+     * where {@code hash}'s FunctionIR has:
+     * <ul>
+     *   <li>0 captures</li>
+     *   <li>2 params (acc, x)</li>
+     *   <li>0 folder-local slots</li>
+     *   <li>body = {@link InlineBinaryOpIR} with 2 {@link ReadLocalIR} leaves at
+     *       slots 0 and 1 (in either order — arithmetic is commutative
+     *       for ADD/MUL but for SUB/DIV/MOD we only fuse the (acc, x) order)</li>
+     * </ul>
+     *
+     * <p>Anything else — captures, more locals, non-inline-op bodies,
+     * PerformOp inside, etc. — returns false and falls through to the
+     * record-ABI native dispatch. That's still correct, just doesn't
+     * skip the per-iter alloc.
+     *
+     * @return true iff the fused loop was emitted; false to fall through
+     *         to the normal CallNativeIR dispatch.
+     */
+    /** #407 env gate: MEZZE_FOLD_FUSE=1 opts in; off by default. */
+    private static final boolean FOLD_FUSE_ENABLED =
+        "1".equals(System.getenv("MEZZE_FOLD_FUSE"));
+
+    /**
+     * #407: registry mapping "known HOF" content-hashes to their fusion
+     * shape. Populated lazily on first lookup by scanning the stdlib
+     * pre-lowered function map for matching qualifiedNames. Idempotent —
+     * safe to call from multiple threads (writes to volatile + racy-init
+     * is fine because the derived map only depends on stdlib snapshot).
+     */
+    private static final class KnownHofs {
+        /**
+         * Fold-shape callables we can fuse, keyed by (name, sourceBasename).
+         * qualifiedName isn't the full FQN in the current tree, so we
+         * disambiguate on the module's source-file basename.
+         *
+         * Extend as new HOFs are handled — same call-shape as seq::fold
+         * (i.e. `{xs, init, f}` with f = `{acc, x} -> ...`).
+         */
+        private static final java.util.Set<String> FOLD_KEYS = java.util.Set.of(
+            "fold@stdlib-std-collections-seq.mz"
+            // TODO extend: list::fold_left, set::fold, deque::fold, ...
+        );
+
+        private static volatile java.util.Map<Hash, String> hashToKey;
+
+        static String lookup(Hash targetHash) {
+            var map = hashToKey;
+            if (map == null) {
+                map = build();
+                hashToKey = map;
+            }
+            return map.get(targetHash);
+        }
+
+        private static java.util.Map<Hash, String> build() {
+            var pre = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE.getPreloweredFunctions();
+            var m = new java.util.HashMap<Hash, String>();
+            for (var e : pre.entrySet()) {
+                var fn = e.getValue();
+                var key = fn.getName() + "@" + basename(fn.getSourceFile());
+                if (FOLD_KEYS.contains(key)) m.put(e.getKey(), key);
+            }
+            if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
+                System.err.println("[fold-fuse] KnownHofs.build: pre.size=" + pre.size() + " matches=" + m.size());
+                // If we found zero matches, list a few sample qualifiedNames so we can
+                // fix the FOLD_QNAMES constant.
+                if (m.isEmpty()) {
+                    int shown = 0;
+                    for (var e : pre.entrySet()) {
+                        var fn = e.getValue();
+                        var q = fn.getQualifiedName();
+                        if (q != null && q.contains("fold")) {
+                            System.err.println("[fold-fuse]   candidate name=" + fn.getName() + " qname=" + q + " sourceFile=" + fn.getSourceFile());
+                            if (++shown > 10) break;
+                        }
+                    }
+                }
+            }
+            return m;
+        }
+
+        private static String basename(String path) {
+            if (path == null) return "";
+            int i = path.lastIndexOf('/');
+            return i < 0 ? path : path.substring(i + 1);
+        }
+    }
+
+    private boolean tryEmitFusedFold(CallDirectIR c, MezzeBytecodeRootNodeGen.Builder b,
+                                     int argCount,
+                                     com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
+        boolean dbg = System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null;
+        // Env gate — off by default while we build confidence.
+        if (!FOLD_FUSE_ENABLED) return false;
+        if (c.isTailCall()) return false;
+        // Is the callee a known fold-shape HOF?
+        var hof = KnownHofs.lookup(c.getTargetHash());
+        if (hof == null) {
+            if (dbg && (c.getTargetHash() != null)) {
+                // Only log occasionally to avoid spam
+                if (Math.random() < 0.001) System.err.println("[fold-fuse] miss: target hash not known-HOF: " + c.getTargetHash());
+            }
+            return false;
+        }
+        if (dbg) {
+            StringBuilder sb = new StringBuilder("[fold-fuse] considering call to " + hof + " isScalarABI=" + c.isScalarABI() + " args=[");
+            for (int i = 0; i < c.getArgs().size(); i++) {
+                if (i > 0) sb.append(",");
+                sb.append(c.getArgs().get(i).getClass().getSimpleName());
+            }
+            sb.append("]");
+            System.err.println(sb);
+        }
+
+        // Extract xs/init/f — handle both scalar-ABI (3 positional args)
+        // and record-ABI (1 arg == MakeRecord{xs,init,f}). The stdlib fold
+        // signature declares params in order (xs, init, f), so scalar-ABI
+        // positions align.
+        NodeIR xsExpr, initExpr, fExpr;
+        var args = c.getArgs();
+        if (c.isScalarABI()) {
+            if (args.size() != 3) { if (dbg) System.err.println("[fold-fuse] reject: scalar arity " + args.size()); return false; }
+            xsExpr = args.get(0);
+            initExpr = args.get(1);
+            fExpr = args.get(2);
+        } else {
+            if (args.size() != 1 || !(args.get(0) instanceof MakeRecordIR mr)) {
+                if (dbg) System.err.println("[fold-fuse] reject: record-ABI arg shape");
+                return false;
+            }
+            var fields = mr.getFields();
+            if (fields.size() != 3) { if (dbg) System.err.println("[fold-fuse] reject: record fields " + fields.size()); return false; }
+            NodeIR xs = null, init = null, f = null;
+            for (var fld : fields) {
+                switch (fld.getName()) {
+                    case "xs" -> xs = fld.getValue();
+                    case "init" -> init = fld.getValue();
+                    case "f" -> f = fld.getValue();
+                }
+            }
+            if (xs == null || init == null || f == null) {
+                if (dbg) System.err.println("[fold-fuse] reject: missing xs/init/f");
+                return false;
+            }
+            xsExpr = xs; initExpr = init; fExpr = f;
+        }
+
+        if (!(fExpr instanceof MakeLambdaIR ml)) {
+            if (dbg) System.err.println("[fold-fuse] reject: f not MakeLambda: " + fExpr.getClass().getSimpleName());
+            return false;
+        }
+        // Folder must have zero captures — anything else needs slot copies.
+        if (!ml.getCaptures().isEmpty()) { if (dbg) System.err.println("[fold-fuse] reject: MakeLambda has captures"); return false; }
+        var folderIR = language.lookupFunctionIR(ml.getFunctionHash());
+        if (folderIR == null) { if (dbg) System.err.println("[fold-fuse] reject: folderIR null"); return false; }
+        if (folderIR.getCaptureSlots().size() != 0) { if (dbg) System.err.println("[fold-fuse] reject: folder captureSlots"); return false; }
+        if (folderIR.getParamSlots().size() != 2) { if (dbg) System.err.println("[fold-fuse] reject: folder paramSlots=" + folderIR.getParamSlots().size()); return false; }
+        if (folderIR.getLocalSlots().size() != 0) { if (dbg) System.err.println("[fold-fuse] reject: folder localSlots=" + folderIR.getLocalSlots().size()); return false; }
+        // Body must be a single inline binary op reading slot 0 and slot 1.
+        if (!(folderIR.getBody() instanceof InlineBinaryOpIR bin)) {
+            if (dbg) System.err.println("[fold-fuse] reject: folder body " + folderIR.getBody().getClass().getSimpleName() + " params=" + folderIR.getParamNames() + " full=" + folderIR.getBody());
+            return false;
+        }
+        if (!(bin.getLeft() instanceof ReadLocalIR l) || !(bin.getRight() instanceof ReadLocalIR r)) {
+            if (dbg) System.err.println("[fold-fuse] reject: body leaves");
+            return false;
+        }
+        int lSlot = l.getSlot();
+        int rSlot = r.getSlot();
+        // slots 0 and 1 in some order — either (acc, x) or (x, acc). For
+        // commutative ops both are fine; for non-commutative we only
+        // fuse the natural (acc, x) order.
+        boolean naturalOrder = (lSlot == 0 && rSlot == 1);
+        boolean swapped      = (lSlot == 1 && rSlot == 0);
+        if (!naturalOrder && !swapped) return false;
+        var op = bin.getOp();
+        boolean commutative = (op == InlineOp.ADD || op == InlineOp.MUL
+                            || op == InlineOp.EQ || op == InlineOp.NEQ
+                            || op == InlineOp.AND || op == InlineOp.OR);
+        if (swapped && !commutative) return false;
+
+        // Emit the fused counted loop. Layout:
+        //   Block {
+        //     seq  = Exs
+        //     size = SeqSize(seq)
+        //     i    = 0L
+        //     acc  = Einit
+        //     While (i < size) {
+        //       x   = SeqGet(seq, i)
+        //       acc = acc <op> x     // inlined folder body
+        //       i   = i + 1
+        //     }
+        //     acc                     // block value
+        //   }
+        b.beginBlock();
+        var seqSlot  = b.createLocal();
+        var sizeSlot = b.createLocal();
+        var iSlot    = b.createLocal();
+        var accSlot  = b.createLocal();
+        var xSlot    = b.createLocal();
+        // seq = Exs
+        b.beginStoreLocal(seqSlot);
+        emitNode(xsExpr, b, argCount, localMap);
+        b.endStoreLocal();
+        // size = SeqSize(seq)
+        b.beginStoreLocal(sizeSlot);
+        b.beginSeqSize();
+        b.emitLoadLocal(seqSlot);
+        b.endSeqSize();
+        b.endStoreLocal();
+        // i = 0L
+        b.beginStoreLocal(iSlot);
+        b.emitLoadLongConstant(0L);
+        b.endStoreLocal();
+        // acc = Einit
+        b.beginStoreLocal(accSlot);
+        emitNode(initExpr, b, argCount, localMap);
+        b.endStoreLocal();
+        // While (i < size)
+        b.beginWhile();
+          b.beginDirectLessThan();
+          b.emitLoadLocal(iSlot);
+          b.emitLoadLocal(sizeSlot);
+          b.endDirectLessThan();
+          b.beginBlock();
+            // x = SeqGet(seq, i)
+            b.beginStoreLocal(xSlot);
+            b.beginSeqGet();
+            b.emitLoadLocal(seqSlot);
+            b.emitLoadLocal(iSlot);
+            b.endSeqGet();
+            b.endStoreLocal();
+            // acc = acc <op> x
+            b.beginStoreLocal(accSlot);
+            emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+            b.endStoreLocal();
+            // i = i + 1
+            b.beginStoreLocal(iSlot);
+            b.beginDirectAdd();
+            b.emitLoadLocal(iSlot);
+            b.emitLoadLongConstant(1L);
+            b.endDirectAdd();
+            b.endStoreLocal();
+          b.endBlock();
+        b.endWhile();
+        // Block yields acc.
+        b.emitLoadLocal(accSlot);
+        b.endBlock();
+        if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
+            System.err.println("[fold-fuse] emitted fused loop for op=" + op);
+        }
+        return true;
+    }
+
+    /**
+     * #407 helper: emit `<accSlot> <op> <xSlot>` using the same
+     * BeginDirectXxx ops the {@link InlineBinaryOpIR} handler uses.
+     * Kept in sync with that handler's switch.
+     */
+    private void emitInlineOpTwoLocals(InlineOp op,
+                                       com.oracle.truffle.api.bytecode.BytecodeLocal a,
+                                       com.oracle.truffle.api.bytecode.BytecodeLocal x,
+                                       MezzeBytecodeRootNodeGen.Builder b) {
+        switch (op) {
+            case ADD -> { b.beginDirectAdd(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectAdd(); }
+            case SUB -> { b.beginDirectSubtract(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectSubtract(); }
+            case MUL -> { b.beginDirectMultiply(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectMultiply(); }
+            case DIV -> { b.beginDirectDivide(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectDivide(); }
+            case MOD -> { b.beginDirectModulo(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectModulo(); }
+            case EQ  -> { b.beginDirectEqual(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectEqual(); }
+            case NEQ -> { b.beginDirectNotEqual(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectNotEqual(); }
+            case LT  -> { b.beginDirectLessThan(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectLessThan(); }
+            case LE  -> { b.beginDirectLessThanOrEqual(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectLessThanOrEqual(); }
+            case GT  -> { b.beginDirectGreaterThan(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectGreaterThan(); }
+            case GE  -> { b.beginDirectGreaterThanOrEqual(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectGreaterThanOrEqual(); }
+            case AND -> { b.beginDirectAnd(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectAnd(); }
+            case OR  -> { b.beginDirectOr(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectOr(); }
+            default -> throw new IllegalStateException("emitInlineOpTwoLocals: unsupported op " + op);
+        }
     }
 
     /**

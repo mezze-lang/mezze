@@ -1348,6 +1348,15 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /** Get seq size as a long. Used by #407 fold-fusion inlined loops. */
+    @Operation
+    public static final class SeqSize {
+        @Specialization
+        public static long doSeq(MezzeSeq<?> seq) {
+            return seq.size();
+        }
+    }
+
     /** Drop N elements from the head of a seq, returning the tail. */
     @Operation
     @ConstantOperand(type = int.class)
