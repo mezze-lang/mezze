@@ -2280,6 +2280,108 @@ public final class BytecodeCompiler {
         }
     }
 
+    /**
+     * #407: registry mapping "known arithmetic op impl-wrapper"
+     * content-hashes to the equivalent {@link InlineOp}. When mono
+     * specializes a folder like `{acc, x} -> acc + x` for concrete
+     * types, the resulting body is `CallDirectIR(add-hash) [ReadLocal(0),
+     * ReadLocal(1)]` — a direct call to the impl-op wrapper (e.g.
+     * `add@stdlib-std-int.mz`), not `InlineBinaryOpIR`. Fusion needs to
+     * recognize that shape as fusable so `acc + x` collapses inside the
+     * counted loop just as `InlineBinaryOpIR` would.
+     *
+     * <p>Populated once by scanning stdlib pre-lowered functions for
+     * matching (name, sourceBasename) pairs. Same lazy-init pattern as
+     * KnownHofs above.
+     */
+    private static final class KnownArithOps {
+        // Maps stdlib impl-op wrappers to their inline op equivalent.
+        // Only Int arith for now; Float/Bool/Char follow if we see them
+        // in real folder bodies.
+        private static final java.util.Map<String, InlineOp> KEY_TO_OP;
+        static {
+            var m = new java.util.HashMap<String, InlineOp>();
+            m.put("add@stdlib-std-int.mz", InlineOp.ADD);
+            m.put("sub@stdlib-std-int.mz", InlineOp.SUB);
+            m.put("mul@stdlib-std-int.mz", InlineOp.MUL);
+            m.put("div@stdlib-std-int.mz", InlineOp.DIV);
+            m.put("mod@stdlib-std-int.mz", InlineOp.MOD);
+            m.put("eq@stdlib-std-int.mz",  InlineOp.EQ);
+            m.put("neq@stdlib-std-int.mz", InlineOp.NEQ);
+            m.put("lt@stdlib-std-int.mz",  InlineOp.LT);
+            m.put("le@stdlib-std-int.mz",  InlineOp.LE);
+            m.put("gt@stdlib-std-int.mz",  InlineOp.GT);
+            m.put("ge@stdlib-std-int.mz",  InlineOp.GE);
+            KEY_TO_OP = java.util.Map.copyOf(m);
+        }
+
+        private static volatile java.util.Map<Hash, InlineOp> hashToOp;
+
+        static InlineOp lookup(Hash targetHash) {
+            var map = hashToOp;
+            if (map == null) {
+                map = build();
+                hashToOp = map;
+            }
+            return map.get(targetHash);
+        }
+
+        private static java.util.Map<Hash, InlineOp> build() {
+            var pre = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE.getPreloweredFunctions();
+            var m = new java.util.HashMap<Hash, InlineOp>();
+            for (var e : pre.entrySet()) {
+                var fn = e.getValue();
+                var key = fn.getName() + "@" + basename(fn.getSourceFile());
+                var op = KEY_TO_OP.get(key);
+                if (op != null) m.put(e.getKey(), op);
+            }
+            if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
+                System.err.println("[fold-fuse] KnownArithOps.build: pre.size=" + pre.size() + " matches=" + m.size());
+            }
+            return m;
+        }
+
+        private static String basename(String path) {
+            if (path == null) return "";
+            int i = path.lastIndexOf('/');
+            return i < 0 ? path : path.substring(i + 1);
+        }
+    }
+
+    /**
+     * #407: classify a folder body as (op, leftSlot, rightSlot) if it's
+     * fusable. Accepts both {@link InlineBinaryOpIR} (already collapsed
+     * by the peephole) and {@link CallDirectIR} to a
+     * {@link KnownArithOps} target (post-mono, where the folder body
+     * became a direct call to the arith impl-op). Returns null if the
+     * body isn't a shape we can fuse.
+     */
+    private static final class FolderShape {
+        final InlineOp op;
+        final int leftSlot;
+        final int rightSlot;
+        FolderShape(InlineOp op, int l, int r) { this.op = op; this.leftSlot = l; this.rightSlot = r; }
+    }
+
+    private static FolderShape classifyFolderBody(NodeIR body) {
+        if (body instanceof InlineBinaryOpIR bin) {
+            if (bin.getLeft() instanceof ReadLocalIR l && bin.getRight() instanceof ReadLocalIR r) {
+                return new FolderShape(bin.getOp(), l.getSlot(), r.getSlot());
+            }
+            return null;
+        }
+        if (body instanceof CallDirectIR call) {
+            if (!call.isScalarABI()) return null;
+            if (call.getArgs().size() != 2) return null;
+            if (!(call.getArgs().get(0) instanceof ReadLocalIR l)) return null;
+            if (!(call.getArgs().get(1) instanceof ReadLocalIR r)) return null;
+            var op = KnownArithOps.lookup(call.getTargetHash());
+            if (op == null) return null;
+            return new FolderShape(op, l.getSlot(), r.getSlot());
+        }
+        return null;
+    }
+
     private boolean tryEmitFusedFold(CallDirectIR c, MezzeBytecodeRootNodeGen.Builder b,
                                      int argCount,
                                      com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
@@ -2350,30 +2452,107 @@ public final class BytecodeCompiler {
         if (folderIR.getCaptureSlots().size() != 0) { if (dbg) System.err.println("[fold-fuse] reject: folder captureSlots"); return false; }
         if (folderIR.getParamSlots().size() != 2) { if (dbg) System.err.println("[fold-fuse] reject: folder paramSlots=" + folderIR.getParamSlots().size()); return false; }
         if (folderIR.getLocalSlots().size() != 0) { if (dbg) System.err.println("[fold-fuse] reject: folder localSlots=" + folderIR.getLocalSlots().size()); return false; }
-        // Body must be a single inline binary op reading slot 0 and slot 1.
-        if (!(folderIR.getBody() instanceof InlineBinaryOpIR bin)) {
+        // Body must classify as a fusable folder shape (inline binary op
+        // or direct call to a known arith impl-op) reading slot 0 and 1.
+        var shape = classifyFolderBody(folderIR.getBody());
+        if (shape == null) {
             if (dbg) System.err.println("[fold-fuse] reject: folder body " + folderIR.getBody().getClass().getSimpleName() + " params=" + folderIR.getParamNames() + " full=" + folderIR.getBody());
             return false;
         }
-        if (!(bin.getLeft() instanceof ReadLocalIR l) || !(bin.getRight() instanceof ReadLocalIR r)) {
-            if (dbg) System.err.println("[fold-fuse] reject: body leaves");
-            return false;
-        }
-        int lSlot = l.getSlot();
-        int rSlot = r.getSlot();
+        int lSlot = shape.leftSlot;
+        int rSlot = shape.rightSlot;
         // slots 0 and 1 in some order — either (acc, x) or (x, acc). For
         // commutative ops both are fine; for non-commutative we only
         // fuse the natural (acc, x) order.
         boolean naturalOrder = (lSlot == 0 && rSlot == 1);
         boolean swapped      = (lSlot == 1 && rSlot == 0);
         if (!naturalOrder && !swapped) return false;
-        var op = bin.getOp();
+        var op = shape.op;
         boolean commutative = (op == InlineOp.ADD || op == InlineOp.MUL
                             || op == InlineOp.EQ || op == InlineOp.NEQ
                             || op == InlineOp.AND || op == InlineOp.OR);
         if (swapped && !commutative) return false;
 
-        // Emit the fused counted loop. Layout:
+        // #404: if xsExpr is `__native_seq_range { start, end }`, emit a
+        // direct counted loop over start..end without materializing the
+        // Seq or paying per-iter SeqGet + boxing. The classifier looks
+        // through both scalar-ABI (args=[start,end]) and record-ABI
+        // (arg=MakeRecord{start,end}) forms.
+        NodeIR rangeStart = null, rangeEnd = null;
+        if (xsExpr instanceof CallNativeIR nat && "__native_seq_range".equals(nat.getName())) {
+            if (nat.isScalarABI() && nat.getArgs().size() == 2) {
+                rangeStart = nat.getArgs().get(0);
+                rangeEnd   = nat.getArgs().get(1);
+            } else if (nat.getArg() instanceof MakeRecordIR mr) {
+                for (var fld : mr.getFields()) {
+                    switch (fld.getName()) {
+                        case "start" -> rangeStart = fld.getValue();
+                        case "end"   -> rangeEnd   = fld.getValue();
+                    }
+                }
+                if (rangeStart == null || rangeEnd == null) {
+                    rangeStart = null; rangeEnd = null;
+                }
+            }
+        }
+
+        b.beginBlock();
+        var accSlot  = b.createLocal();
+        var iSlot    = b.createLocal();
+        var xSlot    = b.createLocal();
+
+        if (rangeStart != null) {
+            // Range-fused layout — no seq alloc, no SeqGet:
+            //   Block {
+            //     i    = Estart
+            //     end  = Eend
+            //     acc  = Einit
+            //     While (i < end) {
+            //       x   = i
+            //       acc = acc <op> x
+            //       i   = i + 1
+            //     }
+            //     acc
+            //   }
+            var endSlot = b.createLocal();
+            b.beginStoreLocal(iSlot);
+            emitNode(rangeStart, b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginStoreLocal(endSlot);
+            emitNode(rangeEnd, b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginStoreLocal(accSlot);
+            emitNode(initExpr, b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginWhile();
+              b.beginDirectLessThan();
+              b.emitLoadLocal(iSlot);
+              b.emitLoadLocal(endSlot);
+              b.endDirectLessThan();
+              b.beginBlock();
+                b.beginStoreLocal(xSlot);
+                b.emitLoadLocal(iSlot);
+                b.endStoreLocal();
+                b.beginStoreLocal(accSlot);
+                emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+                b.endStoreLocal();
+                b.beginStoreLocal(iSlot);
+                b.beginDirectAdd();
+                b.emitLoadLocal(iSlot);
+                b.emitLoadLongConstant(1L);
+                b.endDirectAdd();
+                b.endStoreLocal();
+              b.endBlock();
+            b.endWhile();
+            b.emitLoadLocal(accSlot);
+            b.endBlock();
+            if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
+                System.err.println("[fold-fuse] emitted range-fused loop for op=" + op);
+            }
+            return true;
+        }
+
+        // General seq-fused loop (materialized xs):
         //   Block {
         //     seq  = Exs
         //     size = SeqSize(seq)
@@ -2381,54 +2560,42 @@ public final class BytecodeCompiler {
         //     acc  = Einit
         //     While (i < size) {
         //       x   = SeqGet(seq, i)
-        //       acc = acc <op> x     // inlined folder body
+        //       acc = acc <op> x
         //       i   = i + 1
         //     }
-        //     acc                     // block value
+        //     acc
         //   }
-        b.beginBlock();
         var seqSlot  = b.createLocal();
         var sizeSlot = b.createLocal();
-        var iSlot    = b.createLocal();
-        var accSlot  = b.createLocal();
-        var xSlot    = b.createLocal();
-        // seq = Exs
         b.beginStoreLocal(seqSlot);
         emitNode(xsExpr, b, argCount, localMap);
         b.endStoreLocal();
-        // size = SeqSize(seq)
         b.beginStoreLocal(sizeSlot);
         b.beginSeqSize();
         b.emitLoadLocal(seqSlot);
         b.endSeqSize();
         b.endStoreLocal();
-        // i = 0L
         b.beginStoreLocal(iSlot);
         b.emitLoadLongConstant(0L);
         b.endStoreLocal();
-        // acc = Einit
         b.beginStoreLocal(accSlot);
         emitNode(initExpr, b, argCount, localMap);
         b.endStoreLocal();
-        // While (i < size)
         b.beginWhile();
           b.beginDirectLessThan();
           b.emitLoadLocal(iSlot);
           b.emitLoadLocal(sizeSlot);
           b.endDirectLessThan();
           b.beginBlock();
-            // x = SeqGet(seq, i)
             b.beginStoreLocal(xSlot);
             b.beginSeqGet();
             b.emitLoadLocal(seqSlot);
             b.emitLoadLocal(iSlot);
             b.endSeqGet();
             b.endStoreLocal();
-            // acc = acc <op> x
             b.beginStoreLocal(accSlot);
             emitInlineOpTwoLocals(op, accSlot, xSlot, b);
             b.endStoreLocal();
-            // i = i + 1
             b.beginStoreLocal(iSlot);
             b.beginDirectAdd();
             b.emitLoadLocal(iSlot);
@@ -2437,7 +2604,6 @@ public final class BytecodeCompiler {
             b.endStoreLocal();
           b.endBlock();
         b.endWhile();
-        // Block yields acc.
         b.emitLoadLocal(accSlot);
         b.endBlock();
         if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
