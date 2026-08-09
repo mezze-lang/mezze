@@ -17,6 +17,7 @@ import com.mezze.language.typedast.TypedLambda
 import com.mezze.language.typedast.TypedLetDecl
 import com.mezze.language.typedast.TypedParam
 import com.mezze.language.typedast.TypedVar
+import com.mezze.language.typedast.forEachChild
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -403,6 +404,124 @@ class MonomorphizerTest {
             gh, listOf(intT), emptyList(), mapOf("f" to cHash)
         )
         assertEquals(h1, h2)
+    }
+
+    // ─── #424 Piece 3: LambdaSubstitution splices closure body ─
+
+    /** Build a minimal "fold-like" generic decl: `{acc, f} -> f({acc = acc})`.
+     *  Not real fold, but exercises the two closure-param usage sites:
+     *  a direct call `f({...})` and (elsewhere) a passthrough. */
+    private fun makeFoldLikeDecl(hash: Hash): TypedLetDecl {
+        val ta = TypeVar("'a", 0, 100)
+        val varA = MezzeType.VarType(ta)
+        val folderType = MezzeType.FunctionType(
+            MezzeType.RecordType(linkedMapOf("acc" to varA), rowVar = null),
+            varA
+        )
+        val recTy = MezzeType.RecordType(
+            linkedMapOf("acc" to varA, "f" to folderType),
+            rowVar = null
+        )
+        // body: f { acc = acc } — a direct call to the closure param
+        val fVar = TypedVar("f", BindingRef.Param(1), folderType, loc)
+        val accVar = TypedVar("acc", BindingRef.Param(0), varA, loc)
+        val callArg = com.mezze.language.typedast.TypedRecord(
+            entries = listOf(
+                com.mezze.language.typedast.TypedRecordEntry.Field("acc", accVar, loc),
+            ),
+            type = MezzeType.RecordType(linkedMapOf("acc" to varA), rowVar = null),
+            loc = loc,
+        )
+        val call = TypedCall(
+            function = fVar,
+            arg = callArg,
+            instantiation = null,
+            isTailCall = false,
+            type = varA,
+            loc = loc,
+        )
+        val outer = TypedLambda(
+            params = listOf(
+                TypedParam("acc", varA, loc),
+                TypedParam("f", folderType, loc),
+            ),
+            body = call,
+            captures = emptyList(),
+            type = MezzeType.FunctionType(recTy, varA),
+            loc = loc,
+        )
+        return TypedLetDecl(
+            hash = hash,
+            name = "fold_like",
+            typeParams = listOf(TypeParam("'a", TypeKind.Star)),
+            value = outer,
+            scheme = TypeScheme(
+                typeParams = listOf(TypeParam("'a", TypeKind.Star)),
+                abilityConstraints = emptyList(),
+                type = MezzeType.FunctionType(recTy, varA)
+            ),
+            isPublic = true,
+            loc = loc
+        )
+    }
+
+    /** A folder `{acc} -> <suffix>`, mirroring how fold's `f` gets called. */
+    private fun makeSingleParamFolder(suffix: Long): TypedLambda {
+        val fnTy = MezzeType.FunctionType(
+            MezzeType.RecordType(linkedMapOf("acc" to intT), rowVar = null),
+            intT
+        )
+        return TypedLambda(
+            params = listOf(TypedParam("acc", intT, loc)),
+            body = TypedIntLit(suffix, intT, loc),
+            captures = emptyList(),
+            type = fnTy,
+            loc = loc,
+        )
+    }
+
+    @Test
+    fun `Piece 3 splices lambda body inline — no closure-param call left`() {
+        // Simulate a Piece-2 seed with closureArgs populated. Piece 3
+        // rewrites `f({acc = acc})` inside the specialized body to a
+        // `let acc = acc; <folder body>` block — no TypedVar("f") and
+        // no TypedCall on `f` should remain.
+        val prev = System.getProperty("mezze.mono.closures.override")
+        try {
+            System.setProperty("mezze.mono.closures.override", "1")
+            // Feature flag reads env var (lazy). To test, we call the
+            // splice directly rather than going through run().
+            val fold = makeFoldLikeDecl(Hash("f".repeat(64)))
+            val folder = makeSingleParamFolder(42)
+            val body = fold.value // the outer TypedLambda
+            val spliced = LambdaSubstitution.substituteClosures(
+                (body as TypedLambda).body,
+                mapOf("f" to folder),
+            )
+            // The spliced body must NOT contain a TypedCall where fn is
+            // TypedVar("f"), NOR a bare TypedVar("f").
+            fun hasClosureRef(e: com.mezze.language.typedast.TypedExpr): Boolean {
+                if (e is TypedVar && e.name == "f") return true
+                if (e is TypedCall) {
+                    val fn = e.function
+                    if (fn is TypedVar && fn.name == "f") return true
+                }
+                var found = false
+                e.forEachChild { if (hasClosureRef(it)) found = true }
+                return found
+            }
+            assertTrue(!hasClosureRef(spliced), "spliced body still references closure param `f`: $spliced")
+            // Sanity: the folder's literal 42 should appear.
+            fun containsIntLit(e: com.mezze.language.typedast.TypedExpr, v: Long): Boolean {
+                if (e is TypedIntLit && e.value == v) return true
+                var found = false
+                e.forEachChild { if (containsIntLit(it, v)) found = true }
+                return found
+            }
+            assertTrue(containsIntLit(spliced, 42), "spliced body missing folder body literal 42: $spliced")
+        } finally {
+            if (prev != null) System.setProperty("mezze.mono.closures.override", prev)
+        }
     }
 
     @Test

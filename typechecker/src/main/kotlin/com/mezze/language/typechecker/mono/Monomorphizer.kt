@@ -271,7 +271,117 @@ class Monomorphizer(
             }
         }
 
+        // Post-pass — rewrite ByHash refs inside each specialization
+        // body when the callee ALSO got specialized. Compiler only
+        // routes seed call sites via bySiteLoc; transitive calls need
+        // this rewrite so a specialized `fold` calls the specialized
+        // `fold_go`, not the generic one.
+        //
+        // Only enabled with the #424 flag on. Without it, existing
+        // pre-#424 mono behaviour is preserved (broken for HOFs but
+        // green under gate=off).
+        if (closuresEnabled) {
+            val specHashMap = HashMap<DoneKey, Hash>(done)
+            val rewritten = HashMap<Hash, Specialization>(specializations.size)
+            for ((sh, spec) in specializations) {
+                val newBody = rewriteBodyToSpecializedCalls(
+                    spec.specializedBody,
+                    specHashMap,
+                )
+                rewritten[sh] = spec.copy(specializedBody = newBody)
+            }
+            return Result(rewritten, rewrites, fallbacks)
+        }
+
         return Result(specializations, rewrites, fallbacks)
+    }
+
+    /** Post-pass: rewrite `TypedVar(BindingRef.ByHash(h), …)` inside a
+     *  specialization body to point at the specialized-callee hash when
+     *  the callee's `(h, derivedTypeArgs, closureArgs)` is in
+     *  [specHashMap]. Left alone otherwise — the compiler emits a
+     *  direct call to the generic (which is the correct fallback). */
+    private fun rewriteBodyToSpecializedCalls(
+        expr: TypedExpr,
+        specHashMap: Map<DoneKey, Hash>,
+    ): TypedExpr {
+        fun rewrite(e: TypedExpr): TypedExpr = when (e) {
+            is TypedCall -> {
+                val fn = e.function
+                if (fn is TypedVar && fn.binding is BindingRef.ByHash) {
+                    val callee = resolveDecl((fn.binding as BindingRef.ByHash).hash)
+                    val newFn = if (callee != null && callee.typeParams.isNotEmpty()) {
+                        val derived = deriveTransitiveTypeArgs(callee, e.instantiation, fn.type)
+                        if (derived != null) {
+                            val cArgs = closureArgsAt(e)
+                            val key = DoneKey((fn.binding as BindingRef.ByHash).hash, derived, cArgs)
+                            val specHash = specHashMap[key]
+                            if (specHash != null) {
+                                fn.copy(binding = BindingRef.ByHash(specHash))
+                            } else fn
+                        } else fn
+                    } else fn
+                    e.copy(function = newFn, arg = rewrite(e.arg))
+                } else {
+                    e.copy(function = rewrite(fn), arg = rewrite(e.arg))
+                }
+            }
+            is com.mezze.language.typedast.TypedLambda -> e.copy(body = rewrite(e.body))
+            is com.mezze.language.typedast.TypedRecord -> e.copy(entries = e.entries.map { rewriteEntry(it, ::rewrite) })
+            is com.mezze.language.typedast.TypedRecordUpdate -> e.copy(
+                record = rewrite(e.record),
+                updates = e.updates.map { rewriteEntry(it, ::rewrite) },
+            )
+            is com.mezze.language.typedast.TypedFieldAccess -> e.copy(record = rewrite(e.record))
+            is com.mezze.language.typedast.TypedVariantConstruct -> {
+                val p = e.payload
+                if (p == null) e else e.copy(payload = rewrite(p))
+            }
+            is com.mezze.language.typedast.TypedMatch -> e.copy(
+                scrutinee = rewrite(e.scrutinee),
+                cases = e.cases.map { c ->
+                    c.copy(
+                        guard = c.guard?.let { rewrite(it) },
+                        body = rewrite(c.body),
+                    )
+                },
+            )
+            is com.mezze.language.typedast.TypedIf -> e.copy(
+                condition = rewrite(e.condition),
+                thenBranch = rewrite(e.thenBranch),
+                elseBranch = rewrite(e.elseBranch),
+            )
+            is com.mezze.language.typedast.TypedBlock -> e.copy(
+                statements = e.statements.map { s ->
+                    when (s) {
+                        is com.mezze.language.typedast.TypedStatement.Let -> s.copy(value = rewrite(s.value))
+                        is com.mezze.language.typedast.TypedStatement.Expr -> s.copy(expr = rewrite(s.expr))
+                    }
+                },
+                result = rewrite(e.result),
+            )
+            is com.mezze.language.typedast.TypedSeq -> e.copy(
+                elements = e.elements.map { el ->
+                    when (el) {
+                        is com.mezze.language.typedast.TypedSeqElement.Regular -> el.copy(expr = rewrite(el.expr))
+                        is com.mezze.language.typedast.TypedSeqElement.Spread -> el.copy(expr = rewrite(el.expr))
+                    }
+                },
+            )
+            is com.mezze.language.typedast.TypedPipe -> e.copy(left = rewrite(e.left), right = rewrite(e.right))
+            is com.mezze.language.typedast.TypedPerform -> e.copy(body = rewrite(e.body))
+            is com.mezze.language.typedast.TypedPerformOp -> e.copy(arg = rewrite(e.arg))
+            else -> e
+        }
+        return rewrite(expr)
+    }
+
+    private fun rewriteEntry(
+        entry: com.mezze.language.typedast.TypedRecordEntry,
+        rewrite: (TypedExpr) -> TypedExpr,
+    ): com.mezze.language.typedast.TypedRecordEntry = when (entry) {
+        is com.mezze.language.typedast.TypedRecordEntry.Field -> entry.copy(value = rewrite(entry.value))
+        is com.mezze.language.typedast.TypedRecordEntry.Spread -> entry.copy(expr = rewrite(entry.expr))
     }
 
     /**

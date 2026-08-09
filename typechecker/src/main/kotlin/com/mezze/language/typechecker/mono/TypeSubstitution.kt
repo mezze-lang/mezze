@@ -342,7 +342,12 @@ object LambdaSubstitution {
     ): TypedExpr {
         if (closureBodies.isEmpty()) return body
         // Purity guard — bail per-lambda that isn't safe to inline.
-        val safe = closureBodies.filterValues { isSafeToInline(it.body) }
+        // We also bail on captures for the first cut — inlining a
+        // lambda with captures requires rewriting its Capture indexes
+        // to match the new host frame, which is out of scope here.
+        val safe = closureBodies.filterValues {
+            it.captures.isEmpty() && isSafeToInline(it.body)
+        }
         if (safe.isEmpty()) return body
         return substituteInExpr(body, safe)
     }
