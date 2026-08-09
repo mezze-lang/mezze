@@ -297,4 +297,146 @@ class MonomorphizerTest {
         assertTrue(result.specializations.size <= 4)
         assertTrue(result.fallbacks.isNotEmpty())
     }
+
+    // ─── #424 closure identity ───────────────────────────────────
+
+    /** Build `{a, x} -> a + <suffix>` — the shape of a fold folder.
+     *  Body is deliberately simple, we just need distinguishable
+     *  structural content. */
+    private fun makeFolderLambda(suffix: Long): TypedLambda {
+        val intFn = MezzeType.FunctionType(intT, MezzeType.FunctionType(intT, intT))
+        return TypedLambda(
+            params = listOf(
+                TypedParam("a", intT, loc),
+                TypedParam("x", intT, loc),
+            ),
+            // body = a + <suffix>. We don't need the actual +
+            // dispatch to be resolved — a bare literal or a
+            // param read is enough to make hashes stable.
+            body = TypedIntLit(suffix, intT, loc),
+            captures = emptyList(),
+            type = intFn,
+            loc = loc,
+        )
+    }
+
+    @Test
+    fun `hashClosure equal for structurally identical lambdas`() {
+        val a = makeFolderLambda(1)
+        val b = makeFolderLambda(1)
+        assertEquals(Monomorphizer.hashClosure(a), Monomorphizer.hashClosure(b))
+    }
+
+    @Test
+    fun `hashClosure differs for different bodies`() {
+        val a = makeFolderLambda(1)
+        val b = makeFolderLambda(2)
+        assertNotEquals(Monomorphizer.hashClosure(a), Monomorphizer.hashClosure(b))
+    }
+
+    @Test
+    fun `closureArgsAt extracts lambda-literal fields`() {
+        // Simulate `fold {init=0, f={a,x}->1}` — one lambda field.
+        val recTy = MezzeType.RecordType(
+            linkedMapOf(
+                "init" to intT,
+                "f" to MezzeType.FunctionType(intT, MezzeType.FunctionType(intT, intT)),
+            ),
+            rowVar = null,
+        )
+        val arg = com.mezze.language.typedast.TypedRecord(
+            entries = listOf(
+                com.mezze.language.typedast.TypedRecordEntry.Field("init", TypedIntLit(0, intT, loc), loc),
+                com.mezze.language.typedast.TypedRecordEntry.Field("f", makeFolderLambda(1), loc),
+            ),
+            type = recTy,
+            loc = loc,
+        )
+        val call = TypedCall(
+            function = TypedVar("fold", BindingRef.ByHash(Hash("f".repeat(64))), MezzeType.FunctionType(recTy, intT), loc),
+            arg = arg,
+            instantiation = null,
+            isTailCall = false,
+            type = intT,
+            loc = loc,
+        )
+        val closures = Monomorphizer.closureArgsAt(call)
+        // `init` is an IntLit, not a lambda — skipped. `f` is a lambda.
+        assertEquals(setOf("f"), closures.keys)
+        assertEquals(Monomorphizer.hashClosure(makeFolderLambda(1)), closures["f"])
+    }
+
+    @Test
+    fun `closureArgsAt empty for non-record arg`() {
+        val call = TypedCall(
+            function = TypedVar("id", BindingRef.ByHash(Hash("f".repeat(64))), MezzeType.FunctionType(intT, intT), loc),
+            arg = TypedIntLit(42, intT, loc),
+            instantiation = null,
+            isTailCall = false,
+            type = intT,
+            loc = loc,
+        )
+        assertTrue(Monomorphizer.closureArgsAt(call).isEmpty())
+    }
+
+    // ─── #424 Piece 2: closureArgs in SpecRequest / Specialization ─
+
+    @Test
+    fun `specializedHash differs by closure args`() {
+        val gh = Hash("a".repeat(64))
+        val h1 = Monomorphizer.specializedHash(gh, listOf(intT), emptyList(), emptyMap())
+        val h2 = Monomorphizer.specializedHash(
+            gh, listOf(intT), emptyList(),
+            mapOf("f" to Hash("e".repeat(64)))
+        )
+        assertNotEquals(h1, h2)
+    }
+
+    @Test
+    fun `specializedHash dedupes on same closure hash`() {
+        val gh = Hash("a".repeat(64))
+        val cHash = Hash("c".repeat(64))
+        val h1 = Monomorphizer.specializedHash(
+            gh, listOf(intT), emptyList(), mapOf("f" to cHash)
+        )
+        val h2 = Monomorphizer.specializedHash(
+            gh, listOf(intT), emptyList(), mapOf("f" to cHash)
+        )
+        assertEquals(h1, h2)
+    }
+
+    @Test
+    fun `specializedHash differs by different closures for same field`() {
+        val gh = Hash("a".repeat(64))
+        val h1 = Monomorphizer.specializedHash(
+            gh, listOf(intT), emptyList(), mapOf("f" to Hash("c".repeat(64)))
+        )
+        val h2 = Monomorphizer.specializedHash(
+            gh, listOf(intT), emptyList(), mapOf("f" to Hash("d".repeat(64)))
+        )
+        assertNotEquals(h1, h2)
+    }
+
+    @Test
+    fun `closureArgsAt skips non-lambda record fields`() {
+        // A record with no lambda fields → empty map.
+        val recTy = MezzeType.RecordType(linkedMapOf("x" to intT, "y" to intT), rowVar = null)
+        val arg = com.mezze.language.typedast.TypedRecord(
+            entries = listOf(
+                com.mezze.language.typedast.TypedRecordEntry.Field("x", TypedIntLit(1, intT, loc), loc),
+                com.mezze.language.typedast.TypedRecordEntry.Field("y", TypedIntLit(2, intT, loc), loc),
+            ),
+            type = recTy,
+            loc = loc,
+        )
+        val call = TypedCall(
+            function = TypedVar("f", BindingRef.ByHash(Hash("a".repeat(64))), MezzeType.FunctionType(recTy, intT), loc),
+            arg = arg,
+            instantiation = null,
+            isTailCall = false,
+            type = intT,
+            loc = loc,
+        )
+        assertTrue(Monomorphizer.closureArgsAt(call).isEmpty())
+    }
 }

@@ -60,17 +60,38 @@ class Monomorphizer(
     private val maxDepth: Int = 16,
 ) {
 
-    /** A request to specialize `genericHash` for the given type/impl args. */
+    /** A request to specialize `genericHash` for the given type/impl args.
+     *
+     *  `closureArgs` (#424 Piece 2): fieldName → closureHash for each
+     *  record field of the call site's arg that is a lambda literal.
+     *  Two calls with the same lambda hash for the same fieldName
+     *  dedupe to one specialization; different lambdas produce
+     *  different specializations (Rust-style per-closure mono).
+     *  Empty when the caller's arg is not a record literal, or none
+     *  of its fields are lambda literals. */
     data class SpecRequest(
         val genericHash: Hash,
         val typeArgs: List<MezzeType>,
         val abilityImpls: List<AbilityImplRef>,
+        val closureArgs: Map<String, Hash> = emptyMap(),
+        /** Companion to [closureArgs]: fieldName → the actual lambda IR
+         *  Piece 3 splices into the specialized body. Not part of
+         *  identity — the hashes in [closureArgs] carry that. */
+        val closureBodies: Map<String, com.mezze.language.typedast.TypedLambda> = emptyMap(),
     )
 
     /** Identity key for the `done` set — drops abilityImpls because they are
      *  derivable from typeArgs once the impl table is consulted. The full
-     *  triple still goes into the specialization hash. */
-    private data class DoneKey(val genericHash: Hash, val typeArgs: List<MezzeType>)
+     *  triple still goes into the specialization hash.
+     *
+     *  #424: closureArgs participate — two call sites with different
+     *  closures for the same generic must produce distinct
+     *  specializations (that's the point). Identical closures dedupe. */
+    private data class DoneKey(
+        val genericHash: Hash,
+        val typeArgs: List<MezzeType>,
+        val closureArgs: Map<String, Hash>,
+    )
 
     /** Output of one mono run. */
     data class Result(
@@ -96,6 +117,11 @@ class Monomorphizer(
         val specializedBody: TypedExpr,
         /** The original decl's resolved return type — now concrete. */
         val specializedType: MezzeType,
+        /** #424: fieldName → closureHash for closure-arg specializations. */
+        val closureArgs: Map<String, Hash> = emptyMap(),
+        /** #424: fieldName → the lambda IR that was spliced into the body,
+         *  kept for provenance/debug. Empty when Piece 3 is gated off. */
+        val closureBodies: Map<String, com.mezze.language.typedast.TypedLambda> = emptyMap(),
     )
 
     /** Drive the worklist from a list of seed requests. */
@@ -113,7 +139,7 @@ class Monomorphizer(
 
         while (worklist.isNotEmpty()) {
             val (req, depth) = worklist.removeFirst()
-            val key = DoneKey(req.genericHash, req.typeArgs)
+            val key = DoneKey(req.genericHash, req.typeArgs, req.closureArgs)
 
             // Cycle / cache hit — already specialized.
             done[key]?.let { existing ->
@@ -158,33 +184,54 @@ class Monomorphizer(
             // routing through the dict-passing path.
             val newBody = rewriteConstrainedMethodCalls(substitutedBody, req.abilityImpls)
 
-            val specHash = specializedHash(req.genericHash, req.typeArgs, req.abilityImpls)
+            val specHash = specializedHash(req.genericHash, req.typeArgs, req.abilityImpls, req.closureArgs)
             done[key] = specHash
             rewrites[req] = specHash
+            // #424 Piece 3: splice closure lambdas into the specialized
+            // body, gated on MEZZE_MONO_CLOSURES=1 for safety. The splice
+            // rewrites `f {acc, x}` → the folder body (beta-reduction)
+            // and `f = f` → `f = <literal folder>` in forwarded records
+            // (so transitive fold_go picks up the same closure). Only
+            // runs when the request has closureArgs AND the flag is on.
+            val specializedNewBody = if (req.closureArgs.isNotEmpty()
+                && req.closureBodies.isNotEmpty()
+                && closuresEnabled
+            ) {
+                LambdaSubstitution.substituteClosures(newBody, req.closureBodies)
+            } else newBody
+
             specializations[specHash] = Specialization(
                 specializedHash = specHash,
                 genericHash = req.genericHash,
                 typeArgs = req.typeArgs,
                 abilityImpls = req.abilityImpls,
-                specializedBody = newBody,
+                specializedBody = specializedNewBody,
                 specializedType = newType,
+                closureArgs = req.closureArgs,
+                closureBodies = req.closureBodies,
             )
 
             // Scan the substituted body for further generic call sites and
             // enqueue them. `collectByHashRefsWithSite` yields
-            // `(ByHash, TypeInstantiation?, siteType?)` triples — the site
-            // type is the substituted `fn.type` at each call, which lets us
-            // recover concrete type-args via unification when the AST-
-            // stamped instantiation is missing or wrong-arity.
-            val refs = mutableListOf<Triple<BindingRef.ByHash, TypeInstantiation?, MezzeType?>>()
-            TypeSubstitution.collectByHashRefsWithSite(newBody) { ref, inst, siteType ->
-                refs.add(Triple(ref, inst, siteType))
+            // `(ByHash, TypeInstantiation?, siteType?, enclosingCall?)`
+            // — the enclosingCall is the TypedCall we're inside (null for
+            // non-call refs). Used by #424 to harvest closure-arg
+            // literals at each transitive HOF call site.
+            data class RefSite(
+                val ref: BindingRef.ByHash,
+                val inst: TypeInstantiation?,
+                val siteType: MezzeType?,
+                val enclosingCall: TypedCall?,
+            )
+            val refs = mutableListOf<RefSite>()
+            TypeSubstitution.collectByHashRefsWithSite(specializedNewBody) { ref, inst, siteType, call ->
+                refs.add(RefSite(ref, inst, siteType, call))
             }
             if (System.getenv("MEZZE_MONO_TRACE") != null) {
                 System.err.println("[mono-trace] transitive refs from ${decl.name}: total=${refs.size}")
-                for ((ref, inst, siteType) in refs) {
-                    val target = resolveDecl(ref.hash)
-                    System.err.println("[mono-trace]   ref=${ref.hash} target=${target?.name ?: "<unresolved>"} typeParams=${target?.typeParams?.size ?: 0} inst=$inst siteType=$siteType")
+                for (r in refs) {
+                    val target = resolveDecl(r.ref.hash)
+                    System.err.println("[mono-trace]   ref=${r.ref.hash} target=${target?.name ?: "<unresolved>"} typeParams=${target?.typeParams?.size ?: 0} inst=${r.inst} siteType=${r.siteType}")
                 }
             }
             // #409: for each transitive ref, derive typeArgs by unifying
@@ -193,13 +240,33 @@ class Monomorphizer(
             // `TypedCall.instantiation`, which for ability/impl-wrapper
             // methods stamps the wrong shape (impl target-type instead of
             // each declared typeParam).
-            for ((ref, inst, siteType) in refs) {
-                val targetDecl = resolveDecl(ref.hash) ?: continue
+            for (r in refs) {
+                val targetDecl = resolveDecl(r.ref.hash) ?: continue
                 if (targetDecl.typeParams.isEmpty()) continue
-                val derived = deriveTransitiveTypeArgs(targetDecl, inst, siteType)
+                val derived = deriveTransitiveTypeArgs(targetDecl, r.inst, r.siteType)
                     ?: continue
+                // #424 Piece 2: harvest closure args at each transitive
+                // HOF call site. After Piece 3 splices literals into the
+                // body, forwarded `f = f` becomes `f = <lambda>`, so a
+                // recursive helper like `fold_go` picks the closure up
+                // via this scan and specializes the same way.
+                val cArgs: Map<String, Hash>
+                val cBodies: Map<String, com.mezze.language.typedast.TypedLambda>
+                if (closuresEnabled && r.enclosingCall != null) {
+                    cArgs = closureArgsAt(r.enclosingCall)
+                    cBodies = closureBodiesAt(r.enclosingCall)
+                } else {
+                    cArgs = emptyMap()
+                    cBodies = emptyMap()
+                }
                 worklist.addLast(
-                    SpecRequest(ref.hash, derived, inst?.abilityImpls ?: emptyList()) to (depth + 1)
+                    SpecRequest(
+                        r.ref.hash,
+                        derived,
+                        r.inst?.abilityImpls ?: emptyList(),
+                        cArgs,
+                        cBodies,
+                    ) to (depth + 1)
                 )
             }
         }
@@ -571,6 +638,20 @@ class Monomorphizer(
             genericHash: Hash,
             typeArgs: List<MezzeType>,
             abilityImpls: List<AbilityImplRef>,
+        ): Hash = specializedHash(genericHash, typeArgs, abilityImpls, emptyMap())
+
+        /**
+         * Overload of [specializedHash] that folds closure-arg hashes into
+         * the identity — two call sites of the same generic with the same
+         * lambda literal for a given field dedupe to one spec; different
+         * lambdas produce different specs. See docs/perf/mono-closure-
+         * specialization.md.
+         */
+        fun specializedHash(
+            genericHash: Hash,
+            typeArgs: List<MezzeType>,
+            abilityImpls: List<AbilityImplRef>,
+            closureArgs: Map<String, Hash>,
         ): Hash {
             val b = MezzeHashBuilder()
             b.append(byteArrayOf(MONO_SPEC_TAG))
@@ -599,6 +680,14 @@ class Monomorphizer(
             for (i in abilityImpls.indices) {
                 appendImplBindingInScope(b, abilityImpls[i], canonical.fields[key("i", i)]!!)
             }
+            // #424: fold closure-arg hashes in. Sorted by field name so
+            // ordering in the LinkedHashMap can't change identity.
+            b.appendInt(closureArgs.size)
+            val sortedNames = closureArgs.keys.sorted()
+            for (name in sortedNames) {
+                b.append(name.toByteArray(Charsets.UTF_8))
+                b.append(closureArgs.getValue(name).hex)
+            }
             return b.buildHash()
         }
 
@@ -614,6 +703,99 @@ class Monomorphizer(
             b.append(impl.abilityHash.hex)
             b.append(impl.implHash.hex)
             com.mezze.language.ast.hashing.appendTypeInScope(b, normalizedTargetType)
+        }
+
+        // ────────────────────────────────────────────────────────────
+        // #424 closure identity: give every lambda literal a content
+        // hash — its "closure type." Two structurally identical lambdas
+        // hash the same; different ones hash differently. Foundation
+        // for #416 mono lambda-value specialization: an HOF call site
+        // that passes a lambda literal gets a specialization keyed on
+        // (typeArgs + closureHashes), and the specialized body has
+        // the lambda's IR spliced in place of every read of the
+        // closure parameter — same as Rust monomorphizing on the
+        // closure's anonymous struct type.
+        //
+        // This piece (Piece 1) exposes the hash surface only. It has
+        // no effect on emitted code — Piece 2 wires it into
+        // SpecRequest, Piece 3 wires the splice at emit time.
+        // See docs/perf/mono-closure-specialization.md.
+        // ────────────────────────────────────────────────────────────
+
+        /**
+         * Compute the closure identity hash of a lambda literal.
+         *
+         * Two lambdas are the same closure iff they hash the same.
+         * The hash IGNORES the outer type (mono handles that
+         * separately) but INCLUDES the body structure — so
+         * `{a,x} -> a+x` and `{a,x} -> a+x+0` hash differently,
+         * `{a,x} -> a+x` and `{b,y} -> b+y` hash the same
+         * (alpha-equivalent — bound-var names are de Bruijn'd
+         * inside TypedASTHasher).
+         *
+         * Delegates to [com.mezze.language.typedast.TypedASTHasher]
+         * — that hasher is already content-based over TypedLambda's
+         * params + body + captures, which is exactly the identity
+         * we want.
+         */
+        fun hashClosure(lambda: com.mezze.language.typedast.TypedLambda): Hash =
+            com.mezze.language.typedast.TypedASTHasher.hashExpr(lambda)
+
+        /**
+         * Extract closure-arg hashes from an HOF call site.
+         *
+         * Returns a map `fieldName → closureHash` for every record
+         * field of the call's arg that is a lambda literal. Fields
+         * whose value is NOT a lambda literal (variable binding,
+         * captured value, function-application result) are omitted
+         * — those can't be specialized without escape analysis
+         * (out of scope for Piece 1 per Q1 "strict" decision in
+         * the design doc).
+         *
+         * Callers: mono worklist scan. When a `TypedCall` targets a
+         * generic decl whose signature has functional record-field
+         * parameters (fold's `f`, filter's `p`, etc.), this returns
+         * which of those fields the caller passed a lambda literal
+         * for. The mono driver then keys the specialization on
+         * `(typeArgs + closureHashes)`.
+         *
+         * Returns an empty map if the call's arg is not a record
+         * literal, or contains no lambda-literal fields.
+         */
+        fun closureArgsAt(call: TypedCall): Map<String, Hash> {
+            val arg = call.arg
+            if (arg !is com.mezze.language.typedast.TypedRecord) return emptyMap()
+            val out = LinkedHashMap<String, Hash>()
+            for (entry in arg.entries) {
+                if (entry !is com.mezze.language.typedast.TypedRecordEntry.Field) continue
+                val value = entry.value
+                if (value !is com.mezze.language.typedast.TypedLambda) continue
+                out[entry.name] = hashClosure(value)
+            }
+            return out
+        }
+
+        /** Companion to [closureArgsAt]: for the same fields, return the
+         *  actual `TypedLambda` IR — Piece 3 splices these into the
+         *  specialized body. */
+        fun closureBodiesAt(call: TypedCall): Map<String, com.mezze.language.typedast.TypedLambda> {
+            val arg = call.arg
+            if (arg !is com.mezze.language.typedast.TypedRecord) return emptyMap()
+            val out = LinkedHashMap<String, com.mezze.language.typedast.TypedLambda>()
+            for (entry in arg.entries) {
+                if (entry !is com.mezze.language.typedast.TypedRecordEntry.Field) continue
+                val value = entry.value
+                if (value !is com.mezze.language.typedast.TypedLambda) continue
+                out[entry.name] = value
+            }
+            return out
+        }
+
+        /** #424 feature-gate. Piece 3 splice + Piece 2 closure keying are
+         *  behind MEZZE_MONO_CLOSURES=1 for the initial land — flip default
+         *  to on once both env-var settings run green. */
+        val closuresEnabled: Boolean by lazy {
+            System.getenv("MEZZE_MONO_CLOSURES") == "1"
         }
     }
 }

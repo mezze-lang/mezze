@@ -281,7 +281,22 @@ object MonoDriver {
                         val resolvedImpls = resolveAbilityConstraints(
                             callee, args, abilityImpls = allImpls
                         )
-                        out.add(Monomorphizer.SpecRequest(calleeHash, args, resolvedImpls))
+                        // #424: if the flag is on, harvest closure args
+                        // from this call site — mono keys the spec on
+                        // (typeArgs, closureHashes) and Piece 3 splices
+                        // the lambda bodies into the specialized body.
+                        val closureArgs: Map<String, com.mezze.language.typedast.Hash>
+                        val closureBodies: Map<String, com.mezze.language.typedast.TypedLambda>
+                        if (Monomorphizer.closuresEnabled) {
+                            closureArgs = Monomorphizer.closureArgsAt(expr)
+                            closureBodies = Monomorphizer.closureBodiesAt(expr)
+                        } else {
+                            closureArgs = emptyMap()
+                            closureBodies = emptyMap()
+                        }
+                        out.add(Monomorphizer.SpecRequest(
+                            calleeHash, args, resolvedImpls, closureArgs, closureBodies
+                        ))
                         outLocs.add(expr.loc)
                         counters.byHashSeeded++
                     } else {
@@ -301,7 +316,7 @@ object MonoDriver {
             // (receiver.type, methodName) pair to an ability op and seed
             // the op for specialization.
             if (fn is TypedFieldAccess) {
-                seedFromMethodCall(fn, expr.loc, expr.arg, abilityOpIndex, out, outLocs, counters)
+                seedFromMethodCall(fn, expr, abilityOpIndex, out, outLocs, counters)
             }
 
             collectSeedsFromExpr(fn, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
@@ -371,13 +386,14 @@ object MonoDriver {
      */
     private fun seedFromMethodCall(
         fa: TypedFieldAccess,
-        callLoc: Loc,
-        callArg: TypedExpr,
+        call: TypedCall,
         abilityOpIndex: Map<String, List<AbilityOpEntry>>,
         out: MutableList<Monomorphizer.SpecRequest>,
         outLocs: MutableList<Loc>,
         counters: Counters
     ) {
+        val callLoc = call.loc
+        val callArg = call.arg
         val candidates = abilityOpIndex[fa.field] ?: return
         val genericCandidates = candidates.filter { it.impl.forallVars.isNotEmpty() }
         if (genericCandidates.isEmpty()) return
@@ -421,7 +437,22 @@ object MonoDriver {
 
         val args = deriveTypeArgs(opParamType, match.impl.forallVars, callArg.type)
         if (args != null && args.all { isConcrete(it) }) {
-            out.add(Monomorphizer.SpecRequest(match.opHash, args, emptyList()))
+            // #424: harvest closure args from the method-style call too.
+            // For `xs.fold {init = 0, f = {acc,x} -> ...}`, `f` here is
+            // a lambda literal — spec keyed on its hash gets a separate
+            // specialization from `xs.fold {init = 0, f = {acc,x} -> ...*2}`.
+            val closureArgs: Map<String, com.mezze.language.typedast.Hash>
+            val closureBodies: Map<String, com.mezze.language.typedast.TypedLambda>
+            if (Monomorphizer.closuresEnabled) {
+                closureArgs = Monomorphizer.closureArgsAt(call)
+                closureBodies = Monomorphizer.closureBodiesAt(call)
+            } else {
+                closureArgs = emptyMap()
+                closureBodies = emptyMap()
+            }
+            out.add(Monomorphizer.SpecRequest(
+                match.opHash, args, emptyList(), closureArgs, closureBodies
+            ))
             outLocs.add(callLoc)
             counters.methodSeeded++
         } else {
