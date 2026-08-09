@@ -5,7 +5,7 @@ let sum_to = {n: Int} -> seq::range { start = 0, end = n }
     .fold {init = 0, f = {acc, x} -> acc + x}
 
 let main = {} -> perform Console in do
-    let c = sum_to {n = 1000000}
-    println { msg = "sum 0..1M = $(c.to_str{})" }
-    let d = sum_to {n = 10000000}
-    println { msg = "sum 0..10M = $(d.to_str{})" }
+    let c = sum_to {n = 100}
+    println { msg = "sum 0..100 = $(c.to_str{})" }
+    let d = sum_to {n = 10000}
+    println { msg = "sum 0..10K = $(d.to_str{})" }

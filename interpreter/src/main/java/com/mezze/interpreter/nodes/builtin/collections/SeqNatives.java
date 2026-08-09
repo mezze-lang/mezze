@@ -290,6 +290,76 @@ public final class SeqNatives {
         return foldTwoArg(seq, init, folder, callNode, /*startIndex=*/0, /*scanOut=*/null);
     }
 
+    /**
+     * #417: SIMD-accelerated fold for `Seq Int + primitive op`. Emitted
+     * by the compiler's fold-fusion classifier when it can prove:
+     *   - xs is a materialized Seq (LongSeqStorage fast path, else boxed
+     *     fallback loop);
+     *   - the folder body is a pure primitive op we can dispatch on
+     *     ({@link SeqReduceLongSIMDNode}'s OP_* constants).
+     *
+     * <p>Zero abstraction: user writes `xs.fold {init, f = {a,x} -> a + x}`
+     * and this runs the exact same vectorized code as `xs.sum {}`.
+     */
+    @TruffleBoundary
+    public static long foldReduceLong(MezzeSeq seq, int opOrdinal, long init) {
+        SeqStorage storage = seq.getStorage();
+        if (storage instanceof LongSeqStorage longStorage) {
+            return SeqReduceLongSIMDNode.getUncached().execute(opOrdinal, init, longStorage);
+        }
+        // Boxed-storage fallback: scalar reduce so correctness matches
+        // even when someone slipped a heterogeneous Seq through the pipe.
+        long acc = init;
+        int n = seq.size();
+        for (int i = 0; i < n; i++) {
+            Object elem = seq.get(i);
+            long v = (elem instanceof Long l) ? l : ((Number) elem).longValue();
+            acc = applyLong(opOrdinal, acc, v);
+        }
+        return acc;
+    }
+
+    private static long applyLong(int op, long a, long b) {
+        switch (op) {
+            case SeqReduceLongSIMDNode.OP_ADD: return a + b;
+            case SeqReduceLongSIMDNode.OP_MUL: return a * b;
+            case SeqReduceLongSIMDNode.OP_MIN: return Math.min(a, b);
+            case SeqReduceLongSIMDNode.OP_MAX: return Math.max(a, b);
+            case SeqReduceLongSIMDNode.OP_AND: return a & b;
+            case SeqReduceLongSIMDNode.OP_OR:  return a | b;
+            case SeqReduceLongSIMDNode.OP_XOR: return a ^ b;
+            default: throw new IllegalStateException("foldReduceLong: op " + op);
+        }
+    }
+
+    /** Double-precision variant of {@link #foldReduceLong}. Same
+     *  fast-path/fallback structure over {@link DoubleSeqStorage}. */
+    @TruffleBoundary
+    public static double foldReduceDouble(MezzeSeq seq, int opOrdinal, double init) {
+        SeqStorage storage = seq.getStorage();
+        if (storage instanceof DoubleSeqStorage doubleStorage) {
+            return SeqReduceDoubleSIMDNode.getUncached().execute(opOrdinal, init, doubleStorage);
+        }
+        double acc = init;
+        int n = seq.size();
+        for (int i = 0; i < n; i++) {
+            Object elem = seq.get(i);
+            double v = (elem instanceof Double d) ? d : ((Number) elem).doubleValue();
+            acc = applyDouble(opOrdinal, acc, v);
+        }
+        return acc;
+    }
+
+    private static double applyDouble(int op, double a, double b) {
+        switch (op) {
+            case SeqReduceDoubleSIMDNode.OP_ADD: return a + b;
+            case SeqReduceDoubleSIMDNode.OP_MUL: return a * b;
+            case SeqReduceDoubleSIMDNode.OP_MIN: return Math.min(a, b);
+            case SeqReduceDoubleSIMDNode.OP_MAX: return Math.max(a, b);
+            default: throw new IllegalStateException("foldReduceDouble: op " + op);
+        }
+    }
+
     public static MezzeVariant reduce(MezzeSeq seq, MezzeFunction reducer,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) {

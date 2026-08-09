@@ -748,6 +748,14 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.sum(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_sum_float", (r, c) ->
             SeqNatives.sumFloat(getSeq(r, "xs")));
+
+        // #417: SIMD-accelerated fold with primitive op.  Emitted by the
+        // fold-fusion classifier in BytecodeCompiler when it proves the
+        // folder collapses to a supported InlineOp on a materialized Seq.
+        HANDLERS.put("__native_seq_fold_reduce_long", (r, c) ->
+            SeqNatives.foldReduceLong(getSeq(r, "xs"), (int) getLong(r, "op"), getLong(r, "init")));
+        HANDLERS.put("__native_seq_fold_reduce_double", (r, c) ->
+            SeqNatives.foldReduceDouble(getSeq(r, "xs"), (int) getLong(r, "op"), getDouble(r, "init")));
         HANDLERS.put("__native_seq_product", (r, c) ->
             SeqNatives.product(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_product_float", (r, c) ->

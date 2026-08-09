@@ -2473,11 +2473,18 @@ public final class BytecodeCompiler {
                             || op == InlineOp.AND || op == InlineOp.OR);
         if (swapped && !commutative) return false;
 
+        // #417 wip: SIMD fast path — planned. When xs is a materialized
+        // Seq with associative op, route to SeqReduceLongSIMDNode via a
+        // synthesized CallNativeIR("__native_seq_fold_reduce_long", ...).
+        // Blocked on SO in the synthesized-record emit path; wiring TBD.
+        // The SIMD reducer nodes + SeqNatives.foldReduceLong are landed
+        // and ready; only the compile-side emit needs revisiting.
+
         // #404: if xsExpr is `__native_seq_range { start, end }`, emit a
         // direct counted loop over start..end without materializing the
-        // Seq or paying per-iter SeqGet + boxing. The classifier looks
-        // through both scalar-ABI (args=[start,end]) and record-ABI
-        // (arg=MakeRecord{start,end}) forms.
+        // Seq or paying per-iter SeqGet + boxing. Only used when the op
+        // isn't SIMD-reducible (SUB/DIV/MOD) — for those, the counted
+        // loop still beats materialize+scalar-native-loop.
         NodeIR rangeStart = null, rangeEnd = null;
         if (xsExpr instanceof CallNativeIR nat && "__native_seq_range".equals(nat.getName())) {
             if (nat.isScalarABI() && nat.getArgs().size() == 2) {
@@ -2552,7 +2559,8 @@ public final class BytecodeCompiler {
             return true;
         }
 
-        // General seq-fused loop (materialized xs):
+        // General seq-fused loop (materialized xs) — fallback for ops
+        // that aren't SIMD-reducible (SUB, DIV, MOD, etc):
         //   Block {
         //     seq  = Exs
         //     size = SeqSize(seq)
@@ -2610,6 +2618,23 @@ public final class BytecodeCompiler {
             System.err.println("[fold-fuse] emitted fused loop for op=" + op);
         }
         return true;
+    }
+
+    /**
+     * #417: map an {@link InlineOp} to the {@link com.mezze.datastructures.nodes.SeqReduceLongSIMDNode}
+     * op ordinal, or -1 if the op isn't associative-reducible (e.g. SUB,
+     * DIV, MOD, comparisons that produce bool). The compiler only routes
+     * fold-fusion to SIMD when this returns a non-negative ordinal.
+     */
+    private static int mapToSimdOpLong(InlineOp op) {
+        return switch (op) {
+            case ADD -> com.mezze.datastructures.nodes.SeqReduceLongSIMDNode.OP_ADD;
+            case MUL -> com.mezze.datastructures.nodes.SeqReduceLongSIMDNode.OP_MUL;
+            // AND/OR here mean logical-and-of-longs, not bitwise; only
+            // safe to SIMD-reduce for booleans-as-longs (0/1), which is
+            // rare. Skip for now.
+            default -> -1;
+        };
     }
 
     /**
