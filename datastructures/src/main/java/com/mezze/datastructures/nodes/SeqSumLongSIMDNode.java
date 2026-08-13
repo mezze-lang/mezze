@@ -2,6 +2,7 @@ package com.mezze.datastructures.nodes;
 
 import com.mezze.datastructures.seq.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.dsl.GenerateUncached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.Node;
@@ -17,8 +18,17 @@ import jdk.incubator.vector.VectorSpecies;
  * - Unboxed long[] throughout
  * - Vectorized reduction for large sequences
  * - Scalar fallback for small sequences
+ *
+ * NOTE: {@code @GenerateUncached} is required — the static
+ * {@link #getUncached()} below delegates to the generated
+ * {@code SeqSumLongSIMDNodeGen.getUncached()}. Without the
+ * annotation Truffle doesn't emit that method on the Gen class,
+ * so the delegating call resolves back to this class's static and
+ * infinite-recurses into a StackOverflowError (bug found via
+ * `bench/cases/sum_native` — {@code seq::sum} on any input).
  */
 @NodeInfo(shortName = "seq.sum.long.simd")
+@GenerateUncached
 public abstract class SeqSumLongSIMDNode extends Node {
 
     private static final VectorSpecies<Long> SPECIES = LongVector.SPECIES_PREFERRED;

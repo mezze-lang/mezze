@@ -2,6 +2,7 @@ package com.mezze.datastructures.nodes;
 
 import com.mezze.datastructures.seq.LongSeqStorage;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.dsl.GenerateUncached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.Node;
@@ -29,6 +30,7 @@ import jdk.incubator.vector.VectorSpecies;
  * without runtime dispatch inside the loop.
  */
 @NodeInfo(shortName = "seq.reduce.long.simd")
+@GenerateUncached  // required — see SeqSumLongSIMDNode for rationale (missing → getUncached() infinite-recurses)
 public abstract class SeqReduceLongSIMDNode extends Node {
 
     private static final VectorSpecies<Long> SPECIES = LongVector.SPECIES_PREFERRED;

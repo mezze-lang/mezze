@@ -2,6 +2,7 @@ package com.mezze.datastructures.nodes;
 
 import com.mezze.datastructures.seq.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.dsl.GenerateUncached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.Node;
@@ -17,8 +18,12 @@ import jdk.incubator.vector.VectorSpecies;
  * - Unboxed double[] throughout
  * - Vectorized reduction for large sequences
  * - Scalar fallback for small sequences
+ *
+ * See {@link SeqSumLongSIMDNode} for the {@code @GenerateUncached}
+ * rationale — same SO bug pattern if omitted.
  */
 @NodeInfo(shortName = "seq.sum.double.simd")
+@GenerateUncached
 public abstract class SeqSumDoubleSIMDNode extends Node {
 
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;

@@ -65,6 +65,20 @@ public final class SeqNatives {
         return MezzeVariant.some(seq.get(idx));
     }
 
+    /**
+     * #418: Bounds-unchecked scalar getter. Skips the Option-alloc that
+     * {@link #get} pays for; index is expected in-range because the
+     * caller has already read `size()` and controls the loop bounds.
+     *
+     * <p>This is the primitive `seq.fold`/`seq.map`/`seq.reduce` in
+     * Mezze needs to run without a per-iter allocation. User code
+     * should keep using {@link #get} unless they've enforced the
+     * bounds themselves.
+     */
+    public static Object getUnchecked(MezzeSeq seq, long index) {
+        return seq.get((int) index);
+    }
+
     // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeVariant set(MezzeSeq seq, long index, Object value) {
         int idx = (int) index;
@@ -726,10 +740,21 @@ public final class SeqNatives {
 
     @TruffleBoundary
     public static long sum(MezzeSeq seq) {
-        // OPTIMIZED: Use SIMD node for unboxed long storage
         SeqStorage storage = seq.getStorage();
         if (storage instanceof LongSeqStorage longStorage) {
-            return SeqSumLongSIMDNode.getUncached().execute(longStorage);
+            // Scalar array-loop over unboxed longs.
+            // Prior versions routed through SeqSumLongSIMDNode / SeqSumSimd
+            // (jdk.incubator.vector), but the Vector API has no SVM native
+            // intrinsic — LongVector operations fall back to generic Java
+            // and run ~7× slower than the plain scalar loop on the same
+            // AOT binary (measured Apple M2, sum of 10M longs: SIMD 53ms,
+            // scalar 7ms). On the JVM the JIT still intrinsifies both
+            // paths so this is a no-op for `mez dev`/`mez build`.
+            long[] data = longStorage.getArray();
+            int n = longStorage.size();
+            long total = 0;
+            for (int i = 0; i < n; i++) total += data[i];
+            return total;
         }
         // Fallback for boxed storage
         long total = 0;
@@ -743,10 +768,14 @@ public final class SeqNatives {
 
     @TruffleBoundary
     public static double sumFloat(MezzeSeq seq) {
-        // OPTIMIZED: Use SIMD node for unboxed double storage
         SeqStorage storage = seq.getStorage();
         if (storage instanceof DoubleSeqStorage doubleStorage) {
-            return SeqSumDoubleSIMDNode.getUncached().execute(doubleStorage);
+            // See {@link #sum} for why we avoid the SIMD-node path.
+            double[] data = doubleStorage.getArray();
+            int n = doubleStorage.size();
+            double total = 0.0;
+            for (int i = 0; i < n; i++) total += data[i];
+            return total;
         }
         // Fallback for boxed storage
         double total = 0.0;

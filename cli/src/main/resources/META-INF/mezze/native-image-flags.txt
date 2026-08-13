@@ -20,6 +20,18 @@
 -H:+AddAllCharsets
 -H:+TruffleHostInlining
 
+# #421: The datastructures module uses jdk.incubator.vector (SIMD via
+# LongVector/DoubleVector — see SeqSumSimd, SeqReduce*SIMDNode,
+# VectorOps). Without this add-modules flag, native-image's static
+# analysis can't see the incubator module — classes that reference
+# LongVector/DoubleVector are silently DCE'd from the image, and the
+# corresponding static methods vanish. Symptom on user apps that call
+# seq::sum: `NoSuchMethodError: SeqSumSimd.sumLong(LongSeqStorage)`
+# at first invocation of the native binary. The JVM launcher already
+# passes this flag (see BuildCommand.kt DEFAULT_OPTS); mirroring it
+# here keeps JVM and native paths in sync.
+--add-modules=jdk.incubator.vector
+
 # Truffle-on-Native-Image: links truffle-runtime-svm.jar into the
 # native-image builder, enabling Truffle partial evaluation (JIT) in
 # the resulting binary. #401 turned this on for user-app builds after
@@ -74,6 +86,17 @@ com.mezze.language.ast
 com.mezze.language.truffleir
 com.mezze.language.typedast
 com.mezze.language.parsedast
+
+# #421: jdk.incubator.vector — SeqSumSimd, SeqReduce*SIMDNode et al. hold
+# static VectorSpecies instances (LongVector.SPECIES_PREFERRED etc.).
+# Because those enclosing classes are init-at-build-time (see the
+# com.mezze.datastructures entry above), the VectorSpecies objects land
+# in the image heap; SVM then rejects them unless the incubator classes
+# are also init-at-build-time. Without this, native-image fails with
+# "An object of type 'jdk.incubator.vector.LongVector$LongSpecies' was
+# found in the image heap. This type, however, is marked for
+# initialization at image run time..."
+jdk.incubator.vector
 
 # Stdlib snapshot — runs StdlibSnapshotData.<init> in the build JVM, the
 # decoded ModuleImportContext / FunctionIR graph lands in image heap.
