@@ -9,6 +9,7 @@ import com.mezze.language.typedast.AbilityImplRef
 import com.mezze.language.typedast.BindingRef
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypeInstantiation
+import com.mezze.language.typedast.TypeParam
 import com.mezze.language.typedast.TypedAbilityImpl
 import com.mezze.language.typedast.TypedCall
 import com.mezze.language.typedast.TypedExpr
@@ -104,6 +105,12 @@ class Monomorphizer(
         /** Requests that exceeded `maxDepth` or hit a non-resolvable decl —
          *  these stay on the dict-passing path. */
         val fallbacks: List<SpecRequest>,
+        /** #424 Piece 5 — for each specialization that had closure params
+         *  spliced away, the set of param names that were dropped from
+         *  the specialized signature. MonoDriver / the compiler use this
+         *  to strip the corresponding fields from arg records at SEED
+         *  call sites (user code). */
+        val stripMap: Map<Hash, Set<String>> = emptyMap(),
     )
 
     /** A produced specialization — content + provenance. */
@@ -210,6 +217,11 @@ class Monomorphizer(
                 closureArgs = req.closureArgs,
                 closureBodies = req.closureBodies,
             )
+            if (System.getenv("MEZZE_MONO_TRACE") != null) {
+                System.err.println("[mono-trace] emit spec name=${decl.name} specHash=${specHash.hex.take(8)} " +
+                    "typeArgs=${req.typeArgs.map { MonoDriver.detailedPublic(it) }} " +
+                    "closureArgs=${req.closureArgs.keys}")
+            }
 
             // Scan the substituted body for further generic call sites and
             // enqueue them. `collectByHashRefsWithSite` yields
@@ -228,10 +240,17 @@ class Monomorphizer(
                 refs.add(RefSite(ref, inst, siteType, call))
             }
             if (System.getenv("MEZZE_MONO_TRACE") != null) {
-                System.err.println("[mono-trace] transitive refs from ${decl.name}: total=${refs.size}")
+                System.err.println("[mono-trace] transitive refs from ${decl.name} (spec=${specHash.hex.take(8)}, closureArgs=${req.closureArgs.keys}): total=${refs.size}")
                 for (r in refs) {
                     val target = resolveDecl(r.ref.hash)
-                    System.err.println("[mono-trace]   ref=${r.ref.hash} target=${target?.name ?: "<unresolved>"} typeParams=${target?.typeParams?.size ?: 0} inst=${r.inst} siteType=${r.siteType}")
+                    val siteDetail = when (val s = r.siteType) {
+                        is MezzeType.FunctionType -> "FunctionType(param=${MonoDriver.detailedPublic(s.paramType)}, ret=${MonoDriver.detailedPublic(s.returnType)})"
+                        null -> "null"
+                        else -> MonoDriver.detailedPublic(s)
+                    }
+                    System.err.println("[mono-trace]   ref=${r.ref.hash.hex.take(8)} target=${target?.name ?: "?"} " +
+                        "typeParams=${target?.typeParams?.map { it.name } ?: emptyList<String>()} " +
+                        "inst=${r.inst?.typeArgs?.map { MonoDriver.detailedPublic(it) }} siteType=$siteDetail")
                 }
             }
             // #409: for each transitive ref, derive typeArgs by unifying
@@ -243,7 +262,7 @@ class Monomorphizer(
             for (r in refs) {
                 val targetDecl = resolveDecl(r.ref.hash) ?: continue
                 if (targetDecl.typeParams.isEmpty()) continue
-                val derived = deriveTransitiveTypeArgs(targetDecl, r.inst, r.siteType)
+                val derived = deriveTransitiveTypeArgs(targetDecl, r.inst, r.siteType, r.enclosingCall)
                     ?: continue
                 // #424 Piece 2: harvest closure args at each transitive
                 // HOF call site. After Piece 3 splices literals into the
@@ -282,18 +301,202 @@ class Monomorphizer(
         // green under gate=off).
         if (closuresEnabled) {
             val specHashMap = HashMap<DoneKey, Hash>(done)
+            // #424 Piece 5: DEAD-CLOSURE-PARAM ELIMINATION.
+            //
+            // After Piece 3 splices lambda bodies into specialized decls,
+            // the closure param (`f`) is dead — every `f{...}` call was
+            // beta-reduced to the folder body, and every bare `f` read
+            // was replaced with the lambda literal. But the specialized
+            // decl's outer `TypedLambda` still declares `f` as a param,
+            // so callers pass a fresh `MakeLambdaIR(<folder>)` value on
+            // every call. For a tail-recursive helper like `fold_go`,
+            // that's one allocation per iteration — the exact cost mono
+            // was supposed to eliminate.
+            //
+            // Fix: strip closure-arg keys from each spec's outer lambda
+            // params (and from the specialized paramType). At every call
+            // to a stripped spec, also strip those keys from the arg
+            // record. Bookkeeping map `stripMap: specHash → closure keys`
+            // drives both the rewrite of transitive callsites here and
+            // the rewrite of SEED sites (user call sites) via
+            // `stripMapForSites` returned in Result — MonoDriver consumes
+            // it to also strip fields at seed callers.
+            // #424 Piece 5 gated: dead-closure-param stripping breaks
+            // ~130 collection HOF tests (all fold/filter/all/reduce
+            // paths) with FrameSlotTypeException on unrelated slots.
+            // Root cause is that the stripped record ABI at some call
+            // sites disagrees with the callee's declared paramNames —
+            // strict investigation deferred. Off by default; opt in
+            // with MEZZE_MONO_STRIP=1 for local perf experiments.
+            val stripEnabled = System.getenv("MEZZE_MONO_STRIP") == "1"
+            val stripMap = HashMap<Hash, Set<String>>()
+            if (stripEnabled) {
+                for ((sh, spec) in specializations) {
+                    if (spec.closureArgs.isNotEmpty()) stripMap[sh] = spec.closureArgs.keys
+                }
+            }
             val rewritten = HashMap<Hash, Specialization>(specializations.size)
             for ((sh, spec) in specializations) {
-                val newBody = rewriteBodyToSpecializedCalls(
-                    spec.specializedBody,
-                    specHashMap,
+                var newBody = rewriteBodyToSpecializedCalls(
+                    spec.specializedBody, specHashMap,
                 )
-                rewritten[sh] = spec.copy(specializedBody = newBody)
+                // Strip THIS spec's closure params from its outer lambda.
+                val myStrip = stripMap[sh]
+                var newType = spec.specializedType
+                if (myStrip != null) {
+                    newBody = stripLambdaParams(newBody, myStrip)
+                    newType = stripFunctionParamFields(newType, myStrip)
+                }
+                // Strip closure fields at every call to a stripped spec.
+                newBody = stripCallArgFields(newBody, stripMap)
+                if (System.getenv("MEZZE_MONO_DUMP") != null) {
+                    val name = resolveDecl(spec.genericHash)?.name ?: "?"
+                    System.err.println("[mono-dump] ${name}#${sh.hex.take(8)} stripped=${myStrip ?: "<none>"}")
+                }
+                rewritten[sh] = spec.copy(
+                    specializedBody = newBody,
+                    specializedType = newType,
+                )
             }
-            return Result(rewritten, rewrites, fallbacks)
+            return Result(rewritten, rewrites, fallbacks, stripMap)
         }
 
-        return Result(specializations, rewrites, fallbacks)
+        return Result(specializations, rewrites, fallbacks, emptyMap())
+    }
+
+    /** If [body] is a `TypedLambda` whose params list contains any of
+     *  [stripKeys], drop those params from the outer lambda. All refs to
+     *  them in the body are already gone (LambdaSubstitution replaced
+     *  them with the folder literal + beta-reduced any calls). */
+    private fun stripLambdaParams(
+        body: TypedExpr,
+        stripKeys: Set<String>,
+    ): TypedExpr {
+        if (body !is com.mezze.language.typedast.TypedLambda) return body
+        val kept = body.params.filter { it.name !in stripKeys }
+        if (kept.size == body.params.size) return body
+        // Rebuild the outer function type with the stripped param list.
+        val newType = stripFunctionParamFields(body.type, stripKeys)
+        return body.copy(params = kept, type = newType)
+    }
+
+    /** If [type] is a `FunctionType` whose paramType is a RecordType with
+     *  any of [stripKeys] as fields, return a new FunctionType with those
+     *  fields removed. Non-FunctionType or non-RecordType shapes pass
+     *  through unchanged. */
+    private fun stripFunctionParamFields(
+        type: MezzeType,
+        stripKeys: Set<String>,
+    ): MezzeType {
+        if (type !is MezzeType.FunctionType) return type
+        val paramRec = type.paramType as? MezzeType.RecordType ?: return type
+        if (stripKeys.none { it in paramRec.fields }) return type
+        val keptFields = LinkedHashMap<String, MezzeType>()
+        for ((k, v) in paramRec.fields) if (k !in stripKeys) keptFields[k] = v
+        return type.copy(paramType = paramRec.copy(fields = keptFields))
+    }
+
+    /** Walk [expr] and, for every call whose target hash is in
+     *  [stripMap], remove the corresponding field entries from the arg
+     *  record. Recurses into sub-expressions. */
+    private fun stripCallArgFields(
+        expr: TypedExpr,
+        stripMap: Map<Hash, Set<String>>,
+    ): TypedExpr {
+        fun go(e: TypedExpr): TypedExpr = when (e) {
+            is TypedCall -> {
+                val fn = e.function
+                val fnRewritten = go(fn)
+                val argRewritten = go(e.arg)
+                if (fnRewritten is TypedVar && fnRewritten.binding is BindingRef.ByHash) {
+                    val calleeHash = (fnRewritten.binding as BindingRef.ByHash).hash
+                    val keys = stripMap[calleeHash]
+                    if (keys != null && argRewritten is com.mezze.language.typedast.TypedRecord) {
+                        val kept = argRewritten.entries.filter { entry ->
+                            entry !is com.mezze.language.typedast.TypedRecordEntry.Field || entry.name !in keys
+                        }
+                        val keptFieldTypes = LinkedHashMap<String, MezzeType>()
+                        for ((k, v) in (argRewritten.type as? MezzeType.RecordType)?.fields.orEmpty()) {
+                            if (k !in keys) keptFieldTypes[k] = v
+                        }
+                        val newArg = argRewritten.copy(
+                            entries = kept,
+                            type = (argRewritten.type as? MezzeType.RecordType)?.copy(fields = keptFieldTypes) ?: argRewritten.type,
+                        )
+                        // Also strip the fnRewritten's stamp type so the
+                        // compiler's slot layout for the arg record matches.
+                        val newFn = fnRewritten.copy(type = stripFunctionParamFields(fnRewritten.type, keys))
+                        e.copy(function = newFn, arg = newArg)
+                    } else {
+                        e.copy(function = fnRewritten, arg = argRewritten)
+                    }
+                } else {
+                    e.copy(function = fnRewritten, arg = argRewritten)
+                }
+            }
+            is com.mezze.language.typedast.TypedLambda -> e.copy(body = go(e.body))
+            is com.mezze.language.typedast.TypedRecord -> e.copy(entries = e.entries.map { stripEntry(it, ::go) })
+            is com.mezze.language.typedast.TypedRecordUpdate -> e.copy(
+                record = go(e.record),
+                updates = e.updates.map { stripEntry(it, ::go) },
+            )
+            is com.mezze.language.typedast.TypedFieldAccess -> e.copy(record = go(e.record))
+            is com.mezze.language.typedast.TypedVariantConstruct -> {
+                val p = e.payload
+                if (p == null) e else e.copy(payload = go(p))
+            }
+            is com.mezze.language.typedast.TypedMatch -> e.copy(
+                scrutinee = go(e.scrutinee),
+                cases = e.cases.map { c ->
+                    c.copy(
+                        guard = c.guard?.let { go(it) },
+                        body = go(c.body),
+                    )
+                },
+            )
+            is com.mezze.language.typedast.TypedIf -> e.copy(
+                condition = go(e.condition),
+                thenBranch = go(e.thenBranch),
+                elseBranch = go(e.elseBranch),
+            )
+            is com.mezze.language.typedast.TypedBlock -> e.copy(
+                statements = e.statements.map { s ->
+                    when (s) {
+                        is com.mezze.language.typedast.TypedStatement.Let -> s.copy(value = go(s.value))
+                        is com.mezze.language.typedast.TypedStatement.Expr -> s.copy(expr = go(s.expr))
+                    }
+                },
+                result = go(e.result),
+            )
+            is com.mezze.language.typedast.TypedSeq -> e.copy(
+                elements = e.elements.map { el ->
+                    when (el) {
+                        is com.mezze.language.typedast.TypedSeqElement.Regular -> el.copy(expr = go(el.expr))
+                        is com.mezze.language.typedast.TypedSeqElement.Spread -> el.copy(expr = go(el.expr))
+                    }
+                },
+            )
+            is com.mezze.language.typedast.TypedPipe -> e.copy(left = go(e.left), right = go(e.right))
+            is com.mezze.language.typedast.TypedPerform -> e.copy(body = go(e.body))
+            is com.mezze.language.typedast.TypedPerformOp -> e.copy(arg = go(e.arg))
+            is com.mezze.language.typedast.TypedStringLit -> e.copy(parts = e.parts.map { part ->
+                when (part) {
+                    is com.mezze.language.typedast.TypedStringPart.Literal -> part
+                    is com.mezze.language.typedast.TypedStringPart.Interpolation ->
+                        com.mezze.language.typedast.TypedStringPart.Interpolation(go(part.expr))
+                }
+            })
+            else -> e
+        }
+        return go(expr)
+    }
+
+    private fun stripEntry(
+        entry: com.mezze.language.typedast.TypedRecordEntry,
+        go: (TypedExpr) -> TypedExpr,
+    ): com.mezze.language.typedast.TypedRecordEntry = when (entry) {
+        is com.mezze.language.typedast.TypedRecordEntry.Field -> entry.copy(value = go(entry.value))
+        is com.mezze.language.typedast.TypedRecordEntry.Spread -> entry.copy(expr = go(entry.expr))
     }
 
     /** Post-pass: rewrite `TypedVar(BindingRef.ByHash(h), …)` inside a
@@ -311,7 +514,7 @@ class Monomorphizer(
                 if (fn is TypedVar && fn.binding is BindingRef.ByHash) {
                     val callee = resolveDecl((fn.binding as BindingRef.ByHash).hash)
                     val newFn = if (callee != null && callee.typeParams.isNotEmpty()) {
-                        val derived = deriveTransitiveTypeArgs(callee, e.instantiation, fn.type)
+                        val derived = deriveTransitiveTypeArgs(callee, e.instantiation, fn.type, e)
                         if (derived != null) {
                             val cArgs = closureArgsAt(e)
                             val key = DoneKey((fn.binding as BindingRef.ByHash).hash, derived, cArgs)
@@ -403,7 +606,8 @@ class Monomorphizer(
     private fun deriveTransitiveTypeArgs(
         callee: TypedLetDecl,
         inst: TypeInstantiation?,
-        siteType: MezzeType?
+        siteType: MezzeType?,
+        enclosingCall: com.mezze.language.typedast.TypedCall? = null,
     ): List<MezzeType>? {
         val typeParams = callee.typeParams
         if (typeParams.isEmpty()) return null
@@ -414,13 +618,50 @@ class Monomorphizer(
             return inst.typeArgs
         }
 
-        if (siteType == null) return null
-        val bindings = HashMap<String, MezzeType>()
-        if (!unify(callee.scheme.type, siteType, bindings)) return null
+        // Primary attempt: unify against the substituted site's fn type.
+        // Works when the caller's substitution reached through to the
+        // inner call's TypedVar stamp.
+        if (siteType != null) {
+            val bindings = HashMap<String, MezzeType>()
+            if (unify(callee.scheme.type, siteType, bindings)) {
+                val args = buildArgsFromBindings(typeParams, bindings)
+                if (args != null) return args
+            }
+        }
+
+        // Fallback: unify the callee's declared paramType against the
+        // ENCLOSING call's arg record type. This is the shape mono needs
+        // for cross-decl chained HOFs — impl-op bodies stamp the inner
+        // call's TypedVar with the STDLIB's original typeParam names
+        // (e.g. `'c136`, `'d136` for `seq::fold`), not with the impl-op's
+        // own vars (`'t145`, `'u145`). The caller's substitution can't
+        // rewrite those because the names don't match, so `siteType`
+        // stays generic. But the enclosing call's arg record — actual
+        // args like `{xs = it, init = init, f = f}` — DID get substituted,
+        // so it carries concrete types. Unifying against `callee.scheme
+        // .type.paramType` recovers `'c136 → Int`, `'d136 → Int`.
+        if (enclosingCall != null) {
+            val fnType = callee.scheme.type as? MezzeType.FunctionType
+            if (fnType != null) {
+                val bindings = HashMap<String, MezzeType>()
+                if (unify(fnType.paramType, enclosingCall.arg.type, bindings)) {
+                    val args = buildArgsFromBindings(typeParams, bindings)
+                    if (args != null) return args
+                }
+            }
+        }
+
+        return null
+    }
+
+    private fun buildArgsFromBindings(
+        typeParams: List<TypeParam>,
+        bindings: Map<String, MezzeType>,
+    ): List<MezzeType>? {
         val args = ArrayList<MezzeType>(typeParams.size)
         for (tp in typeParams) {
             val b = bindings[tp.name]
-            if (b != null) {
+            if (b != null && isConcreteEnough(b)) {
                 args.add(b)
             } else if (isEffectVarNameLocal(tp.name)) {
                 args.add(MezzeType.EffectRow.simple(emptySet()))

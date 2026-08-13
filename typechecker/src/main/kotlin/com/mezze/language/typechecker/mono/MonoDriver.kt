@@ -81,6 +81,11 @@ object MonoDriver {
     data class Result(
         val mono: Monomorphizer.Result,
         val bySiteLoc: Map<Loc, Hash>,
+        /** #424 Piece 5 — per SEED call-site loc, the set of arg-record
+         *  field names to strip when the compiler routes the call to
+         *  the specialized decl. Populated for HOF call sites whose
+         *  callee's closure params were dead-code eliminated. */
+        val stripBySiteLoc: Map<Loc, Set<String>> = emptyMap(),
     ) {
         val specializations get() = mono.specializations
         val fallbacks get() = mono.fallbacks
@@ -111,13 +116,37 @@ object MonoDriver {
                     is TypedLambda -> opBody.type
                     else -> opBody.type
                 }
+                // Typechecker stamps op bodies with fresh VarTypes (`'t145`,
+                // `'u145`, …) that don't correspond to `impl.forallVars`
+                // (`'a`, `'b`). Using `impl.forallVars` as the synthetic
+                // decl's typeParams makes seeding impossible: unify binds
+                // the fresh names but `deriveTypeArgs` iterates
+                // `impl.forallVars` and finds no bindings for them.
+                //
+                // Collect the actual VarType names appearing in the op's
+                // typechecked type and use those as typeParams. Preserve
+                // `impl.forallVars` order first so any impl-declared var
+                // that also appears keeps its identity; then append any
+                // extra typechecker-fresh names.
+                val actualVarNames = collectVarTypeNames(opType)
+                val typeParams = buildList {
+                    val seen = HashSet<String>()
+                    for (tp in impl.forallVars) {
+                        if (tp.name in actualVarNames && seen.add(tp.name)) add(tp)
+                    }
+                    for (name in actualVarNames) {
+                        if (seen.add(name)) {
+                            add(TypeParam(name = name, kind = TypeKind.Star))
+                        }
+                    }
+                }
                 val synthetic = TypedLetDecl(
                     hash = opHash,
                     name = opName,
-                    typeParams = impl.forallVars,
+                    typeParams = typeParams,
                     value = opBody,
                     scheme = TypeScheme(
-                        typeParams = impl.forallVars,
+                        typeParams = typeParams,
                         abilityConstraints = emptyList(),
                         type = opType
                     ),
@@ -168,9 +197,15 @@ object MonoDriver {
         // produced a specialization for that request, the compiler will
         // emit CallDirectIR(specializedHash) instead of the generic call.
         val bySiteLoc = HashMap<Loc, Hash>(seeds.size)
+        // #424 Piece 5 — mirror stripMap onto seed sites so the compiler
+        // drops the same fields from user-code call sites.
+        val stripBySiteLoc = HashMap<Loc, Set<String>>()
         for (i in seeds.indices) {
             val sh = result.callSiteRewrites[seeds[i]] ?: continue
             bySiteLoc[seedLocs[i]] = sh
+            result.stripMap[sh]?.let { keys ->
+                if (keys.isNotEmpty()) stripBySiteLoc[seedLocs[i]] = keys
+            }
         }
         if (System.getenv("MEZZE_MONO_STATS") != null) {
             val concreteDecls = (listOf(entry) + imported).sumOf {
@@ -203,7 +238,7 @@ object MonoDriver {
                 )
             }
         }
-        return Result(mono = result, bySiteLoc = bySiteLoc)
+        return Result(mono = result, bySiteLoc = bySiteLoc, stripBySiteLoc = stripBySiteLoc)
     }
 
     private data class AbilityOpEntry(val impl: TypedAbilityImpl, val opHash: Hash)
@@ -303,10 +338,10 @@ object MonoDriver {
                         counters.byHashUnifyFail++
                         if (System.getenv("MEZZE_MONO_TRACE") != null) {
                             System.err.println("[mono-trace] byHash-fail callee=${callee.name} " +
-                                "typeParams=${callee.typeParams} " +
-                                "callee.scheme=${callee.scheme.type} " +
-                                "fn.type=${fn.type} " +
-                                "arg.type=${expr.arg.type}")
+                                "typeParams=${callee.typeParams.map { it.name }} " +
+                                "scheme=${detailed(callee.scheme.type)} " +
+                                "fn.type=${detailed(fn.type)} " +
+                                "arg.type=${detailed(expr.arg.type)}")
                         }
                     }
                 }
@@ -435,7 +470,24 @@ object MonoDriver {
             return
         }
 
-        val args = deriveTypeArgs(opParamType, match.impl.forallVars, callArg.type)
+        // Use the actual VarType names appearing in the op's body — this
+        // is what MonoDriver stamped as the synthetic decl's typeParams
+        // (see the Gap A fix at collectVarTypeNames above). Passing
+        // `match.impl.forallVars` here would produce SpecRequest.typeArgs
+        // sized to `impl.forallVars` but the synthetic decl's `typeParams`
+        // is sized differently, triggering Monomorphizer's arity-mismatch
+        // fallback for every method-style seed on this impl.
+        val opTypeParams = buildList {
+            val seen = HashSet<String>()
+            val actualNames = collectVarTypeNames(opBody.type)
+            for (tp in match.impl.forallVars) {
+                if (tp.name in actualNames && seen.add(tp.name)) add(tp)
+            }
+            for (name in actualNames) {
+                if (seen.add(name)) add(TypeParam(name = name, kind = TypeKind.Star))
+            }
+        }
+        val args = deriveTypeArgs(opParamType, opTypeParams, callArg.type)
         if (args != null && args.all { isConcrete(it) }) {
             // #424: harvest closure args from the method-style call too.
             // For `xs.fold {init = 0, f = {acc,x} -> ...}`, `f` here is
@@ -476,13 +528,22 @@ object MonoDriver {
 
     /** Derive concrete type args for `typeParams` by unifying the generic
      *  pattern against the call-site value type. Returns args in
-     *  `typeParams` order, or null if some param remains unbound. */
+     *  `typeParams` order, or null if some param remains unbound.
+     *
+     *  [fullSchemeType], if provided, is the callee's ENTIRE scheme type
+     *  (param+return). Used only for the phantom-typeParam check — a
+     *  typeParam that doesn't appear anywhere in the scheme is truly
+     *  phantom and safe to fill with a stable placeholder. When null,
+     *  falls back to [genericType] for that check, which is fine when
+     *  the caller passes the full scheme as [genericType]. */
     private fun deriveTypeArgs(
         genericType: MezzeType,
         typeParams: List<TypeParam>,
-        siteType: MezzeType
+        siteType: MezzeType,
+        fullSchemeType: MezzeType? = null,
     ): List<MezzeType>? {
         if (typeParams.isEmpty()) return emptyList()
+        val phantomProbe = fullSchemeType ?: genericType
         val nameToBinding = HashMap<String, MezzeType>()
         if (!unify(genericType, siteType, nameToBinding)) return null
         val args = ArrayList<MezzeType>(typeParams.size)
@@ -500,11 +561,123 @@ object MonoDriver {
                 // effect-polymorphic stdlib function (very common: `sum_to
                 // = {n} -> range.fold {...}` inherits `<'e>` from fold).
                 args.add(MezzeType.EffectRow.simple(emptySet()))
+            } else if (!typeParamAppearsIn(tp.name, phantomProbe)) {
+                // "Phantom" type param — declared in the scheme but never
+                // referenced by the actual type. This happens for ability
+                // impl op bodies where the impl's forallVars include a
+                // param that the specific op's typechecked body has
+                // already resolved to a concrete type (e.g.
+                // `impl Seq 'a where { sum = {it} -> sum {xs = it} }` —
+                // the top-level `sum` requires `[Int]`, so the op's `'a`
+                // is already pinned to `Int` in the op body's type, but
+                // `impl.forallVars` still lists `'a`).
+                //
+                // Substitution over an absent name is a no-op, so any
+                // placeholder yields the same specialized body. Pick a
+                // stable value so the spec-hash is deterministic.
+                args.add(MezzeType.IntType)
             } else {
                 return null
             }
         }
         return args
+    }
+
+    /** Public alias for `detailed` — external tracing (Monomorphizer) uses this. */
+    fun detailedPublic(t: MezzeType?): String = detailed(t)
+
+    /** Verbose type printer for `MEZZE_MONO_TRACE` — MezzeType.toString() is
+     *  depth-truncated, which hides the exact TypeVar names / element types
+     *  we need when diagnosing unify failures. */
+    private fun detailed(t: MezzeType?): String {
+        if (t == null) return "null"
+        return when (t) {
+            is MezzeType.VarType -> "'${t.variable.name}#${t.variable.id}"
+            is MezzeType.FunctionType -> "(${detailed(t.paramType)} -> ${detailed(t.returnType)})"
+            is MezzeType.RecordType -> t.fields.entries.joinToString(prefix = "{", postfix = "}") { "${it.key}: ${detailed(it.value)}" }
+            is MezzeType.VariantType -> t.constructors.entries.joinToString(prefix = "V<${t.typeName ?: "?"}: ", postfix = ">") { "${it.key}(${detailed(it.value ?: MezzeType.RecordType(emptyMap()))})" }
+            is MezzeType.ListType -> "List[${detailed(t.elementType)}]"
+            is MezzeType.SeqType -> "Seq[${detailed(t.elementType)}]"
+            is MezzeType.SetType -> "Set[${detailed(t.elementType)}]"
+            is MezzeType.SortedSetType -> "SortedSet[${detailed(t.elementType)}]"
+            is MezzeType.MapType -> "Map[${detailed(t.keyType)}, ${detailed(t.valueType)}]"
+            is MezzeType.SortedMapType -> "SortedMap[${detailed(t.keyType)}, ${detailed(t.valueType)}]"
+            is MezzeType.SuspendType -> "Susp[${detailed(t.valueType)}]"
+            is MezzeType.NewtypeType -> "New(${t.name})[${detailed(t.wrappedType)}]"
+            is MezzeType.TypeApplication -> "App(${t.constructor})[${t.args.joinToString { detailed(it) }}]"
+            is MezzeType.IntType -> "Int"
+            is MezzeType.FloatType -> "Float"
+            is MezzeType.StringType -> "Str"
+            is MezzeType.BoolType -> "Bool"
+            is MezzeType.NatType -> "Nat"
+            is MezzeType.FracType -> "Frac"
+            is MezzeType.CharType -> "Char"
+            is MezzeType.OrderingType -> "Ordering"
+            is MezzeType.BytesType -> "Bytes"
+            is MezzeType.ByteBufferType -> "ByteBuffer"
+            is MezzeType.EffectRow -> "<eff>"
+        }
+    }
+
+    /** Collect every VarType name reachable from [type], in first-encounter
+     *  order. Deterministic ordering matters because these names become
+     *  the synthetic ability-op decl's typeParams, and typeParam order
+     *  drives the specialization hash. */
+    private fun collectVarTypeNames(type: MezzeType): List<String> {
+        val seen = LinkedHashSet<String>()
+        fun go(t: MezzeType) {
+            when (t) {
+                is MezzeType.VarType -> seen.add(t.variable.name)
+                is MezzeType.FunctionType -> { go(t.paramType); go(t.returnType) }
+                is MezzeType.RecordType -> t.fields.values.forEach(::go)
+                is MezzeType.VariantType -> t.constructors.values.forEach { it?.let(::go) }
+                is MezzeType.ListType -> go(t.elementType)
+                is MezzeType.SeqType -> go(t.elementType)
+                is MezzeType.SetType -> go(t.elementType)
+                is MezzeType.SortedSetType -> go(t.elementType)
+                is MezzeType.MapType -> { go(t.keyType); go(t.valueType) }
+                is MezzeType.SortedMapType -> { go(t.keyType); go(t.valueType) }
+                is MezzeType.SuspendType -> go(t.valueType)
+                is MezzeType.NewtypeType -> go(t.wrappedType)
+                is MezzeType.TypeApplication -> t.args.forEach(::go)
+                is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+                is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+                is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+                is MezzeType.CharType, is MezzeType.EffectRow -> Unit
+            }
+        }
+        go(type)
+        return seen.toList()
+    }
+
+    /** True if `typeParamName` appears anywhere in `type`. Used to
+     *  distinguish "phantom" type params (declared but unreferenced)
+     *  from real ones that must be bound by unification. */
+    private fun typeParamAppearsIn(typeParamName: String, type: MezzeType): Boolean {
+        return when (type) {
+            is MezzeType.VarType -> type.variable.name == typeParamName
+            is MezzeType.FunctionType -> typeParamAppearsIn(typeParamName, type.paramType) ||
+                typeParamAppearsIn(typeParamName, type.returnType)
+            is MezzeType.RecordType -> type.fields.values.any { typeParamAppearsIn(typeParamName, it) }
+            is MezzeType.VariantType -> type.constructors.values.any {
+                it != null && typeParamAppearsIn(typeParamName, it)
+            }
+            is MezzeType.ListType -> typeParamAppearsIn(typeParamName, type.elementType)
+            is MezzeType.SeqType -> typeParamAppearsIn(typeParamName, type.elementType)
+            is MezzeType.SetType -> typeParamAppearsIn(typeParamName, type.elementType)
+            is MezzeType.SortedSetType -> typeParamAppearsIn(typeParamName, type.elementType)
+            is MezzeType.MapType -> typeParamAppearsIn(typeParamName, type.keyType) ||
+                typeParamAppearsIn(typeParamName, type.valueType)
+            is MezzeType.SortedMapType -> typeParamAppearsIn(typeParamName, type.keyType) ||
+                typeParamAppearsIn(typeParamName, type.valueType)
+            is MezzeType.SuspendType -> typeParamAppearsIn(typeParamName, type.valueType)
+            is MezzeType.NewtypeType -> typeParamAppearsIn(typeParamName, type.wrappedType)
+            is MezzeType.TypeApplication -> type.args.any { typeParamAppearsIn(typeParamName, it) }
+            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+            is MezzeType.CharType, is MezzeType.EffectRow -> false
+        }
     }
 
     /** Effect-var type params are named `'eNNN` by generalization —
@@ -527,7 +700,10 @@ object MonoDriver {
         argSiteType: MezzeType
     ): List<MezzeType>? {
         val genericFn = callee.scheme.type as? MezzeType.FunctionType ?: return null
-        return deriveTypeArgs(genericFn.paramType, callee.typeParams, argSiteType)
+        return deriveTypeArgs(
+            genericFn.paramType, callee.typeParams, argSiteType,
+            fullSchemeType = callee.scheme.type,
+        )
     }
 
     /**

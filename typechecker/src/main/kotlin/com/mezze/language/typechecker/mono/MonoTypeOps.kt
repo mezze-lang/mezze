@@ -121,13 +121,40 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
         val name = pattern.variable.name
         val existing = bindings[name]
         return when {
-            existing == null -> { bindings[name] = unwrapped; true }
+            existing == null -> {
+                // A free value TyVar carries no info. Refuse to bind —
+                // this used to be a permissive `bind then continue`
+                // path that incorrectly seeded specializations for
+                // decls whose return type is polymorphic bottom
+                // (e.g. `Exception.throw : {..} -> 'a`, whose site
+                // resolves `'a` to whatever context expects, forcing
+                // the suspend at the wrong time). Better to fail
+                // and fall back to dict/generic dispatch.
+                if (unwrapped is MezzeType.VarType) false
+                else { bindings[name] = unwrapped; true }
+            }
             existing == unwrapped -> true
+            // Pattern already bound to something concrete; value is a
+            // free TyVar. Accept — the concrete binding wins, the free
+            // TyVar contributes nothing. Comes up at HOF call sites
+            // where the callee scheme reuses the same typeParam across
+            // an outer slot (pinned by `init: 'b = 0`) and a folder-
+            // lambda's slot (typed to solver-fresh vars).
+            unwrapped is MezzeType.VarType -> true
             else -> false
         }
     }
     // Unwrap SuspendType on either side when the other is not.
     val v = if (pattern !is MezzeType.SuspendType) unwrapSuspended(value) else value
+    // Symmetric fallback: value side is a free TyVar. Recorded bindings
+    // from `pattern`'s prior TyVar sites already carry the needed
+    // information; a free TyVar on the value side can't disagree with
+    // any of them. Common at HOF call sites where a folder-lambda's
+    // param types are solver-fresh vars — we bind the outer typeParam
+    // to `Int` from the concrete `init` field, then the folder's
+    // `{acc:'b, x:'a} -> 'b` is unified against `{acc:'acc#N, x:'x#N}
+    // -> Int` where `'acc#N`/`'x#N` are free.
+    if (v is MezzeType.VarType) return true
     return when (pattern) {
         is MezzeType.FunctionType -> v is MezzeType.FunctionType &&
             unify(pattern.paramType, v.paramType, bindings) &&
@@ -145,24 +172,54 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
                     else -> false
                 }
             }
-        is MezzeType.ListType -> v is MezzeType.ListType && unify(pattern.elementType, v.elementType, bindings)
-        is MezzeType.SeqType -> v is MezzeType.SeqType && unify(pattern.elementType, v.elementType, bindings)
-        is MezzeType.SetType -> v is MezzeType.SetType && unify(pattern.elementType, v.elementType, bindings)
-        is MezzeType.SortedSetType -> v is MezzeType.SortedSetType && unify(pattern.elementType, v.elementType, bindings)
-        is MezzeType.MapType -> v is MezzeType.MapType &&
-            unify(pattern.keyType, v.keyType, bindings) &&
-            unify(pattern.valueType, v.valueType, bindings)
-        is MezzeType.SortedMapType -> v is MezzeType.SortedMapType &&
-            unify(pattern.keyType, v.keyType, bindings) &&
-            unify(pattern.valueType, v.valueType, bindings)
+        is MezzeType.ListType -> unifyList(pattern.elementType, v, bindings)
+        is MezzeType.SeqType -> unifySeq(pattern.elementType, v, bindings)
+        is MezzeType.SetType -> unifySet(pattern.elementType, v, bindings)
+        is MezzeType.SortedSetType -> unifySortedSet(pattern.elementType, v, bindings)
+        is MezzeType.MapType -> unifyMap(pattern.keyType, pattern.valueType, v, bindings)
+        is MezzeType.SortedMapType -> unifySortedMap(pattern.keyType, pattern.valueType, v, bindings)
         is MezzeType.SuspendType -> v is MezzeType.SuspendType &&
             unify(pattern.valueType, v.valueType, bindings)
         is MezzeType.NewtypeType -> v is MezzeType.NewtypeType &&
             pattern.name == v.name && unify(pattern.wrappedType, v.wrappedType, bindings)
-        is MezzeType.TypeApplication -> v is MezzeType.TypeApplication &&
-            pattern.constructor == v.constructor &&
-            pattern.args.size == v.args.size &&
-            pattern.args.zip(v.args).all { (p2, v2) -> unify(p2, v2, bindings) }
+        is MezzeType.TypeApplication -> when {
+            // Same shape on both sides: constructor + args unify.
+            v is MezzeType.TypeApplication ->
+                pattern.constructor == v.constructor &&
+                pattern.args.size == v.args.size &&
+                pattern.args.zip(v.args).all { (p2, v2) -> unify(p2, v2, bindings) }
+            // Container-alias: pattern is `TypeApplication("Seq", X)` and
+            // value is a concrete `SeqType(Y)`. The two shapes represent
+            // the same nominal type; unify their element types.
+            //
+            // Without this branch, mono seeding fails for the extremely
+            // common case where a stdlib decl's scheme uses the aliased
+            // `TypeApplication` shape but the call site's type has been
+            // solved to the concrete container shape (e.g. `seq::range`
+            // returns `SeqType`, but `impl Seq 'a` methods declare their
+            // receiver as `TypeApplication("Seq", 'a)`).
+            pattern.args.size == 1 -> when {
+                pattern.constructor == "Seq" && v is MezzeType.SeqType ->
+                    unify(pattern.args[0], v.elementType, bindings)
+                pattern.constructor == "List" && v is MezzeType.ListType ->
+                    unify(pattern.args[0], v.elementType, bindings)
+                pattern.constructor == "Set" && v is MezzeType.SetType ->
+                    unify(pattern.args[0], v.elementType, bindings)
+                pattern.constructor == "SortedSet" && v is MezzeType.SortedSetType ->
+                    unify(pattern.args[0], v.elementType, bindings)
+                else -> false
+            }
+            pattern.args.size == 2 -> when {
+                pattern.constructor == "Map" && v is MezzeType.MapType ->
+                    unify(pattern.args[0], v.keyType, bindings) &&
+                    unify(pattern.args[1], v.valueType, bindings)
+                pattern.constructor == "SortedMap" && v is MezzeType.SortedMapType ->
+                    unify(pattern.args[0], v.keyType, bindings) &&
+                    unify(pattern.args[1], v.valueType, bindings)
+                else -> false
+            }
+            else -> false
+        }
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
         is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
         is MezzeType.BytesType, is MezzeType.ByteBufferType,
@@ -170,6 +227,54 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
         is MezzeType.EffectRow -> v is MezzeType.EffectRow
         is MezzeType.VarType -> error("VarType handled above")
     }
+}
+
+/** Container/TypeApplication cross-shape unifiers. Mezze uses two
+ *  representations for the same nominal container types: the concrete
+ *  container shape (`SeqType`, `ListType`, …) and the aliased shape
+ *  (`TypeApplication("Seq", …)`, `TypeApplication("List", …)`, …).
+ *  Both directions must unify: `SeqType(Int)` vs `TypeApplication("Seq", 'a)`
+ *  must bind `'a → Int` for stdlib mono seeding to work. */
+private fun unifySeq(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
+    v is MezzeType.SeqType -> unify(patternElem, v.elementType, bindings)
+    v is MezzeType.TypeApplication && v.constructor == "Seq" && v.args.size == 1 ->
+        unify(patternElem, v.args[0], bindings)
+    else -> false
+}
+
+private fun unifyList(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
+    v is MezzeType.ListType -> unify(patternElem, v.elementType, bindings)
+    v is MezzeType.TypeApplication && v.constructor == "List" && v.args.size == 1 ->
+        unify(patternElem, v.args[0], bindings)
+    else -> false
+}
+
+private fun unifySet(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
+    v is MezzeType.SetType -> unify(patternElem, v.elementType, bindings)
+    v is MezzeType.TypeApplication && v.constructor == "Set" && v.args.size == 1 ->
+        unify(patternElem, v.args[0], bindings)
+    else -> false
+}
+
+private fun unifySortedSet(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
+    v is MezzeType.SortedSetType -> unify(patternElem, v.elementType, bindings)
+    v is MezzeType.TypeApplication && v.constructor == "SortedSet" && v.args.size == 1 ->
+        unify(patternElem, v.args[0], bindings)
+    else -> false
+}
+
+private fun unifyMap(patternKey: MezzeType, patternVal: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
+    v is MezzeType.MapType -> unify(patternKey, v.keyType, bindings) && unify(patternVal, v.valueType, bindings)
+    v is MezzeType.TypeApplication && v.constructor == "Map" && v.args.size == 2 ->
+        unify(patternKey, v.args[0], bindings) && unify(patternVal, v.args[1], bindings)
+    else -> false
+}
+
+private fun unifySortedMap(patternKey: MezzeType, patternVal: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
+    v is MezzeType.SortedMapType -> unify(patternKey, v.keyType, bindings) && unify(patternVal, v.valueType, bindings)
+    v is MezzeType.TypeApplication && v.constructor == "SortedMap" && v.args.size == 2 ->
+        unify(patternKey, v.args[0], bindings) && unify(patternVal, v.args[1], bindings)
+    else -> false
 }
 
 /** Strip the outermost [MezzeType.SuspendType] wrapper if present. */

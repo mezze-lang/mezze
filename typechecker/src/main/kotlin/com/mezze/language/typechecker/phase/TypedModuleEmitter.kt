@@ -241,6 +241,7 @@ private fun compileModule(
         abilityImpls = allAbilityImpls,
         stdlibHashes = preludeHashes,
         monoCallSiteRewrites = monoResult.bySiteLoc,
+        monoStripBySiteLoc = monoResult.stripBySiteLoc,
         preloweredFunctions = stdlibFns,
         substitution = substitution
     )

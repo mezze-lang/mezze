@@ -35,6 +35,10 @@ class TypedASTCompiler(
      * keep the existing dict-passing path. Empty by default → mono is off.
      */
     private val monoCallSiteRewrites: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap(),
+    /** #424 Piece 5 — for each seed call site, arg-record field names to
+     *  strip before compiling to a call. Fields correspond to closure
+     *  params that were dead-code eliminated from the specialized decl. */
+    private val monoStripBySiteLoc: Map<com.mezze.language.parsedast.Loc, Set<String>> = emptyMap(),
     private val preloweredFunctions: Map<Hash, FunctionIR> = emptyMap(),
     /**
      * Final module substitution — used to refresh stale VarType on TypedVar
@@ -497,6 +501,18 @@ class TypedASTCompiler(
         // direct-call sites (see emitCallDirect). Must run AFTER dict prescan
         // so we can include the synthetic __dict_<method> params each callee needs.
         populateHashToParamNames(listOf(module) + additionalModules)
+
+        // Register mono spec paramNames so scalar-ABI callers in USER decls
+        // that route to a specialized hash see the specialized signature
+        // (which may have had closure params stripped by Piece 5). Without
+        // this, `paramNamesForHash(specHash)` returns null and every call
+        // to a spec falls back to the record ABI — correct but not scalar.
+        for (spec in monoSpecializations) {
+            val body = spec.specializedBody
+            if (body is TypedLambda) {
+                hashToParamNames[spec.specializedHash] = body.params.map { it.name }
+            }
+        }
 
         val functions = mutableListOf<FunctionIR>()
         val compiledHashes = mutableSetOf<Hash>()
@@ -1335,7 +1351,12 @@ class TypedASTCompiler(
                 val specialized = monoCallSiteRewrites[expr.loc]
                 val effectiveHash = specialized ?: opHash
                 if (specialized != null) census.methodConcrete++
-                return emitCallDirect(effectiveHash, recordIR, expr.isTailCall, src)
+                // #424 Piece 5: strip closure fields the specialized decl
+                // no longer takes as params.
+                val strip = if (specialized != null) monoStripBySiteLoc[expr.loc] else null
+                val finalRecordIR = if (strip.isNullOrEmpty()) recordIR
+                else MakeRecordIR(recordIR.fields.filter { it.name !in strip }, src)
+                return emitCallDirect(effectiveHash, finalRecordIR, expr.isTailCall, src)
             }
 
             // VarType receiver — try dictionary passing first, then fall back to dynamic dispatch.
@@ -1459,7 +1480,11 @@ class TypedASTCompiler(
                     val specialized = monoCallSiteRewrites[expr.loc]
                     if (specialized != null && !isNonLambdaUserLet(calleeHash)) {
                         census.byHashMono++
-                        return emitCallDirect(specialized, argIR, expr.isTailCall, src)
+                        // #424 Piece 5: strip closure-arg record fields.
+                        val strip = monoStripBySiteLoc[expr.loc]
+                        val finalArgIR = if (strip.isNullOrEmpty() || argIR !is MakeRecordIR) argIR
+                        else MakeRecordIR(argIR.fields.filter { it.name !in strip }, src)
+                        return emitCallDirect(specialized, finalArgIR, expr.isTailCall, src)
                     }
 
                     // Check if the callee needs dictionary params. If so, inject

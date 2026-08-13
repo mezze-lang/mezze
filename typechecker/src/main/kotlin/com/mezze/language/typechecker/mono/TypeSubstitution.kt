@@ -349,7 +349,16 @@ object LambdaSubstitution {
             it.captures.isEmpty() && isSafeToInline(it.body)
         }
         if (safe.isEmpty()) return body
-        return substituteInExpr(body, safe)
+        // If the decl body is itself a TypedLambda whose params include
+        // the closure keys, DON'T let the nested-lambda-shadow branch
+        // in [substituteInExpr] hide them — the whole point is to
+        // rewrite refs to those params. Substitute in the lambda's
+        // body directly, then rebuild the outer lambda.
+        return if (body is com.mezze.language.typedast.TypedLambda) {
+            body.copy(body = substituteInExpr(body.body, safe))
+        } else {
+            substituteInExpr(body, safe)
+        }
     }
 
     // Heuristic purity check — deliberately conservative. A closure body
@@ -386,15 +395,30 @@ object LambdaSubstitution {
         return safe
     }
 
+    /** A TypedVar refs the outer lambda's closure-param when its binding
+     *  is a lexical `Local` (from `resolveBinding`) or the explicit
+     *  `Param` — both point at the destructured record field named after
+     *  the closure arg. Never match `ByHash` (top-level ref) or `Native`
+     *  — those never shadow a lambda-local param. */
+    private fun isClosureParamRef(binding: BindingRef): Boolean = when (binding) {
+        is BindingRef.Param, is BindingRef.Local -> true
+        else -> false
+    }
+
     private fun substituteInExpr(
         expr: TypedExpr,
         closures: Map<String, com.mezze.language.typedast.TypedLambda>,
     ): TypedExpr {
         return when (expr) {
             // Beta-reduce `f {arg-record}` where `f` is a closure param.
+            //
+            // TypedAstBuilder emits lambda-body-scope var refs as
+            // `BindingRef.Local(depth, index)` (see resolveBinding), not
+            // `BindingRef.Param`, so match either — the closure param
+            // name is unique within the enclosing lambda's scope.
             is TypedCall -> {
                 val fn = expr.function
-                if (fn is TypedVar && fn.binding is BindingRef.Param) {
+                if (fn is TypedVar && isClosureParamRef(fn.binding)) {
                     val lam = closures[fn.name]
                     if (lam != null) {
                         val argRec = substituteInExpr(expr.arg, closures)
@@ -412,15 +436,24 @@ object LambdaSubstitution {
             // of the lambda literal. Downstream (record forward paths)
             // picks it up as a lambda literal → transitive spec.
             is TypedVar -> {
-                if (expr.binding is BindingRef.Param) {
+                if (isClosureParamRef(expr.binding)) {
                     val lam = closures[expr.name]
                     if (lam != null) return lam
                 }
                 expr
             }
-            is com.mezze.language.typedast.TypedLambda -> expr.copy(
-                body = substituteInExpr(expr.body, closures),
-            )
+            is com.mezze.language.typedast.TypedLambda -> {
+                // Nested lambda: its own params shadow ours. Remove any
+                // closure key that collides with a nested param name so
+                // in-body refs to the nested param don't get substituted
+                // with the outer closure's lambda literal.
+                val shadowed = expr.params.map { it.name }.toSet()
+                val filtered = if (shadowed.any { it in closures }) {
+                    closures.filterKeys { it !in shadowed }
+                } else closures
+                if (filtered.isEmpty()) expr
+                else expr.copy(body = substituteInExpr(expr.body, filtered))
+            }
             is com.mezze.language.typedast.TypedRecord -> expr.copy(
                 entries = expr.entries.map { substituteInRecordEntry(it, closures) },
             )
@@ -439,9 +472,14 @@ object LambdaSubstitution {
             is com.mezze.language.typedast.TypedMatch -> expr.copy(
                 scrutinee = substituteInExpr(expr.scrutinee, closures),
                 cases = expr.cases.map { c ->
+                    // Match-case bindings can shadow a closure key.
+                    val shadowed = c.bindings.map { it.name }.toSet()
+                    val filtered = if (shadowed.any { it in closures }) {
+                        closures.filterKeys { it !in shadowed }
+                    } else closures
                     c.copy(
-                        guard = c.guard?.let { substituteInExpr(it, closures) },
-                        body = substituteInExpr(c.body, closures),
+                        guard = c.guard?.let { substituteInExpr(it, filtered) },
+                        body = substituteInExpr(c.body, filtered),
                     )
                 },
             )
@@ -450,17 +488,30 @@ object LambdaSubstitution {
                 thenBranch = substituteInExpr(expr.thenBranch, closures),
                 elseBranch = substituteInExpr(expr.elseBranch, closures),
             )
-            is com.mezze.language.typedast.TypedBlock -> expr.copy(
-                statements = expr.statements.map { s ->
+            is com.mezze.language.typedast.TypedBlock -> {
+                // Block-lets progressively shadow closure keys as we
+                // walk the statement list. `active` starts with the
+                // outer closures and drops any name a preceding let
+                // introduces. This mirrors the compiler's scope model.
+                var active = closures
+                val newStmts = ArrayList<com.mezze.language.typedast.TypedStatement>(expr.statements.size)
+                for (s in expr.statements) {
                     when (s) {
-                        is com.mezze.language.typedast.TypedStatement.Let ->
-                            s.copy(value = substituteInExpr(s.value, closures))
+                        is com.mezze.language.typedast.TypedStatement.Let -> {
+                            newStmts.add(s.copy(value = substituteInExpr(s.value, active)))
+                            if (s.name in active) {
+                                active = active.filterKeys { it != s.name }
+                            }
+                        }
                         is com.mezze.language.typedast.TypedStatement.Expr ->
-                            s.copy(expr = substituteInExpr(s.expr, closures))
+                            newStmts.add(s.copy(expr = substituteInExpr(s.expr, active)))
                     }
-                },
-                result = substituteInExpr(expr.result, closures),
-            )
+                }
+                expr.copy(
+                    statements = newStmts,
+                    result = substituteInExpr(expr.result, active),
+                )
+            }
             is com.mezze.language.typedast.TypedSeq -> expr.copy(
                 elements = expr.elements.map { el ->
                     when (el) {
@@ -481,6 +532,13 @@ object LambdaSubstitution {
             is com.mezze.language.typedast.TypedPerformOp -> expr.copy(
                 arg = substituteInExpr(expr.arg, closures),
             )
+            is TypedStringLit -> expr.copy(parts = expr.parts.map { part ->
+                when (part) {
+                    is TypedStringPart.Literal -> part
+                    is TypedStringPart.Interpolation ->
+                        TypedStringPart.Interpolation(substituteInExpr(part.expr, closures))
+                }
+            })
             else -> expr
         }
     }
@@ -528,58 +586,166 @@ object LambdaSubstitution {
         for (p in lambda.params) {
             if (p.name !in fieldValues) return originalCall.copy(function = lambda, arg = argRecord)
         }
-        // Emit `let p1 = v1; let p2 = v2; ...; body` so a subsequent
-        // compilation can still see the params via slot lookups. That's
-        // simpler and safer than rewriting Param(i) refs directly.
+        // Direct substitution — walk the lambda body and replace every
+        // `TypedVar(Param, name)` with the corresponding argument value.
+        // This is safe because:
+        //   * `substituteClosures` already restricted to lambdas whose
+        //     body passes `isSafeToInline` (no perform, no method
+        //     dispatch), so re-evaluating a substituted expression
+        //     doesn't observe extra effects.
+        //   * Callers to HOFs pass simple values or record-field reads
+        //     for the folder's arguments — `acc`, `av`, `__native_seq_get_
+        //     unchecked{xs, i}` — cheap enough to duplicate.
         //
-        // BUT: the lambda's body still contains `TypedVar(binding =
-        // Param(i))` references — they point to the LAMBDA's outer
-        // param slot, not the block's local slot. We rewrite these
-        // to `BindingRef.Local(depth=0, index=<slot>)` so the compiler
-        // resolves them via slot lookup. The block adds one slot per
-        // param in declaration order, so paramName → localIndex is
-        // just the position in `lambda.params`.
-        val paramNameToLocal = HashMap<String, Int>(lambda.params.size)
-        for ((idx, p) in lambda.params.withIndex()) paramNameToLocal[p.name] = idx
-        val statements = ArrayList<com.mezze.language.typedast.TypedStatement>(lambda.params.size)
-        for (p in lambda.params) {
-            val v = fieldValues.getValue(p.name)
-            val letHash = com.mezze.language.typedast.TypedASTHasher.hashExpr(v)
-            statements.add(
-                com.mezze.language.typedast.TypedStatement.Let(
-                    name = p.name,
-                    contentHash = letHash,
-                    type = p.type,
-                    value = v,
-                    loc = p.loc,
-                )
-            )
-        }
-        val rewrittenBody = rewriteParamRefs(lambda.body, paramNameToLocal)
-        return com.mezze.language.typedast.TypedBlock(
-            statements = statements,
-            result = rewrittenBody,
-            type = rewrittenBody.type,
-            loc = originalCall.loc,
-        )
+        // Using an explicit block-with-lets was fragile: the block's
+        // `Let.name` reused the folder's param name (`a`, `b`, `x`),
+        // and TypedASTCompiler's `compileVar` resolves `BindingRef.Local`
+        // by NAME through the innermost match-case scope FIRST. If the
+        // enclosing scope's match already bound the same name (Option
+        // `map2`'s match `{val = a}` bindings vs the folder `{a, b}`
+        // params), the block's fresh slot was allocated but the ref
+        // resolved to the outer scope's slot instead — cross-slot read,
+        // Illegal frame value at runtime.
+        return substituteParamRefs(lambda.body, fieldValues)
     }
 
-    /** Rewrite `TypedVar(binding = Param(i), name = <p>)` inside the
-     *  spliced body to `TypedVar(binding = Local(0, slot))` so the
-     *  compiler resolves it against the block's local slots. Params
-     *  that don't match a splice-time name are left alone — they
-     *  might refer to a nested lambda's own params (Param slot in
-     *  child frame, not caller's). */
+    /** Walk `expr` and replace every `TypedVar(Param|Local, name = n)`
+     *  with `fieldValues[n]` when a mapping exists. Doesn't descend into
+     *  nested lambdas — their own params shadow ours.
+     *
+     *  Both `Param` and `Local` match because `TypedAstBuilder.resolveBinding`
+     *  emits lambda-scope names as `BindingRef.Local(depth, index)` — the
+     *  actual lambda param refs at the site we're inlining show up as
+     *  `Local`, not `Param`. Restricting to `Param` would skip every
+     *  real folder lambda body. */
+    private fun substituteParamRefs(
+        expr: TypedExpr,
+        fieldValues: Map<String, TypedExpr>,
+    ): TypedExpr {
+        return when (expr) {
+            is TypedVar -> {
+                if (expr.binding is BindingRef.Param || expr.binding is BindingRef.Local) {
+                    val v = fieldValues[expr.name]
+                    if (v != null) return v
+                }
+                expr
+            }
+            is com.mezze.language.typedast.TypedLambda -> {
+                // Nested lambda — its own params shadow ours. Leave alone.
+                expr
+            }
+            is TypedCall -> expr.copy(
+                function = substituteParamRefs(expr.function, fieldValues),
+                arg = substituteParamRefs(expr.arg, fieldValues),
+            )
+            is com.mezze.language.typedast.TypedRecord -> expr.copy(
+                entries = expr.entries.map { substituteParamRefsInRecordEntry(it, fieldValues) },
+            )
+            is com.mezze.language.typedast.TypedRecordUpdate -> expr.copy(
+                record = substituteParamRefs(expr.record, fieldValues),
+                updates = expr.updates.map { substituteParamRefsInRecordEntry(it, fieldValues) },
+            )
+            is com.mezze.language.typedast.TypedFieldAccess -> expr.copy(
+                record = substituteParamRefs(expr.record, fieldValues),
+            )
+            is com.mezze.language.typedast.TypedVariantConstruct -> {
+                val payload = expr.payload
+                if (payload == null) expr
+                else expr.copy(payload = substituteParamRefs(payload, fieldValues))
+            }
+            is com.mezze.language.typedast.TypedMatch -> expr.copy(
+                scrutinee = substituteParamRefs(expr.scrutinee, fieldValues),
+                cases = expr.cases.map { c ->
+                    val shadowed = c.bindings.map { it.name }.toSet()
+                    val filtered = if (shadowed.any { it in fieldValues }) {
+                        fieldValues.filterKeys { it !in shadowed }
+                    } else fieldValues
+                    c.copy(
+                        guard = c.guard?.let { substituteParamRefs(it, filtered) },
+                        body = substituteParamRefs(c.body, filtered),
+                    )
+                },
+            )
+            is com.mezze.language.typedast.TypedIf -> expr.copy(
+                condition = substituteParamRefs(expr.condition, fieldValues),
+                thenBranch = substituteParamRefs(expr.thenBranch, fieldValues),
+                elseBranch = substituteParamRefs(expr.elseBranch, fieldValues),
+            )
+            is com.mezze.language.typedast.TypedBlock -> {
+                var active = fieldValues
+                val newStmts = ArrayList<com.mezze.language.typedast.TypedStatement>(expr.statements.size)
+                for (s in expr.statements) {
+                    when (s) {
+                        is com.mezze.language.typedast.TypedStatement.Let -> {
+                            newStmts.add(s.copy(value = substituteParamRefs(s.value, active)))
+                            if (s.name in active) {
+                                active = active.filterKeys { it != s.name }
+                            }
+                        }
+                        is com.mezze.language.typedast.TypedStatement.Expr ->
+                            newStmts.add(s.copy(expr = substituteParamRefs(s.expr, active)))
+                    }
+                }
+                expr.copy(
+                    statements = newStmts,
+                    result = substituteParamRefs(expr.result, active),
+                )
+            }
+            is com.mezze.language.typedast.TypedSeq -> expr.copy(
+                elements = expr.elements.map { el ->
+                    when (el) {
+                        is com.mezze.language.typedast.TypedSeqElement.Regular ->
+                            el.copy(expr = substituteParamRefs(el.expr, fieldValues))
+                        is com.mezze.language.typedast.TypedSeqElement.Spread ->
+                            el.copy(expr = substituteParamRefs(el.expr, fieldValues))
+                    }
+                },
+            )
+            is com.mezze.language.typedast.TypedPipe -> expr.copy(
+                left = substituteParamRefs(expr.left, fieldValues),
+                right = substituteParamRefs(expr.right, fieldValues),
+            )
+            is com.mezze.language.typedast.TypedPerform -> expr.copy(
+                body = substituteParamRefs(expr.body, fieldValues),
+            )
+            is com.mezze.language.typedast.TypedPerformOp -> expr.copy(
+                arg = substituteParamRefs(expr.arg, fieldValues),
+            )
+            is TypedStringLit -> expr.copy(parts = expr.parts.map { part ->
+                when (part) {
+                    is TypedStringPart.Literal -> part
+                    is TypedStringPart.Interpolation ->
+                        TypedStringPart.Interpolation(substituteParamRefs(part.expr, fieldValues))
+                }
+            })
+            else -> expr
+        }
+    }
+
+    private fun substituteParamRefsInRecordEntry(
+        entry: com.mezze.language.typedast.TypedRecordEntry,
+        fieldValues: Map<String, TypedExpr>,
+    ): com.mezze.language.typedast.TypedRecordEntry = when (entry) {
+        is com.mezze.language.typedast.TypedRecordEntry.Field ->
+            entry.copy(value = substituteParamRefs(entry.value, fieldValues))
+        is com.mezze.language.typedast.TypedRecordEntry.Spread ->
+            entry.copy(expr = substituteParamRefs(entry.expr, fieldValues))
+    }
+
+    /** (Retained for a legacy code path — unused after the switch to
+     *  direct-substitution beta-reduction; keep the signature stable so
+     *  external callers that reflect on this file don't break.) */
+    @Suppress("unused")
     private fun rewriteParamRefs(
         expr: TypedExpr,
-        paramNameToLocal: Map<String, Int>,
+        paramRename: Map<String, String>,
     ): TypedExpr {
         return when (expr) {
             is TypedVar -> {
                 if (expr.binding is BindingRef.Param) {
-                    val slot = paramNameToLocal[expr.name]
-                    if (slot != null) {
-                        return expr.copy(binding = BindingRef.Local(depth = 0, index = slot))
+                    val newName = paramRename[expr.name]
+                    if (newName != null) {
+                        return expr.copy(name = newName, binding = BindingRef.Local(depth = 0, index = 0))
                     }
                 }
                 expr
@@ -594,68 +760,68 @@ object LambdaSubstitution {
                 expr
             }
             is TypedCall -> expr.copy(
-                function = rewriteParamRefs(expr.function, paramNameToLocal),
-                arg = rewriteParamRefs(expr.arg, paramNameToLocal),
+                function = rewriteParamRefs(expr.function, paramRename),
+                arg = rewriteParamRefs(expr.arg, paramRename),
             )
             is com.mezze.language.typedast.TypedRecord -> expr.copy(
-                entries = expr.entries.map { rewriteParamRefsInRecordEntry(it, paramNameToLocal) },
+                entries = expr.entries.map { rewriteParamRefsInRecordEntry(it, paramRename) },
             )
             is com.mezze.language.typedast.TypedRecordUpdate -> expr.copy(
-                record = rewriteParamRefs(expr.record, paramNameToLocal),
-                updates = expr.updates.map { rewriteParamRefsInRecordEntry(it, paramNameToLocal) },
+                record = rewriteParamRefs(expr.record, paramRename),
+                updates = expr.updates.map { rewriteParamRefsInRecordEntry(it, paramRename) },
             )
             is com.mezze.language.typedast.TypedFieldAccess -> expr.copy(
-                record = rewriteParamRefs(expr.record, paramNameToLocal),
+                record = rewriteParamRefs(expr.record, paramRename),
             )
             is com.mezze.language.typedast.TypedVariantConstruct -> {
                 val payload = expr.payload
                 if (payload == null) expr
-                else expr.copy(payload = rewriteParamRefs(payload, paramNameToLocal))
+                else expr.copy(payload = rewriteParamRefs(payload, paramRename))
             }
             is com.mezze.language.typedast.TypedMatch -> expr.copy(
-                scrutinee = rewriteParamRefs(expr.scrutinee, paramNameToLocal),
+                scrutinee = rewriteParamRefs(expr.scrutinee, paramRename),
                 cases = expr.cases.map { c ->
                     c.copy(
-                        guard = c.guard?.let { rewriteParamRefs(it, paramNameToLocal) },
-                        body = rewriteParamRefs(c.body, paramNameToLocal),
+                        guard = c.guard?.let { rewriteParamRefs(it, paramRename) },
+                        body = rewriteParamRefs(c.body, paramRename),
                     )
                 },
             )
             is com.mezze.language.typedast.TypedIf -> expr.copy(
-                condition = rewriteParamRefs(expr.condition, paramNameToLocal),
-                thenBranch = rewriteParamRefs(expr.thenBranch, paramNameToLocal),
-                elseBranch = rewriteParamRefs(expr.elseBranch, paramNameToLocal),
+                condition = rewriteParamRefs(expr.condition, paramRename),
+                thenBranch = rewriteParamRefs(expr.thenBranch, paramRename),
+                elseBranch = rewriteParamRefs(expr.elseBranch, paramRename),
             )
             is com.mezze.language.typedast.TypedBlock -> expr.copy(
                 statements = expr.statements.map { s ->
                     when (s) {
                         is com.mezze.language.typedast.TypedStatement.Let ->
-                            s.copy(value = rewriteParamRefs(s.value, paramNameToLocal))
+                            s.copy(value = rewriteParamRefs(s.value, paramRename))
                         is com.mezze.language.typedast.TypedStatement.Expr ->
-                            s.copy(expr = rewriteParamRefs(s.expr, paramNameToLocal))
+                            s.copy(expr = rewriteParamRefs(s.expr, paramRename))
                     }
                 },
-                result = rewriteParamRefs(expr.result, paramNameToLocal),
+                result = rewriteParamRefs(expr.result, paramRename),
             )
             is com.mezze.language.typedast.TypedSeq -> expr.copy(
                 elements = expr.elements.map { el ->
                     when (el) {
                         is com.mezze.language.typedast.TypedSeqElement.Regular ->
-                            el.copy(expr = rewriteParamRefs(el.expr, paramNameToLocal))
+                            el.copy(expr = rewriteParamRefs(el.expr, paramRename))
                         is com.mezze.language.typedast.TypedSeqElement.Spread ->
-                            el.copy(expr = rewriteParamRefs(el.expr, paramNameToLocal))
+                            el.copy(expr = rewriteParamRefs(el.expr, paramRename))
                     }
                 },
             )
             is com.mezze.language.typedast.TypedPipe -> expr.copy(
-                left = rewriteParamRefs(expr.left, paramNameToLocal),
-                right = rewriteParamRefs(expr.right, paramNameToLocal),
+                left = rewriteParamRefs(expr.left, paramRename),
+                right = rewriteParamRefs(expr.right, paramRename),
             )
             is com.mezze.language.typedast.TypedPerform -> expr.copy(
-                body = rewriteParamRefs(expr.body, paramNameToLocal),
+                body = rewriteParamRefs(expr.body, paramRename),
             )
             is com.mezze.language.typedast.TypedPerformOp -> expr.copy(
-                arg = rewriteParamRefs(expr.arg, paramNameToLocal),
+                arg = rewriteParamRefs(expr.arg, paramRename),
             )
             else -> expr
         }
@@ -663,11 +829,11 @@ object LambdaSubstitution {
 
     private fun rewriteParamRefsInRecordEntry(
         entry: com.mezze.language.typedast.TypedRecordEntry,
-        paramNameToLocal: Map<String, Int>,
+        paramRename: Map<String, String>,
     ): com.mezze.language.typedast.TypedRecordEntry = when (entry) {
         is com.mezze.language.typedast.TypedRecordEntry.Field ->
-            entry.copy(value = rewriteParamRefs(entry.value, paramNameToLocal))
+            entry.copy(value = rewriteParamRefs(entry.value, paramRename))
         is com.mezze.language.typedast.TypedRecordEntry.Spread ->
-            entry.copy(expr = rewriteParamRefs(entry.expr, paramNameToLocal))
+            entry.copy(expr = rewriteParamRefs(entry.expr, paramRename))
     }
 }
