@@ -111,8 +111,24 @@ pub let flat_map : { xs: ['a], f: { x: 'a } -> ['b] <...> } -> ['b] <...> = { xs
   __native_seq_flat_map { xs = xs, f = f }
 
 ## Left fold with an initial accumulator value.
+##
+## Implemented in Mezze on top of `__native_seq_get_unchecked` so mono can
+## specialize on the concrete folder lambda at each call site (#409/#416).
+## Once monomorphized, the folder inlines into the loop and the whole
+## `xs.fold {init=0, f={acc,x}->acc+x}` collapses to the same shape as
+## a hand-written for-loop over the sequence.
+let fold_go : { xs: ['a], i: Int, n: Int, acc: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> 'b <...> = { xs, i, n, acc, f } ->
+  if i >= n then acc
+  else fold_go {
+    xs = xs,
+    i = i + 1,
+    n = n,
+    acc = f { acc = acc, x = __native_seq_get_unchecked { xs = xs, i = i } },
+    f = f,
+  }
+
 pub let fold : { xs: ['a], init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> 'b <...> = { xs, init, f } ->
-  __native_seq_fold { xs = xs, init = init, f = f }
+  fold_go { xs = xs, i = 0, n = __native_seq_size { xs = xs }, acc = init, f = f }
 
 ## Reduces elements using f, returning None if empty.
 pub let reduce : { xs: ['a], f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { xs, f } ->

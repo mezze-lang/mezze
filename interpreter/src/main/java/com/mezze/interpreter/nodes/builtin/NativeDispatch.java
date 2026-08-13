@@ -642,6 +642,8 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.isEmpty(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_get", (r, c) ->
             SeqNatives.get(getSeq(r, "xs"), getLong(r, "i")));
+        HANDLERS.put("__native_seq_get_unchecked", (r, c) ->
+            SeqNatives.getUnchecked(getSeq(r, "xs"), getLong(r, "i")));
         HANDLERS.put("__native_seq_set", (r, c) ->
             SeqNatives.set(getSeq(r, "xs"), getLong(r, "i"), getField(r, "x")));
         HANDLERS.put("__native_seq_add", (r, c) ->
