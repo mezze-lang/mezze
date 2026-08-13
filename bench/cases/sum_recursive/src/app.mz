@@ -1,17 +1,13 @@
 use std::effects::log::{println, Console}
 
-## Hand-written imperative-style sum via tail-recursion — no fold, no
-## abstraction, no seq allocation. This is the ceiling for what pure
-## user code can do: pure Int arithmetic in a straight loop shape.
-
-let sum_to = {n: Int} -> do
-  let go = {i: Int, acc: Int} ->
-    if i >= n then acc
-    else go {i = i + 1, acc = acc + i}
-  go {i = 0, acc = 0}
+## Top-level tail-recursion — canonical shape mono+inliner should turn
+## generic user code into. Full 10M iters.
+let go = {i: Int, n: Int, acc: Int} ->
+  if i >= n then acc
+  else go {i = i + 1, n = n, acc = acc + i}
 
 let main = {} -> perform Console in do
-  let c = sum_to {n = 1000000}
+  let c = go {i = 0, n = 1000000, acc = 0}
   println { msg = "sum 0..1M = $(c.to_str{})" }
-  let d = sum_to {n = 10000000}
+  let d = go {i = 0, n = 10000000, acc = 0}
   println { msg = "sum 0..10M = $(d.to_str{})" }
