@@ -401,8 +401,34 @@ object PrecompiledStdlib {
 
             val depGraph = loadDepGraphFromStore(s, functions)
 
+            // #440 Day 7 (Mono Gap A): read stdlib TypedModules from the
+            // store so mono can see stdlib decls. Without this, the sqlite
+            // fast path silently seeded mono with an empty map, blocking
+            // HOF specialization across stdlib calls (fold, map, filter).
+            // Walk the same shape as tryLoadPreloweredFromStore.
+            val typedModules = mutableMapOf<Hash, TypedAstModule>()
+            var typedModDecodeFailures = 0
+            var typedModLastError: String? = null
+            for (mod in s.getAllModules()) {
+                if (!ModulePathConventions.isStdlib(mod.path)) continue
+                val typedBlob = s.getTypedModule(mod.path, mod.sourceHash) ?: continue
+                try {
+                    val typedModule: TypedAstModule = cbor.decodeFromByteArray(typedBlob)
+                    typedModules[typedModule.hash] = typedModule
+                } catch (e: Exception) {
+                    typedModDecodeFailures++
+                    typedModLastError = "${mod.path}: ${e.javaClass.simpleName}"
+                }
+            }
+            if (typedModDecodeFailures > 0 && System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println(
+                    "[PrecompiledStdlib] tryLoadFullFromStore: $typedModDecodeFailures typed module(s) " +
+                    "failed to decode. Last: $typedModLastError"
+                )
+            }
+
             if (functions.isNotEmpty()) {
-                FullCacheData(importContext, functions, performers, depGraph, abilityImpls, declHashes, moduleHashes)
+                FullCacheData(importContext, functions, performers, depGraph, abilityImpls, declHashes, moduleHashes, typedModules)
             } else null
         } catch (e: Exception) {
             if (System.getenv("MEZZE_DEBUG") != null) {
