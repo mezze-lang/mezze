@@ -2528,8 +2528,75 @@ public final class BytecodeCompiler {
         if (mr.getFields().size() != 1) return false;
         var fld = mr.getFields().get(0);
         if (!"xs".equals(fld.getName())) return false;
+        NodeIR xsExpr = fld.getValue();
+
+        // #438 Day 5: sum is fold(range, 0, +). Reuse the map/filter peel
+        // + range-fused loop from the folder path when the source is
+        // (map(filter(range))). Otherwise fall back to BuiltinSumLongSeq
+        // over the materialized seq.
+        InlineOp mapperOp = null; long mapperRhsLit = 0L;
+        FilterPeel filterPeel = null;
+        NodeIR peeledXs = xsExpr;
+        var mapPeel = peelMapFromXs(peeledXs, language);
+        if (mapPeel != null) {
+            mapperOp = mapPeel.op; mapperRhsLit = mapPeel.rhsLit;
+            peeledXs = mapPeel.innerXs;
+        }
+        filterPeel = peelFilterFromXs(peeledXs, language);
+        if (filterPeel != null) {
+            peeledXs = filterPeel.innerXs;
+        }
+        NodeIR rangeStart = null, rangeEnd = null;
+        if (peeledXs instanceof CallNativeIR nat && "__native_seq_range".equals(nat.getName())) {
+            if (nat.isScalarABI() && nat.getArgs().size() == 2) {
+                rangeStart = nat.getArgs().get(0);
+                rangeEnd   = nat.getArgs().get(1);
+            } else if (nat.getArg() instanceof MakeRecordIR nmr) {
+                for (var f : nmr.getFields()) {
+                    switch (f.getName()) {
+                        case "start" -> rangeStart = f.getValue();
+                        case "end"   -> rangeEnd   = f.getValue();
+                    }
+                }
+                if (rangeStart == null || rangeEnd == null) { rangeStart = null; rangeEnd = null; }
+            }
+        }
+        if (rangeStart == null && (mapperOp != null || filterPeel != null)) {
+            // Peel matched but no range underneath — can't fuse. Bail so
+            // caller falls back to the record-ABI native dispatch (which
+            // materializes and then sums).
+            return false;
+        }
+        if (rangeStart != null) {
+            // Fused range path — for the no-peel case, keep the existing
+            // BuiltinSumLongSeq semantics but skip it and go through the
+            // shared range loop which produces the same value with init=0.
+            final NodeIR fRangeStart = rangeStart;
+            final NodeIR fRangeEnd = rangeEnd;
+            final InlineOp fMapper = mapperOp;
+            final long fMapperLit = mapperRhsLit;
+            final FilterPeel fFilter = filterPeel;
+            b.beginBlock();
+              var accSlot = b.createLocal();
+              var iSlot   = b.createLocal();
+              var xSlot   = b.createLocal();
+              emitRangeFusedLoop(b, argCount, localMap,
+                      accSlot, iSlot, xSlot,
+                      fRangeStart, fRangeEnd,
+                      () -> b.emitLoadLongConstant(0L),
+                      InlineOp.ADD,
+                      fMapper, fMapperLit,
+                      fFilter);
+            b.endBlock();
+            if (System.getenv("MEZZE_SEQ_HOF_DEBUG") != null) {
+                System.err.println("[seq-hof] emitted range-fused sum mapper=" + mapperOp
+                    + " pred=" + describeFilter(filterPeel));
+            }
+            return true;
+        }
+        // No range source — fall back to the existing seq-sum builtin.
         b.beginBuiltinSumLongSeq();
-        emitNode(fld.getValue(), b, argCount, localMap);
+        emitNode(xsExpr, b, argCount, localMap);
         b.endBuiltinSumLongSeq();
         if (System.getenv("MEZZE_SEQ_HOF_DEBUG") != null) {
             System.err.println("[seq-hof] emitted BuiltinSumLongSeq");
@@ -2651,9 +2718,8 @@ public final class BytecodeCompiler {
         // order at emit: map first (outermost), then filter, then range.
         NodeIR rangeStart = null, rangeEnd = null;
         InlineOp mapperOp = null;              // op that maps xSlot → xSlot
-        InlineOp predOp = null;                // comparison op on xSlot vs predRhsLit
-        long predRhsLit = 0L;                  // right-hand-side literal for predicate
         long mapperRhsLit = 0L;                // right-hand-side literal for mapper
+        FilterPeel filterPeel = null;          // predicate (simple or compound)
         // Peel outer map (if any).
         NodeIR peeledXs = xsExpr;
         var mapPeel = peelMapFromXs(peeledXs, language);
@@ -2663,15 +2729,14 @@ public final class BytecodeCompiler {
             peeledXs = mapPeel.innerXs;
         }
         // Peel outer filter (if any).
-        var filterPeel = peelFilterFromXs(peeledXs, language);
+        filterPeel = peelFilterFromXs(peeledXs, language);
         if (filterPeel != null) {
-            predOp = filterPeel.op;
-            predRhsLit = filterPeel.rhsLit;
             peeledXs = filterPeel.innerXs;
         }
         // Peeling done. peeledXs is now the innermost source; check for
         // __native_seq_range.
-        if (dbg) System.err.println("[fold-fuse] after peel: mapper=" + mapperOp + " pred=" + predOp
+        if (dbg) System.err.println("[fold-fuse] after peel: mapper=" + mapperOp
+                + " pred=" + describeFilter(filterPeel)
                 + " peeledXs=" + peeledXs.getClass().getSimpleName());
         //
         // #404: if peeledXs is `__native_seq_range { start, end }`, emit a
@@ -2696,7 +2761,7 @@ public final class BytecodeCompiler {
         // If we peeled map/filter but no range source underneath, we
         // can't fuse — bail. The generic fold on materialized xs still
         // runs correctly via the non-fused path.
-        if (rangeStart == null && (mapperOp != null || predOp != null)) {
+        if (rangeStart == null && (mapperOp != null || filterPeel != null)) {
             return false;
         }
 
@@ -2706,7 +2771,7 @@ public final class BytecodeCompiler {
         // BuiltinSumLongSeq: no BDSL slot traffic, InlinedLoopConditionProfile-
         // driven, primitive-long acc kept in a Java local. Java-parity.
         if (rangeStart != null && op == InlineOp.ADD
-                && mapperOp == null && predOp == null) {
+                && mapperOp == null && filterPeel == null) {
             b.beginBuiltinSumRangeLong();
               emitNode(rangeStart, b, argCount, localMap);
               emitNode(rangeEnd,   b, argCount, localMap);
@@ -2724,87 +2789,11 @@ public final class BytecodeCompiler {
         var xSlot    = b.createLocal();
 
         if (rangeStart != null) {
-            // Range-fused layout — no seq alloc, no SeqGet:
-            //   Block {
-            //     i    = Estart
-            //     end  = Eend
-            //     acc  = Einit
-            //     While (i < end) {
-            //       x   = i
-            //       acc = acc <op> x
-            //       i   = i + 1
-            //     }
-            //     acc
-            //   }
-            var endSlot = b.createLocal();
-            b.beginStoreLocal(iSlot);
-            emitNode(rangeStart, b, argCount, localMap);
-            b.endStoreLocal();
-            b.beginStoreLocal(endSlot);
-            emitNode(rangeEnd, b, argCount, localMap);
-            b.endStoreLocal();
-            b.beginStoreLocal(accSlot);
-            emitNode(initExpr, b, argCount, localMap);
-            b.endStoreLocal();
-            b.beginWhile();
-              b.beginDirectLessThan();
-              b.emitLoadLocal(iSlot);
-              b.emitLoadLocal(endSlot);
-              b.endDirectLessThan();
-              b.beginBlock();
-                // x = i (raw range element — predicate sees this)
-                b.beginStoreLocal(xSlot);
-                b.emitLoadLocal(iSlot);
-                b.endStoreLocal();
-                // Peel order at emit was map→filter, so the user's chain
-                // is range.filter(p).map(f).fold — filter runs on the raw
-                // range element, then map, then the fold step. Emit in
-                // that data-flow order:
-                //   if (predOp(x, predRhsLit)) {
-                //     x = x <mapperOp> mapperRhsLit  (if map peeled)
-                //     acc = acc <op> x
-                //   }
-                // IfThen has no else — the no-op fall-through leaves acc
-                // unchanged for filtered-out elements.
-                if (predOp != null) {
-                    b.beginIfThen();
-                      emitInlineOpLocalLit(predOp, xSlot, predRhsLit, b);
-                      b.beginBlock();
-                        if (mapperOp != null) {
-                            b.beginStoreLocal(xSlot);
-                            emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
-                            b.endStoreLocal();
-                        }
-                        b.beginStoreLocal(accSlot);
-                        emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                        b.endStoreLocal();
-                      b.endBlock();
-                    b.endIfThen();
-                } else {
-                    if (mapperOp != null) {
-                        b.beginStoreLocal(xSlot);
-                        emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
-                        b.endStoreLocal();
-                    }
-                    b.beginStoreLocal(accSlot);
-                    emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                    b.endStoreLocal();
-                }
-                // i = i + 1
-                b.beginStoreLocal(iSlot);
-                b.beginDirectAdd();
-                b.emitLoadLocal(iSlot);
-                b.emitLoadLongConstant(1L);
-                b.endDirectAdd();
-                b.endStoreLocal();
-              b.endBlock();
-            b.endWhile();
-            b.emitLoadLocal(accSlot);
+            emitRangeFusedLoop(b, argCount, localMap,
+                    accSlot, iSlot, xSlot,
+                    rangeStart, rangeEnd, initExpr,
+                    op, mapperOp, mapperRhsLit, filterPeel);
             b.endBlock();
-            if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
-                System.err.println("[fold-fuse] emitted range-fused loop for op=" + op
-                    + " mapper=" + mapperOp + " pred=" + predOp);
-            }
             return true;
         }
 
@@ -2914,6 +2903,175 @@ public final class BytecodeCompiler {
     }
 
     /**
+     * #437 — emit the shared range-fused Block/While loop body. Both
+     * {@link #tryEmitFusedFold} and the sum-sink path
+     * ({@link #tryEmitBuiltinSeqReducer}) delegate here so map/filter
+     * peel + range fusion share one code path.
+     *
+     * <p>Layout (semantics identical to the folder inline shape):
+     * <pre>
+     *   Block {
+     *     i    = Estart
+     *     end  = Eend
+     *     acc  = Einit
+     *     While (i < end) {
+     *       x = i
+     *       if (predOp(x, predRhsLit)) {              // if pred peeled
+     *         x = x <mapperOp> mapperRhsLit           // if map peeled
+     *         acc = acc <op> x
+     *       }
+     *       i = i + 1
+     *     }
+     *     acc
+     *   }
+     * </pre>
+     * Peel data-flow order: predicate always sees the raw range element;
+     * map runs after filter; fold step runs last on the mapped element.
+     *
+     * <p>Callers own the outer {@code beginBlock}/{@code endBlock} — this
+     * helper emits only the interior (stores, while, final load).
+     * @param initEmit — call it to emit the init value expression; use
+     *                   a lambda to invoke {@link #emitNode} on any NodeIR,
+     *                   or a direct {@code b.emitLoadLongConstant(0L)} for
+     *                   the sum case.
+     */
+    private void emitRangeFusedLoop(MezzeBytecodeRootNodeGen.Builder b,
+                                    int argCount,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal accSlot,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal iSlot,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+                                    NodeIR rangeStart, NodeIR rangeEnd,
+                                    Runnable initEmit,
+                                    InlineOp op,
+                                    InlineOp mapperOp, long mapperRhsLit,
+                                    FilterPeel filter) {
+        var endSlot = b.createLocal();
+        b.beginStoreLocal(iSlot);
+        emitNode(rangeStart, b, argCount, localMap);
+        b.endStoreLocal();
+        b.beginStoreLocal(endSlot);
+        emitNode(rangeEnd, b, argCount, localMap);
+        b.endStoreLocal();
+        b.beginStoreLocal(accSlot);
+        initEmit.run();
+        b.endStoreLocal();
+        b.beginWhile();
+          b.beginDirectLessThan();
+          b.emitLoadLocal(iSlot);
+          b.emitLoadLocal(endSlot);
+          b.endDirectLessThan();
+          b.beginBlock();
+            b.beginStoreLocal(xSlot);
+            b.emitLoadLocal(iSlot);
+            b.endStoreLocal();
+            if (filter != null) {
+                b.beginIfThen();
+                  emitPredicateCheck(b, xSlot, filter);
+                  b.beginBlock();
+                    if (mapperOp != null) {
+                        b.beginStoreLocal(xSlot);
+                        emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
+                        b.endStoreLocal();
+                    }
+                    b.beginStoreLocal(accSlot);
+                    emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+                    b.endStoreLocal();
+                  b.endBlock();
+                b.endIfThen();
+            } else {
+                if (mapperOp != null) {
+                    b.beginStoreLocal(xSlot);
+                    emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
+                    b.endStoreLocal();
+                }
+                b.beginStoreLocal(accSlot);
+                emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+                b.endStoreLocal();
+            }
+            b.beginStoreLocal(iSlot);
+            b.beginDirectAdd();
+            b.emitLoadLocal(iSlot);
+            b.emitLoadLongConstant(1L);
+            b.endDirectAdd();
+            b.endStoreLocal();
+          b.endBlock();
+        b.endWhile();
+        b.emitLoadLocal(accSlot);
+        if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
+            System.err.println("[fold-fuse] emitted range-fused loop for op=" + op
+                + " mapper=" + mapperOp + " pred=" + describeFilter(filter));
+        }
+    }
+
+    /** Debug: describe a FilterPeel as "null" | "cmpOp" | "preOp-then-cmpOp". */
+    private static String describeFilter(FilterPeel f) {
+        if (f == null) return "null";
+        return f.preOp == null ? f.cmpOp.toString() : (f.preOp + "-then-" + f.cmpOp);
+    }
+
+    /**
+     * Emit a predicate check that produces a Bool on the stack. For a
+     * simple filter {@code x <cmpOp> lit}: emit that op. For a compound
+     * {@code (x <preOp> lit1) <cmpOp> lit2}: emit
+     * {@code (xSlot <preOp> preRhs) <cmpOp> cmpRhs} inline — no temporary
+     * local needed since BDSL operations stack their results.
+     */
+    private void emitPredicateCheck(MezzeBytecodeRootNodeGen.Builder b,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+                                    FilterPeel filter) {
+        if (filter.preOp == null) {
+            // Simple: xSlot cmpOp cmpRhs.
+            emitInlineOpLocalLit(filter.cmpOp, xSlot, filter.cmpRhs, b);
+        } else {
+            // Compound: (xSlot preOp preRhs) cmpOp cmpRhs.
+            emitCompareInnerLitLit(b, filter.preOp, xSlot, filter.preRhs,
+                                   filter.cmpOp, filter.cmpRhs);
+        }
+    }
+
+    /**
+     * Emit {@code (xSlot <preOp> preRhs) <cmpOp> cmpRhs} — the compound
+     * predicate form. Structure the BDSL calls so the pre-op result is
+     * the LHS operand of the comparison, and the cmpRhs literal is the
+     * RHS operand.
+     */
+    private void emitCompareInnerLitLit(MezzeBytecodeRootNodeGen.Builder b,
+                                        InlineOp preOp,
+                                        com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+                                        long preRhs,
+                                        InlineOp cmpOp, long cmpRhs) {
+        switch (cmpOp) {
+            case EQ  -> { b.beginDirectEqual(); emitInlineOpLocalLit(preOp, xSlot, preRhs, b); b.emitLoadLongConstant(cmpRhs); b.endDirectEqual(); }
+            case NEQ -> { b.beginDirectNotEqual(); emitInlineOpLocalLit(preOp, xSlot, preRhs, b); b.emitLoadLongConstant(cmpRhs); b.endDirectNotEqual(); }
+            case LT  -> { b.beginDirectLessThan(); emitInlineOpLocalLit(preOp, xSlot, preRhs, b); b.emitLoadLongConstant(cmpRhs); b.endDirectLessThan(); }
+            case LE  -> { b.beginDirectLessThanOrEqual(); emitInlineOpLocalLit(preOp, xSlot, preRhs, b); b.emitLoadLongConstant(cmpRhs); b.endDirectLessThanOrEqual(); }
+            case GT  -> { b.beginDirectGreaterThan(); emitInlineOpLocalLit(preOp, xSlot, preRhs, b); b.emitLoadLongConstant(cmpRhs); b.endDirectGreaterThan(); }
+            case GE  -> { b.beginDirectGreaterThanOrEqual(); emitInlineOpLocalLit(preOp, xSlot, preRhs, b); b.emitLoadLongConstant(cmpRhs); b.endDirectGreaterThanOrEqual(); }
+            default -> throw new IllegalStateException("emitCompareInnerLitLit: unsupported cmp " + cmpOp);
+        }
+    }
+
+    /**
+     * Overload for the folder path — init is an arbitrary NodeIR.
+     */
+    private void emitRangeFusedLoop(MezzeBytecodeRootNodeGen.Builder b,
+                                    int argCount,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal accSlot,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal iSlot,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+                                    NodeIR rangeStart, NodeIR rangeEnd, NodeIR initExpr,
+                                    InlineOp op,
+                                    InlineOp mapperOp, long mapperRhsLit,
+                                    FilterPeel filter) {
+        emitRangeFusedLoop(b, argCount, localMap, accSlot, iSlot, xSlot,
+                rangeStart, rangeEnd,
+                () -> emitNode(initExpr, b, argCount, localMap),
+                op, mapperOp, mapperRhsLit, filter);
+    }
+
+    /**
      * #437 — emit {@code local <op> long-literal}. Used by the range-fused
      * loop when a mapper `{x} -> x <op> lit` or predicate `{x} -> x <cmp> lit`
      * was peeled from xsExpr and needs to be inlined at each iteration.
@@ -2945,7 +3103,16 @@ public final class BytecodeCompiler {
      * innerXs is the seq expression the map was applied to.
      */
     private record MapPeel(InlineOp op, long rhsLit, NodeIR innerXs) {}
-    private record FilterPeel(InlineOp op, long rhsLit, NodeIR innerXs) {}
+    /**
+     * Predicate peeled from a seq::filter. Simple form (preOp==null):
+     *   {x} -> x <cmpOp> cmpRhs
+     * Compound form (preOp != null):
+     *   {x} -> (x <preOp> preRhs) <cmpOp> cmpRhs
+     * — e.g. {@code x % 2 == 0} → preOp=MOD, preRhs=2, cmpOp=EQ, cmpRhs=0.
+     */
+    private record FilterPeel(InlineOp preOp, long preRhs,
+                              InlineOp cmpOp, long cmpRhs,
+                              NodeIR innerXs) {}
 
     /**
      * #437 — recognize {@code CallNativeIR("__native_seq_map",
@@ -3062,13 +3229,9 @@ public final class BytecodeCompiler {
     }
     private FilterPeel finishFilterPeel(NodeIR xsField, NodeIR pField, MezzeLanguage language) {
         if (xsField == null || !(pField instanceof MakeLambdaIR ml)) return null;
-        var pair = classifyUnaryLiteralLambda(ml, language);
-        if (pair == null) return null;
-        switch (pair.op) {
-            case EQ, NEQ, LT, LE, GT, GE -> {}
-            default -> { return null; }
-        }
-        return new FilterPeel(pair.op, pair.rhsLit, xsField);
+        var shape = classifyUnaryPredicateLambda(ml, language);
+        if (shape == null) return null;
+        return new FilterPeel(shape.preOp, shape.preRhs, shape.cmpOp, shape.cmpRhs, xsField);
     }
     private boolean isSeqFilterCallee(Hash targetHash, MezzeLanguage language) {
         if (targetHash == null || language == null) return false;
@@ -3093,6 +3256,105 @@ public final class BytecodeCompiler {
         final InlineOp op; final long rhsLit;
         UnaryLitShape(InlineOp op, long rhsLit) { this.op = op; this.rhsLit = rhsLit; }
     }
+    /**
+     * #438 — classify a unary predicate lambda for filter fusion.
+     * Recognizes both simple {@code {x} -> x <cmpOp> lit} and compound
+     * {@code {x} -> (x <preOp> lit1) <cmpOp> lit2}. Compound form covers
+     * the common {@code x % 2 == 0} shape. Returns null on anything else.
+     * Comparison op restricted to EQ/NEQ/LT/LE/GT/GE (Bool-producing);
+     * pre-transform op restricted to arith ADD/SUB/MUL/DIV/MOD.
+     */
+    private static final class PredShape {
+        final InlineOp preOp; final long preRhs;
+        final InlineOp cmpOp; final long cmpRhs;
+        PredShape(InlineOp preOp, long preRhs, InlineOp cmpOp, long cmpRhs) {
+            this.preOp = preOp; this.preRhs = preRhs;
+            this.cmpOp = cmpOp; this.cmpRhs = cmpRhs;
+        }
+    }
+    private PredShape classifyUnaryPredicateLambda(MakeLambdaIR ml, MezzeLanguage language) {
+        if (!ml.getCaptures().isEmpty()) return null;
+        var fnIR = language.lookupFunctionIR(ml.getFunctionHash());
+        if (fnIR == null) return null;
+        if (!fnIR.getCaptureSlots().isEmpty()) return null;
+        if (fnIR.getParamSlots().size() != 1) return null;
+        if (!fnIR.getLocalSlots().isEmpty()) return null;
+        int paramSlot = 0;
+        NodeIR body = fnIR.getBody();
+        // Extract outer op: (LHS <cmpOp> LongLit). LHS is either
+        // ReadLocal(paramSlot) [simple] or another binary op [compound].
+        var outer = matchBinaryOpAgainstLongLit(body);
+        if (outer == null) return null;
+        // Outer must be a comparison op — predicate produces Bool.
+        switch (outer.op) {
+            case EQ, NEQ, LT, LE, GT, GE -> {}
+            default -> { return null; }
+        }
+        // Simple form: LHS is ReadLocal(paramSlot).
+        if (outer.leftIsParam) {
+            return new PredShape(null, 0L, outer.op, outer.rhsLit);
+        }
+        // Compound form: LHS is another binary op against a LongLit whose
+        // LHS is ReadLocal(paramSlot).
+        var inner = matchBinaryOpAgainstLongLit(outer.leftNode);
+        if (inner == null || !inner.leftIsParam) return null;
+        switch (inner.op) {
+            case ADD, SUB, MUL, DIV, MOD -> {}
+            default -> { return null; }
+        }
+        return new PredShape(inner.op, inner.rhsLit, outer.op, outer.rhsLit);
+    }
+
+    /**
+     * Result of matching a binary op against a LongLit right operand.
+     * {@link #leftIsParam} true iff LHS is {@code ReadLocal(paramSlot=0)}
+     * — in that case {@link #leftNode} is not set (null); otherwise
+     * {@link #leftNode} is the LHS NodeIR for further inspection.
+     */
+    private static final class BinaryLitMatch {
+        final InlineOp op; final long rhsLit;
+        final boolean leftIsParam; final NodeIR leftNode;
+        BinaryLitMatch(InlineOp op, long rhsLit, boolean leftIsParam, NodeIR leftNode) {
+            this.op = op; this.rhsLit = rhsLit;
+            this.leftIsParam = leftIsParam; this.leftNode = leftNode;
+        }
+    }
+    private BinaryLitMatch matchBinaryOpAgainstLongLit(NodeIR n) {
+        // Shape A: InlineBinaryOp(?, LongLit).
+        if (n instanceof InlineBinaryOpIR bin
+                && bin.getRight() instanceof LongLitIR rr) {
+            boolean lp = bin.getLeft() instanceof ReadLocalIR l && l.getSlot() == 0;
+            return new BinaryLitMatch(bin.getOp(), rr.getValue(), lp, lp ? null : bin.getLeft());
+        }
+        // Shape B: CallDirect (scalar-ABI) to a KnownArithOps target with 2 args.
+        if (n instanceof CallDirectIR call
+                && call.isScalarABI()
+                && call.getArgs().size() == 2
+                && call.getArgs().get(1) instanceof LongLitIR rr) {
+            var op = KnownArithOps.lookup(call.getTargetHash());
+            if (op == null) return null;
+            boolean lp = call.getArgs().get(0) instanceof ReadLocalIR l && l.getSlot() == 0;
+            return new BinaryLitMatch(op, rr.getValue(), lp, lp ? null : call.getArgs().get(0));
+        }
+        // Shape C: CallIndirect(function=ReadField(?, opName), arg=MakeRecord{it, r=LongLit}).
+        if (n instanceof CallIndirectIR ind
+                && ind.getFunction() instanceof ReadFieldIR rf
+                && ind.getArg() instanceof MakeRecordIR argMr
+                && argMr.getFields().size() == 2) {
+            var op = ABILITY_OP_NAMES.get(rf.getFieldName());
+            if (op == null) return null;
+            LongLitIR rLit = null;
+            for (var fld : argMr.getFields()) {
+                if ("r".equals(fld.getName()) && fld.getValue() instanceof LongLitIR ll2) rLit = ll2;
+            }
+            if (rLit == null) return null;
+            NodeIR lhs = rf.getRecord();
+            boolean lp = lhs instanceof ReadLocalIR ll && ll.getSlot() == 0;
+            return new BinaryLitMatch(op, rLit.getValue(), lp, lp ? null : lhs);
+        }
+        return null;
+    }
+
     private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
                                                      MezzeLanguage language) {
         if (!ml.getCaptures().isEmpty()) return null;
