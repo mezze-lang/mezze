@@ -1912,6 +1912,13 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CallNativeIR cn) {
+            // #427 — hand-written BDSL @Operation intercepts. When the
+            // native name is one of our known LongSeq scalar reducers,
+            // emit BuiltinSumLongSeq (etc.) directly on the seq
+            // sub-expression. Skips MezzeRecord alloc + CallNativeRecord
+            // @TruffleBoundary; keeps the tight loop inside the BDSL frame.
+            if (tryEmitBuiltinSeqReducer(cn, b, argCount, localMap)) return;
+
             // Record-ABI: single record arg on the stack; dispatch via
             // NativeDispatch.HANDLERS by name. Slower than the scalar
             // path (still allocs a MezzeRecord in the caller) but routes
@@ -2380,6 +2387,41 @@ public final class BytecodeCompiler {
             return new FolderShape(op, l.getSlot(), r.getSlot());
         }
         return null;
+    }
+
+    /**
+     * #427 — intercept known LongSeq scalar-reducer natives at emit time
+     * and route to a dedicated BDSL @Operation whose specialization owns
+     * the tight scalar long[] loop. Bypasses record-ABI dispatch entirely
+     * — no MezzeRecord alloc, no NativeDispatch.HANDLERS lookup, no
+     * @TruffleBoundary from CallNativeRecord.
+     *
+     * Handled shape (record-ABI only — sum has no scalar-ABI registration):
+     *   CallNativeIR(name="__native_seq_sum",
+     *                arg=MakeRecordIR[xs=&lt;expr&gt;])
+     *
+     * Extract the sole "xs" sub-IR, emit it as an operand to
+     * beginBuiltinSumLongSeq. Falls through (returns false) on any shape
+     * we don't recognize — the caller's record-ABI dispatch takes over.
+     */
+    private boolean tryEmitBuiltinSeqReducer(
+            CallNativeIR cn,
+            MezzeBytecodeRootNodeGen.Builder b,
+            int argCount,
+            com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
+        if (cn.isScalarABI()) return false;
+        if (!"__native_seq_sum".equals(cn.getName())) return false;
+        if (!(cn.getArg() instanceof MakeRecordIR mr)) return false;
+        if (mr.getFields().size() != 1) return false;
+        var fld = mr.getFields().get(0);
+        if (!"xs".equals(fld.getName())) return false;
+        b.beginBuiltinSumLongSeq();
+        emitNode(fld.getValue(), b, argCount, localMap);
+        b.endBuiltinSumLongSeq();
+        if (System.getenv("MEZZE_SEQ_HOF_DEBUG") != null) {
+            System.err.println("[seq-hof] emitted BuiltinSumLongSeq");
+        }
+        return true;
     }
 
     private boolean tryEmitFusedFold(CallDirectIR c, MezzeBytecodeRootNodeGen.Builder b,
