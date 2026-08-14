@@ -2217,9 +2217,10 @@ public final class BytecodeCompiler {
      * @return true iff the fused loop was emitted; false to fall through
      *         to the normal CallNativeIR dispatch.
      */
-    /** #407 env gate: MEZZE_FOLD_FUSE=1 opts in; off by default. */
+    /** #407/#431 env gate: default ON since mono-aware KnownHofs + dict-method
+     *  ability-op classifier landed. Opt out with MEZZE_FOLD_FUSE=0 for A/B. */
     private static final boolean FOLD_FUSE_ENABLED =
-        "1".equals(System.getenv("MEZZE_FOLD_FUSE"));
+        !"0".equals(System.getenv("MEZZE_FOLD_FUSE"));
 
     /**
      * #407: registry mapping "known HOF" content-hashes to their fusion
@@ -2251,6 +2252,62 @@ public final class BytecodeCompiler {
                 hashToKey = map;
             }
             return map.get(targetHash);
+        }
+
+        /**
+         * #431 — mono-aware lookup. If the direct hash lookup misses, ask
+         * the language for the FunctionIR at [targetHash] and check if its
+         * (name, sourceFile) matches a known-HOF key. Monomorphization
+         * produces new specialized decls with fresh hashes; the pre-lowered
+         * snapshot's hashes don't cover them. Cache the resolved
+         * spec→genericKey binding so we only pay the FunctionIR lookup on
+         * the first sight of each spec.
+         */
+        static String lookup(Hash targetHash, MezzeLanguage language) {
+            String direct = lookup(targetHash);
+            if (direct != null) return direct;
+            if (language == null) return null;
+            var fn = language.lookupFunctionIR(targetHash);
+            if (fn == null) {
+                if (System.getenv("MEZZE_FOLD_TRACE") != null) {
+                    System.err.println("[fold-trace/mono] no FunctionIR for " + targetHash);
+                }
+                return null;
+            }
+            var key = fn.getName() + "@" + basename(fn.getSourceFile());
+            String structuralKey = null;
+            // Mono-specialized decls have empty name — recognize by (paramNames, sourceFile).
+            if (fn.getName().isEmpty() && "stdlib-std-collections-seq.mz".equals(basename(fn.getSourceFile()))) {
+                var params = fn.getParamNames();
+                if (params.size() == 3 && params.get(0).equals("xs") && params.get(1).equals("init") && params.get(2).equals("f")) {
+                    structuralKey = "fold@stdlib-std-collections-seq.mz";
+                }
+            }
+            if (System.getenv("MEZZE_FOLD_TRACE") != null) {
+                System.err.println("[fold-trace/mono] " + targetHash + " → key=" + key + " qname=" + fn.getQualifiedName()
+                        + " params=" + fn.getParamNames() + " structuralKey=" + structuralKey);
+            }
+            if (structuralKey != null && FOLD_KEYS.contains(structuralKey)) {
+                var map = hashToKey;
+                if (map != null && !map.containsKey(targetHash)) {
+                    var extended = new java.util.HashMap<>(map);
+                    extended.put(targetHash, structuralKey);
+                    hashToKey = extended;
+                }
+                return structuralKey;
+            }
+            if (FOLD_KEYS.contains(key)) {
+                // Cache the spec→key mapping so subsequent lookups are fast.
+                // Copy-on-write to keep the volatile publish semantics.
+                var map = hashToKey;
+                if (map != null && !map.containsKey(targetHash)) {
+                    var extended = new java.util.HashMap<>(map);
+                    extended.put(targetHash, key);
+                    hashToKey = extended;
+                }
+                return key;
+            }
+            return null;
         }
 
         private static java.util.Map<Hash, String> build() {
@@ -2386,8 +2443,52 @@ public final class BytecodeCompiler {
             if (op == null) return null;
             return new FolderShape(op, l.getSlot(), r.getSlot());
         }
+        // #431 — dict-method call shape: `acc.add {it=acc, r=x}` from the
+        // desugaring of `acc + x` when mono didn't specialize the folder body.
+        // Recognize function=ReadFieldIR(record=ReadLocalIR(receiver), name=op)
+        // + arg=MakeRecordIR{it=receiver, r=other}, where op ∈ {add, sub, mul, ...}.
+        if (body instanceof CallIndirectIR ind) {
+            if (!(ind.getFunction() instanceof ReadFieldIR rf)) return null;
+            if (!(rf.getRecord() instanceof ReadLocalIR recvRead)) return null;
+            var opName = rf.getFieldName();
+            var inlineOp = ABILITY_OP_NAMES.get(opName);
+            if (inlineOp == null) return null;
+            if (!(ind.getArg() instanceof MakeRecordIR mr)) return null;
+            if (mr.getFields().size() != 2) return null;
+            // Fields: {it = receiver, r = other}. Extract the "r" value.
+            NodeIR rExpr = null;
+            for (var fld : mr.getFields()) {
+                if ("r".equals(fld.getName())) rExpr = fld.getValue();
+                // "it" is required to equal recvRead; the arg record encoding
+                // always echoes the receiver as "it" — no need to verify.
+            }
+            if (!(rExpr instanceof ReadLocalIR rSlot)) return null;
+            return new FolderShape(inlineOp, recvRead.getSlot(), rSlot.getSlot());
+        }
         return null;
     }
+
+    /**
+     * #431 — ability-method names (as emitted by the desugaring of infix
+     * operators like `+`, `-`) mapped to their {@link InlineOp}. Only ops
+     * that have direct-inline BDSL equivalents are listed; anything else
+     * bails out of fusion and falls through to the general call path.
+     */
+    private static final java.util.Map<String, InlineOp> ABILITY_OP_NAMES = java.util.Map.ofEntries(
+        java.util.Map.entry("add", InlineOp.ADD),
+        java.util.Map.entry("sub", InlineOp.SUB),
+        java.util.Map.entry("mul", InlineOp.MUL),
+        java.util.Map.entry("div", InlineOp.DIV),
+        java.util.Map.entry("mod", InlineOp.MOD),
+        java.util.Map.entry("eq",  InlineOp.EQ),
+        java.util.Map.entry("neq", InlineOp.NEQ),
+        java.util.Map.entry("lt",  InlineOp.LT),
+        java.util.Map.entry("le",  InlineOp.LE),
+        java.util.Map.entry("gt",  InlineOp.GT),
+        java.util.Map.entry("ge",  InlineOp.GE),
+        java.util.Map.entry("and", InlineOp.AND),
+        java.util.Map.entry("or",  InlineOp.OR)
+    );
 
     /**
      * #427 — intercept known LongSeq scalar-reducer natives at emit time
@@ -2432,7 +2533,10 @@ public final class BytecodeCompiler {
         if (!FOLD_FUSE_ENABLED) return false;
         if (c.isTailCall()) return false;
         // Is the callee a known fold-shape HOF?
-        var hof = KnownHofs.lookup(c.getTargetHash());
+        // #431 mono-aware: after monomorphization the target hash is a fresh
+        // specialization hash, not the pre-lowered stdlib hash. The
+        // language-aware overload resolves it via the FunctionIR's name.
+        var hof = KnownHofs.lookup(c.getTargetHash(), language);
         if (hof == null) {
             if (dbg && (c.getTargetHash() != null)) {
                 // Only log occasionally to avoid spam
