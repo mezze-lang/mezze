@@ -19,6 +19,10 @@ import com.mezze.language.truffleir.InlineBinaryOpIR;
 import com.mezze.language.truffleir.InterpolatedStringIR;
 import com.mezze.language.truffleir.StringPartIR;
 import com.mezze.language.truffleir.InlineOp;
+import com.mezze.language.truffleir.IterChainIR;
+import com.mezze.language.truffleir.SourceIR;
+import com.mezze.language.truffleir.StageIR;
+import com.mezze.language.truffleir.SinkIR;
 import com.mezze.language.truffleir.LongLitIR;
 import com.mezze.language.truffleir.CaseIR;
 import com.mezze.language.truffleir.MakeLambdaIR;
@@ -1513,6 +1517,22 @@ public final class BytecodeCompiler {
                 }
             }
             return;
+        }
+        if (node instanceof IterChainIR chain) {
+            // #446 Phase 4 — canonicalized iter chain from IterCanonicalizer.
+            // The canonicalizer is default-OFF, so this branch is unreachable
+            // in production today. Once the emitter is written it will drive
+            // emitRangeFusedLoop directly from the canonical structure.
+            //
+            // Failing loud here rather than silently falling through — if
+            // MEZZE_ITER_CANONICALIZE=1 is set without the emit path being
+            // ready, we want the crash, not silent miscompilation.
+            throw new IllegalStateException(
+                "IterChainIR reached BDSL emit but emitter is not yet wired (Phase 4b). " +
+                "Set MEZZE_ITER_CANONICALIZE=0 or unset to disable the canonicalizer. " +
+                "Source=" + chain.getSource().getClass().getSimpleName() +
+                " stages=" + chain.getStages().size() +
+                " sink=" + chain.getSink().getClass().getSimpleName());
         }
         if (node instanceof CallDirectIR c) {
             // #407: HOF fusion — if this is a call to a known HOF (seq::fold,
