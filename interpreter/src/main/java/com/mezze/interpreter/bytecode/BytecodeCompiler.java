@@ -2276,10 +2276,22 @@ public final class BytecodeCompiler {
             }
             var key = fn.getName() + "@" + basename(fn.getSourceFile());
             String structuralKey = null;
-            // Mono-specialized decls have empty name — recognize by (paramNames, sourceFile).
-            if (fn.getName().isEmpty() && "stdlib-std-collections-seq.mz".equals(basename(fn.getSourceFile()))) {
+            // Recognize fold shapes in seq.mz by paramNames — two spellings:
+            //   [xs, init, f]  — the module-level `fold` (both generic and
+            //                    mono-spec, where mono-spec has empty name)
+            //   [it, init, f]  — the ability method-impl `fold` wrapper
+            //                    (both generic name="fold" and mono-spec name="")
+            // Both forward to the same fold_go and both are pure param-forwards,
+            // so at the compiled callsite `xs.fold{...}` the CallDirectIR's
+            // args match up positionally regardless of the callee's paramName
+            // convention. Accept both so fusion fires on user code that goes
+            // through the method-impl wrapper (e.g. bench/cases/sum_fold).
+            if ("stdlib-std-collections-seq.mz".equals(basename(fn.getSourceFile()))) {
                 var params = fn.getParamNames();
-                if (params.size() == 3 && params.get(0).equals("xs") && params.get(1).equals("init") && params.get(2).equals("f")) {
+                if (params.size() == 3
+                    && (params.get(0).equals("xs") || params.get(0).equals("it"))
+                    && params.get(1).equals("init")
+                    && params.get(2).equals("f")) {
                     structuralKey = "fold@stdlib-std-collections-seq.mz";
                 }
             }
