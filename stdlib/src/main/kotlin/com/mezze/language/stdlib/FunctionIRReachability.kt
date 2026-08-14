@@ -210,6 +210,37 @@ object FunctionIRReachability {
             is com.mezze.language.truffleir.UnitLitIR -> {}
             is com.mezze.language.truffleir.CharLitIR -> {}
             is com.mezze.language.truffleir.FracLitIR -> {}
+            is com.mezze.language.truffleir.IterChainIR -> {
+                // #446 — descend into source expression + sink init.
+                // Stage/sink MakeLambdas are leaves and the outer
+                // reachability walk visits them via the FunctionIR map.
+                when (val s = node.source) {
+                    is com.mezze.language.truffleir.SourceIR.RangeSeq -> {
+                        collectHashesFromNode(s.start, queue)
+                        collectHashesFromNode(s.end, queue)
+                    }
+                    is com.mezze.language.truffleir.SourceIR.RawSeq -> collectHashesFromNode(s.xs, queue)
+                    is com.mezze.language.truffleir.SourceIR.Opaque -> collectHashesFromNode(s.expr, queue)
+                }
+                // Include the stage/sink lambda function hashes so their
+                // FunctionIRs stay reachable when the canonicalizer wraps
+                // them. Otherwise a wrapper whose only remaining caller
+                // was the pre-canon iter::map/filter/fold call site would
+                // be pruned from the dep graph.
+                for (stage in node.stages) {
+                    when (stage) {
+                        is com.mezze.language.truffleir.StageIR.Map -> queue.add(stage.f.functionHash)
+                        is com.mezze.language.truffleir.StageIR.Filter -> queue.add(stage.p.functionHash)
+                    }
+                }
+                when (val sk = node.sink) {
+                    is com.mezze.language.truffleir.SinkIR.Fold -> {
+                        collectHashesFromNode(sk.init, queue)
+                        queue.add(sk.f.functionHash)
+                    }
+                    is com.mezze.language.truffleir.SinkIR.ForEach -> queue.add(sk.f.functionHash)
+                }
+            }
         }
     }
 

@@ -95,6 +95,12 @@ fun main(args: Array<String>) {
     } else {
         com.mezze.language.truffleir.TrivialWrapperInliner.inline(mutErasedFunctions)
     }
+    // #446 — canonicalize iter chains into IterChainIR so the BDSL
+    // fusion peel matches one shape. Off by default until Phase 5 flips
+    // MEZZE_ITER_CANONICALIZE=1. In the stdlib pipeline the whole map
+    // is visible, so no snapshot arg is needed.
+    val canonicalizedFunctions = com.mezze.language.truffleir.IterCanonicalizer
+        .canonicalize(inlinedFunctions)
     // Dead-let elimination is opt-in (MEZZE_DEAD_LET_ELIMINATION=1). The
     // conservative purity check in DeadLetEliminator misclassified a
     // number of value-producing patterns during first testing (HTTP
@@ -102,9 +108,9 @@ fun main(args: Array<String>) {
     // "pure" means at this IR level (see notes in DeadLetEliminator).
     // Keeping the pass gated so we can iterate without breaking mainline.
     val functions = if (System.getenv("MEZZE_DEAD_LET_ELIMINATION") == "1") {
-        com.mezze.language.truffleir.DeadLetEliminator.eliminate(inlinedFunctions)
+        com.mezze.language.truffleir.DeadLetEliminator.eliminate(canonicalizedFunctions)
     } else {
-        inlinedFunctions
+        canonicalizedFunctions
     }
 
     // Rebuild the dependency graph from the post-inline function bodies.

@@ -799,6 +799,31 @@ object StorePopulator {
             is com.mezze.language.truffleir.UnitLitIR -> {}
             is com.mezze.language.truffleir.CharLitIR -> {}
             is com.mezze.language.truffleir.FracLitIR -> {}
+            is com.mezze.language.truffleir.IterChainIR -> {
+                // #446 — descend into source expression + sink init; report
+                // stage/sink lambda hashes as CALLS edges (same as MakeLambda).
+                when (val s = node.source) {
+                    is com.mezze.language.truffleir.SourceIR.RangeSeq -> {
+                        collectEdgesFromNode(s.start, report)
+                        collectEdgesFromNode(s.end, report)
+                    }
+                    is com.mezze.language.truffleir.SourceIR.RawSeq -> collectEdgesFromNode(s.xs, report)
+                    is com.mezze.language.truffleir.SourceIR.Opaque -> collectEdgesFromNode(s.expr, report)
+                }
+                for (stage in node.stages) {
+                    when (stage) {
+                        is com.mezze.language.truffleir.StageIR.Map -> report(stage.f.functionHash.hex, EdgeKind.CALLS)
+                        is com.mezze.language.truffleir.StageIR.Filter -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
+                    }
+                }
+                when (val sk = node.sink) {
+                    is com.mezze.language.truffleir.SinkIR.Fold -> {
+                        collectEdgesFromNode(sk.init, report)
+                        report(sk.f.functionHash.hex, EdgeKind.CALLS)
+                    }
+                    is com.mezze.language.truffleir.SinkIR.ForEach -> report(sk.f.functionHash.hex, EdgeKind.CALLS)
+                }
+            }
         }
     }
 

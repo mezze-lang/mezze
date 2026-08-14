@@ -650,12 +650,18 @@ class TypedASTCompiler(
         // with MEZZE_INLINE_WRAPPERS=0. See TrivialWrapperInliner.
         val inlinedMap = if (System.getenv("MEZZE_INLINE_WRAPPERS") == "0") erasedMap
             else com.mezze.language.truffleir.TrivialWrapperInliner.inline(erasedMap)
+        // #446 — canonicalize iter chains into IterChainIR so the BDSL
+        // fusion peel matches one shape. Off by default until Phase 5
+        // flips MEZZE_ITER_CANONICALIZE=1. Second arg is stdlib snapshot
+        // so we can classify iter::fold etc. hashes not in inlinedMap.
+        val canonicalizedMap = com.mezze.language.truffleir.IterCanonicalizer
+            .canonicalize(inlinedMap, preloweredFunctions)
         // Dead-let elimination is opt-in: MEZZE_DEAD_LET_ELIMINATION=1.
         // The pass exists but its purity check needs work — see
         // DeadLetEliminator's file comment for the design notes.
         val cleanedMap = if (System.getenv("MEZZE_DEAD_LET_ELIMINATION") == "1")
-            com.mezze.language.truffleir.DeadLetEliminator.eliminate(inlinedMap)
-            else inlinedMap
+            com.mezze.language.truffleir.DeadLetEliminator.eliminate(canonicalizedMap)
+            else canonicalizedMap
         val final = deduped.map { cleanedMap[it.hash] ?: it }
         return CompileResult(final, performerRecords.toList())
     }

@@ -216,6 +216,31 @@ class MezzeExecutor(
                 collectDirectCallTargets(node.index, ownHashes, visited, resolves, out)
             }
             is com.mezze.language.truffleir.DictMethodCallIR -> collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
+            is com.mezze.language.truffleir.IterChainIR -> {
+                // #446 — canonicalizer output. Validate stage/sink lambda hashes;
+                // recurse into source expression + sink init.
+                when (val s = node.source) {
+                    is com.mezze.language.truffleir.SourceIR.RangeSeq -> {
+                        collectDirectCallTargets(s.start, ownHashes, visited, resolves, out)
+                        collectDirectCallTargets(s.end, ownHashes, visited, resolves, out)
+                    }
+                    is com.mezze.language.truffleir.SourceIR.RawSeq -> collectDirectCallTargets(s.xs, ownHashes, visited, resolves, out)
+                    is com.mezze.language.truffleir.SourceIR.Opaque -> collectDirectCallTargets(s.expr, ownHashes, visited, resolves, out)
+                }
+                for (stage in node.stages) {
+                    when (stage) {
+                        is com.mezze.language.truffleir.StageIR.Map -> check(stage.f.functionHash)
+                        is com.mezze.language.truffleir.StageIR.Filter -> check(stage.p.functionHash)
+                    }
+                }
+                when (val sk = node.sink) {
+                    is com.mezze.language.truffleir.SinkIR.Fold -> {
+                        collectDirectCallTargets(sk.init, ownHashes, visited, resolves, out)
+                        check(sk.f.functionHash)
+                    }
+                    is com.mezze.language.truffleir.SinkIR.ForEach -> check(sk.f.functionHash)
+                }
+            }
             // Leaves / effect-hash / read-global — not validated, no recursion.
             is com.mezze.language.truffleir.ReadGlobalByHashIR -> {}
             is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> {}
@@ -351,6 +376,31 @@ class MezzeExecutor(
             is com.mezze.language.truffleir.UnitLitIR -> {}
             is com.mezze.language.truffleir.CharLitIR -> {}
             is com.mezze.language.truffleir.FracLitIR -> {}
+            is com.mezze.language.truffleir.IterChainIR -> {
+                // #446 — descend into source expression + sink init; queue
+                // stage/sink lambda hashes so their FunctionIRs stay loaded.
+                when (val s = node.source) {
+                    is com.mezze.language.truffleir.SourceIR.RangeSeq -> {
+                        collectReferencedHashes(s.start, queue)
+                        collectReferencedHashes(s.end, queue)
+                    }
+                    is com.mezze.language.truffleir.SourceIR.RawSeq -> collectReferencedHashes(s.xs, queue)
+                    is com.mezze.language.truffleir.SourceIR.Opaque -> collectReferencedHashes(s.expr, queue)
+                }
+                for (stage in node.stages) {
+                    when (stage) {
+                        is com.mezze.language.truffleir.StageIR.Map -> queue.add(stage.f.functionHash.hex)
+                        is com.mezze.language.truffleir.StageIR.Filter -> queue.add(stage.p.functionHash.hex)
+                    }
+                }
+                when (val sk = node.sink) {
+                    is com.mezze.language.truffleir.SinkIR.Fold -> {
+                        collectReferencedHashes(sk.init, queue)
+                        queue.add(sk.f.functionHash.hex)
+                    }
+                    is com.mezze.language.truffleir.SinkIR.ForEach -> queue.add(sk.f.functionHash.hex)
+                }
+            }
         }
     }
 
