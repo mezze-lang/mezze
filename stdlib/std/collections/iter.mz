@@ -1,13 +1,14 @@
 use std::abilities::iter::{ Iter, IterStep }
 use std::int
 
-## Descriptor for iterating a `[a]` — position `i` in sequence `xs`.
+## Descriptor for iterating a `['a]` — position `i` in sequence `xs`.
 ##
 ## `next` advances `i` by one; end-of-stream when `i >= len(xs)`. The
 ## representation is deliberately trivial (two Int fields, one seq ref) so
-## the fusion peel can pattern-match on `iter::from_seq(xs).filter(...)
-## .map(...).fold(init, g)` and rewrite it as the range-fused loop that
-## backs `seq::fold(seq::map(seq::filter(xs, p), f), init, g)` — same
+## the fusion peel can pattern-match on
+## `iter::fold(iter::map(iter::filter(iter::from_seq(xs), p), f), init, g)`
+## and rewrite it as the range-fused loop that backs
+## `seq::fold(seq::map(seq::filter(xs, p), f), init, g)` — same
 ## bytes-in-flight, same wall time.
 pub type SeqIter 'a = { xs: ['a], i: Int }
 
@@ -25,11 +26,12 @@ impl Iter for SeqIter 'a having 'elem = 'a where {
 
 ## Build a `SeqIter` from a plain sequence.
 ##
-## The fusion peel recognizes `iter::fold(iter::map(iter::filter(iter::from_seq(xs), p), f), init, g)`
+## The fusion peel recognizes the four-layer chain
+## `iter::fold(iter::map(iter::filter(iter::from_seq(xs), p), f), init, g)`
 ## and rewrites the whole chain into the same range-fused loop as
 ## `seq::fold(seq::map(seq::filter(xs, p), f), init, g)`. Zero descriptor
 ## allocation, zero `IterStep` boxing at runtime.
-pub let from_seq = { xs } -> ({ xs = xs, i = 0 })
+pub let from_seq : { xs: ['a] } -> SeqIter 'a = { xs } -> { xs = xs, i = 0 }
 
 ## Filter descriptor.
 ##
@@ -39,7 +41,7 @@ pub type FilterIter 'src 'a = { src: 'src, p: { x: 'a } -> Bool }
 
 ## Filter iterator over an `Iter` source. Returns a `FilterIter` — pass it
 ## on to `iter::map` / `iter::fold` etc. to compose.
-pub let filter: { src: 'src, p: { x: 'a } -> Bool } -> FilterIter 'src 'a = { src, p } ->
+pub let filter : { src: 'src, p: { x: 'a } -> Bool } -> FilterIter 'src 'a = { src, p } ->
   { src = src, p = p }
 
 impl Iter for FilterIter 'src 'a having 'elem = 'a
@@ -59,7 +61,7 @@ impl Iter for FilterIter 'src 'a having 'elem = 'a
 pub type MapIter 'src 'a 'b = { src: 'src, f: { x: 'a } -> 'b }
 
 ## Map iterator: apply `f` to each element of `src`.
-pub let map: { src: 'src, f: { x: 'a } -> 'b } -> MapIter 'src 'a 'b = { src, f } ->
+pub let map : { src: 'src, f: { x: 'a } -> 'b } -> MapIter 'src 'a 'b = { src, f } ->
   { src = src, f = f }
 
 impl Iter for MapIter 'src 'a 'b having 'elem = 'b
@@ -74,7 +76,12 @@ impl Iter for MapIter 'src 'a 'b having 'elem = 'b
 
 ## Left fold over an iterator. Terminal operation — drives `next` until
 ## `IterDone`, threading the accumulator.
-pub let fold = { src, init, f } -> do
+##
+## The explicit `with Iter 'c having 'elem = 'elem` constraint binds the
+## ability's associated `'elem` to the same variable used in `f`'s param
+## type. Required so the folder callback sees the correct element type.
+pub let fold : { src: 'c, init: 'acc, f: { acc: 'acc, x: 'elem } -> 'acc }
+    with Iter 'c having 'elem = 'elem -> 'acc = { src, init, f } -> do
   let step = Iter.next { it = src }
   match step is
     IterDone -> init
@@ -82,7 +89,7 @@ pub let fold = { src, init, f } -> do
       fold { src = next_it, init = f { acc = init, x = elem }, f = f }
 
 ## Sum an iterator of Int.
-pub let sum = { src } ->
+pub let sum : { src: 'c } with Iter 'c having 'elem = Int -> Int = { src } ->
   fold { src = src, init = 0, f = { acc, x } -> acc + x }
 
 ## Run `f` on each element for its side effect. Returns unit.
@@ -90,7 +97,8 @@ pub let sum = { src } ->
 ## Effect polymorphism (`<'e>`) on `for_each` is not yet expressible in the
 ## current signature form; use `fold` with a unit accumulator if you need
 ## effectful callbacks.
-pub let for_each = { src, f } -> do
+pub let for_each : { src: 'c, f: { x: 'elem } -> {} }
+    with Iter 'c having 'elem = 'elem -> {} = { src, f } -> do
   let step = Iter.next { it = src }
   match step is
     IterDone -> {}

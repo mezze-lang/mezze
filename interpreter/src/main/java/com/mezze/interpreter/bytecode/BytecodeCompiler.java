@@ -2239,7 +2239,8 @@ public final class BytecodeCompiler {
          * (i.e. `{xs, init, f}` with f = `{acc, x} -> ...`).
          */
         private static final java.util.Set<String> FOLD_KEYS = java.util.Set.of(
-            "fold@stdlib-std-collections-seq.mz"
+            "fold@stdlib-std-collections-seq.mz",
+            "fold@stdlib-std-collections-iter.mz"   // #443 Day 10 — iter::fold
             // TODO extend: list::fold_left, set::fold, deque::fold, ...
         );
 
@@ -2293,6 +2294,19 @@ public final class BytecodeCompiler {
                     && params.get(1).equals("init")
                     && params.get(2).equals("f")) {
                     structuralKey = "fold@stdlib-std-collections-seq.mz";
+                }
+            }
+            // #443 Day 10 — iter::fold structural fingerprint. iter.mz's
+            // fold declares {src, init, f}; the ability-wrapper method
+            // spelling uses {it, init, f}. Accept both so chain-style
+            // .fold(...) on an iter is also fused.
+            if ("stdlib-std-collections-iter.mz".equals(basename(fn.getSourceFile()))) {
+                var params = fn.getParamNames();
+                if (params.size() == 3
+                    && (params.get(0).equals("src") || params.get(0).equals("it"))
+                    && params.get(1).equals("init")
+                    && params.get(2).equals("f")) {
+                    structuralKey = "fold@stdlib-std-collections-iter.mz";
                 }
             }
             if (System.getenv("MEZZE_FOLD_TRACE") != null) {
@@ -2727,6 +2741,10 @@ public final class BytecodeCompiler {
         if (filterPeel != null) {
             peeledXs = filterPeel.innerXs;
         }
+        // #443 Day 10 — strip iter::from_seq if present so the range
+        // recognizer sees the underlying __native_seq_range.
+        NodeIR unwrappedIter2 = peelIterFromSeq(peeledXs, language);
+        if (unwrappedIter2 != null) peeledXs = unwrappedIter2;
         NodeIR rangeStart = null, rangeEnd = null;
         if (peeledXs instanceof CallNativeIR nat && "__native_seq_range".equals(nat.getName())) {
             if (nat.isScalarABI() && nat.getArgs().size() == 2) {
@@ -2823,10 +2841,15 @@ public final class BytecodeCompiler {
         // and record-ABI (1 arg == MakeRecord{xs,init,f}). The stdlib fold
         // signature declares params in order (xs, init, f), so scalar-ABI
         // positions align.
+        //
+        // #443 Day 10: iter::fold has an ability constraint (with Iter 'c
+        // having 'elem = 'elem) which desugars to a trailing dictionary
+        // arg. Accept 3 or 4 args; ignore the trailing dict (fusion
+        // bypasses ability dispatch entirely, so the dict is dead).
         NodeIR xsExpr, initExpr, fExpr;
         var args = c.getArgs();
         if (c.isScalarABI()) {
-            if (args.size() != 3) { if (dbg) System.err.println("[fold-fuse] reject: scalar arity " + args.size()); return false; }
+            if (args.size() != 3 && args.size() != 4) { if (dbg) System.err.println("[fold-fuse] reject: scalar arity " + args.size()); return false; }
             xsExpr = args.get(0);
             initExpr = args.get(1);
             fExpr = args.get(2);
@@ -2840,7 +2863,9 @@ public final class BytecodeCompiler {
             NodeIR xs = null, init = null, f = null;
             for (var fld : fields) {
                 switch (fld.getName()) {
-                    case "xs" -> xs = fld.getValue();
+                    // seq::fold field is "xs"; iter::fold field is "src"; the
+                    // ability-wrapper spelling for both uses "it". Same slot.
+                    case "xs", "src", "it" -> xs = fld.getValue();
                     case "init" -> init = fld.getValue();
                     case "f" -> f = fld.getValue();
                 }
@@ -2954,6 +2979,16 @@ public final class BytecodeCompiler {
                 peeledXs = filterPeel.innerXs;
             }
         }
+        // #443 Day 10 — strip an outer iter::from_seq layer so the range
+        // recognizer below sees the underlying __native_seq_range. Iter
+        // chains land here as `iter::from_seq(<seq>)` after the iter::map
+        // and iter::filter (recognized by peelMapFromXs/peelFilterFromXs
+        // Shape C) are peeled. Fusion bypasses the descriptor record.
+        NodeIR unwrappedIter = peelIterFromSeq(peeledXs, language);
+        if (unwrappedIter != null) {
+            if (dbg) System.err.println("[fold-fuse] iter::from_seq peel HIT");
+            peeledXs = unwrappedIter;
+        }
         // Peeling done. peeledXs is now the innermost source; check for
         // __native_seq_range.
         if (dbg) System.err.println("[fold-fuse] after peel: mapper="
@@ -2984,6 +3019,16 @@ public final class BytecodeCompiler {
         // can't fuse — bail. The generic fold on materialized xs still
         // runs correctly via the non-fused path.
         if (rangeStart == null && (mapperOp != null || mapperCallHash != null || filterPeel != null)) {
+            return false;
+        }
+        // #443 Day 10 — if peeledXs is a MakeRecordIR (an iter descriptor
+        // wrapper we couldn't peel through, or an inlined MapIter/
+        // FilterIter/SeqIter whose map/filter peels didn't match), we
+        // cannot pass it to the general seq-fused loop below — that path
+        // emits SeqSize/SeqGet on xsExpr and requires a materialized
+        // sequence. Bail so the callsite falls back to ability dispatch.
+        if (rangeStart == null && peeledXs instanceof MakeRecordIR) {
+            if (dbg) System.err.println("[fold-fuse] reject: peeledXs is descriptor MakeRecordIR, not a seq");
             return false;
         }
 
@@ -3535,6 +3580,43 @@ public final class BytecodeCompiler {
             }
             return finishMapPeel(xsArg, fArg, language);
         }
+        // #443 Day 10 — Shape C: CallDirectIR to iter::map wrapper. Params
+        // are [src, f]; the collection-source field is named "src" (not
+        // "xs"). Semantically the same as seq::map — reuses finishMapPeel.
+        // The ability constraint on iter::map desugars to a trailing dict
+        // arg; accept 2 or 3 positional args (dict ignored).
+        if (xsExpr instanceof CallDirectIR cd && isIterMapCallee(cd.getTargetHash(), language)) {
+            NodeIR xsArg = null, fArg = null;
+            if (cd.isScalarABI() && (cd.getArgs().size() == 2 || cd.getArgs().size() == 3)) {
+                xsArg = cd.getArgs().get(0);
+                fArg  = cd.getArgs().get(1);
+            } else if (cd.getArgs().size() == 1
+                    && cd.getArgs().get(0) instanceof MakeRecordIR mr) {
+                for (var fld : mr.getFields()) {
+                    switch (fld.getName()) {
+                        case "src" -> xsArg = fld.getValue();
+                        case "f"   -> fArg  = fld.getValue();
+                    }
+                }
+            }
+            return finishMapPeel(xsArg, fArg, language);
+        }
+        // #443 Day 10 — Shape D: inlined MapIter descriptor. The trivial-
+        // wrapper inliner may unfold `iter::map({src=..., f=...})` at the
+        // callsite to a raw MakeRecordIR{src, f}. Recognize structurally
+        // (exactly two fields named "src" and "f" — the MapIter shape).
+        if (xsExpr instanceof MakeRecordIR mr && mr.getFields().size() == 2) {
+            NodeIR srcField = null, fField = null;
+            for (var fld : mr.getFields()) {
+                switch (fld.getName()) {
+                    case "src" -> srcField = fld.getValue();
+                    case "f"   -> fField   = fld.getValue();
+                }
+            }
+            if (srcField != null && fField != null) {
+                return finishMapPeel(srcField, fField, language);
+            }
+        }
         return null;
     }
     private MapPeel finishMapPeel(NodeIR xsField, NodeIR fField, MezzeLanguage language) {
@@ -3612,6 +3694,39 @@ public final class BytecodeCompiler {
             }
             return finishFilterPeel(xsArg, pArg, language);
         }
+        // #443 Day 10 — Shape C: CallDirectIR to iter::filter wrapper.
+        // Params are [src, p]; the source field is "src".
+        if (xsExpr instanceof CallDirectIR cd && isIterFilterCallee(cd.getTargetHash(), language)) {
+            NodeIR xsArg = null, pArg = null;
+            if (cd.isScalarABI() && (cd.getArgs().size() == 2 || cd.getArgs().size() == 3)) {
+                xsArg = cd.getArgs().get(0);
+                pArg  = cd.getArgs().get(1);
+            } else if (cd.getArgs().size() == 1
+                    && cd.getArgs().get(0) instanceof MakeRecordIR mr) {
+                for (var fld : mr.getFields()) {
+                    switch (fld.getName()) {
+                        case "src" -> xsArg = fld.getValue();
+                        case "p"   -> pArg  = fld.getValue();
+                    }
+                }
+            }
+            return finishFilterPeel(xsArg, pArg, language);
+        }
+        // #443 Day 10 — Shape D: inlined FilterIter descriptor. Same story
+        // as MapIter — the trivial-wrapper inliner may unfold iter::filter
+        // at the callsite. FilterIter shape is MakeRecord{src, p}.
+        if (xsExpr instanceof MakeRecordIR mr && mr.getFields().size() == 2) {
+            NodeIR srcField = null, pField = null;
+            for (var fld : mr.getFields()) {
+                switch (fld.getName()) {
+                    case "src" -> srcField = fld.getValue();
+                    case "p"   -> pField   = fld.getValue();
+                }
+            }
+            if (srcField != null && pField != null) {
+                return finishFilterPeel(srcField, pField, language);
+            }
+        }
         return null;
     }
     private FilterPeel finishFilterPeel(NodeIR xsField, NodeIR pField, MezzeLanguage language) {
@@ -3632,6 +3747,101 @@ public final class BytecodeCompiler {
         if (!"xs".equals(params.get(0)) || !"p".equals(params.get(1))) return false;
         String name = fn.getName();
         return "filter".equals(name) || name == null || name.isEmpty();
+    }
+
+    /**
+     * #443 Day 10 — recognizer for iter::map. Same shape as
+     * {@link #isSeqMapCallee} but the source file is iter.mz and paramName[0]
+     * is "src" (iter functions use "src" for the collection position).
+     */
+    private boolean isIterMapCallee(Hash targetHash, MezzeLanguage language) {
+        if (targetHash == null || language == null) return false;
+        var fn = language.lookupFunctionIR(targetHash);
+        if (fn == null) return false;
+        String src = fn.getSourceFile();
+        if (src == null || !src.endsWith("iter.mz")) return false;
+        var params = fn.getParamNames();
+        if (params.size() != 2) return false;
+        if (!"src".equals(params.get(0)) || !"f".equals(params.get(1))) return false;
+        String name = fn.getName();
+        return "map".equals(name) || name == null || name.isEmpty();
+    }
+
+    /** #443 Day 10 — recognizer for iter::filter. */
+    private boolean isIterFilterCallee(Hash targetHash, MezzeLanguage language) {
+        if (targetHash == null || language == null) return false;
+        var fn = language.lookupFunctionIR(targetHash);
+        if (fn == null) return false;
+        String src = fn.getSourceFile();
+        if (src == null || !src.endsWith("iter.mz")) return false;
+        var params = fn.getParamNames();
+        if (params.size() != 2) return false;
+        if (!"src".equals(params.get(0)) || !"p".equals(params.get(1))) return false;
+        String name = fn.getName();
+        return "filter".equals(name) || name == null || name.isEmpty();
+    }
+
+    /**
+     * #443 Day 10 — peel {@code iter::from_seq(xs)} to expose the inner seq
+     * expression so downstream range/map/filter peels see the underlying
+     * {@code __native_seq_range} etc. Returns the inner xs, or null on any
+     * mismatch (name, basename, arity, or ABI shape).
+     *
+     * <p>iter::from_seq is declared in iter.mz as {@code { xs } -> { xs = xs,
+     * i = 0 }} — a trivial constructor. Fusion bypasses the constructor
+     * entirely: only the underlying seq matters for the fused loop, and
+     * {@code i = 0} is dead in the fused path because ability dispatch on
+     * SeqIter never happens (we're taking the fusion path instead).
+     */
+    private NodeIR peelIterFromSeq(NodeIR xsExpr, MezzeLanguage language) {
+        // Form 1: still-unresolved CallDirectIR to iter::from_seq (fn name
+        // "from_seq" in iter.mz, one param "xs").
+        if (xsExpr instanceof CallDirectIR cd) {
+            Hash targetHash = cd.getTargetHash();
+            if (targetHash != null && language != null) {
+                var fn = language.lookupFunctionIR(targetHash);
+                if (fn != null) {
+                    String src = fn.getSourceFile();
+                    var params = fn.getParamNames();
+                    String name = fn.getName();
+                    if (src != null && src.endsWith("iter.mz")
+                            && params.size() == 1 && "xs".equals(params.get(0))
+                            && ("from_seq".equals(name) || name == null || name.isEmpty())) {
+                        // Scalar-ABI: single positional arg.
+                        if (cd.isScalarABI() && cd.getArgs().size() == 1) return cd.getArgs().get(0);
+                        // Record-ABI: single MakeRecord{xs}.
+                        if (cd.getArgs().size() == 1
+                                && cd.getArgs().get(0) instanceof MakeRecordIR mr) {
+                            for (var fld : mr.getFields()) {
+                                if ("xs".equals(fld.getName())) return fld.getValue();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Form 2: inlined SeqIter shape — MakeRecordIR{xs = <seq>, i = 0}.
+        // The trivial-wrapper inliner unfolds iter::from_seq at the callsite
+        // to the record construction directly; recognize it structurally.
+        // Requires exactly two fields (xs, i) and i must be the LongLit 0
+        // (defensive — a non-zero i means user built a SeqIter by hand,
+        // possibly starting mid-way; fusion only handles fresh iteration).
+        if (xsExpr instanceof MakeRecordIR mr && mr.getFields().size() == 2) {
+            NodeIR xsField = null;
+            boolean iIsZero = false;
+            boolean sawI = false;
+            for (var fld : mr.getFields()) {
+                switch (fld.getName()) {
+                    case "xs" -> xsField = fld.getValue();
+                    case "i"  -> {
+                        sawI = true;
+                        if (fld.getValue() instanceof LongLitIR li && li.getValue() == 0L) iIsZero = true;
+                    }
+                }
+            }
+            if (xsField != null && sawI && iIsZero) return xsField;
+        }
+        return null;
     }
 
     /**
