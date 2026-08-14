@@ -93,34 +93,55 @@ object TrivialWrapperInliner {
 
         if (wrappers.isEmpty()) return functions
 
-        val out = HashMap<Hash, FunctionIR>(functions.size)
+        // #432 — iterate to fixpoint. A single pass only handles direct
+        // A→B wrapping. Chains like `sum_to → fold_method_impl → fold_module`
+        // need one iteration per link in the chain. Bound at MAX_INLINE_PASSES
+        // to keep pathological deep wrappers from causing quadratic blowup;
+        // in practice chains are 2-3 deep and settle in 2-3 iterations.
         val stats = InlineStats()
-        for ((hash, fn) in functions) {
-            // Don't recursively inline a wrapper's body into itself —
-            // the wrapper IS the trivial body. Other functions are fair
-            // game (they may or may not call into wrappers).
-            val newBody = if (wrappers.containsKey(hash) && hash in functions) {
-                fn.body
-            } else {
-                rewrite(fn.body, wrappers, stats)
+        var current: Map<Hash, FunctionIR> = functions
+        var passes = 0
+        var changedThisPass = -1
+        while (changedThisPass != 0 && passes < MAX_INLINE_PASSES) {
+            passes++
+            changedThisPass = 0
+            val out = HashMap<Hash, FunctionIR>(current.size)
+            for ((hash, fn) in current) {
+                // Don't recursively inline a wrapper's body into itself —
+                // the wrapper IS the trivial body. Other functions are fair
+                // game (they may or may not call into wrappers).
+                val newBody = if (wrappers.containsKey(hash) && hash in current) {
+                    fn.body
+                } else {
+                    rewrite(fn.body, wrappers, stats)
+                }
+                if (newBody === fn.body) {
+                    out[hash] = fn
+                } else {
+                    out[hash] = fn.copy(body = newBody)
+                    stats.fnsChanged++
+                    changedThisPass++
+                }
             }
-            if (newBody === fn.body) {
-                out[hash] = fn
-            } else {
-                out[hash] = fn.copy(body = newBody)
-                stats.fnsChanged++
-            }
+            current = out
         }
         if (stats.fnsChanged > 0 && System.getenv("MEZZE_DEBUG") != null) {
             System.err.println(
                 "TrivialWrapperInliner: ${stats.sitesInlined} call sites inlined " +
                 "(${stats.sitesSkippedHeavyArg} skipped: heavy multi-read arg) " +
                 "across ${stats.fnsChanged}/${functions.size} functions " +
-                "using ${wrappers.size} known wrappers"
+                "using ${wrappers.size} known wrappers " +
+                "in $passes pass(es)"
             )
         }
-        return out
+        return current
     }
+
+    /** Bound on fixpoint iteration count. Chains are typically 2-3 deep
+     *  (e.g. `sum_to → fold_method → fold_module → fold_go`); MAX=8 is
+     *  ample and prevents runaway if the wrapper set has cycles despite
+     *  the self-call guard. */
+    private const val MAX_INLINE_PASSES: Int = 8
 
     /** Per-run counters — mutable, threaded through [rewrite] to make the
      *  MEZZE_DEBUG line report actual work done rather than just "how many
