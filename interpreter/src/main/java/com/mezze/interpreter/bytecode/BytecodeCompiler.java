@@ -2638,13 +2638,46 @@ public final class BytecodeCompiler {
         // The SIMD reducer nodes + SeqNatives.foldReduceLong are landed
         // and ready; only the compile-side emit needs revisiting.
 
-        // #404: if xsExpr is `__native_seq_range { start, end }`, emit a
-        // direct counted loop over start..end without materializing the
-        // Seq or paying per-iter SeqGet + boxing. Only used when the op
-        // isn't SIMD-reducible (SUB/DIV/MOD) — for those, the counted
-        // loop still beats materialize+scalar-native-loop.
+        // #437 Day 4: peel zero or one filter and zero or one map from
+        // xsExpr, seeing through to the underlying range source. This
+        // lets us fuse:
+        //   fold(range, ...)                              — existing path
+        //   fold(map(range, f), ...)                      — peeled here
+        //   fold(filter(range, p), ...)                   — peeled here
+        //   fold(map(filter(range, p), f), ...)           — peeled here
+        // Filter appears BELOW map in the chain because user writes
+        // range.filter(p).map(f).fold — .map runs after .filter, so at
+        // the fold's xsExpr we see map(filter(range)). Peel order = read
+        // order at emit: map first (outermost), then filter, then range.
         NodeIR rangeStart = null, rangeEnd = null;
-        if (xsExpr instanceof CallNativeIR nat && "__native_seq_range".equals(nat.getName())) {
+        InlineOp mapperOp = null;              // op that maps xSlot → xSlot
+        InlineOp predOp = null;                // comparison op on xSlot vs predRhsLit
+        long predRhsLit = 0L;                  // right-hand-side literal for predicate
+        long mapperRhsLit = 0L;                // right-hand-side literal for mapper
+        // Peel outer map (if any).
+        NodeIR peeledXs = xsExpr;
+        var mapPeel = peelMapFromXs(peeledXs, language);
+        if (mapPeel != null) {
+            mapperOp = mapPeel.op;
+            mapperRhsLit = mapPeel.rhsLit;
+            peeledXs = mapPeel.innerXs;
+        }
+        // Peel outer filter (if any).
+        var filterPeel = peelFilterFromXs(peeledXs, language);
+        if (filterPeel != null) {
+            predOp = filterPeel.op;
+            predRhsLit = filterPeel.rhsLit;
+            peeledXs = filterPeel.innerXs;
+        }
+        // Peeling done. peeledXs is now the innermost source; check for
+        // __native_seq_range.
+        if (dbg) System.err.println("[fold-fuse] after peel: mapper=" + mapperOp + " pred=" + predOp
+                + " peeledXs=" + peeledXs.getClass().getSimpleName());
+        //
+        // #404: if peeledXs is `__native_seq_range { start, end }`, emit a
+        // direct counted loop over start..end without materializing the
+        // Seq or paying per-iter SeqGet + boxing.
+        if (peeledXs instanceof CallNativeIR nat && "__native_seq_range".equals(nat.getName())) {
             if (nat.isScalarABI() && nat.getArgs().size() == 2) {
                 rangeStart = nat.getArgs().get(0);
                 rangeEnd   = nat.getArgs().get(1);
@@ -2660,14 +2693,20 @@ public final class BytecodeCompiler {
                 }
             }
         }
+        // If we peeled map/filter but no range source underneath, we
+        // can't fuse — bail. The generic fold on materialized xs still
+        // runs correctly via the non-fused path.
+        if (rangeStart == null && (mapperOp != null || predOp != null)) {
+            return false;
+        }
 
-        // #427 fast path — ADD folder over an inline range collapses to a
-        // single BuiltinSumRangeLong op that owns the whole counted loop.
-        // Same shape as sum_native's BuiltinSumLongSeq: no BDSL slot
-        // traffic, InlinedLoopConditionProfile-driven, primitive-long
-        // acc kept in a Java local. Closes the remaining sum_native/node
-        // gap on this shape.
-        if (rangeStart != null && op == InlineOp.ADD) {
+        // #427 fast path — ADD folder over an inline range with NO map or
+        // filter peel collapses to a single BuiltinSumRangeLong op that
+        // owns the whole counted loop. Same shape as sum_native's
+        // BuiltinSumLongSeq: no BDSL slot traffic, InlinedLoopConditionProfile-
+        // driven, primitive-long acc kept in a Java local. Java-parity.
+        if (rangeStart != null && op == InlineOp.ADD
+                && mapperOp == null && predOp == null) {
             b.beginBuiltinSumRangeLong();
               emitNode(rangeStart, b, argCount, localMap);
               emitNode(rangeEnd,   b, argCount, localMap);
@@ -2713,12 +2752,45 @@ public final class BytecodeCompiler {
               b.emitLoadLocal(endSlot);
               b.endDirectLessThan();
               b.beginBlock();
+                // x = i (raw range element — predicate sees this)
                 b.beginStoreLocal(xSlot);
                 b.emitLoadLocal(iSlot);
                 b.endStoreLocal();
-                b.beginStoreLocal(accSlot);
-                emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                b.endStoreLocal();
+                // Peel order at emit was map→filter, so the user's chain
+                // is range.filter(p).map(f).fold — filter runs on the raw
+                // range element, then map, then the fold step. Emit in
+                // that data-flow order:
+                //   if (predOp(x, predRhsLit)) {
+                //     x = x <mapperOp> mapperRhsLit  (if map peeled)
+                //     acc = acc <op> x
+                //   }
+                // IfThen has no else — the no-op fall-through leaves acc
+                // unchanged for filtered-out elements.
+                if (predOp != null) {
+                    b.beginIfThen();
+                      emitInlineOpLocalLit(predOp, xSlot, predRhsLit, b);
+                      b.beginBlock();
+                        if (mapperOp != null) {
+                            b.beginStoreLocal(xSlot);
+                            emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
+                            b.endStoreLocal();
+                        }
+                        b.beginStoreLocal(accSlot);
+                        emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+                        b.endStoreLocal();
+                      b.endBlock();
+                    b.endIfThen();
+                } else {
+                    if (mapperOp != null) {
+                        b.beginStoreLocal(xSlot);
+                        emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
+                        b.endStoreLocal();
+                    }
+                    b.beginStoreLocal(accSlot);
+                    emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+                    b.endStoreLocal();
+                }
+                // i = i + 1
                 b.beginStoreLocal(iSlot);
                 b.beginDirectAdd();
                 b.emitLoadLocal(iSlot);
@@ -2730,7 +2802,8 @@ public final class BytecodeCompiler {
             b.emitLoadLocal(accSlot);
             b.endBlock();
             if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
-                System.err.println("[fold-fuse] emitted range-fused loop for op=" + op);
+                System.err.println("[fold-fuse] emitted range-fused loop for op=" + op
+                    + " mapper=" + mapperOp + " pred=" + predOp);
             }
             return true;
         }
@@ -2838,6 +2911,237 @@ public final class BytecodeCompiler {
             case OR  -> { b.beginDirectOr(); b.emitLoadLocal(a); b.emitLoadLocal(x); b.endDirectOr(); }
             default -> throw new IllegalStateException("emitInlineOpTwoLocals: unsupported op " + op);
         }
+    }
+
+    /**
+     * #437 — emit {@code local <op> long-literal}. Used by the range-fused
+     * loop when a mapper `{x} -> x <op> lit` or predicate `{x} -> x <cmp> lit`
+     * was peeled from xsExpr and needs to be inlined at each iteration.
+     * Same op set as {@link #emitInlineOpTwoLocals}.
+     */
+    private void emitInlineOpLocalLit(InlineOp op,
+                                      com.oracle.truffle.api.bytecode.BytecodeLocal x,
+                                      long lit,
+                                      MezzeBytecodeRootNodeGen.Builder b) {
+        switch (op) {
+            case ADD -> { b.beginDirectAdd(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectAdd(); }
+            case SUB -> { b.beginDirectSubtract(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectSubtract(); }
+            case MUL -> { b.beginDirectMultiply(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectMultiply(); }
+            case DIV -> { b.beginDirectDivide(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectDivide(); }
+            case MOD -> { b.beginDirectModulo(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectModulo(); }
+            case EQ  -> { b.beginDirectEqual(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectEqual(); }
+            case NEQ -> { b.beginDirectNotEqual(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectNotEqual(); }
+            case LT  -> { b.beginDirectLessThan(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectLessThan(); }
+            case LE  -> { b.beginDirectLessThanOrEqual(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectLessThanOrEqual(); }
+            case GT  -> { b.beginDirectGreaterThan(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectGreaterThan(); }
+            case GE  -> { b.beginDirectGreaterThanOrEqual(); b.emitLoadLocal(x); b.emitLoadLongConstant(lit); b.endDirectGreaterThanOrEqual(); }
+            default -> throw new IllegalStateException("emitInlineOpLocalLit: unsupported op " + op);
+        }
+    }
+
+    /**
+     * #437 — result of peeling a `seq::map` call from a fold's xsExpr.
+     * op/rhsLit describe the mapper lambda body ({@code {x} -> x <op> lit}),
+     * innerXs is the seq expression the map was applied to.
+     */
+    private record MapPeel(InlineOp op, long rhsLit, NodeIR innerXs) {}
+    private record FilterPeel(InlineOp op, long rhsLit, NodeIR innerXs) {}
+
+    /**
+     * #437 — recognize {@code CallNativeIR("__native_seq_map",
+     * MakeRecord{xs=E, f=MakeLambda(...)})} where the lambda is a
+     * single-parameter, zero-capture body of the shape
+     * {@code {x} -> x <op> longLit}. Returns null on any mismatch.
+     */
+    private MapPeel peelMapFromXs(NodeIR xsExpr, MezzeLanguage language) {
+        // Shape A: raw CallNativeIR("__native_seq_map", MakeRecord{xs, f}).
+        if (xsExpr instanceof CallNativeIR nat
+                && "__native_seq_map".equals(nat.getName())
+                && !nat.isScalarABI()
+                && nat.getArg() instanceof MakeRecordIR mr) {
+            NodeIR xsField = null, fField = null;
+            for (var fld : mr.getFields()) {
+                switch (fld.getName()) {
+                    case "xs" -> xsField = fld.getValue();
+                    case "f"  -> fField  = fld.getValue();
+                }
+            }
+            return finishMapPeel(xsField, fField, language);
+        }
+        // Shape B: CallDirectIR to the (mono-specialized) seq::map wrapper.
+        // Params are [xs, f]; args are positional (scalar-ABI) or a
+        // single MakeRecord{xs, f} (record-ABI).
+        if (xsExpr instanceof CallDirectIR cd && isSeqMapCallee(cd.getTargetHash(), language)) {
+            NodeIR xsArg = null, fArg = null;
+            if (cd.isScalarABI() && cd.getArgs().size() == 2) {
+                xsArg = cd.getArgs().get(0);
+                fArg  = cd.getArgs().get(1);
+            } else if (cd.getArgs().size() == 1
+                    && cd.getArgs().get(0) instanceof MakeRecordIR mr) {
+                for (var fld : mr.getFields()) {
+                    switch (fld.getName()) {
+                        case "xs" -> xsArg = fld.getValue();
+                        case "f"  -> fArg  = fld.getValue();
+                    }
+                }
+            }
+            return finishMapPeel(xsArg, fArg, language);
+        }
+        return null;
+    }
+    private MapPeel finishMapPeel(NodeIR xsField, NodeIR fField, MezzeLanguage language) {
+        if (xsField == null) return null;
+        if (!(fField instanceof MakeLambdaIR ml)) return null;
+        var pair = classifyUnaryLiteralLambda(ml, language);
+        if (pair == null) return null;
+        switch (pair.op) {
+            case ADD, SUB, MUL, DIV, MOD -> {}
+            default -> { return null; }
+        }
+        return new MapPeel(pair.op, pair.rhsLit, xsField);
+    }
+    /**
+     * True iff {@code targetHash} points at a FunctionIR whose
+     * name/paramNames identify it as {@code seq::map} — either the
+     * original stdlib decl or a mono specialization thereof. Recognized
+     * shape: sourceFile ends with {@code seq.mz}, name {@code "map"} or
+     * mono-spec empty, paramNames {@code [xs, f]}.
+     */
+    private boolean isSeqMapCallee(Hash targetHash, MezzeLanguage language) {
+        if (targetHash == null || language == null) return false;
+        var fn = language.lookupFunctionIR(targetHash);
+        if (fn == null) return false;
+        String src = fn.getSourceFile();
+        if (src == null || !src.endsWith("seq.mz")) return false;
+        var params = fn.getParamNames();
+        if (params.size() != 2) return false;
+        if (!"xs".equals(params.get(0)) || !"f".equals(params.get(1))) return false;
+        String name = fn.getName();
+        return "map".equals(name) || name == null || name.isEmpty();
+    }
+
+    /**
+     * #437 — same shape as {@link #peelMapFromXs} but for
+     * {@code __native_seq_filter} with field {@code p} holding the
+     * predicate lambda. Predicate must produce Bool — restrict to
+     * comparison ops.
+     */
+    private FilterPeel peelFilterFromXs(NodeIR xsExpr, MezzeLanguage language) {
+        // Shape A: raw CallNativeIR("__native_seq_filter", MakeRecord{xs, p}).
+        if (xsExpr instanceof CallNativeIR nat
+                && "__native_seq_filter".equals(nat.getName())
+                && !nat.isScalarABI()
+                && nat.getArg() instanceof MakeRecordIR mr) {
+            NodeIR xsField = null, pField = null;
+            for (var fld : mr.getFields()) {
+                switch (fld.getName()) {
+                    case "xs" -> xsField = fld.getValue();
+                    case "p"  -> pField  = fld.getValue();
+                }
+            }
+            return finishFilterPeel(xsField, pField, language);
+        }
+        // Shape B: CallDirectIR to the (mono-specialized) seq::filter wrapper.
+        if (xsExpr instanceof CallDirectIR cd && isSeqFilterCallee(cd.getTargetHash(), language)) {
+            NodeIR xsArg = null, pArg = null;
+            if (cd.isScalarABI() && cd.getArgs().size() == 2) {
+                xsArg = cd.getArgs().get(0);
+                pArg  = cd.getArgs().get(1);
+            } else if (cd.getArgs().size() == 1
+                    && cd.getArgs().get(0) instanceof MakeRecordIR mr) {
+                for (var fld : mr.getFields()) {
+                    switch (fld.getName()) {
+                        case "xs" -> xsArg = fld.getValue();
+                        case "p"  -> pArg  = fld.getValue();
+                    }
+                }
+            }
+            return finishFilterPeel(xsArg, pArg, language);
+        }
+        return null;
+    }
+    private FilterPeel finishFilterPeel(NodeIR xsField, NodeIR pField, MezzeLanguage language) {
+        if (xsField == null || !(pField instanceof MakeLambdaIR ml)) return null;
+        var pair = classifyUnaryLiteralLambda(ml, language);
+        if (pair == null) return null;
+        switch (pair.op) {
+            case EQ, NEQ, LT, LE, GT, GE -> {}
+            default -> { return null; }
+        }
+        return new FilterPeel(pair.op, pair.rhsLit, xsField);
+    }
+    private boolean isSeqFilterCallee(Hash targetHash, MezzeLanguage language) {
+        if (targetHash == null || language == null) return false;
+        var fn = language.lookupFunctionIR(targetHash);
+        if (fn == null) return false;
+        String src = fn.getSourceFile();
+        if (src == null || !src.endsWith("seq.mz")) return false;
+        var params = fn.getParamNames();
+        if (params.size() != 2) return false;
+        if (!"xs".equals(params.get(0)) || !"p".equals(params.get(1))) return false;
+        String name = fn.getName();
+        return "filter".equals(name) || name == null || name.isEmpty();
+    }
+
+    /**
+     * #437 — classify a MakeLambdaIR whose body is
+     * {@code (ReadLocal(paramSlot) <op> LongLit)} or the equivalent
+     * CallDirect-to-arith-op shape (mono-desugared form). Returns null
+     * on captures, wrong arity, or any body pattern we don't recognize.
+     */
+    private static final class UnaryLitShape {
+        final InlineOp op; final long rhsLit;
+        UnaryLitShape(InlineOp op, long rhsLit) { this.op = op; this.rhsLit = rhsLit; }
+    }
+    private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
+                                                     MezzeLanguage language) {
+        if (!ml.getCaptures().isEmpty()) return null;
+        var fnIR = language.lookupFunctionIR(ml.getFunctionHash());
+        if (fnIR == null) return null;
+        if (!fnIR.getCaptureSlots().isEmpty()) return null;
+        if (fnIR.getParamSlots().size() != 1) return null;
+        if (!fnIR.getLocalSlots().isEmpty()) return null;
+        // Zero captures + one param → param occupies slot 0.
+        int paramSlot = 0;
+        NodeIR body = fnIR.getBody();
+        // Shape A: InlineBinaryOp(ReadLocal(paramSlot), LongLit)
+        if (body instanceof InlineBinaryOpIR bin
+                && bin.getLeft() instanceof ReadLocalIR l
+                && l.getSlot() == paramSlot
+                && bin.getRight() instanceof LongLitIR r) {
+            return new UnaryLitShape(bin.getOp(), r.getValue());
+        }
+        // Shape B: CallDirect (scalar-ABI) to a KnownArithOps target with
+        // (ReadLocal(paramSlot), LongLit) — mono-desugared arith.
+        if (body instanceof CallDirectIR call
+                && call.isScalarABI()
+                && call.getArgs().size() == 2
+                && call.getArgs().get(0) instanceof ReadLocalIR ll
+                && ll.getSlot() == paramSlot
+                && call.getArgs().get(1) instanceof LongLitIR rr) {
+            var op = KnownArithOps.lookup(call.getTargetHash());
+            if (op == null) return null;
+            return new UnaryLitShape(op, rr.getValue());
+        }
+        // Shape C: mono-not-fired — CallIndirectIR(function=ReadField(receiver,opName),
+        //          arg=MakeRecord{it=receiver, r=LongLit}). Same as
+        //          classifyFolderBody's Shape C.
+        if (body instanceof CallIndirectIR ind
+                && ind.getFunction() instanceof ReadFieldIR rf
+                && rf.getRecord() instanceof ReadLocalIR recvRead
+                && recvRead.getSlot() == paramSlot
+                && ind.getArg() instanceof MakeRecordIR argMr
+                && argMr.getFields().size() == 2) {
+            var op = ABILITY_OP_NAMES.get(rf.getFieldName());
+            if (op == null) return null;
+            LongLitIR rLit = null;
+            for (var fld : argMr.getFields()) {
+                if ("r".equals(fld.getName()) && fld.getValue() instanceof LongLitIR ll2) rLit = ll2;
+            }
+            if (rLit == null) return null;
+            return new UnaryLitShape(op, rLit.getValue());
+        }
+        return null;
     }
 
     /**
