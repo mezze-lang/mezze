@@ -2439,6 +2439,180 @@ public final class BytecodeCompiler {
         FolderShape(InlineOp op, int l, int r) { this.op = op; this.leftSlot = l; this.rightSlot = r; }
     }
 
+    /**
+     * #439 Day 6 — classify a folder body of the shape
+     * {@code if <pred(x)> then acc <op> <mapper(x)> else acc} — i.e., a
+     * folder that internally filters and (optionally) maps its input.
+     * This is the shape a user gets from the natural
+     *   fold { init = 0, f = {acc, x} -> if x%2==0 then acc + (x*10) else acc }
+     * — semantically identical to fold(map(filter(range))) but expressed
+     * inline in the folder body. Returns the (op, mapperOp/rhs, filter)
+     * triple that would apply if we'd seen the equivalent chain.
+     *
+     * <p>Requirements:
+     * <ul>
+     *   <li>Body is IfIR with condition depending only on xSlot,
+     *       elseBr is ReadLocal(accSlot).
+     *   <li>ThenBr is `acc <op> transform(x)` where op is arith and
+     *       transform(x) is either ReadLocal(xSlot) or an inline mapper
+     *       shape (x <mapOp> lit).
+     *   <li>Slots are (accSlot=0, xSlot=1) or swapped for commutative op.
+     * </ul>
+     * Returns null on any mismatch.
+     */
+    private ConditionalFolderShape classifyConditionalFolderBody(NodeIR body) {
+        if (!(body instanceof IfIR iff)) return null;
+        int accSlot = 0, xSlot = 1;
+        if (!(iff.getElseBr() instanceof ReadLocalIR er) || er.getSlot() != accSlot) return null;
+        var thenShape = classifyFolderStep(iff.getThenBr(), accSlot, xSlot);
+        if (thenShape == null) return null;
+        var predShape = classifyBodyPredicate(iff.getCond(), xSlot);
+        if (predShape == null) return null;
+        var filter = new FilterPeel(predShape.preOp, predShape.preRhs,
+                                    predShape.cmpOp, predShape.cmpRhs, null);
+        return new ConditionalFolderShape(thenShape.op, thenShape.mapperOp, thenShape.mapperRhs, filter);
+    }
+    private static final class ConditionalFolderShape {
+        final InlineOp op;
+        final InlineOp mapperOp; final long mapperRhs;
+        final FilterPeel filter;
+        ConditionalFolderShape(InlineOp op, InlineOp mapperOp, long mapperRhs, FilterPeel filter) {
+            this.op = op; this.mapperOp = mapperOp; this.mapperRhs = mapperRhs; this.filter = filter;
+        }
+    }
+    /**
+     * A folder-step: {@code acc <op> transform(x)}, where transform(x)
+     * is either the identity (mapperOp==null) or a unary literal op
+     * {@code x <mapperOp> mapperRhs}.
+     */
+    private static final class FolderStepShape {
+        final InlineOp op;
+        final InlineOp mapperOp; final long mapperRhs;
+        FolderStepShape(InlineOp op, InlineOp mapperOp, long mapperRhs) {
+            this.op = op; this.mapperOp = mapperOp; this.mapperRhs = mapperRhs;
+        }
+    }
+    /**
+     * Classify {@code acc <op> transform(x)}. Reuses the same 3-shape
+     * matcher as {@link #matchBinaryOpAgainstLongLit} for the outer op,
+     * requiring LHS = ReadLocal(accSlot). RHS may be ReadLocal(xSlot)
+     * for identity or a matchable inner transform.
+     */
+    private FolderStepShape classifyFolderStep(NodeIR step, int accSlot, int xSlot) {
+        // Outer binary op: acc <op> RHS.
+        // Shape A: InlineBinaryOp
+        if (step instanceof InlineBinaryOpIR bin
+                && bin.getLeft() instanceof ReadLocalIR l && l.getSlot() == accSlot) {
+            return finishFolderStep(bin.getOp(), bin.getRight(), xSlot);
+        }
+        // Shape B: CallDirect scalar-ABI to KnownArithOps.
+        if (step instanceof CallDirectIR call
+                && call.isScalarABI()
+                && call.getArgs().size() == 2
+                && call.getArgs().get(0) instanceof ReadLocalIR l
+                && l.getSlot() == accSlot) {
+            var op = KnownArithOps.lookup(call.getTargetHash());
+            if (op == null) return null;
+            return finishFolderStep(op, call.getArgs().get(1), xSlot);
+        }
+        // Shape C: CallIndirect ability method acc.<op>{it=acc, r=RHS}.
+        if (step instanceof CallIndirectIR ind
+                && ind.getFunction() instanceof ReadFieldIR rf
+                && rf.getRecord() instanceof ReadLocalIR l && l.getSlot() == accSlot
+                && ind.getArg() instanceof MakeRecordIR mr
+                && mr.getFields().size() == 2) {
+            var op = ABILITY_OP_NAMES.get(rf.getFieldName());
+            if (op == null) return null;
+            NodeIR rhs = null;
+            for (var fld : mr.getFields()) {
+                if ("r".equals(fld.getName())) rhs = fld.getValue();
+            }
+            if (rhs == null) return null;
+            return finishFolderStep(op, rhs, xSlot);
+        }
+        return null;
+    }
+    private FolderStepShape finishFolderStep(InlineOp op, NodeIR rhs, int xSlot) {
+        // Only arith ops for the fold step (must produce Long).
+        switch (op) {
+            case ADD, SUB, MUL, DIV, MOD -> {}
+            default -> { return null; }
+        }
+        // RHS = ReadLocal(xSlot) → identity, no mapper.
+        if (rhs instanceof ReadLocalIR r && r.getSlot() == xSlot) {
+            return new FolderStepShape(op, null, 0L);
+        }
+        // RHS = transform(x) — reuse the slot-parameterized unary-literal matcher.
+        var inner = matchBinaryOpAgainstLongLitSlot(rhs, xSlot);
+        if (inner == null || !inner.leftIsParam) return null;
+        switch (inner.op) {
+            case ADD, SUB, MUL, DIV, MOD -> {}
+            default -> { return null; }
+        }
+        return new FolderStepShape(op, inner.op, inner.rhsLit);
+    }
+    /**
+     * Variant of {@link #matchBinaryOpAgainstLongLit} that recognizes
+     * LHS as {@code ReadLocal(paramSlot)} for an arbitrary paramSlot
+     * (not just 0). Used when the folder body's xSlot is 1 (not 0).
+     */
+    private BinaryLitMatch matchBinaryOpAgainstLongLitSlot(NodeIR n, int paramSlot) {
+        if (n instanceof InlineBinaryOpIR bin
+                && bin.getRight() instanceof LongLitIR rr) {
+            boolean lp = bin.getLeft() instanceof ReadLocalIR l && l.getSlot() == paramSlot;
+            return new BinaryLitMatch(bin.getOp(), rr.getValue(), lp, lp ? null : bin.getLeft());
+        }
+        if (n instanceof CallDirectIR call
+                && call.isScalarABI()
+                && call.getArgs().size() == 2
+                && call.getArgs().get(1) instanceof LongLitIR rr) {
+            var op = KnownArithOps.lookup(call.getTargetHash());
+            if (op == null) return null;
+            boolean lp = call.getArgs().get(0) instanceof ReadLocalIR l && l.getSlot() == paramSlot;
+            return new BinaryLitMatch(op, rr.getValue(), lp, lp ? null : call.getArgs().get(0));
+        }
+        if (n instanceof CallIndirectIR ind
+                && ind.getFunction() instanceof ReadFieldIR rf
+                && ind.getArg() instanceof MakeRecordIR argMr
+                && argMr.getFields().size() == 2) {
+            var op = ABILITY_OP_NAMES.get(rf.getFieldName());
+            if (op == null) return null;
+            LongLitIR rLit = null;
+            for (var fld : argMr.getFields()) {
+                if ("r".equals(fld.getName()) && fld.getValue() instanceof LongLitIR ll2) rLit = ll2;
+            }
+            if (rLit == null) return null;
+            NodeIR lhs = rf.getRecord();
+            boolean lp = lhs instanceof ReadLocalIR ll && ll.getSlot() == paramSlot;
+            return new BinaryLitMatch(op, rLit.getValue(), lp, lp ? null : lhs);
+        }
+        return null;
+    }
+    /**
+     * Classify a folder-body predicate over {@code xSlot}. Simple form:
+     * {@code x <cmpOp> lit}; compound: {@code (x <preOp> lit1) <cmpOp> lit2}.
+     * Same structure as {@link #classifyUnaryPredicateLambda} but for an
+     * arbitrary xSlot (not the lambda-body's slot 0).
+     */
+    private PredShape classifyBodyPredicate(NodeIR body, int xSlot) {
+        var outer = matchBinaryOpAgainstLongLitSlot(body, xSlot);
+        if (outer == null) return null;
+        switch (outer.op) {
+            case EQ, NEQ, LT, LE, GT, GE -> {}
+            default -> { return null; }
+        }
+        if (outer.leftIsParam) {
+            return new PredShape(null, 0L, outer.op, outer.rhsLit);
+        }
+        var inner = matchBinaryOpAgainstLongLitSlot(outer.leftNode, xSlot);
+        if (inner == null || !inner.leftIsParam) return null;
+        switch (inner.op) {
+            case ADD, SUB, MUL, DIV, MOD -> {}
+            default -> { return null; }
+        }
+        return new PredShape(inner.op, inner.rhsLit, outer.op, outer.rhsLit);
+    }
+
     private static FolderShape classifyFolderBody(NodeIR body) {
         if (body instanceof InlineBinaryOpIR bin) {
             if (bin.getLeft() instanceof ReadLocalIR l && bin.getRight() instanceof ReadLocalIR r) {
@@ -2677,26 +2851,42 @@ public final class BytecodeCompiler {
         if (folderIR.getCaptureSlots().size() != 0) { if (dbg) System.err.println("[fold-fuse] reject: folder captureSlots"); return false; }
         if (folderIR.getParamSlots().size() != 2) { if (dbg) System.err.println("[fold-fuse] reject: folder paramSlots=" + folderIR.getParamSlots().size()); return false; }
         if (folderIR.getLocalSlots().size() != 0) { if (dbg) System.err.println("[fold-fuse] reject: folder localSlots=" + folderIR.getLocalSlots().size()); return false; }
-        // Body must classify as a fusable folder shape (inline binary op
-        // or direct call to a known arith impl-op) reading slot 0 and 1.
-        var shape = classifyFolderBody(folderIR.getBody());
-        if (shape == null) {
-            if (dbg) System.err.println("[fold-fuse] reject: folder body " + folderIR.getBody().getClass().getSimpleName() + " params=" + folderIR.getParamNames() + " full=" + folderIR.getBody());
-            return false;
+        // #439 Day 6: recognize a folder body that inlines a filter+map+step
+        //   {acc, x} -> if <pred(x)> then acc <op> <transform(x)> else acc
+        // Convert to (op, embeddedMapper, embeddedFilter) so the range-fused
+        // emit path treats it the same as fold(map(filter(range))).
+        var condShape = classifyConditionalFolderBody(folderIR.getBody());
+        InlineOp op;
+        InlineOp bodyMapperOp = null;
+        long bodyMapperRhs = 0L;
+        FilterPeel bodyFilter = null;
+        if (condShape != null) {
+            op = condShape.op;
+            bodyMapperOp = condShape.mapperOp;
+            bodyMapperRhs = condShape.mapperRhs;
+            bodyFilter = condShape.filter;
+        } else {
+            // Body must classify as a fusable folder shape (inline binary op
+            // or direct call to a known arith impl-op) reading slot 0 and 1.
+            var shape = classifyFolderBody(folderIR.getBody());
+            if (shape == null) {
+                if (dbg) System.err.println("[fold-fuse] reject: folder body " + folderIR.getBody().getClass().getSimpleName() + " params=" + folderIR.getParamNames() + " full=" + folderIR.getBody());
+                return false;
+            }
+            int lSlot = shape.leftSlot;
+            int rSlot = shape.rightSlot;
+            // slots 0 and 1 in some order — either (acc, x) or (x, acc). For
+            // commutative ops both are fine; for non-commutative we only
+            // fuse the natural (acc, x) order.
+            boolean naturalOrder = (lSlot == 0 && rSlot == 1);
+            boolean swapped      = (lSlot == 1 && rSlot == 0);
+            if (!naturalOrder && !swapped) return false;
+            op = shape.op;
+            boolean commutative = (op == InlineOp.ADD || op == InlineOp.MUL
+                                || op == InlineOp.EQ || op == InlineOp.NEQ
+                                || op == InlineOp.AND || op == InlineOp.OR);
+            if (swapped && !commutative) return false;
         }
-        int lSlot = shape.leftSlot;
-        int rSlot = shape.rightSlot;
-        // slots 0 and 1 in some order — either (acc, x) or (x, acc). For
-        // commutative ops both are fine; for non-commutative we only
-        // fuse the natural (acc, x) order.
-        boolean naturalOrder = (lSlot == 0 && rSlot == 1);
-        boolean swapped      = (lSlot == 1 && rSlot == 0);
-        if (!naturalOrder && !swapped) return false;
-        var op = shape.op;
-        boolean commutative = (op == InlineOp.ADD || op == InlineOp.MUL
-                            || op == InlineOp.EQ || op == InlineOp.NEQ
-                            || op == InlineOp.AND || op == InlineOp.OR);
-        if (swapped && !commutative) return false;
 
         // #417 wip: SIMD fast path — planned. When xs is a materialized
         // Seq with associative op, route to SeqReduceLongSIMDNode via a
@@ -2720,18 +2910,29 @@ public final class BytecodeCompiler {
         InlineOp mapperOp = null;              // op that maps xSlot → xSlot
         long mapperRhsLit = 0L;                // right-hand-side literal for mapper
         FilterPeel filterPeel = null;          // predicate (simple or compound)
-        // Peel outer map (if any).
         NodeIR peeledXs = xsExpr;
-        var mapPeel = peelMapFromXs(peeledXs, language);
-        if (mapPeel != null) {
-            mapperOp = mapPeel.op;
-            mapperRhsLit = mapPeel.rhsLit;
-            peeledXs = mapPeel.innerXs;
-        }
-        // Peel outer filter (if any).
-        filterPeel = peelFilterFromXs(peeledXs, language);
-        if (filterPeel != null) {
-            peeledXs = filterPeel.innerXs;
+        if (condShape != null) {
+            // #439 Day 6: filter+map already discovered inside the folder
+            // body. Skip the xs-level peel to avoid double-application; the
+            // conditional folder's synthetic filter/mapper are the entire
+            // pipeline. Composing xs-peel *and* body-conditional would need
+            // careful ordering — deferred until a real bench needs it.
+            mapperOp = bodyMapperOp;
+            mapperRhsLit = bodyMapperRhs;
+            filterPeel = bodyFilter;
+        } else {
+            // Peel outer map (if any).
+            var mapPeel = peelMapFromXs(peeledXs, language);
+            if (mapPeel != null) {
+                mapperOp = mapPeel.op;
+                mapperRhsLit = mapPeel.rhsLit;
+                peeledXs = mapPeel.innerXs;
+            }
+            // Peel outer filter (if any).
+            filterPeel = peelFilterFromXs(peeledXs, language);
+            if (filterPeel != null) {
+                peeledXs = filterPeel.innerXs;
+            }
         }
         // Peeling done. peeledXs is now the innermost source; check for
         // __native_seq_range.
