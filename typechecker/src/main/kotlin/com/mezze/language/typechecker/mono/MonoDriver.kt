@@ -171,10 +171,21 @@ object MonoDriver {
         // Seed only from concrete (non-generic) decls. Track per-seed call
         // site loc in a parallel list so we can map back from each
         // SpecRequest to the originating TypedCall after mono runs.
+        //
+        // #441 Day 8 (Mono Gap B): env-gated stdlib seed walk. When
+        // MEZZE_MONO_SEED_STDLIB=1, also walk stdlib CONCRETE decls
+        // (typeParams.isEmpty()) for callsites — no seeding from generic
+        // decls' bodies (still polymorphic; would produce VarType bindings).
+        // Off by default. The gate exists so we can measure the coverage
+        // lift without risking a default-on regression on the ~496 generic
+        // decls in stdlib (bulk unification cost).
         val seeds = ArrayList<Monomorphizer.SpecRequest>()
         val seedLocs = ArrayList<Loc>()
         val counters = Counters()
-        for (m in listOf(entry) + imported) {
+        val seedStdlib = System.getenv("MEZZE_MONO_SEED_STDLIB") == "1"
+        val seedFrom = if (seedStdlib) listOf(entry) + imported + resolutionOnly
+                       else            listOf(entry) + imported
+        for (m in seedFrom) {
             for (d in m.decls) {
                 if (d !is TypedLetDecl) continue
                 if (d.typeParams.isNotEmpty()) continue
