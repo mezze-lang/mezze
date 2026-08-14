@@ -307,6 +307,61 @@ sealed interface PatternIR {
 @Serializable data class MakeLambdaIR(val functionHash: Hash, val captures: List<CaptureIR>, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class CaptureIR(val slot: Int, val kind: SlotKind)
 
+// #446 Iter fusion — canonical form
+/**
+ * Canonical iter-chain node produced by [IterCanonicalizer].
+ *
+ * Rewrites every fusable iter chain (module-level or ability-method
+ * spelling; scalar-ABI or record-ABI; with or without let aliasing,
+ * wrapper inlining, from_seq layer, iter::sum sink) to this single IR
+ * node so the BDSL fusion peel can match ONE shape instead of ~16
+ * permutations.
+ *
+ * Semantics: evaluate `source`, then iterate; per element apply each
+ * [StageIR] in order; `sink` consumes elements and produces a value.
+ *
+ * See docs/iter-canonicalizer-design.md. Feature-gated behind the
+ * canonicalizer emit path — if the pass never produces an IterChainIR,
+ * downstream consumers only need the exhaustive-`when` case at their
+ * traversal sites (no runtime paths reached).
+ */
+@Serializable data class IterChainIR(
+    val source: SourceIR,
+    val stages: List<StageIR>,
+    val sink: SinkIR,
+    override val src: SourceInfo,
+) : NodeIR
+
+/** Where the iterator's elements come from. */
+@Serializable
+sealed interface SourceIR {
+    /** `__native_seq_range { start, end }` — counted loop over start..end. */
+    @Serializable data class RangeSeq(val start: NodeIR, val end: NodeIR) : SourceIR
+    /** Any expression evaluating to a materialized Seq at runtime. Uses
+     *  SeqSize/SeqGet indexed loop in the emit. */
+    @Serializable data class RawSeq(val xs: NodeIR) : SourceIR
+    /** Fall-through — canonicalizer refuses to fuse (unknown expression,
+     *  descriptor we couldn't peel through). Peel MUST reject on Opaque
+     *  and let ability-dispatch handle it. */
+    @Serializable data class Opaque(val expr: NodeIR) : SourceIR
+}
+
+/** One stage in the pipeline. Applied per-element in list order. */
+@Serializable
+sealed interface StageIR {
+    @Serializable data class Map(val f: MakeLambdaIR) : StageIR
+    @Serializable data class Filter(val p: MakeLambdaIR) : StageIR
+}
+
+/** How elements are combined. */
+@Serializable
+sealed interface SinkIR {
+    /** Left fold with `init` and `f: {acc, x} -> acc'`. */
+    @Serializable data class Fold(val init: NodeIR, val f: MakeLambdaIR) : SinkIR
+    /** `for_each` — side-effecting; result is unit. */
+    @Serializable data class ForEach(val f: MakeLambdaIR) : SinkIR
+}
+
 // Effects
 /**
  * `perform Handler in body`. `staticallyFullyDischarges` is set by the

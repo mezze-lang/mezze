@@ -396,6 +396,36 @@ object MutEraser {
                 val na = f(node.arg)
                 if (na !== node.arg) node.copy(arg = na) else node
             }
+
+            is IterChainIR -> {
+                // #446 — mirror of TrivialWrapperInliner.recurseChildren
+                // IterChainIR case. Descend into source expression and
+                // sink init; stage/sink MakeLambdas are leaves.
+                val newSource: SourceIR = when (val s = node.source) {
+                    is SourceIR.RangeSeq -> {
+                        val nStart = f(s.start); val nEnd = f(s.end)
+                        if (nStart !== s.start || nEnd !== s.end)
+                            SourceIR.RangeSeq(nStart, nEnd) else s
+                    }
+                    is SourceIR.RawSeq -> {
+                        val nXs = f(s.xs)
+                        if (nXs !== s.xs) SourceIR.RawSeq(nXs) else s
+                    }
+                    is SourceIR.Opaque -> {
+                        val nE = f(s.expr)
+                        if (nE !== s.expr) SourceIR.Opaque(nE) else s
+                    }
+                }
+                val newSink: SinkIR = when (val sk = node.sink) {
+                    is SinkIR.Fold -> {
+                        val nInit = f(sk.init)
+                        if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk
+                    }
+                    is SinkIR.ForEach -> sk
+                }
+                if (newSource !== node.source || newSink !== node.sink)
+                    node.copy(source = newSource, sink = newSink) else node
+            }
         }
 
     private fun mapIfChanged(list: List<NodeIR>, f: (NodeIR) -> NodeIR): List<NodeIR> {
