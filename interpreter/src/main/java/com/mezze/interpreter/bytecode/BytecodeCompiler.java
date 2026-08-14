@@ -251,6 +251,22 @@ public final class BytecodeCompiler {
             new java.util.IdentityHashMap<>();
 
     /**
+     * #443 Day 10 — slot → let-init map for fusion peel. When emitting a
+     * BlockIR, each StmtIR.Let records (slot, RHS) here; when leaving the
+     * block, entries are removed. The fusion peel consults this map to
+     * resolve a ReadLocalIR into its defining expression so that
+     * {@code let xs = seq::range{...}; xs.fold(...)} peels the same as
+     * the inline form. Only "stable" defs are recorded — the peel checks
+     * that the slot hasn't been reassigned since (single-def scope).
+     *
+     * <p>Kept as an instance field (not threaded through call args) to
+     * avoid churning every emit method signature. Since compilation is
+     * single-threaded per compiler instance, this is safe.
+     */
+    private final java.util.HashMap<Integer, NodeIR> currentLetInits =
+            new java.util.HashMap<>();
+
+    /**
      * Optional external CallTarget resolver — used when this compiler
      * is invoked from the runtime path where callee CallTargets already
      * live in {@link MezzeLanguage}'s shared stdlib cache rather than
@@ -1397,6 +1413,13 @@ public final class BytecodeCompiler {
         if (node instanceof BlockIR blk) {
             b.beginBlock();
             final boolean debug = currentSource != null;
+            // #443 Day 10 — track slot→let-init at THIS block scope so the
+            // fusion peel can resolve `let xs = seq::range{…}; iter::fold(
+            // iter::from_seq(xs), …)` by replacing ReadLocal(xs's slot)
+            // with the range expr. Save any pre-existing entries so nested
+            // blocks that shadow don't corrupt the outer scope.
+            java.util.List<Integer> localAddedSlots = new java.util.ArrayList<>();
+            java.util.Map<Integer, NodeIR> savedShadows = new java.util.HashMap<>();
             for (StmtIR s : blk.getStmts()) {
                 if (s instanceof StmtIR.Let l) {
                     // A `let` in Mezze IR is a WriteLocal to the let's
@@ -1431,6 +1454,19 @@ public final class BytecodeCompiler {
                     b.endStoreLocal();
                     if (debug) b.endTag(com.oracle.truffle.api.instrumentation.StandardTags.StatementTag.class);
                     if (range != null) b.endSourceSection();
+                    // #443 Day 10 — record the binding so later peel steps
+                    // can resolve ReadLocal → let init. Only pure locals,
+                    // not top-level global-published lets (those are also
+                    // read via ReadGlobalByHash from elsewhere and the
+                    // value is already visible via the global path).
+                    if (!topLevel) {
+                        int slot = l.getSlot();
+                        if (currentLetInits.containsKey(slot)) {
+                            savedShadows.put(slot, currentLetInits.get(slot));
+                        }
+                        currentLetInits.put(slot, l.getValue());
+                        localAddedSlots.add(slot);
+                    }
                 } else if (s instanceof StmtIR.Expr e) {
                     // Bare expression statement — evaluate for side
                     // effects, drop the result. BDSL doesn't expose an
@@ -1465,6 +1501,17 @@ public final class BytecodeCompiler {
             }
             emitNode(blk.getResult(), b, argCount, localMap);
             b.endBlock();
+            // #443 Day 10 — restore prior scope: undo our additions.
+            // Order: for each slot we added, either restore the shadow or
+            // remove the entry entirely. Iterate over localAddedSlots so
+            // we only touch what we introduced (no leaks into caller).
+            for (int slot : localAddedSlots) {
+                if (savedShadows.containsKey(slot)) {
+                    currentLetInits.put(slot, savedShadows.get(slot));
+                } else {
+                    currentLetInits.remove(slot);
+                }
+            }
             return;
         }
         if (node instanceof CallDirectIR c) {
@@ -2728,23 +2775,23 @@ public final class BytecodeCompiler {
         boolean mapperCallScalarABI = false;
         String mapperCallFieldName = null;
         FilterPeel filterPeel = null;
-        NodeIR peeledXs = xsExpr;
+        NodeIR peeledXs = resolveLetAlias(xsExpr);
         var mapPeel = peelMapFromXs(peeledXs, language);
         if (mapPeel != null) {
             mapperOp = mapPeel.op; mapperRhsLit = mapPeel.rhsLit;
             mapperCallHash = mapPeel.callHash;
             mapperCallScalarABI = mapPeel.callScalarABI;
             mapperCallFieldName = mapPeel.callFieldName;
-            peeledXs = mapPeel.innerXs;
+            peeledXs = resolveLetAlias(mapPeel.innerXs);
         }
         filterPeel = peelFilterFromXs(peeledXs, language);
         if (filterPeel != null) {
-            peeledXs = filterPeel.innerXs;
+            peeledXs = resolveLetAlias(filterPeel.innerXs);
         }
         // #443 Day 10 — strip iter::from_seq if present so the range
         // recognizer sees the underlying __native_seq_range.
         NodeIR unwrappedIter2 = peelIterFromSeq(peeledXs, language);
-        if (unwrappedIter2 != null) peeledXs = unwrappedIter2;
+        if (unwrappedIter2 != null) peeledXs = resolveLetAlias(unwrappedIter2);
         NodeIR rangeStart = null, rangeEnd = null;
         if (peeledXs instanceof CallNativeIR nat && "__native_seq_range".equals(nat.getName())) {
             if (nat.isScalarABI() && nat.getArgs().size() == 2) {
@@ -2963,6 +3010,9 @@ public final class BytecodeCompiler {
             // body classifier only recognizes inline arith. Leave callHash null.
             filterPeel = bodyFilter;
         } else {
+            // #443 Day 10 — resolve let-alias before peel, so
+            // `let xs = seq::range{…}; xs.fold(…)` peels the same as inline.
+            peeledXs = resolveLetAlias(peeledXs);
             // Peel outer map (if any).
             var mapPeel = peelMapFromXs(peeledXs, language);
             if (mapPeel != null) {
@@ -2971,12 +3021,12 @@ public final class BytecodeCompiler {
                 mapperCallHash = mapPeel.callHash;
                 mapperCallScalarABI = mapPeel.callScalarABI;
                 mapperCallFieldName = mapPeel.callFieldName;
-                peeledXs = mapPeel.innerXs;
+                peeledXs = resolveLetAlias(mapPeel.innerXs);
             }
             // Peel outer filter (if any).
             filterPeel = peelFilterFromXs(peeledXs, language);
             if (filterPeel != null) {
-                peeledXs = filterPeel.innerXs;
+                peeledXs = resolveLetAlias(filterPeel.innerXs);
             }
         }
         // #443 Day 10 — strip an outer iter::from_seq layer so the range
@@ -2987,7 +3037,7 @@ public final class BytecodeCompiler {
         NodeIR unwrappedIter = peelIterFromSeq(peeledXs, language);
         if (unwrappedIter != null) {
             if (dbg) System.err.println("[fold-fuse] iter::from_seq peel HIT");
-            peeledXs = unwrappedIter;
+            peeledXs = resolveLetAlias(unwrappedIter);
         }
         // Peeling done. peeledXs is now the innermost source; check for
         // __native_seq_range.
@@ -3793,6 +3843,28 @@ public final class BytecodeCompiler {
      * {@code i = 0} is dead in the fused path because ability dispatch on
      * SeqIter never happens (we're taking the fusion path instead).
      */
+    /**
+     * #443 Day 10 — resolve a chain of let-bound aliases. If {@code node}
+     * is a {@link ReadLocalIR} whose slot was bound by a {@link StmtIR.Let}
+     * in the surrounding block scope (tracked in {@link #currentLetInits}),
+     * return the let's init expression. Repeat until the result is not a
+     * ReadLocalIR (handles `let a = b; let b = seq::range{…}` chains).
+     *
+     * <p>Returns the input unchanged if the slot isn't in
+     * {@code currentLetInits} (parameter, capture, or reassigned local).
+     * Guards against infinite loops with a max-depth check.
+     */
+    private NodeIR resolveLetAlias(NodeIR node) {
+        int depth = 0;
+        while (node instanceof ReadLocalIR r && depth < 8) {
+            NodeIR init = currentLetInits.get(r.getSlot());
+            if (init == null) return node;
+            node = init;
+            depth++;
+        }
+        return node;
+    }
+
     private NodeIR peelIterFromSeq(NodeIR xsExpr, MezzeLanguage language) {
         // Form 1: still-unresolved CallDirectIR to iter::from_seq (fn name
         // "from_seq" in iter.mz, one param "xs").
