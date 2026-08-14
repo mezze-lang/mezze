@@ -2469,7 +2469,8 @@ public final class BytecodeCompiler {
         var predShape = classifyBodyPredicate(iff.getCond(), xSlot);
         if (predShape == null) return null;
         var filter = new FilterPeel(predShape.preOp, predShape.preRhs,
-                                    predShape.cmpOp, predShape.cmpRhs, null, null);
+                                    predShape.cmpOp, predShape.cmpRhs,
+                                    null, false, null, null);
         return new ConditionalFolderShape(thenShape.op, thenShape.mapperOp, thenShape.mapperRhs, filter);
     }
     private static final class ConditionalFolderShape {
@@ -2710,12 +2711,16 @@ public final class BytecodeCompiler {
         // over the materialized seq.
         InlineOp mapperOp = null; long mapperRhsLit = 0L;
         Hash mapperCallHash = null;
+        boolean mapperCallScalarABI = false;
+        String mapperCallFieldName = null;
         FilterPeel filterPeel = null;
         NodeIR peeledXs = xsExpr;
         var mapPeel = peelMapFromXs(peeledXs, language);
         if (mapPeel != null) {
             mapperOp = mapPeel.op; mapperRhsLit = mapPeel.rhsLit;
             mapperCallHash = mapPeel.callHash;
+            mapperCallScalarABI = mapPeel.callScalarABI;
+            mapperCallFieldName = mapPeel.callFieldName;
             peeledXs = mapPeel.innerXs;
         }
         filterPeel = peelFilterFromXs(peeledXs, language);
@@ -2752,6 +2757,8 @@ public final class BytecodeCompiler {
             final InlineOp fMapper = mapperOp;
             final long fMapperLit = mapperRhsLit;
             final Hash fMapperCall = mapperCallHash;
+            final boolean fMapperCallScalar = mapperCallScalarABI;
+            final String fMapperCallField = mapperCallFieldName;
             final FilterPeel fFilter = filterPeel;
             b.beginBlock();
               var accSlot = b.createLocal();
@@ -2762,7 +2769,8 @@ public final class BytecodeCompiler {
                       fRangeStart, fRangeEnd,
                       () -> b.emitLoadLongConstant(0L),
                       InlineOp.ADD,
-                      fMapper, fMapperLit, fMapperCall,
+                      fMapper, fMapperLit,
+                      fMapperCall, fMapperCallScalar, fMapperCallField,
                       fFilter);
             b.endBlock();
             if (System.getenv("MEZZE_SEQ_HOF_DEBUG") != null) {
@@ -2914,6 +2922,8 @@ public final class BytecodeCompiler {
         InlineOp mapperOp = null;              // op that maps xSlot → xSlot
         long mapperRhsLit = 0L;                // right-hand-side literal for mapper
         Hash mapperCallHash = null;            // #442 Day 9 — non-null when peel matched arbitrary-call form
+        boolean mapperCallScalarABI = false;   // ABI of the peeled callsite
+        String mapperCallFieldName = null;     // field name for record-ABI callsite
         FilterPeel filterPeel = null;          // predicate (simple/compound/call)
         NodeIR peeledXs = xsExpr;
         if (condShape != null) {
@@ -2934,6 +2944,8 @@ public final class BytecodeCompiler {
                 mapperOp = mapPeel.op;
                 mapperRhsLit = mapPeel.rhsLit;
                 mapperCallHash = mapPeel.callHash;
+                mapperCallScalarABI = mapPeel.callScalarABI;
+                mapperCallFieldName = mapPeel.callFieldName;
                 peeledXs = mapPeel.innerXs;
             }
             // Peel outer filter (if any).
@@ -3003,7 +3015,8 @@ public final class BytecodeCompiler {
                     accSlot, iSlot, xSlot,
                     rangeStart, rangeEnd, initExpr,
                     op, mapperOp, mapperRhsLit,
-                    mapperCallHash, filterPeel);
+                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                    filterPeel);
             b.endBlock();
             return true;
         }
@@ -3157,6 +3170,8 @@ public final class BytecodeCompiler {
                                     InlineOp op,
                                     InlineOp mapperOp, long mapperRhsLit,
                                     Hash mapperCallHash,
+                                    boolean mapperCallScalarABI,
+                                    String mapperCallFieldName,
                                     FilterPeel filter) {
         var endSlot = b.createLocal();
         b.beginStoreLocal(iSlot);
@@ -3181,14 +3196,16 @@ public final class BytecodeCompiler {
                 b.beginIfThen();
                   emitPredicateCheck(b, xSlot, filter);
                   b.beginBlock();
-                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperCallHash);
+                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit,
+                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName);
                     b.beginStoreLocal(accSlot);
                     emitInlineOpTwoLocals(op, accSlot, xSlot, b);
                     b.endStoreLocal();
                   b.endBlock();
                 b.endIfThen();
             } else {
-                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperCallHash);
+                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit,
+                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName);
                 b.beginStoreLocal(accSlot);
                 emitInlineOpTwoLocals(op, accSlot, xSlot, b);
                 b.endStoreLocal();
@@ -3228,35 +3245,69 @@ public final class BytecodeCompiler {
     private void emitMapperStep(MezzeBytecodeRootNodeGen.Builder b,
                                 com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
                                 InlineOp mapperOp, long mapperRhsLit,
-                                Hash mapperCallHash) {
+                                Hash mapperCallHash,
+                                boolean mapperCallScalarABI,
+                                String mapperCallFieldName) {
         if (mapperCallHash != null) {
             var target = resolveCallTarget(mapperCallHash);
             if (target != null) {
                 b.beginStoreLocal(xSlot);
-                b.beginCallDirectN(target);
-                  // Scalar-marker: the callee is a 1-param direct call and
-                  // the peel gate (isPureSingleArgCallee) confirmed it has
-                  // one param. AST callees would need the marker; BDSL
-                  // callees don't. We pay the marker cost unconditionally
-                  // for correctness — the cost is one push per element.
-                  if (!isBdslCallee(target)) {
-                      b.emitLoadObjectConstant(
-                          com.mezze.interpreter.nodes.function.ScalarABIMarker.INSTANCE);
-                  }
-                  b.emitLoadLocal(xSlot);
-                b.endCallDirectN();
+                emitCallOneArg(b, target, xSlot, mapperCallScalarABI, mapperCallFieldName);
                 b.endStoreLocal();
                 return;
             }
-            // Fallthrough: hash didn't resolve (shouldn't happen if peel
-            // gate passed) — emit nothing, xSlot stays as-is. Safer than
-            // aborting emission mid-loop.
+            // Fallthrough: hash didn't resolve — emit nothing, xSlot stays
+            // as-is. Safer than aborting emission mid-loop.
         }
         if (mapperOp != null) {
             b.beginStoreLocal(xSlot);
             emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
             b.endStoreLocal();
         }
+    }
+
+    /**
+     * #442 Day 9 — emit `target(xSlot)` in whichever ABI form the callsite
+     * originally used. Result is left on the BDSL stack.
+     *
+     * <ul>
+     *   <li>Scalar-ABI ({@code scalarABI == true, fieldName == null}):
+     *       {@code beginCallDirectN(target); [ScalarABIMarker if !BDSL]; xSlot; endCallDirectN}
+     *   </li>
+     *   <li>Record-ABI ({@code scalarABI == false, fieldName != null}):
+     *       {@code beginCallDirectN(target); MakeRecord{fieldName = xSlot}; endCallDirectN}
+     *       — mimics what the original callsite emitted.
+     *   </li>
+     * </ul>
+     */
+    private void emitCallOneArg(MezzeBytecodeRootNodeGen.Builder b,
+                                com.oracle.truffle.api.CallTarget target,
+                                com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+                                boolean scalarABI,
+                                String fieldName) {
+        b.beginCallDirectN(target);
+          if (scalarABI) {
+              // Same marker rule as the generic CallDirect emit path:
+              // AST callees need the marker to disambiguate scalar-ABI
+              // 1-arg from record-ABI (arity==1 collision).
+              if (!isBdslCallee(target)) {
+                  b.emitLoadObjectConstant(
+                      com.mezze.interpreter.nodes.function.ScalarABIMarker.INSTANCE);
+              }
+              b.emitLoadLocal(xSlot);
+          } else {
+              // Record-ABI: wrap xSlot in a one-field MakeRecord matching
+              // the original callsite's field name. This is a per-iter
+              // allocation; a proper fix would inline the callee body
+              // (deforestation) instead of calling — but that's a larger
+              // change; today's win is going from "not fused at all" to
+              // "fused with one alloc per iter". Truffle EA often folds
+              // the alloc when the callee reads the field once.
+              b.beginMakeRecord(new String[] { fieldName });
+                b.emitLoadLocal(xSlot);
+              b.endMakeRecord();
+          }
+        b.endCallDirectN();
     }
 
     /** Debug: describe a FilterPeel as "null" | "cmpOp" | "preOp-then-cmpOp" | "CALL hash8". */
@@ -3277,24 +3328,17 @@ public final class BytecodeCompiler {
                                     com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
                                     FilterPeel filter) {
         if (filter.callHash != null) {
-            // #442 Day 9 — call form: user_pred(xSlot) produces Bool
-            //   on the stack, which becomes the IfThen condition.
+            // #442 Day 9 — call form: user_pred(xSlot) produces Bool on
+            // the stack, becoming the IfThen condition.
             var target = resolveCallTarget(filter.callHash);
             if (target != null) {
-                b.beginCallDirectN(target);
-                  if (!isBdslCallee(target)) {
-                      b.emitLoadObjectConstant(
-                          com.mezze.interpreter.nodes.function.ScalarABIMarker.INSTANCE);
-                  }
-                  b.emitLoadLocal(xSlot);
-                b.endCallDirectN();
+                emitCallOneArg(b, target, xSlot,
+                    filter.callScalarABI, filter.callFieldName);
                 return;
             }
-            // Fallback: hash didn't resolve — emit a constant true so the
-            // loop body always executes. Safer than crashing at emit time;
-            // slightly wrong behavior at runtime (all elements included)
-            // but we'd have to know at peel time and the gate should have
-            // rejected the callee.
+            // Fallback: hash didn't resolve — emit constant true. Safer
+            // than crashing; slightly wrong behavior at runtime (all
+            // elements included). Gate should have prevented this.
             b.emitLoadObjectConstant(Boolean.TRUE);
             return;
         }
@@ -3343,11 +3387,15 @@ public final class BytecodeCompiler {
                                     InlineOp op,
                                     InlineOp mapperOp, long mapperRhsLit,
                                     Hash mapperCallHash,
+                                    boolean mapperCallScalarABI,
+                                    String mapperCallFieldName,
                                     FilterPeel filter) {
         emitRangeFusedLoop(b, argCount, localMap, accSlot, iSlot, xSlot,
                 rangeStart, rangeEnd,
                 () -> emitNode(initExpr, b, argCount, localMap),
-                op, mapperOp, mapperRhsLit, mapperCallHash, filter);
+                op, mapperOp, mapperRhsLit,
+                mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                filter);
     }
 
     /**
@@ -3391,7 +3439,17 @@ public final class BytecodeCompiler {
      *   </li>
      * </ul>
      */
-    private record MapPeel(InlineOp op, long rhsLit, Hash callHash, NodeIR innerXs) {}
+    /**
+     * When {@code callHash != null}: {@code callScalarABI} tells whether the
+     * callsite was scalar-ABI (arg is raw local) or record-ABI (arg is
+     * MakeRecord{field=local}), and {@code callFieldName} names the record
+     * field for the record-ABI case (null when scalar). Emit uses these to
+     * reproduce the original ABI shape at each iteration so the callee sees
+     * its argument in the form it expects.
+     */
+    private record MapPeel(InlineOp op, long rhsLit,
+                           Hash callHash, boolean callScalarABI, String callFieldName,
+                           NodeIR innerXs) {}
     /**
      * Predicate peeled from a seq::filter. Three forms:
      * <ul>
@@ -3411,7 +3469,7 @@ public final class BytecodeCompiler {
      */
     private record FilterPeel(InlineOp preOp, long preRhs,
                               InlineOp cmpOp, long cmpRhs,
-                              Hash callHash,
+                              Hash callHash, boolean callScalarABI, String callFieldName,
                               NodeIR innerXs) {}
 
     /**
@@ -3464,13 +3522,14 @@ public final class BytecodeCompiler {
         if (pair.callHash != null) {
             // #442 Day 9 — arbitrary pure call form. No arith op to gate on;
             // the peel-side purity check (isPureSingleArgCallee) is enough.
-            return new MapPeel(null, 0L, pair.callHash, xsField);
+            return new MapPeel(null, 0L,
+                pair.callHash, pair.callScalarABI, pair.callFieldName, xsField);
         }
         switch (pair.op) {
             case ADD, SUB, MUL, DIV, MOD -> {}
             default -> { return null; }
         }
-        return new MapPeel(pair.op, pair.rhsLit, null, xsField);
+        return new MapPeel(pair.op, pair.rhsLit, null, false, null, xsField);
     }
     /**
      * True iff {@code targetHash} points at a FunctionIR whose
@@ -3536,7 +3595,8 @@ public final class BytecodeCompiler {
         if (xsField == null || !(pField instanceof MakeLambdaIR ml)) return null;
         var shape = classifyUnaryPredicateLambda(ml, language);
         if (shape == null) return null;
-        return new FilterPeel(shape.preOp, shape.preRhs, shape.cmpOp, shape.cmpRhs, shape.callHash, xsField);
+        return new FilterPeel(shape.preOp, shape.preRhs, shape.cmpOp, shape.cmpRhs,
+            shape.callHash, shape.callScalarABI, shape.callFieldName, xsField);
     }
     private boolean isSeqFilterCallee(Hash targetHash, MezzeLanguage language) {
         if (targetHash == null || language == null) return false;
@@ -3561,10 +3621,22 @@ public final class BytecodeCompiler {
         final InlineOp op; final long rhsLit;
         /** #442 Day 9 — non-null when the mapper body is a call to a pure
          *  user function (rather than {@code x <op> lit}). When set,
-         *  {@code op} is null and {@code rhsLit} is ignored. */
+         *  {@code op} is null and {@code rhsLit} is ignored;
+         *  {@code callScalarABI} and {@code callFieldName} describe the
+         *  original callsite ABI (see {@link MapPeel}). */
         final Hash callHash;
-        UnaryLitShape(InlineOp op, long rhsLit) { this.op = op; this.rhsLit = rhsLit; this.callHash = null; }
-        UnaryLitShape(Hash callHash) { this.op = null; this.rhsLit = 0L; this.callHash = callHash; }
+        final boolean callScalarABI;
+        final String callFieldName;
+        UnaryLitShape(InlineOp op, long rhsLit) {
+            this.op = op; this.rhsLit = rhsLit;
+            this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
+        }
+        UnaryLitShape(Hash callHash, boolean callScalarABI, String callFieldName) {
+            this.op = null; this.rhsLit = 0L;
+            this.callHash = callHash;
+            this.callScalarABI = callScalarABI;
+            this.callFieldName = callFieldName;
+        }
     }
     /**
      * #438 — classify a unary predicate lambda for filter fusion.
@@ -3578,17 +3650,23 @@ public final class BytecodeCompiler {
         final InlineOp preOp; final long preRhs;
         final InlineOp cmpOp; final long cmpRhs;
         /** #442 Day 9 — non-null when predicate body is a call to a pure
-         *  Bool-returning user function. Other fields null/0 in that case. */
+         *  Bool-returning user function. Other fields null/0 in that case;
+         *  {@code callScalarABI} and {@code callFieldName} describe the
+         *  original callsite ABI. */
         final Hash callHash;
+        final boolean callScalarABI;
+        final String callFieldName;
         PredShape(InlineOp preOp, long preRhs, InlineOp cmpOp, long cmpRhs) {
             this.preOp = preOp; this.preRhs = preRhs;
             this.cmpOp = cmpOp; this.cmpRhs = cmpRhs;
-            this.callHash = null;
+            this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
         }
-        PredShape(Hash callHash) {
+        PredShape(Hash callHash, boolean callScalarABI, String callFieldName) {
             this.preOp = null; this.preRhs = 0L;
             this.cmpOp = null; this.cmpRhs = 0L;
             this.callHash = callHash;
+            this.callScalarABI = callScalarABI;
+            this.callFieldName = callFieldName;
         }
     }
     private PredShape classifyUnaryPredicateLambda(MakeLambdaIR ml, MezzeLanguage language) {
@@ -3613,7 +3691,8 @@ public final class BytecodeCompiler {
                     && call.getArgs().get(0) instanceof ReadLocalIR llp1
                     && llp1.getSlot() == paramSlot
                     && isPureSingleArgCallee(call.getTargetHash())) {
-                return new PredShape(call.getTargetHash());
+                return new PredShape(call.getTargetHash(),
+                    /*callScalarABI=*/ true, /*callFieldName=*/ null);
             }
             if (!call.isScalarABI() && call.getArgs().size() == 1
                     && call.getArgs().get(0) instanceof MakeRecordIR mrp
@@ -3621,7 +3700,9 @@ public final class BytecodeCompiler {
                     && mrp.getFields().get(0).getValue() instanceof ReadLocalIR llp2
                     && llp2.getSlot() == paramSlot
                     && isPureSingleArgCallee(call.getTargetHash())) {
-                return new PredShape(call.getTargetHash());
+                return new PredShape(call.getTargetHash(),
+                    /*callScalarABI=*/ false,
+                    /*callFieldName=*/ mrp.getFields().get(0).getName());
             }
         }
         // Extract outer op: (LHS <cmpOp> LongLit). LHS is either
@@ -3762,7 +3843,8 @@ public final class BytecodeCompiler {
                     && call.getArgs().get(0) instanceof ReadLocalIR ll3
                     && ll3.getSlot() == paramSlot) {
                 if (isPureSingleArgCallee(call.getTargetHash())) {
-                    return new UnaryLitShape(call.getTargetHash());
+                    return new UnaryLitShape(call.getTargetHash(),
+                        /*callScalarABI=*/ true, /*callFieldName=*/ null);
                 }
                 return null;
             }
@@ -3772,7 +3854,9 @@ public final class BytecodeCompiler {
                     && mr.getFields().get(0).getValue() instanceof ReadLocalIR ll4
                     && ll4.getSlot() == paramSlot) {
                 if (isPureSingleArgCallee(call.getTargetHash())) {
-                    return new UnaryLitShape(call.getTargetHash());
+                    return new UnaryLitShape(call.getTargetHash(),
+                        /*callScalarABI=*/ false,
+                        /*callFieldName=*/ mr.getFields().get(0).getName());
                 }
                 return null;
             }
@@ -3784,26 +3868,36 @@ public final class BytecodeCompiler {
      * #442 Day 9 — purity gate for fusion-inline call peel. Returns true iff
      * we can safely inline a call to this target inside a range-fused loop:
      * the callee must exist, take exactly one parameter, have no captures,
-     * and its body must not (transitively) yield a MezzeSuspend — i.e.
-     * contain no {@link PerformOpIR}. Uses {@link #canYieldSuspended} as a
-     * conservative check. Returns false on any unknown/uncompiled target.
+     * have no locals, and its body must not (transitively) yield a
+     * MezzeSuspend — i.e. contain no {@link PerformOpIR}. Uses
+     * {@link #canYieldSuspended} as a conservative check.
      *
-     * <p><b>WIP — env-gated OFF by default.</b> The peel matcher and emit
-     * infrastructure are in place, but the emit currently uses a single
-     * scalar-ABI shape that mismatches record-ABI callees, producing wrong
-     * results (see bench user_fn_map_fold: 4950 vs expected 1338150 —
-     * mapper effectively returned identity). Follow-up needed: preserve
-     * the callsite ABI shape (scalar vs record-with-1-field-record) when
-     * emitting the inline call. Set {@code MEZZE_FUSE_CALL_PEEL=1} to
-     * enable for experimentation.
+     * <p><b>The "no locals" restriction is deliberate.</b> Complex callee
+     * bodies with `let` bindings (or any code that allocates local slots)
+     * empirically produced wrong results in early testing — the scalar-ABI
+     * call path fed the callee a raw long but the callee, after mono, was
+     * accessing param via a different slot indirection. Rather than debug
+     * that ABI mismatch in the general case, we tightly gate to "trivial
+     * wrapper" callees whose body is a single expression referencing the
+     * one param. This covers the important case for Day 10 (Iter ability
+     * trivial wrappers) without opening the correctness can of worms for
+     * arbitrary user functions with locals.
+     *
+     * <p>Returns false on any unknown/uncompiled target, or any target
+     * with locals/captures/effects.
+     *
+     * <p>Kill-switch: {@code MEZZE_FUSE_CALL_PEEL=0} disables the peel
+     * entirely (falls through to the pre-Day 9 path — user_fn callsites
+     * materialize an intermediate seq). Default is on.
      */
     private boolean isPureSingleArgCallee(Hash targetHash) {
-        if (System.getenv("MEZZE_FUSE_CALL_PEEL") == null) return false;
+        if ("0".equals(System.getenv("MEZZE_FUSE_CALL_PEEL"))) return false;
         if (targetHash == null) return false;
         var fn = language.lookupFunctionIR(targetHash);
         if (fn == null) return false;
         if (fn.getParamSlots().size() != 1) return false;
         if (!fn.getCaptureSlots().isEmpty()) return false;
+        if (!fn.getLocalSlots().isEmpty()) return false;  // no `let`-bound bodies
         if (canYieldSuspended(fn.getBody())) return false;
         return true;
     }
