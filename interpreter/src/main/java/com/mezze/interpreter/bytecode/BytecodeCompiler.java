@@ -2469,7 +2469,7 @@ public final class BytecodeCompiler {
         var predShape = classifyBodyPredicate(iff.getCond(), xSlot);
         if (predShape == null) return null;
         var filter = new FilterPeel(predShape.preOp, predShape.preRhs,
-                                    predShape.cmpOp, predShape.cmpRhs, null);
+                                    predShape.cmpOp, predShape.cmpRhs, null, null);
         return new ConditionalFolderShape(thenShape.op, thenShape.mapperOp, thenShape.mapperRhs, filter);
     }
     private static final class ConditionalFolderShape {
@@ -2709,11 +2709,13 @@ public final class BytecodeCompiler {
         // (map(filter(range))). Otherwise fall back to BuiltinSumLongSeq
         // over the materialized seq.
         InlineOp mapperOp = null; long mapperRhsLit = 0L;
+        Hash mapperCallHash = null;
         FilterPeel filterPeel = null;
         NodeIR peeledXs = xsExpr;
         var mapPeel = peelMapFromXs(peeledXs, language);
         if (mapPeel != null) {
             mapperOp = mapPeel.op; mapperRhsLit = mapPeel.rhsLit;
+            mapperCallHash = mapPeel.callHash;
             peeledXs = mapPeel.innerXs;
         }
         filterPeel = peelFilterFromXs(peeledXs, language);
@@ -2735,7 +2737,7 @@ public final class BytecodeCompiler {
                 if (rangeStart == null || rangeEnd == null) { rangeStart = null; rangeEnd = null; }
             }
         }
-        if (rangeStart == null && (mapperOp != null || filterPeel != null)) {
+        if (rangeStart == null && (mapperOp != null || mapperCallHash != null || filterPeel != null)) {
             // Peel matched but no range underneath — can't fuse. Bail so
             // caller falls back to the record-ABI native dispatch (which
             // materializes and then sums).
@@ -2749,6 +2751,7 @@ public final class BytecodeCompiler {
             final NodeIR fRangeEnd = rangeEnd;
             final InlineOp fMapper = mapperOp;
             final long fMapperLit = mapperRhsLit;
+            final Hash fMapperCall = mapperCallHash;
             final FilterPeel fFilter = filterPeel;
             b.beginBlock();
               var accSlot = b.createLocal();
@@ -2759,11 +2762,12 @@ public final class BytecodeCompiler {
                       fRangeStart, fRangeEnd,
                       () -> b.emitLoadLongConstant(0L),
                       InlineOp.ADD,
-                      fMapper, fMapperLit,
+                      fMapper, fMapperLit, fMapperCall,
                       fFilter);
             b.endBlock();
             if (System.getenv("MEZZE_SEQ_HOF_DEBUG") != null) {
-                System.err.println("[seq-hof] emitted range-fused sum mapper=" + mapperOp
+                System.err.println("[seq-hof] emitted range-fused sum mapper="
+                    + (mapperCallHash != null ? "CALL " + mapperCallHash.getHex().substring(0, 8) : mapperOp)
                     + " pred=" + describeFilter(filterPeel));
             }
             return true;
@@ -2909,7 +2913,8 @@ public final class BytecodeCompiler {
         NodeIR rangeStart = null, rangeEnd = null;
         InlineOp mapperOp = null;              // op that maps xSlot → xSlot
         long mapperRhsLit = 0L;                // right-hand-side literal for mapper
-        FilterPeel filterPeel = null;          // predicate (simple or compound)
+        Hash mapperCallHash = null;            // #442 Day 9 — non-null when peel matched arbitrary-call form
+        FilterPeel filterPeel = null;          // predicate (simple/compound/call)
         NodeIR peeledXs = xsExpr;
         if (condShape != null) {
             // #439 Day 6: filter+map already discovered inside the folder
@@ -2919,6 +2924,8 @@ public final class BytecodeCompiler {
             // careful ordering — deferred until a real bench needs it.
             mapperOp = bodyMapperOp;
             mapperRhsLit = bodyMapperRhs;
+            // condShape's synthetic mapper never uses the call form; the
+            // body classifier only recognizes inline arith. Leave callHash null.
             filterPeel = bodyFilter;
         } else {
             // Peel outer map (if any).
@@ -2926,6 +2933,7 @@ public final class BytecodeCompiler {
             if (mapPeel != null) {
                 mapperOp = mapPeel.op;
                 mapperRhsLit = mapPeel.rhsLit;
+                mapperCallHash = mapPeel.callHash;
                 peeledXs = mapPeel.innerXs;
             }
             // Peel outer filter (if any).
@@ -2936,7 +2944,8 @@ public final class BytecodeCompiler {
         }
         // Peeling done. peeledXs is now the innermost source; check for
         // __native_seq_range.
-        if (dbg) System.err.println("[fold-fuse] after peel: mapper=" + mapperOp
+        if (dbg) System.err.println("[fold-fuse] after peel: mapper="
+                + (mapperCallHash != null ? "CALL " + mapperCallHash.getHex().substring(0, 8) : mapperOp)
                 + " pred=" + describeFilter(filterPeel)
                 + " peeledXs=" + peeledXs.getClass().getSimpleName());
         //
@@ -2962,7 +2971,7 @@ public final class BytecodeCompiler {
         // If we peeled map/filter but no range source underneath, we
         // can't fuse — bail. The generic fold on materialized xs still
         // runs correctly via the non-fused path.
-        if (rangeStart == null && (mapperOp != null || filterPeel != null)) {
+        if (rangeStart == null && (mapperOp != null || mapperCallHash != null || filterPeel != null)) {
             return false;
         }
 
@@ -2972,7 +2981,7 @@ public final class BytecodeCompiler {
         // BuiltinSumLongSeq: no BDSL slot traffic, InlinedLoopConditionProfile-
         // driven, primitive-long acc kept in a Java local. Java-parity.
         if (rangeStart != null && op == InlineOp.ADD
-                && mapperOp == null && filterPeel == null) {
+                && mapperOp == null && mapperCallHash == null && filterPeel == null) {
             b.beginBuiltinSumRangeLong();
               emitNode(rangeStart, b, argCount, localMap);
               emitNode(rangeEnd,   b, argCount, localMap);
@@ -2993,7 +3002,8 @@ public final class BytecodeCompiler {
             emitRangeFusedLoop(b, argCount, localMap,
                     accSlot, iSlot, xSlot,
                     rangeStart, rangeEnd, initExpr,
-                    op, mapperOp, mapperRhsLit, filterPeel);
+                    op, mapperOp, mapperRhsLit,
+                    mapperCallHash, filterPeel);
             b.endBlock();
             return true;
         }
@@ -3146,6 +3156,7 @@ public final class BytecodeCompiler {
                                     Runnable initEmit,
                                     InlineOp op,
                                     InlineOp mapperOp, long mapperRhsLit,
+                                    Hash mapperCallHash,
                                     FilterPeel filter) {
         var endSlot = b.createLocal();
         b.beginStoreLocal(iSlot);
@@ -3170,22 +3181,14 @@ public final class BytecodeCompiler {
                 b.beginIfThen();
                   emitPredicateCheck(b, xSlot, filter);
                   b.beginBlock();
-                    if (mapperOp != null) {
-                        b.beginStoreLocal(xSlot);
-                        emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
-                        b.endStoreLocal();
-                    }
+                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperCallHash);
                     b.beginStoreLocal(accSlot);
                     emitInlineOpTwoLocals(op, accSlot, xSlot, b);
                     b.endStoreLocal();
                   b.endBlock();
                 b.endIfThen();
             } else {
-                if (mapperOp != null) {
-                    b.beginStoreLocal(xSlot);
-                    emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
-                    b.endStoreLocal();
-                }
+                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperCallHash);
                 b.beginStoreLocal(accSlot);
                 emitInlineOpTwoLocals(op, accSlot, xSlot, b);
                 b.endStoreLocal();
@@ -3201,13 +3204,65 @@ public final class BytecodeCompiler {
         b.emitLoadLocal(accSlot);
         if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
             System.err.println("[fold-fuse] emitted range-fused loop for op=" + op
-                + " mapper=" + mapperOp + " pred=" + describeFilter(filter));
+                + " mapper=" + (mapperCallHash != null ? "CALL " + mapperCallHash.getHex().substring(0, 8) : mapperOp)
+                + " pred=" + describeFilter(filter));
         }
     }
 
-    /** Debug: describe a FilterPeel as "null" | "cmpOp" | "preOp-then-cmpOp". */
+    /**
+     * #442 Day 9 — emit the map step inside the range-fused loop body.
+     * Three cases:
+     *   - No mapper: emit nothing (fold step reads xSlot directly).
+     *   - Inline op form (mapperCallHash == null, mapperOp != null):
+     *       xSlot = xSlot <mapperOp> mapperRhsLit
+     *   - Call form (mapperCallHash != null):
+     *       xSlot = user_fn(xSlot)
+     *     Emitted as BDSL beginCallDirectN targeting the resolved
+     *     CallTarget. Callee must be a pure single-arg function
+     *     (isPureSingleArgCallee gate). Scalar-ABI (1 arg) is preferred;
+     *     if the callee's ABI needs a record wrapper, we synthesize a
+     *     one-field MakeRecord — but that allocs per iter, defeating
+     *     the point. In practice, mono specializes to scalar-ABI when
+     *     the callee is small and single-typed.
+     */
+    private void emitMapperStep(MezzeBytecodeRootNodeGen.Builder b,
+                                com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+                                InlineOp mapperOp, long mapperRhsLit,
+                                Hash mapperCallHash) {
+        if (mapperCallHash != null) {
+            var target = resolveCallTarget(mapperCallHash);
+            if (target != null) {
+                b.beginStoreLocal(xSlot);
+                b.beginCallDirectN(target);
+                  // Scalar-marker: the callee is a 1-param direct call and
+                  // the peel gate (isPureSingleArgCallee) confirmed it has
+                  // one param. AST callees would need the marker; BDSL
+                  // callees don't. We pay the marker cost unconditionally
+                  // for correctness — the cost is one push per element.
+                  if (!isBdslCallee(target)) {
+                      b.emitLoadObjectConstant(
+                          com.mezze.interpreter.nodes.function.ScalarABIMarker.INSTANCE);
+                  }
+                  b.emitLoadLocal(xSlot);
+                b.endCallDirectN();
+                b.endStoreLocal();
+                return;
+            }
+            // Fallthrough: hash didn't resolve (shouldn't happen if peel
+            // gate passed) — emit nothing, xSlot stays as-is. Safer than
+            // aborting emission mid-loop.
+        }
+        if (mapperOp != null) {
+            b.beginStoreLocal(xSlot);
+            emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
+            b.endStoreLocal();
+        }
+    }
+
+    /** Debug: describe a FilterPeel as "null" | "cmpOp" | "preOp-then-cmpOp" | "CALL hash8". */
     private static String describeFilter(FilterPeel f) {
         if (f == null) return "null";
+        if (f.callHash != null) return "CALL " + f.callHash.getHex().substring(0, 8);
         return f.preOp == null ? f.cmpOp.toString() : (f.preOp + "-then-" + f.cmpOp);
     }
 
@@ -3221,6 +3276,28 @@ public final class BytecodeCompiler {
     private void emitPredicateCheck(MezzeBytecodeRootNodeGen.Builder b,
                                     com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
                                     FilterPeel filter) {
+        if (filter.callHash != null) {
+            // #442 Day 9 — call form: user_pred(xSlot) produces Bool
+            //   on the stack, which becomes the IfThen condition.
+            var target = resolveCallTarget(filter.callHash);
+            if (target != null) {
+                b.beginCallDirectN(target);
+                  if (!isBdslCallee(target)) {
+                      b.emitLoadObjectConstant(
+                          com.mezze.interpreter.nodes.function.ScalarABIMarker.INSTANCE);
+                  }
+                  b.emitLoadLocal(xSlot);
+                b.endCallDirectN();
+                return;
+            }
+            // Fallback: hash didn't resolve — emit a constant true so the
+            // loop body always executes. Safer than crashing at emit time;
+            // slightly wrong behavior at runtime (all elements included)
+            // but we'd have to know at peel time and the gate should have
+            // rejected the callee.
+            b.emitLoadObjectConstant(Boolean.TRUE);
+            return;
+        }
         if (filter.preOp == null) {
             // Simple: xSlot cmpOp cmpRhs.
             emitInlineOpLocalLit(filter.cmpOp, xSlot, filter.cmpRhs, b);
@@ -3265,11 +3342,12 @@ public final class BytecodeCompiler {
                                     NodeIR rangeStart, NodeIR rangeEnd, NodeIR initExpr,
                                     InlineOp op,
                                     InlineOp mapperOp, long mapperRhsLit,
+                                    Hash mapperCallHash,
                                     FilterPeel filter) {
         emitRangeFusedLoop(b, argCount, localMap, accSlot, iSlot, xSlot,
                 rangeStart, rangeEnd,
                 () -> emitNode(initExpr, b, argCount, localMap),
-                op, mapperOp, mapperRhsLit, filter);
+                op, mapperOp, mapperRhsLit, mapperCallHash, filter);
     }
 
     /**
@@ -3300,19 +3378,40 @@ public final class BytecodeCompiler {
 
     /**
      * #437 — result of peeling a `seq::map` call from a fold's xsExpr.
-     * op/rhsLit describe the mapper lambda body ({@code {x} -> x <op> lit}),
-     * innerXs is the seq expression the map was applied to.
+     *
+     * <p>Discriminated union of two body shapes:
+     * <ul>
+     *   <li><b>Inline op form</b> ({@code callHash == null}): lambda body is
+     *       {@code {x} -> x <op> lit} — carried as {@code (op, rhsLit)}.
+     *   </li>
+     *   <li><b>#442 Day 9 arbitrary-call form</b> ({@code callHash != null}):
+     *       lambda body is {@code {x} -> user_fn {arg = x}} where user_fn
+     *       is a pure single-argument function whose runtime target is
+     *       {@code callHash}. Fusion emits an inline call in the loop body.
+     *   </li>
+     * </ul>
      */
-    private record MapPeel(InlineOp op, long rhsLit, NodeIR innerXs) {}
+    private record MapPeel(InlineOp op, long rhsLit, Hash callHash, NodeIR innerXs) {}
     /**
-     * Predicate peeled from a seq::filter. Simple form (preOp==null):
-     *   {x} -> x <cmpOp> cmpRhs
-     * Compound form (preOp != null):
-     *   {x} -> (x <preOp> preRhs) <cmpOp> cmpRhs
-     * — e.g. {@code x % 2 == 0} → preOp=MOD, preRhs=2, cmpOp=EQ, cmpRhs=0.
+     * Predicate peeled from a seq::filter. Three forms:
+     * <ul>
+     *   <li><b>Simple inline</b> ({@code preOp==null, callHash==null}):
+     *       {@code {x} -> x <cmpOp> cmpRhs}
+     *   </li>
+     *   <li><b>Compound inline</b> ({@code preOp != null, callHash==null}):
+     *       {@code {x} -> (x <preOp> preRhs) <cmpOp> cmpRhs}
+     *       — e.g. {@code x % 2 == 0} → preOp=MOD, preRhs=2, cmpOp=EQ, cmpRhs=0.
+     *   </li>
+     *   <li><b>#442 Day 9 arbitrary-call form</b> ({@code callHash != null}):
+     *       {@code {x} -> user_pred {arg = x}} where user_pred is pure and
+     *       returns Bool. Fusion emits an inline call as the {@code if}
+     *       condition.
+     *   </li>
+     * </ul>
      */
     private record FilterPeel(InlineOp preOp, long preRhs,
                               InlineOp cmpOp, long cmpRhs,
+                              Hash callHash,
                               NodeIR innerXs) {}
 
     /**
@@ -3362,11 +3461,16 @@ public final class BytecodeCompiler {
         if (!(fField instanceof MakeLambdaIR ml)) return null;
         var pair = classifyUnaryLiteralLambda(ml, language);
         if (pair == null) return null;
+        if (pair.callHash != null) {
+            // #442 Day 9 — arbitrary pure call form. No arith op to gate on;
+            // the peel-side purity check (isPureSingleArgCallee) is enough.
+            return new MapPeel(null, 0L, pair.callHash, xsField);
+        }
         switch (pair.op) {
             case ADD, SUB, MUL, DIV, MOD -> {}
             default -> { return null; }
         }
-        return new MapPeel(pair.op, pair.rhsLit, xsField);
+        return new MapPeel(pair.op, pair.rhsLit, null, xsField);
     }
     /**
      * True iff {@code targetHash} points at a FunctionIR whose
@@ -3432,7 +3536,7 @@ public final class BytecodeCompiler {
         if (xsField == null || !(pField instanceof MakeLambdaIR ml)) return null;
         var shape = classifyUnaryPredicateLambda(ml, language);
         if (shape == null) return null;
-        return new FilterPeel(shape.preOp, shape.preRhs, shape.cmpOp, shape.cmpRhs, xsField);
+        return new FilterPeel(shape.preOp, shape.preRhs, shape.cmpOp, shape.cmpRhs, shape.callHash, xsField);
     }
     private boolean isSeqFilterCallee(Hash targetHash, MezzeLanguage language) {
         if (targetHash == null || language == null) return false;
@@ -3455,7 +3559,12 @@ public final class BytecodeCompiler {
      */
     private static final class UnaryLitShape {
         final InlineOp op; final long rhsLit;
-        UnaryLitShape(InlineOp op, long rhsLit) { this.op = op; this.rhsLit = rhsLit; }
+        /** #442 Day 9 — non-null when the mapper body is a call to a pure
+         *  user function (rather than {@code x <op> lit}). When set,
+         *  {@code op} is null and {@code rhsLit} is ignored. */
+        final Hash callHash;
+        UnaryLitShape(InlineOp op, long rhsLit) { this.op = op; this.rhsLit = rhsLit; this.callHash = null; }
+        UnaryLitShape(Hash callHash) { this.op = null; this.rhsLit = 0L; this.callHash = callHash; }
     }
     /**
      * #438 — classify a unary predicate lambda for filter fusion.
@@ -3468,9 +3577,18 @@ public final class BytecodeCompiler {
     private static final class PredShape {
         final InlineOp preOp; final long preRhs;
         final InlineOp cmpOp; final long cmpRhs;
+        /** #442 Day 9 — non-null when predicate body is a call to a pure
+         *  Bool-returning user function. Other fields null/0 in that case. */
+        final Hash callHash;
         PredShape(InlineOp preOp, long preRhs, InlineOp cmpOp, long cmpRhs) {
             this.preOp = preOp; this.preRhs = preRhs;
             this.cmpOp = cmpOp; this.cmpRhs = cmpRhs;
+            this.callHash = null;
+        }
+        PredShape(Hash callHash) {
+            this.preOp = null; this.preRhs = 0L;
+            this.cmpOp = null; this.cmpRhs = 0L;
+            this.callHash = callHash;
         }
     }
     private PredShape classifyUnaryPredicateLambda(MakeLambdaIR ml, MezzeLanguage language) {
@@ -3482,6 +3600,30 @@ public final class BytecodeCompiler {
         if (!fnIR.getLocalSlots().isEmpty()) return null;
         int paramSlot = 0;
         NodeIR body = fnIR.getBody();
+        // #442 Day 9 — Shape D first: arbitrary pure single-arg call.
+        //   {x} -> user_pred { arg = x }   returning Bool
+        // Same 2 recognized IR forms as classifyUnaryLiteralLambda's Shape D.
+        // Purity gate: callee must be pure (no PerformOpIR transitively).
+        // We don't verify the return type is Bool here — the peel is used
+        // as an `if` condition, so a non-Bool would crash at emit time in
+        // BDSL's IfThen. In practice the typechecker rejected the source
+        // before we got here if the predicate wasn't Bool-valued.
+        if (body instanceof CallDirectIR call && call.getTargetHash() != null) {
+            if (call.isScalarABI() && call.getArgs().size() == 1
+                    && call.getArgs().get(0) instanceof ReadLocalIR llp1
+                    && llp1.getSlot() == paramSlot
+                    && isPureSingleArgCallee(call.getTargetHash())) {
+                return new PredShape(call.getTargetHash());
+            }
+            if (!call.isScalarABI() && call.getArgs().size() == 1
+                    && call.getArgs().get(0) instanceof MakeRecordIR mrp
+                    && mrp.getFields().size() == 1
+                    && mrp.getFields().get(0).getValue() instanceof ReadLocalIR llp2
+                    && llp2.getSlot() == paramSlot
+                    && isPureSingleArgCallee(call.getTargetHash())) {
+                return new PredShape(call.getTargetHash());
+            }
+        }
         // Extract outer op: (LHS <cmpOp> LongLit). LHS is either
         // ReadLocal(paramSlot) [simple] or another binary op [compound].
         var outer = matchBinaryOpAgainstLongLit(body);
@@ -3604,7 +3746,66 @@ public final class BytecodeCompiler {
             if (rLit == null) return null;
             return new UnaryLitShape(op, rLit.getValue());
         }
+        // #442 Day 9 — Shape D: arbitrary pure single-arg call.
+        //   {x} -> user_fn { arg = x }
+        // Recognized shapes at IR level:
+        //   D1 scalar-ABI: CallDirect(hash, [ReadLocal(paramSlot)])
+        //   D2 record-ABI: CallDirect(hash, [MakeRecord{someField = ReadLocal(paramSlot)}])
+        //                  — one-field record wrapping our param
+        // Purity gate: callee body must not contain any PerformOpIR
+        // (transitively) — otherwise fusion would change execution order
+        // for filtered-out elements. Uses the existing canYieldSuspended
+        // predicate as a conservative approximation.
+        if (body instanceof CallDirectIR call) {
+            if (call.getTargetHash() == null) return null;
+            if (call.isScalarABI() && call.getArgs().size() == 1
+                    && call.getArgs().get(0) instanceof ReadLocalIR ll3
+                    && ll3.getSlot() == paramSlot) {
+                if (isPureSingleArgCallee(call.getTargetHash())) {
+                    return new UnaryLitShape(call.getTargetHash());
+                }
+                return null;
+            }
+            if (!call.isScalarABI() && call.getArgs().size() == 1
+                    && call.getArgs().get(0) instanceof MakeRecordIR mr
+                    && mr.getFields().size() == 1
+                    && mr.getFields().get(0).getValue() instanceof ReadLocalIR ll4
+                    && ll4.getSlot() == paramSlot) {
+                if (isPureSingleArgCallee(call.getTargetHash())) {
+                    return new UnaryLitShape(call.getTargetHash());
+                }
+                return null;
+            }
+        }
         return null;
+    }
+
+    /**
+     * #442 Day 9 — purity gate for fusion-inline call peel. Returns true iff
+     * we can safely inline a call to this target inside a range-fused loop:
+     * the callee must exist, take exactly one parameter, have no captures,
+     * and its body must not (transitively) yield a MezzeSuspend — i.e.
+     * contain no {@link PerformOpIR}. Uses {@link #canYieldSuspended} as a
+     * conservative check. Returns false on any unknown/uncompiled target.
+     *
+     * <p><b>WIP — env-gated OFF by default.</b> The peel matcher and emit
+     * infrastructure are in place, but the emit currently uses a single
+     * scalar-ABI shape that mismatches record-ABI callees, producing wrong
+     * results (see bench user_fn_map_fold: 4950 vs expected 1338150 —
+     * mapper effectively returned identity). Follow-up needed: preserve
+     * the callsite ABI shape (scalar vs record-with-1-field-record) when
+     * emitting the inline call. Set {@code MEZZE_FUSE_CALL_PEEL=1} to
+     * enable for experimentation.
+     */
+    private boolean isPureSingleArgCallee(Hash targetHash) {
+        if (System.getenv("MEZZE_FUSE_CALL_PEEL") == null) return false;
+        if (targetHash == null) return false;
+        var fn = language.lookupFunctionIR(targetHash);
+        if (fn == null) return false;
+        if (fn.getParamSlots().size() != 1) return false;
+        if (!fn.getCaptureSlots().isEmpty()) return false;
+        if (canYieldSuspended(fn.getBody())) return false;
+        return true;
     }
 
     /**
