@@ -2661,6 +2661,24 @@ public final class BytecodeCompiler {
             }
         }
 
+        // #427 fast path — ADD folder over an inline range collapses to a
+        // single BuiltinSumRangeLong op that owns the whole counted loop.
+        // Same shape as sum_native's BuiltinSumLongSeq: no BDSL slot
+        // traffic, InlinedLoopConditionProfile-driven, primitive-long
+        // acc kept in a Java local. Closes the remaining sum_native/node
+        // gap on this shape.
+        if (rangeStart != null && op == InlineOp.ADD) {
+            b.beginBuiltinSumRangeLong();
+              emitNode(rangeStart, b, argCount, localMap);
+              emitNode(rangeEnd,   b, argCount, localMap);
+              emitNode(initExpr,   b, argCount, localMap);
+            b.endBuiltinSumRangeLong();
+            if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
+                System.err.println("[fold-fuse] emitted BuiltinSumRangeLong");
+            }
+            return true;
+        }
+
         b.beginBlock();
         var accSlot  = b.createLocal();
         var iSlot    = b.createLocal();

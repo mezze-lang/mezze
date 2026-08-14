@@ -148,6 +148,7 @@ import com.oracle.truffle.api.nodes.RootNode;
 @OperationProxy(value = DirectNotNode.class, name = "DirectNot")
 @OperationProxy(value = com.mezze.interpreter.nodes.seq.SeqAccessNode.class, name = "SeqGet")
 @OperationProxy(value = com.mezze.datastructures.nodes.SeqSumLongScalarNode.class, name = "BuiltinSumLongSeq")
+@OperationProxy(value = com.mezze.datastructures.nodes.SumRangeLongNode.class, name = "BuiltinSumRangeLong")
 public abstract class MezzeBytecodeRootNode extends RootNode implements BytecodeRootNode {
 
     protected MezzeBytecodeRootNode(MezzeLanguage language, FrameDescriptor frameDescriptor) {
