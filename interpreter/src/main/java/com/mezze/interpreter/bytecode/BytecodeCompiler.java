@@ -3251,8 +3251,22 @@ public final class BytecodeCompiler {
         if (mapperCallHash != null) {
             var target = resolveCallTarget(mapperCallHash);
             if (target != null) {
+                // #442 Day 9 fix — stage the arg through a fresh local before
+                // the call. The naive `beginStoreLocal(xSlot); call(xSlot);
+                // endStoreLocal` shape aliases the same slot as read source
+                // AND write target across the call. For callees with their
+                // own local slots, BDSL's frame model can shift storage
+                // during the call, corrupting the arg-load. A fresh
+                // `argCopy` local decouples the two roles: argCopy holds the
+                // input value for the entire call duration, and xSlot is
+                // stored to with the result. This is the general fix that
+                // makes the peel correct for arbitrary user-fn callees.
+                var argCopy = b.createLocal();
+                b.beginStoreLocal(argCopy);
+                  b.emitLoadLocal(xSlot);
+                b.endStoreLocal();
                 b.beginStoreLocal(xSlot);
-                emitCallOneArg(b, target, xSlot, mapperCallScalarABI, mapperCallFieldName);
+                  emitCallOneArg(b, target, argCopy, mapperCallScalarABI, mapperCallFieldName);
                 b.endStoreLocal();
                 return;
             }
@@ -3260,6 +3274,9 @@ public final class BytecodeCompiler {
             // as-is. Safer than aborting emission mid-loop.
         }
         if (mapperOp != null) {
+            // Inline op is safe as-is: the emitted op reads xSlot on the
+            // BDSL stack, applies the op, produces a value. No callee =
+            // no frame-slot aliasing risk.
             b.beginStoreLocal(xSlot);
             emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
             b.endStoreLocal();
@@ -3329,10 +3346,16 @@ public final class BytecodeCompiler {
                                     FilterPeel filter) {
         if (filter.callHash != null) {
             // #442 Day 9 — call form: user_pred(xSlot) produces Bool on
-            // the stack, becoming the IfThen condition.
+            // the stack, becoming the IfThen condition. Stage the arg
+            // through a fresh local to isolate it from the callee's frame
+            // activity (see emitMapperStep for the full rationale).
             var target = resolveCallTarget(filter.callHash);
             if (target != null) {
-                emitCallOneArg(b, target, xSlot,
+                var argCopy = b.createLocal();
+                b.beginStoreLocal(argCopy);
+                  b.emitLoadLocal(xSlot);
+                b.endStoreLocal();
+                emitCallOneArg(b, target, argCopy,
                     filter.callScalarABI, filter.callFieldName);
                 return;
             }
@@ -3868,23 +3891,23 @@ public final class BytecodeCompiler {
      * #442 Day 9 — purity gate for fusion-inline call peel. Returns true iff
      * we can safely inline a call to this target inside a range-fused loop:
      * the callee must exist, take exactly one parameter, have no captures,
-     * have no locals, and its body must not (transitively) yield a
-     * MezzeSuspend — i.e. contain no {@link PerformOpIR}. Uses
-     * {@link #canYieldSuspended} as a conservative check.
+     * and its body must not (transitively) yield a MezzeSuspend — i.e.
+     * contain no {@link PerformOpIR}. Uses {@link #canYieldSuspended}.
      *
-     * <p><b>The "no locals" restriction is deliberate.</b> Complex callee
-     * bodies with `let` bindings (or any code that allocates local slots)
-     * empirically produced wrong results in early testing — the scalar-ABI
-     * call path fed the callee a raw long but the callee, after mono, was
-     * accessing param via a different slot indirection. Rather than debug
-     * that ABI mismatch in the general case, we tightly gate to "trivial
-     * wrapper" callees whose body is a single expression referencing the
-     * one param. This covers the important case for Day 10 (Iter ability
-     * trivial wrappers) without opening the correctness can of worms for
-     * arbitrary user functions with locals.
+     * <p><b>Locals are now permitted</b> (fix landed with the fresh-argCopy
+     * emit in {@link #emitMapperStep} and {@link #emitPredicateCheck}).
+     * The earlier restriction existed because a naive
+     * {@code beginStoreLocal(xSlot); call(xSlot); endStoreLocal} shape
+     * aliased the induction slot as both call-arg-source AND result-target
+     * across a callee that could re-lay-out its own locals; for callees
+     * with local slots this corrupted the arg-load and produced wrong
+     * results (e.g. `{x} -> let a = x*2 in ... -x` returning 4950 instead
+     * of 1338150 on the standard bench). Staging the arg through a fresh
+     * {@code argCopy} local decouples the two roles and makes the peel
+     * correct for arbitrary user-fn callees with local bindings.
      *
      * <p>Returns false on any unknown/uncompiled target, or any target
-     * with locals/captures/effects.
+     * with captures/effects.
      *
      * <p>Kill-switch: {@code MEZZE_FUSE_CALL_PEEL=0} disables the peel
      * entirely (falls through to the pre-Day 9 path — user_fn callsites
@@ -3897,7 +3920,6 @@ public final class BytecodeCompiler {
         if (fn == null) return false;
         if (fn.getParamSlots().size() != 1) return false;
         if (!fn.getCaptureSlots().isEmpty()) return false;
-        if (!fn.getLocalSlots().isEmpty()) return false;  // no `let`-bound bodies
         if (canYieldSuspended(fn.getBody())) return false;
         return true;
     }
