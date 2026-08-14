@@ -3071,12 +3071,26 @@ public final class BytecodeCompiler {
         if (rangeStart == null && (mapperOp != null || mapperCallHash != null || filterPeel != null)) {
             return false;
         }
-        // #443 Day 10 — if peeledXs is a MakeRecordIR (an iter descriptor
-        // wrapper we couldn't peel through, or an inlined MapIter/
-        // FilterIter/SeqIter whose map/filter peels didn't match), we
-        // cannot pass it to the general seq-fused loop below — that path
-        // emits SeqSize/SeqGet on xsExpr and requires a materialized
-        // sequence. Bail so the callsite falls back to ability dispatch.
+        // #443 Day 10 — for iter::fold specifically, the general seq-fused
+        // loop below CANNOT run: iter's `src` param is a descriptor
+        // (SeqIter/MapIter/FilterIter), not a materialized Seq. If we
+        // couldn't reach __native_seq_range, bail so ability-dispatch
+        // runs — SeqSize/SeqGet on a descriptor produces
+        // "Expected record for field 'xs', got: MezzeVariant" at runtime.
+        //
+        // seq::fold still allowed to fall through — SeqSize/SeqGet handle
+        // real MezzeSeq objects (from ReadLocal of a param, native calls,
+        // etc.). The old guard was too narrow (MakeRecordIR only) and
+        // missed cases like `iter::sum {src = iter::from_seq{xs = range}}`
+        // where fold's `src` reaches xsExpr via ReadLocalIR.
+        boolean isIterFold = "fold@stdlib-std-collections-iter.mz".equals(hof);
+        if (rangeStart == null && isIterFold) {
+            if (dbg) System.err.println("[fold-fuse] reject: iter::fold with peeledXs=" + peeledXs.getClass().getSimpleName()
+                    + " isn't a fusable range source");
+            return false;
+        }
+        // Also keep the descriptor-safety net for seq::fold — MakeRecordIR
+        // is never a valid seq source and would crash SeqSize.
         if (rangeStart == null && peeledXs instanceof MakeRecordIR) {
             if (dbg) System.err.println("[fold-fuse] reject: peeledXs is descriptor MakeRecordIR, not a seq");
             return false;
