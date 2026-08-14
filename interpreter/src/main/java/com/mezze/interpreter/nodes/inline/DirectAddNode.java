@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes.inline;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeSuspend;
+import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.bytecode.OperationProxy;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
@@ -37,8 +38,19 @@ public abstract class DirectAddNode extends MezzeNode {
 
     /**
      * Fast path: Int + Int (unboxed longs).
+     *
+     * {@code @ForceQuickening} opts this specialization into BDSL's
+     * type-specialized bytecode. Without it, {@code DirectAdd} would only
+     * appear in bytecode as the polymorphic op that dispatches through
+     * every specialization every iteration — and the {@code LOAD_LOCAL} /
+     * {@code STORE_LOCAL} pair around it would fall back to Object slots
+     * and re-box every iteration. With the annotation, BDSL emits
+     * {@code DirectAdd$Long} + long-typed load/store, keeping the fused
+     * fold accumulator on a primitive long slot end-to-end (~2× win on
+     * long-heavy loops like sum_fold).
      */
     @Specialization(rewriteOn = ArithmeticException.class)
+    @ForceQuickening
     public static long addLongs(long left, long right) {
         return Math.addExact(left, right);
     }

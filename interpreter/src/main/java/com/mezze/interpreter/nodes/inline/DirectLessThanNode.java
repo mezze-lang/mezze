@@ -7,6 +7,7 @@ import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.bytecode.OperationProxy;
 
 /**
@@ -22,7 +23,11 @@ import com.oracle.truffle.api.bytecode.OperationProxy;
 @OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectLessThanNode extends MezzeNode {
 
+    /** {@code @ForceQuickening} — see DirectAddNode.addLongs for rationale.
+     *  Needed so the fused-fold loop-bound check stays on primitive-long
+     *  bytecode (LOAD_LOCAL$Long i, LOAD_LOCAL$Long end, DirectLessThan$Long). */
     @Specialization
+    @ForceQuickening
     public static boolean ltLongs(long left, long right) {
         return left < right;
     }
