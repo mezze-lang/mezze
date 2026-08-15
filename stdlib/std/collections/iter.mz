@@ -41,7 +41,13 @@ pub type FilterIter 'src 'a = { src: 'src, p: { x: 'a } -> Bool }
 
 ## Filter iterator over an `Iter` source. Returns a `FilterIter` — pass it
 ## on to `iter::map` / `iter::fold` etc. to compose.
-pub let filter : { src: 'src, p: { x: 'a } -> Bool } -> FilterIter 'src 'a = { src, p } ->
+##
+## The `with Iter 'src having 'elem = 'a` constraint fails misuse at the
+## stage constructor (before it composes into a fold) rather than at the
+## terminal — so `iter::filter { src = 42, p = _ }` errors with an unmet
+## Iter dictionary, not "type mismatch in fold".
+pub let filter : { src: 'src, p: { x: 'a } -> Bool }
+    with Iter 'src having 'elem = 'a -> FilterIter 'src 'a = { src, p } ->
   { src = src, p = p }
 
 impl Iter for FilterIter 'src 'a having 'elem = 'a
@@ -61,7 +67,12 @@ impl Iter for FilterIter 'src 'a having 'elem = 'a
 pub type MapIter 'src 'a 'b = { src: 'src, f: { x: 'a } -> 'b }
 
 ## Map iterator: apply `f` to each element of `src`.
-pub let map : { src: 'src, f: { x: 'a } -> 'b } -> MapIter 'src 'a 'b = { src, f } ->
+##
+## The `with Iter 'src having 'elem = 'a` constraint binds `'a` to the
+## source's element type so misuse (`iter::map` on a non-Iter) fails at
+## the stage constructor rather than at the terminal.
+pub let map : { src: 'src, f: { x: 'a } -> 'b }
+    with Iter 'src having 'elem = 'a -> MapIter 'src 'a 'b = { src, f } ->
   { src = src, f = f }
 
 impl Iter for MapIter 'src 'a 'b having 'elem = 'b

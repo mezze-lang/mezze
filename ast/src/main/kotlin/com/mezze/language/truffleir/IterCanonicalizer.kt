@@ -157,15 +157,31 @@ object IterCanonicalizer {
     }
 
     /**
-     * iter::sum — desugars to Fold(LongLit(0), synthetic {acc,x}->acc+x).
-     * We don't synthesize a lambda for that at this point; instead we
-     * refuse if the sum body isn't in a form the peel can handle directly.
-     * For MVP: skip sum. Add in a follow-up commit once BDSL emits sums
-     * natively from IterChainIR without a synthetic MakeLambda.
+     * iter::sum { src = X } — equivalent to Fold(0, +). Since Phase 5c added
+     * SinkIR.Sum, we can canonicalize the sum callsite directly without
+     * synthesizing a folder lambda: return SinkIR.Sum + the raw src expr.
+     * BDSL emit routes the resulting IterChainIR to BuiltinSumRangeLong /
+     * BuiltinSumLongSeq exactly like the seq::sum path.
+     *
+     * Expects arity 1 (record { src }) or 2 (scalar-ABI [src, dict]).
      */
     private fun extractSum(call: CallDirectIR): Pair<SinkIR, NodeIR>? {
-        // MVP: not handled — refuse. Case 1 fusion enabled in a later phase.
-        return null
+        val args = call.args
+        val srcExpr: NodeIR = if (call.isScalarABI) {
+            // Scalar-ABI: [src] or [src, dict]
+            if (args.size !in 1..2) return null
+            args[0]
+        } else {
+            // Record-ABI: single MakeRecord{src}
+            if (args.size != 1) return null
+            val rec = args[0] as? MakeRecordIR ?: return null
+            var src: NodeIR? = null
+            for (fld in rec.fields) {
+                if (fld.name in SRC_NAMES) src = fld.value
+            }
+            src ?: return null
+        }
+        return SinkIR.Sum to srcExpr
     }
 
     /** iter::for_each — (src, f) + optional trailing dict. */
