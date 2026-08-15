@@ -22,8 +22,13 @@ import com.mezze.language.typedast.Hash
  */
 object IterCanonicalizer {
 
-    /** Kill switch. Default OFF until Phase 5 flips it on. */
-    private val ENABLED: Boolean = System.getenv("MEZZE_ITER_CANONICALIZE") == "1"
+    /**
+     * Kill switch. Default ON since Phase 5. Escape hatch:
+     * MEZZE_ITER_CANONICALIZE=0 disables the pass and forces callers to
+     * rely on the throwing intercept in BytecodeCompiler.emitNode — no
+     * IterChainIR is produced, so the intercept is unreachable.
+     */
+    private val ENABLED: Boolean = System.getenv("MEZZE_ITER_CANONICALIZE") != "0"
 
     /**
      * Rewrite each function's body. Bodies that don't contain any
