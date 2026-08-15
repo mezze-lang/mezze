@@ -454,6 +454,20 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
         wrapCallResultWithEffects(resultType, strippedMethodType.effects)
 
+    // #458: harvest closure-callback row-var effects into the outer call's
+    // effect set. See generateInherentMethodCall for the design note. Gate:
+    // any declared CALLBACK PARAM has a row-var — closed rows must not
+    // over-propagate. Ability methods usually have pure returns but their
+    // callback rows are open (that's what makes them polymorphic in effects).
+    val abilityCaughtByOp = collectCaughtByAncestor(strippedMethodType.paramType)
+    val abilityHasCallbackRowVar = (strippedMethodType.paramType as? MezzeType.RecordType)?.fields?.values?.any { field ->
+        (field as? MezzeType.FunctionType)?.effects?.rowVar != null
+    } == true
+    val abilityHarvestedEffects: Set<String> =
+        if (abilityHasCallbackRowVar) {
+            collectClosureArgEffects(argumentResult.type) - abilityCaughtByOp
+        } else emptySet()
+
     // #218: stash the ability's instantiation TyVars into typeArgs so the
     // monomorphizer can substitute them when specializing the enclosing
     // function. Without this, an in-isolation lambda body checks `w.eq`
@@ -477,7 +491,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     return ConstraintResult(
         type = callType,
         constraints = constraints,
-        effects = receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects,
+        effects = (receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects + abilityHarvestedEffects) - abilityCaughtByOp,
         effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
         abilityConstraints = abilityConstraints,
         associatedTypeConstraints = associatedTypeConstraints,
@@ -816,10 +830,32 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
         wrapCallResultWithEffects(resultType, (freshMethodType as? MezzeType.FunctionType)?.effects)
 
+    // #458: harvest closure-callback row-var effects into the outer call's
+    // effect set for inherent method dispatch (`.map{f=...}` on Seq/List/etc).
+    // Similar in spirit to ExprFunctionConstraints.kt:757-764 (plain-call path)
+    // but with a different gate: for method dispatch we gate on whether ANY
+    // declared CALLBACK PARAM has a row-var (not the method's return row —
+    // methods like Seq.map declare `{f: T -> T <ρ>} -> [T] <ρ>` and the ρ is
+    // shared, but for methods with pure returns whose callbacks still carry
+    // rowvars we still need to harvest).
+    // Without this, `xs.map{f = {x} -> perform E.op{}; x}.fold{...}` drops
+    // the E effect silently.
+    val inherentFnType = freshMethodType as? MezzeType.FunctionType
+    val inherentCaughtByOp = if (inherentFnType != null) collectCaughtByAncestor(inherentFnType.paramType) else emptySet()
+    val inherentHasCallbackRowVar = inherentFnType?.paramType?.let { pt ->
+        (pt as? MezzeType.RecordType)?.fields?.values?.any { field ->
+            (field as? MezzeType.FunctionType)?.effects?.rowVar != null
+        }
+    } == true
+    val inherentHarvestedEffects: Set<String> =
+        if (inherentHasCallbackRowVar) {
+            collectClosureArgEffects(argumentResult.type) - inherentCaughtByOp
+        } else emptySet()
+
     return ConstraintResult(
         type = callType,
         constraints = constraints,
-        effects = receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects,
+        effects = (receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects + inherentHarvestedEffects) - inherentCaughtByOp,
         effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
         abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints,
         associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
@@ -926,6 +962,25 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
         effects = MezzeType.EffectRow(effects = candidateEffects, effectInstances = emptySet(), rowVar = null)
     )
 
+    // #458: harvest closure-callback row-var effects for the deferred inherent
+    // path — same rationale as generateInherentMethodCall / generateAbilityMethodCall.
+    // Gate: any candidate declares a callback param with a row-var. Their param
+    // types agree modulo unresolved TyVars, so union caughtByAncestor across
+    // candidates for the subtraction.
+    val deferredAnyCallbackRowVar = resolvedCandidates.any { (_, fnType) ->
+        val pt = (fnType as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType
+        pt?.fields?.values?.any { field ->
+            (field as? MezzeType.FunctionType)?.effects?.rowVar != null
+        } == true
+    }
+    val deferredCaughtByOp: Set<String> = resolvedCandidates
+        .mapNotNull { (_, fnType) -> (fnType as? MezzeType.FunctionType)?.paramType }
+        .flatMap { collectCaughtByAncestor(it) }
+        .toSet()
+    val deferredHarvestedEffects: Set<String> =
+        if (deferredAnyCallbackRowVar) collectClosureArgEffects(argumentResult.type) - deferredCaughtByOp
+        else emptySet()
+
     val methodCallInfo = ConstraintResult.MethodCallInfo(
         abilityName = null,
         methodName = methodName,
@@ -947,7 +1002,7 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
     return ConstraintResult(
         type = callType,
         constraints = constraints,
-        effects = receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects,
+        effects = (receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects + deferredHarvestedEffects) - deferredCaughtByOp,
         effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
         abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints,
         associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
