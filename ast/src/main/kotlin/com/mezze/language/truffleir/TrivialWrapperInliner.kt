@@ -722,6 +722,7 @@ object TrivialWrapperInliner {
                         if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk
                     }
                     is SinkIR.ForEach -> sk
+                    SinkIR.Sum -> sk
                 }
                 if (newSource !== node.source || newSink !== node.sink)
                     node.copy(source = newSource, sink = newSink) else node

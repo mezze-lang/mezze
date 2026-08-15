@@ -1978,12 +1978,11 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CallNativeIR cn) {
-            // #427 — hand-written BDSL @Operation intercepts. When the
-            // native name is one of our known LongSeq scalar reducers,
-            // emit BuiltinSumLongSeq (etc.) directly on the seq
-            // sub-expression. Skips MezzeRecord alloc + CallNativeRecord
-            // @TruffleBoundary; keeps the tight loop inside the BDSL frame.
-            if (tryEmitBuiltinSeqReducer(cn, b, argCount, localMap)) return;
+            // #446 Phase 5c — CallNativeIR("__native_seq_sum", …) is
+            // rewritten to IterChainIR(<xs>, [], SinkIR.Sum) by the
+            // canonicalizer above and handled by emitCanonicalIterChain,
+            // which routes to BuiltinSumLongSeq / BuiltinSumRangeLong.
+            // The old tryEmitBuiltinSeqReducer path was removed here.
 
             // Record-ABI: single record arg on the stack; dispatch via
             // NativeDispatch.HANDLERS by name. Slower than the scalar
@@ -2379,123 +2378,6 @@ public final class BytecodeCompiler {
         java.util.Map.entry("or",  InlineOp.OR)
     );
 
-    /**
-     * #427 — intercept known LongSeq scalar-reducer natives at emit time
-     * and route to a dedicated BDSL @Operation whose specialization owns
-     * the tight scalar long[] loop. Bypasses record-ABI dispatch entirely
-     * — no MezzeRecord alloc, no NativeDispatch.HANDLERS lookup, no
-     * @TruffleBoundary from CallNativeRecord.
-     *
-     * Handled shape (record-ABI only — sum has no scalar-ABI registration):
-     *   CallNativeIR(name="__native_seq_sum",
-     *                arg=MakeRecordIR[xs=&lt;expr&gt;])
-     *
-     * Extract the sole "xs" sub-IR, emit it as an operand to
-     * beginBuiltinSumLongSeq. Falls through (returns false) on any shape
-     * we don't recognize — the caller's record-ABI dispatch takes over.
-     */
-    private boolean tryEmitBuiltinSeqReducer(
-            CallNativeIR cn,
-            MezzeBytecodeRootNodeGen.Builder b,
-            int argCount,
-            com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
-        if (cn.isScalarABI()) return false;
-        if (!"__native_seq_sum".equals(cn.getName())) return false;
-        if (!(cn.getArg() instanceof MakeRecordIR mr)) return false;
-        if (mr.getFields().size() != 1) return false;
-        var fld = mr.getFields().get(0);
-        if (!"xs".equals(fld.getName())) return false;
-        NodeIR xsExpr = fld.getValue();
-
-        // #438 Day 5: sum is fold(range, 0, +). Reuse the map/filter peel
-        // + range-fused loop from the folder path when the source is
-        // (map(filter(range))). Otherwise fall back to BuiltinSumLongSeq
-        // over the materialized seq.
-        InlineOp mapperOp = null; long mapperRhsLit = 0L;
-        Hash mapperCallHash = null;
-        boolean mapperCallScalarABI = false;
-        String mapperCallFieldName = null;
-        FilterPeel filterPeel = null;
-        NodeIR peeledXs = resolveLetAlias(xsExpr);
-        var mapPeel = peelMapFromXs(peeledXs, language);
-        if (mapPeel != null) {
-            mapperOp = mapPeel.op; mapperRhsLit = mapPeel.rhsLit;
-            mapperCallHash = mapPeel.callHash;
-            mapperCallScalarABI = mapPeel.callScalarABI;
-            mapperCallFieldName = mapPeel.callFieldName;
-            peeledXs = resolveLetAlias(mapPeel.innerXs);
-        }
-        filterPeel = peelFilterFromXs(peeledXs, language);
-        if (filterPeel != null) {
-            peeledXs = resolveLetAlias(filterPeel.innerXs);
-        }
-        // #443 Day 10 — strip iter::from_seq if present so the range
-        // recognizer sees the underlying __native_seq_range.
-        NodeIR unwrappedIter2 = peelIterFromSeq(peeledXs, language);
-        if (unwrappedIter2 != null) peeledXs = resolveLetAlias(unwrappedIter2);
-        NodeIR rangeStart = null, rangeEnd = null;
-        if (peeledXs instanceof CallNativeIR nat && "__native_seq_range".equals(nat.getName())) {
-            if (nat.isScalarABI() && nat.getArgs().size() == 2) {
-                rangeStart = nat.getArgs().get(0);
-                rangeEnd   = nat.getArgs().get(1);
-            } else if (nat.getArg() instanceof MakeRecordIR nmr) {
-                for (var f : nmr.getFields()) {
-                    switch (f.getName()) {
-                        case "start" -> rangeStart = f.getValue();
-                        case "end"   -> rangeEnd   = f.getValue();
-                    }
-                }
-                if (rangeStart == null || rangeEnd == null) { rangeStart = null; rangeEnd = null; }
-            }
-        }
-        if (rangeStart == null && (mapperOp != null || mapperCallHash != null || filterPeel != null)) {
-            // Peel matched but no range underneath — can't fuse. Bail so
-            // caller falls back to the record-ABI native dispatch (which
-            // materializes and then sums).
-            return false;
-        }
-        if (rangeStart != null) {
-            // Fused range path — for the no-peel case, keep the existing
-            // BuiltinSumLongSeq semantics but skip it and go through the
-            // shared range loop which produces the same value with init=0.
-            final NodeIR fRangeStart = rangeStart;
-            final NodeIR fRangeEnd = rangeEnd;
-            final InlineOp fMapper = mapperOp;
-            final long fMapperLit = mapperRhsLit;
-            final Hash fMapperCall = mapperCallHash;
-            final boolean fMapperCallScalar = mapperCallScalarABI;
-            final String fMapperCallField = mapperCallFieldName;
-            final FilterPeel fFilter = filterPeel;
-            b.beginBlock();
-              var accSlot = b.createLocal();
-              var iSlot   = b.createLocal();
-              var xSlot   = b.createLocal();
-              emitRangeFusedLoop(b, argCount, localMap,
-                      accSlot, iSlot, xSlot,
-                      fRangeStart, fRangeEnd,
-                      () -> b.emitLoadLongConstant(0L),
-                      InlineOp.ADD,
-                      fMapper, fMapperLit,
-                      fMapperCall, fMapperCallScalar, fMapperCallField,
-                      fFilter);
-            b.endBlock();
-            if (System.getenv("MEZZE_SEQ_HOF_DEBUG") != null) {
-                System.err.println("[seq-hof] emitted range-fused sum mapper="
-                    + (mapperCallHash != null ? "CALL " + mapperCallHash.getHex().substring(0, 8) : mapperOp)
-                    + " pred=" + describeFilter(filterPeel));
-            }
-            return true;
-        }
-        // No range source — fall back to the existing seq-sum builtin.
-        b.beginBuiltinSumLongSeq();
-        emitNode(xsExpr, b, argCount, localMap);
-        b.endBuiltinSumLongSeq();
-        if (System.getenv("MEZZE_SEQ_HOF_DEBUG") != null) {
-            System.err.println("[seq-hof] emitted BuiltinSumLongSeq");
-        }
-        return true;
-    }
-
 
     /**
      * #446 Phase 4b — emit a canonicalized {@link IterChainIR} directly.
@@ -2541,42 +2423,51 @@ public final class BytecodeCompiler {
 
         // Only Fold sink is emittable today. ForEach needs a bool-returning
         // step and no accSlot; wire it in Phase 4c.
-        if (!(chain.getSink() instanceof SinkIR.Fold foldSink)) {
-            if (dbg) System.err.println("[iter-canon-emit] reject: sink not Fold: " + chain.getSink().getClass().getSimpleName());
+        // Classify the sink: Fold {init, folder} needs body classification;
+        // Sum is the canonical shorthand for Fold(0, {acc,x} -> acc+x).
+        InlineOp op;
+        NodeIR initExpr;
+        boolean isSumSink;
+        if (chain.getSink() instanceof SinkIR.Fold foldSink) {
+            isSumSink = false;
+            initExpr = foldSink.getInit();
+            MakeLambdaIR folderLambda = foldSink.getF();
+            if (!folderLambda.getCaptures().isEmpty()) {
+                if (dbg) System.err.println("[iter-canon-emit] reject: folder has captures");
+                return false;
+            }
+            var folderIR = language.lookupFunctionIR(folderLambda.getFunctionHash());
+            if (folderIR == null
+                    || !folderIR.getCaptureSlots().isEmpty()
+                    || folderIR.getParamSlots().size() != 2
+                    || !folderIR.getLocalSlots().isEmpty()) {
+                if (dbg) System.err.println("[iter-canon-emit] reject: folder shape mismatch");
+                return false;
+            }
+            var folderShape = classifyFolderBody(folderIR.getBody());
+            if (folderShape == null) {
+                if (dbg) System.err.println("[iter-canon-emit] reject: unclassifiable folder body: "
+                        + folderIR.getBody().getClass().getSimpleName());
+                return false;
+            }
+            int lSlot = folderShape.leftSlot;
+            int rSlot = folderShape.rightSlot;
+            boolean naturalOrder = (lSlot == 0 && rSlot == 1);
+            boolean swapped      = (lSlot == 1 && rSlot == 0);
+            if (!naturalOrder && !swapped) return false;
+            op = folderShape.op;
+            boolean commutative = (op == InlineOp.ADD || op == InlineOp.MUL
+                                || op == InlineOp.EQ || op == InlineOp.NEQ
+                                || op == InlineOp.AND || op == InlineOp.OR);
+            if (swapped && !commutative) return false;
+        } else if (chain.getSink() instanceof SinkIR.Sum) {
+            isSumSink = true;
+            op = InlineOp.ADD;
+            initExpr = new LongLitIR(0L, chain.getSrc());
+        } else {
+            if (dbg) System.err.println("[iter-canon-emit] reject: sink not Fold/Sum: " + chain.getSink().getClass().getSimpleName());
             return false;
         }
-        MakeLambdaIR folderLambda = foldSink.getF();
-        NodeIR initExpr = foldSink.getInit();
-
-        // Folder must be pure with no captures; body must classify.
-        if (!folderLambda.getCaptures().isEmpty()) {
-            if (dbg) System.err.println("[iter-canon-emit] reject: folder has captures");
-            return false;
-        }
-        var folderIR = language.lookupFunctionIR(folderLambda.getFunctionHash());
-        if (folderIR == null
-                || !folderIR.getCaptureSlots().isEmpty()
-                || folderIR.getParamSlots().size() != 2
-                || !folderIR.getLocalSlots().isEmpty()) {
-            if (dbg) System.err.println("[iter-canon-emit] reject: folder shape mismatch");
-            return false;
-        }
-        var folderShape = classifyFolderBody(folderIR.getBody());
-        if (folderShape == null) {
-            if (dbg) System.err.println("[iter-canon-emit] reject: unclassifiable folder body: "
-                    + folderIR.getBody().getClass().getSimpleName());
-            return false;
-        }
-        int lSlot = folderShape.leftSlot;
-        int rSlot = folderShape.rightSlot;
-        boolean naturalOrder = (lSlot == 0 && rSlot == 1);
-        boolean swapped      = (lSlot == 1 && rSlot == 0);
-        if (!naturalOrder && !swapped) return false;
-        InlineOp op = folderShape.op;
-        boolean commutative = (op == InlineOp.ADD || op == InlineOp.MUL
-                            || op == InlineOp.EQ || op == InlineOp.NEQ
-                            || op == InlineOp.AND || op == InlineOp.OR);
-        if (swapped && !commutative) return false;
 
         // Stages → single mapper + single filter (MVP). Multi-stage
         // composition falls through until Phase 4c gives each stage its
@@ -2645,11 +2536,22 @@ public final class BytecodeCompiler {
             rangeEnd = rangeSrc.getEnd();
         } else if (chain.getSource() instanceof SourceIR.RawSeq rawSrc) {
             rawXsExpr = rawSrc.getXs();
+        } else if (chain.getSource() instanceof SourceIR.Opaque opaqueSrc && isSumSink
+                && mapperOp == null && mapperCallHash == null && filterPeel == null) {
+            // Sum sink over an unclassified seq expression with no stages —
+            // emit BuiltinSumLongSeq directly. This is the shape that
+            // seq::sum {xs=<ReadLocal>} produces after canon rewrites the
+            // desugared __native_seq_sum call.
+            b.beginBuiltinSumLongSeq();
+              emitNode(opaqueSrc.getExpr(), b, argCount, localMap);
+            b.endBuiltinSumLongSeq();
+            if (dbg) System.err.println("[iter-canon-emit] emitted BuiltinSumLongSeq (Opaque+Sum)");
+            return true;
         } else {
-            // Opaque — the canonicalizer refuses to produce this with no
-            // stages, and with stages we don't have a materialized seq to
-            // index over. Refuse.
-            if (dbg) System.err.println("[iter-canon-emit] reject: Opaque source");
+            // Opaque with stages, or ForEach — we don't have a materialized
+            // seq to index over. Refuse; canonicalizer emitted this in
+            // error or emitter needs a new shape.
+            if (dbg) System.err.println("[iter-canon-emit] reject: unhandled source/sink combo");
             return false;
         }
 
@@ -2663,6 +2565,16 @@ public final class BytecodeCompiler {
               emitNode(initExpr,   b, argCount, localMap);
             b.endBuiltinSumRangeLong();
             if (dbg) System.err.println("[iter-canon-emit] emitted BuiltinSumRangeLong");
+            return true;
+        }
+
+        // Sum sink over a RawSeq with no stages — BuiltinSumLongSeq fast path.
+        if (rawXsExpr != null && isSumSink
+                && mapperOp == null && mapperCallHash == null && filterPeel == null) {
+            b.beginBuiltinSumLongSeq();
+              emitNode(rawXsExpr, b, argCount, localMap);
+            b.endBuiltinSumLongSeq();
+            if (dbg) System.err.println("[iter-canon-emit] emitted BuiltinSumLongSeq (RawSeq+Sum)");
             return true;
         }
 

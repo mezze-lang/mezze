@@ -234,6 +234,7 @@ object FunctionIRReachability {
                     }
                 }
                 when (val sk = node.sink) {
+                    com.mezze.language.truffleir.SinkIR.Sum -> {}
                     is com.mezze.language.truffleir.SinkIR.Fold -> {
                         collectHashesFromNode(sk.init, queue)
                         queue.add(sk.f.functionHash)

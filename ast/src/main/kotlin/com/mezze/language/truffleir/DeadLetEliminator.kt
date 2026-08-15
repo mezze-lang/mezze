@@ -441,6 +441,7 @@ object DeadLetEliminator {
                     }
                 }
                 val newSink: SinkIR = when (val sk = node.sink) {
+                    SinkIR.Sum -> sk
                     is SinkIR.Fold -> {
                         val nInit = f(sk.init)
                         if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk

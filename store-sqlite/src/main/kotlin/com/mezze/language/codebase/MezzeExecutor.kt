@@ -239,6 +239,7 @@ class MezzeExecutor(
                         check(sk.f.functionHash)
                     }
                     is com.mezze.language.truffleir.SinkIR.ForEach -> check(sk.f.functionHash)
+                    com.mezze.language.truffleir.SinkIR.Sum -> {}
                 }
             }
             // Leaves / effect-hash / read-global — not validated, no recursion.
@@ -399,6 +400,7 @@ class MezzeExecutor(
                         queue.add(sk.f.functionHash.hex)
                     }
                     is com.mezze.language.truffleir.SinkIR.ForEach -> queue.add(sk.f.functionHash.hex)
+                    com.mezze.language.truffleir.SinkIR.Sum -> {}
                 }
             }
         }

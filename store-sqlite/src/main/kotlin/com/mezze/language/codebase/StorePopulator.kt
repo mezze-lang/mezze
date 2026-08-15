@@ -822,6 +822,7 @@ object StorePopulator {
                         report(sk.f.functionHash.hex, EdgeKind.CALLS)
                     }
                     is com.mezze.language.truffleir.SinkIR.ForEach -> report(sk.f.functionHash.hex, EdgeKind.CALLS)
+                    com.mezze.language.truffleir.SinkIR.Sum -> {}
                 }
             }
         }

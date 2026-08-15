@@ -360,6 +360,13 @@ sealed interface SinkIR {
     @Serializable data class Fold(val init: NodeIR, val f: MakeLambdaIR) : SinkIR
     /** `for_each` — side-effecting; result is unit. */
     @Serializable data class ForEach(val f: MakeLambdaIR) : SinkIR
+    /**
+     * Sum sink — equivalent to `Fold(LongLit(0), {acc,x} -> acc + x)` but
+     * with no folder lambda. Emitted by the canonicalizer when it
+     * recognizes `__native_seq_sum { xs = <source> }`. The BDSL emit
+     * treats this identically to Fold with an ADD folder over init=0.
+     */
+    @Serializable data object Sum : SinkIR
 }
 
 // Effects

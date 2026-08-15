@@ -93,6 +93,22 @@ object IterCanonicalizer {
      * the shape isn't recognized — caller keeps the original node.
      */
     private fun tryCanonicalize(node: NodeIR, classifier: IterHofClassifier): IterChainIR? {
+        // Bare __native_seq_sum { xs = ... } — desugared body of seq::sum.
+        // Rewrite to IterChainIR with a Sum sink so the BDSL emit can drive
+        // BuiltinSumLongSeq / BuiltinSumRangeLong through the canonical path.
+        if (node is CallNativeIR
+            && node.name == "__native_seq_sum"
+            && !node.isScalarABI) {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            if (mr.fields.size != 1) return null
+            val fld = mr.fields[0]
+            if (fld.name != "xs") return null
+            val (stages, source) = peelSource(fld.value, classifier)
+            // Opaque with no stages: just a raw seq expression. Still worth
+            // canonicalizing — emit falls through to BuiltinSumLongSeq via
+            // RawSeq source. Only refuse if we can't get a usable source.
+            return IterChainIR(source, stages, SinkIR.Sum, node.src)
+        }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
         // Extract sink + source expr from the CallDirect args.
@@ -502,6 +518,7 @@ object IterCanonicalizer {
                 val newSink: SinkIR = when (val sk = node.sink) {
                     is SinkIR.Fold -> { val nInit = f(sk.init); if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk }
                     is SinkIR.ForEach -> sk
+                    SinkIR.Sum -> sk
                 }
                 if (newSource !== node.source || newSink !== node.sink) node.copy(source = newSource, sink = newSink) else node
             }
