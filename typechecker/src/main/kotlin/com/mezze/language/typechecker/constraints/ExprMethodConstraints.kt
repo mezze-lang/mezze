@@ -129,6 +129,19 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         // against the wrong impl's it slot ("[Int] vs {x:Int, y:Int}").
         if (inherentMethods.size > 1) {
             val concreteReceiver = getReceiverConcreteType(memberAccess.receiver, context)
+            // #448: when receiver's concrete type has a well-known nominal name
+            // (Seq/List/Map/Set/Bytes/Str/Int/…), filter inherent candidates
+            // to those matching. This is the STRUCTURAL fix: "value before `.`
+            // has type T; look up T.method". Without it, Seq/List/etc.
+            // literals + chain-method returns fall through to all-candidates
+            // dispatch and misroute to Option/Bytes based on load order.
+            val nominalName = concreteReceiver?.let { resolveReceiverTypeName(it) }
+            if (nominalName != null) {
+                val filtered = inherentMethods.filter { it.targetTypeName == nominalName }
+                if (filtered.isNotEmpty()) {
+                    return generateInherentMethodCall(expr, memberAccess, filtered, context)
+                }
+            }
             val candidateAliases: Set<String> = when {
                 concreteReceiver is MezzeType.RecordType && concreteReceiver.typeName == null ->
                     findMatchingRecordTypeAliases(concreteReceiver, context).toSet()
@@ -580,8 +593,32 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
         // the callee's return type so e.g. `help { a = 5, b = 6 }.to_str {}`
         // (help : … -> Int) dispatches on Int.
         is ParsedFunctionCall -> {
+            // Direct callee `f{...}` — look up f's declared return type.
             val ret = calleeReturnType(receiver, context)
-            return if (ret == null || ret is MezzeType.VarType) null else ret
+            if (ret != null && ret !is MezzeType.VarType) {
+                return if (ret is MezzeType.SuspendType) ret.valueType else ret
+            }
+            // #448: Method-chain callee `x.m{...}` — the direct-callee lookup
+            // above fails because the callee is a ParsedMemberAccess, not a
+            // ParsedIdentifier. Resolve the chain: find the inner receiver's
+            // type, look up its `.m` inherent method, return `.m`'s return
+            // type. This is the structural fix: EVERY "thing before `.`"
+            // should return a value whose type is looked up. Previously only
+            // identifier receivers worked; literal chains and method chains
+            // fell through to null, forcing the outer dispatch to guess.
+            val callee = receiver.function
+            if (callee is ParsedMemberAccess) {
+                val innerType = getReceiverConcreteType(callee.receiver, context) ?: return null
+                val innerTypeName = resolveReceiverTypeName(innerType) ?: return null
+                val candidates = context.typingContext.findAnonymousMethodsByName(callee.member)
+                    .filter { it.targetTypeName == innerTypeName }
+                val method = candidates.singleOrNull() ?: return null
+                val ret2 = (method.methodType as? MezzeType.FunctionType)?.returnType ?: return null
+                // Peel SuspendType — the effect wrapper is transparent for
+                // "what nominal type does this value have?".
+                return if (ret2 is MezzeType.SuspendType) ret2.valueType else ret2
+            }
+            return null
         }
         // `r.f.method` — the receiver is a field access. When `r`'s concrete
         // type is a record with field `f`, the receiver's type is that field's
@@ -961,8 +998,15 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
             .filter { it.targetTypeName == innerTypeName }
         val method = candidates.singleOrNull() ?: return null
         val ret = (method.methodType as? MezzeType.FunctionType)?.returnType ?: return null
-        // Suspended return (unhandled effects from callback params, e.g. Seq.map's `f`
-        // may perform effects) is transparent for nominal dispatch — peel it.
+        // #448: Peel SuspendType before nominal dispatch. Inherent methods
+        // whose callback carries an effect row (e.g. Seq.map's `f: <...>`)
+        // have declared return type `SuspendType(SeqType('b), effects)`;
+        // resolveReceiverTypeName has no SuspendType case and returns null,
+        // which falls the outer heuristic through to picking Bytes.fold as
+        // the sole concrete candidate — silently misdispatching every chain
+        // like `xs.map{f}.fold{...}` on [Int] to a Bytes signature. The
+        // wrapper is transparent for the "what nominal type is this value"
+        // question; peel it before naming.
         val peeled = if (ret is MezzeType.SuspendType) ret.valueType else ret
         return resolveReceiverTypeName(peeled)
     }
