@@ -1519,17 +1519,17 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof IterChainIR chain) {
-            // #446 Phase 4 — canonicalized iter chain from IterCanonicalizer.
-            // The canonicalizer is default-OFF, so this branch is unreachable
-            // in production today. Once the emitter is written it will drive
-            // emitRangeFusedLoop directly from the canonical structure.
-            //
-            // Failing loud here rather than silently falling through — if
-            // MEZZE_ITER_CANONICALIZE=1 is set without the emit path being
-            // ready, we want the crash, not silent miscompilation.
+            // #446 Phase 4b — canonicalized iter chain from IterCanonicalizer.
+            // Drive emitRangeFusedLoop directly from the structural form.
+            // See emitCanonicalIterChain for the full policy.
+            if (emitCanonicalIterChain(chain, b, argCount, localMap)) return;
+            // Fail loud if the canonicalizer produced a shape the emitter
+            // can't handle. The two must stay in lockstep: any shape the
+            // canonicalizer emits must be emittable here. Silent fall-
+            // through would miscompile (there's no CallDirect equivalent
+            // to reconstruct).
             throw new IllegalStateException(
-                "IterChainIR reached BDSL emit but emitter is not yet wired (Phase 4b). " +
-                "Set MEZZE_ITER_CANONICALIZE=0 or unset to disable the canonicalizer. " +
+                "IterChainIR reached BDSL emit but emitter refused it. " +
                 "Source=" + chain.getSource().getClass().getSimpleName() +
                 " stages=" + chain.getStages().size() +
                 " sink=" + chain.getSink().getClass().getSimpleName());
@@ -3208,6 +3208,256 @@ public final class BytecodeCompiler {
         if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
             System.err.println("[fold-fuse] emitted fused loop for op=" + op);
         }
+        return true;
+    }
+
+    /**
+     * #446 Phase 4b — emit a canonicalized {@link IterChainIR} directly.
+     * The canonicalizer has already resolved (source × stages × sink) into
+     * a structural form, so this bypasses the pattern-matching peel and
+     * drives {@link #emitRangeFusedLoop} (for range sources) or the
+     * general seq-fused indexed loop (for RawSeq sources) from the
+     * classified stages/sink.
+     *
+     * <p>Returns {@code true} when emission fired; {@code false} to fall
+     * through to the throwing intercept, which surfaces canon/emit skew.
+     * (Today the canonicalizer refuses to produce anything the emit can't
+     * handle — Opaque source with no stages, uncompilable folder body —
+     * so a {@code false} return is a real skew bug, not expected.)
+     *
+     * <p>Supported today:
+     * <ul>
+     *   <li>Source: RangeSeq (counted loop) or RawSeq (SeqSize/SeqGet loop).
+     *       Opaque falls through to false — canonicalizer refuses to
+     *       produce it as a fold source.</li>
+     *   <li>Stages: any prefix of Map/Filter, at most one of each (MVP).
+     *       Multi-map or multi-filter → false (composition is Phase 4c).</li>
+     *   <li>Sink: Fold(init, folder) where folder classifies as an
+     *       {@link InlineOp} on ({@code acc}, {@code x}) in natural order,
+     *       or swapped for a commutative op.</li>
+     * </ul>
+     *
+     * <p>Everything the pre-canon {@link #tryEmitFusedFold} path was
+     * doing via pattern peel is now driven by pre-resolved IR:
+     * <pre>
+     *   pre-canon:  CallDirect(fold, [map(filter(range, p), f), init, folder])
+     *               → peel .map / .filter / range → classify folder → emit
+     *   canonical:  IterChain(RangeSeq(s,e), [Map(f), Filter(p)], Fold(init, folder))
+     *               → classify folder + stages → emit directly
+     * </pre>
+     */
+    private boolean emitCanonicalIterChain(
+            IterChainIR chain,
+            MezzeBytecodeRootNodeGen.Builder b,
+            int argCount,
+            com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
+        boolean dbg = System.getenv("MEZZE_ITER_CANON_EMIT_DEBUG") != null;
+
+        // Only Fold sink is emittable today. ForEach needs a bool-returning
+        // step and no accSlot; wire it in Phase 4c.
+        if (!(chain.getSink() instanceof SinkIR.Fold foldSink)) {
+            if (dbg) System.err.println("[iter-canon-emit] reject: sink not Fold: " + chain.getSink().getClass().getSimpleName());
+            return false;
+        }
+        MakeLambdaIR folderLambda = foldSink.getF();
+        NodeIR initExpr = foldSink.getInit();
+
+        // Folder must be pure with no captures; body must classify.
+        if (!folderLambda.getCaptures().isEmpty()) {
+            if (dbg) System.err.println("[iter-canon-emit] reject: folder has captures");
+            return false;
+        }
+        var folderIR = language.lookupFunctionIR(folderLambda.getFunctionHash());
+        if (folderIR == null
+                || !folderIR.getCaptureSlots().isEmpty()
+                || folderIR.getParamSlots().size() != 2
+                || !folderIR.getLocalSlots().isEmpty()) {
+            if (dbg) System.err.println("[iter-canon-emit] reject: folder shape mismatch");
+            return false;
+        }
+        var folderShape = classifyFolderBody(folderIR.getBody());
+        if (folderShape == null) {
+            if (dbg) System.err.println("[iter-canon-emit] reject: unclassifiable folder body: "
+                    + folderIR.getBody().getClass().getSimpleName());
+            return false;
+        }
+        int lSlot = folderShape.leftSlot;
+        int rSlot = folderShape.rightSlot;
+        boolean naturalOrder = (lSlot == 0 && rSlot == 1);
+        boolean swapped      = (lSlot == 1 && rSlot == 0);
+        if (!naturalOrder && !swapped) return false;
+        InlineOp op = folderShape.op;
+        boolean commutative = (op == InlineOp.ADD || op == InlineOp.MUL
+                            || op == InlineOp.EQ || op == InlineOp.NEQ
+                            || op == InlineOp.AND || op == InlineOp.OR);
+        if (swapped && !commutative) return false;
+
+        // Stages → single mapper + single filter (MVP). Multi-stage
+        // composition falls through until Phase 4c gives each stage its
+        // own emit slot in the loop body.
+        InlineOp mapperOp = null;
+        long mapperRhsLit = 0L;
+        Hash mapperCallHash = null;
+        boolean mapperCallScalarABI = false;
+        String mapperCallFieldName = null;
+        FilterPeel filterPeel = null;
+
+        int mapCount = 0, filterCount = 0;
+        for (var stage : chain.getStages()) {
+            if (stage instanceof StageIR.Map mapStage) {
+                mapCount++;
+                if (mapCount > 1) {
+                    if (dbg) System.err.println("[iter-canon-emit] reject: multi-map stages (MVP)");
+                    return false;
+                }
+                var shape = classifyUnaryLiteralLambda(mapStage.getF(), language);
+                if (shape == null) {
+                    if (dbg) System.err.println("[iter-canon-emit] reject: unclassifiable map lambda");
+                    return false;
+                }
+                if (shape.callHash != null) {
+                    mapperCallHash = shape.callHash;
+                    mapperCallScalarABI = shape.callScalarABI;
+                    mapperCallFieldName = shape.callFieldName;
+                } else {
+                    // Restrict to arith ops — comparisons produce bool, not fusable
+                    // as a mapper. Same gate as finishMapPeel.
+                    switch (shape.op) {
+                        case ADD, SUB, MUL, DIV, MOD -> {}
+                        default -> {
+                            if (dbg) System.err.println("[iter-canon-emit] reject: map op not arith: " + shape.op);
+                            return false;
+                        }
+                    }
+                    mapperOp = shape.op;
+                    mapperRhsLit = shape.rhsLit;
+                }
+            } else if (stage instanceof StageIR.Filter filterStage) {
+                filterCount++;
+                if (filterCount > 1) {
+                    if (dbg) System.err.println("[iter-canon-emit] reject: multi-filter stages (MVP)");
+                    return false;
+                }
+                var predShape = classifyUnaryPredicateLambda(filterStage.getP(), language);
+                if (predShape == null) {
+                    if (dbg) System.err.println("[iter-canon-emit] reject: unclassifiable filter lambda");
+                    return false;
+                }
+                filterPeel = new FilterPeel(
+                    predShape.preOp, predShape.preRhs,
+                    predShape.cmpOp, predShape.cmpRhs,
+                    predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
+                    /*innerXs=*/ null /* unused for canon path */);
+            }
+        }
+
+        // Source classification.
+        NodeIR rangeStart = null, rangeEnd = null;
+        NodeIR rawXsExpr = null;
+        if (chain.getSource() instanceof SourceIR.RangeSeq rangeSrc) {
+            rangeStart = rangeSrc.getStart();
+            rangeEnd = rangeSrc.getEnd();
+        } else if (chain.getSource() instanceof SourceIR.RawSeq rawSrc) {
+            rawXsExpr = rawSrc.getXs();
+        } else {
+            // Opaque — the canonicalizer refuses to produce this with no
+            // stages, and with stages we don't have a materialized seq to
+            // index over. Refuse.
+            if (dbg) System.err.println("[iter-canon-emit] reject: Opaque source");
+            return false;
+        }
+
+        // #427 fast path — ADD folder over an inline range with NO map or
+        // filter collapses to a single BuiltinSumRangeLong op.
+        if (rangeStart != null && op == InlineOp.ADD
+                && mapperOp == null && mapperCallHash == null && filterPeel == null) {
+            b.beginBuiltinSumRangeLong();
+              emitNode(rangeStart, b, argCount, localMap);
+              emitNode(rangeEnd,   b, argCount, localMap);
+              emitNode(initExpr,   b, argCount, localMap);
+            b.endBuiltinSumRangeLong();
+            if (dbg) System.err.println("[iter-canon-emit] emitted BuiltinSumRangeLong");
+            return true;
+        }
+
+        b.beginBlock();
+        var accSlot = b.createLocal();
+        var iSlot   = b.createLocal();
+        var xSlot   = b.createLocal();
+
+        if (rangeStart != null) {
+            emitRangeFusedLoop(b, argCount, localMap,
+                    accSlot, iSlot, xSlot,
+                    rangeStart, rangeEnd, initExpr,
+                    op, mapperOp, mapperRhsLit,
+                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                    filterPeel);
+            b.endBlock();
+            if (dbg) System.err.println("[iter-canon-emit] emitted range-fused loop");
+            return true;
+        }
+
+        // RawSeq source — general SeqSize/SeqGet indexed loop with the
+        // classified stages inside. The pre-canon path had no in-loop
+        // filter/map for the seq case; we emit them here so canon covers
+        // fold(map(filter(seq, p), f), init, g) on a materialized seq too.
+        var seqSlot  = b.createLocal();
+        var sizeSlot = b.createLocal();
+        b.beginStoreLocal(seqSlot);
+        emitNode(rawXsExpr, b, argCount, localMap);
+        b.endStoreLocal();
+        b.beginStoreLocal(sizeSlot);
+        b.beginSeqSize();
+        b.emitLoadLocal(seqSlot);
+        b.endSeqSize();
+        b.endStoreLocal();
+        b.beginStoreLocal(iSlot);
+        b.emitLoadLongConstant(0L);
+        b.endStoreLocal();
+        b.beginStoreLocal(accSlot);
+        emitNode(initExpr, b, argCount, localMap);
+        b.endStoreLocal();
+        b.beginWhile();
+          b.beginDirectLessThan();
+          b.emitLoadLocal(iSlot);
+          b.emitLoadLocal(sizeSlot);
+          b.endDirectLessThan();
+          b.beginBlock();
+            b.beginStoreLocal(xSlot);
+            b.beginSeqGet();
+            b.emitLoadLocal(seqSlot);
+            b.emitLoadLocal(iSlot);
+            b.endSeqGet();
+            b.endStoreLocal();
+            if (filterPeel != null) {
+                b.beginIfThen();
+                  emitPredicateCheck(b, xSlot, filterPeel);
+                  b.beginBlock();
+                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit,
+                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName);
+                    b.beginStoreLocal(accSlot);
+                    emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+                    b.endStoreLocal();
+                  b.endBlock();
+                b.endIfThen();
+            } else {
+                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit,
+                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName);
+                b.beginStoreLocal(accSlot);
+                emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+                b.endStoreLocal();
+            }
+            b.beginStoreLocal(iSlot);
+            b.beginDirectAdd();
+            b.emitLoadLocal(iSlot);
+            b.emitLoadLongConstant(1L);
+            b.endDirectAdd();
+            b.endStoreLocal();
+          b.endBlock();
+        b.endWhile();
+        b.emitLoadLocal(accSlot);
+        b.endBlock();
+        if (dbg) System.err.println("[iter-canon-emit] emitted seq-fused loop");
         return true;
     }
 
