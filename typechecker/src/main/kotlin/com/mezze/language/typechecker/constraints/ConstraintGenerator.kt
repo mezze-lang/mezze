@@ -349,9 +349,22 @@ class ConstraintGenerator(
 
         if (annotation is ParsedFunctionType) {
             val abilityConstrainedVars = result.abilityConstraints.map { it.typeVar }.toSet()
+            // Associated-type vars bound via `having 'out = T` in the annotation are
+            // EXPECTED to be forced to a concrete type by the impl — that's what the
+            // binding means. Exempt them from the "annotation over-generalizes" check;
+            // their correctness is enforced by unification (unifyFunctions unifies
+            // ability associated-type bindings, mirroring the effect-row path).
+            val havingVarNames = (preConvertedAnnotationType as? MezzeType.FunctionType)
+                ?.abilityConstraints.orEmpty()
+                .flatMap { it.associatedTypeBindings.keys }
+                .map { it.removePrefix("'") }
+                .toSet()
+            val havingVars = com.mezze.language.ast.collectTypeVarsInOrder(preConvertedAnnotationType)
+                .filter { it.name.removePrefix("'") in havingVarNames }
+                .toSet()
             annotationValidator.validatePolymorphismPreserved(
                 preConvertedAnnotationType, substitution, varName,
-                item.value.loc, abilityConstrainedVars
+                item.value.loc, abilityConstrainedVars + havingVars
             )
         }
 

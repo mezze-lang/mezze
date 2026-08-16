@@ -219,10 +219,18 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
         val abilityConstraints = if (filteredConstraints.isNotEmpty()) {
             " with " + filteredConstraints.joinToString(", ") { constraint ->
                 val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
-                if (typeArgs.isNotEmpty()) {
-                    "${constraint.abilityName} $typeArgs"
+                val head = if (typeArgs.isNotEmpty()) "${constraint.abilityName} $typeArgs" else constraint.abilityName
+                if (constraint.associatedTypeBindings.isEmpty()) {
+                    head
                 } else {
-                    constraint.abilityName
+                    // Mirror the effect-row printer: `having 'a = T, 'b = U`,
+                    // comma-joined, sorted by key.
+                    val bindingsStr = constraint.associatedTypeBindings.entries
+                        .sortedBy { it.key.removePrefix("'") }
+                        .joinToString(", ") { (name, ty) ->
+                            "'${name.removePrefix("'")} = ${prettyPrintTypeWithMapping(ty, typeVarMapping)}"
+                        }
+                    "$head having $bindingsStr"
                 }
             }
         } else {
@@ -409,10 +417,16 @@ private fun prettyPrintTypeWithAliasesRecursive(
         val abilityConstraints = if (filteredConstraints.isNotEmpty()) {
             " with " + filteredConstraints.joinToString(", ") { constraint ->
                 val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
-                if (typeArgs.isNotEmpty()) {
-                    "${constraint.abilityName} $typeArgs"
+                val head = if (typeArgs.isNotEmpty()) "${constraint.abilityName} $typeArgs" else constraint.abilityName
+                if (constraint.associatedTypeBindings.isEmpty()) {
+                    head
                 } else {
-                    constraint.abilityName
+                    val bindingsStr = constraint.associatedTypeBindings.entries
+                        .sortedBy { it.key.removePrefix("'") }
+                        .joinToString(", ") { (name, ty) ->
+                            "'${name.removePrefix("'")} = ${prettyPrintWithAliasCheck(ty, typeAliases, showExpansion, typeVarMapping)}"
+                        }
+                    "$head having $bindingsStr"
                 }
             }
         } else {

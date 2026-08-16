@@ -366,7 +366,42 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
         else -> unifyEffectRows(effects1!!, effects2!!).getOrElse { return it }
     }
 
-    val finalSubst = returnSubst.compose(paramSubst).compose(effectSubst)
+    // Unify ability-constraint ASSOCIATED TYPES, mirroring the effect-row path
+    // (unifyEffectRows). Without this, `with Producer 'a having 'out = Int` in an
+    // annotation is never checked against the body's resolved 'out — the exact
+    // asymmetry that let effect `having` be sound while ability `having` was not.
+    // Only bindings on constraints shared by (ability name, hash) are unified,
+    // key-by-key; a mismatch is a hard failure (naming the key).
+    val abilitySubst = run {
+        val soFar = returnSubst.compose(paramSubst).compose(effectSubst)
+        fun key(c: MezzeType.FunctionAbilityConstraint) = c.abilityName to c.abilityHash
+        val byKey1 = fn1.abilityConstraints.associateBy { key(it) }
+        val byKey2 = fn2.abilityConstraints.associateBy { key(it) }
+        var acc = soFar
+        for (k in byKey1.keys.intersect(byKey2.keys)) {
+            val c1 = byKey1[k]!!
+            val c2 = byKey2[k]!!
+            val allKeys = c1.associatedTypeBindings.keys + c2.associatedTypeBindings.keys
+            for (bindingKey in allKeys) {
+                val t1 = c1.associatedTypeBindings[bindingKey]
+                val t2 = c2.associatedTypeBindings[bindingKey]
+                if (t1 != null && t2 != null) {
+                    when (val r = unify(acc.apply(t1), acc.apply(t2), registry)) {
+                        is UnificationResult.Success -> acc = r.substitution.compose(acc)
+                        is UnificationResult.Failure -> return UnificationResult.Failure(
+                            message = "Ability '${c1.abilityName}' has incompatible associated type " +
+                                "'${bindingKey.removePrefix("'")}': ${r.message}",
+                            type1 = fn1,
+                            type2 = fn2
+                        )
+                    }
+                }
+            }
+        }
+        acc
+    }
+
+    val finalSubst = abilitySubst
     return UnificationResult.Success(finalSubst)
 }
 
