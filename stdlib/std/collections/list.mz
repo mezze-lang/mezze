@@ -59,21 +59,38 @@ pub let singleton : { x: 'a } -> List 'a = { x } -> cons { head = x, tail = empt
 ## Prepends x to the front (alias for push).
 pub let prepend : { x: 'a, xs: List 'a } -> List 'a = { x, xs } -> cons { head = x, tail = xs }
 
-## Concatenates two lists.
+## Concatenates two lists. Walks xs reversed onto ys via fold_left.
 pub let append : { xs: List 'a, ys: List 'a } -> List 'a = { xs, ys } ->
-  __native_list_append { xs = xs, ys = ys }
+  fold_left { xs = reverse { xs = xs }, init = ys, f = {acc, x} -> cons { head = x, tail = acc } }
 
 ## Returns the element at index, or None if out of bounds.
 pub let get : { xs: List 'a, index: Int } -> Option 'a = { xs, index } ->
   __native_list_get { xs = xs, index = index }
 
+## Take n elements from front — build reverse-accum, reverse at end.
+let take_go : { xs: List 'a, n: Int, acc: List 'a } -> List 'a = { xs, n, acc } ->
+  if n <= 0
+    then acc
+    else match uncons { xs = xs } is
+      None -> acc
+      Some { val = { head, tail } } ->
+        take_go { xs = tail, n = n - 1, acc = cons { head = head, tail = acc } }
+
 ## Returns the first n elements.
 pub let take : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
-  __native_list_take { xs = xs, n = n }
+  reverse { xs = take_go { xs = xs, n = n, acc = empty {} } }
+
+## Drop n elements from front — tail-recursive walk, returns rest.
+let drop_go : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+  if n <= 0
+    then xs
+    else match uncons { xs = xs } is
+      None -> xs
+      Some { val = { head, tail } } -> drop_go { xs = tail, n = n - 1 }
 
 ## Drops the first n elements.
 pub let drop : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
-  __native_list_drop { xs = xs, n = n }
+  drop_go { xs = xs, n = n }
 
 ## Applies f to each element, returning a new list.
 pub let map : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'b <...> = { xs, f } ->
@@ -132,8 +149,10 @@ pub let all : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, 
   all_go { xs = xs, p = p }
 
 ## Returns True if the list contains the element.
-pub let contains : { xs: List 'a, x: 'a } -> Bool = { xs, x } ->
-  __native_list_contains { xs = xs, x = x }
+## Uses any + eq. Requires 'a to have Eq (checked at call site).
+pub let contains : { xs: List 'a, x: 'a } with Eq 'a -> Bool = { xs, x } -> do
+  let target = x
+  any { xs = xs, p = {x} -> x == target }
 
 ## Reverses the list.
 pub let reverse : { xs: List 'a } -> List 'a = { xs } -> __native_list_reverse { xs = xs }
