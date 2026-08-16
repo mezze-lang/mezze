@@ -492,6 +492,16 @@ public final class BytecodeCompiler {
         if (node instanceof ReadArgIR) return true;
         if (node instanceof ReadCaptureIR) return true;
         if (node instanceof EffectBindingIR) return true;
+        if (node instanceof IterChainIR) {
+            // Canon-emit contract (#446): canonicalizer must only produce
+            // shapes emit can handle. Accept unconditionally here; if emit
+            // refuses at runtime, it throws and MezzeLanguage buckets it
+            // as emit-crash. Without this branch (removed by oversight
+            // when Phase 4b landed), supports() rejects at line 864 and
+            // emit is never given a chance — which crashed all
+            // fusion-producing user programs like bench/cases/sum_fold.
+            return true;
+        }
         if (node instanceof PerformOpIR p) {
             // arg is evaluated then handed to PerformD chain-dispatch.
             // The Mut fast path lowers the raw `act` lambda directly (no
