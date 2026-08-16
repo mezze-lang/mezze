@@ -255,24 +255,60 @@ pub let partition : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { pass: List 
   { pass = reverse { xs = both.ps }, fail = reverse { xs = both.fs } }
 
 ## Returns the last element, or None if empty.
-pub let last : { xs: List 'a } -> Option 'a = { xs } -> __native_list_last { xs = xs }
+## Tail-recursive walk to end.
+let last_go : { xs: List 'a, cur: 'a } -> 'a = { xs, cur } ->
+  match uncons { xs = xs } is
+    None -> cur
+    Some { val = { head, tail } } -> last_go { xs = tail, cur = head }
+
+pub let last : { xs: List 'a } -> Option 'a = { xs } ->
+  match uncons { xs = xs } is
+    None -> None
+    Some { val = { head, tail } } -> Some { val = last_go { xs = tail, cur = head } }
 
 ## Returns all elements except the last.
-pub let init : { xs: List 'a } -> List 'a = { xs } -> __native_list_init { xs = xs }
+## fold_left accumulates every element except the current head-of-tail's None case.
+## Simpler: reverse, drop head, reverse back.
+pub let init : { xs: List 'a } -> List 'a = { xs } ->
+  match uncons { xs = reverse { xs = xs } } is
+    None -> empty {}
+    Some { val = { head = _, tail = rev_tail } } -> reverse { xs = rev_tail }
 
 ## Returns the minimum element, or None if empty.
-pub let min : { xs: List 'a } -> Option 'a = { xs } -> __native_list_min { xs = xs }
+pub let min : { xs: List 'a } with Ord 'a -> Option 'a = { xs } ->
+  match uncons { xs = xs } is
+    None -> None
+    Some { val = { head, tail } } ->
+      Some { val = fold_left { xs = tail, init = head, f = {acc, x} -> if x < acc then x else acc } }
 
 ## Returns the maximum element, or None if empty.
-pub let max : { xs: List 'a } -> Option 'a = { xs } -> __native_list_max { xs = xs }
+pub let max : { xs: List 'a } with Ord 'a -> Option 'a = { xs } ->
+  match uncons { xs = xs } is
+    None -> None
+    Some { val = { head, tail } } ->
+      Some { val = fold_left { xs = tail, init = head, f = {acc, x} -> if x > acc then x else acc } }
 
 ## Returns the minimum element by a key function, or None if empty.
-pub let min_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> Option 'a <...> = { xs, f } ->
-  __native_list_min_by { xs = xs, f = f }
+pub let min_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } with Ord 'b -> Option 'a <...> = { xs, f } ->
+  match uncons { xs = xs } is
+    None -> None
+    Some { val = { head, tail } } -> do
+      let seed = { best = head, key = f { x = head } }
+      let r = fold_left { xs = tail, init = seed, f = {acc, x} -> do
+        let k = f { x = x }
+        if k < acc.key then { best = x, key = k } else acc }
+      Some { val = r.best }
 
 ## Returns the maximum element by a key function, or None if empty.
-pub let max_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> Option 'a <...> = { xs, f } ->
-  __native_list_max_by { xs = xs, f = f }
+pub let max_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } with Ord 'b -> Option 'a <...> = { xs, f } ->
+  match uncons { xs = xs } is
+    None -> None
+    Some { val = { head, tail } } -> do
+      let seed = { best = head, key = f { x = head } }
+      let r = fold_left { xs = tail, init = seed, f = {acc, x} -> do
+        let k = f { x = x }
+        if k > acc.key then { best = x, key = k } else acc }
+      Some { val = r.best }
 
 ## Sums all integer elements.
 pub let sum : { xs: List Int } -> Int = { xs } -> __native_list_sum { xs = xs }
@@ -394,7 +430,7 @@ pub let distinct : { xs: List 'a } -> List 'a = { xs } -> __native_list_distinct
 
 ## Flattens a list of lists into a single list (alias for concat).
 pub let flatten : { xss: List (List 'a) } -> List 'a = { xss } ->
-  __native_list_flatten { xss = xss }
+  concat { xss = xss }
 
 ## Returns True if the two lists are equal.
 pub let equals : { xs: List 'a, ys: List 'a } -> Bool = { xs, ys } ->
