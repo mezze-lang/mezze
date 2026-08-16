@@ -928,7 +928,10 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
             .filter { it.targetTypeName == innerTypeName }
         val method = candidates.singleOrNull() ?: return null
         val ret = (method.methodType as? MezzeType.FunctionType)?.returnType ?: return null
-        return resolveReceiverTypeName(ret)
+        // Suspended return (unhandled effects from callback params, e.g. Seq.map's `f`
+        // may perform effects) is transparent for nominal dispatch — peel it.
+        val peeled = if (ret is MezzeType.SuspendType) ret.valueType else ret
+        return resolveReceiverTypeName(peeled)
     }
     val fnExpr: ParsedExpr? = when (receiver) {
         is ParsedFunctionCall -> receiver.function
