@@ -197,7 +197,7 @@ class SmartEffectSchedulerTest {
     }
 
     // =============================================================================
-    // ForkJoinParallel Execution of Dependent Operations
+    // LoomParallel Execution of Dependent Operations
     // =============================================================================
 
     @Test

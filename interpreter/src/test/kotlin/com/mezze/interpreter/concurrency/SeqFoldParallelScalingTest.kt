@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
  *   - Sequential: four cpu_work calls one after another
  *   - Parallel: same four cpu_work calls but fanned out via three
  *     {@code Parallel.join} calls (recursive binary split) under
- *     {@code ForkJoinParallel}, i.e. a real ForkJoinPool with
+ *     {@code LoomParallel}, i.e. a real ForkJoinPool with
  *     one platform-thread worker per core (Rayon-style).
  *
  * <p>Historical numbers on this branch:
@@ -34,19 +34,15 @@ class SeqFoldParallelScalingTest {
 
     private val program = """
         use std::collections::seq
-        use std::effects::parallel::{ Parallel, ForkJoinParallel, ForkJoinParallelWith }
-        use std::effects::time::{ Time, SystemTime }
-        use std::datetime::{ duration_to_nanos }
+        use std::effects::parallel::{ Parallel, LoomParallel, LoomParallelWith }
 
         let cpu_work = { n } -> do
             let xs = seq::range { start = 0, end = n }
             seq::fold { xs = xs, init = 0, f = { acc, x } -> acc + x * x - x / 2 }
 
-        let now_nanos = {} -> duration_to_nanos { d = Time.monotonic {} }
-
-        perform SystemTime in perform ForkJoinParallel in do
-            let scope_t0 = now_nanos {}
-            let scope_t1 = now_nanos {}
+        let scope_t0 = __native_time_now_nanos {}
+        perform LoomParallel in do
+            let scope_t1 = __native_time_now_nanos {}
             # Warmup — repeat cpu_work to get the fold call site JIT-hot.
             let w1 = cpu_work { n = 5000000 }
             let w2 = cpu_work { n = 5000000 }
@@ -70,24 +66,24 @@ class SeqFoldParallelScalingTest {
             let w20 = cpu_work { n = 5000000 }
 
             # Sequential baseline: four cpu_work calls one at a time.
-            let s0 = now_nanos {}
+            let s0 = __native_time_now_nanos {}
             let a = cpu_work { n = 5000000 }
             let b = cpu_work { n = 5000000 }
             let c = cpu_work { n = 5000000 }
             let d = cpu_work { n = 5000000 }
             let seq_sum = a + b + c + d
-            let s1 = now_nanos {}
+            let s1 = __native_time_now_nanos {}
 
             # Parallel: four cpu_work calls fanned out via three Parallel.join
-            # under ForkJoinParallel — recursive binary split so all four leaves
+            # under LoomParallel — recursive binary split so all four leaves
             # can execute on separate ForkJoinPool workers. Each leaf reports
             # its own wall-clock duration so we can see the spread — a wide
             # spread (e.g. 40ms/40ms/40ms/150ms) indicates JIT staggering:
             # the slow leaf ran interpreted while the others ran JIT'd.
             let timed_cpu_work = { n } -> do
-                let t0 = now_nanos {}
+                let t0 = __native_time_now_nanos {}
                 let v = cpu_work { n = n }
-                let t1 = now_nanos {}
+                let t1 = __native_time_now_nanos {}
                 { v = v, ns = t1 - t0 }
 
             # True 4-way fanout: outer join, each side forks another join.
@@ -100,7 +96,7 @@ class SeqFoldParallelScalingTest {
             # and cd run in parallel (via the outer join), and each of them
             # forks its own leaves in parallel, all 4 leaves execute concurrently
             # on a 4+-core box.
-            let p0 = now_nanos {}
+            let p0 = __native_time_now_nanos {}
             let outer = Parallel.join {
                 l = {} -> Parallel.join {
                     l = {} -> timed_cpu_work { n = 5000000 },
@@ -114,9 +110,9 @@ class SeqFoldParallelScalingTest {
             let ab = outer.l
             let cd = outer.r
             let par_sum = ab.l.v + ab.r.v + cd.l.v + cd.r.v
-            let p1 = now_nanos {}
+            let p1 = __native_time_now_nanos {}
 
-            let scope_t2 = now_nanos {}
+            let scope_t2 = __native_time_now_nanos {}
             {
                 seq_ns = s1 - s0,
                 par_ns = p1 - p0,
@@ -133,7 +129,7 @@ class SeqFoldParallelScalingTest {
 
     @Test
     @Timeout(value = 120, unit = TimeUnit.SECONDS)
-    fun `seq_fold scales across cores under ForkJoinParallel`() {
+    fun `seq_fold scales across cores under LoomParallel`() {
         val result = MezzeTestHelper.runJit(program)
         val record = result as com.mezze.interpreter.values.MezzeRecord
         fun long(name: String): Long = when (val v = record.getField(name)) {
@@ -156,7 +152,7 @@ class SeqFoldParallelScalingTest {
         val ratio = parNs.toDouble() / seqNs.toDouble()
         val seqMs = seqNs / 1_000_000
         val parMs = parNs / 1_000_000
-        println("[SeqFold ForkJoinParallel scaling] seq=${seqMs}ms  par=${parMs}ms  ratio(par/seq)=${"%.2f".format(ratio)}×  " +
+        println("[SeqFold LoomParallel scaling] seq=${seqMs}ms  par=${parMs}ms  ratio(par/seq)=${"%.2f".format(ratio)}×  " +
             "seq_sum=$seqSum  par_sum=$parSum")
         println("[Per-leaf] min=${leafMin}ms  median=${leafMedian}ms  max=${leafMax}ms  spread=${leafMax - leafMin}ms  " +
             "leaves(ms)=${leaves.map { it / 1_000_000 }}")
@@ -170,7 +166,7 @@ class SeqFoldParallelScalingTest {
         // Guard is loose (< 1.0) so any real speedup passes; a tighter guard
         // would flake under load.
         assert(ratio < 1.0) {
-            "expected parallel < sequential under ForkJoinParallel on a multi-core box; " +
+            "expected parallel < sequential under LoomParallel on a multi-core box; " +
             "seq=${seqMs}ms par=${parMs}ms (${"%.2f".format(ratio)}×)"
         }
     }

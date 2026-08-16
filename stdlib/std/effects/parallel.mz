@@ -1,31 +1,23 @@
 use std::collections::seq
 use std::int
 
-## Data parallelism, Rayon-shape: one runtime primitive, everything
-## else derived.
+## Data parallelism: one runtime primitive, everything else derived.
 ##
 ## Runtime primitive:
 ##   Parallel.join { l, r } — run l and r in parallel, return both.
 ##
 ## Every derived combinator (map, reduce, filter, find, ...) is a
-## recursive binary split over the input, bottoming out at single
-## elements. Every element gets forked via Parallel.join.
+## recursive binary split over the input. When the sub-batch drops
+## to `min_chunk` (default 1024, tunable via the `With` variants)
+## the leaf runs sequentially via the corresponding seq:: combinator.
 ##
-## No hidden thresholds. The user asked for parallel by writing
-## `perform ForkJoinParallel in ...`, so every derived combinator
-## actually parallelizes — even for small inputs, even when the
-## fork overhead > per-element work. Silent size-based fall-through
-## to seq::* would mean `perform Parallel` is a lie for small N.
-##
-## If a caller wants sequential behavior for tiny inputs, they
-## just don't perform Parallel and call seq::* directly.
-##
-## Backends:
-##   - ForkJoinParallel — ForkJoinPool + RecursiveTask, work-stealing
-##     across a worker pool (default; fastest for CPU-bound work with
-##     irregular subtask sizes).
-##   - VirtualParallel  — one virtual thread per side (good for
-##     I/O-bound work where subtasks park).
+## Backends (mirror the Async handler naming — pick your substrate):
+##   - LoomParallel      — one Loom virtual thread per fork. Default;
+##     cheap forks, great for I/O-bound work and general use.
+##   - OSThreadParallel  — real platform threads via a shared pool.
+##     Best for CPU-bound work where Loom carrier mounting overhead
+##     would show up. Rebuilt as a genuine platform-thread pool in
+##     phase 2 (currently aliases the Loom path).
 ##
 ## Both backends bracket per-scope state via the impl-only
 ## initialize_scope / finalize_scope convention.
@@ -37,68 +29,68 @@ effect Parallel where {
 }
 
 ## ==================================================================
-## ForkJoinParallel — Rayon-shape work-stealing pool. Default.
+## LoomParallel — one Loom virtual thread per fork. Default.
 ## ==================================================================
 
-## Default parallelism (Runtime.availableProcessors), min_chunk = 1024
-## so derived combinators (map/filter/fold/...) stop splitting at
-## sub-batches of 1024 elements and run the leaf as a sequential
-## seq::-family call. Matches Rayon's work-splitting floor. Users
-## wanting to fork all the way down to singletons should use
-## `ForkJoinParallelWith { parallelism = 0, min_chunk = 1 }`.
-impl Parallel for ForkJoinParallel where {
-  initialize_scope = {} -> __native_fjpool_init { parallelism = 0, min_chunk = 1024 },
-  finalize_scope   = {} -> __native_fjpool_finalize {},
-  join             = { l, r } -> __native_fjpool_join { l = l, r = r },
-}
-
-## Fresh private pool with the given worker count + minimum-chunk-size
-## hint. Shut down on scope exit.
+## Every Parallel.join spawns a fresh Loom virtual thread for the
+## right side (left runs inline on caller). Virtual threads are cheap
+## (~14µs spawn on Loom), scheduled M:N onto the JDK's default
+## ForkJoinPool carriers. Great for I/O-bound work and general use.
 ##
-## `parallelism`: worker count. 0 or negative → Runtime.availableProcessors.
-## `min_chunk`: derived combinators (map, filter, fold, ...) stop
-## splitting at sub-batches of size ≤ `min_chunk` and run the leaf
-## inline via the corresponding `seq::` combinator instead of forking.
-## Rayon's `with_min_len` in spirit. Set to 1 to match the default
-## `ForkJoinParallel` behavior of forking down to singletons. Larger
-## values keep small sub-batches sequential — useful when per-element
-## work is light and fork overhead would dominate. #65.
-##
-## Example: `perform ForkJoinParallelWith { parallelism = 8, min_chunk = 64 } in ...`
-impl Parallel for ForkJoinParallelWith { parallelism: Int, min_chunk: Int } where {
-  initialize_scope = {} -> __native_fjpool_init {
-    parallelism = parallelism,
-    min_chunk = min_chunk,
-  },
-  finalize_scope   = {} -> __native_fjpool_finalize {},
-  join             = { l, r } -> __native_fjpool_join { l = l, r = r },
-}
-
-## ==================================================================
-## VirtualParallel — virtual threads. For I/O-bound work.
-## ==================================================================
-
-## Unbounded — every join spawns one vthread. Cheap because vthreads
-## are cheap; useful when subtasks block on I/O.
-impl Parallel for VirtualParallel where {
-  initialize_scope = {} -> __native_vthread_init { max_concurrent = 0, min_chunk = 1024 },
-  finalize_scope   = {} -> __native_vthread_finalize {},
-  join             = { l, r } -> __native_vthread_join { l = l, r = r },
+## Mirrors LoomAsync from std::effects::async.
+impl Parallel for LoomParallel where {
+  initialize_scope = {} -> __native_loom_parallel_init { max_concurrent = 0, min_chunk = 1024 },
+  finalize_scope   = {} -> __native_loom_parallel_finalize {},
+  join             = { l, r } -> __native_loom_parallel_join { l = l, r = r },
 }
 
 ## Backpressure cap + minimum-chunk-size hint. At most `max_concurrent`
 ## join sub-tasks run at once (semaphore-based) — useful when you'd
 ## otherwise spawn thousands of vthreads and starve I/O. Set
-## `max_concurrent = 0` for unbounded (same as VirtualParallel).
-## `min_chunk`: see ForkJoinParallelWith. Set to 1 to fork down to
-## singletons. #65.
-impl Parallel for VirtualParallelWith { max_concurrent: Int, min_chunk: Int } where {
-  initialize_scope = {} -> __native_vthread_init {
+## `max_concurrent = 0` for unbounded (same as LoomParallel).
+## `min_chunk`: derived combinators (map, filter, fold, ...) stop
+## splitting at sub-batches of size ≤ `min_chunk` and run the leaf
+## inline via the corresponding `seq::` combinator instead of forking.
+## Rayon's `with_min_len` in spirit. Set to 1 to fork down to
+## singletons.
+##
+## Example: `perform LoomParallelWith { max_concurrent = 8, min_chunk = 64 } in ...`
+impl Parallel for LoomParallelWith { max_concurrent: Int, min_chunk: Int } where {
+  initialize_scope = {} -> __native_loom_parallel_init {
     max_concurrent = max_concurrent,
     min_chunk = min_chunk,
   },
-  finalize_scope   = {} -> __native_vthread_finalize {},
-  join             = { l, r } -> __native_vthread_join { l = l, r = r },
+  finalize_scope   = {} -> __native_loom_parallel_finalize {},
+  join             = { l, r } -> __native_loom_parallel_join { l = l, r = r },
+}
+
+## ==================================================================
+## OSThreadParallel — real platform threads via a shared pool.
+##
+## Phase 1 note: currently aliases the LoomParallel path (same
+## __native_loom_parallel_* impls under the hood). Phase 2 (#465)
+## rebuilds this on a real ForkJoinPool of platform-thread workers
+## with per-task context enter/leave. Semantically identical today.
+## ==================================================================
+
+## Mirrors OSThreadAsync from std::effects::async.
+impl Parallel for OSThreadParallel where {
+  initialize_scope = {} -> __native_osthread_parallel_init { pool_size = 0, min_chunk = 1024 },
+  finalize_scope   = {} -> __native_osthread_parallel_finalize {},
+  join             = { l, r } -> __native_osthread_parallel_join { l = l, r = r },
+}
+
+## `pool_size`: worker count. 0 or negative → Runtime.availableProcessors.
+## `min_chunk`: see LoomParallelWith. Set to 1 to fork down to singletons.
+##
+## Example: `perform OSThreadParallelWith { pool_size = 8, min_chunk = 64 } in ...`
+impl Parallel for OSThreadParallelWith { pool_size: Int, min_chunk: Int } where {
+  initialize_scope = {} -> __native_osthread_parallel_init {
+    pool_size = pool_size,
+    min_chunk = min_chunk,
+  },
+  finalize_scope   = {} -> __native_osthread_parallel_finalize {},
+  join             = { l, r } -> __native_osthread_parallel_join { l = l, r = r },
 }
 
 ## ==================================================================
@@ -133,13 +125,13 @@ impl Parallel for DeterministicSequential where {
 ## call Parallel.join once with two empty halves, which is wasted
 ## work. With it, single-element leaves are pure computation.
 ##
-## Chunk-size hint (#65): when the current scope was entered via
-## ForkJoinParallelWithChunk / VirtualParallelWithChunk with a
-## `min_chunk` value > 1, combinators additionally short-circuit to
-## a sequential seq::-family call when `n <= min_chunk`. This
-## prevents fork overhead from dominating on small sub-batches.
-## The default (no chunk hint) is min_chunk = 1, matching pre-#65
-## behavior of splitting all the way to singletons.
+## Chunk-size hint: when the current scope was entered via
+## LoomParallelWith / OSThreadParallelWith with a `min_chunk`
+## value > 1, combinators additionally short-circuit to a sequential
+## seq::-family call when `n <= min_chunk`. This prevents fork
+## overhead from dominating on small sub-batches. The default for
+## the no-arg LoomParallel / OSThreadParallel handlers is
+## min_chunk = 1024, matching Rayon's work-splitting floor.
 ## ==================================================================
 
 ## Read the current scope's min_chunk hint. Returns 1 when no hint
@@ -321,11 +313,11 @@ pub let both3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> {
 ## faster than delegating to `reduce`. Falls back to a scalar loop
 ## when the seq isn't a native LongSeqStorage. #69.
 pub let sum : { xs: [Int] } -> Int <Parallel> = { xs } ->
-  __native_fjpool_sum_long { xs = xs }
+  __native_parallel_sum_long { xs = xs }
 
 ## Parallel product of a Seq of Ints. Same shape as `sum`. #69.
 pub let product : { xs: [Int] } -> Int <Parallel> = { xs } ->
-  __native_fjpool_product_long { xs = xs }
+  __native_parallel_product_long { xs = xs }
 
 pub let count : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Int <Parallel, ...> = { xs, f } ->
   fold {

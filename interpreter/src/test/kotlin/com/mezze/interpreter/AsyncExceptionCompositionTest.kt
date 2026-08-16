@@ -92,9 +92,9 @@ class AsyncExceptionCompositionTest {
         // parent.
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
-            use std::effects::parallel::{ Parallel, VirtualParallel, both, for_each, map }
+            use std::effects::parallel::{ Parallel, LoomParallel, both, for_each, map }
 
-            perform ExceptionToResult in perform VirtualParallel in do
+            perform ExceptionToResult in perform LoomParallel in do
               let r = map { xs = [1, 2, 3, 4, 5], f = { x } ->
                 if x == 3 then Exception.throw { error = "three" } else x * 10
               }
@@ -112,9 +112,9 @@ class AsyncExceptionCompositionTest {
     fun `raise inside Parallel both lands on outer handler`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
-            use std::effects::parallel::{ Parallel, VirtualParallel, both, for_each, map }
+            use std::effects::parallel::{ Parallel, LoomParallel, both, for_each, map }
 
-            perform ExceptionToResult in perform VirtualParallel in do
+            perform ExceptionToResult in perform LoomParallel in do
               let _ = both {
                 l = {} -> Exception.throw { error = "left-fail" },
                 r = {} -> 42,
@@ -189,9 +189,9 @@ class AsyncExceptionCompositionTest {
     fun `Parallel for_each whose callback raises surfaces on the handler`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
-            use std::effects::parallel::{ Parallel, VirtualParallel, both, for_each, map }
+            use std::effects::parallel::{ Parallel, LoomParallel, both, for_each, map }
 
-            perform ExceptionToResult in perform VirtualParallel in do
+            perform ExceptionToResult in perform LoomParallel in do
               let _ = for_each { xs = [1, 2, 3], f = { x } ->
                 if x == 2 then Exception.throw { error = "two-fail" } else {}
               }

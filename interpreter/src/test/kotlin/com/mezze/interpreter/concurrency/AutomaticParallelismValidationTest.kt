@@ -89,9 +89,9 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should detect independent operations via Mezze Parallel effect`() {
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 # Three independent operations that can run in parallel
                 let result = both3 {
                     a = {} -> 1,
@@ -137,7 +137,7 @@ class AutomaticParallelismValidationTest {
             val totalTime = endTime - startTime
 
             // Should execute sequentially due to dependency
-            assertTrue(totalTime >= 140, "ForkJoinParallel execution should take at least sum of durations (${totalTime}ms)")
+            assertTrue(totalTime >= 140, "LoomParallel execution should take at least sum of durations (${totalTime}ms)")
             assertEquals(listOf("op1", "op2"), executionOrder, "Operations should execute in dependency order")
         } finally {
             executor.shutdown()
@@ -203,9 +203,9 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle mixed operations via Mezze Parallel effect`() {
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 # First: two independent operations
                 let phase1 = both {
                     l = {} -> 10,
@@ -295,9 +295,9 @@ class AutomaticParallelismValidationTest {
         // In Mezze, parallel operations that throw will propagate the error
         // Test that errors are properly caught
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 # All operations succeed
                 let result = map {
                     xs = [1, 2, 3],
@@ -317,9 +317,9 @@ class AutomaticParallelismValidationTest {
     fun `should cache and reuse execution plans for similar operation patterns via Mezze`() {
         // Execute same pattern multiple times - should use caching internally
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 # Pattern 1
                 let result1 = map {xs = [1, 2], f = {x} -> x * 2}
 
@@ -346,9 +346,9 @@ class AutomaticParallelismValidationTest {
     fun `should handle nested parallel operations correctly via Mezze`() {
         // Test nested parallel computations through sequential phases
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 # Phase 1: Map two lists in parallel using both
                 let phase1 = both {
                     l = {} -> [1, 2, 3],
@@ -377,9 +377,9 @@ class AutomaticParallelismValidationTest {
     fun `should provide accurate performance statistics`() {
         // Test that parallel execution is faster than sequential
         val parallelCode = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 let xs = [1, 2, 3, 4, 5]
                 let result = map {xs = xs, f = {x} -> x * x}
                 let sum = reduce {xs = result, f = {l, r} -> l + r}
@@ -395,9 +395,9 @@ class AutomaticParallelismValidationTest {
         }
 
         val sequentialCode = """
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let xs = [1, 2, 3, 4, 5]
                 let result = map {xs = xs, f = {x} -> x * x}
                 let sum = reduce {xs = result, f = {l, r} -> l + r}
@@ -413,7 +413,7 @@ class AutomaticParallelismValidationTest {
         }
 
         println("Parallel execution: ${parallelTime}ms")
-        println("ForkJoinParallel execution: ${sequentialTime}ms")
+        println("LoomParallel execution: ${sequentialTime}ms")
 
         // Both should produce correct results
         val parallelResult = eval(parallelCode)
@@ -426,9 +426,9 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle large parallel workloads`() {
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
                           11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
                           21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
@@ -449,9 +449,9 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle ForkJoin parallel execution`() {
         val code = """
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8]
                 let doubled = map {xs = xs, f = {x} -> x * 2}
                 let sum = reduce {xs = doubled, f = {l, r} -> l + r}
@@ -467,9 +467,9 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle parallel filter operations`() {
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
                 let evens = filter {xs = xs, f = {x} -> x % 2 == 0}
                 let sum = reduce {xs = evens, f = {l, r} -> l + r}
@@ -485,9 +485,9 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle parallel fold operations`() {
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 let xs = [1, 2, 3, 4, 5]
                 let result = fold {
                     xs = xs,
@@ -505,9 +505,9 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle parallel any and all operations`() {
         val anyCode = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 let xs = [1, 2, 3, 4, 5]
                 any {xs = xs, f = {x} -> x > 3}
         """
@@ -515,9 +515,9 @@ class AutomaticParallelismValidationTest {
         assertEquals(true, anyResult)
 
         val allCode = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 let xs = [2, 4, 6, 8]
                 all {xs = xs, f = {x} -> x % 2 == 0}
         """
@@ -525,9 +525,9 @@ class AutomaticParallelismValidationTest {
         assertEquals(true, allResult)
 
         val allFalseCode = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 let xs = [2, 4, 5, 8]
                 all {xs = xs, f = {x} -> x % 2 == 0}
         """

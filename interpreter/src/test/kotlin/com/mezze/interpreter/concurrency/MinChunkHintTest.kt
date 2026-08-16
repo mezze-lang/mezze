@@ -10,7 +10,7 @@ import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 
 /**
- * #65 — min_chunk hint on ForkJoinParallelWith / VirtualParallelWith.
+ * #65 — min_chunk hint on LoomParallelWith / LoomParallelWith.
  *
  * <p>The derived combinators (map, filter, fold, ...) recurse via
  * binary split all the way to singletons by default. When per-element
@@ -35,11 +35,11 @@ class MinChunkHintTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     @Test
-    fun `ForkJoinParallelWith map produces same result as ForkJoinParallel`() {
+    fun `LoomParallelWith map produces same result as LoomParallel`() {
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallelWith, map }
+            use std::effects::parallel::{ Parallel, LoomParallelWith, map }
 
-            perform ForkJoinParallelWith { parallelism = 4, min_chunk = 8 } in do
+            perform LoomParallelWith { max_concurrent = 4, min_chunk = 8 } in do
                 map { xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], f = { x } -> x * 2 }
         """
         val result = eval(code) as MezzeSeq<*>
@@ -49,11 +49,11 @@ class MinChunkHintTest {
     }
 
     @Test
-    fun `ForkJoinParallelWith fold correct result`() {
+    fun `LoomParallelWith fold correct result`() {
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallelWith, fold }
+            use std::effects::parallel::{ Parallel, LoomParallelWith, fold }
 
-            perform ForkJoinParallelWith { parallelism = 4, min_chunk = 16 } in do
+            perform LoomParallelWith { max_concurrent = 4, min_chunk = 16 } in do
                 fold {
                     xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
                     zero = 0,
@@ -66,14 +66,14 @@ class MinChunkHintTest {
     }
 
     @Test
-    fun `ForkJoinParallelWith with large min_chunk keeps small workload sequential`() {
+    fun `LoomParallelWith with large min_chunk keeps small workload sequential`() {
         // With min_chunk = 100 and a 10-element list, the initial size (10)
         // is below the threshold, so the combinator delegates directly to
         // seq::map — no forking happens at all. Verifies the fast path.
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallelWith, map }
+            use std::effects::parallel::{ Parallel, LoomParallelWith, map }
 
-            perform ForkJoinParallelWith { parallelism = 4, min_chunk = 100 } in do
+            perform LoomParallelWith { max_concurrent = 4, min_chunk = 100 } in do
                 map { xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], f = { x } -> x + 100 }
         """
         val result = eval(code) as MezzeSeq<*>
@@ -83,11 +83,11 @@ class MinChunkHintTest {
     }
 
     @Test
-    fun `VirtualParallelWith filter correct result`() {
+    fun `LoomParallelWith filter correct result`() {
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallelWith, filter }
+            use std::effects::parallel::{ Parallel, LoomParallelWith, filter }
 
-            perform VirtualParallelWith { max_concurrent = 4, min_chunk = 4 } in do
+            perform LoomParallelWith { max_concurrent = 4, min_chunk = 4 } in do
                 filter { xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], f = { x } -> x > 5 }
         """
         val result = eval(code) as MezzeSeq<*>
@@ -97,13 +97,13 @@ class MinChunkHintTest {
     }
 
     @Test
-    fun `default ForkJoinParallel behavior unchanged`() {
-        // ForkJoinParallel (no chunk hint) should still split down to
+    fun `default LoomParallel behavior unchanged`() {
+        // LoomParallel (no chunk hint) should still split down to
         // singletons — verifies backward compatibility.
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallel, reduce }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 match reduce { xs = [1, 2, 3, 4, 5], f = { l, r } -> l + r } is
                     Some { val } -> val
                     None -> 0
@@ -112,13 +112,13 @@ class MinChunkHintTest {
     }
 
     @Test
-    fun `ForkJoinParallelWith reduce works via wrapper`() {
+    fun `LoomParallelWith reduce works via wrapper`() {
         // parallel::reduce uses {l, r} but seq::reduce uses {acc, x};
         // the wrapper lambda inside the chunk-fallback bridges them.
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallelWith, reduce }
+            use std::effects::parallel::{ Parallel, LoomParallelWith, reduce }
 
-            perform ForkJoinParallelWith { parallelism = 4, min_chunk = 100 } in do
+            perform LoomParallelWith { max_concurrent = 4, min_chunk = 100 } in do
                 match reduce { xs = [1, 2, 3, 4, 5], f = { l, r } -> l + r } is
                     Some { val } -> val
                     None -> 0

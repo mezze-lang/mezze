@@ -11,8 +11,8 @@ import org.junit.jupiter.api.parallel.ExecutionMode
 
 /**
  * #63 — DeterministicSequential: a Parallel impl that runs l then r
- * sequentially on the current thread. Same signature as ForkJoinParallel
- * and VirtualParallel, but zero scheduler nondeterminism.
+ * sequentially on the current thread. Same signature as LoomParallel
+ * and LoomParallel, but zero scheduler nondeterminism.
  *
  * <p>Useful in tests that want to verify combinator correctness
  * (associativity of reduce, ordering of map results, etc.) without

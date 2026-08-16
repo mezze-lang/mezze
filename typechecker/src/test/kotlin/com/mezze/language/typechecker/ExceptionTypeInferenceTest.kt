@@ -561,7 +561,7 @@ class ExceptionTypeInferenceTest {
     }
 
     // ========================================================================
-    // Test 16: Variant Combination in ForkJoinParallel Branches
+    // Test 16: Variant Combination in LoomParallel Branches
     // ========================================================================
 
     @Test

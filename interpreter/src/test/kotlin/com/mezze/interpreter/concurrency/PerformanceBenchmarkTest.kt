@@ -126,7 +126,7 @@ class PerformanceBenchmarkTest {
         val efficiency = speedup / n
 
         println("IO Operations Benchmark (via Async.spawn/await):")
-        println("  ForkJoinParallel time: ${sequentialTime}ms")
+        println("  LoomParallel time: ${sequentialTime}ms")
         println("  Parallel time:   ${parallelTime}ms")
         println("  Speedup:         ${"%.2f".format(speedup)}x")
         println("  Efficiency:      ${"%.2f".format(efficiency * 100)}%")
@@ -156,7 +156,7 @@ class PerformanceBenchmarkTest {
 
         val speedup = sequentialTime.toDouble() / parallelTime
         println("Compute Operations Benchmark (via Async.spawn/await):")
-        println("  ForkJoinParallel time: ${sequentialTime}ms")
+        println("  LoomParallel time: ${sequentialTime}ms")
         println("  Parallel time:   ${parallelTime}ms")
         println("  Speedup:         ${"%.2f".format(speedup)}x")
 
@@ -207,7 +207,7 @@ class PerformanceBenchmarkTest {
         val speedup = sequentialTime.toDouble() / parallelTime
         println("Mixed Workload Benchmark (via Async.spawn/await):")
         println("  Operations:      ${durations.size} (mixed durations)")
-        println("  ForkJoinParallel time: ${sequentialTime}ms")
+        println("  LoomParallel time: ${sequentialTime}ms")
         println("  Parallel time:   ${parallelTime}ms")
         println("  Speedup:         ${"%.2f".format(speedup)}x")
 
@@ -372,7 +372,7 @@ class PerformanceBenchmarkTest {
         // parent fiber. This benchmark records that round-trip cost vs.
         // running the same throws in-fiber.
         //
-        // ForkJoinParallel baseline: one perform per throw, all in the main
+        // LoomParallel baseline: one perform per throw, all in the main
         // fiber, no spawn.
         //
         // Cross-thread: spawn N tasks each of which throws; await the

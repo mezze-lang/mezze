@@ -28,9 +28,9 @@ class ParallelNumericFastPathTest {
     @Test
     fun `parallel_sum small list`() {
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, sum }
+            use std::effects::parallel::{ Parallel, LoomParallel, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 sum { xs = [1, 2, 3, 4, 5] }
         """
         assertEquals(15L, eval(code))
@@ -39,9 +39,9 @@ class ParallelNumericFastPathTest {
     @Test
     fun `parallel_sum empty list`() {
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, sum }
+            use std::effects::parallel::{ Parallel, LoomParallel, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 sum { xs = [] }
         """
         assertEquals(0L, eval(code))
@@ -51,9 +51,9 @@ class ParallelNumericFastPathTest {
     fun `parallel_sum matches Gauss formula for range`() {
         val code = """
             use std::collections::seq
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, sum }
+            use std::effects::parallel::{ Parallel, LoomParallel, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 sum { xs = seq::range { start = 1, end = 10001 } }
         """
         // Sum 1..10000 = 10000 * 10001 / 2 = 50_005_000
@@ -63,9 +63,9 @@ class ParallelNumericFastPathTest {
     @Test
     fun `parallel_product small list`() {
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, product }
+            use std::effects::parallel::{ Parallel, LoomParallel, product }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 product { xs = [1, 2, 3, 4, 5] }
         """
         // 5! = 120
@@ -75,22 +75,22 @@ class ParallelNumericFastPathTest {
     @Test
     fun `parallel_product empty list`() {
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, product }
+            use std::effects::parallel::{ Parallel, LoomParallel, product }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 product { xs = [] }
         """
         assertEquals(1L, eval(code))
     }
 
     @Test
-    fun `parallel_sum under VirtualParallel still works`() {
+    fun `parallel_sum under LoomParallel still works`() {
         // vthread pool doesn't populate CURRENT_POOL — the native falls
         // back to inline (single-chunk) SIMD. Result should still match.
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallel, sum }
+            use std::effects::parallel::{ Parallel, LoomParallel, sum }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 sum { xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }
         """
         assertEquals(55L, eval(code))
@@ -99,9 +99,9 @@ class ParallelNumericFastPathTest {
     @Test
     fun `parallel_sum with negative values`() {
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, sum }
+            use std::effects::parallel::{ Parallel, LoomParallel, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 sum { xs = [-100, 50, -25, 75] }
         """
         assertEquals(0L, eval(code))

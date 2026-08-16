@@ -20,11 +20,13 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Native primitives for the Parallel effect. Both ForkJoinParallel and
- * VirtualParallel now share one implementation shape: {@code join}
- * spawns a fresh Truffle virtual thread for the right side, runs the
- * left inline on the caller, and joins. Derived combinators (map,
- * reduce, filter, ...) sit on top of this in the Mezze stdlib.
+ * Native primitives for the Parallel effect. In phase 1 (#464) both
+ * LoomParallel and OSThreadParallel share one implementation:
+ * {@code join} spawns a fresh Truffle virtual thread for the right
+ * side, runs the left inline on the caller, and joins. Derived
+ * combinators (map, reduce, filter, ...) sit on top of this in the
+ * Mezze stdlib. Phase 2 (#465) will split OSThreadParallel onto a
+ * real platform-thread pool with per-task context enter/leave.
  *
  * <p>This shape matches TruffleRuby's {@code ThreadManager} — one
  * polyglot thread per unit of parallel work, virtual-thread backed for
@@ -35,11 +37,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * on polyglot threads. Full research in
  * {@code scratchpad/truffle_deep_research.md}.
  *
- * <p>Pure-Java parallel kernels ({@link #fjpoolSumLong},
- * {@link #fjpoolProductLong}) still use {@link ForkJoinPool#commonPool()} —
+ * <p>Pure-Java parallel kernels ({@link #parallelSumLong},
+ * {@link #parallelProductLong}) still use {@link ForkJoinPool#commonPool()} —
  * those workers never enter the polyglot context, so they are safe under
  * the GraalPy AsyncHandler pattern (system-thread scheduler that never
- * runs guest code).
+ * runs guest code). Handler-neutral: used by both LoomParallel and
+ * OSThreadParallel.
  */
 public final class ParallelNatives {
 
@@ -52,13 +55,13 @@ public final class ParallelNatives {
     // No pool / worker state anymore — every join is a fresh virtual
     // thread.
 
-    /** Parallelism hint for a ForkJoinParallel scope. Used by SIMD
-     *  kernels to decide chunk count. Default: available processors. */
-    private static final ThreadLocal<Integer> FJP_PARALLELISM = new InheritableThreadLocal<>();
+    /** Parallelism hint for a Parallel scope (Loom or OSThread). Used
+     *  by SIMD kernels to decide chunk count. Default: availableProcessors. */
+    private static final ThreadLocal<Integer> PARALLELISM_HINT = new InheritableThreadLocal<>();
 
-    /** Backpressure semaphore for VirtualParallelWith { max_concurrent }.
-     *  Null means unbounded (VirtualParallel default). */
-    private static final ThreadLocal<Semaphore> VTHREAD_SEMAPHORE = new ThreadLocal<>();
+    /** Backpressure semaphore for LoomParallelWith { max_concurrent }.
+     *  Null means unbounded (LoomParallel default). */
+    private static final ThreadLocal<Semaphore> LOOM_SEMAPHORE = new ThreadLocal<>();
 
     /**
      * Minimum chunk size for derived combinators (map, filter, fold, ...).
@@ -71,31 +74,50 @@ public final class ParallelNatives {
             @Override protected Long initialValue() { return 1L; }
         };
 
-    // ==================== ForkJoinParallel ====================
+    // ==================== LoomParallel ====================
+    //
+    // Both LoomParallel (Mezze API) and OSThreadParallel (phase 1
+    // alias — see #464/#465) route through these init/finalize/join
+    // natives. Phase 2 will split OSThreadParallel onto a real
+    // platform-thread pool with per-task context enter/leave.
 
     /**
-     * Enter a ForkJoinParallel scope. Records the parallelism hint (for
-     * SIMD chunking) and the min_chunk hint. No pool allocation — each
-     * {@code join} spawns its own virtual thread.
+     * Enter a LoomParallel (or phase-1-aliased OSThreadParallel) scope.
+     * Records the min_chunk + parallelism hints and optional backpressure
+     * semaphore. No pool allocation — each {@code join} spawns its own
+     * virtual thread.
      */
     @TruffleBoundary
-    public static MezzeUnit fjpoolInit(MezzeRecord args, MezzeNode node) {
-        long parallelism = getLongOrZero(args, "parallelism");
+    public static MezzeUnit loomParallelInit(MezzeRecord args, MezzeNode node) {
+        // Accept both `max_concurrent` (LoomParallelWith) and `pool_size`
+        // (OSThreadParallelWith) as the concurrency hint — during phase 1
+        // they're the same knob. Phase 2 splits them.
+        long parallelism = getLongOrZero(args, "pool_size");
+        if (parallelism <= 0) parallelism = getLongOrZero(args, "max_concurrent");
         int size = parallelism > 0 ? (int) parallelism : Runtime.getRuntime().availableProcessors();
-        FJP_PARALLELISM.set(size);
+        PARALLELISM_HINT.set(size);
+
+        long maxConcurrent = getLongOrZero(args, "max_concurrent");
+        if (maxConcurrent > 0) {
+            LOOM_SEMAPHORE.set(new Semaphore((int) maxConcurrent));
+        } else {
+            LOOM_SEMAPHORE.remove();
+        }
+
         long minChunk = getLongOrZero(args, "min_chunk");
         MIN_CHUNK_HINT.set(minChunk > 0 ? minChunk : 1L);
         return MezzeUnit.INSTANCE;
     }
 
     /**
-     * Exit a ForkJoinParallel scope. Just clears the hint ThreadLocals —
-     * no pool to shut down, no {@code awaitTermination} race with the
-     * Truffle context close-lock.
+     * Exit a LoomParallel scope. Just clears the ThreadLocals — no pool
+     * to shut down, no {@code awaitTermination} race with the Truffle
+     * context close-lock.
      */
     @TruffleBoundary
-    public static MezzeUnit fjpoolFinalize(MezzeRecord args) {
-        FJP_PARALLELISM.remove();
+    public static MezzeUnit loomParallelFinalize(MezzeRecord args) {
+        PARALLELISM_HINT.remove();
+        LOOM_SEMAPHORE.remove();
         MIN_CHUNK_HINT.remove();
         return MezzeUnit.INSTANCE;
     }
@@ -108,25 +130,27 @@ public final class ParallelNatives {
     }
 
     /**
-     * The Parallel.join primitive on ForkJoinParallel. Same shape as
-     * {@link #vthreadJoin}: fresh virtual thread for the right side,
-     * left runs inline. Loom absorbs the per-fork cost; no shared queue
+     * The Parallel.join primitive on LoomParallel. Fresh virtual
+     * Truffle thread for the right side, left runs inline (or as its
+     * own vthread when caller is a platform thread — Loom pinning
+     * interaction). Loom absorbs the per-fork cost; no shared queue
      * means no priority-inversion deadlock on recursive nested joins.
      */
     @TruffleBoundary
-    public static MezzeRecord fjpoolJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
-        return joinOnVirtualThread(args, callNode, node, /* sem = */ null);
+    public static MezzeRecord loomParallelJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+        return joinOnVirtualThread(args, callNode, node, LOOM_SEMAPHORE.get());
     }
 
-    // ==================== ForkJoinParallel numeric fast paths ====================
+    // ==================== Parallel numeric fast paths ====================
     //
     // parallel::sum / product on LongSeqStorage. The SIMD kernel runs on
     // ForkJoinPool.commonPool() — pure Java, no guest code, so the
     // workers never enter the polyglot context. This matches the GraalPy
-    // AsyncHandler shape (system-thread scheduler).
+    // AsyncHandler shape (system-thread scheduler). Handler-neutral:
+    // used by both LoomParallel and OSThreadParallel scopes.
 
     private static int chunkCountForParallelism(int arrayLen) {
-        Integer hint = FJP_PARALLELISM.get();
+        Integer hint = PARALLELISM_HINT.get();
         int p = hint != null ? hint : Runtime.getRuntime().availableProcessors();
         if (arrayLen < p) return Math.max(1, arrayLen);
         return p;
@@ -139,7 +163,7 @@ public final class ParallelNatives {
      * boxed-storage scalar loop when the seq isn't a LongSeqStorage.
      */
     @TruffleBoundary
-    public static long fjpoolSumLong(MezzeRecord args) {
+    public static long parallelSumLong(MezzeRecord args) {
         Object xs = args.getField("xs");
         if (!(xs instanceof com.mezze.datastructures.seq.MezzeSeq seq)) return 0L;
         com.mezze.datastructures.seq.SeqStorage storage = seq.getStorage();
@@ -193,9 +217,9 @@ public final class ParallelNatives {
     }
 
     /** Parallel SIMD product over a Seq of Ints. Same shape as
-     *  {@link #fjpoolSumLong}. */
+     *  {@link #parallelSumLong}. */
     @TruffleBoundary
-    public static long fjpoolProductLong(MezzeRecord args) {
+    public static long parallelProductLong(MezzeRecord args) {
         Object xs = args.getField("xs");
         if (!(xs instanceof com.mezze.datastructures.seq.MezzeSeq seq)) return 1L;
         com.mezze.datastructures.seq.SeqStorage storage = seq.getStorage();
@@ -247,52 +271,12 @@ public final class ParallelNatives {
         return total;
     }
 
-    // ==================== VirtualParallel ====================
+    // ==================== Shared virtual-thread join impl ====================
 
     /**
-     * Enter a VirtualParallel scope. If {@code max_concurrent} is
-     * positive, installs a semaphore with that many permits — every
-     * vthread {@code join} sub-task acquires one before running.
-     * Zero means unbounded.
-     */
-    @TruffleBoundary
-    public static MezzeUnit vthreadInit(MezzeRecord args) {
-        long maxConcurrent = getLongOrZero(args, "max_concurrent");
-        if (maxConcurrent > 0) {
-            VTHREAD_SEMAPHORE.set(new Semaphore((int) maxConcurrent));
-        } else {
-            VTHREAD_SEMAPHORE.remove();
-        }
-        long minChunk = getLongOrZero(args, "min_chunk");
-        MIN_CHUNK_HINT.set(minChunk > 0 ? minChunk : 1L);
-        return MezzeUnit.INSTANCE;
-    }
-
-    /** Exit a VirtualParallel scope. Clears the semaphore. */
-    @TruffleBoundary
-    public static MezzeUnit vthreadFinalize(MezzeRecord args) {
-        VTHREAD_SEMAPHORE.remove();
-        MIN_CHUNK_HINT.remove();
-        return MezzeUnit.INSTANCE;
-    }
-
-    /**
-     * The Parallel.join primitive on VirtualParallel. Spawns one virtual
-     * thread for {@code r}, runs {@code l} inline on caller (or as its
-     * own thread when caller is a platform thread — Loom pinning
-     * interaction), joins.
-     */
-    @TruffleBoundary
-    public static MezzeRecord vthreadJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
-        return joinOnVirtualThread(args, callNode, node, VTHREAD_SEMAPHORE.get());
-    }
-
-    // ==================== Shared join impl ====================
-
-    /**
-     * Shared virtual-thread-per-fork join. Both fjpoolJoin and
-     * vthreadJoin land here — the only difference is whether a
-     * backpressure semaphore is passed.
+     * Virtual-thread-per-fork join. Called from loomParallelJoin (and
+     * from OSThreadParallel in phase 1 — see #464/#465). The only
+     * per-call variation is the optional backpressure semaphore.
      *
      * <p>Left side: run inline on caller when caller is itself a virtual
      * thread (cheap — no second spawn). When caller is a platform

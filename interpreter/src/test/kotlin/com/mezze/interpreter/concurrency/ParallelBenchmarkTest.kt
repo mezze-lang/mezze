@@ -107,9 +107,9 @@ class ParallelBenchmarkTest {
     fun `parallel_map 10K elements baseline`() {
         val src = """
             use std::collections::seq
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, map }
+            use std::effects::parallel::{ Parallel, LoomParallel, map }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 map { xs = seq::range { start = 0, end = 10000 }, f = { x } -> x * 2 }
         """.trimIndent()
         val r = BenchRecorder.bench("Parallel", "parallel::map 10K x2", iters = 1, warmup = 5, runs = 5) {
@@ -123,9 +123,9 @@ class ParallelBenchmarkTest {
     fun `parallel_sum 1M range baseline`() {
         val src = """
             use std::collections::seq
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, sum }
+            use std::effects::parallel::{ Parallel, LoomParallel, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 sum { xs = seq::range { start = 0, end = 1000000 } }
         """.trimIndent()
         val r = BenchRecorder.bench("Parallel", "parallel::sum 1M seq range", iters = 1, warmup = 5, runs = 5) {
@@ -148,11 +148,11 @@ class ParallelBenchmarkTest {
     fun `parallel_sum 1M range steady-state`() {
         val src = """
             use std::collections::seq
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, sum }
+            use std::effects::parallel::{ Parallel, LoomParallel, sum }
 
             let one_sum = { xs } -> sum { xs = xs }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let xs = seq::range { start = 0, end = 1000000 }
                 # Run the sum 100 times so the CallTarget stays warm.
                 one_sum { xs = xs }
@@ -188,9 +188,9 @@ class ParallelBenchmarkTest {
     fun `parallel_product 1M range baseline`() {
         val src = """
             use std::collections::seq
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, product }
+            use std::effects::parallel::{ Parallel, LoomParallel, product }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 # Use small values to avoid overflow — product of 1s is still meaningful
                 # perf-wise since the storage traversal + parallel dispatch is the cost.
                 product { xs = seq::range { start = 1, end = 1000001 } }
@@ -206,9 +206,9 @@ class ParallelBenchmarkTest {
     fun `parallel_fold 100K sum baseline`() {
         val src = """
             use std::collections::seq
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, fold }
+            use std::effects::parallel::{ Parallel, LoomParallel, fold }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 fold {
                     xs = seq::range { start = 0, end = 100000 },
                     zero = 0,
@@ -230,9 +230,9 @@ class ParallelBenchmarkTest {
         // path stack together well on CPU-heavy work.
         val src = """
             use std::collections::seq
-            use std::effects::parallel::{ Parallel, ForkJoinParallel, sum }
+            use std::effects::parallel::{ Parallel, LoomParallel, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let outer = Parallel.join {
                     l = {} -> Parallel.join {
                         l = {} -> sum { xs = seq::range { start = 0, end = 5000000 } },

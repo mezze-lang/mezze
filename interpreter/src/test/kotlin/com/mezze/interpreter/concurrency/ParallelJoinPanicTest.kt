@@ -35,9 +35,9 @@ class ParallelJoinPanicTest {
     @Test
     fun `ArithmeticException in right side of ForkJoinParallel_join propagates as RuntimeException`() {
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallel }
+            use std::effects::parallel::{ Parallel, LoomParallel }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 Parallel.join {
                     l = {} -> 42,
                     r = {} -> 100 / 0
@@ -55,9 +55,9 @@ class ParallelJoinPanicTest {
     @Test
     fun `ArithmeticException in left side of ForkJoinParallel_join propagates as RuntimeException`() {
         val code = """
-            use std::effects::parallel::{ Parallel, ForkJoinParallel }
+            use std::effects::parallel::{ Parallel, LoomParallel }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 Parallel.join {
                     l = {} -> 100 / 0,
                     r = {} -> 42
@@ -87,11 +87,11 @@ class ParallelJoinPanicTest {
     }
 
     @Test
-    fun `panic in VirtualParallel join propagates`() {
+    fun `panic in LoomParallel join propagates`() {
         val code = """
-            use std::effects::parallel::{ Parallel, VirtualParallel }
+            use std::effects::parallel::{ Parallel, LoomParallel }
 
-            perform VirtualParallel in do
+            perform LoomParallel in do
                 Parallel.join {
                     l = {} -> 42,
                     r = {} -> 100 / 0

@@ -291,9 +291,9 @@ class ComprehensiveConcurrencyValidationTest {
         @Test
         fun `should detect independent operations for parallelization via Mezze language`() {
             val code = """
-                use std::effects::parallel::{ Parallel, VirtualParallel, both, both3, fold, map, reduce }
+                use std::effects::parallel::{ Parallel, LoomParallel, both, both3, fold, map, reduce }
 
-                perform VirtualParallel in do
+                perform LoomParallel in do
                     # Three independent operations
                     let result = both3 {
                         a = {} -> 1,
@@ -309,9 +309,9 @@ class ComprehensiveConcurrencyValidationTest {
         @Test
         fun `should execute parallel map correctly`() {
             val code = """
-                use std::effects::parallel::{ Parallel, VirtualParallel, both, both3, fold, map, reduce }
+                use std::effects::parallel::{ Parallel, LoomParallel, both, both3, fold, map, reduce }
 
-                perform VirtualParallel in do
+                perform LoomParallel in do
                     let xs = [1, 2, 3, 4, 5]
                     let result = map {xs = xs, f = {x} -> x * 2}
                     let sum = reduce {xs = result, f = {l, r} -> l + r}
@@ -326,9 +326,9 @@ class ComprehensiveConcurrencyValidationTest {
         @Test
         fun `should handle mixed independent and dependent operations`() {
             val code = """
-                use std::effects::parallel::{ Parallel, VirtualParallel, both, both3, fold, map, reduce }
+                use std::effects::parallel::{ Parallel, LoomParallel, both, both3, fold, map, reduce }
 
-                perform VirtualParallel in do
+                perform LoomParallel in do
                     # Two independent operations
                     let both_result = both {
                         l = {} -> [1, 2, 3],
@@ -423,7 +423,7 @@ class ComprehensiveConcurrencyValidationTest {
                 }
             }
 
-            println("ForkJoinParallel time: ${sequentialTime}ms")
+            println("LoomParallel time: ${sequentialTime}ms")
             println("Parallel time: ${parallelTime}ms")
             println("Speedup: ${sequentialTime.toDouble() / parallelTime}")
 
@@ -593,9 +593,9 @@ class ComprehensiveConcurrencyValidationTest {
         @Test
         fun `should integrate all concurrency components successfully via Mezze`() {
             val code = """
-                use std::effects::parallel::{ Parallel, VirtualParallel, both, both3, fold, map, reduce }
+                use std::effects::parallel::{ Parallel, LoomParallel, both, both3, fold, map, reduce }
 
-                perform VirtualParallel in do
+                perform LoomParallel in do
                     let result = both3 {
                         a = {} -> "Data from IO",
                         b = {} -> 42,
@@ -611,9 +611,9 @@ class ComprehensiveConcurrencyValidationTest {
         @Test
         fun `should handle complex dependency scenarios via Mezze`() {
             val code = """
-                use std::effects::parallel::{ Parallel, VirtualParallel, both, both3, fold, map, reduce }
+                use std::effects::parallel::{ Parallel, LoomParallel, both, both3, fold, map, reduce }
 
-                perform VirtualParallel in do
+                perform LoomParallel in do
                     # First phase: independent operations
                     let phase1 = both {
                         l = {} -> [1, 2, 3],

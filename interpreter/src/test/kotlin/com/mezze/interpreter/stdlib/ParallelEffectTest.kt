@@ -7,7 +7,7 @@ import org.junit.jupiter.api.BeforeEach
 
 /**
  * Tests for std/parallel module.
- * Tests data parallel operations using ForkJoinParallel handler for deterministic testing.
+ * Tests data parallel operations using LoomParallel handler for deterministic testing.
  * Migrated from V1 to V2 with unboxed values.
  */
 class ParallelEffectTest {
@@ -25,10 +25,10 @@ class ParallelEffectTest {
     @Test
     fun `test map doubles each element`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let results = map {xs = [1, 2, 3], f = {x} -> x * 2}
                 match seq::get {xs = results, i = 0} is
                     Some {val} -> val
@@ -40,10 +40,10 @@ class ParallelEffectTest {
     @Test
     fun `test map with empty array`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let results = map {xs = [], f = {x} -> x * 2}
                 seq::size {xs = results}
         """)
@@ -53,10 +53,10 @@ class ParallelEffectTest {
     @Test
     fun `test map preserves order`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let results = map {xs = [3, 1, 4, 1, 5], f = {x} -> x + 10}
                 seq::size {xs = results}
         """)
@@ -68,9 +68,9 @@ class ParallelEffectTest {
     @Test
     fun `test for_each returns unit`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 for_each {xs = [1, 2, 3], f = {x} -> {}}
                 42
         """)
@@ -82,10 +82,10 @@ class ParallelEffectTest {
     @Test
     fun `test filter keeps matching elements`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let results = filter {xs = [1, 2, 3, 4, 5, 6], f = {x} -> x % 2 == 0}
                 seq::size {xs = results}
         """)
@@ -95,10 +95,10 @@ class ParallelEffectTest {
     @Test
     fun `test filter with no matches`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let results = filter {xs = [1, 3, 5], f = {x} -> x % 2 == 0}
                 seq::size {xs = results}
         """)
@@ -108,10 +108,10 @@ class ParallelEffectTest {
     @Test
     fun `test filter with all matches`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let results = filter {xs = [2, 4, 6], f = {x} -> x % 2 == 0}
                 seq::size {xs = results}
         """)
@@ -123,9 +123,9 @@ class ParallelEffectTest {
     @Test
     fun `test reduce with sum`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 match reduce {xs = [1, 2, 3, 4, 5], f = {l, r} -> l + r} is
                     Some {val} -> val
                     None -> 0
@@ -136,9 +136,9 @@ class ParallelEffectTest {
     @Test
     fun `test reduce with product`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 match reduce {xs = [1, 2, 3, 4], f = {l, r} -> l * r} is
                     Some {val} -> val
                     None -> 0
@@ -149,9 +149,9 @@ class ParallelEffectTest {
     @Test
     fun `test reduce with empty array returns None`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 match reduce {xs = [], f = {l, r} -> l + r} is
                     Some {val} -> False
                     None -> True
@@ -162,9 +162,9 @@ class ParallelEffectTest {
     @Test
     fun `test reduce with single element`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 match reduce {xs = [42], f = {l, r} -> l + r} is
                     Some {val} -> val
                     None -> 0
@@ -177,9 +177,9 @@ class ParallelEffectTest {
     @Test
     fun `test fold with sum`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 fold {
                     xs = [1, 2, 3],
                     zero = 0,
@@ -193,9 +193,9 @@ class ParallelEffectTest {
     @Test
     fun `test fold with transform and combine`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 fold {
                     xs = [1, 2, 3],
                     zero = 0,
@@ -209,9 +209,9 @@ class ParallelEffectTest {
     @Test
     fun `test fold with empty array returns zero`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 fold {
                     xs = [],
                     zero = 100,
@@ -227,9 +227,9 @@ class ParallelEffectTest {
     @Test
     fun `test both runs two computations`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let r = both {
                     l = {} -> 1 + 2,
                     r = {} -> 3 * 4
@@ -244,9 +244,9 @@ class ParallelEffectTest {
     @Test
     fun `test both3 runs three computations`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let r = both3 {
                     a = {} -> 1,
                     b = {} -> 2,
@@ -262,9 +262,9 @@ class ParallelEffectTest {
     @Test
     fun `test find returns first match`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 match find {xs = [1, 2, 3, 4, 5], f = {x} -> x > 2} is
                     Some {val} -> val
                     None -> 0
@@ -275,9 +275,9 @@ class ParallelEffectTest {
     @Test
     fun `test find returns None when no match`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 match find {xs = [1, 2, 3], f = {x} -> x > 10} is
                     Some {val} -> False
                     None -> True
@@ -290,9 +290,9 @@ class ParallelEffectTest {
     @Test
     fun `test any returns true when some match`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 any {xs = [1, 2, 3, 4], f = {x} -> x > 3}
         """)
         assertEquals(true, result)
@@ -301,9 +301,9 @@ class ParallelEffectTest {
     @Test
     fun `test any returns false when none match`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 any {xs = [1, 2, 3], f = {x} -> x > 10}
         """)
         assertEquals(false, result)
@@ -312,9 +312,9 @@ class ParallelEffectTest {
     @Test
     fun `test any with empty array`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 any {xs = [], f = {x} -> True}
         """)
         assertEquals(false, result)
@@ -325,9 +325,9 @@ class ParallelEffectTest {
     @Test
     fun `test all returns true when all match`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 all {xs = [2, 4, 6], f = {x} -> x % 2 == 0}
         """)
         assertEquals(true, result)
@@ -336,9 +336,9 @@ class ParallelEffectTest {
     @Test
     fun `test all returns false when some don't match`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 all {xs = [2, 3, 6], f = {x} -> x % 2 == 0}
         """)
         assertEquals(false, result)
@@ -347,9 +347,9 @@ class ParallelEffectTest {
     @Test
     fun `test all with empty array`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 all {xs = [], f = {x} -> False}
         """)
         assertEquals(true, result) // vacuously true
@@ -360,10 +360,10 @@ class ParallelEffectTest {
     @Test
     fun `test partition separates by predicate`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let r = partition {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
                 seq::size {xs = r.pass}
         """)
@@ -373,10 +373,10 @@ class ParallelEffectTest {
     @Test
     fun `test partition returns not_matching`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let r = partition {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
                 seq::size {xs = r.fail}
         """)
@@ -388,10 +388,10 @@ class ParallelEffectTest {
     @Test
     fun `test group_by groups by key`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let groups = group_by {xs = [1, 2, 3, 4, 5, 6], f = {x} -> x % 2}
                 seq::size {xs = groups}
         """)
@@ -403,9 +403,9 @@ class ParallelEffectTest {
     @Test
     fun `test sum helper`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in sum {xs = [1, 2, 3, 4, 5]}
+            perform LoomParallel in sum {xs = [1, 2, 3, 4, 5]}
         """)
         assertEquals(15L, result)
     }
@@ -413,9 +413,9 @@ class ParallelEffectTest {
     @Test
     fun `test sum with empty array`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in sum {xs = []}
+            perform LoomParallel in sum {xs = []}
         """)
         assertEquals(0L, result)
     }
@@ -423,9 +423,9 @@ class ParallelEffectTest {
     @Test
     fun `test product helper`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in product {xs = [1, 2, 3, 4]}
+            perform LoomParallel in product {xs = [1, 2, 3, 4]}
         """)
         assertEquals(24L, result)
     }
@@ -433,9 +433,9 @@ class ParallelEffectTest {
     @Test
     fun `test product with empty array`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in product {xs = []}
+            perform LoomParallel in product {xs = []}
         """)
         assertEquals(1L, result)
     }
@@ -443,9 +443,9 @@ class ParallelEffectTest {
     @Test
     fun `test count helper`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallel in count {xs = [1, 2, 3, 4, 5], f = {x} -> x > 2}
+            perform LoomParallel in count {xs = [1, 2, 3, 4, 5], f = {x} -> x > 2}
         """)
         assertEquals(3L, result) // 3, 4, 5
     }
@@ -453,10 +453,10 @@ class ParallelEffectTest {
     @Test
     fun `test flatten helper`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let results = flatten {xs = [[1, 2], [3], [4, 5, 6]]}
                 seq::size {xs = results}
         """)
@@ -466,10 +466,10 @@ class ParallelEffectTest {
     @Test
     fun `test flat_map helper`() {
         val result = eval("""
-            use std::effects::parallel::{ ForkJoinParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
+            use std::effects::parallel::{ LoomParallel, all, any, both, both3, count, filter, find, flat_map, flatten, fold, for_each, group_by, map, partition, product, reduce, sum }
             use std::collections::seq
 
-            perform ForkJoinParallel in do
+            perform LoomParallel in do
                 let results = flat_map {xs = [1, 2, 3], f = {x} -> [x, x * 10]}
                 seq::size {xs = results}
         """)

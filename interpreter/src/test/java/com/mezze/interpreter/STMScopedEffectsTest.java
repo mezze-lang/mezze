@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * - TVar creation and operations (read, write, modify, swap)
  * - Transaction isolation and atomicity
  * - Nested perform blocks
- * - ForkJoinParallel and parallel execution
+ * - LoomParallel and parallel execution
  * - Money transfer invariants (total balance preservation)
  */
 @Timeout(value = 30, unit = TimeUnit.SECONDS)
