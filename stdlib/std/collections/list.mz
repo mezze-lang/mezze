@@ -165,13 +165,25 @@ pub let concat : { xss: List (List 'a) } -> List 'a = { xss } ->
 pub let flat_map : { xs: List 'a, f: { x: 'a } -> List 'b <...> } -> List 'b <...> = { xs, f } ->
   concat { xss = map { xs = xs, f = f } }
 
+## Walks both lists in parallel, stopping at the shorter one.
+## Builds in reverse-accum then reverses once at end.
+let zip_go : { xs: List 'a, ys: List 'b, acc: List { fst: 'a, snd: 'b } } -> List { fst: 'a, snd: 'b } = { xs, ys, acc } ->
+  match uncons { xs = xs } is
+    None -> acc
+    Some { val = { head = hx, tail = tx } } ->
+      match uncons { xs = ys } is
+        None -> acc
+        Some { val = { head = hy, tail = ty } } ->
+          zip_go { xs = tx, ys = ty, acc = cons { head = { fst = hx, snd = hy }, tail = acc } }
+
 ## Pairs elements from two lists into records of {fst, snd}.
 pub let zip : { xs: List 'a, ys: List 'b } -> List { fst: 'a, snd: 'b } = { xs, ys } ->
-  __native_list_zip { xs = xs, ys = ys }
+  reverse { xs = zip_go { xs = xs, ys = ys, acc = empty {} } }
 
-## Splits a list of {fst, snd} pairs into two lists.
-pub let unzip : { xs: List { fst: 'a, snd: 'b } } -> { fsts: List 'a, snds: List 'b } = { xs } ->
-  __native_list_unzip { xs = xs }
+## Splits pairs via a single fold_left, then reverses both accumulators once.
+pub let unzip : { xs: List { fst: 'a, snd: 'b } } -> { fsts: List 'a, snds: List 'b } = { xs } -> do
+  let both = fold_left { xs = xs, init = { fs = empty {}, ss = empty {} }, f = {acc, x} -> { fs = cons { head = x.fst, tail = acc.fs }, ss = cons { head = x.snd, tail = acc.ss } } }
+  { fsts = reverse { xs = both.fs }, snds = reverse { xs = both.ss } }
 
 ## Converts to a Seq.
 pub let to_seq : { xs: List 'a } -> ['a] = { xs } -> __native_list_to_seq { xs = xs }
@@ -222,8 +234,14 @@ pub let find_index : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option Int <
   find_index_go { xs = xs, p = p, i = 0 }
 
 ## Splits into elements matching and not matching the predicate.
-pub let partition : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { pass: List 'a, fail: List 'a } <...> = { xs, p } ->
-  __native_list_partition { xs = xs, p = p }
+## Single fold_left builds both accumulators in reverse, one reverse per output.
+pub let partition : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { pass: List 'a, fail: List 'a } <...> = { xs, p } -> do
+  let both = fold_left { xs = xs, init = { ps = empty {}, fs = empty {} }, f = {acc, x} ->
+    if p { x = x }
+      then { ps = cons { head = x, tail = acc.ps }, fs = acc.fs }
+      else { ps = acc.ps, fs = cons { head = x, tail = acc.fs } }
+  }
+  { pass = reverse { xs = both.ps }, fail = reverse { xs = both.fs } }
 
 ## Returns the last element, or None if empty.
 pub let last : { xs: List 'a } -> Option 'a = { xs } -> __native_list_last { xs = xs }
@@ -452,16 +470,28 @@ pub let compare : { xs: List 'a, ys: List 'a } -> Int = { xs, ys } ->
 pub let lexicographic_compare : { xs: List 'a, ys: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Int <...> = { xs, ys, cmp } ->
   __native_list_lexicographic_compare { xs = xs, ys = ys, cmp = cmp }
 
-## Returns True if elements are in ascending order.
-pub let is_sorted : { xs: List 'a } -> Bool = { xs } -> __native_list_is_sorted { xs = xs }
+## Adjacent-pair walk with short-circuit on first out-of-order pair.
+let is_sorted_by_go : { prev: 'a, rest: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Bool <...> = { prev, rest, cmp } ->
+  match uncons { xs = rest } is
+    None -> True
+    Some { val = { head, tail } } ->
+      if cmp { a = prev, b = head } > 0
+        then False
+        else is_sorted_by_go { prev = head, rest = tail, cmp = cmp }
 
 ## Returns True if elements are sorted by the given comparator.
 pub let is_sorted_by : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Bool <...> = { xs, cmp } ->
-  __native_list_is_sorted_by { xs = xs, cmp = cmp }
+  match uncons { xs = xs } is
+    None -> True
+    Some { val = { head, tail } } -> is_sorted_by_go { prev = head, rest = tail, cmp = cmp }
+
+## Returns True if elements are in ascending order.
+pub let is_sorted : { xs: List 'a } with Ord 'a -> Bool = { xs } ->
+  is_sorted_by { xs = xs, cmp = {a, b} -> if a > b then 1 else 0 }
 
 ## Returns True if elements are in descending order.
-pub let is_sorted_descending : { xs: List 'a } -> Bool = { xs } ->
-  __native_list_is_sorted_descending { xs = xs }
+pub let is_sorted_descending : { xs: List 'a } with Ord 'a -> Bool = { xs } ->
+  is_sorted_by { xs = xs, cmp = {a, b} -> if a < b then 1 else 0 }
 
 ## Binary search in a sorted list, returning the index or None.
 pub let binary_search : { xs: List 'a, target: 'a } -> Option Int = { xs, target } ->
