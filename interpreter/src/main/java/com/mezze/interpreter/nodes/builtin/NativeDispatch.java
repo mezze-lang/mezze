@@ -2928,7 +2928,7 @@ public final class NativeDispatch extends MezzeNode {
         // === Parallel effect: 1-primitive (join) + init/finalize scope ===
         HANDLERS_WITH_NODE.put("__native_fjpool_init", (r, c, n) -> ParallelNatives.fjpoolInit(r, n));
         HANDLERS.put("__native_fjpool_finalize", (r, c) -> ParallelNatives.fjpoolFinalize(r));
-        HANDLERS.put("__native_fjpool_join", (r, c) -> ParallelNatives.fjpoolJoin(r, c));
+        HANDLERS_WITH_NODE.put("__native_fjpool_join", (r, c, n) -> ParallelNatives.fjpoolJoin(r, c, n));
         HANDLERS.put("__native_parallel_min_chunk_hint", (r, c) -> ParallelNatives.minChunkHint(r));
         // Parallel numeric fast paths (#69).
         HANDLERS.put("__native_fjpool_sum_long", (r, c) -> ParallelNatives.fjpoolSumLong(r));
