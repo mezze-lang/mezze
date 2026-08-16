@@ -1,0 +1,43 @@
+# In-process timing of native fused Seq fold. Matches list_fold_compare's
+# shape so numbers are directly comparable.
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::seq
+
+let time_one = {xs} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let s = seq::fold {xs = xs, init = 0, f = {acc, x} -> acc + x}
+    let t1 = monotonic {}
+    let ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+    { sum = s, ns = ns }
+
+let time_k = {xs, k, acc} -> if k == 0
+    then acc
+    else do
+      let r = time_one {xs = xs}
+      time_k {xs = xs, k = k - 1, acc = seq::push {xs = acc, x = r.ns}}
+
+let main = {} -> perform Console in perform SystemTime in do
+    let n = 1000000
+    let xs = seq::range {start = 0, end = n}
+
+    let _w = time_k {xs = xs, k = 3, acc = []}
+    let times = time_k {xs = xs, k = 10, acc = []}
+    let sorted = seq::sort {xs = times}
+    let n_times = seq::size {xs = sorted}
+
+    let min_ns = match seq::get {xs = sorted, i = 0} is
+        Some {val} -> val
+        None -> 0
+    let med_ns = match seq::get {xs = sorted, i = n_times / 2} is
+        Some {val} -> val
+        None -> 0
+    let max_ns = match seq::get {xs = sorted, i = n_times - 1} is
+        Some {val} -> val
+        None -> 0
+
+    println { msg = "seq-fused fold N=$(n.to_str{}) — per-fold ns min/med/max:" }
+    println { msg = "  min = $(min_ns.to_str{})" }
+    println { msg = "  med = $(med_ns.to_str{})" }
+    println { msg = "  max = $(max_ns.to_str{})" }

@@ -1,0 +1,34 @@
+# fold_recursive — user-level recursion vs a hand-written loop equivalent.
+#
+# We're deliberately AVOIDING seq (peephole-fused) and List (native-fold).
+# Instead we use a user-defined `Chain` variant so every step goes through
+# real user-level pattern-matching recursion — which is what a real Mezze
+# program using functional decomposition would compile to.
+
+use std::effects::log::{println, Console}
+
+type Chain = | Nil, Cons {head: Int, tail: Chain} |
+
+let build_chain = {n, acc} -> if n == 0
+    then acc
+    else build_chain {n = n - 1, acc = Cons {head = n, tail = acc}}
+
+let sum_tail = {xs, acc} -> match xs is
+    Nil -> acc
+    Cons {head, tail} -> sum_tail {xs = tail, acc = acc + head}
+
+let sum_nontail = {xs} -> match xs is
+    Nil -> 0
+    Cons {head, tail} -> head + sum_nontail {xs = tail}
+
+let main = {} -> perform Console in do
+    # Tail-recursive first — proves it works on a big input regardless
+    # of what non-tail does. 2M elements should give the sampler plenty.
+    let xs_big = build_chain {n = 2000000, acc = Nil}
+    let t = sum_tail {xs = xs_big, acc = 0}
+    println { msg = "sum_tail    2M  = $(t.to_str{})" }
+
+    # Non-tail on a much smaller chain — recursion depth = list length.
+    let xs_small = build_chain {n = 500, acc = Nil}
+    let nt = sum_nontail {xs = xs_small}
+    println { msg = "sum_nontail 500 = $(nt.to_str{})" }
