@@ -40,9 +40,14 @@ effect Parallel where {
 ## ForkJoinParallel — Rayon-shape work-stealing pool. Default.
 ## ==================================================================
 
-## Uses ForkJoinPool.commonPool() — cheap, shared across scopes.
+## Default parallelism (Runtime.availableProcessors), min_chunk = 1024
+## so derived combinators (map/filter/fold/...) stop splitting at
+## sub-batches of 1024 elements and run the leaf as a sequential
+## seq::-family call. Matches Rayon's work-splitting floor. Users
+## wanting to fork all the way down to singletons should use
+## `ForkJoinParallelWith { parallelism = 0, min_chunk = 1 }`.
 impl Parallel for ForkJoinParallel where {
-  initialize_scope = {} -> __native_fjpool_init { parallelism = 0 },
+  initialize_scope = {} -> __native_fjpool_init { parallelism = 0, min_chunk = 1024 },
   finalize_scope   = {} -> __native_fjpool_finalize {},
   join             = { l, r } -> __native_fjpool_join { l = l, r = r },
 }
@@ -76,7 +81,7 @@ impl Parallel for ForkJoinParallelWith { parallelism: Int, min_chunk: Int } wher
 ## Unbounded — every join spawns one vthread. Cheap because vthreads
 ## are cheap; useful when subtasks block on I/O.
 impl Parallel for VirtualParallel where {
-  initialize_scope = {} -> __native_vthread_init { max_concurrent = 0 },
+  initialize_scope = {} -> __native_vthread_init { max_concurrent = 0, min_chunk = 1024 },
   finalize_scope   = {} -> __native_vthread_finalize {},
   join             = { l, r } -> __native_vthread_join { l = l, r = r },
 }

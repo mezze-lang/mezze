@@ -54,7 +54,7 @@ public final class ParallelNatives {
 
     /** Parallelism hint for a ForkJoinParallel scope. Used by SIMD
      *  kernels to decide chunk count. Default: available processors. */
-    private static final ThreadLocal<Integer> FJP_PARALLELISM = new ThreadLocal<>();
+    private static final ThreadLocal<Integer> FJP_PARALLELISM = new InheritableThreadLocal<>();
 
     /** Backpressure semaphore for VirtualParallelWith { max_concurrent }.
      *  Null means unbounded (VirtualParallel default). */
@@ -67,7 +67,9 @@ public final class ParallelNatives {
      * Default of 1 preserves the pre-hint behavior (fork until singletons).
      */
     private static final ThreadLocal<Long> MIN_CHUNK_HINT =
-        ThreadLocal.withInitial(() -> 1L);
+        new InheritableThreadLocal<Long>() {
+            @Override protected Long initialValue() { return 1L; }
+        };
 
     // ==================== ForkJoinParallel ====================
 
