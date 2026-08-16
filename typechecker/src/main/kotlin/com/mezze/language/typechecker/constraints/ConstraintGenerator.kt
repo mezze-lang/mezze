@@ -209,7 +209,7 @@ class ConstraintGenerator(
                             }
 
                             if (item.pattern is ParsedVariablePattern && preConvertedAnnotationType != null) {
-                                validateLetAnnotation(item, preConvertedAnnotationType, result, substitution)
+                                validateLetAnnotation(item, preConvertedAnnotationType, result, substitution, solveResult.resolvedAssociatedBindings)
                             }
 
                             val solvedBindings = if (item.pattern is ParsedVariablePattern && authoritativeType != substitution.apply(result.type)) {
@@ -221,7 +221,7 @@ class ConstraintGenerator(
                             }
 
                             val solvedBindingsWithAbilities = solvedBindings.mapValues { (name, solvedType) ->
-                                addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution)
+                                addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution, solveResult.resolvedAssociatedBindings)
                             }
 
                             val hasEffectsOrPerformed = result.effects.isNotEmpty() || result.effectInstances.isNotEmpty() || result.performed
@@ -338,13 +338,14 @@ class ConstraintGenerator(
         preConvertedAnnotationType: MezzeType,
         result: ConstraintResult,
         substitution: Substitution,
+        resolvedAssociatedBindings: Map<Pair<String, Int>, Map<String, MezzeType>> = emptyMap(),
     ) {
         val annotation = item.typeAnnotation
         val varName = (item.pattern as ParsedVariablePattern).name
 
         val inferredTypeRaw = substitution.apply(result.type)
         val inferredTypeWithAbilities = addAbilityConstraintsToFunctionType(
-            inferredTypeRaw, result.abilityConstraints, substitution
+            inferredTypeRaw, result.abilityConstraints, substitution, resolvedAssociatedBindings
         )
 
         if (annotation is ParsedFunctionType) {
@@ -767,7 +768,8 @@ class ConstraintGenerator(
     internal fun addAbilityConstraintsToFunctionType(
         type: MezzeType,
         abilityConstraints: List<Constraint.AbilityRequired>,
-        substitution: Substitution
+        substitution: Substitution,
+        resolvedAssociatedBindings: Map<Pair<String, Int>, Map<String, MezzeType>> = emptyMap()
     ): MezzeType {
         DebugLogger.debugSection(Category.ConstraintGenerator, "addAbilityConstraintsToFunctionType") {
             val lines = mutableListOf("Type: $type")
@@ -812,24 +814,37 @@ class ConstraintGenerator(
                     // single arg dropped the extras for a multi-param ability, which
                     // both malformed the constraint and produced a duplicate against
                     // the correct multi-arg one from the call-site path.
+                    //
+                    // Populate `having` bindings resolved during solving for this
+                    // ability on this primary var (keyed by original primary id).
+                    // Concrete or var-valued — mirrors how effects carry
+                    // associatedTypes, so the with-clause renders + unifies.
+                    val bindings = resolvedAssociatedBindings[constraint.abilityName to constraint.typeVar.id]
+                        ?: emptyMap()
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
                         typeArgs = listOf(MezzeType.VarType(matchingTypeVar)) +
                             constraint.typeArgs.map { substitution.apply(it) },
+                        associatedTypeBindings = bindings,
                         abilityHash = constraint.abilityHash
                     )
                 } else null
             } else null
         }
 
-        val allConstraints = (type.abilityConstraints + functionAbilityConstraints).distinctBy {
-            it.abilityName to it.typeArgs.map { arg ->
-                when (arg) {
-                    is MezzeType.VarType -> arg.variable.name
-                    else -> arg.toString()
+        // Dedup on (abilityName, typeArgs); when duplicates exist prefer the one
+        // that carries associated-type bindings (the populated one) over an empty
+        // sibling from another pass.
+        val allConstraints = (type.abilityConstraints + functionAbilityConstraints)
+            .sortedByDescending { it.associatedTypeBindings.size }
+            .distinctBy {
+                it.abilityName to it.typeArgs.map { arg ->
+                    when (arg) {
+                        is MezzeType.VarType -> arg.variable.name
+                        else -> arg.toString()
+                    }
                 }
             }
-        }
 
         DebugLogger.debugSection(Category.ConstraintGenerator, "addAbilityConstraintsToFunctionType result") {
             val lines = mutableListOf("All constraints: ${allConstraints.size} constraints")

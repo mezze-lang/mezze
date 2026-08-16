@@ -140,7 +140,12 @@ class ConstraintSolver(
             // may still resolve. TypeChecker re-checks these against the COMPOSED
             // (global ∘ per-binding) substitution — only then is a still-tyvar
             // receiver genuinely undispatchable.
-            val unresolvedInherentMethods: List<Constraint.InherentMethodResolve> = emptyList()
+            val unresolvedInherentMethods: List<Constraint.InherentMethodResolve> = emptyList(),
+            // Ability associated-type bindings resolved this solve, keyed by
+            // (abilityName, primary type-var id) → (assocName → resolved type).
+            // Populates the inferred function's FunctionAbilityConstraint so
+            // ability `having` shows + unifies, mirroring effect associated types.
+            val resolvedAssociatedBindings: Map<Pair<String, Int>, Map<String, MezzeType>> = emptyMap()
         ) : SolveResult()
 
         data class Failure(
@@ -211,6 +216,18 @@ class ConstraintSolver(
         resolveMustBeOpenRowVars(substitution)
 
         return if (errors.isEmpty()) {
+            // For each ability associated-type resolution this solve saw, record
+            // what each associated var resolved to under the FINAL substitution —
+            // concrete (from a matched impl) or still a var (generic fn, prints as
+            // `having 'out = 'a`, like effects). Keyed by (abilityName, primary id).
+            val resolvedAssociatedBindings = mutableMapOf<Pair<String, Int>, MutableMap<String, MezzeType>>()
+            for (c in rawConstraints) {
+                if (c !is Constraint.AssociatedTypeResolution) continue
+                val bucket = resolvedAssociatedBindings.getOrPut(c.abilityName to c.primaryTypeVar.id) { mutableMapOf() }
+                for ((name, tv) in c.associatedTypeVars) {
+                    bucket[name.removePrefix("'")] = substitution.apply(MezzeType.VarType(tv))
+                }
+            }
             SolveResult.Success(
                 substitution = substitution,
                 warnings = warnings,
@@ -219,7 +236,8 @@ class ConstraintSolver(
                 mustBeOpenRowVars = mustBeOpenRowVars.toSet(),
                 mustBeOpenBindings = mustBeOpenBindings.toSet(),
                 patternBasedRowVars = patternBasedRowVars.toSet(),
-                unresolvedInherentMethods = deferredInherentLeftovers.toList()
+                unresolvedInherentMethods = deferredInherentLeftovers.toList(),
+                resolvedAssociatedBindings = resolvedAssociatedBindings
             )
         } else {
             SolveResult.Failure(errors)

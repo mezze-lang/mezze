@@ -180,6 +180,10 @@ data class Substitution(
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
                         typeArgs = constraint.typeArgs.map { applyWithVisited(it, visitedVars, chainCache) },
+                        // Carry (and substitute) associated-type bindings; dropping
+                        // them stripped populated `having` bindings on every apply.
+                        associatedTypeBindings = constraint.associatedTypeBindings
+                            .mapValues { (_, t) -> applyWithVisited(t, visitedVars, chainCache) },
                         abilityHash = constraint.abilityHash
                     )
                 }
