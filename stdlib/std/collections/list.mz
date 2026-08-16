@@ -77,11 +77,11 @@ pub let drop : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
 
 ## Applies f to each element, returning a new list.
 pub let map : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'b <...> = { xs, f } ->
-  __native_list_map { xs = xs, f = f }
+  reverse { xs = fold_left { xs = xs, init = empty {}, f = {acc, x} -> cons { head = f { x = x }, tail = acc } } }
 
 ## Keeps only elements for which the predicate returns True.
 pub let filter : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
-  __native_list_filter { xs = xs, p = p }
+  reverse { xs = fold_left { xs = xs, init = empty {}, f = {acc, x} -> if p { x = x } then cons { head = x, tail = acc } else acc } }
 
 ## Tail-recursive uncons walk — each step peels one cons cell (O(1) via
 ## __native_list_uncons) and tail-calls with the new accumulator. The
@@ -104,13 +104,27 @@ pub let fold_right : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc 
 pub let reduce : { xs: List 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { xs, f } ->
   __native_list_reduce { xs = xs, f = f }
 
+## Short-circuiting recursive helper for any/all.
+## Walks uncons; stops as soon as the target result is seen.
+let any_go : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+  match uncons { xs = xs } is
+    None -> False
+    Some { val = { head, tail } } ->
+      if p { x = head } then True else any_go { xs = tail, p = p }
+
+let all_go : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+  match uncons { xs = xs } is
+    None -> True
+    Some { val = { head, tail } } ->
+      if p { x = head } then all_go { xs = tail, p = p } else False
+
 ## Returns True if any element matches the predicate.
 pub let any : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
-  __native_list_any { xs = xs, p = p }
+  any_go { xs = xs, p = p }
 
 ## Returns True if all elements match the predicate.
 pub let all : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
-  __native_list_all { xs = xs, p = p }
+  all_go { xs = xs, p = p }
 
 ## Returns True if the list contains the element.
 pub let contains : { xs: List 'a, x: 'a } -> Bool = { xs, x } ->
@@ -276,7 +290,7 @@ pub let none : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs,
 
 ## Counts elements matching the predicate.
 pub let count : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p } ->
-  __native_list_count { xs = xs, p = p }
+  fold_left { xs = xs, init = 0, f = {acc, x} -> if p { x = x } then acc + 1 else acc }
 
 ## Removes duplicate elements, keeping the first occurrence.
 pub let unique : { xs: List 'a } -> List 'a = { xs } -> __native_list_unique { xs = xs }
