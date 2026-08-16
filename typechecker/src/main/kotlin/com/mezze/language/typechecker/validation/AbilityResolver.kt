@@ -332,25 +332,35 @@ class AbilityResolver(
 
             val associatedBindings = impl.associatedTypeBindings
 
-            val allTypes = if (additionalTypeArgs.isNotEmpty() && additionalTypeArgs.any { it == type }) {
-                additionalTypeArgs
-            } else if (additionalTypeArgs.isEmpty()) {
-                listOf(type)
-            } else {
-                listOf(type) + additionalTypeArgs
+            // The full type tuple to match against the impl's annotations is the
+            // primary `type` followed by the extra ability type args. Pick by the
+            // impl's ANNOTATION ARITY, not by type-equality: a previous heuristic
+            // dropped `type` whenever some arg shared its type (e.g. `Int` scaled
+            // by `Int`), collapsing a 2-arg tuple to 1 and failing to match a
+            // multi-param `impl Scale Int for Int`. Arity-directed selection is
+            // immune to that coincidence.
+            val withPrimary = listOf(type) + additionalTypeArgs
+            val allTypes = when {
+                additionalTypeArgs.isEmpty() -> listOf(type)
+                // args alone already fill the annotations (some caller passed the
+                // complete tuple, e.g. codec paths) — use them as-is.
+                additionalTypeArgs.size == annotations.size -> additionalTypeArgs
+                else -> withPrimary
             }
 
             val typeVarBindings = mutableMapOf<String, MezzeType>()
 
-            val structuralMatch = if (associatedBindings.isEmpty()) {
+            // Target-type matching is the same whether or not the impl binds an
+            // associated type (`having 'out = ...`): the associated binding only
+            // adds OUTPUT info, it doesn't change which (receiver, arg…) tuple the
+            // impl applies to. A previous shortcut forced `annotations.size == 1`
+            // in the associated-binding case, which rejected every multi-param
+            // impl with a `having` clause (e.g. `impl Scale Int for Int having 'out`).
+            val structuralMatch =
                 annotations.size == allTypes.size &&
                 allTypes.zip(annotations).all { (actualType, annotation) ->
                     TypeAnnotationMatcher.typeMatchesAnnotation(actualType, annotation, typeDeclarations, impl.typeVars, typeVarBindings)
                 }
-            }
-            else {
-                annotations.size == 1 && TypeAnnotationMatcher.typeMatchesAnnotation(type, annotations.first(), typeDeclarations, impl.typeVars, typeVarBindings)
-            }
 
             if (!structuralMatch) return@find false
 
