@@ -83,9 +83,18 @@ pub let map : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'b <...> = { xs,
 pub let filter : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
   __native_list_filter { xs = xs, p = p }
 
+## Tail-recursive uncons walk — each step peels one cons cell (O(1) via
+## __native_list_uncons) and tail-calls with the new accumulator. The
+## cross-fn tail-call trampoline keeps this O(1) stack.
+let fold_left_go : { xs: List 'a, acc: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, acc, f } ->
+  match uncons { xs = xs } is
+    None -> acc
+    Some { val = { head, tail } } ->
+      fold_left_go { xs = tail, acc = f { acc = acc, x = head }, f = f }
+
 ## Left fold with an initial accumulator value.
 pub let fold_left : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
-  __native_list_fold_left { xs = xs, init = init, f = f }
+  fold_left_go { xs = xs, acc = init, f = f }
 
 ## Right fold with an initial accumulator value.
 pub let fold_right : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
