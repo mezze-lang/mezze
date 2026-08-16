@@ -1,0 +1,129 @@
+# In-process perf comparison: post-Mezze-rewrite List ops vs native Seq ops.
+# Measures library ops (post-batches 0-6): list::fold_left, list::map,
+# list::filter, list::any, list::count are all Mezze recursion + fold on top
+# of native uncons/cons. Seq counterparts are the reference: fused
+# SeqFoldLongLoopNode + fused native map/filter.
+#
+# Note: `list::sum` deliberately still native (kept per perf policy).
+# So `list::sum {xs}` vs `list::fold_left {xs, init=0, f=+}` shows the
+# native vs Mezze gap on the same op.
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::list
+use std::collections::seq
+
+# Build a List of length n by prepending.
+let build_list = {n, acc} -> if n == 0
+    then acc
+    else build_list {n = n - 1, acc = list::cons {head = n, tail = acc}}
+
+# --- timed one-shot wrappers, each returns {result, ns} ---
+
+let time_list_fold_left = {xs} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let s = list::fold_left {xs = xs, init = 0, f = {acc, x} -> acc + x}
+    let t1 = monotonic {}
+    { r = s, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_list_sum_native = {xs} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let s = list::sum {xs = xs}
+    let t1 = monotonic {}
+    { r = s, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_list_map = {xs} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let ys = list::map {xs = xs, f = {x} -> x + 1}
+    let t1 = monotonic {}
+    { r = list::size {xs = ys}, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_list_filter = {xs} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let ys = list::filter {xs = xs, p = {x} -> x % 2 == 0}
+    let t1 = monotonic {}
+    { r = list::size {xs = ys}, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_list_any = {xs} -> perform SystemTime in do
+    # any that short-circuits at the end (worst case scan)
+    let t0 = monotonic {}
+    let b = list::any {xs = xs, p = {x} -> x == (0 - 1)}
+    let t1 = monotonic {}
+    let br = if b then 1 else 0
+    { r = br, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_list_count = {xs} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let c = list::count {xs = xs, p = {x} -> x % 2 == 0}
+    let t1 = monotonic {}
+    { r = c, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_seq_fold = {ys} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let s = seq::fold {xs = ys, init = 0, f = {acc, x} -> acc + x}
+    let t1 = monotonic {}
+    { r = s, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_seq_map = {ys} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let zs = seq::map {xs = ys, f = {x} -> x + 1}
+    let t1 = monotonic {}
+    { r = seq::size {xs = zs}, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_seq_filter = {ys} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let zs = seq::filter {xs = ys, p = {x} -> x % 2 == 0}
+    let t1 = monotonic {}
+    { r = seq::size {xs = zs}, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+# --- generic k-shot driver ---
+
+let run_k = {label, thunk, k, warmup} -> perform Console in perform SystemTime in do
+    # Warmup
+    let _w = warmup_go {thunk = thunk, k = warmup, acc = []}
+    let times = warmup_go {thunk = thunk, k = k, acc = []}
+    let sorted = seq::sort {xs = times}
+    let n_times = seq::size {xs = sorted}
+    let min_ns = match seq::get {xs = sorted, i = 0} is
+        Some {val} -> val
+        None -> 0
+    let med_ns = match seq::get {xs = sorted, i = n_times / 2} is
+        Some {val} -> val
+        None -> 0
+    let max_ns = match seq::get {xs = sorted, i = n_times - 1} is
+        Some {val} -> val
+        None -> 0
+    println { msg = "  $(label): min=$(min_ns.to_str{}) med=$(med_ns.to_str{}) max=$(max_ns.to_str{})" }
+
+let warmup_go = {thunk, k, acc} -> if k == 0
+    then acc
+    else do
+      let r = thunk {}
+      warmup_go {thunk = thunk, k = k - 1, acc = seq::push {xs = acc, x = r.ns}}
+
+let main = {} -> perform Console in perform SystemTime in do
+    let n = 10000
+    println { msg = "N=$(n.to_str{}) — per-op ns (min/med/max over 10 runs, 3 warmups):" }
+    let xs = build_list {n = n, acc = list::empty {}}
+    let ys = seq::range {start = 1, end = n + 1}
+
+    println { msg = "" }
+    println { msg = "-- SUM --" }
+    run_k {label = "list::fold_left (Mezze)     ", thunk = {} -> time_list_fold_left {xs = xs}, k = 10, warmup = 3}
+    run_k {label = "list::sum (native, ref)     ", thunk = {} -> time_list_sum_native {xs = xs}, k = 10, warmup = 3}
+    run_k {label = "seq::fold (fused native)    ", thunk = {} -> time_seq_fold {ys = ys}, k = 10, warmup = 3}
+
+    println { msg = "" }
+    println { msg = "-- MAP --" }
+    run_k {label = "list::map (Mezze)           ", thunk = {} -> time_list_map {xs = xs}, k = 10, warmup = 3}
+    run_k {label = "seq::map (fused native)     ", thunk = {} -> time_seq_map {ys = ys}, k = 10, warmup = 3}
+
+    println { msg = "" }
+    println { msg = "-- FILTER --" }
+    run_k {label = "list::filter (Mezze)        ", thunk = {} -> time_list_filter {xs = xs}, k = 10, warmup = 3}
+    run_k {label = "seq::filter (fused native)  ", thunk = {} -> time_seq_filter {ys = ys}, k = 10, warmup = 3}
+
+    println { msg = "" }
+    println { msg = "-- SHORT-CIRCUIT / COUNT --" }
+    run_k {label = "list::any (Mezze, no match) ", thunk = {} -> time_list_any {xs = xs}, k = 10, warmup = 3}
+    run_k {label = "list::count (Mezze)         ", thunk = {} -> time_list_count {xs = xs}, k = 10, warmup = 3}
