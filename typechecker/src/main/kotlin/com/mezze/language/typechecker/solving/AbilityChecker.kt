@@ -173,6 +173,8 @@ internal class AbilityChecker(
         }
 
         if (matchingImplPair == null) {
+            // No impl for this type yet — nothing to resolve. Not an error here;
+            // a missing impl surfaces via the AbilityRequired check instead.
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
         }
 
@@ -181,6 +183,7 @@ internal class AbilityChecker(
 
         val associatedBindings = matchingImpl.associatedTypeBindings
         if (associatedBindings.isEmpty()) {
+            // Impl declares no `having` bindings — nothing to resolve.
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
         }
 

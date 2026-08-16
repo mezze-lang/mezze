@@ -684,40 +684,30 @@ class ConstraintGenerator(
             annotationValidator.validateAnnotationAgainstExpression(binding, annotatedType, typeAnnotationValue, binding.value, exprResult.type)
 
             val annotationAbilityConstraints = if (typeAnnotationValue is ParsedFunctionType) {
+                // Prefer the already-converted annotation FunctionType (typeArgs are
+                // MezzeType); fall back to converting the parsed annotation's args.
+                // Either way, each constraint's first type-VAR is the primary; skip
+                // constraints with no variable (nothing to require).
                 val preConvertedFnType = annotatedType as? MezzeType.FunctionType
-                if (preConvertedFnType != null) {
-                    preConvertedFnType.abilityConstraints.mapNotNull { constraint ->
-                        val typeVarArg = constraint.typeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
-                        if (typeVarArg != null) {
-                            Constraint.AbilityRequired(
-                                typeVar = typeVarArg.variable,
-                                abilityName = constraint.abilityName,
-                                abilityHash = registry.abilityDeclarations[constraint.abilityName]?.contentHash,
-                                typeArgs = constraint.typeArgs,
-                                context = "Type annotation on ${getBindingName(binding)}",
-                                loc = binding.loc,
-                            )
-                        } else {
-                            null
+                val abilityTypeArgs: List<Pair<String, List<MezzeType>>> =
+                    if (preConvertedFnType != null) {
+                        preConvertedFnType.abilityConstraints.map { it.abilityName to it.typeArgs }
+                    } else {
+                        typeAnnotationValue.abilityConstraints.map { c ->
+                            c.abilityName to c.typeArgs.map { convertTypeAnnotation(it) }
                         }
                     }
-                } else {
-                    typeAnnotationValue.abilityConstraints.mapNotNull { constraint ->
-                        val allTypeArgs = constraint.typeArgs.map { convertTypeAnnotation(it) }
-                        val typeVarArg = allTypeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
-                        if (typeVarArg != null) {
-                            Constraint.AbilityRequired(
-                                typeVar = typeVarArg.variable,
-                                abilityName = constraint.abilityName,
-                                abilityHash = registry.abilityDeclarations[constraint.abilityName]?.contentHash,
-                                typeArgs = allTypeArgs,
-                                context = "Type annotation on ${getBindingName(binding)}",
-                                loc = binding.loc
-                            )
-                        } else {
-                            null
-                        }
-                    }
+                abilityTypeArgs.mapNotNull { (abilityName, typeArgs) ->
+                    val typeVarArg = typeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
+                        ?: return@mapNotNull null
+                    Constraint.AbilityRequired(
+                        typeVar = typeVarArg.variable,
+                        abilityName = abilityName,
+                        abilityHash = registry.abilityDeclarations[abilityName]?.contentHash,
+                        typeArgs = typeArgs,
+                        context = "Type annotation on ${getBindingName(binding)}",
+                        loc = binding.loc,
+                    )
                 }
             } else {
                 emptyList()

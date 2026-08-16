@@ -372,37 +372,54 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
     // asymmetry that let effect `having` be sound while ability `having` was not.
     // Only bindings on constraints shared by (ability name, hash) are unified,
     // key-by-key; a mismatch is a hard failure (naming the key).
-    val abilitySubst = run {
-        val soFar = returnSubst.compose(paramSubst).compose(effectSubst)
-        fun key(c: MezzeType.FunctionAbilityConstraint) = c.abilityName to c.abilityHash
-        val byKey1 = fn1.abilityConstraints.associateBy { key(it) }
-        val byKey2 = fn2.abilityConstraints.associateBy { key(it) }
-        var acc = soFar
-        for (k in byKey1.keys.intersect(byKey2.keys)) {
-            val c1 = byKey1[k]!!
-            val c2 = byKey2[k]!!
-            val allKeys = c1.associatedTypeBindings.keys + c2.associatedTypeBindings.keys
-            for (bindingKey in allKeys) {
-                val t1 = c1.associatedTypeBindings[bindingKey]
-                val t2 = c2.associatedTypeBindings[bindingKey]
-                if (t1 != null && t2 != null) {
-                    when (val r = unify(acc.apply(t1), acc.apply(t2), registry)) {
-                        is UnificationResult.Success -> acc = r.substitution.compose(acc)
-                        is UnificationResult.Failure -> return UnificationResult.Failure(
-                            message = "Ability '${c1.abilityName}' has incompatible associated type " +
-                                "'${bindingKey.removePrefix("'")}': ${r.message}",
-                            type1 = fn1,
-                            type2 = fn2
-                        )
-                    }
-                }
-            }
-        }
-        acc
+    fun key(c: MezzeType.FunctionAbilityConstraint) = c.abilityName to c.abilityHash
+    val byKey1 = fn1.abilityConstraints.associateBy { key(it) }
+    val byKey2 = fn2.abilityConstraints.associateBy { key(it) }
+    var abilitySubst = returnSubst.compose(paramSubst).compose(effectSubst)
+    for (k in byKey1.keys.intersect(byKey2.keys)) {
+        val c1 = byKey1[k]!!
+        val c2 = byKey2[k]!!
+        abilitySubst = unifyAssociatedTypeMaps(
+            c1.associatedTypeBindings, c2.associatedTypeBindings,
+            kind = "Ability", owner = c1.abilityName, acc = abilitySubst, registry = registry
+        ).getOrElse { return it }
     }
 
-    val finalSubst = abilitySubst
-    return UnificationResult.Success(finalSubst)
+    return UnificationResult.Success(abilitySubst)
+}
+
+/**
+ * Unify two associated-type binding maps key-by-key, threading [acc]. Shared by
+ * the effect-row path (`EffectInstance.associatedTypes`) and the ability-
+ * constraint path (`FunctionAbilityConstraint.associatedTypeBindings`) so both
+ * check associated types identically. Only keys present on BOTH sides are
+ * unified; a mismatch is a Failure naming the [kind] ("Effect"/"Ability"), the
+ * [owner] (effect/ability name), and the key. On success returns the updated
+ * substitution; the caller decides how to surface a Failure.
+ */
+private fun unifyAssociatedTypeMaps(
+    m1: Map<String, MezzeType>,
+    m2: Map<String, MezzeType>,
+    kind: String,
+    owner: String,
+    acc: Substitution,
+    registry: DeclarationRegistry,
+): UnificationResult {
+    var subst = acc
+    for (key in m1.keys + m2.keys) {
+        val t1 = m1[key] ?: continue
+        val t2 = m2[key] ?: continue
+        when (val r = unify(subst.apply(t1), subst.apply(t2), registry)) {
+            is UnificationResult.Success -> subst = r.substitution.compose(subst)
+            is UnificationResult.Failure -> return UnificationResult.Failure(
+                message = "$kind '$owner' has incompatible associated type " +
+                    "'${key.removePrefix("'")}': ${r.message}",
+                type1 = t1,
+                type2 = t2,
+            )
+        }
+    }
+    return UnificationResult.Success(subst)
 }
 
 private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType, registry: DeclarationRegistry): UnificationResult {
