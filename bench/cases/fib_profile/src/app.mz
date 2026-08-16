@@ -1,0 +1,13 @@
+# fib_profile — heavier fib workload (fib 42) tuned for CPU profiling.
+# The standard bench_fib case runs fib(35)+fib(38) in ~330ms combined
+# on Mezze JIT, which is too short for async-profiler's default 10ms
+# sampling interval to gather statistically-useful samples. fib(42) is
+# roughly 8× larger and gives the sampler ~250-500 hits, enough to
+# reason about hot paths.
+use std::effects::log::{println, Console}
+
+let fib = {n} -> if n < 2 then n else fib {n = n - 1} + fib {n = n - 2}
+
+let main = {} -> perform Console in do
+    let a = fib {n = 42}
+    println { msg = "fib(42) = $(a.to_str{})" }

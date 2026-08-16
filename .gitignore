@@ -64,5 +64,11 @@ debug_*.txt
 *.bak
 *.bak[0-9]
 
+# bench profile / flamegraph output — regenerated per run, not source of truth
+bench/results/*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-*.txt
+bench/results/*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-*.html
+bench/results/*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-*.collapsed
+bench/results/*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-*.jfr
+
 # ai tools
 .claudedocker-test-project/build_test.jar
