@@ -170,100 +170,107 @@ object EmbeddedExec {
         // tool jars (cpusampler, coverage, chromeinspector, insight) — they
         // were dropped from the classpath in NativeBuildPath.extractRuntimeClasspath
         // to keep the binary slim. The options they expose simply don't
-        // exist at runtime, and trying to set them crashes with
-        // "Could not find option with name cpusampler" before user code
-        // runs. Same root cause as #195 (MEZZE_JIT=0 on DefaultTruffleRuntime).
+        // exist at runtime, and enabling one causes engineBuilder.build()
+        // to throw "Could not find option with name cpusampler" before user
+        // code runs. Same root cause as #195 (MEZZE_JIT=0 on DefaultTruffleRuntime).
         //
-        // Treat the dev-instrumentation flags as no-ops with a one-line
-        // warning when the runtime can't honor them. Users who want
-        // profiling / coverage / inspect should run via `mez dev` or
-        // `mez exec` which spawn a JVM child with the tools on its
-        // classpath. (#236)
-        if (profile && !jitCapable) {
-            System.err.println(
-                "[mezze] --profile ignored — this binary doesn't ship the cpusampler tool. " +
-                "Run via `mez exec` / `mez dev` for profiling."
-            )
-        }
-        if (coverage && !jitCapable) {
-            System.err.println(
-                "[mezze] --coverage ignored — this binary doesn't ship the coverage tool. " +
-                "Run via `mez exec` / `mez dev` for coverage."
-            )
-        }
-        if (allocations && !jitCapable) {
-            System.err.println(
-                "[mezze] --allocations ignored — this binary doesn't ship the allocations tool. " +
-                "Run via `mez exec` / `mez dev` for allocation tracking."
-            )
-        }
-        if (insightFile != null && !jitCapable) {
-            System.err.println(
-                "[mezze] --insight=... ignored — this binary doesn't ship the GraalVM Insight tool. " +
-                "Run via `mez exec` / `mez dev` for Insight."
-            )
-        }
-        if ((inspect || inspectBrk) && !jitCapable) {
-            System.err.println(
-                "[mezze] --inspect ignored — this binary doesn't ship the Chrome DevTools inspector. " +
-                "Run via `mez exec` / `mez dev` for the debugger."
-            )
+        // Historical note: earlier attempts (#236) gated on `!jitCapable`
+        // to demote these flags. That was correct while user native binaries
+        // used the interpreter-only DefaultTruffleRuntime. Once #402 turned
+        // on --macro:truffle-svm, native binaries became jitCapable=true —
+        // so the guard let the option calls through and the crash returned.
+        //
+        // Fix: probe the option registry ONCE against a throwaway engine
+        // (Engine.getOptions() enumerates every option every registered tool
+        // exposes). Each flag checks if its option key is present before
+        // touching engineBuilder — if the tool jar isn't shipped, the option
+        // isn't registered, so we skip setting it and print a warning.
+        // Building the probe engine is unavoidable overhead but only pays
+        // when the user asked for instrumentation, and it's cheap (<50ms).
+        val availableOptions: Set<String> = try {
+            Engine.newBuilder().option("engine.WarnInterpreterOnly", "false").build().use { probe ->
+                probe.options.mapNotNull { it.name }.toSet()
+            }
+        } catch (_: Throwable) {
+            emptySet()
         }
 
-        if (profile && jitCapable) {
+        fun trySetOption(flagName: String, primaryOption: String, action: () -> Unit): Boolean {
+            if (primaryOption !in availableOptions) {
+                System.err.println(
+                    "[mezze] $flagName ignored — this binary doesn't ship the required Truffle tool " +
+                    "(option '$primaryOption' not registered). " +
+                    "Run via `mez exec` / `mez dev` for full tooling."
+                )
+                return false
+            }
+            return try {
+                action()
+                true
+            } catch (e: IllegalArgumentException) {
+                System.err.println("[mezze] $flagName ignored — ${e.message?.trim() ?: "option not registered"}")
+                false
+            }
+        }
+
+        if (profile) {
             val out = File(outputDir(), "mezze-profile.txt")
             out.parentFile?.mkdirs()
-            engineBuilder.option("cpusampler", "true")
-                .option("cpusampler.OutputFile", out.absolutePath)
-            System.err.println("[mezze] profile → ${out.absolutePath}")
+            val ok = trySetOption("--profile", "cpusampler") {
+                engineBuilder.option("cpusampler", "true")
+                    .option("cpusampler.OutputFile", out.absolutePath)
+            }
+            if (ok) System.err.println("[mezze] profile → ${out.absolutePath}")
         }
-        if (coverage && jitCapable) {
+        if (coverage) {
             val out = File(outputDir(), "mezze-coverage.txt")
             out.parentFile?.mkdirs()
-            engineBuilder.option("coverage", "true")
-                .option("coverage.OutputFile", out.absolutePath)
-            System.err.println("[mezze] coverage → ${out.absolutePath}")
+            val ok = trySetOption("--coverage", "coverage") {
+                engineBuilder.option("coverage", "true")
+                    .option("coverage.OutputFile", out.absolutePath)
+            }
+            if (ok) System.err.println("[mezze] coverage → ${out.absolutePath}")
         }
-        if (allocations && jitCapable) {
+        if (allocations) {
             val out = File(outputDir(), "mezze-allocations.txt")
             out.parentFile?.mkdirs()
-            engineBuilder.option("mezze-allocations", "true")
-                .out(PrintStream(out.outputStream(), true))
-            System.err.println("[mezze] allocations → ${out.absolutePath}")
+            val ok = trySetOption("--allocations", "mezze-allocations") {
+                engineBuilder.option("mezze-allocations", "true")
+                    .out(PrintStream(out.outputStream(), true))
+            }
+            if (ok) System.err.println("[mezze] allocations → ${out.absolutePath}")
         }
-        if (insightFile != null && jitCapable) {
+        if (insightFile != null) {
             val f = File(insightFile)
             if (!f.exists()) {
                 System.err.println("Error: --insight=$insightFile: file not found")
                 kotlin.system.exitProcess(1)
             }
-            engineBuilder.option("insight", f.absolutePath)
+            trySetOption("--insight", "insight") { engineBuilder.option("insight", f.absolutePath) }
         }
-        if ((inspect || inspectBrk) && jitCapable) {
-            engineBuilder.option("inspect", "4242")
-            if (inspectBrk) engineBuilder.option("inspect.Suspend", "true")
-            // #356 — BDSL bytecode has no debugger instrumentation; force off
-            // so scopes/breakpoints/stepping keep working on the AST path.
-            com.mezze.interpreter.runtime.MezzeLanguage.enableBdslDebugInstrumentation()
-            System.err.println("[mezze] devtools listening on chrome://inspect — port 4242")
+        if (inspect || inspectBrk) {
+            val ok = trySetOption("--inspect", "inspect") {
+                engineBuilder.option("inspect", "4242")
+                if (inspectBrk) engineBuilder.option("inspect.Suspend", "true")
+                // #356 — BDSL bytecode has no debugger instrumentation; force off
+                // so scopes/breakpoints/stepping keep working on the AST path.
+                com.mezze.interpreter.runtime.MezzeLanguage.enableBdslDebugInstrumentation()
+            }
+            if (ok) System.err.println("[mezze] devtools listening on chrome://inspect — port 4242")
         }
-        if (dap && !jitCapable) {
-            System.err.println(
-                "[mezze] --dap ignored — this binary doesn't ship the debug adapter. " +
-                "Run via `mez exec` / `mez dev` (JIT mode) for the debugger."
-            )
-        }
-        if (dap && jitCapable) {
-            // GraalVM's built-in DAP server (dap-tool). Statement/root source
-            // sections + StatementTag on the Truffle nodes make Mezze line
-            // breakpoints + stepping work through it.
-            engineBuilder.option("dap", dapPort.toString())
-            if (dapBrk) engineBuilder.option("dap.Suspend", "true")
-            else engineBuilder.option("dap.Suspend", "false")
-            // #356 — BDSL bytecode has no debugger instrumentation; force off
-            // so scopes/breakpoints/stepping keep working on the AST path.
-            com.mezze.interpreter.runtime.MezzeLanguage.enableBdslDebugInstrumentation()
-            System.err.println("[mezze] DAP server listening on port $dapPort — attach a DAP client (VS Code)")
+        if (dap) {
+            val ok = trySetOption("--dap", "dap") {
+                // GraalVM's built-in DAP server (dap-tool). Statement/root source
+                // sections + StatementTag on the Truffle nodes make Mezze line
+                // breakpoints + stepping work through it.
+                engineBuilder.option("dap", dapPort.toString())
+                if (dapBrk) engineBuilder.option("dap.Suspend", "true")
+                else engineBuilder.option("dap.Suspend", "false")
+                // #356 — BDSL bytecode has no debugger instrumentation; force off
+                // so scopes/breakpoints/stepping keep working on the AST path.
+                com.mezze.interpreter.runtime.MezzeLanguage.enableBdslDebugInstrumentation()
+            }
+            if (ok) System.err.println("[mezze] DAP server listening on port $dapPort — attach a DAP client (VS Code)")
         }
 
         val engine = engineBuilder.build()
