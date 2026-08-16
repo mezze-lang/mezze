@@ -14,10 +14,10 @@ use std::int
 ## Backends (mirror the Async handler naming — pick your substrate):
 ##   - LoomParallel      — one Loom virtual thread per fork. Default;
 ##     cheap forks, great for I/O-bound work and general use.
-##   - OSThreadParallel  — real platform threads via a shared pool.
+##   - OSThreadParallel  — one platform Truffle thread per fork.
 ##     Best for CPU-bound work where Loom carrier mounting overhead
-##     would show up. Rebuilt as a genuine platform-thread pool in
-##     phase 2 (currently aliases the Loom path).
+##     would show up. More expensive per spawn (~50µs vs Loom's ~14µs)
+##     but avoids virtual-thread scheduler churn.
 ##
 ## Both backends bracket per-scope state via the impl-only
 ## initialize_scope / finalize_scope convention.
@@ -65,12 +65,16 @@ impl Parallel for LoomParallelWith { max_concurrent: Int, min_chunk: Int } where
 }
 
 ## ==================================================================
-## OSThreadParallel — real platform threads via a shared pool.
+## OSThreadParallel — one platform Truffle thread per fork.
 ##
-## Phase 1 note: currently aliases the LoomParallel path (same
-## __native_loom_parallel_* impls under the hood). Phase 2 (#465)
-## rebuilds this on a real ForkJoinPool of platform-thread workers
-## with per-task context enter/leave. Semantically identical today.
+## Every Parallel.join spawns a fresh polyglot-attached platform OS
+## thread (via `env.newTruffleThreadBuilder(...).virtual(false)`),
+## one thread per fork, no Loom carrier mounting. More expensive per
+## spawn (~50µs vs Loom's ~14µs) but avoids virtual-thread scheduler
+## churn. Best for coarse-grained CPU-bound joins where forks are
+## long-lived.
+##
+## Mirrors OSThreadAsync from std::effects::async.
 ## ==================================================================
 
 ## Mirrors OSThreadAsync from std::effects::async.

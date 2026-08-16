@@ -20,22 +20,31 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Native primitives for the Parallel effect. In phase 1 (#464) both
- * LoomParallel and OSThreadParallel share one implementation:
- * {@code join} spawns a fresh Truffle virtual thread for the right
- * side, runs the left inline on the caller, and joins. Derived
- * combinators (map, reduce, filter, ...) sit on top of this in the
- * Mezze stdlib. Phase 2 (#465) will split OSThreadParallel onto a
- * real platform-thread pool with per-task context enter/leave.
+ * Native primitives for the Parallel effect.
  *
- * <p>This shape matches TruffleRuby's {@code ThreadManager} — one
- * polyglot thread per unit of parallel work, virtual-thread backed for
- * cheap fork cost, no shared queue or worker pool. Prior attempts to
- * build a shared pool of polyglot workers hit oracle/graal#10923
- * (ThreadLocalHandshake barrier hang) and violated the Truffle
- * Javadoc's own guidance against {@code ExecutorService.awaitTermination}
- * on polyglot threads. Full research in
- * {@code scratchpad/truffle_deep_research.md}.
+ * <p>Two backends, honestly different substrates:
+ * <ul>
+ *   <li><b>LoomParallel</b> — {@code env.newTruffleThreadBuilder(...).virtual(true)}.
+ *     Each fork is a Loom virtual Truffle thread, scheduled M:N onto
+ *     the JDK's default carrier ForkJoinPool. Cheap spawn (~14µs),
+ *     scales to millions of forks, ideal for I/O-bound work.
+ *   <li><b>OSThreadParallel</b> — {@code env.newTruffleThreadBuilder(...).virtual(false)}.
+ *     Each fork is a fresh platform Truffle thread, one OS thread per
+ *     fork, no Loom mounting overhead. More expensive per spawn
+ *     (~50µs) but avoids virtual-thread scheduler churn. Best for
+ *     CPU-bound work where forks are coarse-grained and long-lived.
+ * </ul>
+ *
+ * <p>Both backends share {@link #joinOnTruffleThread} — the only
+ * difference is the {@code virtual} flag and (optionally) a
+ * backpressure semaphore. Both use TruffleRuby's shape: one polyglot
+ * thread per unit of work, no worker pool, no shared queue.
+ *
+ * <p>Prior attempts to build a shared pool of polyglot workers hit
+ * oracle/graal#10923 (ThreadLocalHandshake barrier hang) and violated
+ * the Truffle Javadoc's own guidance against
+ * {@code ExecutorService.awaitTermination} on polyglot threads. Full
+ * research in {@code scratchpad/truffle_deep_research.md}.
  *
  * <p>Pure-Java parallel kernels ({@link #parallelSumLong},
  * {@link #parallelProductLong}) still use {@link ForkJoinPool#commonPool()} —
@@ -138,7 +147,49 @@ public final class ParallelNatives {
      */
     @TruffleBoundary
     public static MezzeRecord loomParallelJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
-        return joinOnVirtualThread(args, callNode, node, LOOM_SEMAPHORE.get());
+        return joinOnTruffleThread(args, callNode, node, LOOM_SEMAPHORE.get(), /* virtual = */ true);
+    }
+
+    // ==================== OSThreadParallel ====================
+    //
+    // Same init/finalize as LoomParallel (shared PARALLELISM_HINT +
+    // MIN_CHUNK_HINT + LOOM_SEMAPHORE state; nothing OSThread-specific
+    // to stash at the moment). Only the join primitive differs: it
+    // requests virtual(false) so each fork is a fresh polyglot-attached
+    // platform Truffle thread rather than a Loom virtual thread.
+
+    /**
+     * Enter an OSThreadParallel scope. Same knob semantics as
+     * {@link #loomParallelInit} — accepts pool_size (worker count hint,
+     * currently only feeds SIMD chunking) and min_chunk. No pool is
+     * pre-allocated: each Parallel.join spawns its own platform Truffle
+     * thread.
+     */
+    @TruffleBoundary
+    public static MezzeUnit osthreadParallelInit(MezzeRecord args, MezzeNode node) {
+        return loomParallelInit(args, node);
+    }
+
+    /** Exit an OSThreadParallel scope. Clears the hint ThreadLocals. */
+    @TruffleBoundary
+    public static MezzeUnit osthreadParallelFinalize(MezzeRecord args) {
+        return loomParallelFinalize(args);
+    }
+
+    /**
+     * The Parallel.join primitive on OSThreadParallel. Fresh platform
+     * Truffle thread for the right side (one OS thread per fork), left
+     * runs inline on caller (or spawns its own platform thread when
+     * caller is virtual — mixing Loom callers with a platform-only
+     * scope, pinning would wedge the carrier).
+     *
+     * <p>Best for coarse-grained CPU-bound joins where the ~50µs
+     * platform-thread spawn cost is amortized. For fine-grained
+     * parallelism prefer LoomParallel.
+     */
+    @TruffleBoundary
+    public static MezzeRecord osthreadParallelJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+        return joinOnTruffleThread(args, callNode, node, LOOM_SEMAPHORE.get(), /* virtual = */ false);
     }
 
     // ==================== Parallel numeric fast paths ====================
@@ -271,43 +322,48 @@ public final class ParallelNatives {
         return total;
     }
 
-    // ==================== Shared virtual-thread join impl ====================
+    // ==================== Shared thread-per-fork join impl ====================
 
     /**
-     * Virtual-thread-per-fork join. Called from loomParallelJoin (and
-     * from OSThreadParallel in phase 1 — see #464/#465). The only
-     * per-call variation is the optional backpressure semaphore.
+     * Thread-per-fork join. Called from loomParallelJoin (virtual=true)
+     * and osthreadParallelJoin (virtual=false). Per-call variation:
+     * optional backpressure semaphore + the virtual/platform choice.
      *
-     * <p>Left side: run inline on caller when caller is itself a virtual
-     * thread (cheap — no second spawn). When caller is a platform
-     * thread, spawn a fresh virtual thread for the left too — running
-     * Mezze code inline while a peer vthread runs the same triggers a
-     * Truffle safepoint / Loom pinning interaction that wedges the
-     * platform thread.
+     * <p>Left side: run inline on caller only when the caller's thread
+     * KIND matches what this scope wants — i.e. inline iff
+     * {@code virtual == callerIsVirtual}. Otherwise spawn the left as
+     * its own fresh thread of the requested kind. This avoids two
+     * hazards: Loom pinning (a platform caller running Mezze code
+     * inline while a peer vthread does the same wedges the carrier),
+     * and kind divergence (an OSThreadParallel scope should not
+     * silently execute half its work on a virtual thread because the
+     * caller happened to be one).
      *
-     * <p>Right side: always a fresh virtual thread via
-     * {@code env.newTruffleThreadBuilder(...).virtual(true).build()} —
+     * <p>Right side: always a fresh Truffle thread of the requested
+     * kind, via {@code env.newTruffleThreadBuilder(...).virtual(flag).build()} —
      * the polyglot-context-safe primitive, same one TruffleRuby uses
      * for its Fibers.
      */
-    private static MezzeRecord joinOnVirtualThread(
+    private static MezzeRecord joinOnTruffleThread(
         MezzeRecord args,
         IndirectCallNode callNode,
         MezzeNode node,
-        Semaphore sem
+        Semaphore sem,
+        boolean virtual
     ) {
         MezzeFunction leftFn = getFunction(args, "l");
         MezzeFunction rightFn = getFunction(args, "r");
 
         HandlerChainEntry[] chain = HandlerChainRegistry.snapshotHandlerChainEntries();
-        boolean callerIsPlatform = !Thread.currentThread().isVirtual();
+        boolean callerIsVirtual = Thread.currentThread().isVirtual();
+        boolean leftInline = (virtual == callerIsVirtual);
 
         AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
         AtomicReference<Throwable> errSink = new AtomicReference<>();
 
         Env env = MezzeContext.get(node).getEnv();
 
-        // Right side: always a fresh virtual thread.
+        // Right side: always a fresh Truffle thread of the requested kind.
         Object[] rightResultHolder = new Object[1];
         Thread rightThread = env.newTruffleThreadBuilder(() -> {
             if (sem != null) {
@@ -322,12 +378,12 @@ public final class ParallelNatives {
             } finally {
                 if (sem != null) sem.release();
             }
-        }).virtual(true).build();
+        }).virtual(virtual).build();
         rightThread.start();
 
         Object[] leftResultHolder = new Object[1];
         Thread leftThread = null;
-        if (callerIsPlatform) {
+        if (!leftInline) {
             leftThread = env.newTruffleThreadBuilder(() -> {
                 if (sem != null) {
                     try { sem.acquire(); } catch (InterruptedException e) {
@@ -341,7 +397,7 @@ public final class ParallelNatives {
                 } finally {
                     if (sem != null) sem.release();
                 }
-            }).virtual(true).build();
+            }).virtual(virtual).build();
             leftThread.start();
         } else {
             if (sem != null) {

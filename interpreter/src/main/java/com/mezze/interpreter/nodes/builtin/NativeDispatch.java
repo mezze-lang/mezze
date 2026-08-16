@@ -2930,11 +2930,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS_WITH_NODE.put("__native_loom_parallel_init", (r, c, n) -> ParallelNatives.loomParallelInit(r, n));
         HANDLERS.put("__native_loom_parallel_finalize", (r, c) -> ParallelNatives.loomParallelFinalize(r));
         HANDLERS_WITH_NODE.put("__native_loom_parallel_join", (r, c, n) -> ParallelNatives.loomParallelJoin(r, c, n));
-        // OSThreadParallel: phase 1 aliases the Loom path; phase 2 (#465) rebuilds on a real
-        // platform-thread pool with per-task context enter/leave.
-        HANDLERS_WITH_NODE.put("__native_osthread_parallel_init", (r, c, n) -> ParallelNatives.loomParallelInit(r, n));
-        HANDLERS.put("__native_osthread_parallel_finalize", (r, c) -> ParallelNatives.loomParallelFinalize(r));
-        HANDLERS_WITH_NODE.put("__native_osthread_parallel_join", (r, c, n) -> ParallelNatives.loomParallelJoin(r, c, n));
+        // OSThreadParallel: platform-thread-per-fork (#465). Shares init/finalize
+        // with LoomParallel; join spawns virtual(false) Truffle threads.
+        HANDLERS_WITH_NODE.put("__native_osthread_parallel_init", (r, c, n) -> ParallelNatives.osthreadParallelInit(r, n));
+        HANDLERS.put("__native_osthread_parallel_finalize", (r, c) -> ParallelNatives.osthreadParallelFinalize(r));
+        HANDLERS_WITH_NODE.put("__native_osthread_parallel_join", (r, c, n) -> ParallelNatives.osthreadParallelJoin(r, c, n));
         HANDLERS.put("__native_parallel_min_chunk_hint", (r, c) -> ParallelNatives.minChunkHint(r));
         // Parallel numeric fast paths (#69) — handler-neutral: use ForkJoinPool.commonPool() over long[].
         HANDLERS.put("__native_parallel_sum_long", (r, c) -> ParallelNatives.parallelSumLong(r));
