@@ -804,9 +804,15 @@ class ConstraintGenerator(
 
                 val constraintResolvedHash = constraint.abilityHash ?: WellKnownHashConstants.resolveHash(constraint.abilityName)
                 if (matchingTypeVar != null && !WellKnownHashConstants.isInspect(constraintResolvedHash)) {
+                    // Carry the FULL type-arg tuple: primary (the matched var) plus
+                    // the constraint's extra ability args, substituted. Hardcoding a
+                    // single arg dropped the extras for a multi-param ability, which
+                    // both malformed the constraint and produced a duplicate against
+                    // the correct multi-arg one from the call-site path.
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = listOf(MezzeType.VarType(matchingTypeVar)),
+                        typeArgs = listOf(MezzeType.VarType(matchingTypeVar)) +
+                            constraint.typeArgs.map { substitution.apply(it) },
                         abilityHash = constraint.abilityHash
                     )
                 } else null
