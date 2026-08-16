@@ -97,12 +97,17 @@ pub let fold_left : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <
   fold_left_go { xs = xs, acc = init, f = f }
 
 ## Right fold with an initial accumulator value.
+## Implemented as reverse-then-fold_left so stack usage stays O(1)
+## regardless of list length. Costs one extra O(n) reverse pass.
 pub let fold_right : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
-  __native_list_fold_right { xs = xs, init = init, f = f }
+  fold_left { xs = reverse { xs = xs }, init = init, f = f }
 
-## Reduces elements using f, returning None if empty.
+## Reduces elements using f, returning None if empty. Uses head as init.
 pub let reduce : { xs: List 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { xs, f } ->
-  __native_list_reduce { xs = xs, f = f }
+  match uncons { xs = xs } is
+    None -> None
+    Some { val = { head, tail } } ->
+      Some { val = fold_left { xs = tail, init = head, f = f } }
 
 ## Short-circuiting recursive helper for any/all.
 ## Walks uncons; stops as soon as the target result is seen.
@@ -178,12 +183,24 @@ pub let sort_by : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> List 'a
   __native_list_sort_by { xs = xs, cmp = cmp }
 
 ## Returns the first element matching the predicate, or None.
+let find_go : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
+  match uncons { xs = xs } is
+    None -> None
+    Some { val = { head, tail } } ->
+      if p { x = head } then Some { val = head } else find_go { xs = tail, p = p }
+
 pub let find : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
-  __native_list_find { xs = xs, p = p }
+  find_go { xs = xs, p = p }
+
+let find_index_go : { xs: List 'a, p: { x: 'a } -> Bool <...>, i: Int } -> Option Int <...> = { xs, p, i } ->
+  match uncons { xs = xs } is
+    None -> None
+    Some { val = { head, tail } } ->
+      if p { x = head } then Some { val = i } else find_index_go { xs = tail, p = p, i = i + 1 }
 
 ## Returns the index of the first element matching the predicate, or None.
 pub let find_index : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option Int <...> = { xs, p } ->
-  __native_list_find_index { xs = xs, p = p }
+  find_index_go { xs = xs, p = p, i = 0 }
 
 ## Splits into elements matching and not matching the predicate.
 pub let partition : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { pass: List 'a, fail: List 'a } <...> = { xs, p } ->
@@ -277,16 +294,30 @@ pub let group_consecutive_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List
   __native_list_group_consecutive_by { xs = xs, f = f }
 
 ## Takes elements from the front while the predicate holds.
+## take_while walks + collects into reverse-accum, then reverse at end.
+## Short-circuits on first predicate-false via helper (fold_left can't).
+let take_while_go : { xs: List 'a, p: { x: 'a } -> Bool <...>, acc: List 'a } -> List 'a <...> = { xs, p, acc } ->
+  match uncons { xs = xs } is
+    None -> acc
+    Some { val = { head, tail } } ->
+      if p { x = head } then take_while_go { xs = tail, p = p, acc = cons { head = head, tail = acc } } else acc
+
 pub let take_while : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
-  __native_list_take_while { xs = xs, p = p }
+  reverse { xs = take_while_go { xs = xs, p = p, acc = empty {} } }
 
 ## Drops elements from the front while the predicate holds.
+let drop_while_go : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
+  match uncons { xs = xs } is
+    None -> xs
+    Some { val = { head, tail } } ->
+      if p { x = head } then drop_while_go { xs = tail, p = p } else xs
+
 pub let drop_while : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
-  __native_list_drop_while { xs = xs, p = p }
+  drop_while_go { xs = xs, p = p }
 
 ## Returns True if no element matches the predicate.
 pub let none : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
-  __native_list_none { xs = xs, p = p }
+  ! any { xs = xs, p = p }
 
 ## Counts elements matching the predicate.
 pub let count : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p } ->
