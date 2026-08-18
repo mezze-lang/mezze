@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.constraints
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.DeclarationRegistry
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.TypeCheckError
@@ -270,6 +271,117 @@ internal class AnnotationValidator(
                 }
             }
         }
+    }
+
+    /**
+     * Validate the `having 'x = T` bindings a user wrote in a `with X 'a having
+     * 'x = T` annotation, independently of whether the receiver stays generic:
+     *
+     *   R5 — every `having` key must be an associated type the ability actually
+     *        declares (`ability X for 'a having 'x, 'y`). A `having 'nope` for an
+     *        undeclared name is a hard error.
+     *   R2 — when the ability resolves that associated type to a CONCRETE type
+     *        (from the impl, carried in [resolvedAssociatedBindings]), the
+     *        annotated `T` must equal it. A wrong `having 'x = Int` where the
+     *        impl says `'x = Str` is a hard error — even on a generic function.
+     *
+     * @param annotationConstraints the parsed `with … having …` constraints.
+     * @param resolvedAssociatedBindings solver output keyed (abilityName,
+     *        primaryVar.id) → assocName(bare) → resolved type; used for R2.
+     * @param inferredAbilityConstraints the body's inferred ability constraints,
+     *        used to map an annotation's ability to the primary var whose
+     *        resolved bindings we look up.
+     */
+    fun validateHavingAnnotations(
+        annotationType: MezzeType,
+        annotationConstraints: List<ParsedFnAbilityConstraint>,
+        inferredAbilityConstraints: List<Constraint.AbilityRequired>,
+        resolvedAssociatedBindings: Map<Pair<String, Int>, Map<String, MezzeType>>,
+        implDeclaredHaving: Map<String, Map<String, Set<MezzeType>>>,
+        varName: String,
+        sourceLoc: Loc?,
+    ) {
+        for (constraint in annotationConstraints) {
+            if (constraint.associatedTypeBindings.isEmpty()) continue
+            val abilityName = constraint.abilityName
+            val abilityDecl = registry.lookupAbility(abilityName) ?: continue
+
+            // Declared associated-type names for this ability (normalized bare).
+            val declaredAssoc = abilityDecl.associatedTypes.map { it.removePrefix("'") }.toSet()
+
+            // The resolved bindings for whichever inferred constraint corresponds
+            // to this annotation's ability. There may be several primary vars; a
+            // concrete resolution for the assoc name is what we check R2 against.
+            val resolvedForAbility: Map<String, MezzeType> =
+                inferredAbilityConstraints
+                    .filter { it.abilityName == abilityName }
+                    .fold(emptyMap()) { acc, ic ->
+                        acc + (resolvedAssociatedBindings[abilityName to ic.typeVar.id] ?: emptyMap())
+                    }
+
+            for ((rawName, annotatedAnn) in constraint.associatedTypeBindings) {
+                val name = rawName.removePrefix("'")
+
+                // R5: unknown associated-type name.
+                if (name !in declaredAssoc) {
+                    val known = if (declaredAssoc.isEmpty()) "none"
+                                else declaredAssoc.sorted().joinToString(", ") { "'$it" }
+                    throw TypeCheckError(
+                        "Type annotation for '$varName': ability '$abilityName' has no associated type '$rawName'. " +
+                        "Declared associated types: $known.",
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf(
+                            if (declaredAssoc.isEmpty())
+                                "'$abilityName' declares no `having` types; drop the `having` clause"
+                            else
+                                "use one of the declared associated types: $known"
+                        ),
+                    )
+                }
+
+                // R2: the annotated value must be consistent with what the
+                // ability actually binds `'name` to. Two signals:
+                //  (a) a CONCRETE resolution from solving (concrete receiver), or
+                //  (b) the concrete values the ability's impls DECLARE for 'name
+                //      (works on a generic receiver, where (a) is still a var).
+                val annotatedType = runCatching { publicAnnToMezze(annotatedAnn) }.getOrNull() ?: continue
+                if (annotatedType is MezzeType.VarType) continue  // annotated a var — allowed
+
+                val resolved = resolvedForAbility[name]
+                if (resolved != null && resolved !is MezzeType.VarType && annotatedType != resolved) {
+                    throw TypeCheckError(
+                        "Type annotation for '$varName': `having '$name = ${prettyPrintType(annotatedType)}` " +
+                        "but ability '$abilityName' resolves '$name to ${prettyPrintType(resolved)}.",
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("change the `having` binding to ${prettyPrintType(resolved)}, or drop it to let it be inferred"),
+                    )
+                }
+
+                // (b) generic receiver: compare against the impls' declared values.
+                val declared = implDeclaredHaving[abilityName]?.get(name)
+                if (!declared.isNullOrEmpty() && annotatedType !in declared) {
+                    val expected = declared.map { prettyPrintType(it) }.sorted().joinToString(" | ")
+                    throw TypeCheckError(
+                        "Type annotation for '$varName': `having '$name = ${prettyPrintType(annotatedType)}` " +
+                        "but no impl of ability '$abilityName' declares '$name = ${prettyPrintType(annotatedType)} (declared: $expected).",
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("change the `having` binding to one of: $expected, or drop it to let it be inferred"),
+                    )
+                }
+            }
+        }
+    }
+
+    /** Minimal annotation→type conversion for concrete `having` values (R2).
+     *  Public so the constraint generator can precompute impl-declared bindings. */
+    fun publicAnnToMezze(annotation: ParsedTypeAnnotation): MezzeType = when (annotation) {
+        is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
+        is ParsedTypeApp -> WellKnownTypeApp.of(annotation.constructor, annotation.args.map { publicAnnToMezze(it) })
+        is ParsedSeqType -> MezzeType.SeqType(publicAnnToMezze(annotation.elementType))
+        else -> MezzeType.VarType(TypeVar.fresh())  // conservative: treat unknown shapes as "don't check"
     }
 
     private fun collectTypeVars(type: MezzeType): Set<TypeVar> {

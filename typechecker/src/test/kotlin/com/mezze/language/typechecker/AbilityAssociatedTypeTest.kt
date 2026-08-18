@@ -140,6 +140,58 @@ class AbilityAssociatedTypeTest {
     // ─── annotation rules: having optional ───────────────────────────────
 
     @Test
+    fun `wrong having value in a with-clause on a generic fn is rejected`() {
+        // R2: the impl resolves 'out = Str; annotating `having 'out = Int` on a
+        // GENERIC function must be rejected (not just on a concrete receiver).
+        val e = err("""
+            ability Producer for 'a having 'out where {
+              produce: { it: 'a } -> 'out
+            }
+            impl Producer for Int having 'out = Str where {
+              produce = { it } -> "x"
+            }
+            pub let mk: { x: 'a } with Producer 'a having 'out = Int -> Int = { x } -> x.produce {}
+        """.trimIndent())
+        assertNotNull(e, "wrong `having 'out = Int` (impl says Str) must be rejected")
+        assertTrue(e!!.contains("'out"), "error should name the associated type, got: $e")
+    }
+
+    @Test
+    fun `having for a nonexistent associated type is rejected`() {
+        // R5: `Producer` declares only `'out`; `having 'nope` must be rejected.
+        val e = err("""
+            ability Producer for 'a having 'out where {
+              produce: { it: 'a } -> 'out
+            }
+            impl Producer for Int having 'out = Str where {
+              produce = { it } -> "x"
+            }
+            pub let mk: { x: 'a } with Producer 'a having 'nope = Str -> Str = { x } -> x.produce {}
+        """.trimIndent())
+        assertNotNull(e, "`having 'nope` (undeclared) must be rejected")
+        assertTrue(e!!.contains("'nope") || e.contains("no associated type"),
+            "error should call out the unknown associated type, got: $e")
+    }
+
+    @Test
+    fun `a generic ability annotation carries exactly one constraint (no doubling)`() {
+        // Cosmetic regression guard: the printed signature must not contain a
+        // malformed self-repeat like `Producer 'a 'a`.
+        val t = typeOf("mk", """
+            ability Producer for 'a having 'out where {
+              produce: { it: 'a } -> 'out
+            }
+            impl Producer for Int having 'out = Str where {
+              produce = { it } -> "x"
+            }
+            pub let mk: { x: 'a } with Producer 'a having 'out = Str -> Str = { x } -> x.produce {}
+        """.trimIndent())
+        assertNotNull(t, "mk should typecheck")
+        assertFalse(Regex("""Producer '\w+ '\w+""").containsMatchIn(t!!),
+            "must not print a doubled `Producer 'a 'a` constraint, got: $t")
+    }
+
+    @Test
     fun `omitting having in a with-clause annotation typechecks`() {
         assertNull(
             err("""

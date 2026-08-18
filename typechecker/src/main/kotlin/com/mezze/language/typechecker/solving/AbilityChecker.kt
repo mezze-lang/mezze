@@ -205,7 +205,7 @@ internal class AbilityChecker(
                     }
                     is UnificationResult.Failure -> {
                         return ConstraintSolver.ConstraintResult.Failure(
-                            "Type mismatch for associated type '$assocTypeName': expected $concreteType but got $resolvedTypeVar"
+                            "Type mismatch for associated type '$assocTypeName': expected ${prettyPrintType(concreteType)} but got ${prettyPrintType(resolvedTypeVar)}"
                         )
                     }
                 }

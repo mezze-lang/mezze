@@ -209,7 +209,7 @@ class ConstraintGenerator(
                             }
 
                             if (item.pattern is ParsedVariablePattern && preConvertedAnnotationType != null) {
-                                validateLetAnnotation(item, preConvertedAnnotationType, result, substitution, solveResult.resolvedAssociatedBindings)
+                                validateLetAnnotation(item, preConvertedAnnotationType, result, substitution, solveResult.resolvedAssociatedBindings, context)
                             }
 
                             val solvedBindings = if (item.pattern is ParsedVariablePattern && authoritativeType != substitution.apply(result.type)) {
@@ -333,12 +333,38 @@ class ConstraintGenerator(
         )
     }
 
+    /**
+     * For each ability named in the annotation, the set of CONCRETE types its
+     * impls declare for each associated type (assocName(bare) → set of types).
+     * Used by R2 on a generic receiver: an annotated `having 'x = T` where no
+     * impl of that ability declares `'x = T` is a mismatch. Empty when there is
+     * no context (e.g. cache paths) — R2 then only fires for concrete receivers.
+     */
+    private fun implDeclaredHaving(
+        context: TypingContext?,
+        annotationConstraints: List<ParsedFnAbilityConstraint>,
+    ): Map<String, Map<String, Set<MezzeType>>> {
+        if (context == null) return emptyMap()
+        return annotationConstraints.map { it.abilityName }.distinct().associateWith { abilityName ->
+            val byName = mutableMapOf<String, MutableSet<MezzeType>>()
+            for (impl in context.getAbilityImpls(abilityName)) {
+                for ((rawName, ann) in impl.associatedTypeBindings) {
+                    val t = runCatching { annotationValidator.publicAnnToMezze(ann) }.getOrNull() ?: continue
+                    if (t is MezzeType.VarType) continue
+                    byName.getOrPut(rawName.removePrefix("'")) { mutableSetOf() }.add(t)
+                }
+            }
+            byName.mapValues { it.value.toSet() }
+        }.filterValues { it.isNotEmpty() }
+    }
+
     private fun validateLetAnnotation(
         item: ParsedLetDecl,
         preConvertedAnnotationType: MezzeType,
         result: ConstraintResult,
         substitution: Substitution,
         resolvedAssociatedBindings: Map<Pair<String, Int>, Map<String, MezzeType>> = emptyMap(),
+        context: TypingContext? = null,
     ) {
         val annotation = item.typeAnnotation
         val varName = (item.pattern as ParsedVariablePattern).name
@@ -391,6 +417,21 @@ class ConstraintGenerator(
             annotationValidator.validateAbilityOnCorrectTypeVar(
                 preConvertedAnnotationType, resolvedAbilityConstraints,
                 varName, substitution, item.value.loc
+            )
+
+            // Validate the annotation's `having 'x = T` bindings: reject an
+            // undeclared associated-type name (R5), and a wrong concrete value
+            // vs the impls' declared bindings (R2) — both hold even on a generic
+            // fn. On a generic receiver the resolved var isn't concrete, so R2
+            // compares against the concrete `having` values the ability's impls
+            // declare, keyed assocName → set of declared types across impls.
+            annotationValidator.validateHavingAnnotations(
+                preConvertedAnnotationType,
+                annotation.abilityConstraints,
+                result.abilityConstraints,
+                resolvedAssociatedBindings,
+                implDeclaredHaving(context, annotation.abilityConstraints),
+                varName, item.value.loc
             )
         }
     }
@@ -832,19 +873,21 @@ class ConstraintGenerator(
             } else null
         }
 
-        // Dedup on (abilityName, typeArgs); when duplicates exist prefer the one
-        // that carries associated-type bindings (the populated one) over an empty
+        // Dedup on (abilityName, DISTINCT typeArg identities). Using the distinct
+        // set rather than the positional list collapses a malformed self-repeat
+        // like `Producer 'a 'a` (single-param receiver accidentally prepended
+        // onto a typeArgs that already held it) against the correct `Producer 'a`
+        // — while keeping a genuine multi-param `Scale 'by 'a` (two DISTINCT args)
+        // separate from `Scale 'a`. When duplicates collapse, prefer the one that
+        // carries associated-type bindings (the populated one) over an empty
         // sibling from another pass.
+        fun argKey(arg: MezzeType) = when (arg) {
+            is MezzeType.VarType -> "v:" + arg.variable.name
+            else -> "t:" + arg.toString()
+        }
         val allConstraints = (type.abilityConstraints + functionAbilityConstraints)
             .sortedByDescending { it.associatedTypeBindings.size }
-            .distinctBy {
-                it.abilityName to it.typeArgs.map { arg ->
-                    when (arg) {
-                        is MezzeType.VarType -> arg.variable.name
-                        else -> arg.toString()
-                    }
-                }
-            }
+            .distinctBy { c -> c.abilityName to c.typeArgs.map(::argKey).distinct() }
 
         DebugLogger.debugSection(Category.ConstraintGenerator, "addAbilityConstraintsToFunctionType result") {
             val lines = mutableListOf("All constraints: ${allConstraints.size} constraints")
