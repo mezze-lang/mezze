@@ -348,10 +348,18 @@ internal class AnnotationValidator(
                 val annotatedType = runCatching { publicAnnToMezze(annotatedAnn) }.getOrNull() ?: continue
                 if (annotatedType is MezzeType.VarType) continue  // annotated a var — allowed
 
+                // Compare by RENDERED name, not structural equality: an annotation's
+                // `Money` (a bare TypeApplication) and the impl/solver's `Money`
+                // (which may be a VariantType or reach via a different path) are the
+                // same type here but `==`-unequal — a naive `!=` falsely rejected a
+                // CORRECT `having 'out = Money`. Two types that print identically
+                // are the same for this annotation check.
+                val annotatedName = prettyPrintType(annotatedType)
+
                 val resolved = resolvedForAbility[name]
-                if (resolved != null && resolved !is MezzeType.VarType && annotatedType != resolved) {
+                if (resolved != null && resolved !is MezzeType.VarType && annotatedName != prettyPrintType(resolved)) {
                     throw TypeCheckError(
-                        "Type annotation for '$varName': `having '$name = ${prettyPrintType(annotatedType)}` " +
+                        "Type annotation for '$varName': `having '$name = $annotatedName` " +
                         "but ability '$abilityName' resolves '$name to ${prettyPrintType(resolved)}.",
                         sourceLoc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
@@ -361,11 +369,11 @@ internal class AnnotationValidator(
 
                 // (b) generic receiver: compare against the impls' declared values.
                 val declared = implDeclaredHaving[abilityName]?.get(name)
-                if (!declared.isNullOrEmpty() && annotatedType !in declared) {
+                if (!declared.isNullOrEmpty() && declared.none { prettyPrintType(it) == annotatedName }) {
                     val expected = declared.map { prettyPrintType(it) }.sorted().joinToString(" | ")
                     throw TypeCheckError(
-                        "Type annotation for '$varName': `having '$name = ${prettyPrintType(annotatedType)}` " +
-                        "but no impl of ability '$abilityName' declares '$name = ${prettyPrintType(annotatedType)} (declared: $expected).",
+                        "Type annotation for '$varName': `having '$name = $annotatedName` " +
+                        "but no impl of ability '$abilityName' declares '$name = $annotatedName (declared: $expected).",
                         sourceLoc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
                         hints = listOf("change the `having` binding to one of: $expected, or drop it to let it be inferred"),
