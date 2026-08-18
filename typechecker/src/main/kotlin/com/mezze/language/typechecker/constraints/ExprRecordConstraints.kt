@@ -440,8 +440,24 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
         )
     )
 
+    // Effect soundness: when the receiver is an already-concrete record and the
+    // accessed field is a FUNCTION type, surface that concrete function type
+    // (carrying its effect row) as the access result — not the fresh `fieldType`
+    // VarType. Otherwise, calling `(r.g) {}` sees an unresolved VarType callee, so
+    // the call handler's `is FunctionType` effect-harvest is skipped and the
+    // field function's effects are LAUNDERED (a pure-typed caller could perform
+    // them untracked). The HasField constraint still unifies fieldType with the
+    // field, so this only *refines* the reported type; it never loosens it.
+    val concreteFieldFn = (receiverValueType as? MezzeType.RecordType)
+        ?.fields?.get(expr.member) as? MezzeType.FunctionType
+    val resultType: MezzeType = if (concreteFieldFn != null && concreteFieldFn.effects != null) {
+        concreteFieldFn
+    } else {
+        fieldType
+    }
+
     return ConstraintResult(
-        type = fieldType,
+        type = resultType,
         constraints = constraints + receiverResult.constraints,
         effects = receiverResult.effects,
         effectInstances = receiverResult.effectInstances,
