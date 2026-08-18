@@ -122,6 +122,22 @@ object DuplicateDeclarationValidator {
 
         private fun validateNewtypeConstructors(module: ParsedModule) {
         for (typeDecl in module.decls.filterIsInstance<ParsedTypeDecl>()) {
+            // Every TYPE NAME (alias/record/variant/newtype) must start with an
+            // uppercase letter — types live in the type namespace and are written
+            // capitalised everywhere they're used. Newtypes already enforced this
+            // on their CONSTRUCTOR below; this closes the gap where `type lang =
+            // …` (or a lowercase record/variant/newtype name) was silently
+            // accepted.
+            val typeName = typeDecl.name
+            if (typeName.isNotEmpty() && !typeName.first().isUpperCase()) {
+                throw TypeCheckError(
+                    "Type name '$typeName' must start with an uppercase letter",
+                    typeDecl.loc,
+                    code = ErrorCode.V0707_CONSTRUCTOR_MUST_BE_UPPERCASE,
+                    hints = listOf("rename to `${typeName.replaceFirstChar { it.uppercase() }}`"),
+                )
+            }
+
             val definition = typeDecl.definition
             if (definition is ParsedNewtypeDef) {
                 val constructorName = definition.constructor
