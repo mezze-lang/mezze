@@ -47,9 +47,6 @@ class PerformValidator(
                         is ParsedStatement.Expr -> {
                             errors.addAll(validatePerformExpressionsInExpression(stmt.expr, implDeclarations, effectDeclarations, functionDefinitions))
                         }
-                        is ParsedStatement.Bind -> {
-                            errors.addAll(validatePerformExpressionsInExpression(stmt.expr, implDeclarations, effectDeclarations, functionDefinitions))
-                        }
                     }
                 }
                 errors.addAll(validatePerformExpressionsInExpression(expr.result, implDeclarations, effectDeclarations, functionDefinitions))
@@ -268,7 +265,6 @@ class PerformValidator(
                         when (stmt) {
                             is ParsedStatement.Let -> traverse(stmt.value)
                             is ParsedStatement.Expr -> traverse(stmt.expr)
-                            is ParsedStatement.Bind -> traverse(stmt.expr)
                         }
                     }
                     traverse(e.result)

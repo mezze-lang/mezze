@@ -241,14 +241,6 @@ object ParsedDeclHasher {
                         stmt.typeAnnotation?.let { b.appendBoolean(true); appendTypeAnnotation(b, it) } ?: b.appendBoolean(false)
                         appendExpr(b, stmt.value)
                     }
-                    is ParsedStatement.Bind -> {
-                        // Distinct from Let: use boolean true + extra discriminator byte
-                        // so `let x = e` and `x <- e` produce different hashes.
-                        b.appendBoolean(true)
-                        b.append(byteArrayOf(0x02))  // 0x02 = Bind marker (0x00, 0x01 reserved by Let's typeAnnotation slot)
-                        appendPattern(b, stmt.pattern)
-                        appendExpr(b, stmt.expr)
-                    }
                 }
                 appendExpr(b, expr.result)
             }

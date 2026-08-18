@@ -446,10 +446,6 @@ class ContextBuilder {
                                 val found = findSuspendWithValueParsed(stmt.value)
                                 if (found != null) return found
                             }
-                            is ParsedStatement.Bind -> {
-                                val found = findSuspendWithValueParsed(stmt.expr)
-                                if (found != null) return found
-                            }
                         }
                     }
                     null

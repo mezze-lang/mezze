@@ -315,35 +315,6 @@ class LspFeaturesTest {
         )
     }
 
-    // ===== Do-bind (`<-`) ==============================================
-    //
-    // Hover and goto-def on `<-`-bound names go through the same TypedAST
-    // walk as regular `let` bindings — the desugar rewrites `pat <- expr`
-    // into a typed `let pat = expr.try {}` before LSP sees the typed AST.
-    // The synthetic Let inherits the bind statement's loc and is marked
-    // `isSynthetic = true` so position lookups land on user-written source.
-
-    @Test
-    fun `hover on bind pattern does not leak desugar internals`() {
-        val (uri, _) = openSingleFile("""
-            let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
-
-            let foo = {} -> do
-                let a <- make_ok {}
-                a
-        """.trimIndent())
-
-        // `    let a <- make_ok {}` — `a` is now at col 8 (was 4 before the
-        // `let ` prefix became mandatory on binds).
-        val hover = hoverAt(uri, line = 3, character = 8)
-        assertNotNull(hover, "expected hover on the `<-` pattern name")
-        val content = hoverText(hover!!)
-        assertTrue(content.contains("a :") || content.contains("a:"),
-            "expected hover to render as a binding for `a`, got:\n$content")
-        assertFalse(content.contains("Tryable.try"),
-            "hover should NOT leak the synthetic `.try` ability call: $content")
-    }
-
     @Test
     fun `hover on an ability method shows the specialized receiver type`() {
         // Hovering `to_str` on a concrete Int receiver should show
@@ -1054,29 +1025,6 @@ class LspFeaturesTest {
             "expected hover to show specialized `Int` (not generic `'a`), got:\n$content")
     }
 
-    @Test
-    fun `hover on receiver function inside bind shows function type`() {
-        // `a <- make_ok {}` — hovering on `make_ok` should show its
-        // declared function type, demonstrating that the desugar doesn't
-        // disrupt normal hover on user-written sub-expressions of `<-`.
-        val (uri, _) = openSingleFile("""
-            let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
-
-            let foo = {} -> do
-                let a <- make_ok {}
-                a
-        """.trimIndent())
-
-        // Cursor on the `make_ok` call inside the bind. The line is
-        // `    let a <- make_ok {}` (4-space indent). `let ` (4) + `a ` (2) +
-        // `<- ` (3) puts `make_ok` at col 13.
-        val hover = hoverAt(uri, line = 3, character = 13)
-        assertNotNull(hover, "expected hover on `make_ok` inside the bind")
-        val content = hoverText(hover!!)
-        assertTrue(content.contains("Result") || content.contains("Ok"),
-            "expected hover to surface the function's return type, got:\n$content")
-    }
-
     // ===== Inlay hints =================================================
 
     @Test
@@ -1706,44 +1654,6 @@ class LspFeaturesTest {
             "must not edit the string-literal line, got edits on lines: ${edits.map { it.range.start.line }}")
         assertTrue(edits.any { it.newText == "5" && it.range.start.line == 3 },
             "expected the real use on line 3 replaced with `5`, got: ${edits.map { it.range.start.line to it.newText }}")
-    }
-
-    @Test
-    fun `toggle do-bind converts a plain let to a bind and back`() {
-        // `let x = e` inside a do-block → offer "Convert to do-bind (<-)",
-        // which flips `=` to `<-`. And a bind offers the reverse.
-        val (uri, _) = openSingleFile("""
-            let f = {} -> do
-              let a = fetch {}
-              let b <- fetch {}
-              a
-        """.trimIndent())
-
-        // Cursor on the plain-let line (line 1): expect let→bind.
-        val a1 = server.textDocumentService.codeAction(CodeActionParams().apply {
-            textDocument = TextDocumentIdentifier(uri)
-            range = Range(Position(1, 6), Position(1, 6))
-            context = CodeActionContext(emptyList())
-        }).get(5, TimeUnit.SECONDS) ?: emptyList()
-        val toBind = a1.mapNotNull { if (it.isRight) it.right else null }
-            .firstOrNull { it.title.startsWith("Convert to do-bind") }
-            ?: fail("expected 'Convert to do-bind', got: ${a1.mapNotNull { if (it.isRight) it.right.title else null }}")
-        val bindEdits = toBind.edit?.changes?.values?.flatten() ?: emptyList()
-        assertTrue(bindEdits.any { it.newText == "<-" },
-            "let→bind should insert `<-`, got: ${bindEdits.map { it.newText }}")
-
-        // Cursor on the bind line (line 2): expect bind→let.
-        val a2 = server.textDocumentService.codeAction(CodeActionParams().apply {
-            textDocument = TextDocumentIdentifier(uri)
-            range = Range(Position(2, 6), Position(2, 6))
-            context = CodeActionContext(emptyList())
-        }).get(5, TimeUnit.SECONDS) ?: emptyList()
-        val toLet = a2.mapNotNull { if (it.isRight) it.right else null }
-            .firstOrNull { it.title.startsWith("Convert to plain let") }
-            ?: fail("expected 'Convert to plain let', got: ${a2.mapNotNull { if (it.isRight) it.right.title else null }}")
-        val letEdits = toLet.edit?.changes?.values?.flatten() ?: emptyList()
-        assertTrue(letEdits.any { it.newText == "=" },
-            "bind→let should insert `=`, got: ${letEdits.map { it.newText }}")
     }
 
     @Test

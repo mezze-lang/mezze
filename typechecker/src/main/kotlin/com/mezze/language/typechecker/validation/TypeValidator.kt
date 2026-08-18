@@ -484,7 +484,6 @@ class TypeValidator(
                 for (stmt in expr.statements) when (stmt) {
                     is ParsedStatement.Let -> recurse(stmt.value)
                     is ParsedStatement.Expr -> recurse(stmt.expr)
-                    is ParsedStatement.Bind -> recurse(stmt.expr)
                 }
                 recurse(expr.result)
             }

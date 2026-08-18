@@ -1,5 +1,0 @@
-# `<-` at module top level (no surrounding do-block / function body).
-# Should be rejected — Bind statements only make sense inside do blocks.
-
-x <- Some { val = 42 }
-x

@@ -5,7 +5,7 @@ use std::effects::exception::{ Exception }
 ## Tryable for Result — extract Ok, throw the raw error on Err.
 ##
 ## When this throw is caught by an enclosing `ExceptionToResult`, the
-## `Err` is reconstructed exactly as it was. Two `<-` lines on `Result`s
+## `Err` is reconstructed exactly as it was. Two `.try {}` calls on `Result`s
 ## with different error types contribute their error types to `<Exception>`'s
 ## `'error` row; standard `Exception` unification handles the union (variants
 ## row-union, primitives must match).

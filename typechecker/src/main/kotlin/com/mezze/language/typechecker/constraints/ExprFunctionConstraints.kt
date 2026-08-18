@@ -376,20 +376,15 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         }
     }
     // Propagate the body's associated-type resolutions to the enclosing binding
-    // so the inferred function's ability `having` bindings can be populated —
-    // EXCEPT `Tryable`. `Tryable` is the desugar target of `<-` do-bind: its
-    // 'inner is resolved LOCALLY (bound to a `let` in the body and consumed) and
-    // MUST stay resolve-and-drop here. Propagating it re-resolves 'inner in the
-    // wrong outer scope and breaks `<-` (do_bind regressions). `<-` is the only
-    // producer of `Tryable` resolutions, so excluding it by name is exact.
-    val escapingAssocConstraints = bodyResult.associatedTypeConstraints.filter {
-        it.abilityName != "Tryable"
-    }
+    // so the inferred function's ability `having` bindings can be populated. Any
+    // ability method call in the body (e.g. `x.produce{}`, `x.first_key{}`) whose
+    // receiver stays generic contributes a `having` binding to this function's
+    // signature — see AbilityHavingParityTest.
     return ConstraintResult(
         type = functionType,
         constraints = stampedBodyConstraints + effectAssociatedTypeConstraints + abilityAssociatedTypeConstraints + effectMergeConstraints,
         abilityConstraints = bodyResult.abilityConstraints,
-        associatedTypeConstraints = escapingAssocConstraints,
+        associatedTypeConstraints = bodyResult.associatedTypeConstraints,
         undefinedVariables = bodyResult.undefinedVariables,
         tailCalls = bodyResult.tailCalls,
         usedVariables = bodyResult.usedVariables,

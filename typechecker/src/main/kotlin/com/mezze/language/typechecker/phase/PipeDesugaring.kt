@@ -20,7 +20,6 @@ internal fun desugarPipesInParsedModule(module: ParsedModule): ParsedModule {
             when (stmt) {
                 is ParsedStatement.Let -> hasPipes(stmt.value)
                 is ParsedStatement.Expr -> hasPipes(stmt.expr)
-                is ParsedStatement.Bind -> hasPipes(stmt.expr)
             }
         }
         is ParsedPerform -> hasPipes(expr.body)
@@ -73,7 +72,6 @@ internal fun desugarPipesInParsedModule(module: ParsedModule): ParsedModule {
                 when (stmt) {
                     is ParsedStatement.Let -> stmt.copy(value = desugar(stmt.value))
                     is ParsedStatement.Expr -> stmt.copy(expr = desugar(stmt.expr))
-                    is ParsedStatement.Bind -> stmt.copy(expr = desugar(stmt.expr))
                 }
             },
             result = desugar(expr.result)
@@ -139,7 +137,6 @@ private fun replaceParsedPlaceholder(expr: ParsedExpr, replacement: ParsedExpr):
             when (stmt) {
                 is ParsedStatement.Let -> stmt.copy(value = replaceParsedPlaceholder(stmt.value, replacement))
                 is ParsedStatement.Expr -> stmt.copy(expr = replaceParsedPlaceholder(stmt.expr, replacement))
-                is ParsedStatement.Bind -> stmt.copy(expr = replaceParsedPlaceholder(stmt.expr, replacement))
             }
         },
         result = replaceParsedPlaceholder(expr.result, replacement)

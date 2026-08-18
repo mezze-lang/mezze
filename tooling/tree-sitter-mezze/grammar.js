@@ -822,28 +822,14 @@ module.exports = grammar({
     )),
 
     // Inline let in a do-block. Same shape as let_declaration minus the
-    // `pub` modifier (which only makes sense at top level). The tail is either
-    // a value bind (`= expr`) or a monadic do-bind (`<- expr`). Both forms
-    // share the identical `let <pattern>` prefix so they parse through ONE
-    // state; the `=` / `<-` token is what the LR parser shifts on to pick a
-    // form. Keeping them in a single rule (rather than two sibling rules) is
-    // what makes tree-sitter build the merged post-`let <pattern>` state that
-    // expects BOTH `=` and `<-` — two separate rules land in distinct
-    // continuation states and the do-block only reaches the `=` one.
+    // `pub` modifier (which only makes sense at top level): `let <pattern>
+    // [: T] = expr`.
     let_statement: $ => seq(
       'let',
       field('pattern', $._pattern),
-      choice(
-        seq(
-          optional(seq(':', field('type', $._signature_type))),
-          '=',
-          field('value', $._expression),
-        ),
-        seq(
-          '<-',
-          field('bind_value', $._expression),
-        ),
-      ),
+      optional(seq(':', field('type', $._signature_type))),
+      '=',
+      field('value', $._expression),
     ),
 
     perform_expression: $ => choice(

@@ -12,11 +12,8 @@ import org.junit.jupiter.api.Test
  * the user's module.
  *
  * `Exception` (effect) and `ExceptionToResult` (performer) are NOT in the
- * prelude. They reach a user module only when:
- *   1. The user imports them explicitly via `use std::effects::exception`, or
- *   2. The do-bind desugar runs (because the module contains `<-`), at which
- *      point TypeChecker.injectExceptionToResultForBind adds them to the
- *      module's import context so the synthesized perform resolves.
+ * prelude — a module that handles `.try {}`'s `<Exception>` row must import
+ * them explicitly via `use std::effects::exception`.
  */
 class PreludeTryableTest {
     private val parser = MezzeParser()
@@ -40,10 +37,9 @@ class PreludeTryableTest {
 
     @Test
     fun `Tryable in prelude — dispatch on Result without explicit import`() {
-        // User does NOT write `use std::effects::exception::...`
-        // Tryable should still be available via the prelude.
-        // We still need ExceptionToResult to make this compile because <-
-        // hasn't been wired yet — for now use explicit perform.
+        // User does NOT import `Tryable` — it's in the prelude, so `.try {}`
+        // dispatches on Result anyway. ExceptionToResult IS imported
+        // explicitly to handle the `<Exception>` row.
         val error = typeCheck("""
             use std::effects::exception::{ExceptionToResult}
 

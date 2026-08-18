@@ -13,13 +13,6 @@ import com.mezze.language.parsedast.Loc
 object TypedAstLookup {
 
     /**
-     * Columns between a bind statement's `loc.startCol` (the `let` keyword)
-     * and its pattern name. Every do-bind is `let pat <- expr`, so the name
-     * begins exactly after `"let "` (4 chars).
-     */
-    private const val LET_KEYWORD_PREFIX_LEN = 4
-
-    /**
      * Result of looking up a position in the TypedAST.
      */
     sealed interface LookupResult {
@@ -367,22 +360,6 @@ object TypedAstLookup {
                                 (line == stmt.value.loc.startLine && col < stmt.value.loc.startCol)
                             if (inStmt && beforeValue) {
                                 return LookupResult.Binding(stmt.name, stmt.type, stmt.loc)
-                            }
-                            // For do-bind-synthesized lets (`let pat <- expr`
-                            // rewritten to `let pat = expr.try {}`), value.loc ==
-                            // stmt.loc so beforeValue is false. Detect a hit
-                            // directly on the pattern name's text via `isBind`.
-                            // The bind's loc starts at the mandatory `let`
-                            // keyword, so the pattern name sits `"let ".length`
-                            // (4) columns further right on the same line.
-                            if (inStmt && stmt.isBind) {
-                                val nameLen = stmt.name.length
-                                val nameStartCol = stmt.loc.startCol + LET_KEYWORD_PREFIX_LEN
-                                val onName = line == stmt.loc.startLine &&
-                                    col in nameStartCol until (nameStartCol + nameLen)
-                                if (onName) {
-                                    return LookupResult.Binding(stmt.name, stmt.type, stmt.loc)
-                                }
                             }
                             findNestedLetAtName(stmt.value, line, col)?.let { return it }
                         }

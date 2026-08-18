@@ -968,10 +968,6 @@ class ConstraintGenerator(
                             collectReferencedNames(stmt.value, out, scope)
                             scope = scope + stmt.pattern.extractBindings()
                         }
-                        is ParsedStatement.Bind -> {
-                            collectReferencedNames(stmt.expr, out, scope)
-                            scope = scope + stmt.pattern.extractBindings()
-                        }
                         is ParsedStatement.Expr -> collectReferencedNames(stmt.expr, out, scope)
                     }
                 }

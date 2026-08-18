@@ -5,7 +5,6 @@ import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.module.ImportResolutionResult
 import com.mezze.language.typechecker.module.ImportResolver
 import com.mezze.language.ast.ModulePath
-import com.mezze.language.typechecker.desugar.DoBindDesugar
 import com.mezze.language.typechecker.module.ModuleImportContext
 import com.mezze.language.typechecker.module.TypedModule
 
@@ -48,28 +47,4 @@ internal fun loadPreludeModules(
     }
 
     return preludeContext
-}
-
-internal fun injectExceptionToResultForBind(
-    baseCtx: ModuleImportContext,
-    importResolver: ImportResolver,
-    cachedExceptionForBindCtx: ModuleImportContext?,
-    onCached: (ModuleImportContext) -> Unit,
-): ModuleImportContext {
-    val exceptionCtx = cachedExceptionForBindCtx ?: run {
-        val effectName = DoBindDesugar.EXCEPTION_EFFECT_NAME
-        val performerName = DoBindDesugar.EXCEPTION_TO_RESULT_NAME
-        val syntheticSrc = "use std::effects::exception::{ $effectName, $performerName }"
-        val syntheticModule = MezzeParser().parseParsedModule(syntheticSrc, file = "<dobind-synthetic>")
-        when (val r = importResolver.resolveImports(syntheticModule)) {
-            is ImportResolutionResult.Success -> r.importContext.also {
-                onCached(it)
-            }
-            is ImportResolutionResult.Failure -> return baseCtx
-        }
-    }
-    return baseCtx.copy(
-        importedEffects = baseCtx.importedEffects + exceptionCtx.importedEffects,
-        importedImpls = baseCtx.importedImpls + exceptionCtx.importedImpls,
-    )
 }

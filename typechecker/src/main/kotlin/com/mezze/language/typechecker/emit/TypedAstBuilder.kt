@@ -39,7 +39,6 @@ class TypedAstBuilder(
     // populate PatternBinding.type + identifierContext for guard/body emit
     // instead of constructing fresh disconnected placeholders.
     private val matchCaseBindings: Map<Loc, Map<String, MezzeType>> = emptyMap(),
-    private val bindLetLocs: Set<Loc> = emptySet(),
 ) {
 
     private val identifierContext = mutableMapOf<String, MezzeType>()
@@ -931,19 +930,12 @@ class TypedAstBuilder(
 
                         val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
                         val contentHash = v1LetHash ?: ParsedDeclHasher.hashExpr(stmt.value)
-                        val isBind = stmt.loc in bindLetLocs
-                        stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive, isBind))
+                        stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive))
                     }
                 }
                 is ParsedStatement.Expr -> {
                     val exprTyped = buildExpr(stmt.expr, file)
                     stmts.add(TypedStatement.Expr(exprTyped, stmt.loc))
-                }
-                is ParsedStatement.Bind -> {
-                    throw IllegalStateException(
-                        "ParsedStatement.Bind reached TypedAstBuilder at ${stmt.loc} — " +
-                        "DoBindDesugar must rewrite Bind statements to Let before this phase."
-                    )
                 }
             }
         }

@@ -186,8 +186,7 @@ class AbilityMethodEffectsRegressionTest {
 
     @Test
     fun `Tryable_try on direct effectful call inside nested perform`() {
-        // The shape `<-` will desugar to: `expr.try {}` where `expr` may
-        // be an effectful call. The whole thing is wrapped in implicit
+        // `expr.try {}` where `expr` may be an effectful call, wrapped in a
         // `perform ExceptionToResult`. This is the canonical regression case.
         val error = typeCheck("""
             use std::effects::exception::{ExceptionToResult}

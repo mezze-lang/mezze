@@ -79,20 +79,4 @@ class TryableErrorMessagesTest {
         """)
         assertTrue(msg.contains("Tryable"), "Expected mention of Tryable: $msg")
     }
-
-    @Test
-    fun `bind on Int has friendly do-bind error`() {
-        // The Phase 5 improvement: error should be framed around `<-` (not
-        // the underlying ability), and suggest `let x = ...` as a workaround.
-        val msg = expectError("""
-            let foo = {} -> do
-                let x <- 42
-                x
-            foo {}
-        """)
-        assertTrue(msg.contains("`<-`"), "Expected '`<-`' in error, got: $msg")
-        assertTrue(msg.contains("let") && msg.contains("="),
-            "Expected `let x = ...` hint, got: $msg")
-        assertTrue(msg.contains("Int"), "Expected mention of Int, got: $msg")
-    }
 }

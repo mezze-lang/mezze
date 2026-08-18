@@ -8,9 +8,9 @@ import org.junit.jupiter.api.BeforeEach
 /**
  * Tests for the `Tryable` ability declared in std::effects::exception.
  *
- * Verifies that the ability + impls work when called manually, inside a
- * hand-written `perform ExceptionToResult` block — the desugared form
- * that `<-` produces (see DoBindBasicTest for `<-` itself).
+ * Verifies that the ability + impls work when `.try {}` is called inside a
+ * `perform ExceptionToResult` block: `try` unwraps the success value or
+ * throws, and the handler folds the throw back into an `Err`.
  *
  * Tests use **typed helper functions** to pin receiver types — bare variant
  * literals like `Ok {val = 42}` infer as single-constructor variants and

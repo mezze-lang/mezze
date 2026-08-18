@@ -299,31 +299,6 @@ sealed interface ParsedStatement {
         override val docComment: String? = null,
         override val metadata: ParsedMetadata? = null,
     ) : ParsedStatement
-
-    /**
-     * Do-block bind statement: `pat <- expr`.
-     *
-     * Sugar for the Tryable mechanism. The typechecker's TypedAstBuilder
-     * rewrites a do-block containing any Bind statement into:
-     *   - each Bind becomes `let pat = expr.try {}`
-     *   - the do-block's result expression is wrapped in `Ok {val = ...}`
-     *   - the whole block is wrapped in a synthetic `perform ExceptionToResult`
-     *
-     * Pattern must be irrefutable (same constraint as Let). The pattern
-     * binds to the unwrapped success value (the `'a` inside `Result/Option/...`).
-     *
-     * See `docs/design/do-bind-proposal.md`.
-     */
-    @Serializable
-    data class Bind(
-        val pattern: ParsedPattern,
-        val expr: ParsedExpr,
-        override val loc: Loc,
-        override val leadingComments: List<ParsedComment> = emptyList(),
-        override val trailingComment: ParsedComment? = null,
-        override val docComment: String? = null,
-        override val metadata: ParsedMetadata? = null,
-    ) : ParsedStatement
 }
 
 

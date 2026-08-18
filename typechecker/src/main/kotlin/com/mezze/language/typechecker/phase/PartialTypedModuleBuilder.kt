@@ -36,7 +36,6 @@ internal fun buildPartialTypedModule(
     buildResult: ContextBuilder.BuildResult,
     importContext: ModuleImportContext?,
     registry: DeclarationRegistry,
-    bindLetLocs: Set<Loc> = emptySet(),
 ): TypedModule? {
     return try {
         val resolvedResults = constraintResults.mapValues { (_, r) ->
@@ -74,7 +73,6 @@ internal fun buildPartialTypedModule(
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes,
             matchCaseBindings = matchCaseBindings,
-            bindLetLocs = bindLetLocs,
         )
         builder.build(parsedModule)
     } catch (e: Exception) {

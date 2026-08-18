@@ -45,7 +45,6 @@ internal fun emitTypedModuleAndLower(
     methodCallResolutions: Map<Pair<Loc, String>, ConstraintResult.MethodCallInfo>,
     callReturnTypes: Map<Loc, MezzeType>,
     matchCaseBindings: Map<Loc, Map<String, MezzeType>>,
-    bindLetLocs: Set<Loc>,
     isStdlibModule: Boolean,
     currentModulePath: String?,
 ): EmitResult {
@@ -68,7 +67,6 @@ internal fun emitTypedModuleAndLower(
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes,
             matchCaseBindings = matchCaseBindings,
-            bindLetLocs = bindLetLocs,
         )
         val typed = builder.build(parsedModule)
 

@@ -19,9 +19,9 @@ import java.nio.file.Paths
  * bound to (here the return var), not a concrete type — a concrete type only
  * appears once the ability is discharged (concrete receiver / handler), at which
  * point there's no `with`-clause left. The ability path should match: render
- * `having`, reject a wrong annotation, allow `having` to be omitted. And none of
- * this may disturb `<-` do-bind, which is itself a `Tryable` associated-type
- * ability that must resolve locally.
+ * `having`, reject a wrong annotation, allow `having` to be omitted. `Tryable`
+ * (the `.try {}` ability) shares this exact machinery, so an explicit `.try {}`
+ * call is exercised as a regression guard.
  */
 class AbilityHavingParityTest {
     private lateinit var parser: MezzeParser
@@ -118,7 +118,7 @@ class AbilityHavingParityTest {
         assertNotNull(e, "produce resolves 'out=Str on a concrete Int; annotating Int must be rejected")
     }
 
-    // ─── ANNOTATION RULES: having optional; do-bind unaffected ───────────
+    // ─── ANNOTATION RULES: having optional; .try {} unaffected ───────────
 
     @Test
     fun `omitting having in the annotation still typechecks`() {
@@ -140,21 +140,21 @@ class AbilityHavingParityTest {
     }
 
     /** Guard: the associated-type-constraint propagation this feature adds must
-     *  NOT disturb `<-` do-bind, which is itself a Tryable associated-type
-     *  ability resolved locally in the body. (The stdlib do_bind_* fixtures are
-     *  the fuller regression set; this is a fast local smoke.) */
+     *  NOT disturb `Tryable`, which is itself a `having 'inner` associated-type
+     *  ability. An explicit `.try {}` inside a `perform ExceptionToResult` (the
+     *  surviving way to unwrap a `Result`) must still typecheck. */
     @Test
-    fun `do-bind still typechecks (regression guard)`() {
-        // Unannotated: `<-` injects <Exception>, so the do-block yields a Result.
+    fun `explicit try still typechecks (regression guard)`() {
         assertNull(
             err(
                 """
-                pub let unwrap = { a: Result Int Str } -> do
-                  let x <- a
-                  x
+                use std::effects::exception::{ ExceptionToResult }
+                pub let unwrap = { a: Result Int Str } -> perform ExceptionToResult in do
+                  let x = a.try {}
+                  Ok { val = x }
                 """.trimIndent()
             ),
-            "do-bind (<-) must still typecheck"
+            "explicit .try {} must still typecheck"
         )
     }
 }

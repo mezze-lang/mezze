@@ -1003,53 +1003,12 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
 
                                 val stream5 = skipNewlines(streamAfterType)
 
-                                // A `let` binding statement forks on its operator:
-                                //   `let pat = expr`   — plain value binding
-                                //   `let pat <- expr`  — do-bind: unwrap expr's
-                                //                        success value into pat,
-                                //                        short-circuiting on failure
-                                // The leading `let` is REQUIRED for both (the bind
-                                // used to be a bare `pat <- expr`, but requiring
-                                // `let` makes every binding statement start with
-                                // `let`, disambiguating it from a bare expression
-                                // at token one — which keeps the grammar
+                                // A `let` binding statement: `let pat = expr`.
+                                // The leading `let` is REQUIRED (it makes every
+                                // binding statement start with `let`,
+                                // disambiguating it from a bare expression at
+                                // token one — which keeps the grammar
                                 // LL(1)-friendly and tooling-parseable).
-                                val bindTok = tok(TokenType.BIND)(stream5)
-                                if (bindTok is ParseResult.Success) {
-                                    // `let pat <- expr`. A type annotation before
-                                    // `<-` isn't meaningful (the bind infers the
-                                    // unwrapped type); reject it for clarity.
-                                    if (typeAnnotation != null) {
-                                        fatalFailure = stream5.failure(
-                                            "A `let … <- …` bind cannot carry a type annotation " +
-                                            "(the bind infers the unwrapped type)."
-                                        ).copy(isFatal = true)
-                                        break
-                                    }
-                                    val stream6 = skipNewlines(bindTok.remaining)
-                                    val rhs = expression(stream6)
-                                    when (rhs) {
-                                        is ParseResult.Success -> {
-                                            val stmtLoc = spanLocTo(letToken.value, rhs.remaining, file)
-                                            statements.add(
-                                                ParsedStatement.Bind(
-                                                    pattern = pattern,
-                                                    expr = rhs.value,
-                                                    loc = stmtLoc,
-                                                    leadingComments = stmtAnnotations.regularComments,
-                                                    docComment = stmtAnnotations.docComment,
-                                                    metadata = stmtAnnotations.metadata,
-                                                )
-                                            )
-                                            currentStream = skipNewlinesOnly(rhs.remaining)
-                                            lastStatementWasLet = false
-                                            lastLetName = null
-                                        }
-                                        is ParseResult.Failure -> { keepIfFatal(rhs); break }
-                                    }
-                                    continue
-                                }
-
                                 val assign = tok(TokenType.ASSIGN)(stream5)
 
                                 when (assign) {
@@ -1092,13 +1051,11 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                             is ParseResult.Failure -> { keepIfFatal(patternResult); break }
                         }
                     } else {
-                        // Not a let statement (both `let pat = expr` and the
-                        // do-bind `let pat <- expr` are handled in the `let`
-                        // branch above). Before falling back to expression
+                        // Not a let statement (`let pat = expr` is handled in the
+                        // `let` branch above). Before falling back to expression
                         // parsing, detect a binding that FORGOT its leading
-                        // `let` — `x = e` or `x <- e` — and give a targeted
-                        // "you forgot `let`" error instead of the cryptic
-                        // downstream failure.
+                        // `let` — `x = e` — and give a targeted "you forgot
+                        // `let`" error instead of the cryptic downstream failure.
                         val missingLetPat = letBindingPattern(currentStream)
                         if (missingLetPat is ParseResult.Success) {
                             val afterPat = skipNewlines(missingLetPat.remaining)
@@ -1107,13 +1064,6 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                     fatalFailure = currentStream.failure(
                                         "A binding statement must start with `let`. " +
                                         "Write `let … = …` (this `= …` binding is missing its `let`)."
-                                    ).copy(isFatal = true)
-                                    break
-                                }
-                                TokenType.BIND -> {
-                                    fatalFailure = currentStream.failure(
-                                        "A do-bind must start with `let`. " +
-                                        "Write `let … <- …` (this `<- …` bind is missing its `let`)."
                                     ).copy(isFatal = true)
                                     break
                                 }
@@ -1817,7 +1767,6 @@ internal fun countPipePlaceholders(expr: ParsedExpr): Int {
             when (stmt) {
                 is ParsedStatement.Let -> countPipePlaceholders(stmt.value)
                 is ParsedStatement.Expr -> countPipePlaceholders(stmt.expr)
-                is ParsedStatement.Bind -> countPipePlaceholders(stmt.expr)
             }
         } + countPipePlaceholders(expr.result)
         is ParsedSeqLit -> expr.elements.sumOf { element ->
@@ -1868,7 +1817,6 @@ internal fun findPipePlaceholderLocations(expr: ParsedExpr): List<Loc> {
             when (stmt) {
                 is ParsedStatement.Let -> findPipePlaceholderLocations(stmt.value)
                 is ParsedStatement.Expr -> findPipePlaceholderLocations(stmt.expr)
-                is ParsedStatement.Bind -> findPipePlaceholderLocations(stmt.expr)
             }
         } + findPipePlaceholderLocations(expr.result)
         is ParsedSeqLit -> expr.elements.flatMap { element ->
@@ -1922,7 +1870,6 @@ internal fun pipePlaceholderInReceiverPosition(expr: ParsedExpr): Loc? = when (e
         when (stmt) {
             is ParsedStatement.Let -> pipePlaceholderInReceiverPosition(stmt.value)
             is ParsedStatement.Expr -> pipePlaceholderInReceiverPosition(stmt.expr)
-            is ParsedStatement.Bind -> pipePlaceholderInReceiverPosition(stmt.expr)
         }
     } ?: pipePlaceholderInReceiverPosition(expr.result)
     is ParsedSeqLit -> expr.elements.firstNotNullOfOrNull { element ->

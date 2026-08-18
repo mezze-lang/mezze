@@ -7,7 +7,7 @@ use std::effects::exception::{ Exception }
 ##
 ## `Option` carries no error information, so the throw is a synthetic
 ## variant `NoneOpt` that downstream code can match on. In a do-block
-## that mixes `Option` and `Result` `<-` lines, the `<Exception>` row's
+## that mixes `Option` and `Result` `.try {}` calls, the `<Exception>` row's
 ## `'error` parameter unifies to include both the `Result`s error types
 ## and `NoneOpt` for the `Option`s.
 impl Tryable for Option 'a having 'inner = 'a where {

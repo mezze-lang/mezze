@@ -236,12 +236,33 @@ internal class AbilityChecker(
     ): Pair<TypingContext.AbilityImplInfo, Map<String, MezzeType>>? {
         val allImpls = context.getAbilityImpls(abilityName)
 
+        // Which annotation is the RECEIVER? For a single-param ability it's the
+        // only one; for a multi-param ability (`Scale 'by for 'a`) the impl's
+        // `targetTypeAnnotations` maps positionally to the ability's type params
+        // (`AbilityImplFactory` builds it as concreteArgs + targetTypes, "extra
+        // params first, self last"), so the receiver sits at the ability's
+        // `receiverTypeParam` index. We match `primaryType` (the receiver) against
+        // that annotation only — the non-receiver args are pinned separately by
+        // the ability-required constraint, and matching the receiver is what
+        // disambiguates which impl supplies the `having` bindings.
+        val abilityDecl = registry.lookupAbility(abilityName)
+        val receiverIdx = abilityDecl?.let { decl ->
+            decl.receiverTypeParam?.let { rp -> decl.typeParams.indexOf(rp) }
+        }?.takeIf { it >= 0 }
+
         for (impl in allImpls) {
             val annotations = impl.targetTypeAnnotations ?: continue
-            if (annotations.size != 1) continue
+            // Pick the receiver annotation: the ability-declared receiver index
+            // when it's in range, else fall back to the last annotation (the
+            // `for X` target is always last in the positional tuple).
+            val receiverAnnotation = when {
+                annotations.size == 1 -> annotations.first()
+                receiverIdx != null && receiverIdx < annotations.size -> annotations[receiverIdx]
+                else -> annotations.last()
+            }
             val typeVarBindings = mutableMapOf<String, MezzeType>()
             val matched = TypeAnnotationMatcher.typeMatchesAnnotation(
-                primaryType, annotations.first(), registry.typeDeclarations, impl.typeVars, typeVarBindings
+                primaryType, receiverAnnotation, registry.typeDeclarations, impl.typeVars, typeVarBindings
             )
             if (matched) return impl to typeVarBindings
         }

@@ -20,7 +20,6 @@ import com.mezze.language.typechecker.debug.ConstraintDumper
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.debug.InvariantChecker
-import com.mezze.language.typechecker.desugar.DoBindDesugar
 import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.module.*
 import com.mezze.language.typechecker.phase.*
@@ -186,12 +185,7 @@ class TypeChecker(
         enablePrelude: Boolean = false
     ): TypeCheckResult {
         @Suppress("NAME_SHADOWING")
-        var module = desugarPipesInParsedModule(module)
-
-        val bindDesugarResult = DoBindDesugar.desugar(module)
-        module = bindDesugarResult.module
-        val bindLetLocs = bindDesugarResult.bindLetLocs
-        val moduleUsesBind = bindLetLocs.isNotEmpty()
+        val module = desugarPipesInParsedModule(module)
 
         clearUnificationCache()
         if (!TypeCheckCache.hasPersistence()) {
@@ -204,13 +198,13 @@ class TypeChecker(
         val hasUserImports = hasImportsParsed(module)
         val precompiled = try { PrecompiledStdlib } catch (_: Exception) { null }
 
-        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && precompiled != null && !moduleUsesBind) {
+        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && precompiled != null) {
             importContext = precompiled.preludeImportContext
             if (cachedPreludeLoadedModules == null) {
                 cachedPreludeLoadedModules = precompiled.loadedModules
             }
             precompiled.compiledPrelude.mergeInto(parentContext)
-        } else if (hasUserImports || shouldInjectPrelude || moduleUsesBind) {
+        } else if (hasUserImports || shouldInjectPrelude) {
             val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "."))
             val importResolver = if (precompiled != null && (currentPath == projectRoot || currentPath.startsWith(projectRoot))) {
                 precompiled.importResolver
@@ -242,9 +236,6 @@ class TypeChecker(
                     if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModulesInternal(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
-                    }
-                    if (moduleUsesBind) {
-                        importContext = injectExceptionToResultForBindInternal(importContext!!, importResolver)
                     }
                     val inScopeNames = localTypeNames + importContext!!.explicitlyImportedTypeNames + builtinNames
                     mergeImportContext(parentContext, importContext!!, inScopeNames)
@@ -366,7 +357,7 @@ class TypeChecker(
                     parsedModule = parsedModule, substitution = perBindingSubstitution,
                     constraintResults = constraintResults, context = context,
                     buildResult = buildResult, importContext = importContext,
-                    registry = registry, bindLetLocs = bindLetLocs,
+                    registry = registry,
                 )
                 val partialExpectedTypeAt = constraintResults.values
                     .fold(emptyMap<Loc, MezzeType>()) { acc, r ->
@@ -441,7 +432,6 @@ class TypeChecker(
                     methodCallResolutions = aggregated.methodCallResolutions,
                     callReturnTypes = aggregated.callReturnTypes,
                     matchCaseBindings = aggregated.matchCaseBindings,
-                    bindLetLocs = bindLetLocs,
                     isStdlibModule = isStdlibModule,
                     currentModulePath = currentModulePath,
                 )
@@ -646,18 +636,6 @@ class TypeChecker(
         return result
     }
 
-    private fun injectExceptionToResultForBindInternal(
-        baseCtx: ModuleImportContext,
-        importResolver: ImportResolver,
-    ): ModuleImportContext {
-        return injectExceptionToResultForBind(
-            baseCtx = baseCtx,
-            importResolver = importResolver,
-            cachedExceptionForBindCtx = cachedExceptionForBindCtx,
-            onCached = { cachedExceptionForBindCtx = it },
-        )
-    }
-
     private var cachedTypeAliases: Map<String, TypeAliasInfo> = emptyMap()
 
     fun getTypeAliases(): Map<String, TypeAliasInfo> {
@@ -756,9 +734,6 @@ class TypeChecker(
     companion object {
         @Volatile
         private var cachedPreludeContext: ModuleImportContext? = null
-
-        @Volatile
-        internal var cachedExceptionForBindCtx: ModuleImportContext? = null
 
         @Volatile
         @JvmStatic

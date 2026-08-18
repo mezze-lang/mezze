@@ -6998,109 +6998,7 @@ class MezzeTextDocumentService(
         if (addAnnotation != null) out.add(Either.forRight(addAnnotation))
         val implMembers = buildImplementMembersAction(uri, state, range)
         if (implMembers != null) out.add(Either.forRight(implMembers))
-        val toggleBind = buildToggleDoBindAction(uri, state, range)
-        if (toggleBind != null) out.add(Either.forRight(toggleBind))
         return out
-    }
-
-    /**
-     * Toggle a do-block statement between a plain `let x = e` and a bind
-     * `let x <- e`. Binds unwrap a Result/Option (the Tryable sugar); flipping
-     * between the two forms is one of the most frequent edits when authoring
-     * effectful code, and doing it by hand means retyping the arrow (and, going
-     * to a bind, deleting any `: T` annotation — binds don't take one).
-     *
-     * Text-level and comment-safe: we edit only the arrow token (and, for
-     * let→bind, drop a type annotation) inside the statement's own loc, leaving
-     * leading/trailing comments untouched. Returns null unless the cursor is on
-     * a do-block Let or Bind statement.
-     */
-    private fun buildToggleDoBindAction(uri: String, state: DocumentState, range: Range): CodeAction? {
-        val parsed = state.parsedModule ?: return null
-        val doBlock = findParsedExprCovering(parsed, range) { it is ParsedDo } as? ParsedDo ?: return null
-        val cursorLine = range.start.line + 1
-        val cursorCol = range.start.character + 1
-        fun contains(loc: com.mezze.language.parsedast.Loc): Boolean {
-            val sb = loc.startLine < cursorLine || (loc.startLine == cursorLine && loc.startCol <= cursorCol)
-            val ea = loc.endLine > cursorLine || (loc.endLine == cursorLine && loc.endCol >= cursorCol)
-            return sb && ea
-        }
-        val content = state.content
-
-        // The pattern's end is where we start scanning for the arrow — this
-        // skips any `=`/`<-` that appears inside the pattern or a type name.
-        for (stmt in doBlock.statements) {
-            when (stmt) {
-                is ParsedStatement.Let -> {
-                    if (!contains(stmt.loc)) continue
-                    // Find the top-level `=` after the pattern (and any `: T`).
-                    val scanFrom = (stmt.typeAnnotation?.loc ?: stmt.pattern.loc)
-                    val eqLoc = findArrowToken(content, scanFrom, stmt.value.loc, "=") ?: return null
-                    // Replace `=` with `<-`. If there's a type annotation, also
-                    // delete it (from the pattern's end through the `:`+type) —
-                    // binds don't carry one.
-                    val edits = mutableListOf(TextEdit(eqLoc, "<-"))
-                    stmt.typeAnnotation?.let { ann ->
-                        // Delete from just after the pattern to the end of the
-                        // annotation, inclusive of the leading `:`.
-                        val delStart = Position(stmt.pattern.loc.endLine - 1, stmt.pattern.loc.endCol)
-                        val delEnd = Position(ann.loc.endLine - 1, ann.loc.endCol)
-                        edits.add(0, TextEdit(Range(delStart, delEnd), ""))
-                    }
-                    return CodeAction("Convert to do-bind (<-)").apply {
-                        kind = CodeActionKind.RefactorRewrite
-                        edit = WorkspaceEdit(mapOf(uri to edits))
-                    }
-                }
-                is ParsedStatement.Bind -> {
-                    if (!contains(stmt.loc)) continue
-                    val arrowLoc = findArrowToken(content, stmt.pattern.loc, stmt.expr.loc, "<-") ?: return null
-                    return CodeAction("Convert to plain let (=)").apply {
-                        kind = CodeActionKind.RefactorRewrite
-                        edit = WorkspaceEdit(mapOf(uri to listOf(TextEdit(arrowLoc, "="))))
-                    }
-                }
-                is ParsedStatement.Expr -> {}
-            }
-        }
-        return null
-    }
-
-    /**
-     * Locate the `token` (`=` or `<-`) that sits between [afterLoc] and
-     * [beforeLoc] in [content] and return its Range. Scans the source slice
-     * from the end of [afterLoc] to the start of [beforeLoc]; returns null if
-     * not found (defensive — a malformed edit is worse than no action).
-     */
-    private fun findArrowToken(
-        content: String,
-        afterLoc: com.mezze.language.parsedast.Loc,
-        beforeLoc: com.mezze.language.parsedast.Loc,
-        token: String
-    ): Range? {
-        val lines = content.split('\n')
-        // Absolute char offset of a (1-based line, 1-based col) position.
-        fun offsetOf(line: Int, col: Int): Int {
-            var off = 0
-            for (i in 0 until line - 1) off += (lines.getOrNull(i)?.length ?: 0) + 1
-            return off + (col - 1)
-        }
-        val from = offsetOf(afterLoc.endLine, afterLoc.endCol)
-        val to = offsetOf(beforeLoc.startLine, beforeLoc.startCol)
-        if (from < 0 || to > content.length || from >= to) return null
-        val idx = content.substring(from, to).indexOf(token)
-        if (idx < 0) return null
-        val absStart = from + idx
-        // Convert absolute offset back to (line, col) 0-based for LSP.
-        var remaining = absStart
-        var lineIdx = 0
-        while (lineIdx < lines.size && remaining > lines[lineIdx].length) {
-            remaining -= lines[lineIdx].length + 1
-            lineIdx++
-        }
-        val startPos = Position(lineIdx, remaining)
-        val endPos = Position(lineIdx, remaining + token.length)
-        return Range(startPos, endPos)
     }
 
     /**
@@ -9245,7 +9143,6 @@ class MezzeTextDocumentService(
                     // `let { x, y } = e` inside a do-block binds a record pattern.
                     e.statements.forEach { st ->
                         if (st is com.mezze.language.parsedast.ParsedStatement.Let) walkPatternFields(st.pattern)
-                        if (st is com.mezze.language.parsedast.ParsedStatement.Bind) walkPatternFields(st.pattern)
                     }
                 else -> {}
             }

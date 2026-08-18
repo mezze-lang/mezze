@@ -492,12 +492,6 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 val exprResult = generate(stmt.expr, currentContext)
                 collector.merge(exprResult)
             }
-            is ParsedStatement.Bind -> {
-                throw IllegalStateException(
-                    "ParsedStatement.Bind reached constraint generation at ${stmt.loc} — " +
-                    "DoBindDesugar must rewrite Bind statements to Let before this phase."
-                )
-            }
         }
     }
 

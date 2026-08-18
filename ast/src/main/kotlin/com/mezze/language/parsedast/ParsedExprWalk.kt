@@ -48,7 +48,6 @@ fun ParsedExpr.children(): List<ParsedExpr> = when (this) {
         when (stmt) {
             is ParsedStatement.Let -> stmt.value
             is ParsedStatement.Expr -> stmt.expr
-            is ParsedStatement.Bind -> stmt.expr
         }
     } + result
     is ParsedPerform -> handlers.mapNotNull { it.params } + body

@@ -134,7 +134,6 @@ class MatchValidator(
                 for (stmt in expr.statements) when (stmt) {
                     is ParsedStatement.Let -> walkParsedExpr(stmt.value, visitor)
                     is ParsedStatement.Expr -> walkParsedExpr(stmt.expr, visitor)
-                    is ParsedStatement.Bind -> walkParsedExpr(stmt.expr, visitor)
                 }
                 walkParsedExpr(expr.result, visitor)
             }

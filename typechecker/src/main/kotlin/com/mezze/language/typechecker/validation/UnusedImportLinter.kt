@@ -182,7 +182,6 @@ object UnusedImportLinter {
                         collectExprRefs(stmt.value, into)
                     }
                     is ParsedStatement.Expr -> collectExprRefs(stmt.expr, into)
-                    is ParsedStatement.Bind -> collectExprRefs(stmt.expr, into)
                 }
                 collectExprRefs(expr.result, into)
             }
