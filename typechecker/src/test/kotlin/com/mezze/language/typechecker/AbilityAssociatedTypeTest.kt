@@ -227,6 +227,28 @@ class AbilityAssociatedTypeTest {
     }
 
     @Test
+    fun `multi-param having ability dispatches on a newtype receiver (Money times Int)`() {
+        // The heterogeneous-operator scenario on a real custom type: a bare
+        // `Money { … }` constructor-literal receiver must dispatch the
+        // multi-param `ScaleMoney Int for Money having 'out = Money` ability.
+        // (Regression: a newtype constructor literal used to infer as the
+        // anonymous `| Money {…} |`, losing the name so dispatch couldn't match
+        // `impl … for Money` — TypeAnnotationMatcher.typeMatchesDeclaration was
+        // missing the ParsedNewtypeDef case.)
+        val e = err("""
+            newtype Money = Money Int
+            ability ScaleMoney 'b for 'a having 'out where {
+              times: { it: 'a, by: 'b } -> 'out
+            }
+            impl ScaleMoney Int for Money having 'out = Money where {
+              times = { it, by } -> match it is Money { val } -> Money { val = val }
+            }
+            pub let g = {} -> (Money { val = 5 }).times { by = 3 }
+        """.trimIndent())
+        assertNull(e, "a bare Money literal receiver must dispatch the multi-param ability, got: $e")
+    }
+
+    @Test
     fun `multi-param ability wrong having is rejected`() {
         val e = err("""
             ability Scale 'by for 'a having 'out where {

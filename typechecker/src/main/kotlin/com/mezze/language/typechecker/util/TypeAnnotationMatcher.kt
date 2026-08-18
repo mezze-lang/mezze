@@ -121,6 +121,18 @@ object TypeAnnotationMatcher {
                 hashMatch || type.typeName == typeDecl.name ||
                 definition.constructors.map { it.name }.toSet().containsAll(type.constructors.keys)
             }
+            is ParsedNewtypeDef -> {
+                // A newtype `T = T <wrapped>` constructed as `T { … }` (or `T x`)
+                // solves to a single-constructor VariantType named after the
+                // newtype's constructor. Match by hash, by the carried typeName,
+                // or by that sole constructor name — otherwise a newtype receiver
+                // (`(Money{val=5}).method{}`, whose inferred type is the anonymous
+                // `| Money {…} |`) never matches `impl … for Money`.
+                if (type !is MezzeType.VariantType) return false
+                val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
+                hashMatch || type.typeName == typeDecl.name ||
+                (type.constructors.size == 1 && type.constructors.containsKey(definition.constructor))
+            }
             else -> false
         }
     }
