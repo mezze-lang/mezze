@@ -167,19 +167,31 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
         caseResultTypes.add(caseBodyResult.type)
     }
 
-    val resultType = MezzeType.VarType(TypeVar.fresh())
+    val resultVar = MezzeType.VarType(TypeVar.fresh())
 
     for (caseType in caseResultTypes) {
         collector.constraints.add(
             Constraint.Equality(
                 left = caseType,
-                right = resultType,
+                right = resultVar,
                 context = "Match case must have same type as other cases",
                 isMatchCaseContext = true,
                 loc = expr.loc,
             )
         )
     }
+
+    // Effect soundness: when every arm's value is a concrete FUNCTION type,
+    // surface a merged function type (UNIONing the arms' effect rows) as the
+    // match result — not the bare `resultVar` VarType. Otherwise, CALLING the
+    // match result (`(match … { True -> effectfulFn … }) {}`) sees an unresolved
+    // VarType callee, so the call handler's `is FunctionType` effect-harvest is
+    // skipped and the selected function's effects are LAUNDERED (a pure-typed
+    // caller could perform them untracked). `if`/`else` desugars to `match`, so
+    // this covers both. The Equality constraints above still unify every arm
+    // with the result, so this only refines the reported type; it never loosens
+    // it. Mirrors the concrete-receiver member-access fix in generateMemberAccess.
+    val resultType = mergeArmFunctionEffects(caseResultTypes) ?: resultVar
 
     // Add this match's own unused case bindings to the collector's set (which
     // already holds any unused vars propagated up from nested sub-expressions).
@@ -188,6 +200,42 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
         patternWarnings = patternWarnings,
         matchCaseBindings = matchCaseBindings,
     )
+}
+
+/**
+ * If every arm's value type is a concrete [MezzeType.FunctionType] and at least
+ * one carries an effect row, return a single function type whose effect row is
+ * the UNION of all arms' effects (so calling the branch result performs any
+ * effect any arm's function could). Returns null when the arms aren't all
+ * concrete functions (fall back to the fresh result VarType) or none has
+ * effects (nothing to preserve — keep inference unconstrained).
+ */
+private fun mergeArmFunctionEffects(armTypes: List<MezzeType>): MezzeType.FunctionType? {
+    if (armTypes.isEmpty()) return null
+    val fns = armTypes.map { it as? MezzeType.FunctionType ?: return null }
+
+    val effects = mutableSetOf<String>()
+    val effectInstances = mutableSetOf<MezzeType.EffectInstance>()
+    var performed = false
+    var anyRowVar: RowVar? = null
+    for (fn in fns) {
+        val row = fn.effects ?: continue
+        effects.addAll(row.effects)
+        effectInstances.addAll(row.effectInstances)
+        performed = performed || row.performed
+        if (row.rowVar != null) anyRowVar = row.rowVar
+    }
+    if (effects.isEmpty() && effectInstances.isEmpty() && !performed && anyRowVar == null) return null
+
+    val mergedRow = MezzeType.EffectRow(
+        effects = effects,
+        effectInstances = effectInstances,
+        rowVar = anyRowVar,
+        performed = performed,
+    )
+    // Use the first arm as the structural template (param/return); the Equality
+    // constraints guarantee all arms unify, so any is representative.
+    return fns.first().copy(effects = mergedRow)
 }
 
 /**
