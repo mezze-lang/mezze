@@ -539,11 +539,16 @@ internal class AbilityChecker(
             }
 
             WellKnownHashConstants.isOrd(abilityHash) -> {
-                unwrappedType is MezzeType.VarType ||
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
-                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash)) ||
-                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash))
+                // Ord is NOT structurally derivable for composite types. Unlike Eq
+                // (DirectEqualNode has an Objects.equals fallback that reaches
+                // MezzeVariant/MezzeRecord), the runtime Direct{LessThan,GreaterThan,
+                // Le,Ge}Node only specialize long/double/String/Frac and THROW on
+                // anything else. Auto-deriving Ord for a record/variant/list/seq
+                // therefore type-checks a program that crashes at runtime (`a < b`
+                // on a variant). Require an explicit `impl Ord` for those (newtypes
+                // already require it). A VarType stays derivable so a type var can
+                // be resolved to something that HAS Ord.
+                unwrappedType is MezzeType.VarType
             }
 
             resolvedHash == WellKnownHashConstants.ABILITY_LOGICALAND ||

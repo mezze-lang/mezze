@@ -293,11 +293,12 @@ class TypeValidator(
             }
 
             WellKnownHashConstants.isOrd(abilityHash) -> {
-                unwrappedType is MezzeType.VarType ||
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Ord", it, abilityHash) }) ||
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Ord", it, abilityHash) }) ||
-                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Ord", unwrappedType.elementType, abilityHash)) ||
-                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Ord", unwrappedType.elementType, abilityHash))
+                // Ord is NOT structurally derivable for composite types — the
+                // runtime Direct{LessThan,…}Node only handle long/double/String/Frac
+                // and throw otherwise, so deriving Ord for a record/variant/list/seq
+                // type-checks a program that crashes at runtime. Require explicit
+                // `impl Ord`. (Mirrors AbilityChecker.canDeriveAbility.)
+                unwrappedType is MezzeType.VarType
             }
 
             abilityHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
