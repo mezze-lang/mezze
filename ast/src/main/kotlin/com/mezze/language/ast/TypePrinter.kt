@@ -150,13 +150,22 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     return when (type) {
     is MezzeType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is MezzeType.RecordType -> {
-        val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
-            "$name: ${prettyPrintTypeWithMapping(fieldType, typeVarMapping)}"
-        }
-        if (type.isOpen) {
-            if (fields.isEmpty()) "{ ... }" else "{ $fields, ... }"
+        // A record carrying a type-alias name (from an annotation or exact-match
+        // adoption) prints as that name, mirroring the variant branch below.
+        if (type.typeName != null
+            && type.typeName != "<inline>"
+            && !type.typeName.startsWith("<")
+        ) {
+            type.typeName
         } else {
-            if (fields.isEmpty()) "{}" else "{ $fields }"
+            val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
+                "$name: ${prettyPrintTypeWithMapping(fieldType, typeVarMapping)}"
+            }
+            if (type.isOpen) {
+                if (fields.isEmpty()) "{ ... }" else "{ $fields, ... }"
+            } else {
+                if (fields.isEmpty()) "{}" else "{ $fields }"
+            }
         }
     }
     is MezzeType.VariantType -> {

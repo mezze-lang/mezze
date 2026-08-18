@@ -45,6 +45,47 @@ class TypedAstBuilder(
 
     private val typeVarCache = mutableMapOf<String, TypeVar>()
 
+    /**
+     * In-scope CLOSED record aliases, as (name, field-name→field-type). Built
+     * once from local decls + imported types (so `pub`/import scoping is
+     * respected — a private or un-imported alias never appears here). Used to
+     * LABEL a bare record literal whose finalized shape exactly matches one:
+     * `type Lang = { name: Str, released: Bool }` + `{ name = "M", released =
+     * False }` ⇒ the literal's RecordType.typeName becomes "Lang". This is a
+     * display/label only — the type stays structurally the same record, so it
+     * still passes anywhere the bare `{ name, released }` (open OR closed) is
+     * accepted. Same-shape collisions are impossible (rejected at declaration).
+     */
+    private val closedRecordAliases: List<Pair<String, Map<String, MezzeType>>> by lazy {
+        val decls = registry.allTypeDecls + (importContext?.importedTypes?.values ?: emptyList())
+        decls.mapNotNull { decl ->
+            val def = decl.definition
+            if (def is ParsedRecordDef && !def.isOpen) {
+                decl.name to def.fields.associate { it.name to convertParsedTypeAnnotation(it.type) }
+            } else null
+        }
+    }
+
+    /**
+     * If [record] (a finalized record-literal type, closed) exactly matches an
+     * in-scope closed record alias by field NAMES and field TYPES, return it
+     * with that alias's `typeName`. Otherwise return it unchanged.
+     */
+    private fun labelRecordWithAlias(record: MezzeType.RecordType): MezzeType.RecordType {
+        if (record.typeName != null || record.rowVar != null) return record
+        // Compare field types by RENDERED form, not structural `==`: a `Bool`
+        // annotation and an inferred `Bool` (or a newtype's two representations)
+        // print identically but can be `==`-unequal.
+        val match = closedRecordAliases.firstOrNull { (_, aliasFields) ->
+            aliasFields.keys == record.fields.keys &&
+            aliasFields.all { (name, ty) ->
+                val actual = record.fields[name] ?: return@all false
+                prettyPrintType(ty) == prettyPrintType(actual)
+            }
+        } ?: return record
+        return record.copy(typeName = match.first)
+    }
+
     private fun precomputeContentHashes(module: ParsedModule) {
         val mutableHashes = identifierContentHashes.toMutableMap()
 
@@ -172,7 +213,12 @@ class TypedAstBuilder(
 
         val rawType = constraintResults[name]?.let { substitution.apply(it.type) }
             ?: MezzeType.VarType(TypeVar.freshWithName("unknown"))
-        val type = closeGeneratedRowVars(rawType, mustBeOpenRowVars)
+        val closedType = closeGeneratedRowVars(rawType, mustBeOpenRowVars)
+        // If the binding's inferred type is a bare closed record whose shape
+        // exactly matches an in-scope closed alias, LABEL it with that alias name
+        // so `x` reads as `Lang` (hover, errors, signatures). Structural, so `x`
+        // still passes anywhere the bare record — open or closed — is accepted.
+        val type = (closedType as? MezzeType.RecordType)?.let { labelRecordWithAlias(it) } ?: closedType
 
         val value = buildExpr(decl.value, file, type)
 
@@ -569,7 +615,7 @@ class TypedAstBuilder(
                 val fieldTypes = entries
                     .filterIsInstance<TypedRecordEntry.Field>()
                     .associate { it.name to it.value.type }
-                val recordType = MezzeType.RecordType(fieldTypes)
+                val recordType = labelRecordWithAlias(MezzeType.RecordType(fieldTypes))
 
                 TypedRecord(entries, recordType, loc)
             }
