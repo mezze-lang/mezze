@@ -37,8 +37,6 @@ class ErrorMessageSnapshotTest {
             e.code.name to (e.message ?: "null")
         } catch (e: ParseException) {
             "PARSE_ERROR" to (e.message ?: "null")
-        } catch (e: SpreadSyntaxError) {
-            e.javaClass.simpleName to (e.message ?: "null")
         }
 
         val snapshotPath = fixturePath.resolveSibling("$fixtureName.expected")

@@ -30,11 +30,9 @@ class TypeCheckerFuzzTest {
             val parsed = parser.parseParsedModule(source, "fuzz_${rng.nextInt()}.mz")
             typeChecker.typeCheck(parsed, Paths.get("."))
         } catch (_: TypeCheckError) {
-            // Expected — random programs can have type errors
+            // Expected — random programs can have type errors (spread errors included)
         } catch (_: ParseException) {
             // Expected — random programs can have parse errors
-        } catch (_: SpreadSyntaxError) {
-            // Expected
         } catch (e: StackOverflowError) {
             throw AssertionError("StackOverflowError on program:\n$source", e)
         } catch (e: OutOfMemoryError) {

@@ -5,7 +5,6 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.TypeCheckError
-import com.mezze.language.typechecker.SpreadSyntaxError
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.FixHint
@@ -92,11 +91,20 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
 
                 when {
                     resolvedSpreadType != null -> {
-                        for (fieldName in explicitFieldNames) {
+                        for (fieldEntry in explicitFieldEntries) {
+                            val fieldName = fieldEntry.name
                             if (fieldName !in resolvedSpreadType.fields) {
-                                throw SpreadSyntaxError.FieldAdditionNotAllowed(
-                                    fieldName,
-                                    resolvedSpreadType.fields.keys.toList()
+                                val available = resolvedSpreadType.fields.keys.toList()
+                                throw TypeCheckError(
+                                    message = "Cannot add new field '$fieldName' to record type. " +
+                                        "Only existing fields can be overridden. " +
+                                        "Available fields: ${available.joinToString(", ")}",
+                                    loc = fieldEntry.loc,
+                                    errorType = ErrorType.TYPE_MISMATCH,
+                                    code = ErrorCode.T0203_RECORD_EXTRA_FIELDS,
+                                    fixHints = listOf(
+                                        FixHint.RemoveRange(fieldEntry.loc, "Remove field `$fieldName`")
+                                    ),
                                 )
                             }
                         }
@@ -127,7 +135,12 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
                         )
                     }
                     else -> {
-                        throw SpreadSyntaxError.NonRecordSpread(prettyPrintType(spreadResult.type))
+                        throw TypeCheckError(
+                            message = "Cannot spread non-record value of type ${prettyPrintType(spreadResult.type)}",
+                            loc = entry.expr.loc,
+                            errorType = ErrorType.TYPE_MISMATCH,
+                            code = ErrorCode.V0708_SPREAD_ONLY_RECORD_FORBIDDEN,
+                        )
                     }
                 }
             }

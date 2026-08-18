@@ -2,6 +2,7 @@ package com.mezze.language.typechecker
 
 import java.nio.file.Paths
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -47,9 +48,10 @@ class RestrictiveSpreadTest {
             let invalid = {...person, city = "NYC"}
         """.trimIndent()
         
-        val exception = assertThrows<SpreadSyntaxError.FieldAdditionNotAllowed> {
+        val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
+        assertEquals(ErrorCode.T0203_RECORD_EXTRA_FIELDS, exception.code)
         assertTrue(exception.message.contains("Cannot add new field 'city' to record type"))
         assertTrue(exception.message.contains("Available fields: name, age"))
     }
@@ -61,9 +63,10 @@ class RestrictiveSpreadTest {
             let invalid = {...number, field = "value"}
         """.trimIndent()
         
-        val exception = assertThrows<SpreadSyntaxError.NonRecordSpread> {
+        val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
+        assertEquals(ErrorCode.V0708_SPREAD_ONLY_RECORD_FORBIDDEN, exception.code)
         assertTrue(exception.message.contains("Cannot spread non-record value"))
     }
     
@@ -86,9 +89,10 @@ class RestrictiveSpreadTest {
             let invalid = {...person, age = 30}
         """.trimIndent()
         
-        val exception = assertThrows<SpreadSyntaxError.FieldAdditionNotAllowed> {
+        val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
+        assertEquals(ErrorCode.T0203_RECORD_EXTRA_FIELDS, exception.code)
         assertTrue(exception.message.contains("Cannot add new field 'age' to record type"))
         assertTrue(exception.message.contains("Available fields: name"))
     }
@@ -207,9 +211,10 @@ class RestrictiveSpreadTest {
             let invalid = { ...default_config, extra = "not allowed" }
         """.trimIndent()
 
-        val exception = assertThrows<SpreadSyntaxError.FieldAdditionNotAllowed> {
+        val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
+        assertEquals(ErrorCode.T0203_RECORD_EXTRA_FIELDS, exception.code)
         assertTrue(exception.message.contains("Cannot add new field 'extra'"))
     }
 

@@ -8,7 +8,6 @@ import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.dependencies.DefinitionRef
 import com.mezze.language.typechecker.TypeCheckError
-import com.mezze.language.typechecker.SpreadSyntaxError
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.mono.unwrapSuspended
