@@ -60,6 +60,13 @@ object DuplicateDeclarationValidator {
 
         private fun validateDuplicateConstructors(module: ParsedModule) {
         val constructorToTypeMap = mutableMapOf<String, String>()
+        // Structural shape → first alias name, for CLOSED record aliases. Because
+        // records are structural, two closed aliases with an identical
+        // field-name+type set are the SAME type wearing two names (no added
+        // safety, and it makes structural→alias inference ambiguous). Reject the
+        // second, mirroring the variant duplicate-constructor rule. The nominal
+        // "two distinct single-field types" case is what `newtype` is for.
+        val recordShapeToType = mutableMapOf<String, String>()
 
         for (typeDecl in module.decls.filterIsInstance<ParsedTypeDecl>()) {
             val definition = typeDecl.definition
@@ -115,6 +122,30 @@ object DuplicateDeclarationValidator {
                     constructorToTypeMap[constructorName] = typeDecl.name
                 }
                 is ParsedRecordDef -> {
+                    // Only CLOSED records collide by shape — an OPEN record
+                    // (`{ a, b, ... }`) admits extra fields, so two open aliases
+                    // with the same declared fields are genuinely different types.
+                    if (!definition.isOpen) {
+                        val shapeKey = definition.fields
+                            .map { it.name to parsedTypeAnnotationToString(it.type) }
+                            .sortedBy { it.first }
+                            .joinToString(",") { "${it.first}:${it.second}" }
+                        val existingType = recordShapeToType[shapeKey]
+                        if (existingType != null && existingType != typeDecl.name) {
+                            throw TypeCheckError(
+                                "Record alias '${typeDecl.name}' has the same shape as '$existingType'. " +
+                                "Records are structural, so identical closed record aliases are the same type " +
+                                "with two names.",
+                                typeDecl.loc,
+                                code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+                                hints = listOf(
+                                    "reuse '$existingType' instead, or if you need two DISTINCT types with the " +
+                                    "same fields use a `newtype`"
+                                ),
+                            )
+                        }
+                        recordShapeToType[shapeKey] = typeDecl.name
+                    }
                 }
             }
         }
