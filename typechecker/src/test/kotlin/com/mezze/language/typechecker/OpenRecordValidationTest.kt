@@ -121,4 +121,58 @@ class OpenRecordValidationTest {
             let config: Config = { host = "localhost", port = 8080, debug = True, timeout = 30 }
         """)
     }
+
+    // ========================================================================
+    // Nested / argument-passing open records (unifyRecords open branch).
+    //
+    // The soundness hole: an open record `{ a: Int, b: Int, ... }` used as a
+    // parameter/nested type still REQUIRES both `a` AND `b`. The `...` only
+    // admits EXTRA fields beyond the declared ones — it does NOT make the
+    // declared fields optional. This is checked through `unifyRecords`' open
+    // branch (arg unification), a different path than the top-level annotation
+    // check above, so it gets its own coverage.
+    // ========================================================================
+
+    @Test
+    fun `nested open record arg requires all declared fields — missing one fails`() {
+        // f: { r: { a: Int, b: Int, ... } }  — passing { r = { a = 1 } } drops b.
+        shouldFail("""
+            let f = { r: { a: Int, b: Int, ... } } -> r.a
+            let g = {} -> f { r = { a = 1 } }
+        """, "b")
+    }
+
+    @Test
+    fun `nested open record arg with both declared fields succeeds`() {
+        shouldPass("""
+            let f = { r: { a: Int, b: Int, ... } } -> r.a
+            let g = {} -> f { r = { a = 1, b = 2 } }
+        """)
+    }
+
+    @Test
+    fun `nested open record arg with both fields plus extras succeeds`() {
+        // `...` admits the extra `c` — but a and b were still both required.
+        shouldPass("""
+            let f = { r: { a: Int, b: Int, ... } } -> r.a
+            let g = {} -> f { r = { a = 1, b = 2, c = 3 } }
+        """)
+    }
+
+    @Test
+    fun `open record arg missing a required field fails (flat)`() {
+        // The flat version of the same rule, straight through arg unification.
+        shouldFail("""
+            let f = { user: { name: Str, age: Str, ... } } -> user.name
+            let g = {} -> f { user = { name = "Alice" } }
+        """, "age")
+    }
+
+    @Test
+    fun `open record arg with all required fields plus extras succeeds (flat)`() {
+        shouldPass("""
+            let f = { user: { name: Str, age: Str, ... } } -> user.name
+            let g = {} -> f { user = { name = "Alice", age = "30", city = "NYC" } }
+        """)
+    }
 }

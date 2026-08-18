@@ -449,6 +449,27 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
                     }
                     substitution = fieldSubst.compose(substitution)
                 }
+                // A field declared on ONE record but absent from the OTHER is
+                // only sound if the ABSENT side is OPEN — its row variable can
+                // absorb that field. If the absent side is CLOSED, the field is
+                // genuinely missing: `{ a, b, ... }` still REQUIRES `b`, so a
+                // closed `{ a }` value (no `b`) must fail — the `...` only admits
+                // EXTRA fields beyond the declared ones, it doesn't make them
+                // optional.
+                fieldType1 != null && fieldType2 == null && rec2.rowVar == null -> {
+                    return UnificationResult.Failure(
+                        message = "record fields don't match: missing '$fieldName'",
+                        type1 = rec1,
+                        type2 = rec2
+                    )
+                }
+                fieldType2 != null && fieldType1 == null && rec1.rowVar == null -> {
+                    return UnificationResult.Failure(
+                        message = "record fields don't match: missing '$fieldName'",
+                        type1 = rec1,
+                        type2 = rec2
+                    )
+                }
                 else -> {}
             }
         }
