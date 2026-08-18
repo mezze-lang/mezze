@@ -103,7 +103,7 @@ class ModuleLoader(
     }
 
     private fun convertResolverError(error: ResolverModuleError): ModuleError = when (error) {
-        is ResolverModuleError.ModuleNotFound -> ModuleError.ModuleNotFound(error.modulePath, error.searchPaths)
+        is ResolverModuleError.ModuleNotFound -> ModuleError.ModuleNotFound(error.modulePath, error.searchPaths, error.suggestion)
         is ResolverModuleError.CircularDependency -> ModuleError.CircularDependency(error.cycle)
         is ResolverModuleError.ParseError -> ModuleError.ParseError(error.modulePath, error.error)
         is ResolverModuleError.ExportNotFound -> ModuleError.ExportNotFound(error.modulePath, error.exportName, error.loc)

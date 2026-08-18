@@ -56,10 +56,16 @@ sealed class ModuleError(override val message: String) : Exception(message) {
 
     data class ModuleNotFound(
         val modulePath: String,
-        val searchPaths: List<String>
-    ) : ModuleError("Module not found: $modulePath. Searched in: ${searchPaths.joinToString(", ")}") {
+        val searchPaths: List<String>,
+        val suggestion: String? = null,
+    ) : ModuleError(
+        "Module not found: $modulePath." +
+            (if (suggestion != null) " Did you mean '$suggestion'?" else "") +
+            " Searched in: ${searchPaths.joinToString(", ")}"
+    ) {
         override val code = ErrorCode.M0801_MODULE_NOT_FOUND
-        override val hints: List<String> = listOf(
+        override val hints: List<String> = listOfNotNull(
+            suggestion?.let { "did you mean '$it'?" },
             "check the module path spelling and ensure the file exists"
         )
     }

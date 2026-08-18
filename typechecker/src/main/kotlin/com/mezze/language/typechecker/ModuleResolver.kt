@@ -160,8 +160,16 @@ sealed class ModuleError(message: String) : Exception(message) {
 
     open val fixHints: List<FixHint> = emptyList()
 
-    data class ModuleNotFound(val modulePath: String, val searchPaths: List<String>) :
-        ModuleError("Module not found: $modulePath. Searched in: ${searchPaths.joinToString(", ")}") {
+    data class ModuleNotFound(
+        val modulePath: String,
+        val searchPaths: List<String>,
+        val suggestion: String? = null,
+    ) :
+        ModuleError(
+            "Module not found: $modulePath." +
+                (if (suggestion != null) " Did you mean '$suggestion'?" else "") +
+                " Searched in: ${searchPaths.joinToString(", ")}"
+        ) {
         override val code = ErrorCode.M0801_MODULE_NOT_FOUND
     }
 
@@ -471,7 +479,11 @@ class ModuleResolver(
             }
 
             val filePath = resolveModuleFile(modulePath)
-                ?: throw ModuleError.ModuleNotFound(modulePath, getSearchPaths(modulePath))
+                ?: throw ModuleError.ModuleNotFound(
+                    modulePath,
+                    getSearchPaths(modulePath),
+                    suggestion = suggestModulePath(modulePath),
+                )
 
             val source = Files.readString(filePath)
             val sourceHash = Hash(
@@ -585,6 +597,30 @@ class ModuleResolver(
 
         private fun resolveModuleFile(modulePath: String): Path? {
         return resolveModuleFile(ModulePath.parse(modulePath))
+    }
+
+    /** The stdlib grouping directories a leaf module may live under. Probed when a
+     *  bare `std::<leaf>` path fails, so `std::list` suggests `std::collections::list`. */
+    private val stdlibCategories = listOf("collections", "effects", "abilities", "codec", "math")
+
+    /**
+     * Best-effort "did you mean" for an unresolved module path. Grounded — every
+     * candidate is verified with [resolveModuleFile], so we never suggest a path
+     * that doesn't exist. Handles the common mistake of omitting the grouping
+     * directory (`std::list` → `std::collections::list`).
+     */
+    private fun suggestModulePath(modulePath: String): String? {
+        val segments = ModulePath.parse(modulePath).segments
+        // Only bare `std::<leaf>` (exactly two segments) is a category-omission
+        // candidate; deeper paths are the user's own layout, not stdlib grouping.
+        if (segments.size == 2 && segments[0] == "std") {
+            val leaf = segments[1]
+            for (category in stdlibCategories) {
+                val candidate = "std::$category::$leaf"
+                if (resolveModuleFile(candidate) != null) return candidate
+            }
+        }
+        return null
     }
 
         private fun resolveModuleFile(path: ModulePath): Path? {
