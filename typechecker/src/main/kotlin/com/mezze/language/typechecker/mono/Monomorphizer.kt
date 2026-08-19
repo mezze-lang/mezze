@@ -281,6 +281,15 @@ class Monomorphizer(
             }
             is com.mezze.language.typedast.TypedPerform -> collectBodyTypeVars(expr.body, visit)
             is com.mezze.language.typedast.TypedPerformOp -> collectBodyTypeVars(expr.arg, visit)
+            // #225 companion: string-interpolation subexprs may carry TypeVars that
+            // share a surface param name — traverse them so buildSubstitution maps
+            // them. (Doesn't fix the #225 program itself — that var is name-mismatched —
+            // but closes the identical latent gap; the rewriteCalls case is the real fix.)
+            is com.mezze.language.typedast.TypedStringLit -> for (part in expr.parts) {
+                if (part is com.mezze.language.typedast.TypedStringPart.Interpolation) {
+                    collectBodyTypeVars(part.expr, visit)
+                }
+            }
             // Leaves — already visited via `expr.type` above.
             else -> Unit
         }
@@ -421,6 +430,26 @@ class Monomorphizer(
             )
             is com.mezze.language.typedast.TypedPerformOp -> expr.copy(
                 arg = rewriteCalls(expr.arg, methodNameToOpHash),
+            )
+            // #225: a string interpolation `"$(… x.tag {} …)"` embeds exprs that
+            // may contain constraint-driven method calls. Without recursing here,
+            // an ability-method call inside an interpolation inside a mono-
+            // specialized generic was NEVER rewritten to a direct op-hash call —
+            // its receiver stayed a VarType, forcing dict-passing, and a hash
+            // collision with the dict-passing lambda then collapsed the two into
+            // one FunctionIR with mismatched capture arity → ArrayIndexOOB at
+            // runtime. Recursing fixes dispatch AND (because interpolation exprs
+            // are hashed) dissolves the collision. Mirror TypeSubstitution.applyStringPart.
+            is com.mezze.language.typedast.TypedStringLit -> expr.copy(
+                parts = expr.parts.map { part ->
+                    when (part) {
+                        is com.mezze.language.typedast.TypedStringPart.Literal -> part
+                        is com.mezze.language.typedast.TypedStringPart.Interpolation ->
+                            com.mezze.language.typedast.TypedStringPart.Interpolation(
+                                rewriteCalls(part.expr, methodNameToOpHash)
+                            )
+                    }
+                },
             )
             // Leaves — no recursive children with TypedCalls.
             else -> expr
