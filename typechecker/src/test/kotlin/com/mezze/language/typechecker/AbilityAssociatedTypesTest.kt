@@ -752,4 +752,63 @@ class AbilityAssociatedTypesTest {
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
+
+    // ── HOLE B: the impl BODY must be checked against the declared `having` ──
+    // The impl's declared associated-type bindings (`having 'out = Str`) must
+    // substitute into the operation's signature before its body is checked.
+    // Without that, a return-type of `'out` stays an unconstrained var and the
+    // body's actual type unifies against it freely, so `produce = {it} -> it`
+    // returning Int under `having 'out = Str` type-checked — then `(5).produce{}`
+    // was typed Str while yielding a Long → ClassCastException at runtime. The
+    // effect-impl path already substituted `having` bindings; the ability-impl
+    // path did not. (Contrast: the same mismatch on a NON-associated return type
+    // was already caught by T0210.)
+
+    private fun err(src: String): String? =
+        try { typeChecker.typeCheck(parser.parseParsedModule(src.trimIndent(), "t.mz"), Paths.get("."), enablePrelude = true); null }
+        catch (e: TypeCheckError) { e.message }
+
+    @Test
+    fun `impl body returning the wrong associated type is rejected`() {
+        val m = err("""
+            ability Producer for 'self having 'out where {
+                produce: { it: 'self } -> 'out
+            }
+            impl Producer for Int having 'out = Str where {
+                produce = { it } -> it
+            }
+            let f: {} -> Str = {} -> (5).produce {}
+        """)
+        assertNotNull(m, "body returns Int but declares `having 'out = Str` — must be rejected")
+        assertTrue(
+            m!!.contains("Str") && m.contains("Int"),
+            "the error should name the expected (Str) and actual (Int) types; got: $m",
+        )
+    }
+
+    @Test
+    fun `impl body matching the declared associated type is accepted`() {
+        assertNull(err("""
+            ability Producer for 'self having 'out where {
+                produce: { it: 'self } -> 'out
+            }
+            impl Producer for Int having 'out = Str where {
+                produce = { it } -> "hello"
+            }
+            let f: {} -> Str = {} -> (5).produce {}
+        """), "body returns Str matching `having 'out = Str` — must be accepted")
+    }
+
+    @Test
+    fun `impl body returning wrong type against a Bool associated binding is rejected`() {
+        assertNotNull(err("""
+            ability Producer for 'self having 'out where {
+                produce: { it: 'self } -> 'out
+            }
+            impl Producer for Int having 'out = Bool where {
+                produce = { it } -> it
+            }
+            let f: {} -> Bool = {} -> (5).produce {}
+        """), "body returns Int but declares `having 'out = Bool` — must be rejected")
+    }
 }

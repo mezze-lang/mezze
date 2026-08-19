@@ -43,9 +43,26 @@ internal class ImplValidator(
             concreteArgs + impl.targetTypes
         }
 
-        val typeParamSubstitution = abilityDeclaration.typeParams.zip(allTypeArgs).associate { (param, targetType) ->
+        val paramSubstitution = abilityDeclaration.typeParams.zip(allTypeArgs).associate { (param, targetType) ->
             param to convertTypeAnnotation(targetType)
         }
+
+        // Associated-type bindings (`having 'out = Str`) must substitute into the op
+        // signatures too — otherwise a declared return type of `'out` stays an
+        // unconstrained var and the body's actual type unifies against it freely
+        // (HOLE B: `produce = { it } -> it` returning Int under `having 'out = Str`
+        // type-checked, then `(5).produce{}` typed Str yielded a Long →
+        // ClassCastException). The effect-impl path already does this; mirror it.
+        // Keys are stored under both the `'`-prefixed and bare name because
+        // substituteTypeParams matches type vars by name.
+        val associatedTypeSubstitution = impl.associatedTypeBindings.mapKeys { (key, _) ->
+            if (key.startsWith("'")) key else "'$key"
+        }.mapValues { (_, typeAnnotation) ->
+            convertTypeAnnotation(typeAnnotation)
+        }
+        val typeParamSubstitution = paramSubstitution +
+            associatedTypeSubstitution +
+            associatedTypeSubstitution.mapKeys { (k, _) -> k.removePrefix("'") }
 
         for (implOp in impl.operations) {
             val declOp = abilityDeclaration.operations.find { it.name == implOp.name }
