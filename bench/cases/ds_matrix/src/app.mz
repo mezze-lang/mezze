@@ -1,0 +1,81 @@
+# Phase G0 (#481) baseline bench matrix.
+#
+# Per-op × per-collection × per-N. Captures current numbers so every downstream
+# Phase G ticket (G1-G12 storage rewrites, G3-G8 Iter migration) has a hard
+# regression gate.
+#
+# Kept small (N=10K) because list::map + list::filter are 100-644x slower
+# than seq counterparts (see project_list_mezze_batches_perf memory) — larger
+# N hangs. Once List chunked backing (#483) lands, bump to N=1M.
+#
+# Reference: seq::fold is the fastest fused path today. Every non-seq op is
+# measured as a multiplier of the seq counterpart.
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::seq
+use std::collections::list
+
+# --- builders ---
+
+let build_list = {n, acc} -> if n == 0
+    then acc
+    else build_list {n = n - 1, acc = list::cons {head = n, tail = acc}}
+
+# --- timing wrapper ---
+
+let time_one = {thunk} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let r = thunk {}
+    let t1 = monotonic {}
+    duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+
+let time_k_go = {thunk, k, acc} -> if k == 0
+    then acc
+    else time_k_go {thunk = thunk, k = k - 1, acc = seq::push {xs = acc, x = time_one {thunk = thunk}}}
+
+let report = {label, thunk} -> perform Console in perform SystemTime in do
+    # warmup 3, measured 10
+    let _w = time_k_go {thunk = thunk, k = 3, acc = []}
+    let times = time_k_go {thunk = thunk, k = 10, acc = []}
+    let sorted = seq::sort {xs = times}
+    let n_times = seq::size {xs = sorted}
+    let min_ns = match seq::get {xs = sorted, i = 0} is
+        Some {val} -> val
+        None -> 0
+    let med_ns = match seq::get {xs = sorted, i = n_times / 2} is
+        Some {val} -> val
+        None -> 0
+    println { msg = "  $(label): min=$(min_ns.to_str{}) med=$(med_ns.to_str{})" }
+
+# --- main ---
+
+let main = {} -> perform Console in perform SystemTime in do
+    let n = 10000
+    println { msg = "Phase G0 baseline (N=$(n.to_str{})): 3 warmup + 10 measured runs, min/med ns" }
+    let seq_ns = seq::range {start = 0, end = n}
+    let list_ns = build_list {n = n, acc = list::empty {}}
+
+    # SEQ (native fused, reference)
+    println { msg = "" }
+    println { msg = "-- SEQ (reference) --" }
+    report {label = "seq::fold        (sum)", thunk = {} -> seq::fold {xs = seq_ns, init = 0, f = {acc, x} -> acc + x}}
+    report {label = "seq::sum         (native)", thunk = {} -> seq::sum {xs = seq_ns}}
+    report {label = "seq::map+size    (alloc)", thunk = {} -> seq::size {xs = seq::map {xs = seq_ns, f = {x} -> x + 1}}}
+    report {label = "seq::filter+size (alloc)", thunk = {} -> seq::size {xs = seq::filter {xs = seq_ns, p = {x} -> x % 2 == 0}}}
+    report {label = "seq::any (miss)", thunk = {} -> if seq::any {xs = seq_ns, p = {x} -> x == (0 - 1)} then 1 else 0}
+    report {label = "seq::count", thunk = {} -> seq::count {xs = seq_ns, p = {x} -> x % 2 == 0}}
+
+    # LIST (Mezze recursion for HOFs, native storage)
+    println { msg = "" }
+    println { msg = "-- LIST (Mezze HOFs) --" }
+    report {label = "list::fold_left  (sum)", thunk = {} -> list::fold_left {xs = list_ns, init = 0, f = {acc, x} -> acc + x}}
+    report {label = "list::map+size   (alloc)", thunk = {} -> list::size {xs = list::map {xs = list_ns, f = {x} -> x + 1}}}
+    report {label = "list::filter+size(alloc)", thunk = {} -> list::size {xs = list::filter {xs = list_ns, p = {x} -> x % 2 == 0}}}
+    report {label = "list::any (miss)", thunk = {} -> if list::any {xs = list_ns, p = {x} -> x == (0 - 1)} then 1 else 0}
+    report {label = "list::count", thunk = {} -> list::count {xs = list_ns, p = {x} -> x % 2 == 0}}
+
+    # RANGE fusion
+    println { msg = "" }
+    println { msg = "-- RANGE.fold (fusion target) --" }
+    report {label = "range.fold direct", thunk = {} -> seq::fold {xs = seq::range {start = 0, end = n}, init = 0, f = {acc, x} -> acc + x}}
