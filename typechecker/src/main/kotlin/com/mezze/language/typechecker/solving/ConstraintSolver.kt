@@ -1006,7 +1006,16 @@ class ConstraintSolver(
         if (recordType is MezzeType.RecordType) {
             val actualFieldType = recordType.fields[fieldName]
             if (actualFieldType == null) {
-                if (recordType.rowVar != null && !constraint.strictFieldCheck) {
+                // Growing an open row by INVENTING the missing field is only sound
+                // when the row is solver-inferred (an unannotated param whose shape
+                // is still being discovered). A USER-WRITTEN open record
+                // (`{ a: Int, ... }`, a `userOpen_` row) is different: the `...`
+                // means "the caller may pass extra fields I don't know about" — it
+                // does NOT license reading an arbitrary unlisted field here. So for
+                // a user-specified open row, a missing field is an error, not an
+                // invitation to invent (which let `r.zzz` read a nonexistent field).
+                val isUserOpenRow = recordType.rowVar?.isUserSpecified() == true
+                if (recordType.rowVar != null && !constraint.strictFieldCheck && !isUserOpenRow) {
                     val extendedFields = recordType.fields + (fieldName to expectedFieldType)
                     val extendedRecord = MezzeType.RecordType(
                         fields = extendedFields,
