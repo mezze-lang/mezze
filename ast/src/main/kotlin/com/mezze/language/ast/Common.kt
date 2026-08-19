@@ -37,6 +37,22 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
             return TypeVar(name, level, id)
         }
 
+        /**
+         * Fresh TypeVar with a caller-chosen name, stored VERBATIM (unlike
+         * [fresh]/[freshNamed], which always prepend `'`). The leading `'` is a
+         * load-bearing tag, not decoration: instantiation branches on it
+         * (ExpressionConstraints — `if (name.startsWith("'")) freshWithName(name)
+         * else fresh()`), so a name's `'`-prefix decides whether its identity is
+         * preserved across instantiation.
+         *
+         * Two intents share this one function, distinguished only by the name:
+         *  - Real / associated type variables (`'a`, `'it`) — pass a `'`-prefixed
+         *    name (usually straight from source or a type param) to keep identity.
+         *  - Internal placeholders (`"unknown"`, `"ret"`, `"elem"`, `"pat"`, …) —
+         *    pass a BARE name so instantiation treats them as replaceable.
+         * Keep this split: giving an internal placeholder a `'` (or dropping the
+         * `'` from a real type var) silently changes instantiation behavior.
+         */
         fun freshWithName(name: String, level: Int = currentLevel): TypeVar {
             val id = globalCounter++
             return TypeVar(name, level, id)
