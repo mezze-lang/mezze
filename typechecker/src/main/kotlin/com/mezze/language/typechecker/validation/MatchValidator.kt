@@ -411,9 +411,8 @@ class MatchValidator(
         }
         if (armFieldPatterns.isEmpty()) {
             // No catch-all and no usable (unguarded) record arm ⇒ non-exhaustive.
-            return ValidationResult.Failure(listOf(ValidationError.NonExhaustiveMatch(
-                coveredConstructors = emptyList(),
-                missingConstructors = listOf("_ (this record match has no catch-all or exhaustive field coverage)"),
+            return ValidationResult.Failure(listOf(ValidationError.NonExhaustiveRecordMatch(
+                detail = "no arm covers every value; add a `_ ->` catch-all",
                 loc = matchExpr.loc,
             )))
         }
@@ -431,9 +430,8 @@ class MatchValidator(
             for (arm in armFieldPatterns) {
                 val sub = subFor(arm, fieldName)
                 if (sub != null && !sub.isIrrefutable()) {
-                    return ValidationResult.Failure(listOf(ValidationError.NonExhaustiveMatch(
-                        coveredConstructors = emptyList(),
-                        missingConstructors = listOf("_ (field `$fieldName` is not exhausted — add a `_` arm or bind it)"),
+                    return ValidationResult.Failure(listOf(ValidationError.NonExhaustiveRecordMatch(
+                        detail = "field `$fieldName` has no finite set of cases to enumerate; add a `_ ->` catch-all",
                         loc = matchExpr.loc,
                     )))
                 }
@@ -449,9 +447,8 @@ class MatchValidator(
                 val errs = missingInVariantField(variant, subs, matchExpr.loc, "{ $name = ", " }")
                 if (errs.isEmpty()) ValidationResult.Success() else ValidationResult.Failure(errs)
             }
-            else -> ValidationResult.Failure(listOf(ValidationError.NonExhaustiveMatch(
-                coveredConstructors = emptyList(),
-                missingConstructors = listOf("_ (a record with ${finiteFields.size} variant fields needs a `_` catch-all)"),
+            else -> ValidationResult.Failure(listOf(ValidationError.NonExhaustiveRecordMatch(
+                detail = "matching ${finiteFields.size} variant fields at once can't be checked case-by-case; add a `_ ->` catch-all",
                 loc = matchExpr.loc,
             )))
         }

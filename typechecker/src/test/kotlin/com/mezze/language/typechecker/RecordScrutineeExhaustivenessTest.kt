@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.parsedast.diagnostics.FixHint
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -33,6 +34,10 @@ class RecordScrutineeExhaustivenessTest {
     private fun err(src: String): String? =
         try { tc.typeCheck(parser.parseParsedModule(src.trimIndent(), "t.mz"), Paths.get("."), enablePrelude = true); null }
         catch (e: TypeCheckError) { e.message }
+
+    private fun caught(src: String): TypeCheckError? =
+        try { tc.typeCheck(parser.parseParsedModule(src.trimIndent(), "t.mz"), Paths.get("."), enablePrelude = true); null }
+        catch (e: TypeCheckError) { e }
 
     // ── rejected: genuinely non-exhaustive record matches ────────────────
 
@@ -178,6 +183,27 @@ class RecordScrutineeExhaustivenessTest {
                 """
             ),
             "a guarded arm can fail at runtime, so it can't be relied on for coverage",
+        )
+    }
+
+    // ── normalization: advice-only errors offer no "fill arms" fix ───────
+
+    @Test fun `an advice-only record error offers no fill-match-arms fix`() {
+        // The ≥2-variant-field product case is guidance ("needs a `_`"), not an
+        // insertable constructor list — so no FillMatchArms quick-fix is offered
+        // (the guidance lives in NonExhaustiveRecordMatch.advice, not in
+        // missingConstructors, so it can never leak as a bogus arm).
+        val e = caught(
+            """
+            type Color = | Red, Green |
+            let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
+              { a = Red, b = Red } -> 1
+            """
+        )
+        assertNotNull(e)
+        assertTrue(
+            e!!.fixHints.none { it is FixHint.FillMatchArms },
+            "a match with no enumerable missing cases must not offer a fill-arms fix",
         )
     }
 }

@@ -106,6 +106,25 @@ sealed interface ValidationError {
         override fun location() = loc
     }
 
+    /**
+     * #218: a record-scrutinee match that isn't exhaustive but whose fix can't be
+     * expressed as an insertable set of missing constructors — a non-enumerable
+     * field with no catch-all, or a record with ≥2 variant fields (the product
+     * case). Reads like any other non-exhaustive-match error (same headline +
+     * location); the reason why lives in [detail] as a hint, and there is no
+     * "fill arms" fix because nothing concrete is insertable.
+     */
+    data class NonExhaustiveRecordMatch(
+        val detail: String,
+        val loc: Loc? = null,
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0601_NON_EXHAUSTIVE_MATCH
+        override val hints: List<String> get() = listOf(detail)
+        override fun message(): String =
+            "This match expression doesn't handle all cases. Add a `_ ->` catch-all."
+        override fun location() = loc
+    }
+
         data class UnreachablePattern(
         val pattern: Any? = null,
         val reason: String,
