@@ -33,26 +33,52 @@ class PatternExhaustivenessHolesTest {
 
     // ── KNOWN HOLES (currently accepted; should be rejected) ─────────────
 
-    @Test fun `HOLE nested variant field non-exhaustive is currently accepted`() {
+    @Test fun `nested variant field non-exhaustive is rejected`() {
         // Wrap { inner = X } covers X but not Y — crashes on Wrap { inner = Y }.
-        // WHEN FIXED: change assertNull -> assertNotNull.
+        // FIXED #203: nested-variant exhaustiveness now checked.
+        val e = err("""
+            type Inner = | X, Y |
+            type Outer = | Wrap { inner: Inner } |
+            let f = { o: Outer } ->
+              match o is
+                Wrap { inner = X } -> 1
+        """)
+        assertNotNull(e, "#203: nested variant `inner` missing `Y` must be rejected")
+        assertTrue(e!!.contains("Y"), "error should name the missing inner constructor Y: $e")
+    }
+
+    @Test fun `nested variant covering both inner constructors across arms is accepted`() {
+        // Two arms, each pinning inner to one ctor — together exhaustive.
         assertNull(err("""
             type Inner = | X, Y |
             type Outer = | Wrap { inner: Inner } |
             let f = { o: Outer } ->
               match o is
                 Wrap { inner = X } -> 1
-        """), "KNOWN HOLE #203: nested-variant exhaustiveness not checked yet")
+                Wrap { inner = Y } -> 2
+        """))
     }
 
-    @Test fun `HOLE nested variant field with a scalar sibling is currently accepted`() {
-        assertNull(err("""
+    @Test fun `multi-constructor outer with one nested miss is rejected`() {
+        // Both outer ctors covered, but B's nested `k` misses `Off`.
+        assertNotNull(err("""
+            type Switch = | On, Off |
+            type Box = | Plain, Tagged { k: Switch } |
+            let f = { b: Box } ->
+              match b is
+                Plain -> 0
+                Tagged { k = On } -> 1
+        """), "#203: outer covered but Tagged's `k` missing `Off`")
+    }
+
+    @Test fun `nested variant field with a scalar sibling is rejected`() {
+        assertNotNull(err("""
             type Choice = | A, B |
             type Pair = | P { l: Choice, r: Int } |
             let f = { p: Pair } ->
               match p is
                 P { l = A, r = n } -> n
-        """), "KNOWN HOLE #203: nested-variant exhaustiveness not checked yet")
+        """), "#203: nested variant `l` missing `B` must be rejected")
     }
 
     @Test fun `HOLE seq match without an empty arm is currently accepted`() {

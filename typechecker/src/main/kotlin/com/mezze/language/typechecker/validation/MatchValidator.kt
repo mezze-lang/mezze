@@ -6,6 +6,7 @@ import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
+import com.mezze.language.typechecker.solving.expandTypeApplicationToRecord
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
 
 class MatchValidator(
@@ -238,6 +239,13 @@ class MatchValidator(
                     missingConstructors = uncoveredConstructors.toList(),
                     loc = matchExpr.loc
                 ))
+            } else if (uncoveredConstructors.isEmpty() && !hasWildcard) {
+                // #203: the outer variant IS fully covered, but a covered
+                // constructor's payload may destructure a NESTED variant field
+                // non-exhaustively (`Wrap { inner = X }` covers X but not Y). The
+                // check above only inspects outer constructors — recurse into
+                // payloads.
+                errors.addAll(nestedVariantExhaustivenessErrors(matchExpr, expandedType))
             }
             if (hasWildcard && uncoveredConstructors.isEmpty()) {
                 for (case in matchExpr.cases) {
@@ -256,6 +264,98 @@ class MatchValidator(
         }
 
         return if (errors.isEmpty()) ValidationResult.Success() else ValidationResult.Failure(errors)
+    }
+
+    /**
+     * #203: nested-variant exhaustiveness. The outer variant is fully covered, but
+     * a constructor arm may destructure a payload field whose type is a CLOSED
+     * variant, listing only some of its constructors. Conservative to avoid ANY
+     * false reject: a field is flagged only when EVERY unguarded arm for the outer
+     * constructor pins that field to a concrete inner constructor and their union
+     * still misses one. Any wildcard/variable/whole-payload binding, a guard, or a
+     * deeper payload on the inner ctor treats the field as covered.
+     */
+    private fun nestedVariantExhaustivenessErrors(
+        matchExpr: ParsedMatch,
+        outer: MezzeType.VariantType,
+    ): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        for ((ctorName, payloadType) in outer.constructors) {
+            val payloadRecord = resolveRecord(payloadType) ?: continue
+
+            // Field-name -> list of sub-patterns bound across the unguarded arms
+            // that match this outer constructor with a record payload.
+            val armFieldPatterns = mutableListOf<Map<String, ParsedPattern?>>()
+            var opaque = false  // an arm binds the whole payload (`Ctor x`) → all fields covered
+            for (case in matchExpr.cases) {
+                if (case.guard != null || case.ifLetBindings.isNotEmpty()) continue
+                for (pattern in case.patterns) {
+                    if (pattern !is ParsedConstructorPattern || pattern.constructor != ctorName) continue
+                    when (val rec = pattern.payload) {
+                        is ParsedRecordPattern -> armFieldPatterns.add(rec.entries.associate { it.name to it.pattern })
+                        else -> opaque = true
+                    }
+                }
+            }
+            if (opaque || armFieldPatterns.isEmpty()) continue
+
+            for ((fieldName, fieldType) in payloadRecord.fields) {
+                val fieldVariant = resolveClosedVariant(fieldType) ?: continue
+                val allInner = fieldVariant.constructors.keys
+                val coveredInner = mutableSetOf<String>()
+                var covered = false
+                for (arm in armFieldPatterns) {
+                    val sub = if (arm.containsKey(fieldName)) arm[fieldName] else { covered = true; null }
+                    when (sub) {
+                        null -> covered = true                                   // `{ inner }` pun binds it
+                        is ParsedWildcardPattern, is ParsedVariablePattern -> covered = true
+                        is ParsedConstructorPattern ->
+                            if (sub.payload == null) coveredInner.add(sub.constructor) else covered = true
+                        else -> covered = true                                   // literal/seq/etc — conservative
+                    }
+                }
+                if (covered) continue
+                val missing = allInner - coveredInner
+                if (missing.isNotEmpty()) {
+                    errors.add(ValidationError.NonExhaustiveMatch(
+                        coveredConstructors = coveredInner.map { "$ctorName.$fieldName=$it" },
+                        missingConstructors = missing.map { "$ctorName { $fieldName = $it }" },
+                        loc = matchExpr.loc,
+                    ))
+                }
+            }
+        }
+        return errors
+    }
+
+    private fun resolveRecord(type: MezzeType?): MezzeType.RecordType? = when (type) {
+        is MezzeType.RecordType -> type
+        is MezzeType.TypeApplication -> expandTypeApplicationToRecord(type, registry)
+        else -> null
+    }
+
+    private fun resolveClosedVariant(type: MezzeType): MezzeType.VariantType? {
+        val v = when (type) {
+            is MezzeType.VariantType -> type
+            is MezzeType.TypeApplication -> expandTypeApplicationToVariant(type, registry)
+            // A field type built from a bare annotation (`inner: Inner`) via
+            // TypeAnnotationConverter arrives as VarType(name = "Inner") — the type
+            // NAME wasn't resolved to its declaration. Resolve it here by looking up
+            // the matching variant decl so nested exhaustiveness can see its arms.
+            is MezzeType.VarType -> variantFromDeclName(type.variable.name)
+            else -> null
+        } ?: return null
+        return if (v.rowVar == null) v else null
+    }
+
+    /** Build a closed VariantType for a declared variant type NAME, or null. */
+    private fun variantFromDeclName(name: String): MezzeType.VariantType? {
+        val def = typeDeclarations[name]?.definition as? ParsedVariantDef ?: return null
+        if (def.isOpen) return null
+        return MezzeType.VariantType(
+            constructors = def.constructors.associate { it.name to it.dataType?.let { dt -> TypeAnnotationConverter.convert(dt) } },
+            rowVar = null,
+        )
     }
 
     fun validateParsedUnreachablePatterns(matchExpr: ParsedMatch): ValidationResult {
