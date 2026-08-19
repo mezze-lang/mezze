@@ -350,13 +350,14 @@ class MatchValidator(
     }
 
     /**
-     * #203: nested-variant exhaustiveness. The outer variant is fully covered, but
-     * a constructor arm may destructure a payload field whose type is a CLOSED
-     * variant, listing only some of its constructors. Conservative to avoid ANY
-     * false reject: a field is flagged only when EVERY unguarded arm for the outer
-     * constructor pins that field to a concrete inner constructor and their union
-     * still misses one. Any wildcard/variable/whole-payload binding, a guard, or a
-     * deeper payload on the inner ctor treats the field as covered.
+     * #203/#212: nested-variant exhaustiveness. The outer variant is fully
+     * covered, but a constructor arm may destructure a payload field whose type is
+     * a CLOSED variant, listing only some of its constructors — at ANY depth
+     * (`Wrap { m = Mid { i = X } }` misses `Mid { i = Y }`). Conservative to avoid
+     * any false reject: a field is flagged only when EVERY unguarded arm pins that
+     * field to a concrete inner constructor and their union still misses one. A
+     * wildcard/variable/whole-payload binding, a guard, or a scalar field treats
+     * the field as covered.
      */
     private fun nestedVariantExhaustivenessErrors(
         matchExpr: ParsedMatch,
@@ -366,8 +367,8 @@ class MatchValidator(
         for ((ctorName, payloadType) in outer.constructors) {
             val payloadRecord = resolveRecord(payloadType) ?: continue
 
-            // Field-name -> list of sub-patterns bound across the unguarded arms
-            // that match this outer constructor with a record payload.
+            // The sub-patterns bound to this outer constructor's record payload,
+            // one map (field -> sub-pattern) per unguarded arm that matches it.
             val armFieldPatterns = mutableListOf<Map<String, ParsedPattern?>>()
             var opaque = false  // an arm binds the whole payload (`Ctor x`) → all fields covered
             for (case in matchExpr.cases) {
@@ -384,29 +385,80 @@ class MatchValidator(
 
             for ((fieldName, fieldType) in payloadRecord.fields) {
                 val fieldVariant = resolveClosedVariant(fieldType) ?: continue
-                val allInner = fieldVariant.constructors.keys
-                val coveredInner = mutableSetOf<String>()
-                var covered = false
-                for (arm in armFieldPatterns) {
-                    val sub = if (arm.containsKey(fieldName)) arm[fieldName] else { covered = true; null }
-                    when (sub) {
-                        null -> covered = true                                   // `{ inner }` pun binds it
-                        is ParsedWildcardPattern, is ParsedVariablePattern -> covered = true
-                        is ParsedConstructorPattern ->
-                            if (sub.payload == null) coveredInner.add(sub.constructor) else covered = true
-                        else -> covered = true                                   // literal/seq/etc — conservative
-                    }
+                // Collect each arm's sub-pattern for this field (a missing key is
+                // an irrefutable bind → whole field covered).
+                val subPatterns = armFieldPatterns.map { arm ->
+                    if (arm.containsKey(fieldName)) arm[fieldName] else ParsedWildcardPattern(matchExpr.loc)
                 }
-                if (covered) continue
-                val missing = allInner - coveredInner
-                if (missing.isNotEmpty()) {
-                    errors.add(ValidationError.NonExhaustiveMatch(
-                        coveredConstructors = coveredInner.map { "$ctorName.$fieldName=$it" },
-                        missingConstructors = missing.map { "$ctorName { $fieldName = $it }" },
-                        loc = matchExpr.loc,
-                    ))
-                }
+                errors.addAll(missingInVariantField(fieldVariant, subPatterns, matchExpr.loc, "$ctorName { $fieldName = ", " }"))
             }
+        }
+        return errors
+    }
+
+    /**
+     * #212: given a CLOSED variant and the sub-patterns matched against it across
+     * arms, return the non-exhaustive errors — recursing into an inner
+     * constructor's OWN record payload when arms destructure it. `prefix`/`suffix`
+     * frame the missing-case message with the enclosing path
+     * (`Wrap { m = ` … ` }`). Conservative: any wildcard/variable/whole-payload
+     * arm, or a scalar/opaque inner field, treats the level as covered.
+     */
+    private fun missingInVariantField(
+        variant: MezzeType.VariantType,
+        subPatterns: List<ParsedPattern?>,
+        loc: Loc,
+        prefix: String,
+        suffix: String,
+    ): List<ValidationError> {
+        val allInner = variant.constructors.keys
+        val coveredInner = mutableSetOf<String>()
+        // For inner ctors that arms destructure with a record payload, the arms'
+        // field patterns, so we can recurse one level deeper.
+        val innerRecordArms = mutableMapOf<String, MutableList<Map<String, ParsedPattern?>>>()
+        for (sub in subPatterns) {
+            when (sub) {
+                null, is ParsedWildcardPattern, is ParsedVariablePattern -> return emptyList()  // covers everything
+                is ParsedConstructorPattern -> when (val p = sub.payload) {
+                    null -> coveredInner.add(sub.constructor)                     // bare inner ctor `X`
+                    is ParsedRecordPattern -> {
+                        // `Mid { i = … }` — record which inner ctor + its field pats,
+                        // but only mark it covered once we confirm its payload is total.
+                        innerRecordArms.getOrPut(sub.constructor) { mutableListOf() }
+                            .add(p.entries.associate { it.name to it.pattern })
+                    }
+                    else -> coveredInner.add(sub.constructor)                     // opaque payload bind
+                }
+                else -> return emptyList()                                       // literal/seq/etc — conservative
+            }
+        }
+
+        val errors = mutableListOf<ValidationError>()
+        // Recurse into each inner ctor destructured with a record: its own
+        // closed-variant fields must be exhausted. If so, the inner ctor is
+        // covered; if not, emit the deeper missing case.
+        for ((innerCtor, arms) in innerRecordArms) {
+            val innerPayload = resolveRecord(variant.constructors[innerCtor]) ?: run {
+                coveredInner.add(innerCtor); return@run null
+            } ?: continue
+            var innerCovered = true
+            val innerErrors = mutableListOf<ValidationError>()
+            for ((fName, fType) in innerPayload.fields) {
+                val fVariant = resolveClosedVariant(fType) ?: continue
+                val fSubs = arms.map { a -> if (a.containsKey(fName)) a[fName] else ParsedWildcardPattern(loc) }
+                val deeper = missingInVariantField(fVariant, fSubs, loc, "$prefix$innerCtor { $fName = ", " }$suffix")
+                if (deeper.isNotEmpty()) { innerCovered = false; innerErrors.addAll(deeper) }
+            }
+            if (innerCovered) coveredInner.add(innerCtor) else errors.addAll(innerErrors)
+        }
+
+        val missing = allInner - coveredInner
+        if (missing.isNotEmpty()) {
+            errors.add(ValidationError.NonExhaustiveMatch(
+                coveredConstructors = coveredInner.toList(),
+                missingConstructors = missing.map { "$prefix$it$suffix" },
+                loc = loc,
+            ))
         }
         return errors
     }
