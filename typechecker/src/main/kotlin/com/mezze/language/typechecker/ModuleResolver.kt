@@ -763,9 +763,21 @@ class ModuleResolver(
                     val fromContext = typeContext?.get(name)
                     val fromAnnotation = decl.typeAnnotation
                         ?.let { TypeAnnotationConverter.convert(it, faithful = false) }
-                    val mezzeType: MezzeType = fromContext
-                        ?: fromAnnotation
-                        ?: MezzeType.VarType(TypeVar.fresh())
+                    // #213: the solver-inferred `fromContext` type does NOT carry the
+                    // written `with Ord 'a` ability constraints, so exporting it drops
+                    // them — importers then see a constraint-free scheme and accept
+                    // `SortedSet Color` (no `Ord Color` obligation) → runtime crash.
+                    // When the annotation declares ability constraints, that annotation
+                    // is the authoritative signature (its type-vars are self-consistent),
+                    // so export the annotation-derived type instead of the inferred one.
+                    val annotationHasAbilityConstraints =
+                        (fromAnnotation as? MezzeType.FunctionType)
+                            ?.abilityConstraints?.isNotEmpty() == true
+                    val mezzeType: MezzeType =
+                        if (annotationHasAbilityConstraints) fromAnnotation!!
+                        else fromContext
+                            ?: fromAnnotation
+                            ?: MezzeType.VarType(TypeVar.fresh())
                     val contentHash = ParsedDeclHasher.hashLetDecl(decl)
 
                     exports[name] = ExportedItem(

@@ -317,6 +317,40 @@ class ConstraintGenerator(
                             perBindingSubstitution = solveResult.substitution.compose(perBindingSubstitution)
                         }
                     }
+
+                    // A bare trailing expression must still discharge its ABILITY
+                    // obligations. The global solve strips HasConstructor/HasField
+                    // before its ability check (collectGlobalConstraints), so the var
+                    // an `AbilityRequired` rides on is never pinned to the concrete
+                    // argument type and the obligation is silently dropped — an
+                    // ability-constrained call used as the module result (e.g.
+                    // `sorted_set::singleton { x = Red }` where Color has no `Ord`)
+                    // type-checked and then crashed at runtime, though the identical
+                    // call was correctly rejected once `let`-bound. Re-solve the FULL
+                    // constraint set here (so the arg equalities + HasConstructor pin
+                    // the ability var to the concrete type, e.g. Red → Color) but
+                    // report ONLY the ability failures — equality / method-resolution
+                    // mismatches must stay deferred to the global solver, which owns
+                    // their inference ordering, so we must not surface those here.
+                    val abilityObligations = result.abilityConstraints + result.associatedTypeConstraints
+                    if (abilityObligations.isNotEmpty()) {
+                        val solveResult = solver.solve(result.constraints + abilityObligations)
+                        if (solveResult is ConstraintSolver.SolveResult.Failure) {
+                            // Keep only genuine ability failures. The deferred
+                            // validateAbilityConstraints re-check wraps its failure in a
+                            // placeholder Equality carrying context "ability constraint
+                            // validation" (ConstraintSolver), while a directly-solved
+                            // obligation keeps its AbilityRequired constraint — match
+                            // both. Equality / method-resolution failures are dropped
+                            // here; the global solver owns and reports those.
+                            perBindingSolveErrors.addAll(
+                                solveResult.errors.filter {
+                                    it.constraint is Constraint.AbilityRequired ||
+                                        it.context == "ability constraint validation"
+                                }
+                            )
+                        }
+                    }
                 }
                 is ParsedUseDecl,
                 is ParsedPubUseDecl -> {

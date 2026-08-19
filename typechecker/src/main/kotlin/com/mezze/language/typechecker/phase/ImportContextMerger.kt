@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.phase
 
+import com.mezze.language.ast.AbilityConstraint
 import com.mezze.language.ast.BindingKey
+import com.mezze.language.ast.MezzeType
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypeScheme
@@ -53,7 +55,13 @@ internal fun mergeImportContext(
         } else {
             val scheme = TypeScheme(
                 quantifiedVars = freeVars.toList(),
-                constraints = emptyList(),
+                // #213: carry the imported function's ability constraints into its
+                // scheme. Without this the scheme is constraint-free, so instantiating
+                // an imported `with Ord 'a` function emits no `Ord 'a` obligation and
+                // `SortedSet Color` type-checks then crashes at runtime. `instantiate()`
+                // matches a scheme constraint to a fresh var BY NAME (constraint.typeParam
+                // vs. quantified-var name), so typeParam is the constrained var's name.
+                constraints = importedAbilityConstraints(bindingType),
                 type = bindingType
             )
             context = context.extendPoly(bindingKey, scheme, binding.modulePath, binding.contentHash)
@@ -184,6 +192,28 @@ private fun collectFromEffectRow(
         // Try loaded modules snapshot for a decl by this name.
         val fromLoaded = findEffectDeclByNameInLoadedModules(name)
         if (fromLoaded != null) into[name] = fromLoaded
+    }
+}
+
+/**
+ * #213: reconstruct scheme-level [AbilityConstraint]s from an imported function's
+ * [MezzeType.FunctionType.abilityConstraints]. `TypeScheme.instantiate()` pairs a
+ * scheme constraint with a fresh type var BY NAME — matching `constraint.typeParam`
+ * against the quantified variable's name — so `typeParam` is taken from the name of
+ * the (single, by construction) type-variable argument the constraint mentions. A
+ * constraint whose argument isn't a plain type variable (unexpected for a written
+ * `with Ability 'a`) is skipped rather than mislinked to a dangling var.
+ */
+private fun importedAbilityConstraints(bindingType: MezzeType): List<AbilityConstraint> {
+    val fn = bindingType as? MezzeType.FunctionType ?: return emptyList()
+    return fn.abilityConstraints.mapNotNull { fac ->
+        val varArg = fac.typeArgs.firstOrNull { it is MezzeType.VarType } as? MezzeType.VarType
+            ?: return@mapNotNull null
+        AbilityConstraint(
+            abilityName = fac.abilityName,
+            typeParam = varArg.variable.name,
+            typeArgs = fac.typeArgs
+        )
     }
 }
 
