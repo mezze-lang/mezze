@@ -570,6 +570,11 @@ class ConstraintSolver(
                 errors.add(ConstraintError(
                     message = result.message,
                     constraint = appliedConstraint,
+                    // Stamp a typed code on ability failures so callers can
+                    // discriminate them without matching the free-text message
+                    // or context (see ConstraintGenerator's top-level-expr filter).
+                    code = if (appliedConstraint is Constraint.AbilityRequired)
+                        ErrorCode.V0402_ABILITY_NOT_SATISFIED else ErrorCode.UNCATEGORIZED,
                     context = appliedConstraint.context
                 ))
                 poison(constraint)
@@ -657,7 +662,12 @@ class ConstraintSolver(
             val (validationError, errorLoc) = validationResult
             errors.add(ConstraintError(
                 message = validationError,
+                // The deferred re-check has no single AbilityRequired constraint to
+                // attach (it validates the accumulated set), so it carries a
+                // placeholder Equality. The typed code — NOT the constraint shape or
+                // context string — is what callers discriminate on.
                 constraint = Constraint.Equality(MezzeType.IntType, MezzeType.IntType, loc = errorLoc),
+                code = ErrorCode.V0402_ABILITY_NOT_SATISFIED,
                 context = "ability constraint validation"
             ))
         }

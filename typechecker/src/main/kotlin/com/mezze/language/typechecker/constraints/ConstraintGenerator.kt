@@ -336,18 +336,14 @@ class ConstraintGenerator(
                     if (abilityObligations.isNotEmpty()) {
                         val solveResult = solver.solve(result.constraints + abilityObligations)
                         if (solveResult is ConstraintSolver.SolveResult.Failure) {
-                            // Keep only genuine ability failures. The deferred
-                            // validateAbilityConstraints re-check wraps its failure in a
-                            // placeholder Equality carrying context "ability constraint
-                            // validation" (ConstraintSolver), while a directly-solved
-                            // obligation keeps its AbilityRequired constraint — match
-                            // both. Equality / method-resolution failures are dropped
-                            // here; the global solver owns and reports those.
+                            // Keep only genuine ability failures — both the directly
+                            // solved obligation and the deferred validateAbilityConstraints
+                            // re-check stamp ErrorCode.V0402_ABILITY_NOT_SATISFIED, so a
+                            // single typed code discriminates them (no magic-string or
+                            // constraint-shape matching). Equality / method-resolution
+                            // failures are dropped here; the global solver owns those.
                             perBindingSolveErrors.addAll(
-                                solveResult.errors.filter {
-                                    it.constraint is Constraint.AbilityRequired ||
-                                        it.context == "ability constraint validation"
-                                }
+                                solveResult.errors.filter { it.code == ErrorCode.V0402_ABILITY_NOT_SATISFIED }
                             )
                         }
                     }
