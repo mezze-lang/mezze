@@ -2062,6 +2062,49 @@ class TypedASTCompiler(
                 val patternIR = compilePattern(pat)
                 var guardIR = case.guard?.let { compileExpr(it) }
 
+                // HOLE A: synthesize runtime tests for nested constructor/literal
+                // sub-patterns and fold them into the guard. The outer pattern has
+                // already bound each field to a slot, so the test reads those slots
+                // (ReadLocalIR) and recurses. A false test falls through to the next
+                // arm via the guard mechanism below. When there is also a user guard,
+                // gate it behind the nested test (IfIR short-circuit) so the guard
+                // never runs against a value whose nested shape didn't match.
+                val nestedTest: NodeIR? = when (pat) {
+                    is TypedRecordPattern -> {
+                        val terms = pat.fields.mapNotNull { fp ->
+                            if (fp.pattern is TypedVarPattern || fp.pattern is TypedWildcardPattern || fp.pattern == null) {
+                                null
+                            } else {
+                                val slot = fieldBindingSlot(fp)
+                                if (slot < 0) null
+                                else buildNestedTests(fp.pattern, ReadLocalIR(slot, SlotKind.OBJECT, src), src)
+                            }
+                        }
+                        andAll(terms, src)
+                    }
+                    is TypedVariantPattern -> {
+                        // Nested tests inside a top-level variant arm's payload fields.
+                        val payload = pat.payload
+                        if (payload is TypedRecordPattern) {
+                            val terms = payload.fields.mapNotNull { fp ->
+                                if (fp.pattern is TypedVarPattern || fp.pattern is TypedWildcardPattern || fp.pattern == null) {
+                                    null
+                                } else {
+                                    val slot = fieldBindingSlot(fp)
+                                    if (slot < 0) null
+                                    else buildNestedTests(fp.pattern, ReadLocalIR(slot, SlotKind.OBJECT, src), src)
+                                }
+                            }
+                            andAll(terms, src)
+                        } else null
+                    }
+                    else -> null
+                }
+                if (nestedTest != null) {
+                    guardIR = if (guardIR == null) nestedTest
+                              else IfIR(nestedTest, guardIR, BoolLitIR(false, src), src)
+                }
+
                 // Compile if-let bindings.
                 // Also collect nested destructuring from if-let patterns.
                 val ifLetIRs = case.ifLetBindings.map { ifLet ->
@@ -2272,6 +2315,113 @@ class TypedASTCompiler(
             else -> {} // Other patterns don't have nested records
         }
     }
+
+    /**
+     * HOLE A: build a runtime boolean test for nested CONSTRUCTOR/LITERAL
+     * sub-patterns inside a record field or variant payload field. A flat
+     * `PatternIR.Record`/`PatternIR.Variant` only EXTRACTS + BINDS its fields —
+     * it never tests a nested tag/literal. So `match r is { c = Red } -> …` (r a
+     * record with `c: Color`) selected its arm on the record's SHAPE alone and
+     * bound `c`'s value, silently ignoring that the nested `Red` must MATCH — a
+     * `{ c = Blue }` value wrongly ran the `Red` arm. Same for a nested variant
+     * in a variant payload (`Wrap { inner = A { n } }`) and a nested literal
+     * (`{ n = 0 }`).
+     *
+     * We synthesize a pure boolean expression that reads the field (via
+     * `accessExpr`) and tests the nested pattern, and AND it (short-circuit, see
+     * [compileMatch]) into the case guard. Because a false guard falls through to
+     * the NEXT arm (the guard→body→next-arm structure already handles that), a
+     * nested mismatch correctly abandons the arm — which a body-level test could
+     * never do. Returns null when the sub-pattern is irrefutable (var/wildcard/
+     * absent), i.e. no test is needed.
+     *
+     * Bindings are unaffected: the outer pattern + [collectNestedDestructuring]
+     * still bind every field; this only ADDS tests. Nested variant *payload*
+     * variables are bound by the synthesized `MatchIR`'s Variant pattern into the
+     * same frame slots the body reads (resolved by name), so `A { n } -> n` still
+     * sees `n`. Nested seq / string-interp sub-patterns are not tested here (they
+     * are separate, pre-existing gaps); they return null and keep prior behavior.
+     */
+    /**
+     * The frame slot that [compilePattern] binds a record/variant field's VALUE
+     * to — must mirror that logic exactly so [buildNestedTests] reads the same
+     * slot the outer pattern populated. A nested-record field goes to `__tmp_*`
+     * (allocated by [collectNestedDestructuring]); everything else goes to the
+     * field's binding name (renamed var, else the field name).
+     */
+    private fun fieldBindingSlot(fp: TypedFieldPattern): Int {
+        if (fp.pattern is TypedRecordPattern) {
+            return localsByName["__tmp_${fp.name}"] ?: -1
+        }
+        val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
+        return scopeStack.lastOrNull()?.get(bindingName)
+            ?: localsByName[bindingName]
+            ?: -1
+    }
+
+    private fun buildNestedTests(pattern: TypedPattern?, accessExpr: NodeIR, src: SourceInfo): NodeIR? {
+        if (pattern == null) return null
+        return when (pattern) {
+            is TypedVarPattern, is TypedWildcardPattern -> null
+            is TypedLiteralPattern -> InlineBinaryOpIR(InlineOp.EQ, accessExpr, compileExpr(pattern.value), src)
+            is TypedRecordPattern -> {
+                val terms = pattern.fields.mapNotNull { fp ->
+                    buildNestedTests(fp.pattern, ReadFieldIR(accessExpr, fp.name, -1, src), src)
+                }
+                andAll(terms, src)
+            }
+            is TypedVariantPattern -> {
+                // Test the tag AND (recursively) the payload, atomically, via a
+                // nested match whose true-arm binds the payload and returns the
+                // sub-tests, and whose wildcard-arm returns false.
+                val adtHashHex = (pattern.type as? VariantType)?.typeHash?.hex
+                val tag = com.mezze.language.ast.BuiltinTypes.computeVariantTag(pattern.tag, adtHashHex)
+
+                val fieldNames = mutableListOf<String>()
+                val fieldSlots = mutableListOf<Int>()
+                var payloadTest: NodeIR? = null
+                when (val payload = pattern.payload) {
+                    is TypedRecordPattern -> {
+                        val terms = mutableListOf<NodeIR>()
+                        for (fp in payload.fields) {
+                            fieldNames.add(fp.name)
+                            val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
+                            val slot = scopeStack.lastOrNull()?.get(bindingName)
+                                ?: localsByName[bindingName]
+                                ?: forceAllocLocal(bindingName)
+                            fieldSlots.add(slot)
+                            // A nested sub-pattern inside the payload field reads the
+                            // just-bound slot and recurses.
+                            buildNestedTests(fp.pattern, ReadLocalIR(slot, SlotKind.OBJECT, src), src)
+                                ?.let { terms.add(it) }
+                        }
+                        payloadTest = andAll(terms, src)
+                    }
+                    is TypedVarPattern -> {
+                        fieldNames.add(payload.name)
+                        val slot = scopeStack.lastOrNull()?.get(payload.name)
+                            ?: localsByName[payload.name]
+                            ?: forceAllocLocal(payload.name)
+                        fieldSlots.add(slot)
+                    }
+                    else -> {}
+                }
+
+                val trueBody: NodeIR = payloadTest ?: BoolLitIR(true, src)
+                val matchCase = CaseIR(
+                    PatternIR.Variant(tag, pattern.tag, fieldNames, fieldSlots),
+                    emptyList(), null, trueBody, src,
+                )
+                val wildcardCase = CaseIR(PatternIR.Wildcard(-1), emptyList(), null, BoolLitIR(false, src), src)
+                MatchIR(accessExpr, listOf(matchCase, wildcardCase), src)
+            }
+            else -> null // seq / string-interp nested sub-patterns: separate gaps
+        }
+    }
+
+    /** AND a list of boolean tests, short-circuit-strict; null if empty. */
+    private fun andAll(terms: List<NodeIR>, src: SourceInfo): NodeIR? =
+        terms.reduceOrNull { acc, t -> InlineBinaryOpIR(InlineOp.AND, acc, t, src) }
 
     /**
      * Collect nested seq element patterns that need post-bind destructuring.
