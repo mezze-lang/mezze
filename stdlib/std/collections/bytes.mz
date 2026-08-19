@@ -80,10 +80,10 @@ pub let ends_with: { b: Bytes, suffix: Bytes } -> Bool = { b, suffix } -> __nati
 pub let reverse: { b: Bytes } -> Bytes = { b } -> __native_bytes_reverse { b = b }
 
 ## Maps a function over each byte (function receives and returns 0-255).
-pub let map: { b: Bytes, f: { x: Int } -> Int } -> Bytes = { b, f } -> __native_bytes_map { b = b, f = f }
+pub let map: { b: Bytes, f: { x: Int } -> Int <...> } -> Bytes <...> = { b, f } -> __native_bytes_map { b = b, f = f }
 
 ## Folds over bytes from left to right.
-pub let fold: { b: Bytes, init: 'a, f: { acc: 'a, byte: Int } -> 'a } -> 'a = { b, init, f } -> __native_bytes_fold { b = b, init = init, f = f }
+pub let fold: { b: Bytes, init: 'a, f: { acc: 'a, byte: Int } -> 'a <...> } -> 'a <...> = { b, init, f } -> __native_bytes_fold { b = b, init = init, f = f }
 
 ## Decodes as a UTF-8 string, returning a Result.
 pub let to_str: { b: Bytes } -> Result Str Str = { b } -> __native_bytes_to_str { b = b }

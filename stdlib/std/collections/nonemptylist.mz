@@ -56,31 +56,31 @@ pub let get : { xs: NonEmptyList 'a, index: Int } -> 'a = { xs, index } ->
 pub let last : { xs: NonEmptyList 'a } -> 'a = { xs } -> __native_nel_last { xs = xs }
 
 ## Applies f to each element, returning a new non-empty list.
-pub let map : { xs: NonEmptyList 'a, f: { x: 'a } -> 'b } -> NonEmptyList 'b = { xs, f } ->
+pub let map : { xs: NonEmptyList 'a, f: { x: 'a } -> 'b <...> } -> NonEmptyList 'b <...> = { xs, f } ->
   __native_nel_map { xs = xs, f = f }
 
 ## Applies f to each element and flattens the resulting non-empty lists.
-pub let flat_map : { xs: NonEmptyList 'a, f: { x: 'a } -> NonEmptyList 'b } -> NonEmptyList 'b = { xs, f } ->
+pub let flat_map : { xs: NonEmptyList 'a, f: { x: 'a } -> NonEmptyList 'b <...> } -> NonEmptyList 'b <...> = { xs, f } ->
   __native_nel_flat_map { xs = xs, f = f }
 
 ## Left fold with an initial accumulator value.
-pub let fold_left : { xs: NonEmptyList 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc } -> 'acc = { xs, init, f } ->
+pub let fold_left : { xs: NonEmptyList 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
   __native_nel_fold_left { xs = xs, init = init, f = f }
 
 ## Right fold with an initial accumulator value.
-pub let fold_right : { xs: NonEmptyList 'a, init: 'acc, f: { x: 'a, acc: 'acc } -> 'acc } -> 'acc = { xs, init, f } ->
+pub let fold_right : { xs: NonEmptyList 'a, init: 'acc, f: { x: 'a, acc: 'acc } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
   __native_nel_fold_right { xs = xs, init = init, f = f }
 
 ## Reduces elements using f (always succeeds since non-empty).
-pub let reduce : { xs: NonEmptyList 'a, f: { acc: 'a, x: 'a } -> 'a } -> 'a = { xs, f } ->
+pub let reduce : { xs: NonEmptyList 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> 'a <...> = { xs, f } ->
   __native_nel_reduce { xs = xs, f = f }
 
 ## Returns True if any element matches the predicate.
-pub let any : { xs: NonEmptyList 'a, p: { x: 'a } -> Bool } -> Bool = { xs, p } ->
+pub let any : { xs: NonEmptyList 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   __native_nel_any { xs = xs, p = p }
 
 ## Returns True if all elements match the predicate.
-pub let all : { xs: NonEmptyList 'a, p: { x: 'a } -> Bool } -> Bool = { xs, p } ->
+pub let all : { xs: NonEmptyList 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   __native_nel_all { xs = xs, p = p }
 
 ## Returns True if the list contains the element.
@@ -117,7 +117,7 @@ pub let sort : { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } ->
   __native_nel_sort { xs = xs }
 
 ## Sorts using a custom comparator.
-pub let sort_by : { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Int } -> NonEmptyList 'a = { xs, cmp } ->
+pub let sort_by : { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Int <...> } -> NonEmptyList 'a <...> = { xs, cmp } ->
   __native_nel_sort_by { xs = xs, cmp = cmp }
 
 ## Method implementations for NonEmptyList.
