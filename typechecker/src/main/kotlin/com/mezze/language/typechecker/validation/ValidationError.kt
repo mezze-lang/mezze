@@ -304,6 +304,32 @@ sealed interface ValidationError {
         override fun location() = loc
     }
 
+        /**
+         * #202: a hermetic effect (Mut) co-occurs with other effects in a
+         * function's inferred effect row. Mut must be the only effect in scope to
+         * prevent data races. The annotated-row form of this is thrown as a
+         * TypeCheckError during annotation conversion; this variant reports the
+         * INFERRED-row form (an unannotated fn that performs Mut inside a
+         * spawned/joined callback), which the annotation path never sees.
+         */
+        data class HermeticEffectConflict(
+        val bindingName: String,
+        val hermeticEffect: String,
+        val otherEffects: List<String>,
+        val loc: Loc? = null
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0504_HERMETIC_EFFECT_CONFLICT
+
+        override fun message(): String =
+            "$hermeticEffect effect is hermetic: cannot coexist with other effects " +
+                "(${otherEffects.joinToString(", ")}). $hermeticEffect must be the only effect in " +
+                "scope to prevent data races. Either handle the other effects before entering the " +
+                "$hermeticEffect scope, or restructure the code to separate $hermeticEffect from " +
+                "other effectful operations."
+
+        override fun location() = loc
+    }
+
 }
 
 sealed class ValidationResult {

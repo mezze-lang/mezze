@@ -61,6 +61,7 @@ class TypeValidator(
                 is ParsedLetDecl -> {
                     errors.addAll(validateParsedAnnotation(decl, substitution, constraintResults))
                     errors.addAll(validateParsedTopLevelEffects(decl, substitution, constraintResults))
+                    errors.addAll(validateHermeticInferredEffects(decl, substitution, constraintResults))
                     val scrutineeType = if (decl.isSimpleBinding) {
                         constraintResults[decl.variableName]?.type?.let { substitution.apply(it) }
                     } else null
@@ -389,6 +390,43 @@ class TypeValidator(
             ))
         }
         return emptyList()
+    }
+
+    /**
+     * #202: enforce the hermetic rule (Mut must be the only effect in scope) on a
+     * binding's INFERRED effect row. The annotated form is rejected during
+     * annotation conversion (V0504 thrown as a TypeCheckError), but an unannotated
+     * fn that performs Mut inside a spawned/joined callback gets an inferred
+     * {Mut, Async}/{Mut, Parallel} row that never passes through the annotation
+     * converter — so it slipped through. We run the same check here on the solved
+     * type. A DISCHARGED Mut is already absent from this row, so a
+     * `perform LocalMut in …` then another effect is NOT rejected.
+     *
+     * Reported as a ValidationError (not thrown) so it surfaces as a normal
+     * diagnostic; the emit phase swallows thrown exceptions, so throwing here
+     * would be lost.
+     */
+    private fun validateHermeticInferredEffects(
+        decl: ParsedLetDecl,
+        substitution: Substitution,
+        constraintResults: Map<String, ConstraintResult>
+    ): List<ValidationError> {
+        if (!decl.isSimpleBinding) return emptyList()
+        val finalType = substitution.apply(constraintResults[decl.variableName]?.type ?: return emptyList())
+        val row = when (finalType) {
+            is MezzeType.FunctionType -> finalType.effects
+            is MezzeType.SuspendType -> finalType.effects
+            else -> null
+        } ?: return emptyList()
+
+        fun resolveHash(name: String) = row.effectHashes[name] ?: WellKnownHashConstants.resolveHash(name)
+        val names = row.allEffectNames
+        val hermetic = names.firstOrNull { WellKnownHashConstants.isMut(resolveHash(it)) } ?: return emptyList()
+        if (names.size <= 1) return emptyList()
+        val others = names.filter { !WellKnownHashConstants.isMut(resolveHash(it)) }
+        return listOf(ValidationError.HermeticEffectConflict(
+            bindingName = decl.variableName, hermeticEffect = hermetic, otherEffects = others.sorted(), loc = decl.loc
+        ))
     }
 
     private fun alphaEquivalent(type1: MezzeType, type2: MezzeType, mapping: MutableMap<TypeVar, TypeVar>): Boolean = when {
