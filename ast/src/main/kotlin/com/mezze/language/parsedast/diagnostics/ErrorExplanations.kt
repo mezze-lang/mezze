@@ -316,6 +316,11 @@ fun ErrorCode.explain(): String = when (this) {
     ErrorCode.V0605_OR_PATTERN_BINDS_DIFFERENT_VARS ->
         "Both sides of an or-pattern (`A | B`) must bind the same set of variables."
 
+    ErrorCode.V0606_NON_LINEAR_PATTERN ->
+        "A pattern may not bind the same variable name twice (`A { x = n, y = n }`). " +
+        "Each binding must be distinct — the two occurrences could have different types. " +
+        "Use `_` for a value you want to ignore."
+
     ErrorCode.V0701_DUPLICATE_DECLARATION ->
         "A binding with this name already exists in this scope. " +
         "Choose a different name or shadow intentionally with a nested scope."

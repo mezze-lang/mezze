@@ -13,6 +13,31 @@ import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 
+/**
+ * Reject a non-linear pattern — one that binds the same variable name more than
+ * once (`A { x = n, y = n }`, `[n, n]`). Without this, the two occurrences are
+ * given DIFFERENT types with no unification between them (record-field binding is
+ * last-wins), so `n` is typed at one field's type while the runtime may bind the
+ * other — silent type confusion. (Or-pattern alternatives are a separate, allowed
+ * case: they bind the SAME name across mutually-exclusive arms, and are unified
+ * elsewhere. Here we only look WITHIN one alternative pattern.)
+ */
+private fun rejectDuplicateBinders(pattern: ParsedPattern, loc: Loc) {
+    val names = pattern.extractBindings()
+    val seen = HashSet<String>()
+    val dupes = LinkedHashSet<String>()
+    for (n in names) if (!seen.add(n)) dupes.add(n)
+    if (dupes.isNotEmpty()) {
+        throw TypeCheckError(
+            "Pattern binds the same variable more than once: ${dupes.joinToString(", ")}. " +
+                "Each binding in a pattern must use a distinct name (use `_` to ignore a value).",
+            loc,
+            code = ErrorCode.V0606_NON_LINEAR_PATTERN,
+            hints = listOf("rename one of the duplicate bindings, or use `_` for the one you don't need"),
+        )
+    }
+}
+
 internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, context: ConstraintContext): ConstraintResult {
 
     val scrutineeResult = generate(expr.scrutinee, context.notInTailPosition())
@@ -47,12 +72,14 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
     for (matchCase in expr.cases) {
 
         val firstPattern = matchCase.patterns.first()
+        rejectDuplicateBinders(firstPattern, expr.loc)
         val patternResult = patternGenerator.generate(firstPattern, scrutineeResult.type, context, expr.loc)
         collector.constraints.addAll(patternResult.constraints)
         patternWarnings.addAll(patternResult.warnings)
 
         val firstPatternBindings = patternResult.bindings.keys
         for (pattern in matchCase.patterns.drop(1)) {
+            rejectDuplicateBinders(pattern, expr.loc)
             val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context, expr.loc)
             collector.constraints.addAll(orPatternResult.constraints)
             patternWarnings.addAll(orPatternResult.warnings)

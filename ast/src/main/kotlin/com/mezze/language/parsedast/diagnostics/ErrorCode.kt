@@ -119,6 +119,7 @@ enum class ErrorCode {
     V0603_UNREACHABLE_PATTERN,
     V0604_CONSTRUCTOR_NO_PAYLOAD,
     V0605_OR_PATTERN_BINDS_DIFFERENT_VARS,
+    V0606_NON_LINEAR_PATTERN,
 
     // ─── Validator: bindings (V07xx) ─────────────────────────────────────
     V0701_DUPLICATE_DECLARATION,
