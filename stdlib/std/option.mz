@@ -33,25 +33,28 @@ impl Eq 'a for Option 'a where {
       None -> False,
 }
 
+## Lexicographic ordering for options, requiring the element to be Ord.
+## `None < Some _`. The `with Ord 'a` preconditions prevent `Option T < Option T`
+## from type-checking for a T with no Ord and crashing in the element compare (#224).
 impl Ord 'a for Option 'a where {
-  lt = { it, r } -> match it is
+  lt: { it: Option 'a, r: Option 'a } with Ord 'a -> Bool = { it, r } -> match it is
     None -> match r is
       Some { val = _ } -> True
       None -> False
     Some { val = l } -> match r is
       None -> False
       Some { val = r_val } -> l < r_val,
-  le = { it, r } -> match it is
+  le: { it: Option 'a, r: Option 'a } with Ord 'a -> Bool = { it, r } -> match it is
     None -> True
     Some { val = l } -> match r is
       None -> False
       Some { val = r_val } -> l <= r_val,
-  gt = { it, r } -> match it is
+  gt: { it: Option 'a, r: Option 'a } with Ord 'a -> Bool = { it, r } -> match it is
     None -> False
     Some { val = l } -> match r is
       None -> True
       Some { val = r_val } -> l > r_val,
-  ge = { it, r } -> match it is
+  ge: { it: Option 'a, r: Option 'a } with Ord 'a -> Bool = { it, r } -> match it is
     Some { val = l } -> match r is
       Some { val = r_val } -> l >= r_val
       None -> True

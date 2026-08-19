@@ -14,12 +14,15 @@ impl Eq 'a for ['a] where {
   neq = { it, r } -> if __native_seq_equals { l = it, r = r } then False else True,
 }
 
-## Lexicographic ordering for sequences.
+## Lexicographic ordering for sequences, requiring the element to be Ord.
+## `__native_seq_compare` compares elements, so the `with Ord 'a` preconditions
+## are load-bearing: without them `[T] < [T]` would type-check for a T with no
+## Ord and crash at runtime (#224). The native-delegating body can't infer this.
 impl Ord 'a for ['a] where {
-  lt = { it, r } -> __native_seq_compare { xs = it, ys = r } == (0 - 1),
-  le = { it, r } -> __native_seq_compare { xs = it, ys = r } != 1,
-  gt = { it, r } -> __native_seq_compare { xs = it, ys = r } == 1,
-  ge = { it, r } -> __native_seq_compare { xs = it, ys = r } != (0 - 1),
+  lt: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } -> __native_seq_compare { xs = it, ys = r } == (0 - 1),
+  le: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } -> __native_seq_compare { xs = it, ys = r } != 1,
+  gt: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } -> __native_seq_compare { xs = it, ys = r } == 1,
+  ge: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } -> __native_seq_compare { xs = it, ys = r } != (0 - 1),
 }
 
 ## Returns the number of elements.

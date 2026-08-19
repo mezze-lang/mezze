@@ -16,10 +16,10 @@ impl Eq 'a for SortedSet 'a where {
 
 ## Lexicographic ordering for sorted sets.
 impl Ord 'a for SortedSet 'a where {
-  lt = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } == (0 - 1),
-  le = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } != 1,
-  gt = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } == 1,
-  ge = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } != (0 - 1),
+  lt: { it: SortedSet 'a, r: SortedSet 'a } with Ord 'a -> Bool = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } == (0 - 1),
+  le: { it: SortedSet 'a, r: SortedSet 'a } with Ord 'a -> Bool = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } != 1,
+  gt: { it: SortedSet 'a, r: SortedSet 'a } with Ord 'a -> Bool = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } == 1,
+  ge: { it: SortedSet 'a, r: SortedSet 'a } with Ord 'a -> Bool = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } != (0 - 1),
 }
 
 ## Creates an empty sorted set.
