@@ -275,8 +275,14 @@ sealed interface PatternIR {
     @Serializable data class Literal(val value: NodeIR) : PatternIR
     @Serializable data class Wildcard(val slot: Int = -1) : PatternIR
     @Serializable data class Record(val fieldNames: List<String>, val fieldSlots: List<Int>, val isOpen: Boolean) : PatternIR
-    /** Seq pattern: matches arrays by length and binds elements to slots. restSlot >= 0 for [x, ...rest] patterns */
-    @Serializable data class Seq(val elementSlots: List<Int>, val restSlot: Int = -1) : PatternIR
+    /**
+     * Seq pattern: matches arrays by length and binds elements to slots.
+     * `hasRest` is the open-vs-fixed flag: true for `[x, ...rest]` and `[x, ..._]`
+     * (matches length >= elementSlots.size), false for `[x, y]` (== size).
+     * `restSlot >= 0` names a slot to bind the dropped tail into; restSlot == -1
+     * with hasRest == true is `..._` (open, but the tail is not bound).
+     */
+    @Serializable data class Seq(val elementSlots: List<Int>, val restSlot: Int = -1, val hasRest: Boolean = restSlot >= 0) : PatternIR
     /** String interpolation pattern: partTypes 0=literal, 1=capture; literals has string for literal parts; captureSlots has frame slots for captures */
     @Serializable data class StringInterp(val partTypes: List<Int>, val literals: List<String?>, val captureSlots: List<Int>) : PatternIR
 }

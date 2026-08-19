@@ -457,7 +457,10 @@ module.exports = grammar({
       ']',
     ),
 
-    rest_pattern: $ => seq('...', optional($.lower_identifier)),
+    // A rest pattern needs a name (`...rest`) to capture the tail, or `..._` to
+    // match and ignore it. A bare `...` is rejected (it would hide the seq's
+    // length, breaking exhaustiveness). Mirrors PatternParsers.kt.
+    rest_pattern: $ => seq('...', choice($.lower_identifier, $.wildcard_pattern)),
 
     // ===== Types =====
 

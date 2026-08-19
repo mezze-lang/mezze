@@ -2478,7 +2478,10 @@ public final class BytecodeCompiler {
             // then bind each element into elementSlots[i], plus the drop-N
             // tail into restSlot if restSlot >= 0.
             int elemCount = sp.getElementSlots().size();
-            boolean hasRest = sp.getRestSlot() >= 0;
+            // hasRest = open pattern (length >= N); bindRest = the tail is captured
+            // into a slot. `..._` is open (hasRest) but binds nothing (restSlot < 0).
+            boolean hasRest = sp.getHasRest();
+            boolean bindRest = sp.getRestSlot() >= 0;
             b.beginConditional();
             if (hasRest) {
                 b.beginSeqSizeAtLeast(elemCount);
@@ -2502,7 +2505,7 @@ public final class BytecodeCompiler {
                 b.endSeqGetAt();
                 b.endStoreLocal();
             }
-            if (hasRest) {
+            if (bindRest) {
                 BytecodeLocal target = localMap[sp.getRestSlot() - argCount];
                 b.beginStoreLocal(target);
                 b.beginSeqDrop(elemCount);

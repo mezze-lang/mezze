@@ -92,26 +92,37 @@ internal val MezzeParser.seqPattern: Parser<ParsedPattern>
                                     }
                                 }
                                 is ParseResult.Failure -> {
-                                    when (afterEllipsis.current()?.type) {
-                                        TokenType.RBRACKET -> {
-                                            ParseResult.Success(Pair(accum, Pair(null, afterEllipsis)), afterEllipsis)
+                                    // `..._` is the tail-ignoring rest: it matches the remaining
+                                    // elements (so the pattern covers length >= elements.size) but
+                                    // binds nothing. It parses as PLACEHOLDER, not an identifier, so
+                                    // it lands here. We record it as the sentinel rest name "_" so the
+                                    // AST can distinguish a fixed-length pattern (restPattern == null)
+                                    // from an open one — exhaustiveness checking depends on this.
+                                    if (afterEllipsis.current()?.type == TokenType.PLACEHOLDER) {
+                                        val afterUnderscore = skipNewlines(afterEllipsis.advance())
+                                        val afterRest = if (afterUnderscore.current()?.type == TokenType.COMMA) {
+                                            skipNewlines(afterUnderscore.advance())
+                                        } else {
+                                            afterUnderscore
                                         }
-                                        TokenType.COMMA -> {
-                                            val afterComma = skipNewlines(afterEllipsis.advance())
-                                            if (afterComma.current()?.type != TokenType.RBRACKET) {
-                                                afterComma.failure(
-                                                    "Rest pattern (...) must be the last element in a seq pattern. " +
-                                                    "Use [elem1, elem2, ...] to match elements at the start and ignore the rest."
-                                                )
-                                            } else {
-                                                ParseResult.Success(Pair(accum, Pair(null, afterComma)), afterComma)
-                                            }
-                                        }
-                                        else -> {
-                                            ellipsisStream.failure(
-                                                "After '...' in seq pattern, expected a name for the rest or ']' to end the pattern. Examples: [first, ...rest] or [first, ...]"
+                                        if (afterRest.current()?.type != TokenType.RBRACKET) {
+                                            afterRest.failure(
+                                                "Rest pattern (..._) must be the last element in a seq pattern. " +
+                                                "Use [elem1, elem2, ..._] to match the start and ignore the rest."
                                             )
+                                        } else {
+                                            ParseResult.Success(Pair(accum, Pair("_", afterRest)), afterRest)
                                         }
+                                    } else {
+                                        // A bare anonymous `...` is not allowed: it makes a
+                                        // fixed-length pattern indistinguishable from an open one.
+                                        // Require a name (`...rest`) to capture the tail, or `..._`
+                                        // to match-and-ignore it.
+                                        ellipsisStream.failure(
+                                            "A rest pattern needs a name: use [first, ...rest] to capture the " +
+                                            "remaining elements, or [first, ..._] to match and ignore them. " +
+                                            "A bare `...` is not allowed because it would hide the seq's length."
+                                        )
                                     }
                                 }
                             }

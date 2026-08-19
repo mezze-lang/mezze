@@ -122,7 +122,8 @@ fun ParsedPattern.extractBindings(): List<String> = when (this) {
     is ParsedConstructorPattern -> payload?.extractBindings() ?: emptyList()
     is ParsedLiteralPattern -> emptyList()
     is ParsedSeqPattern -> {
-        elements.flatMap { it.extractBindings() } + listOfNotNull(restPattern)
+        // "_" is the tail-ignoring rest (`..._`) — it matches but binds nothing.
+        elements.flatMap { it.extractBindings() } + listOfNotNull(restPattern?.takeIf { it != "_" })
     }
     is ParsedStringInterpPattern -> parts.mapNotNull {
         (it as? ParsedStringPatternPart.Capture)?.variableName

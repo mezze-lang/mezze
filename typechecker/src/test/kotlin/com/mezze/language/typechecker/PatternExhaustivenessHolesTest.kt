@@ -7,16 +7,19 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Paths
 
 /**
- * KNOWN OPEN HOLES in match exhaustiveness, found by the multi-agent soundness
- * hunt (task #203). These programs TYPE-CHECK today but are non-exhaustive and
- * crash at runtime on the uncovered input. Exhaustiveness analysis
- * (MatchValidator.validateParsedExhaustiveness) currently only checks the
- * TOP-LEVEL constructor set — it does not recurse into a constructor's payload
- * (nested variant fields), and it does not reason about seq/list length at all.
+ * Match-exhaustiveness holes found by the multi-agent soundness hunt (#203), now
+ * FIXED. Two axes were unsound and are now checked by MatchValidator:
  *
- * The `holeStillOpen` tests assert the CURRENT (buggy) behavior so the hole is
- * documented and tracked; when the fix lands, flip each to `assertNotNull(err)`.
- * The `alreadySound` tests pin the boundary cases that must keep working.
+ *  - Nested-variant payloads: `Wrap { inner = X }` covers X but not Y
+ *    (`nestedVariantExhaustivenessErrors`, commit 6003125b6).
+ *  - Seq/list length: a match must cover every length. Exhaustive iff a catch-all
+ *    (`_`/var/`[...all]`/`[..._]`) OR (`[]` plus a one-leading-element open-cons
+ *    `[x, ...rest]`/`[x, ..._]`). Fixed-length patterns (`[a]`, `[a, b]`) cover
+ *    only that one length (`seqExhaustivenessErrors`).
+ *
+ * Each `is rejected` test pins a real non-exhaustive program that used to
+ * type-check and crash at runtime. The `is accepted` tests pin the boundary
+ * cases a fix must not break (they must stay total).
  */
 class PatternExhaustivenessHolesTest {
     private lateinit var parser: MezzeParser
@@ -81,20 +84,24 @@ class PatternExhaustivenessHolesTest {
         """), "#203: nested variant `l` missing `B` must be rejected")
     }
 
-    @Test fun `HOLE seq match without an empty arm is currently accepted`() {
-        assertNull(err("""
+    @Test fun `seq match without an empty arm is rejected`() {
+        // `[x, ...rest]` covers length >= 1 but not the empty seq. FIXED #203.
+        val e = err("""
             let head = { xs: [Int] } ->
               match xs is
                 [x, ...rest] -> x
-        """), "KNOWN HOLE #203: seq-length exhaustiveness not checked yet")
+        """)
+        assertNotNull(e, "#203: seq match missing `[]` must be rejected")
+        assertTrue(e!!.contains("[]"), "error should name the missing empty seq: $e")
     }
 
-    @Test fun `HOLE fixed-length seq pattern treated as total is currently accepted`() {
-        assertNull(err("""
+    @Test fun `fixed-length seq pattern treated as total is rejected`() {
+        // `[a, b]` covers only length 2 — misses `[]` and every other length. FIXED #203.
+        assertNotNull(err("""
             let both = { xs: [Int] } ->
               match xs is
                 [a, b] -> a + b
-        """), "KNOWN HOLE #203: seq-length exhaustiveness not checked yet")
+        """), "#203: a single fixed-length seq pattern is not exhaustive")
     }
 
     // ── boundary cases that MUST stay accepted (a fix must not break these) ─
@@ -137,5 +144,85 @@ class PatternExhaustivenessHolesTest {
                 [] -> 0
                 [x, ...rest] -> x
         """))
+    }
+
+    // ── #203 seq-length exhaustiveness: the length rule in detail ────────
+
+    @Test fun `seq match with a wildcard catch-all is accepted`() {
+        assertNull(err("""
+            let f = { xs: [Int] } ->
+              match xs is
+                [a, b] -> a + b
+                _ -> 0
+        """))
+    }
+
+    @Test fun `seq match with a whole-seq underscore-rest is accepted`() {
+        // `[..._]` binds nothing and matches any length — a catch-all.
+        assertNull(err("""
+            let f = { xs: [Int] } ->
+              match xs is
+                [..._] -> 0
+        """))
+    }
+
+    @Test fun `seq match with a whole-seq named rest is accepted`() {
+        assertNull(err("""
+            let f = { xs: [Int] } ->
+              match xs is
+                [...all] -> 0
+        """))
+    }
+
+    @Test fun `seq match empty plus underscore-cons is accepted`() {
+        assertNull(err("""
+            let f = { xs: [Int] } ->
+              match xs is
+                [] -> 0
+                [x, ..._] -> x
+        """))
+    }
+
+    @Test fun `two refutable-head cons arms covering the element type are accepted`() {
+        // `[Some x, ...t]` + `[None, ...t]` jointly cover every non-empty seq; the
+        // length check must not reject this idiom (it reasons about length only).
+        assertNull(err("""
+            use std::collections::seq
+            let f = { xs: [Option Int] } ->
+              match xs is
+                [] -> 0
+                [Some { val = x }, ...t] -> x
+                [None, ...t] -> 0
+        """))
+    }
+
+    @Test fun `empty plus a two-element open cons still misses length one`() {
+        // `[a, b, ...rest]` covers length >= 2, so length 1 is uncovered.
+        assertNotNull(err("""
+            let f = { xs: [Int] } ->
+              match xs is
+                [] -> 0
+                [a, b, ...rest] -> a + b
+        """), "#203: `[a, b, ...rest]` covers len>=2, missing length 1")
+    }
+
+    @Test fun `only a guarded cons arm is not exhaustive`() {
+        // A guard can fail at runtime, so `[x, ...rest] if ...` covers nothing on
+        // its own — even with `[]`, some non-empty seq falls through.
+        assertNotNull(err("""
+            let f = { xs: [Int] } ->
+              match xs is
+                [] -> 0
+                [x, ...rest] if x > 0 -> x
+        """), "#203: a guarded cons arm can't be relied on for coverage")
+    }
+
+    @Test fun `list type gets the same length exhaustiveness check`() {
+        // The check applies to List 'a as well as Seq 'a.
+        assertNotNull(err("""
+            let f = { xs: List Int } ->
+              match xs is
+                [a, b] -> a + b
+        """), "#203: fixed-length pattern on a List is not exhaustive")
     }
 }

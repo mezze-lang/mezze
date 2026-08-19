@@ -162,8 +162,7 @@ class SeqVsListTypeDistinctionTest {
             let get_first : { arr: [Int] } -> Int = { arr } ->
                 match arr is
                     [] -> 0
-                    [x] -> x
-                    [x, y] -> x
+                    [x, ...rest] -> x
 
             let numbers = [10, 20, 30]
             let result = get_first { arr = numbers }
@@ -258,13 +257,13 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test polymorphic function with Seq parameter`() {
         val source = """
-            let get_element : { arr: ['a] } -> 'a = { arr } ->
+            let get_element : { arr: ['a], fallback: 'a } -> 'a = { arr, fallback } ->
                 match arr is
-                    [x] -> x
-                    [x, y] -> x
+                    [] -> fallback
+                    [first, ...rest] -> first
 
             let numbers = [1, 2, 3]
-            let first = get_element { arr = numbers }
+            let first = get_element { arr = numbers, fallback = 0 }
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -481,9 +480,8 @@ class SeqVsListTypeDistinctionTest {
             # Get first element (simplified without spread syntax)
             let get_first : { a: [Int] } -> Int = { a } ->
                 match a is
-                    [x] -> x
-                    [x, y] -> x
                     [] -> 0
+                    [x, ...rest] -> x
 
             let result = get_first { a = arr1 }
         """.trimIndent()

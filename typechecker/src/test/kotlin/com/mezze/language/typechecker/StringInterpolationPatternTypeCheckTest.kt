@@ -491,7 +491,7 @@ class StringInterpolationPatternTypeCheckTest {
         val code = """
             let parse_first = {strs: [Str]} ->
                 match strs is
-                    ["$(first)-$(second)", ...] -> { a = first, b = second }
+                    ["$(first)-$(second)", ..._] -> { a = first, b = second }
                     _ -> { a = "", b = "" }
             let result = parse_first {strs = ["hello-world", "foo-bar"]}
         """.trimIndent()

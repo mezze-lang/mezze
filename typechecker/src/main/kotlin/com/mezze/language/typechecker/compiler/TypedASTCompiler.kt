@@ -2121,9 +2121,10 @@ class TypedASTCompiler(
                                     seqStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, innerElem.name, Hash.ZERO, getElem, src))
                                 }
                             }
-                            // Handle rest binding in inner seq pattern
+                            // Handle rest binding in inner seq pattern.
+                            // "_" (`..._`) matches the tail but binds nothing — skip it.
                             val restName = innerPat.rest
-                            if (restName != null) {
+                            if (restName != null && restName != "_") {
                                 val restSlot = scopeStack.lastOrNull()?.get(restName)
                                     ?: localsByName[restName]
                                     ?: forceAllocLocal(restName)
@@ -2372,12 +2373,16 @@ class TypedASTCompiler(
                     },
                     run {
                         val restName = pattern.rest
-                        if (restName != null) {
+                        // "_" is the tail-ignoring rest (`..._`): match the tail but bind nothing,
+                        // just like a wildcard element (slot -1).
+                        if (restName != null && restName != "_") {
                             scopeStack.lastOrNull()?.get(restName)
                                 ?: localsByName[restName]
                                 ?: forceAllocLocal(restName)
                         } else -1
-                    }
+                    },
+                    // hasRest: any rest (named OR `..._`) makes this an open, length>=N pattern.
+                    hasRest = pattern.rest != null
                 )
             }
             is TypedStringInterpPattern -> {

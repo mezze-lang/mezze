@@ -85,6 +85,10 @@ class MatchValidator(
                     // catch-all. Only for literal-only matches (this path already
                     // runs solely when there's no constructor pattern).
                     if (isNonEnumerablePrimitive(expanded)) return expanded
+                    // #203: a seq/list scrutinee, so validateParsedExhaustiveness can
+                    // require an empty + open-cons pair (or a catch-all). A fixed-length
+                    // pattern like `[a, b]` covers only length 2 and is not total.
+                    if (expanded is MezzeType.SeqType || expanded is MezzeType.ListType) return expanded
                 }
             }
         }
@@ -176,6 +180,14 @@ class MatchValidator(
         // a value not covered by the literals hits no branch at runtime. Same
         // exhaustiveness error as a variant missing a constructor.
         if (expandedType !is MezzeType.VariantType) {
+            // #203: a seq/list match is exhaustive only if it covers every length.
+            // The sound, conservative rule: a catch-all arm (`_`/variable/`[...all]`/
+            // `[..._]`), OR an empty-arm (`[]`) together with an open-cons arm
+            // (`[x, ...rest]`/`[x, ..._]`) that covers all lengths >= 1. A
+            // fixed-length pattern (`[a]`, `[a, b]`) covers only that one length.
+            if (expandedType is MezzeType.SeqType || expandedType is MezzeType.ListType) {
+                return seqExhaustivenessErrors(matchExpr)
+            }
             if (isNonEnumerablePrimitive(expandedType)) {
                 val hasCatchAll = matchExpr.cases.any { case ->
                     case.guard == null && case.ifLetBindings.isEmpty() &&
@@ -264,6 +276,77 @@ class MatchValidator(
         }
 
         return if (errors.isEmpty()) ValidationResult.Success() else ValidationResult.Failure(errors)
+    }
+
+    /**
+     * #203: seq/list length exhaustiveness. A seq value can have any length 0, 1,
+     * 2, …, so a match is exhaustive only if every length is covered. This is the
+     * same shape as nil/cons list exhaustiveness:
+     *
+     *   exhaustive  ⇔  a catch-all arm exists
+     *                   OR ( an empty arm `[]`  AND  an open-cons arm `[x, ...rest]` )
+     *
+     * where a **catch-all** is `_`, a bare variable, or a whole-seq rest with no
+     * fixed elements (`[...all]` / `[..._]`); an **open-cons** is ONE leading
+     * element plus a rest (`[x, ...rest]`, `[Some x, ...tail]`), which covers every
+     * length ≥ 1. A wider open-cons like `[a, b, ...rest]` covers only length ≥ 2
+     * (leaving length 1 uncovered), and fixed-length patterns (`[a]`, `[a, b]`)
+     * cover only that single length — so neither alone makes the match total.
+     *
+     * This check is deliberately about the LENGTH axis only. An open-cons arm
+     * whose head is refutable (`[Some x, ...tail]`) still counts as covering the
+     * "non-empty" length case — whether its *elements* match every value is a
+     * separate, nested-pattern question we do NOT decide here (e.g. two arms
+     * `[Some x, ...t]` + `[None, ...t]` are jointly total and must not be
+     * rejected). Requiring an irrefutable head would false-reject that idiom, so
+     * we don't. The trade: we may miss a hole that is purely about element
+     * coverage inside an open-cons; we never invent a false length error.
+     *
+     * Only UNGUARDED arms count toward coverage — a guard or an if-let binding may
+     * fail at runtime, so it can't be relied on to cover its length.
+     */
+    private fun seqExhaustivenessErrors(matchExpr: ParsedMatch): ValidationResult {
+        var hasCatchAll = false
+        var coversEmpty = false
+        var coversAllNonEmpty = false
+
+        for (case in matchExpr.cases) {
+            val unguarded = case.guard == null && case.ifLetBindings.isEmpty()
+            if (!unguarded) continue
+            for (pattern in case.patterns) {
+                when (pattern) {
+                    is ParsedWildcardPattern, is ParsedVariablePattern -> hasCatchAll = true
+                    is ParsedSeqPattern -> {
+                        val hasRest = pattern.restPattern != null
+                        when {
+                            pattern.elements.isEmpty() && hasRest -> hasCatchAll = true      // [...all] / [..._]
+                            pattern.elements.isEmpty() && !hasRest -> coversEmpty = true      // []
+                            pattern.elements.size == 1 && hasRest -> coversAllNonEmpty = true // [x, ...rest], [Some x, ...t]
+                            // A wider open-cons (`[a, b, ...rest]`, covers len>=2) or a
+                            // fixed-length pattern (`[a]`, `[a, b]`) covers only some
+                            // lengths — neither alone makes the non-empty case total.
+                            else -> {}
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+
+        val exhaustive = hasCatchAll || (coversEmpty && coversAllNonEmpty)
+        if (exhaustive) return ValidationResult.Success()
+
+        val missing = when {
+            !coversEmpty && !coversAllNonEmpty ->
+                "the empty seq `[]` and a non-empty seq `[x, ...rest]`"
+            !coversEmpty -> "the empty seq `[]`"
+            else -> "a non-empty seq `[x, ...rest]` (add `[x, ...rest]`, `[x, ..._]`, or `_`)"
+        }
+        return ValidationResult.Failure(listOf(ValidationError.NonExhaustiveMatch(
+            coveredConstructors = emptyList(),
+            missingConstructors = listOf(missing),
+            loc = matchExpr.loc
+        )))
     }
 
     /**
