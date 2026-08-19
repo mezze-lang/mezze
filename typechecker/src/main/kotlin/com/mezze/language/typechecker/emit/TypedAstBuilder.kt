@@ -815,6 +815,21 @@ class TypedAstBuilder(
                 ?: methodInfo.implContentHash
         }
 
+        val receiverFieldName = methodInfo.receiverFieldName
+
+        // #226: the STATIC ability-call form `Ability.method { it = v, ... }` carries
+        // the receiver in the args' `it` field; `memberAccess.receiver` is the
+        // ability NAME (a nullary variant), not the receiver value. Recover the real
+        // receiver from the args so both the `fn` field-access receiver (built-in
+        // dispatch reads its TYPE — must be `Int`, not the ability-variant VarType,
+        // else built-in Eq/Ord route to the wrong dispatch and return a wrong result)
+        // and the wrapped arg use the actual value.
+        val staticReceiverValue: TypedExpr? =
+            if (argExpr is TypedRecord) {
+                argExpr.entries.filterIsInstance<TypedRecordEntry.Field>()
+                    .firstOrNull { it.name == receiverFieldName }?.value
+            } else null
+
         val fn = if (methodInfo.methodHash != null) {
             val hash = methodInfo.methodHash!!
             TypedVar(
@@ -837,15 +852,32 @@ class TypedAstBuilder(
                 type = solvedFnType ?: substitution.apply(contextType),
                 loc = memberAccess.memberLoc
             )
+        } else if (staticReceiverValue != null) {
+            // Built-in (or otherwise unresolved) static ability call: rebuild the
+            // field-access on the real receiver VALUE so the compiler's receiverType
+            // (fn.record.type) is the element type, giving the correct dispatch.
+            TypedFieldAccess(staticReceiverValue, methodInfo.methodName, -1, solvedFnType ?: substitution.apply(contextType), memberAccess.memberLoc)
         } else {
             buildExpr(expr.function, file)
         }
 
-        val receiverFieldName = methodInfo.receiverFieldName
-        val receiverField = TypedRecordEntry.Field(receiverFieldName, receiverExpr, memberAccess.receiver.loc)
+        // #226: the STATIC ability-call form `Ability.method { it = v, ... }`
+        // (desugared to a method call by the typechecker) already carries the
+        // receiver in the args' `it` field — the `memberAccess.receiver` here is
+        // the ability NAME (a nullary variant), NOT the receiver value. Building
+        // `receiverExpr` from it and prepending `{ it = <Ability-variant> }`
+        // would shadow the real `it = v` (duplicate field), so the body would
+        // see the ability variant instead of the argument (silent wrong result,
+        // or a crash for arithmetic bodies). Detect this structurally: if the
+        // arg record ALREADY binds `receiverFieldName`, that field IS the
+        // receiver — don't synthesize another from the name.
+        val argsAlreadyHaveReceiver = argExpr is TypedRecord &&
+            argExpr.entries.any { it is TypedRecordEntry.Field && it.name == receiverFieldName }
 
-        val wrappedArg = when (argExpr) {
-            is TypedRecord -> {
+        val wrappedArg = when {
+            argsAlreadyHaveReceiver -> argExpr as TypedRecord
+            argExpr is TypedRecord -> {
+                val receiverField = TypedRecordEntry.Field(receiverFieldName, receiverExpr, memberAccess.receiver.loc)
                 val allEntries = listOf(receiverField) + argExpr.entries
                 val allFieldTypes = mutableMapOf(receiverFieldName to receiverExpr.type)
                 for (entry in argExpr.entries) {
@@ -856,6 +888,7 @@ class TypedAstBuilder(
                 TypedRecord(allEntries, MezzeType.RecordType(allFieldTypes), argExpr.loc)
             }
             else -> {
+                val receiverField = TypedRecordEntry.Field(receiverFieldName, receiverExpr, memberAccess.receiver.loc)
                 val entries = listOf(receiverField)
                 TypedRecord(entries, MezzeType.RecordType(mapOf(receiverFieldName to receiverExpr.type)), loc)
             }
