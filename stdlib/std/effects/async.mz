@@ -102,7 +102,7 @@ pub let cancel : { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async
 
 ## Construct a Promise via a setup callback that receives three
 ## write-side capabilities. See module comment above for semantics.
-pub let promise_from : { setup: { complete: { val: 'a } -> {}, fail: { err: AsyncError } -> {}, on_cancel: { hook: { reason: CancelReason } -> {} } -> {} } -> {} } -> Promise 'a = { setup } ->
+pub let promise_from : { setup: { complete: { val: 'a } -> {}, fail: { err: AsyncError } -> {}, on_cancel: { hook: { reason: CancelReason } -> {} <...> } -> {} <...> } -> {} <...> } -> Promise 'a = { setup } ->
   __native_promise_from { setup = setup }
 
 ## A Promise already resolved with `val`. Sugar over promise_from.
@@ -811,11 +811,11 @@ pub let check_cancelled : { token: CancellationToken } -> {} <Async> = { token }
 pub let throw_if_cancelled : { token: CancellationToken } -> {} <Async> = check_cancelled
 
 ## Register a callback invoked on cancellation. Returns a callback ID.
-pub let on_cancel : { token: CancellationToken, callback: {} -> {} } -> Str <Async> = { token, callback } ->
+pub let on_cancel : { token: CancellationToken, callback: {} -> {} <...> } -> Str <Async> = { token, callback } ->
   __native_cancellation_token_on_cancellation { token = token, callback = callback }
 
 ## Alias for on_cancel.
-pub let on_cancellation : { token: CancellationToken, callback: {} -> {} } -> Str <Async> = on_cancel
+pub let on_cancellation : { token: CancellationToken, callback: {} -> {} <...> } -> Str <Async> = on_cancel
 
 ## Remove a previously registered callback by ID.
 pub let remove_callback : { token: CancellationToken, id: Str } -> {} <Async> = { token, id } ->

@@ -341,17 +341,27 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
         isPure1 && isPolymorphic2 -> Substitution.empty
         isPolymorphic1 && isPure2 -> Substitution.empty
 
-        // Pure vs. concrete effects — historically accepted (pure ⊆
-        // effectful subtyping). BUT: if the concrete side is a declared
-        // callback row (has caughtByAncestor), route through
-        // unifyEffectRows so the strict "declared must be performed"
-        // check fires.
-        isPure1 && hasConcrete2 -> if (declaredCallbackPresent) {
+        // Pure vs. concrete effects. Route through unifyEffectRows so the
+        // directional extras logic applies (concrete extras on the ACTUAL
+        // side, against a CLOSED formal row, are rejected; extras on the
+        // FORMAL/declared side against a pure actual are contravariantly
+        // accepted). For a call argument the convention is
+        // Equality(left = arg, right = param) → unifyFunctions(fn1 = arg,
+        // fn2 = param), so:
+        //   isPure1 && hasConcrete2  = pure ACTUAL into an effectful FORMAL
+        //     → widening; unifyEffectRows sees the extras as eff2Extra
+        //       against a closed eff1 and accepts (contravariant). Sound.
+        //   isPure2 && hasConcrete1  = effectful ACTUAL into a pure FORMAL
+        //     → the launder (#215); unifyEffectRows sees the extras as
+        //       eff1Extra against a closed eff2 and REJECTS. Previously this
+        //       returned Substitution.empty, silently swallowing the effect
+        //       (e.g. `apply_pure { f = leaky }` where leaky performs Log but
+        //       apply_pure's callback param is pure) — the module then
+        //       type-checked as pure while performing Log at runtime.
+        isPure1 && hasConcrete2 ->
             unifyEffectRows(effects1 ?: MezzeType.EffectRow(emptySet()), effects2!!).getOrElse { return it }
-        } else Substitution.empty
-        isPure2 && hasConcrete1 -> if (declaredCallbackPresent) {
+        isPure2 && hasConcrete1 ->
             unifyEffectRows(effects1!!, effects2 ?: MezzeType.EffectRow(emptySet())).getOrElse { return it }
-        } else Substitution.empty
 
         // Both polymorphic-only or polymorphic-vs-concrete: keep the row
         // var open. Eagerly binding here (via unifyEffectRows) would
