@@ -438,20 +438,84 @@ class MatchValidator(
             }
         }
 
-        return when (finiteFields.size) {
-            0 -> ValidationResult.Success()  // all opaque fields irrefutable ⇒ total
-            1 -> {
-                val (name, type) = finiteFields.entries.single()
-                val variant = resolveClosedVariant(type)!!
-                val subs = armFieldPatterns.map { subFor(it, name) }
-                val errs = missingInVariantField(variant, subs, matchExpr.loc, "{ $name = ", " }")
-                if (errs.isEmpty()) ValidationResult.Success() else ValidationResult.Failure(errs)
-            }
-            else -> ValidationResult.Failure(listOf(ValidationError.NonExhaustiveRecordMatch(
-                detail = "matching ${finiteFields.size} variant fields at once can't be checked case-by-case; add a `_ ->` catch-all",
+        if (finiteFields.isEmpty()) return ValidationResult.Success()  // opaque fields all irrefutable ⇒ total
+
+        if (finiteFields.size == 1) {
+            // One axis: reuse the nested-variant machinery so a finite field whose
+            // arms destructure a constructor payload recurses for free.
+            val (name, type) = finiteFields.entries.single()
+            val variant = resolveClosedVariant(type)!!
+            val subs = armFieldPatterns.map { subFor(it, name) }
+            val errs = missingInVariantField(variant, subs, matchExpr.loc, "{ $name = ", " }")
+            return if (errs.isEmpty()) ValidationResult.Success() else ValidationResult.Failure(errs)
+        }
+
+        // ≥2 finite fields: the value space is the CARTESIAN PRODUCT of the fields'
+        // constructor sets. Exhaustive iff every combination is covered by some
+        // (unguarded) arm. An arm covers a combination iff, for EVERY finite field,
+        // its sub-pattern is irrefutable OR a bare constructor pattern matching that
+        // field's constructor in the combination. (A constructor pattern with a
+        // refutable payload does NOT fully cover its field-constructor — conservative:
+        // may ask for more arms, never accepts a hole.)
+        return recordProductExhaustivenessErrors(matchExpr, finiteFields, armFieldPatterns, ::subFor)
+    }
+
+    /** Max product size we enumerate; beyond this a `_` catch-all is required so we
+     *  never blow up on a pathological match (e.g. 6 Bool fields = 64, still fine;
+     *  many wide variants could explode). */
+    private val MAX_RECORD_PRODUCT = 256
+
+    private fun recordProductExhaustivenessErrors(
+        matchExpr: ParsedMatch,
+        finiteFields: Map<String, MezzeType>,
+        armFieldPatterns: List<Map<String, ParsedPattern?>>,
+        subFor: (Map<String, ParsedPattern?>, String) -> ParsedPattern?,
+    ): ValidationResult {
+        // (fieldName, its constructor names), stable order for readable combos.
+        val axes: List<Pair<String, List<String>>> = finiteFields.entries.map { (name, type) ->
+            name to resolveClosedVariant(type)!!.constructors.keys.sorted()
+        }
+        val productSize = axes.fold(1L) { acc, (_, ctors) -> acc * ctors.size }
+        if (productSize > MAX_RECORD_PRODUCT) {
+            return ValidationResult.Failure(listOf(ValidationError.NonExhaustiveRecordMatch(
+                detail = "too many field combinations ($productSize) to check exhaustively; add a `_ ->` catch-all",
                 loc = matchExpr.loc,
             )))
         }
+
+        // Does `arm` cover the combination `combo` (fieldName -> constructorName)?
+        fun armCovers(arm: Map<String, ParsedPattern?>, combo: Map<String, String>): Boolean =
+            axes.all { (field, _) ->
+                when (val sub = subFor(arm, field)) {
+                    null, is ParsedWildcardPattern, is ParsedVariablePattern -> true  // irrefutable
+                    is ParsedConstructorPattern -> {
+                        val payload = sub.payload
+                        sub.constructor == combo[field] && (payload == null || payload.isIrrefutable())
+                    }
+                    else -> false  // literal/seq/etc — doesn't cover a variant constructor
+                }
+            }
+
+        // Enumerate the product; collect combinations no arm covers.
+        val missing = mutableListOf<String>()
+        fun render(combo: Map<String, String>) =
+            "{ " + axes.joinToString(", ") { (f, _) -> "$f = ${combo[f]}" } + " }"
+        fun walk(i: Int, acc: Map<String, String>) {
+            if (i == axes.size) {
+                if (armFieldPatterns.none { armCovers(it, acc) }) missing.add(render(acc))
+                return
+            }
+            val (field, ctors) = axes[i]
+            for (c in ctors) walk(i + 1, acc + (field to c))
+        }
+        walk(0, emptyMap())
+
+        return if (missing.isEmpty()) ValidationResult.Success()
+        else ValidationResult.Failure(listOf(ValidationError.NonExhaustiveMatch(
+            coveredConstructors = emptyList(),
+            missingConstructors = missing,
+            loc = matchExpr.loc,
+        )))
     }
 
     /**

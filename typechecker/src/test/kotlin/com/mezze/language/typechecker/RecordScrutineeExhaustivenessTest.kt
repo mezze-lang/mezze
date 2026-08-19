@@ -77,18 +77,62 @@ class RecordScrutineeExhaustivenessTest {
         )
     }
 
-    @Test fun `record with two variant fields and no catch-all is rejected`() {
-        // The unsound product case — `{a=Red,b=Red}` covers neither the full a-axis
-        // nor the full product, so a catch-all is conservatively required.
-        assertNotNull(
+    @Test fun `two variant fields covering only one combination is rejected, naming the rest`() {
+        // Product coverage: `{a=Red,b=Red}` covers 1 of the 4 (2×2) combinations.
+        val m = err(
+            """
+            type Color = | Red, Green |
+            let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
+              { a = Red, b = Red } -> 1
+            """
+        )
+        assertNotNull(m, "a match covering 1 of 4 field combinations is not exhaustive")
+        assertTrue(m!!.contains("{ a = Green, b = Green }"),
+            "should name an uncovered combination; got: $m")
+    }
+
+    @Test fun `two variant fields covering the full product is accepted`() {
+        // All 2×2 combinations present ⇒ exhaustive WITHOUT a catch-all.
+        assertNull(
             err(
                 """
                 type Color = | Red, Green |
                 let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
                   { a = Red, b = Red } -> 1
+                  { a = Red, b = Green } -> 2
+                  { a = Green, b = Red } -> 3
+                  { a = Green, b = Green } -> 4
                 """
-            ),
-            "a record with two variant fields needs a `_` catch-all",
+            )
+        )
+    }
+
+    @Test fun `two variant fields covered via a wildcard on one axis is accepted`() {
+        // `{a=Red, b=_}` + `{a=Green, b=_}` covers every b for each a ⇒ total.
+        assertNull(
+            err(
+                """
+                type Color = | Red, Green |
+                let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
+                  { a = Red, b = _ } -> 1
+                  { a = Green, b = _ } -> 2
+                """
+            )
+        )
+    }
+
+    @Test fun `a Bool field crossed with a variant field is checked as a product`() {
+        assertNull(
+            err(
+                """
+                type Color = | Red, Green |
+                let f: { r: { flag: Bool, c: Color } } -> Int = { r } -> match r is
+                  { flag = True, c = Red } -> 1
+                  { flag = True, c = Green } -> 2
+                  { flag = False, c = Red } -> 3
+                  { flag = False, c = Green } -> 4
+                """
+            )
         )
     }
 
@@ -189,15 +233,15 @@ class RecordScrutineeExhaustivenessTest {
     // ── normalization: advice-only errors offer no "fill arms" fix ───────
 
     @Test fun `an advice-only record error offers no fill-match-arms fix`() {
-        // The ≥2-variant-field product case is guidance ("needs a `_`"), not an
-        // insertable constructor list — so no FillMatchArms quick-fix is offered
-        // (the guidance lives in NonExhaustiveRecordMatch.advice, not in
-        // missingConstructors, so it can never leak as a bogus arm).
+        // A non-enumerable field (Int) has no finite missing set to insert, so this
+        // is guidance ("add a `_`") — a NonExhaustiveRecordMatch whose detail lives
+        // outside missingConstructors and offers no FillMatchArms quick-fix (it can
+        // never leak a bogus arm). Contrast the product case above, which DOES name
+        // concrete combinations and keeps the fill-arms fix.
         val e = caught(
             """
-            type Color = | Red, Green |
-            let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
-              { a = Red, b = Red } -> 1
+            let f: { r: { n: Int } } -> Int = { r } -> match r is
+              { n = 0 } -> 1
             """
         )
         assertNotNull(e)
