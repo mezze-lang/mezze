@@ -10,6 +10,7 @@ import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.WellKnownHashConstants
+import com.mezze.language.typechecker.util.TypeAnnotationConverter
 
 internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: ParsedVariantConstruct, context: ConstraintContext): ConstraintResult {
 
@@ -80,8 +81,54 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
     } else {
         val payloadResult = generate(valueExpr, context)
 
+        // #209: field-type constraints emitted for a NEWTYPE construction (below).
+        // Variant constructors get these from HasConstructor solving; newtypes did
+        // not, so `Meters { val = "boom" }` (Str into an Int newtype) type-checked.
+        val newtypeFieldConstraints = mutableListOf<Constraint>()
+
         if (valueExpr is ParsedRecordLit && context.typeDeclarations.isNotEmpty()) {
             for ((typeName, typeDecl) in context.typeDeclarations) {
+                val newtypeDef = typeDecl.definition as? ParsedNewtypeDef
+                if (newtypeDef != null && newtypeDef.constructor == expr.constructor) {
+                    val literalFields = valueExpr.entries.filterIsInstance<ParsedRecordEntry.Field>()
+                    val providedType = payloadResult.type as? MezzeType.RecordType
+                    when (val wrapped = newtypeDef.wrappedType) {
+                        is ParsedRecordType -> {
+                            // Record-newtype (`Point { x: Int, y: Int }`): field names
+                            // are meaningful — pin each provided field to its declared
+                            // type. (Name arity is left to the existing record-shape
+                            // machinery; here we only enforce the field types, which
+                            // was the missing check that let `Point { x = "no" }` pass.)
+                            for (entry in wrapped.entries) {
+                                val expectedFieldType = try { TypeAnnotationConverter.convert(entry.type) } catch (_: Exception) { null }
+                                val actualFieldType = providedType?.fields?.get(entry.name)
+                                if (expectedFieldType != null && actualFieldType != null) {
+                                    newtypeFieldConstraints.add(Constraint.Equality(
+                                        left = actualFieldType, right = expectedFieldType,
+                                        context = "Newtype ${expr.constructor} field '${entry.name}'", loc = expr.loc,
+                                    ))
+                                }
+                            }
+                        }
+                        else -> {
+                            // Scalar-newtype (`Meters Int`): the payload is a single
+                            // wrapped value, conventionally spelled `{ val = … }` OR
+                            // `{ value = … }` (both are in active use). Enforce the
+                            // wrapped TYPE on whatever single field was provided,
+                            // without pinning the field NAME — so `Meters { val =
+                            // "boom" }` (Str into an Int newtype) is now rejected.
+                            val expectedFieldType = try { TypeAnnotationConverter.convert(wrapped) } catch (_: Exception) { null }
+                            val soleField = literalFields.singleOrNull()
+                            val actualFieldType = soleField?.let { providedType?.fields?.get(it.name) }
+                            if (expectedFieldType != null && actualFieldType != null) {
+                                newtypeFieldConstraints.add(Constraint.Equality(
+                                    left = actualFieldType, right = expectedFieldType,
+                                    context = "Newtype ${expr.constructor} wrapped value", loc = expr.loc,
+                                ))
+                            }
+                        }
+                    }
+                }
                 if (typeDecl.definition is ParsedVariantDef) {
                     val variantDef = typeDecl.definition as ParsedVariantDef
                     val constructor = variantDef.constructors.find { it.name == expr.constructor }
@@ -125,6 +172,7 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
 
         val constraints = mutableListOf<Constraint>()
         constraints.addAll(payloadResult.constraints)
+        constraints.addAll(newtypeFieldConstraints)
         constraints.add(
             Constraint.HasConstructor(
                 variantType = resultType,
