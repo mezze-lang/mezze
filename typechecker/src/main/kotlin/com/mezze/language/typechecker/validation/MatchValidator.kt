@@ -89,6 +89,12 @@ class MatchValidator(
                     // require an empty + open-cons pair (or a catch-all). A fixed-length
                     // pattern like `[a, b]` covers only length 2 and is not total.
                     if (expanded is MezzeType.SeqType || expanded is MezzeType.ListType) return expanded
+                    // #218: a record scrutinee matched with record patterns
+                    // (`match r is { c = Red } -> …`). Surface it so
+                    // validateParsedExhaustiveness can check its finite (variant/Bool)
+                    // fields — the outer record has no constructor pattern, so this is
+                    // the only call site that fires for it.
+                    if (expanded is MezzeType.RecordType) return expanded
                 }
             }
         }
@@ -187,6 +193,14 @@ class MatchValidator(
             // fixed-length pattern (`[a]`, `[a, b]`) covers only that one length.
             if (expandedType is MezzeType.SeqType || expandedType is MezzeType.ListType) {
                 return seqExhaustivenessErrors(matchExpr)
+            }
+            // #218: a record scrutinee is exhaustive iff a catch-all covers it, or its
+            // finite (variant/Bool) fields are covered. Checked conservatively (see
+            // recordExhaustivenessErrors) so a truly non-exhaustive record match — e.g.
+            // `{ c = Red }` only, missing Green/Blue — is rejected like the equivalent
+            // top-level `match c is Red -> …`.
+            if (expandedType is MezzeType.RecordType) {
+                return recordExhaustivenessErrors(matchExpr, expandedType)
             }
             if (isNonEnumerablePrimitive(expandedType)) {
                 val hasCatchAll = matchExpr.cases.any { case ->
@@ -350,6 +364,100 @@ class MatchValidator(
     }
 
     /**
+     * #218: exhaustiveness for a RECORD scrutinee (`match r is { c = Red } -> …`).
+     *
+     * A record match is exhaustive iff:
+     *  - (C) some unguarded arm is a catch-all — `_`, a variable, or a fully
+     *    irrefutable record pattern (every listed entry irrefutable); OR
+     *  - (S) partitioning the scrutinee's fields into FINITE (closed variant / Bool)
+     *    and OPAQUE (everything else), every opaque field is irrefutably bound in
+     *    every arm AND either there are no finite fields, or there is exactly ONE
+     *    finite field and its constructors are fully covered across the arms.
+     *
+     * With ≥2 finite fields we do NOT reason per-field (that is the unsound PRODUCT
+     * case: `{a=T,b=T}` + `{a=F,b=F}` covers each field but misses `{a=T,b=F}`), so
+     * we conservatively require a catch-all. This never accepts a non-exhaustive
+     * match; it only asks for a `_` on the rare multi-variant-field record match.
+     * Guarded / if-let arms never count. Reuses [missingInVariantField] for the
+     * single finite field, so nested variant payloads recurse for free.
+     */
+    private fun recordExhaustivenessErrors(
+        matchExpr: ParsedMatch,
+        record: MezzeType.RecordType,
+    ): ValidationResult {
+        fun unguarded(case: ParsedMatchCase) = case.guard == null && case.ifLetBindings.isEmpty()
+
+        // (C) A catch-all makes the match total regardless of field coverage.
+        for (case in matchExpr.cases) {
+            if (!unguarded(case)) continue
+            for (pattern in case.patterns) {
+                when (pattern) {
+                    is ParsedWildcardPattern, is ParsedVariablePattern -> return ValidationResult.Success()
+                    is ParsedRecordPattern -> if (pattern.isIrrefutable()) return ValidationResult.Success()
+                    else -> {}
+                }
+            }
+        }
+
+        // Collect the unguarded top-level record-pattern arms (field -> sub-pattern).
+        val armFieldPatterns = mutableListOf<Map<String, ParsedPattern?>>()
+        for (case in matchExpr.cases) {
+            if (!unguarded(case)) continue
+            for (pattern in case.patterns) {
+                if (pattern is ParsedRecordPattern) {
+                    armFieldPatterns.add(pattern.entries.associate { it.name to it.pattern })
+                }
+            }
+        }
+        if (armFieldPatterns.isEmpty()) {
+            // No catch-all and no usable (unguarded) record arm ⇒ non-exhaustive.
+            return ValidationResult.Failure(listOf(ValidationError.NonExhaustiveMatch(
+                coveredConstructors = emptyList(),
+                missingConstructors = listOf("_ (this record match has no catch-all or exhaustive field coverage)"),
+                loc = matchExpr.loc,
+            )))
+        }
+
+        // A field is absent from an arm ⇒ irrefutable bind ⇒ substitute a wildcard.
+        fun subFor(arm: Map<String, ParsedPattern?>, field: String): ParsedPattern? =
+            if (arm.containsKey(field)) arm[field] else ParsedWildcardPattern(matchExpr.loc)
+
+        val finiteFields = record.fields.filter { resolveClosedVariant(it.value) != null }
+        val opaqueFields = record.fields.keys - finiteFields.keys
+
+        // Opaque fields (Int/Str/nested record/open variant/…) can only be exhausted
+        // by an irrefutable binding in EVERY arm.
+        for (fieldName in opaqueFields) {
+            for (arm in armFieldPatterns) {
+                val sub = subFor(arm, fieldName)
+                if (sub != null && !sub.isIrrefutable()) {
+                    return ValidationResult.Failure(listOf(ValidationError.NonExhaustiveMatch(
+                        coveredConstructors = emptyList(),
+                        missingConstructors = listOf("_ (field `$fieldName` is not exhausted — add a `_` arm or bind it)"),
+                        loc = matchExpr.loc,
+                    )))
+                }
+            }
+        }
+
+        return when (finiteFields.size) {
+            0 -> ValidationResult.Success()  // all opaque fields irrefutable ⇒ total
+            1 -> {
+                val (name, type) = finiteFields.entries.single()
+                val variant = resolveClosedVariant(type)!!
+                val subs = armFieldPatterns.map { subFor(it, name) }
+                val errs = missingInVariantField(variant, subs, matchExpr.loc, "{ $name = ", " }")
+                if (errs.isEmpty()) ValidationResult.Success() else ValidationResult.Failure(errs)
+            }
+            else -> ValidationResult.Failure(listOf(ValidationError.NonExhaustiveMatch(
+                coveredConstructors = emptyList(),
+                missingConstructors = listOf("_ (a record with ${finiteFields.size} variant fields needs a `_` catch-all)"),
+                loc = matchExpr.loc,
+            )))
+        }
+    }
+
+    /**
      * #203/#212: nested-variant exhaustiveness. The outer variant is fully
      * covered, but a constructor arm may destructure a payload field whose type is
      * a CLOSED variant, listing only some of its constructors — at ANY depth
@@ -472,6 +580,9 @@ class MatchValidator(
     private fun resolveClosedVariant(type: MezzeType): MezzeType.VariantType? {
         val v = when (type) {
             is MezzeType.VariantType -> type
+            // #218: Bool is the closed `True | False` variant (special-cased),
+            // so a Bool field is finite and must have both True and False covered.
+            is MezzeType.BoolType -> BuiltinTypes.getBoolType()
             is MezzeType.TypeApplication -> expandTypeApplicationToVariant(type, registry)
             // A field type built from a bare annotation (`inner: Inner`) via
             // TypeAnnotationConverter arrives as VarType(name = "Inner") — the type
