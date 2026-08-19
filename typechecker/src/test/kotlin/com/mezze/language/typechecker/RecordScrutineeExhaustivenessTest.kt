@@ -136,6 +136,82 @@ class RecordScrutineeExhaustivenessTest {
         )
     }
 
+    @Test fun `a wildcard on one axis combines with concrete arms on the other to be total`() {
+        // `{a=Red, b=_}` covers Red×{all b}; the two Green arms cover the rest.
+        assertNull(
+            err(
+                """
+                type Color = | Red, Green |
+                let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
+                  { a = Red, b = _ } -> 1
+                  { a = Green, b = Red } -> 2
+                  { a = Green, b = Green } -> 3
+                """
+            )
+        )
+    }
+
+    @Test fun `a wildcard on one axis still leaves the other axis to be covered`() {
+        // `{a=Red, b=_}` covers all of a=Red, but a=Green only covers b=Red →
+        // { a = Green, b = Green } is still missing.
+        val m = err(
+            """
+            type Color = | Red, Green |
+            let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
+              { a = Red, b = _ } -> 1
+              { a = Green, b = Red } -> 2
+            """
+        )
+        assertNotNull(m)
+        assertTrue(m!!.contains("{ a = Green, b = Green }"), "should name the uncovered combo; got: $m")
+    }
+
+    @Test fun `three variant fields are checked as a full product`() {
+        // 2×2×2 = 8, covered via collapsing wildcards.
+        assertNull(
+            err(
+                """
+                type Bit = | O, I |
+                let f: { r: { a: Bit, b: Bit, c: Bit } } -> Int = { r } -> match r is
+                  { a = O, b = _, c = _ } -> 1
+                  { a = I, b = O, c = _ } -> 2
+                  { a = I, b = I, c = _ } -> 3
+                """
+            )
+        )
+    }
+
+    @Test fun `a guarded arm can't cover its combination in a product match`() {
+        // The 4th combo is only under a guard → { a = Green, b = Green } is missing.
+        val m = err(
+            """
+            type Color = | Red, Green |
+            let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
+              { a = Red, b = Red } -> 1
+              { a = Red, b = Green } -> 2
+              { a = Green, b = Red } -> 3
+              { a = Green, b = Green } if False -> 4
+            """
+        )
+        assertNotNull(m, "a guarded arm can fail at runtime, so it can't cover its combination")
+        assertTrue(m!!.contains("{ a = Green, b = Green }"), "should name the guard-only combo; got: $m")
+    }
+
+    @Test fun `an oversized product falls back to requiring a catch-all`() {
+        // 9 Bool fields = 512 combinations > the enumeration cap → we don't
+        // enumerate; a `_ ->` catch-all is required instead of naming 512 cases.
+        assertNotNull(
+            err(
+                """
+                let f: { r: { a: Bool, b: Bool, c: Bool, d: Bool, e: Bool, g: Bool, h: Bool, i: Bool, j: Bool } } -> Int = { r } ->
+                  match r is
+                    { a = True, b = _, c = _, d = _, e = _, g = _, h = _, i = _, j = _ } -> 1
+                """
+            ),
+            "a 512-combination product can't be enumerated; a catch-all is required",
+        )
+    }
+
     // ── accepted: total record matches (must not regress) ────────────────
 
     @Test fun `record with a single variant field covering every constructor is accepted`() {
