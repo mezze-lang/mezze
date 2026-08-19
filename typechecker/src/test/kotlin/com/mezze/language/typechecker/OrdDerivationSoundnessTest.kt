@@ -73,6 +73,44 @@ class OrdDerivationSoundnessTest {
     // soundness is a distinct question (element Ord vs whole-seq compare) —
     // deliberately not asserted here; see task #201 notes.
 
+    // ── HOLE C: an OPEN record's Ord obligation must not be silently dropped ──
+    // A closed record `{ x: Int }` was already rejected above. An OPEN record
+    // `{ x: Int, ... }` carries a rowVar, so it is not `isConcrete` — the ability
+    // obligation deferred as "not yet concrete" and was then PERMANENTLY skipped
+    // in validateAbilityConstraints (the same defer-drop family as #213). The fix
+    // closes open records before the concreteness test: extra hidden fields can
+    // never supply a structural-ability impl the written shape lacks, so testing
+    // the closed shape is sound. `<` on an open record is now rejected too.
+
+    @Test fun `less-than on an OPEN record is rejected (HOLE C)`() {
+        assertNotNull(err("""
+            let f: { r: { a: Int, ... } } -> Bool = { r } -> r < r
+        """), "an open record has no Ord impl; its obligation must not be dropped just because the row is open")
+    }
+
+    @Test fun `less-than on a nested OPEN record field is rejected`() {
+        // The inner open record `{ b: Int, ... }` is what `<` is applied to; its
+        // Ord obligation must survive being nested inside another open record.
+        assertNotNull(err("""
+            let f: { r: { a: { b: Int, ... }, ... } } -> Bool = { r } -> r.a < r.a
+        """))
+    }
+
+    @Test fun `greater-than-or-equal on an OPEN record is rejected`() {
+        assertNotNull(err("""
+            let f: { r: { a: Int, b: Str, ... } } -> Bool = { r } -> r >= r
+        """))
+    }
+
+    @Test fun `equality on an OPEN record is still accepted`() {
+        // Eq stays derivable for records (DirectEqualNode's structural fallback),
+        // whether the record is open or closed — closing only strips the row, so
+        // the visible fields (all Eq-able) still derive. Must not over-reject.
+        assertNull(err("""
+            let f: { r: { a: Int, ... } } -> Bool = { r } -> r == r
+        """), "== on an open record stays sound; closing the row must not break it")
+    }
+
     // ── still sound: Eq on a variant works ───────────────────────────────
 
     @Test fun `equality on a payload-less variant is still accepted`() {

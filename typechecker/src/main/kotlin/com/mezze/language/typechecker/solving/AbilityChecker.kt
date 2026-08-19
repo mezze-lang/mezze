@@ -70,18 +70,18 @@ internal class AbilityChecker(
                         }
                     }
 
-                    val closedTypeArgs = if (isCodecAbility(abilityName, tracked.abilityHash)) {
-                        concreteTypeArgs.map { closeOpenRecordsForCodec(it) }
-                    } else {
-                        concreteTypeArgs
-                    }
+                    // Close open records/variants BEFORE the concreteness test. An open
+                    // record `{a: Int, ...}` is not `isConcrete` (its rowVar is a hole),
+                    // so without this it defers as "not yet concrete" and the obligation
+                    // is silently dropped (HOLE C). Extra hidden fields can never SUPPLY a
+                    // structural-ability impl the closed shape lacks (impls match on the
+                    // written shape), so validating against the closed shape is sound: a
+                    // record with `Ord`-lacking visible fields is rejected, and one whose
+                    // visible fields all derive (e.g. Eq) still passes. This generalizes
+                    // the codec-only closing that already existed.
+                    val closedTypeArgs = concreteTypeArgs.map { closeOpenRecords(it) }
 
                     val allConcrete = closedTypeArgs.all { isConcrete(it) }
-
-                    val primaryArg = closedTypeArgs.firstOrNull()
-                    if (tracked.fromAnnotation && primaryArg is MezzeType.RecordType) {
-                        return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs, errorLoc), errorLoc)
-                    }
 
                     if (allConcrete) {
                         val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs, tracked.abilityHash)
@@ -400,78 +400,84 @@ internal class AbilityChecker(
         return type is MezzeType.VarType || type.anyChild { containsVarType(it) }
     }
 
-    internal fun closeOpenRecordsForCodec(type: MezzeType): MezzeType {
+    /**
+     * Strip open-row holes (`rowVar`) from records/variants recursively, yielding the
+     * closed shape written by the programmer. Used both by codec (which serializes the
+     * closed shape) and by [validateAbilityConstraints] (which must test a structural
+     * ability against the closed shape rather than defer on the open row — HOLE C).
+     */
+    internal fun closeOpenRecords(type: MezzeType): MezzeType {
         return when (type) {
             is MezzeType.RecordType -> {
-                val needsClosing = type.rowVar != null || type.fields.values.any { needsClosingForCodec(it) }
+                val needsClosing = type.rowVar != null || type.fields.values.any { needsRowClosing(it) }
                 if (!needsClosing) {
                     return type
                 }
                 val closedFields = type.fields.mapValues { (_, fieldType) ->
-                    closeOpenRecordsForCodec(fieldType)
+                    closeOpenRecords(fieldType)
                 }
                 MezzeType.RecordType(fields = closedFields, rowVar = null, typeName = type.typeName, typeHash = type.typeHash)
             }
             is MezzeType.TypeApplication -> {
-                if (type.args.none { needsClosingForCodec(it) }) {
+                if (type.args.none { needsRowClosing(it) }) {
                     return type
                 }
-                val closedArgs = type.args.map { closeOpenRecordsForCodec(it) }
+                val closedArgs = type.args.map { closeOpenRecords(it) }
                 WellKnownTypeApp.of(type.constructor, closedArgs, type.typeHash)
             }
             is MezzeType.VariantType -> {
-                val needsClosing = type.rowVar != null || type.constructors.values.any { it != null && needsClosingForCodec(it) }
+                val needsClosing = type.rowVar != null || type.constructors.values.any { it != null && needsRowClosing(it) }
                 if (!needsClosing) {
                     return type
                 }
                 val closedConstructors = type.constructors.mapValues { (_, payload) ->
-                    payload?.let { closeOpenRecordsForCodec(it) }
+                    payload?.let { closeOpenRecords(it) }
                 }
                 MezzeType.VariantType(closedConstructors, rowVar = null, typeName = type.typeName, typeHash = type.typeHash)
             }
             is MezzeType.ListType -> {
-                if (!needsClosingForCodec(type.elementType)) return type
-                MezzeType.ListType(closeOpenRecordsForCodec(type.elementType))
+                if (!needsRowClosing(type.elementType)) return type
+                MezzeType.ListType(closeOpenRecords(type.elementType))
             }
             is MezzeType.SeqType -> {
-                if (!needsClosingForCodec(type.elementType)) return type
-                MezzeType.SeqType(closeOpenRecordsForCodec(type.elementType))
+                if (!needsRowClosing(type.elementType)) return type
+                MezzeType.SeqType(closeOpenRecords(type.elementType))
             }
             is MezzeType.SetType -> {
-                if (!needsClosingForCodec(type.elementType)) return type
-                MezzeType.SetType(closeOpenRecordsForCodec(type.elementType))
+                if (!needsRowClosing(type.elementType)) return type
+                MezzeType.SetType(closeOpenRecords(type.elementType))
             }
             is MezzeType.SortedSetType -> {
-                if (!needsClosingForCodec(type.elementType)) return type
-                MezzeType.SortedSetType(closeOpenRecordsForCodec(type.elementType))
+                if (!needsRowClosing(type.elementType)) return type
+                MezzeType.SortedSetType(closeOpenRecords(type.elementType))
             }
             is MezzeType.MapType -> {
-                if (!needsClosingForCodec(type.keyType) && !needsClosingForCodec(type.valueType)) return type
+                if (!needsRowClosing(type.keyType) && !needsRowClosing(type.valueType)) return type
                 MezzeType.MapType(
-                    closeOpenRecordsForCodec(type.keyType),
-                    closeOpenRecordsForCodec(type.valueType)
+                    closeOpenRecords(type.keyType),
+                    closeOpenRecords(type.valueType)
                 )
             }
             is MezzeType.SortedMapType -> {
-                if (!needsClosingForCodec(type.keyType) && !needsClosingForCodec(type.valueType)) return type
+                if (!needsRowClosing(type.keyType) && !needsRowClosing(type.valueType)) return type
                 MezzeType.SortedMapType(
-                    closeOpenRecordsForCodec(type.keyType),
-                    closeOpenRecordsForCodec(type.valueType)
+                    closeOpenRecords(type.keyType),
+                    closeOpenRecords(type.valueType)
                 )
             }
             is MezzeType.FunctionType -> {
-                if (!needsClosingForCodec(type.paramType) && !needsClosingForCodec(type.returnType)) return type
+                if (!needsRowClosing(type.paramType) && !needsRowClosing(type.returnType)) return type
                 MezzeType.FunctionType(
-                    paramType = closeOpenRecordsForCodec(type.paramType),
-                    returnType = closeOpenRecordsForCodec(type.returnType),
+                    paramType = closeOpenRecords(type.paramType),
+                    returnType = closeOpenRecords(type.returnType),
                     effects = type.effects,
                     abilityConstraints = type.abilityConstraints
                 )
             }
             is MezzeType.SuspendType -> {
-                if (!needsClosingForCodec(type.valueType)) return type
+                if (!needsRowClosing(type.valueType)) return type
                 MezzeType.SuspendType(
-                    valueType = closeOpenRecordsForCodec(type.valueType),
+                    valueType = closeOpenRecords(type.valueType),
                     effects = type.effects
                 )
             }
@@ -491,12 +497,12 @@ internal class AbilityChecker(
         }
     }
 
-    private fun needsClosingForCodec(type: MezzeType): Boolean {
+    private fun needsRowClosing(type: MezzeType): Boolean {
         return when (type) {
             is MezzeType.RecordType -> type.rowVar != null
             is MezzeType.VariantType -> type.rowVar != null
             else -> false
-        } || type.anyChild { needsClosingForCodec(it) }
+        } || type.anyChild { needsRowClosing(it) }
     }
 
     private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
