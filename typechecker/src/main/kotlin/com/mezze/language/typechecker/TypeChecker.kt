@@ -342,7 +342,18 @@ class TypeChecker(
         ConstraintDumper.dumpGeneratedConstraints(constraintResults)
         ConstraintDumper.dumpSolverInput(allConstraints)
 
-        val solver = ConstraintSolver(context, registry, strictEffectRows = strictEffectRows)
+        // asymmetry fix: fold ability preconditions inferred from impl-op bodies
+        // into the frozen context's AbilityImplInfo.operationConstraints, so the
+        // final use-site solve rejects a generic impl applied to a type that
+        // doesn't satisfy what its body needs (e.g. `impl Ord 'a for Wrap 'a`
+        // whose body does `it.v < r.v` requires `Ord 'a`). An impl op is a
+        // function; its body's residual is a precondition, like a fn's `with`.
+        var solveContext = context
+        for ((implHash, extra) in programConstraintResult.inferredImplConstraints) {
+            solveContext = solveContext.withUpdatedImplConstraints(implHash, extra)
+        }
+
+        val solver = ConstraintSolver(solveContext, registry, strictEffectRows = strictEffectRows)
         val solveResult = withInScopeAliasNames(inScopeAliasNames) {
             solver.solve(allConstraints)
         }

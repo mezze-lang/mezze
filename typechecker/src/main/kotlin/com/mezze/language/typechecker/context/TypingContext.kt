@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.context
 import com.mezze.language.ast.BindingKey
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.ParsedFnAbilityConstraint
+import com.mezze.language.parsedast.ParsedNamedType
 import com.mezze.language.parsedast.ParsedTypeAnnotation
 import com.mezze.language.typedast.Hash
 
@@ -114,6 +115,48 @@ data class TypingContext(
 
     fun extendAll(newBindings: Map<BindingKey, Binding>): TypingContext {
         return copy(bindings = bindings + newBindings)
+    }
+
+    /**
+     * #224/asymmetry: union extra operation constraints into an already-registered
+     * ability impl, keyed by its content hash. Used to fold body-inferred
+     * preconditions (`impl Ord 'a for Wrap 'a where { lt = {…} -> it.v < r.v }`
+     * infers `with Ord 'a`) into the impl AFTER the context was frozen in
+     * ContextBuilder — an impl operation is just a function, so its body's
+     * residual ability obligations on the impl's type params must become
+     * preconditions of the impl, exactly as a top-level fn records them in its
+     * signature. Only the `AbilityImplInfo` value is replaced; the name/hash
+     * indices are untouched (the key already exists), so this can't duplicate
+     * the impl. A no-op when `extra` is empty or the impl isn't local.
+     */
+    fun withUpdatedImplConstraints(key: Hash, extra: List<ParsedFnAbilityConstraint>): TypingContext {
+        if (extra.isEmpty()) return this
+        val existing = abilityImpls[key] ?: return this
+        val merged = mergeOperationConstraints(existing.operationConstraints, extra)
+        if (merged.size == existing.operationConstraints.size) return this
+        return copy(abilityImpls = abilityImpls + (key to existing.copy(operationConstraints = merged)))
+    }
+
+    private fun mergeOperationConstraints(
+        explicit: List<ParsedFnAbilityConstraint>,
+        inferred: List<ParsedFnAbilityConstraint>
+    ): List<ParsedFnAbilityConstraint> {
+        // Key by (abilityName, tick-normalized type-arg names). Inference only ADDS
+        // requirements; an explicit `with` is never dropped, and an inferred one
+        // equal to an explicit one is deduped (the recursive check is idempotent
+        // anyway, so a missed dedup is at worst redundant, never unsound).
+        fun key(c: ParsedFnAbilityConstraint): String {
+            val args = c.typeArgs.joinToString(",") { arg ->
+                (arg as? ParsedNamedType)?.name?.removePrefix("'") ?: arg.toString()
+            }
+            return "${c.abilityName}(${args})"
+        }
+        val seen = explicit.map { key(it) }.toMutableSet()
+        val result = explicit.toMutableList()
+        for (c in inferred) {
+            if (seen.add(key(c))) result.add(c)
+        }
+        return result
     }
 
     fun extendWithImpl(key: Hash, implInfo: AbilityImplInfo): TypingContext {

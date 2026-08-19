@@ -152,4 +152,66 @@ class OrdDerivationSoundnessTest {
             let f = { a: Color, b: Color } -> a.lt { r = b }
         """))
     }
+
+    // ── impl-body-driven element-Ord inference (the asymmetry fix) ───────────
+    // A top-level fn already infers `with Ord 'a` from a body that calls the
+    // element `<`. An impl operation is just a function, so its body must infer
+    // the SAME residual and record it as the impl's PRECONDITION — even with no
+    // explicit `with Ord 'a` written. Otherwise `impl Ord 'a for Wrap 'a where
+    // { lt = {it,r} -> it.v < r.v }` accepts `Wrap Color` (Color has no Ord) and
+    // crashes in the element compare, exactly the #201/#224 family of holes.
+
+    @Test fun `generic Ord impl infers element-Ord from body — rejects non-Ord element`() {
+        // No `with Ord 'a` on `lt`; the body `it.v < r.v` requires it, so a
+        // `Wrap Color` comparison must be REJECTED (Color has no Ord).
+        assertNotNull(err("""
+            use std::abilities::compare::{ Ord }
+            type Color = | Red, Green |
+            type Wrap 'a = { v: 'a }
+            impl Ord 'a for Wrap 'a where {
+              lt = { it, r } -> it.v < r.v,
+              le = { it, r } -> True,
+              gt = { it, r } -> False,
+              ge = { it, r } -> True
+            }
+            let f = { a: Wrap Color, b: Wrap Color } -> a < b
+        """), "the impl body calls the element `<`, so `Wrap Color` needs `Ord Color`, which does not exist")
+    }
+
+    @Test fun `generic Ord impl with inferred element-Ord accepts an Ord element`() {
+        // Same impl, applied to `Wrap Int`. Int has Ord, so the inferred
+        // `with Ord 'a` is satisfied — must NOT over-reject.
+        assertNull(err("""
+            use std::abilities::compare::{ Ord }
+            type Wrap 'a = { v: 'a }
+            impl Ord 'a for Wrap 'a where {
+              lt = { it, r } -> it.v < r.v,
+              le = { it, r } -> True,
+              gt = { it, r } -> False,
+              ge = { it, r } -> True
+            }
+            let f = { a: Wrap Int, b: Wrap Int } -> a < b
+        """), "Int has Ord, so the inferred element precondition is satisfied")
+    }
+
+    @Test fun `structural variant Ord impl infers element-Ord through a match arm`() {
+        // The residual `Ord 'a` is produced by `l < rv` nested inside match arms;
+        // it must still be harvested, so `Opt Color` is REJECTED with no `with`.
+        assertNotNull(err("""
+            use std::abilities::compare::{ Ord }
+            type Color = | Red, Green |
+            type Opt 'a = | Non, Jus { v: 'a } |
+            impl Ord 'a for Opt 'a where {
+              lt = { it, r } -> match it is
+                Non -> True
+                Jus { v = l } -> match r is
+                  Non -> False
+                  Jus { v = rv } -> l < rv,
+              le = { it, r } -> True,
+              gt = { it, r } -> False,
+              ge = { it, r } -> True
+            }
+            let f = { a: Opt Color, b: Opt Color } -> a < b
+        """), "the element `<` inside the match arm requires `Ord Color`, which does not exist")
+    }
 }

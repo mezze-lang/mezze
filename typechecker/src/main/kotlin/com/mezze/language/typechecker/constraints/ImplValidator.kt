@@ -10,6 +10,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.typedast.Hash
 
 internal class ImplValidator(
     private val expressionGenerator: ExpressionConstraintGenerator,
@@ -20,6 +21,23 @@ internal class ImplValidator(
     private val effectNames: Set<String>,
     private val convertTypeAnnotation: (ParsedTypeAnnotation) -> MezzeType,
 ) {
+    /**
+     * asymmetry fix: ability preconditions inferred from impl-operation BODIES,
+     * keyed by the impl's content hash. `validateAbilityImplementation` fills
+     * this while checking each impl; the caller (via [drainInferredImplConstraints])
+     * folds them into the frozen context's `AbilityImplInfo.operationConstraints`
+     * before the final use-site solve. An impl op is just a function: its body's
+     * residual ability obligations on the impl's type params become the impl's
+     * preconditions, exactly as a top-level fn records `with Ord 'a` in its sig.
+     */
+    private val inferredImplConstraints = mutableMapOf<Hash, MutableList<ParsedFnAbilityConstraint>>()
+
+    fun drainInferredImplConstraints(): Map<Hash, List<ParsedFnAbilityConstraint>> {
+        val snapshot = inferredImplConstraints.mapValues { it.value.toList() }
+        inferredImplConstraints.clear()
+        return snapshot
+    }
+
     fun validateAbilityImplementation(impl: ParsedImplAbilityDecl, context: TypingContext) {
         if (impl.isInherent) return
 
@@ -64,6 +82,15 @@ internal class ImplValidator(
             associatedTypeSubstitution +
             associatedTypeSubstitution.mapKeys { (k, _) -> k.removePrefix("'") }
 
+        // asymmetry fix: harvest body-inferred ability preconditions on the impl's
+        // own type params. Only for a generic impl (has forallVars) with a content
+        // hash to key the accumulation by.
+        val implForallVars = impl.forallVars.toSet()
+        val inferredSink: MutableList<ParsedFnAbilityConstraint>? =
+            if (implForallVars.isNotEmpty() && impl.contentHash != null)
+                inferredImplConstraints.getOrPut(impl.contentHash!!) { mutableListOf() }
+            else null
+
         for (implOp in impl.operations) {
             val declOp = abilityDeclaration.operations.find { it.name == implOp.name }
                 ?: continue
@@ -89,6 +116,8 @@ internal class ImplValidator(
                     baseContext = context,
                     implLabel = "ability '$abilityName'",
                     validationReason = "Ability body validation",
+                    implForallVars = implForallVars,
+                    inferredSink = inferredSink,
                     onSolveFailure = { solveResult ->
                         val allFieldAccessErrors = solveResult.errors.all {
                             it.message.contains("Cannot access field") && it.message.contains("non-record type")
@@ -107,6 +136,27 @@ internal class ImplValidator(
         }
     }
 
+    /**
+     * Find, for each of the impl's declared type params, the solver [TypeVar] that
+     * represents it inside the op's expected param type (e.g. the `'a` in
+     * `{ it: Wrap 'a, r: Wrap 'a }`). Keyed by the param's surface name.
+     */
+    private fun collectParamVarsByName(
+        paramType: MezzeType,
+        forallVars: Set<String>
+    ): Map<String, TypeVar> {
+        val out = mutableMapOf<String, TypeVar>()
+        fun walk(t: MezzeType) {
+            if (t is MezzeType.VarType) {
+                val n = t.variable.name.removePrefix("'")
+                if (forallVars.any { it.removePrefix("'") == n } && n !in out) out[n] = t.variable
+            }
+            t.transformChildren { walk(it); it }
+        }
+        walk(paramType)
+        return out
+    }
+
     private fun validateImplOperationBody(
         lambda: ParsedLambda,
         opName: String,
@@ -121,6 +171,13 @@ internal class ImplValidator(
         onBodyResult: ((ConstraintResult, TypingContext) -> Unit)? = null,
         onUndefinedVars: ((ConstraintResult) -> Boolean)? = null,
         onSolveFailure: ((ConstraintSolver.SolveResult.Failure) -> Boolean)? = null,
+        // asymmetry fix: the impl's declared type params (tick-prefixed). When set,
+        // ability obligations the body places on one of these params are harvested
+        // into `inferredSink` as `with <Ability> 'param` — an impl op is just a
+        // function, so its body's residual constraints become the impl's
+        // preconditions (like a top-level fn records `with Ord 'a` in its sig).
+        implForallVars: Set<String> = emptySet(),
+        inferredSink: MutableList<ParsedFnAbilityConstraint>? = null,
     ) {
         val paramNames = when (val params = lambda.params) {
             is ParsedLambdaParams.Untyped -> params.names
@@ -211,6 +268,36 @@ internal class ImplValidator(
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
                         hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                     )
+                }
+
+                // Harvest body-inferred ability preconditions on the impl's type
+                // params (the asymmetry fix). The body's `it.v < r.v` produces an
+                // `Ord <var>` obligation; if <var> resolves to one of the impl's
+                // declared type params, record `with Ord 'param` so the impl is
+                // only applicable when that param satisfies the ability.
+                if (inferredSink != null && implForallVars.isNotEmpty()) {
+                    // Map each of the impl's declared type params to its
+                    // solver var AS IT APPEARS in the op's param type, then to that
+                    // var's post-solve REPRESENTATIVE. A residual `Ord <var>` counts
+                    // as `with Ord 'param` when <var>'s representative equals the
+                    // param's representative — matching by unification-equivalence,
+                    // not by name (the body's field-access introduces a fresh var
+                    // that unifies with `'a` but keeps a solver-internal name).
+                    val paramVarsByName = collectParamVarsByName(expectedParamType, implForallVars)
+                    val repToParamName = paramVarsByName.mapNotNull { (paramName, v) ->
+                        val rep = substitution.apply(MezzeType.VarType(v))
+                        if (rep is MezzeType.VarType) rep.variable.id to paramName else null
+                    }.toMap()
+                    for (ab in bodyResult.abilityConstraints) {
+                        val rep = substitution.apply(MezzeType.VarType(ab.typeVar))
+                        val paramName = (rep as? MezzeType.VarType)?.let { repToParamName[it.variable.id] }
+                            ?: continue
+                        inferredSink.add(ParsedFnAbilityConstraint(
+                            abilityName = ab.abilityName,
+                            typeArgs = listOf(ParsedNamedType("'${paramName.removePrefix("'")}", ab.loc ?: opLoc)),
+                            loc = ab.loc ?: opLoc
+                        ))
+                    }
                 }
             }
         }

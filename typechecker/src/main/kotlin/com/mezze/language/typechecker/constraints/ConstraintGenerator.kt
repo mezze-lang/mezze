@@ -26,7 +26,11 @@ data class ProgramConstraintResult(
     val perBindingMustBeOpenRowVars: Set<RowVar>,
     val perBindingSolveErrors: List<ConstraintSolver.ConstraintError> = emptyList(),
     val perBindingSubstitution: Substitution = Substitution.empty,
-    val collectedTypeCheckErrors: List<TypeCheckError> = emptyList()
+    val collectedTypeCheckErrors: List<TypeCheckError> = emptyList(),
+    // asymmetry fix: ability preconditions inferred from impl-op bodies, keyed by
+    // impl content hash. TypeChecker folds these into the frozen context's
+    // AbilityImplInfo.operationConstraints before the final use-site solve.
+    val inferredImplConstraints: Map<Hash, List<ParsedFnAbilityConstraint>> = emptyMap()
 ) {
 }
 
@@ -359,7 +363,8 @@ class ConstraintGenerator(
             perBindingMustBeOpenRowVars = solver.getMustBeOpenRowVars(),
             perBindingSolveErrors = perBindingSolveErrors,
             perBindingSubstitution = perBindingSubstitution,
-            collectedTypeCheckErrors = collectedTypeCheckErrors
+            collectedTypeCheckErrors = collectedTypeCheckErrors,
+            inferredImplConstraints = implValidator.drainInferredImplConstraints()
         )
     }
 
