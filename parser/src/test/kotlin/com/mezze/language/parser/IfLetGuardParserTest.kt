@@ -170,6 +170,31 @@ class IfLetGuardParserTest {
     }
 
     @Test
+    fun `guard expression may end in a record-argument call`() {
+        // Regression: the guard's trailing `->` is the arm arrow, not a lambda,
+        // so a `{…}` in postfix position (here `.not {}`) must parse as call
+        // args. Previously the parser mistook `{} ->` for a lambda and failed
+        // with "Expected '->' but got '{'".
+        val code = """
+            match x is
+              n if (n == 0).not {} -> "non-zero"
+              _ -> "zero"
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
+
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val firstCase = matchExpr.cases[0]
+        assertTrue(firstCase.ifLetBindings.isEmpty())
+        // The whole `(n == 0).not {}` is the guard, ending in a function call.
+        assertTrue(
+            firstCase.guard is ParsedFunctionCall,
+            "guard should be a call `(n == 0).not {}`, got ${firstCase.guard}"
+        )
+    }
+
+    @Test
     fun `parse match without any guard still works`() {
         val code = """
             match x is

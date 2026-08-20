@@ -52,12 +52,10 @@ class OperatorMappingTest {
     }
 
     @Test
-    fun `test unary not uses LogicalNot not`() {
-        val op = OperatorMapping.getUnaryOp("!")
-        assertNotNull(op)
-        assertEquals("LogicalNot", op!!.ability)
-        assertEquals("not", op.method)
-        assertEquals("val", op.fieldName)
+    fun `test unary not operator was removed`() {
+        // `!` is no longer an operator — boolean negation is the `.not {}`
+        // method on Bool.
+        assertNull(OperatorMapping.getUnaryOp("!"))
     }
 
     @Test

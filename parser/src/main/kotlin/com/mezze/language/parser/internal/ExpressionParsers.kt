@@ -1403,8 +1403,17 @@ internal val MezzeParser.matchCase: Parser<ParsedMatchCase>
                                 parseIfLetBindingsAndBody(patterns, letCheck.remaining, letCheck.value, file)
                             }
                             is ParseResult.Failure -> {
-                                // No 'let', parse as regular guard expression
-                                val guardExp = expression(stream3)
+                                // No 'let', parse as regular guard expression. The
+                                // `->` that ends the guard is the match-arm arrow,
+                                // not a lambda, so postfix `{…}` here must be read
+                                // as call args (see [inMatchGuard]).
+                                val savedInMatchGuard = inMatchGuard
+                                inMatchGuard = true
+                                val guardExp = try {
+                                    expression(stream3)
+                                } finally {
+                                    inMatchGuard = savedInMatchGuard
+                                }
 
                                 when (guardExp) {
                                     is ParseResult.Success -> {
@@ -2260,7 +2269,9 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
 
             when (token?.type) {
                 TokenType.LBRACE -> {
-                    if (!lookAheadForArrowAfterBrace(currentStream)) {
+                    // In a match guard the trailing `->` is the arm arrow, so a
+                    // `{…}` here is always call arguments, never a lambda start.
+                    if (inMatchGuard || !lookAheadForArrowAfterBrace(currentStream)) {
                         val args = recordLiteral(currentStream)
                         result = when (args) {
                             is ParseResult.Success -> {

@@ -10,6 +10,16 @@ class MezzeParser {
     internal var currentSource: String?? = null
     internal var currentFile: String?? = null
 
+    /**
+     * True while parsing a match-guard expression (`n if <expr> ->`). In that
+     * context the `->` that follows the guard belongs to the match arm, not to
+     * a lambda, so a `{…}` in postfix position (e.g. `(n == 0).not {}`) must be
+     * read as call arguments — never as a lambda start. Postfix parsing checks
+     * this to bypass [lookAheadForArrowAfterBrace], mirroring the dedicated
+     * if-let guard parser.
+     */
+    internal var inMatchGuard: Boolean = false
+
     companion object
 
     fun parseParsedModule(source: String, file: String = "<unknown>"): ParsedModule {
