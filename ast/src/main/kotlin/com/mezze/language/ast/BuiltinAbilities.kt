@@ -19,7 +19,6 @@ object BuiltinAbilities {
     // Logical abilities
     const val LOGICAL_AND = "LogicalAnd"
     const val LOGICAL_OR = "LogicalOr"
-    const val LOGICAL_NOT = "LogicalNot"
 
     // Inspect ability
     const val INSPECT = "Inspect"
@@ -70,7 +69,7 @@ object BuiltinAbilities {
         "Int" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD),
         "Float" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
         "Str" to setOf(EQ, ORD, INSPECT),
-        "Bool" to setOf(EQ, ORD, INSPECT, LOGICAL_AND, LOGICAL_OR, LOGICAL_NOT),
+        "Bool" to setOf(EQ, ORD, INSPECT, LOGICAL_AND, LOGICAL_OR),
         "Nat" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_MUL, NUM_DIV, NUM_MOD),
         "Frac" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
 

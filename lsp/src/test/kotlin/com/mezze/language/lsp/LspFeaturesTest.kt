@@ -1750,7 +1750,7 @@ class LspFeaturesTest {
     @Test
     fun `redundant double negation offers a Simplify quick-fix (AST-driven, regex could not)`() {
         val (uri, _) = openSingleFile("""
-            let f = {b: Bool} -> !(!b)
+            let f = {b: Bool} -> (b.not {}).not {}
         """.trimIndent())
         val diags = client.awaitDiagnostics(uri, 5_000)
         assertNotNull(diags)
@@ -1762,9 +1762,9 @@ class LspFeaturesTest {
             context = CodeActionContext(listOf(w))
         }).get(5, TimeUnit.SECONDS) ?: emptyList()
         val fix = actions.mapNotNull { if (it.isRight) it.right else null }.firstOrNull { it.title.startsWith("Simplify") }
-            ?: fail("expected a Simplify action for !(!b), got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+            ?: fail("expected a Simplify action for (b.not {}).not {}, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
         val edit = fix.edit?.changes?.values?.flatten()?.firstOrNull()?.newText ?: ""
-        assertEquals("b", edit.trim(), "!(!b) should simplify to `b`, got `$edit`")
+        assertEquals("b", edit.trim(), "(b.not {}).not {} should simplify to `b`, got `$edit`")
     }
 
     @Test

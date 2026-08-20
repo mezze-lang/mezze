@@ -638,8 +638,7 @@ internal class AbilityChecker(
             }
 
             resolvedHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
-            resolvedHash == WellKnownHashConstants.ABILITY_LOGICALOR ||
-            resolvedHash == WellKnownHashConstants.ABILITY_LOGICALNOT -> {
+            resolvedHash == WellKnownHashConstants.ABILITY_LOGICALOR -> {
                 unwrappedType is MezzeType.BoolType || BuiltInAbilities.isBoolVariant(unwrappedType) ||
                 isBoolLikeVariant(unwrappedType)
             }

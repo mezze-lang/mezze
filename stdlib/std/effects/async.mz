@@ -5,6 +5,7 @@ use std::effects::exception::{ Exception, unwrap }
 use std::effects::time::{ Time }
 use std::datetime::{ duration_millis }
 use std::int
+use std::bool
 
 ## Opaque promise representing an asynchronous computation.
 pub newtype Promise 'a = Promise __NativePromise
@@ -658,9 +659,9 @@ pub let scoped_with : { policy: JoinPolicy, body: { sc: Scope 'a } -> [Promise '
 ## OnSuccessAllFailed with the per-task errors in input order.
 pub let join_on_success : { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Async, ...> = { sc, ps } -> do
   park { predicate = {} ->
-    seq::any { xs = ps, p = { x } -> is_done { p = x } && !is_failed { p = x } } ||
+    seq::any { xs = ps, p = { x } -> is_done { p = x } && (is_failed { p = x }).not {} } ||
     seq::all { xs = ps, p = { x } -> is_done { p = x } } }
-  let winner_opt = seq::find { xs = ps, p = { x } -> is_done { p = x } && !is_failed { p = x } }
+  let winner_opt = seq::find { xs = ps, p = { x } -> is_done { p = x } && (is_failed { p = x }).not {} }
   match winner_opt is
     Some { val = winner } -> do
       let winner_val = match inspect { p = winner } is

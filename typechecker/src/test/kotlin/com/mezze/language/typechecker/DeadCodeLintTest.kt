@@ -88,7 +88,7 @@ class DeadCodeLintTest {
     @Test
     fun `double negation warns`() {
         assertTrue(has(WarningCode.W0303_REDUNDANT_BOOLEAN, """
-            let f = {b: Bool} -> !(!b)
+            let f = {b: Bool} -> (b.not {}).not {}
         """.trimIndent()))
     }
 
@@ -109,7 +109,7 @@ class DeadCodeLintTest {
     @Test
     fun `a single negation is fine`() {
         assertFalse(has(WarningCode.W0303_REDUNDANT_BOOLEAN, """
-            let f = {b: Bool} -> !b
+            let f = {b: Bool} -> b.not {}
         """.trimIndent()))
     }
 

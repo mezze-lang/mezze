@@ -129,7 +129,7 @@ public class AbilityIntegrationTest {
     @Test
     void testLogicalNot() {
         Object result = MezzeTestHelper.run("""
-            !False
+            False.not {}
             """);
         assertEquals(true, result);
     }

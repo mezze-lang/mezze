@@ -23,8 +23,7 @@ object OperatorMapping {
     )
 
     val UNARY_OPERATORS: Map<String, UnaryOp> = mapOf(
-        "-" to UnaryOp("NumSub", "neg", "n"),
-        "!" to UnaryOp("LogicalNot", "not", "val")
+        "-" to UnaryOp("NumSub", "neg", "n")
     )
 
     fun getBinaryOp(operator: String): BinaryOp? = BINARY_OPERATORS[operator]

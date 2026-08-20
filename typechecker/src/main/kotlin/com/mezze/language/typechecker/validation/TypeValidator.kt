@@ -303,8 +303,7 @@ class TypeValidator(
             }
 
             abilityHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
-            abilityHash == WellKnownHashConstants.ABILITY_LOGICALOR ||
-            abilityHash == WellKnownHashConstants.ABILITY_LOGICALNOT -> {
+            abilityHash == WellKnownHashConstants.ABILITY_LOGICALOR -> {
                 unwrappedType is MezzeType.BoolType || BuiltInAbilities.isBoolVariant(unwrappedType)
             }
 

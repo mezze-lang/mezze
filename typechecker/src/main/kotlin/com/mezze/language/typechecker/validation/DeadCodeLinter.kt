@@ -110,10 +110,9 @@ object DeadCodeLinter {
 
     private fun checkRedundantBoolean(expr: ParsedExpr, findings: MutableList<Finding>) {
         val msg: String? = when {
-            // !(!b) -> b
-            expr is ParsedUnaryOp && expr.op == "!" &&
-                unwrap(expr.operand).let { it is ParsedUnaryOp && it.op == "!" } ->
-                "`!(!b)` is just `b` — remove the double negation."
+            // (b.not {}).not {} -> b
+            isBoolNot(expr) && unwrap(boolNotReceiver(expr)!!).let { isBoolNot(it) } ->
+                "`(b.not {}).not {}` is just `b` — remove the double negation."
 
             // if b then True else False  -> b   (and the inverted form)
             expr is ParsedIf && isBoolLiteral(expr.thenBranch) && isBoolLiteral(expr.elseBranch) ->
@@ -124,7 +123,7 @@ object DeadCodeLinter {
             expr is ParsedBinaryOp && expr.op == "==" &&
                 (isBoolLiteral(expr.left) || isBoolLiteral(expr.right)) ->
                 "Comparing a boolean to a boolean literal is redundant — `x == True` is `x`, " +
-                "`x == False` is `!x`."
+                "`x == False` is `x.not {}`."
 
             else -> null
         }
@@ -134,4 +133,18 @@ object DeadCodeLinter {
     }
 
     private fun unwrap(e: ParsedExpr): ParsedExpr = if (e is ParsedParens) unwrap(e.expr) else e
+
+    /** True when `e` is a `<recv>.not {}` method call (the boolean-negation form). */
+    private fun isBoolNot(e: ParsedExpr): Boolean {
+        val call = unwrap(e) as? ParsedFunctionCall ?: return false
+        val member = call.function as? ParsedMemberAccess ?: return false
+        return member.member == "not"
+    }
+
+    /** The receiver of a `<recv>.not {}` call, or null if `e` isn't one. */
+    private fun boolNotReceiver(e: ParsedExpr): ParsedExpr? {
+        val call = unwrap(e) as? ParsedFunctionCall ?: return null
+        val member = call.function as? ParsedMemberAccess ?: return null
+        return if (member.member == "not") member.receiver else null
+    }
 }

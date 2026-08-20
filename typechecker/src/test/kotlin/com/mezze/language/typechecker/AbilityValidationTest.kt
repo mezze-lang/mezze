@@ -36,7 +36,7 @@ class AbilityValidationTest {
 
             impl Eq for Str where {
               eq: {it: Str, r: Str} -> Bool = {it, r} -> stringEquals {a = it, b = r},
-              neq: {it: Str, r: Str} -> Bool = {it, r} -> !(stringEquals {a = it, b = r})
+              neq: {it: Str, r: Str} -> Bool = {it, r} -> (stringEquals {a = it, b = r}).not {}
 
             }
 

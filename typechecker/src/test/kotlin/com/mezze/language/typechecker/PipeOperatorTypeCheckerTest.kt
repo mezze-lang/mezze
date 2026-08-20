@@ -308,7 +308,7 @@ let result = "World" |> greet {name = @}
     @Test
     fun `test pipe with boolean operations`() {
         val source = """
-let negate = {b} -> !b
+let negate = {b} -> b.not {}
 let result = True |> negate {b = @}
 """.trim()
 

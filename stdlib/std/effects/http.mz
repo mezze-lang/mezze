@@ -6,6 +6,7 @@ use std::collections::seq
 use std::collections::bytes
 use std::str
 use std::int
+use std::bool
 
 ## HTTP request methods.
 pub type Method = | Get, Post, Put, Delete, Patch, Head, Options |
@@ -537,7 +538,7 @@ let retry_loop : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: In
   match resp is
     Ok { val } -> resp
     Err { error } ->
-      if attempt >= max_attempts || ! is_retryable { err = error }
+      if attempt >= max_attempts || (is_retryable { err = error }).not {}
       then resp
       else do
         sleep { ms = backoff_ms }

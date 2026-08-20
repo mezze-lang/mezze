@@ -9,9 +9,3 @@ ability LogicalOr for 'a where {
   ## Logical disjunction of it and r.
   or: { it: 'a, r: 'a } -> 'a
 }
-
-## Logical NOT. Desugars the `!` operator.
-ability LogicalNot for 'a where {
-  ## Logical negation.
-  not: { it: 'a } -> 'a
-}

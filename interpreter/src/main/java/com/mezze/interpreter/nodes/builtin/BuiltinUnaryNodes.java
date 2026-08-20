@@ -17,7 +17,7 @@ public abstract class BuiltinUnaryNodes {
 
     // Field index for unary operations
     private static final int N_INDEX = 0;  // NumSub.neg uses 'n'
-    private static final int VAL_INDEX = 0;  // LogicalNot.not uses 'val'
+    private static final int VAL_INDEX = 0;  // boolean not uses 'val'
 
     /**
      * Builtin negate: {n} -> -n

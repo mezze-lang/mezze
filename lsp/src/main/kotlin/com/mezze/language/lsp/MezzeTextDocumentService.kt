@@ -6857,7 +6857,7 @@ class MezzeTextDocumentService(
     /**
      * #106: simplify a W0303 redundant-boolean expression using the PARSED AST
      * the LSP already holds (no regex). Handles `!(!b)` -> `b`,
-     * `x == True`/`True == x` -> `x`, `x == False`/`False == x` -> `!(x)`, and
+     * `x == True`/`True == x` -> `x`, `x == False`/`False == x` -> `(x).not {}`, and
      * `if b then True else False` -> `b`. Returns the (range, replacement) or
      * null when the shape isn't one we rewrite. The inner sub-expression is
      * copied verbatim from source via its own loc — so nested/multi-line
@@ -6875,20 +6875,27 @@ class MezzeTextDocumentService(
         fun isBoolLit(e: ParsedExpr, name: String) =
             e is ParsedVariantConstruct && e.value == null && e.constructor == name
 
-        val replacement: String? = when (node) {
-            // !(!b) -> b   (unwrap parens around the inner)
-            is ParsedUnaryOp -> if (node.op == "!") {
-                val inner = unwrapParens(node.operand)
-                if (inner is ParsedUnaryOp && inner.op == "!") srcOf(unwrapParens(inner.operand).loc) else null
-            } else null
+        // The inner receiver of a `<recv>.not {}` method call, or null.
+        fun boolNotReceiver(e: ParsedExpr): ParsedExpr? {
+            val call = unwrapParens(e) as? ParsedFunctionCall ?: return null
+            val member = call.function as? ParsedMemberAccess ?: return null
+            return if (member.member == "not") member.receiver else null
+        }
 
-            // x == True -> x ; x == False -> !(x)  (either side)
+        val replacement: String? = when (node) {
+            // (b.not {}).not {} -> b   (unwrap the double negation)
+            is ParsedFunctionCall -> {
+                val inner = boolNotReceiver(node)?.let { boolNotReceiver(it) }
+                if (inner != null) srcOf(unwrapParens(inner).loc) else null
+            }
+
+            // x == True -> x ; x == False -> x.not {}  (either side)
             is ParsedBinaryOp -> if (node.op == "==") {
                 when {
                     isBoolLit(node.right, "True") -> srcOf(node.left.loc)
                     isBoolLit(node.left, "True") -> srcOf(node.right.loc)
-                    isBoolLit(node.right, "False") -> "!(${srcOf(node.left.loc)})"
-                    isBoolLit(node.left, "False") -> "!(${srcOf(node.right.loc)})"
+                    isBoolLit(node.right, "False") -> "(${srcOf(node.left.loc)}).not {}"
+                    isBoolLit(node.left, "False") -> "(${srcOf(node.right.loc)}).not {}"
                     else -> null
                 }
             } else null

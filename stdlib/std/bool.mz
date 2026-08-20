@@ -1,5 +1,5 @@
 use std::abilities::compare::{ Eq }
-use std::abilities::logic::{ LogicalAnd, LogicalOr, LogicalNot }
+use std::abilities::logic::{ LogicalAnd, LogicalOr }
 use std::abilities::convert::{ Into }
 use std::abilities::default::{ Default }
 
@@ -14,10 +14,6 @@ impl LogicalAnd for Bool where {
 
 impl LogicalOr for Bool where {
   or = { it, r } -> __native_bool_or { l = it, r = r }
-}
-
-impl LogicalNot for Bool where {
-  not = { it } -> __native_bool_not { b = it }
 }
 
 impl Into Str for Bool where {
@@ -43,7 +39,7 @@ pub let not: { b: Bool } -> Bool = { b } -> __native_bool_not { b = b }
 ## Exclusive OR.
 pub let xor: { l: Bool, r: Bool } -> Bool = { l, r } -> __native_bool_xor { l = l, r = r }
 
-## Material implication: !l || r.
+## Material implication: (l.not {}) || r.
 pub let implies: { l: Bool, r: Bool } -> Bool = { l, r } ->
   __native_bool_or { l = __native_bool_not { b = l }, r = r }
 
@@ -58,6 +54,8 @@ pub let iff: { l: Bool, r: Bool } -> Bool = { l, r } ->
   }
 
 impl Bool where {
+  ## Logical negation — flips the boolean.
+  not = { it } -> __native_bool_not { b = it },
   to_str = { it } -> __native_bool_to_str { b = it },
   to_int = { it } -> if it then 1 else 0,
   xor = { it, r } -> __native_bool_xor { l = it, r = r },

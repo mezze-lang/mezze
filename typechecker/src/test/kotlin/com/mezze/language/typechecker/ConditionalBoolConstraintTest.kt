@@ -233,7 +233,7 @@ class ConditionalBoolConstraintTest {
     @Test
     fun `test if with boolean NOT condition`() {
         val source = """
-            let notCheck = {x} -> if !x then 1 else 0
+            let notCheck = {x} -> if x.not {} then 1 else 0
 
             notCheck {x = True}
         """.trimIndent()
@@ -307,7 +307,7 @@ class ConditionalBoolConstraintTest {
     @Test
     fun `test if with complex boolean expression`() {
         val source = """
-            let complexCheck = {a, b, c} -> if (a && b) || !c then 1 else 0
+            let complexCheck = {a, b, c} -> if (a && b) || c.not {} then 1 else 0
 
             complexCheck {a = True, b = False, c = True}
         """.trimIndent()

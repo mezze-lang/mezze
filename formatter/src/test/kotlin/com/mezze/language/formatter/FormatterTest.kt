@@ -272,10 +272,11 @@ class FormatterTest {
     }
 
     @Test
-    fun `format not operator`() {
-        val input = "let x = !True"
+    fun `format not method call`() {
+        // `!` unary operator was removed; boolean negation is now `.not {}`.
+        val input = "let x = True.not {}"
         val output = formatter.format(input)
-        assertEquals("let x = !True\n", output)
+        assertEquals("let x = True.not {}\n", output)
     }
 
     // =========================================================================
@@ -1166,7 +1167,7 @@ class FormatterTest {
                         Red -> True
                         _ -> False
                     _ -> False,
-                neq = {it, r} -> !(it.eq {r = r})
+                neq = {it, r} -> (it.eq {r = r}).not {}
             }
         """.trimIndent()
         val output = formatter.format(input)

@@ -193,13 +193,13 @@ class MezzeInterpreterComprehensiveTest {
 
     @Test
     fun testBooleanLogic() {
-        // Use Mezze's native boolean operators: && for AND, || for OR, ! for NOT
+        // Use Mezze's native boolean operators: && for AND, || for OR, .not {} for NOT
         val source = """
             let x = True
             let y = False
             let result1 = x && y
             let result2 = x || y
-            let result3 = !x
+            let result3 = x.not {}
             {and = result1, or = result2, not = result3}
         """.trimIndent()
 

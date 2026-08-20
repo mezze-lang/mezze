@@ -433,7 +433,7 @@ class FileSystemEffectTest {
               let _ = FileSystem.create_directory { path = "/d" }
               match is_file { path = "/f" } is
                 Ok { val = f } -> match is_file { path = "/d" } is
-                  Ok { val = d } -> f && !d
+                  Ok { val = d } -> f && d.not {}
                   Err { error } -> False
                 Err { error } -> False
         """.trimIndent()
@@ -449,7 +449,7 @@ class FileSystemEffectTest {
               let _ = FileSystem.create_directory { path = "/d" }
               match is_directory { path = "/d" } is
                 Ok { val = d } -> match is_directory { path = "/f" } is
-                  Ok { val = f } -> d && !f
+                  Ok { val = f } -> d && f.not {}
                   Err { error } -> False
                 Err { error } -> False
         """.trimIndent()

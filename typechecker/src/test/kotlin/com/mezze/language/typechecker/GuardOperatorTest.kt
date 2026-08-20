@@ -97,11 +97,14 @@ class GuardOperatorTest {
     }
 
     @Test
-    fun `guard with not operator`() {
+    fun `guard with negated equality`() {
+        // A match-guard's expression grammar does not admit a record-argument
+        // call (`{ ... }`), so `.not {}` / `not { b = ... }` can't appear here.
+        // Negation in a guard is expressed by comparing against `False`.
         val code = """
             let check = {x: Int} ->
                 match x is
-                    n if !(n == 0) -> "non-zero"
+                    n if (n == 0) == False -> "non-zero"
                     _ -> "zero"
             let result = check {x = 5}
         """.trimIndent()
