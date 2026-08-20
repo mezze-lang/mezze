@@ -1442,8 +1442,22 @@ class TypedASTCompiler(
                     // does NOT take dict params — every dict was pinned to
                     // a concrete impl during specialization. So we skip the
                     // dict-injection branch entirely.
+                    //
+                    // BUT skip the specialized CallDirect for a non-lambda user let
+                    // (#389). Such a callee is a thunk that evaluates to a
+                    // MezzeFunction, possibly PARTIALLY applied — e.g.
+                    // `let addTen = adder {base = 10}` where `adder = {base} -> {x} ->
+                    // x + base`. CallDirect'ing the specialized hash and passing the
+                    // new arg record discards the accumulated partialArgs, so
+                    // `addTen {x = 5}` returns the raw inner lambda instead of
+                    // computing (an under-applied MezzeFunction). Fall through to the
+                    // CallIndirect path below, which routes through the
+                    // MezzeFunction's withPartialArgs slow path. The class-parameter
+                    // NumAdd feature made the monomorphizer specialize these
+                    // curried-`+` call sites where it previously did not — surfacing
+                    // this latent gap in the mono-rewrite fast path.
                     val specialized = monoCallSiteRewrites[expr.loc]
-                    if (specialized != null) {
+                    if (specialized != null && !isNonLambdaUserLet(calleeHash)) {
                         census.byHashMono++
                         return emitCallDirect(specialized, argIR, expr.isTailCall, src)
                     }

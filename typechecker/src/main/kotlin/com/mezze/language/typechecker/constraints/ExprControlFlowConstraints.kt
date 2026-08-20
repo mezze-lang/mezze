@@ -314,12 +314,23 @@ private fun ExpressionConstraintGenerator.generalizeDoBlockBinding(
             val carried = bindingAbilityConstraints.mapNotNull { c ->
                 val resolved = substitution.apply(MezzeType.VarType(c.typeVar))
                 val varId = if (resolved is MezzeType.VarType) resolved.variable.id else c.typeVar.id
-                if (varId in quantifiableIds) {
+                val resolvedTypeArgs = c.typeArgs.map { substitution.apply(it) }
+                // Keep the constraint if the receiver OR any class-arg is
+                // quantifiable, and capture a concrete receiver — mirrors
+                // ConstraintGenerator.buildBindingForContext so a class-param
+                // obligation like `NumAdd Int 'a` (from a do-block `let f={x}->x+1`)
+                // still rejects `f {x = "s"}` instead of laundering it.
+                val classArgQuantifiable = resolvedTypeArgs.any { arg ->
+                    collectFreeTypeVars(arg).any { it.id in quantifiableIds }
+                }
+                if (varId in quantifiableIds || classArgQuantifiable) {
                     val quantVar = quantifiable.find { it.id == varId }
+                    val concreteReceiver = (resolved as? MezzeType.VarType)?.let { null } ?: resolved
                     AbilityConstraint(
                         abilityName = c.abilityName,
                         typeParam = quantVar?.name ?: c.typeVar.name,
-                        typeArgs = c.typeArgs.map { substitution.apply(it) }
+                        typeArgs = resolvedTypeArgs,
+                        concreteReceiver = concreteReceiver
                     )
                 } else null
             }

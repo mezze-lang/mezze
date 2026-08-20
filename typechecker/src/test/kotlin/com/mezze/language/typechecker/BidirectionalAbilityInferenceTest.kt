@@ -65,7 +65,10 @@ class BidirectionalAbilityInferenceTest {
 
     @Test
     fun `test bidirectional inference - case 2 - no Float implementation`() {
-        // Only Int impl exists, but usage context requires Float (10.5 + y)
+        // Only Int impl exists, so y is Int (resolved from receiver x: Int).
+        // Under heterogeneous NumAdd, `10.5 + y` is Float + Int -> Float, so this
+        // now type-checks. y stays Int (the receiver determines the for-type);
+        // only the addition widens.
         val code = """
             ability Transform for 'a where {
                 apply: { src: Str } -> 'a
@@ -80,17 +83,35 @@ class BidirectionalAbilityInferenceTest {
             let ans = 10.5 + y
         """.trimIndent()
 
-        // This should fail because y is Int but 10.5 + y requires Float
-        assertThrows<TypeCheckError> {
+        try {
             val parsedModule = parser.parseParsedModule(code, "test.mz")
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
+
+            assertNotNull(result)
+
+            // y is still Int - the receiver x: Int determines the for-type.
+            val yType = result.getVariableType("y")
+            assertNotNull(yType)
+            assertEquals(MezzeType.IntType, yType,
+                "y should be Int because receiver x is Int")
+
+            // Float + Int widens to Float.
+            val ansType = result.getVariableType("ans")
+            assertNotNull(ansType)
+            assertEquals(MezzeType.FloatType, ansType,
+                "10.5 + y is Float + Int and widens to Float")
+
+        } catch (e: Exception) {
+            fail("Float + Int now type checks under heterogeneous NumAdd: ${e.message}")
         }
     }
 
     @Test
     fun `test bidirectional inference - case 3 - first usage should determine type`() {
-        // x is Int, y = x.apply returns Int. First usage (10 + y) is fine.
-        // Second usage (10.4 + y) should fail because y is Int, not Float.
+        // x is Int, so y = x.apply returns Int (the receiver determines 'a = Int),
+        // regardless of the Float impl also being in scope. First usage (10 + y) is
+        // Int + Int -> Int. Under heterogeneous NumAdd, the second usage (10.4 + y)
+        // is Float + Int -> Float and now type-checks; y stays Int.
         val code = """
             ability Transform for 'a where {
                 apply: { src: Str } -> 'a
@@ -110,10 +131,26 @@ class BidirectionalAbilityInferenceTest {
             let ans2 = 10.4 + y
         """.trimIndent()
 
-        // y is Int (receiver x is Int, so 'a = Int). 10.4 + y fails.
-        assertThrows<TypeCheckError> {
+        try {
             val parsedModule = parser.parseParsedModule(code, "test.mz")
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
+
+            assertNotNull(result)
+
+            // y is Int - the receiver x: Int fixes the for-type, not later usage.
+            val yType = result.getVariableType("y")
+            assertNotNull(yType)
+            assertEquals(MezzeType.IntType, yType,
+                "y should be Int because receiver x is Int")
+
+            // Int + Int stays Int; Float + Int widens to Float.
+            assertEquals(MezzeType.IntType, result.getVariableType("ans"),
+                "10 + y is Int + Int -> Int")
+            assertEquals(MezzeType.FloatType, result.getVariableType("ans2"),
+                "10.4 + y is Float + Int -> Float")
+
+        } catch (e: Exception) {
+            fail("Float + Int now type checks under heterogeneous NumAdd: ${e.message}")
         }
     }
 

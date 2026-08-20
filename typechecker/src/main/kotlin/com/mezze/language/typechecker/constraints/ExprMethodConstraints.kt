@@ -226,7 +226,15 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         matchingAbilities.filter { (_, rawMethodType) ->
             val methodParamFields = when (rawMethodType) {
                 is MezzeType.FunctionType -> when (val pt = rawMethodType.paramType) {
-                    is MezzeType.RecordType -> pt.fields.keys
+                    // Drop the ability receiver param `it` before comparing: a call
+                    // site `x.m {a=…}` desugars to args `{a}` (no `it`), while the
+                    // ability op's param record still carries `it`. Without this,
+                    // an ability whose real method type is seeded into the context
+                    // (e.g. the built-in NumAdd, so `+` can reach the class-param
+                    // dispatch path) is spuriously filtered out and falls back to
+                    // the single-var flattened path. Mirrors the `- Keywords.IT`
+                    // shape-match used for inherent-method preference below.
+                    is MezzeType.RecordType -> pt.fields.keys - Keywords.IT
                     else -> null
                 }
                 else -> null
@@ -352,6 +360,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
                         abilityName = abilityName,
                         primaryTypeVar = abilityTypeVars.first(),
                         associatedTypeVars = associatedTypeVarsMap,
+                        classArgTypeVars = abilityTypeVars,
                         context = "Associated type resolution for $abilityName.$methodName",
                         loc = expr.loc
                     ))

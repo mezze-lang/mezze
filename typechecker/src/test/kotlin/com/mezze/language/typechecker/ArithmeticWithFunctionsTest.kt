@@ -42,13 +42,16 @@ class ArithmeticWithFunctionsTest {
         """.trimIndent()
 
         val error = typeCheckShouldFail(code)
-        // Either the old error format or the new unification error format is acceptable
+        // Any of the accepted rejection formats is fine — what matters is that
+        // adding a function value is still rejected.
         // Old format: "Cannot apply arithmetic operator '(+)' ... function type ... NumAdd ability"
-        // New format: "Type mismatch Int with {...} -> ..." (unification of record fields fails)
+        // Unification format: "Type mismatch Int with {...} -> ..." (unification of record fields fails)
+        // Heterogeneous-NumAdd format: "Cannot use '+' with a function. Functions cannot implement NumAdd."
         assertTrue(
             error.contains("Cannot apply arithmetic operator") ||
             error.contains("Type mismatch") ||
-            error.contains("type mismatch"),
+            error.contains("type mismatch") ||
+            error.contains("Cannot use '+' with a function"),
             "Expected arithmetic/unification error but got: $error"
         )
     }
@@ -114,11 +117,14 @@ class ArithmeticWithFunctionsTest {
         """.trimIndent()
 
         val error = typeCheckShouldFail(code)
-        // Either the old error format or the new unification error format is acceptable
+        // Any of the accepted rejection formats is fine — the function value must
+        // still be rejected. Heterogeneous NumAdd emits
+        // "Cannot use '+' with a function. Functions cannot implement NumAdd."
         assertTrue(
             error.contains("Cannot apply arithmetic operator") ||
             error.contains("Type mismatch") ||
-            error.contains("type mismatch"),
+            error.contains("type mismatch") ||
+            error.contains("Cannot use '+' with a function"),
             "Expected arithmetic/unification error but got: $error"
         )
     }
@@ -134,11 +140,14 @@ class ArithmeticWithFunctionsTest {
         """.trimIndent()
 
         val error = typeCheckShouldFail(code)
-        // Either the old error format or the new unification error format is acceptable
+        // Any of the accepted rejection formats is fine — the function value must
+        // still be rejected. Heterogeneous NumAdd emits
+        // "Cannot use '+' with a function. Functions cannot implement NumAdd."
         assertTrue(
             error.contains("Cannot apply arithmetic operator") ||
             error.contains("Type mismatch") ||
-            error.contains("type mismatch"),
+            error.contains("type mismatch") ||
+            error.contains("Cannot use '+' with a function"),
             "Expected arithmetic/unification error but got: $error"
         )
     }

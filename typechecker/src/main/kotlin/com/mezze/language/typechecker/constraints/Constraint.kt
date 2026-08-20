@@ -92,6 +92,14 @@ sealed interface Constraint {
         val abilityName: String,
         val primaryTypeVar: TypeVar,
         val associatedTypeVars: Map<String, TypeVar>,
+        // The FULL class-parameter type-var tuple in ability-decl order (e.g. for
+        // `NumAdd 'r for 'l`, [ 'r, 'l ]). Needed to disambiguate which impl
+        // supplies the `having` bindings when several impls share a receiver type
+        // — e.g. `NumAdd Float for Float` and `NumAdd Int for Float` both have
+        // receiver `'l = Float`, so matching the receiver alone picks the wrong
+        // impl's `'out`. Matching the whole tuple resolves it. Empty for
+        // single-param abilities (primaryTypeVar alone suffices).
+        val classArgTypeVars: List<TypeVar> = emptyList(),
         override val context: String? = null,
         override val loc: Loc? = null
     ) : Constraint {

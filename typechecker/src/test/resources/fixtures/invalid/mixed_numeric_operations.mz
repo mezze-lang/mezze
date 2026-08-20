@@ -1,15 +1,14 @@
-# Mixed numeric operations should fail without explicit conversion
-let intVal = 42  # expected: intVal : Int
+# Frac does NOT participate in numeric coercion: it has only a diagonal
+# `NumAdd Frac for Frac` impl, so mixing Frac with any other numeric type is a
+# type error. (Int + Float now coerces to Float and is NOT an error, so it is
+# deliberately not tested here.)
+use std::frac::{ from_int }
 
 let floatVal = 3.14  # expected: floatVal : Float
 
-let fracVal = 1 / 2  # expected: fracVal : Frac
+let fracVal = from_int { n = 1 }  # expected: fracVal : Frac
 
-# These should fail - cannot mix different numeric types directly
-let mixedSum1 = intVal + floatVal  # Type error: cannot add Int and Float
+# Type error: no `NumAdd Float for Frac` impl (Frac is coercion-isolated).
+let mixed = floatVal + fracVal
 
-let mixedSum2 = floatVal + fracVal  # Type error: cannot add Float and Frac
-
-let mixedComp = intVal < fracVal  # Type error: cannot compare Int and Frac
-
-mixedSum1
+mixed

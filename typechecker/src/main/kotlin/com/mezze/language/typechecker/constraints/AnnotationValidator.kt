@@ -347,6 +347,15 @@ internal class AnnotationValidator(
                 //      (works on a generic receiver, where (a) is still a var).
                 val annotatedType = runCatching { publicAnnToMezze(annotatedAnn) }.getOrNull() ?: continue
                 if (annotatedType is MezzeType.VarType) continue  // annotated a var — allowed
+                // A polymorphic `having 'out = 'a` (the binding is a type-PARAMETER
+                // name, e.g. `NumAdd 'a 'a having 'out = 'a`) just says "out unifies
+                // with this param" — for each concrete instantiation of 'a the impl's
+                // concrete `out` satisfies it. It must NOT be checked against the
+                // impls' concrete declared outputs (Int|Float|…), which would reject
+                // a legitimate same-type add annotation. Some paths convert a rigid
+                // param to a non-VarType shape, so the VarType guard above misses it;
+                // catch it by the rendered `'`-prefixed name here.
+                if (prettyPrintType(annotatedType).startsWith("'")) continue
 
                 // Compare by RENDERED name, not structural equality: an annotation's
                 // `Money` (a bare TypeApplication) and the impl/solver's `Money`

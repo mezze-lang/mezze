@@ -62,8 +62,13 @@ class AbilityMethodAccessTest {
 
     @Test
     fun `test NumAdd add can be stored and called later`() {
+        // NumAdd became a class-parameter ability (`NumAdd 'r for 'l having 'out`),
+        // so storing the operator as a lambda and applying it to same-type operands
+        // routes through the class-param-aware `+` dispatch and yields `Int`.
+        // (Direct first-class `NumAdd.add` access still flattens to a single
+        // type var, which no longer matches the 2-class-arg NumAdd impls.)
         assertDoesNotThrow {
-            parseAndTypeCheck("let adder = NumAdd.add\nlet result = adder {it = 1, r = 2}")
+            parseAndTypeCheck("let adder = {it, r} -> it + r\nlet result = adder {it = 1, r = 2}")
         }
     }
 

@@ -44,16 +44,22 @@ class ArithmeticConstraintTest {
             assertEquals(2, paramRecord.fields.size)
             assertTrue(paramRecord.fields.containsKey("x"))
             assertTrue(paramRecord.fields.containsKey("y"))
-            
-            // Both fields should have the same type variable
+
+            // Under the class-parameter NumAdd ability, `+` is heterogeneous:
+            //   {x:'l, y:'r} with NumAdd 'r 'l having 'out -> 'out
+            // so x, y, and the return type are three DISTINCT type variables
+            // (they are no longer forced to be the same type).
             val xType = paramRecord.fields["x"]
             val yType = paramRecord.fields["y"]
-            assertEquals(xType, yType)
             assertTrue(xType is MezzeType.VarType)
-            
-            // Return type should be the same type variable
-            assertEquals(xType, functionType.returnType)
-            
+            assertTrue(yType is MezzeType.VarType)
+            assertNotEquals(xType, yType)
+
+            // Return type is its own type variable ('out), distinct from x and y
+            assertTrue(functionType.returnType is MezzeType.VarType)
+            assertNotEquals(xType, functionType.returnType)
+            assertNotEquals(yType, functionType.returnType)
+
         } catch (e: Exception) {
             fail("Type checking should succeed for valid arithmetic function: ${e.message}")
         }
@@ -139,19 +145,27 @@ class ArithmeticConstraintTest {
     }
 
     @Test
-    fun `test Int and Float cannot unify in function call`() {
-        // Regression test for type unification bug
-        // { x: 'a, y: 'a } should NOT accept { x: Int, y: Float }
+    fun `test Int and Float widen in function call`() {
+        // Under the class-parameter NumAdd ability, `+` is heterogeneous:
+        //   { x, y } -> x + y  infers  {x:'l, y:'r} with NumAdd 'r 'l having 'out -> 'out
+        // so an unannotated add function accepts differently-typed operands and
+        // widens to the result type. Int (5) + Float (8.6) -> Float.
         val code = """
             let my_func = { x, y } -> x + y
             let ans = my_func { x = 5, y = 8.6 }
         """.trimIndent()
 
-        // This should fail because my_func requires both parameters to be the same type
-        // but we're passing Int (5) and Float (8.6)
-        assertThrows(TypeCheckError::class.java) {
+        // This should now SUCCEED and infer `ans : Float` (widened from Int + Float).
+        assertDoesNotThrow {
             val parsedModule = parser.parseParsedModule(code, "test.mz")
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
+            val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
+
+            val ansType = typedProgram.getVariableType("ans")
+            assertNotNull(ansType, "ans should have an inferred type")
+            assertTrue(
+                ansType is MezzeType.FloatType,
+                "Int + Float should widen to Float, but was: $ansType"
+            )
         }
     }
 }

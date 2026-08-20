@@ -84,8 +84,13 @@ class ConditionalBoolConstraintTest {
 
     @Test
     fun `test if with multiple operations in branches`() {
+        // Operands are annotated Int so the arithmetic collapses to the same-type
+        // diagonal; the focus is that `useAdd` (the if condition) is constrained to
+        // Bool. With heterogeneous `+`, unannotated operands would infer distinct
+        // types and the class-parameter NumAdd chain no longer unifies against the
+        // homogeneous `*` branch, which is orthogonal to what this test protects.
         val source = """
-            let compute = {a, b, c, useAdd} -> if useAdd then a + b + c else a * b * c
+            let compute = {a: Int, b: Int, c: Int, useAdd} -> if useAdd then a + b + c else a * b * c
 
             compute {a = 1, b = 2, c = 3, useAdd = True}
         """.trimIndent()

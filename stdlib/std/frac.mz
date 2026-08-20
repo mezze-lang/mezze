@@ -3,7 +3,7 @@ use std::abilities::compare::{ Eq, Ord }
 use std::abilities::convert::{ Into }
 use std::abilities::default::{ Default }
 
-impl NumAdd for Frac where {
+impl NumAdd Frac for Frac having 'out = Frac where {
   add = { it, r } -> __native_frac_add { l = it, r = r }
 }
 

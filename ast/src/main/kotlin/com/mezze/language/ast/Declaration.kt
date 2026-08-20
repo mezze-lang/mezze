@@ -15,7 +15,21 @@ import kotlinx.serialization.Serializable
 data class AbilityConstraint(
     val abilityName: String,
     val typeParam: String,
-    val typeArgs: List<MezzeType> = emptyList()
+    val typeArgs: List<MezzeType> = emptyList(),
+    // Associated-type bindings (`having 'out = 'c`). Carried through
+    // generalization so a call site can resolve the associated type against the
+    // matched impl — e.g. calling `{x,y}->x+y` must pin its `'out` return to the
+    // widened numeric type. The bound values are the function's OWN type vars
+    // (e.g. its return var), so they freshen alongside `typeParam`/`typeArgs`
+    // during TypeScheme.instantiate().
+    val associatedTypeBindings: Map<String, MezzeType> = emptyMap(),
+    // Concrete receiver type when the ability's `for 'l` position resolved to a
+    // concrete type at generalization time (e.g. `{x}->x+1` yields `NumAdd Int 'a`
+    // where the class-arg `Int` comes from the literal). `typeParam` can only hold
+    // a var NAME, so a concrete receiver would otherwise degrade to a free var and
+    // the call-site obligation would never fire — laundering `f {x = "s"}` past the
+    // missing `NumAdd Int Str` impl. Null when the receiver is a genuine type var.
+    val concreteReceiver: MezzeType? = null
 )
 
 /**

@@ -69,8 +69,16 @@ class TypeCheckerCompatibilityTest {
             checker.typeCheck(parsedModule, java.nio.file.Paths.get("."))
             assert(false) { "Expected TypeCheckError to be thrown" }
         } catch (e: TypeCheckError) {
-            // Expected behavior - old TypeChecker throws exceptions
-            assertTrue(e.message?.contains("Type") == true || e.message?.contains("type") == true)
+            // Expected behavior: a type error is thrown. Under the class-parameter
+            // NumAdd ability the message is "Cannot use '+' with Str, Int" (no
+            // `NumAdd Str Int` impl) rather than the old "type mismatch" wording —
+            // accept either. What matters is that Int + Str is rejected.
+            val msg = e.message ?: ""
+            assertTrue(
+                msg.contains("Type") || msg.contains("type") ||
+                    msg.contains("Cannot use '+'") || msg.contains("NumAdd"),
+                "Expected a type/ability error message, got: $msg"
+            )
         }
     }
 

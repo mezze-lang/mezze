@@ -5,6 +5,7 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility as ParsedVisibility
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashConstants
+import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.ast.ScopedEffectConstants
 import com.mezze.language.typechecker.util.AbilityImplFactory
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
@@ -154,6 +155,18 @@ class ContextBuilder {
             ctx = addAbilityMethods(ctx, abilityDecl)
         }
         for (abilityDecl in importedAbilities.values) {
+            if (ctx.getAbilityOperationType(abilityDecl.name) == null) {
+                ctx = addAbilityMethods(ctx, abilityDecl)
+            }
+        }
+        // Seed the built-in abilities (NumAdd, Ord, Eq, …) with their REAL,
+        // class-param-preserving method types so `2 + 3` (which desugars to
+        // `2.add {r=3}` and never `use`s NumAdd) resolves through the same
+        // class-param-aware ability path as a user ability — not the single-var
+        // flattening in BuiltInAbilities.getAbilityMethodType. Lowest precedence:
+        // only seed a name a local/imported decl hasn't already registered, so a
+        // module that explicitly imports the ability always wins.
+        for (abilityDecl in BuiltInAbilities.getRawAbilityDeclarations().values) {
             if (ctx.getAbilityOperationType(abilityDecl.name) == null) {
                 ctx = addAbilityMethods(ctx, abilityDecl)
             }

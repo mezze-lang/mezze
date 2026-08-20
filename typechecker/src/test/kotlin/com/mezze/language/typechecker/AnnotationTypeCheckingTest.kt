@@ -976,7 +976,7 @@ class AnnotationTypeCheckingTest {
     fun `test function with multiple ability constraints annotation`() {
         val result = parseAndTypeCheck(
             """
-            let showSum: { x: 'a, y: 'a } with NumAdd 'a, Inspect 'a -> Str =
+            let showSum: { x: 'a, y: 'a } with NumAdd 'a 'a having 'out = 'a, Inspect 'a -> Str =
               {x, y} -> (x + y).to_dbg_str {}
             showSum {x = 1, y = 2}
             """.trimIndent()
@@ -987,11 +987,11 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test function with extra ability constraint in annotation is allowed`() {
-        // Annotation says it requires NumAdd but implementation doesn't use it - this is fine
+        // Annotation says it requires NumSub but implementation doesn't use it - this is fine
         // Extra constraints in annotation are allowed (restricts usage, doesn't break anything)
         assertTypeChecks(
             """
-            let id: { x: 'a } with NumAdd 'a -> 'a = {x} -> x
+            let id: { x: 'a } with NumSub 'a -> 'a = {x} -> x
             id {x = 42}
             """.trimIndent()
         )
@@ -1035,11 +1035,11 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test polymorphic function with extra ability in annotation is allowed`() {
-        // Annotation declares NumAdd 'a but it's not needed - this is fine
+        // Annotation declares NumSub 'a but it's not needed - this is fine
         // Extra constraints in annotation are allowed (restricts usage, doesn't break anything)
         assertTypeChecks(
             """
-            let id: { x: 'a } with NumAdd 'a -> 'a = {x} -> x
+            let id: { x: 'a } with NumSub 'a -> 'a = {x} -> x
             id {x = 42}
             """.trimIndent()
         )

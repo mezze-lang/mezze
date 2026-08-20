@@ -240,14 +240,13 @@ class TruffleIntegrationTest {
     // ========================================
 
     @Test
-    fun `test mixed type addition fails type check`() {
-        val code = "10.5 + 5"
-        val exception = assertThrows(PolyglotException::class.java) {
-            eval(code)
-        }
-        assertTrue(exception.message?.contains("TypeCheckError") == true ||
-                   exception.message?.contains("Type mismatch") == true ||
-                   exception.message?.contains("Cannot") == true)
+    fun `test mixed type addition widens to Float`() {
+        // Under the class-parameter NumAdd ability, Float + Int has an impl
+        // (`NumAdd Int for Float having 'out = Float`) that widens the Int to
+        // Float. So `10.5 + 5` now type-checks and evaluates to 15.5 (it was
+        // rejected under the old homogeneous NumAdd, before numeric coercion).
+        val result = eval("10.5 + 5")
+        assertEquals(15.5, result)
     }
 
     // ========================================

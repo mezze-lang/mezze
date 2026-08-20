@@ -66,9 +66,11 @@ class DoBlockLetPolymorphismTest {
     }
 
     @Test
-    fun `do-block let with pinned param stays monomorphic and rejects wrong use`() {
-        // `f`'s body pins x to Int (`x + 1`), so f must NOT generalize; using it
-        // with a Str must fail. This guards against unsound over-generalization.
+    fun `do-block let with numeric body rejects a param type that has no NumAdd impl`() {
+        // `f`'s body is `x + 1`, so f generalizes to `{x: 'l} with NumAdd Int 'l
+        // having 'out -> 'out`. Using it with a Str must still fail: there is no
+        // `NumAdd Int Str` impl. Guards against dropping the carried NumAdd
+        // constraint when generalizing a do-block let.
         val src = """
             let main = {} -> do
               let f = { x } -> x + 1
@@ -78,7 +80,7 @@ class DoBlockLetPolymorphismTest {
         """.trimIndent()
 
         val errors = errorsFor(src)
-        assertTrue(errors.isNotEmpty(), "expected wrong-type use of a monomorphic-in-body binding to fail")
+        assertTrue(errors.isNotEmpty(), "expected `f { x = \"s\" }` to fail: no NumAdd Int Str impl")
     }
 
     @Test

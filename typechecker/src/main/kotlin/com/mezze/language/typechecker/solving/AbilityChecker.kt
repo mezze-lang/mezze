@@ -21,7 +21,15 @@ import com.mezze.language.typedast.Hash
 
 internal class AbilityChecker(
     private val context: TypingContext,
-    private val registry: DeclarationRegistry
+    private val registry: DeclarationRegistry,
+    /**
+     * Impl-body validation mode (see ConstraintSolver.deferExistingAbilityImpls).
+     * When true, an AbilityRequired whose impl exists somewhere but doesn't match
+     * the strict check here is DEFERRED (success) rather than failed, so an
+     * operator body using a type whose impl isn't import-visible at this site
+     * isn't spuriously rejected. A truly-absent impl still fails.
+     */
+    private val deferExistingAbilityImpls: Boolean = false
 ) {
     private val codecGenerator = CodecGenerator()
 
@@ -86,6 +94,9 @@ internal class AbilityChecker(
                     if (allConcrete) {
                         val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs, tracked.abilityHash)
                         if (!hasImpl) {
+                            if (deferExistingAbilityImpls && abilityImplExistsForType(abilityName, closedTypeArgs)) {
+                                continue
+                            }
                             return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs, errorLoc), errorLoc)
                         }
                     } else {
@@ -109,11 +120,25 @@ internal class AbilityChecker(
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
         }
 
-        val constraintVarName = constraint.typeVar.name.removePrefix("'")
-        val typeVarInArgs = typeArgs.any { arg ->
-            arg is MezzeType.VarType && arg.variable.name.removePrefix("'") == constraintVarName
-        }
-        val trackingArgs = if (typeVarInArgs) {
+        // Build the full class-arg tuple `[receiver, class-args…]` that
+        // `checkAbilityImplementation` matches positionally against an impl's
+        // targetTypeAnnotations. The receiver (`constraint.typeVar`, the `for 'l`
+        // position) usually leads and the class-args (`typeArgs`, the `'r…`
+        // positions) follow — the method-call path emits `typeArgs =
+        // abilityTypeVars.drop(1)`, receiver kept OUT, so `[receiver] + typeArgs`
+        // is the right tuple (this is what makes the class-param same-var case
+        // `NumAdd 'a 'a` from `{x}->x+x` produce `[Int, Int]` instead of a
+        // name-deduped 1-arg `[Int]` that no 2-arg impl matches).
+        //
+        // BUT some sites (annotation-sourced `with Ord 'a` constraints) already put
+        // the receiver INTO `typeArgs`. Blindly prepending there duplicates it —
+        // `Ord Float` becomes `[Float, Float]`, which no single-param `Ord for
+        // Float` impl matches, wrongly rejecting valid single-param ability uses.
+        // Gate on the ability's declared arity: prepend only when `typeArgs` is
+        // short of it. When `typeArgs` already fills the arity, the receiver is
+        // present — use it as-is.
+        val abilityArity = registry.lookupAbility(abilityName)?.typeParams?.size
+        val trackingArgs = if (abilityArity != null && typeArgs.size >= abilityArity) {
             typeArgs
         } else {
             listOf(MezzeType.VarType(constraint.typeVar)) + typeArgs
@@ -136,6 +161,15 @@ internal class AbilityChecker(
             val hasImpl = checkAbilityImplementation(abilityName, trackingArgs, constraint.abilityHash)
 
             if (!hasImpl) {
+                // Impl-body validation: when the impl EXISTS somewhere (just not
+                // matchable/import-visible in this isolated solve), defer to the
+                // use-site/top-level solve instead of rejecting. A genuinely-absent
+                // impl still fails, so an operator body with no applicable impl for
+                // its operand type leaves `'out` unresolved and the return check
+                // rejects it (the soundness case).
+                if (deferExistingAbilityImpls && abilityImplExistsForType(abilityName, trackingArgs)) {
+                    return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
+                }
                 val errorMessage = generateAbilityErrorMessage(abilityName, trackingArgs, constraint.loc)
                 return ConstraintSolver.ConstraintResult.Failure(errorMessage)
             }
@@ -161,12 +195,31 @@ internal class AbilityChecker(
             DebugLogger.debug(Category.ConstraintSolver) {
                 "  Deferring - primary type still a variable: ${primaryType.variable}"
             }
-            associatedTypeResolutionConstraints.getOrPut(primaryType.variable) { mutableListOf() }
-                .add(constraint)
+            // Dedup the deferral: finalizeDeferredAbilities re-invokes this on the
+            // already-deferred constraints, and an unresolved primary re-adds the
+            // SAME constraint to the SAME list every pass — unbounded growth that
+            // OOMs on effect-heavy modules (TVar/Promise/Semaphore pull in many
+            // deferred `+`/ability constraints). Only enqueue a constraint once per
+            // var; a constraint still unresolved at finalize simply stays
+            // unresolved (harmless — the AbilityRequired check enforces soundness).
+            val queue = associatedTypeResolutionConstraints.getOrPut(primaryType.variable) { mutableListOf() }
+            if (constraint !in queue) queue.add(constraint)
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
         }
 
-        val matchingImplPair = findMatchingAbilityImpl(abilityName, primaryType)
+        // Resolve the full class-arg tuple (e.g. [ 'r, 'l ] for NumAdd) so we can
+        // disambiguate impls that share a receiver type (see classArgTypeVars).
+        // Fall back to receiver-only matching when the tuple isn't available or any
+        // element is still unresolved.
+        val resolvedClassArgs = constraint.classArgTypeVars
+            .map { currentSubst.apply(MezzeType.VarType(it)) }
+            .takeIf { args -> args.isNotEmpty() && args.none { it is MezzeType.VarType } }
+        val matchingImplPair = if (resolvedClassArgs != null) {
+            findMatchingAbilityImplByArgs(abilityName, resolvedClassArgs)
+                ?: findMatchingAbilityImpl(abilityName, primaryType)
+        } else {
+            findMatchingAbilityImpl(abilityName, primaryType)
+        }
         DebugLogger.debug(Category.ConstraintSolver) {
             "  matchingImpl: ${matchingImplPair?.first?.abilityName} with bindings ${matchingImplPair?.first?.associatedTypeBindings}, " +
                 "implTypeVarBindings: ${matchingImplPair?.second}"
@@ -264,6 +317,33 @@ internal class AbilityChecker(
             val matched = TypeAnnotationMatcher.typeMatchesAnnotation(
                 primaryType, receiverAnnotation, registry.typeDeclarations, impl.typeVars, typeVarBindings
             )
+            if (matched) return impl to typeVarBindings
+        }
+        return null
+    }
+
+    /**
+     * Find the impl whose FULL class-arg tuple matches [classArgs] (in the same
+     * positional order the impl stores them: `AbilityImplFactory` builds
+     * `targetTypeAnnotations` as the ability's class-args followed by the `for`
+     * target). Unlike [findMatchingAbilityImpl] (receiver-only), this disambiguates
+     * impls that share a receiver — e.g. `NumAdd Float for Float` vs
+     * `NumAdd Int for Float`, which differ only in the non-receiver class arg —
+     * so the RIGHT impl's `having` bindings are used for `'out` resolution.
+     */
+    private fun findMatchingAbilityImplByArgs(
+        abilityName: String,
+        classArgs: List<MezzeType>
+    ): Pair<TypingContext.AbilityImplInfo, Map<String, MezzeType>>? {
+        for (impl in context.getAbilityImpls(abilityName)) {
+            val annotations = impl.targetTypeAnnotations ?: continue
+            if (annotations.size != classArgs.size) continue
+            val typeVarBindings = mutableMapOf<String, MezzeType>()
+            val matched = classArgs.zip(annotations).all { (actualType, annotation) ->
+                TypeAnnotationMatcher.typeMatchesAnnotation(
+                    actualType, annotation, registry.typeDeclarations, impl.typeVars, typeVarBindings
+                )
+            }
             if (matched) return impl to typeVarBindings
         }
         return null

@@ -18,53 +18,45 @@ class AddFunctionDebugTest {
             let add = {x, y} -> x + y
         """.trimIndent()
 
-        println("=== STARTING CONSTRAINT DEBUG ===")
 
         val parser = MezzeParser()
         val parsedModule = parser.parseParsedModule(source, "test.mz")
 
-        println("Parsed program: $parsedModule")
 
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         val typeAliases = typeChecker.getTypeAliases()
 
-        println("Source: $source")
-        println("Program AST: $parsedModule")
-        println("Type check result: $result")
 
         // Extract the type of 'add' from typedModule
         val addRawType = result.getVariableType("add")
-        println("Raw inferred type: $addRawType")
-
-        if (addRawType is MezzeType.FunctionType) {
-            println("Function type details:")
-            println("  - Parameter type: ${addRawType.paramType}")
-            println("  - Return type: ${addRawType.returnType}")
-            println("  - Ability constraints: ${addRawType.abilityConstraints}")
-            println("  - Effects: ${addRawType.effects}")
-        }
 
         val addType = addRawType?.let {
             prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false)
         } ?: "unknown"
-        println("Pretty printed type: $addType")
 
-        val expectedType = "{ x: 'a, y: 'a } with NumAdd 'a -> 'a"
-        println("Expected: $expectedType")
-        println("Actual: $addType")
+        // Under the class-parameter NumAdd ability (`NumAdd 'r for 'l having 'out`),
+        // `+` is heterogeneous, so an unannotated `{x, y} -> x + y` now infers the
+        // MORE GENERAL shape where the two params may differ:
+        //   { x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c -> 'c
+        // (letters are assigned positionally; the load-bearing facts are: distinct
+        // param vars, a NumAdd constraint with a `having 'out` result binding, and a
+        // polymorphic return equal to that `out` binding).
+        val expectedType = "{ x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c -> 'c"
 
-        // Check that we have the correct structure (unified parameters, polymorphic return, ability constraint)
-        val hasUnifiedParams = addType.contains("x: 'a, y: 'a")
-        val hasPolymorphicReturn = addType.contains("-> 'a")
-        val hasAbilityConstraint = addType.contains("with NumAdd")
+        // Extract the (now distinct) param type vars to assert they are NOT unified.
+        val paramVars = Regex("""x: ('\w+), y: ('\w+)""").find(addType)
+        val hasDistinctParams = paramVars != null &&
+            paramVars.groupValues[1] != paramVars.groupValues[2]
+        // The heterogeneous NumAdd constraint carries a `having 'out` result binding.
+        val hasNumAddHaving = Regex("""with NumAdd .*having 'out""").containsMatchIn(addType)
+        // The return type stays polymorphic (the `out` result type var).
+        val hasPolymorphicReturn = Regex("""-> '\w+$""").containsMatchIn(addType.trim())
 
-        if (hasUnifiedParams && hasPolymorphicReturn && hasAbilityConstraint) {
-            println("SUCCESS: Bidirectional type checker working correctly!")
-            println("Unified parameters: $hasUnifiedParams")
-            println("Polymorphic return: $hasPolymorphicReturn")
-            println("Ability constraint: $hasAbilityConstraint")
-        } else {
+        // Accept either the exact expected string or any rendering that carries
+        // the three load-bearing facts (distinct param vars, a NumAdd `having 'out`
+        // constraint, and a polymorphic return) — variable letters aren't stable.
+        if (!(hasDistinctParams && hasPolymorphicReturn && hasNumAddHaving)) {
             assertEquals(expectedType, addType, "Type mismatch for add function")
         }
     }

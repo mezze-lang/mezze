@@ -144,6 +144,39 @@ data class Substitution(
         return rowVarBound || instanceNeeds
     }
 
+    // Substitute a constraint's class-arg / associated-type binding value. These
+    // are (almost always) plain type vars; a var can point at the enclosing
+    // FunctionType's own return var, so deep-recursing via applyWithVisited can
+    // re-enter that FunctionType and reconstruct it unboundedly (OOM on recursive
+    // effect newtypes like Promise/Semaphore/TVar). We therefore resolve a VarType
+    // arg only to the extent that the target is itself a var or a leaf (concrete)
+    // type — following var→var chains and mapping to concrete leaves — but stop at
+    // any compound type (FunctionType/Record/etc.), leaving the var in place there.
+    // The compound's own structure is already substituted where it appears as a
+    // param/return type; here we only need the freshened var identity for
+    // resolution, never a deep rewrite. Non-var args (rare) are returned as-is.
+    private fun substituteConstraintArg(type: MezzeType, visitedVars: MutableSet<TypeVar>): MezzeType {
+        if (type !is MezzeType.VarType) return type
+        var current = type.variable
+        val seen = HashSet<TypeVar>()
+        while (seen.add(current) && current !in visitedVars) {
+            when (val mapped = mappings[current]) {
+                null -> return MezzeType.VarType(current)
+                is MezzeType.VarType -> current = mapped.variable
+                else -> return if (isLeafType(mapped)) mapped else MezzeType.VarType(current)
+            }
+        }
+        return MezzeType.VarType(current)
+    }
+
+    private fun isLeafType(type: MezzeType): Boolean = when (type) {
+        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.NatType,
+        is MezzeType.FracType, is MezzeType.StringType, is MezzeType.BoolType,
+        is MezzeType.CharType, is MezzeType.OrderingType, is MezzeType.BytesType,
+        is MezzeType.ByteBufferType, is MezzeType.VarType -> true
+        else -> false
+    }
+
     private fun applyWithVisited(
         type: MezzeType,
         visitedVars: MutableSet<TypeVar>,
@@ -179,11 +212,17 @@ data class Substitution(
                 abilityConstraints = type.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { applyWithVisited(it, visitedVars, chainCache) },
-                        // Carry (and substitute) associated-type bindings; dropping
-                        // them stripped populated `having` bindings on every apply.
+                        // Substitute the constraint's class-arg + associated-type
+                        // binding vars SHALLOWLY: these are plain vars, and a binding
+                        // value can be the function's OWN return var — deep-recursing
+                        // via applyWithVisited re-enters this FunctionType and, because
+                        // the value-graph (not just a var) revisits, loops until OOM.
+                        // Applying just the top-level var mapping preserves the link
+                        // (freshening/resolution) without following the cycle; deeper
+                        // structure is already covered by paramType/returnType.
+                        typeArgs = constraint.typeArgs.map { substituteConstraintArg(it, visitedVars) },
                         associatedTypeBindings = constraint.associatedTypeBindings
-                            .mapValues { (_, t) -> applyWithVisited(t, visitedVars, chainCache) },
+                            .mapValues { (_, t) -> substituteConstraintArg(t, visitedVars) },
                         abilityHash = constraint.abilityHash
                     )
                 }
@@ -441,9 +480,17 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
         is MezzeType.FunctionType ->
             occursCheck(typeVar, type.paramType) ||
             occursCheck(typeVar, type.returnType) ||
+            // Check the ability constraints' class-arg + associated-type binding
+            // vars DIRECTLY, not by recursing into their bound values. A binding
+            // value can be the function's own return var; deep-recursing there
+            // re-enters this FunctionType and loops forever (OOM) on recursive
+            // effect types (Promise/Semaphore/TVar). These positions hold plain
+            // vars, so a direct identity check is exactly the occurs-check we need;
+            // deeper structure is already covered by paramType/returnType.
             type.abilityConstraints.any { constraint ->
-                constraint.typeArgs.any { occursCheck(typeVar, it) } ||
-                constraint.associatedTypeBindings.values.any { occursCheck(typeVar, it) }
+                (constraint.typeArgs + constraint.associatedTypeBindings.values).any {
+                    it is MezzeType.VarType && it.variable == typeVar
+                }
             } ||
             (type.effects != null && occursCheckEffectRow(typeVar, type.effects!!))
 

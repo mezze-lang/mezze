@@ -20,7 +20,9 @@ data class TypeScheme(
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
                     typeVar = TypeVar.freshWithName(constraint.typeParam),
-                    typeArgs = constraint.typeArgs
+                    typeArgs = constraint.typeArgs,
+                    associatedTypeBindings = constraint.associatedTypeBindings,
+                    concreteReceiver = constraint.concreteReceiver
                 )
             }
             return InstantiationResult(
@@ -48,17 +50,28 @@ data class TypeScheme(
             val baseName = constraint.typeParam.removePrefix("'")
             val freshTypeVar = nameToFreshVar[baseName] ?: nameToFreshVar[constraint.typeParam]
             val instantiatedTypeArgs = constraint.typeArgs.map { applySubstitutionToType(it, substitution) }
+            // Freshen the associated-type binding values through the SAME
+            // substitution as the type, so a binding like `'out = 'c` points at the
+            // instance's fresh `'c` (the call's return var) — the load-bearing link
+            // for resolving a called `+`-fn's result type.
+            val instantiatedBindings = constraint.associatedTypeBindings
+                .mapValues { (_, v) -> applySubstitutionToType(v, substitution) }
+            val instantiatedReceiver = constraint.concreteReceiver?.let { applySubstitutionToType(it, substitution) }
             if (freshTypeVar != null) {
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
                     typeVar = freshTypeVar,
-                    typeArgs = instantiatedTypeArgs
+                    typeArgs = instantiatedTypeArgs,
+                    associatedTypeBindings = instantiatedBindings,
+                    concreteReceiver = instantiatedReceiver
                 )
             } else {
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
                     typeVar = TypeVar.freshWithName(constraint.typeParam),
-                    typeArgs = instantiatedTypeArgs
+                    typeArgs = instantiatedTypeArgs,
+                    associatedTypeBindings = instantiatedBindings,
+                    concreteReceiver = instantiatedReceiver
                 )
             }
         }
@@ -79,7 +92,17 @@ data class TypeScheme(
         data class FreshAbilityConstraint(
         val abilityName: String,
         val typeVar: TypeVar,
-        val typeArgs: List<MezzeType> = emptyList()
+        val typeArgs: List<MezzeType> = emptyList(),
+        // Associated-type bindings freshened alongside typeVar/typeArgs. The bound
+        // values are the callee's own (now instantiated) type vars — e.g. the
+        // fresh return var for a `+`-using fn's `'out` — so the call site can emit
+        // an AssociatedTypeResolution that pins them to the matched impl's output.
+        val associatedTypeBindings: Map<String, MezzeType> = emptyMap(),
+        // Concrete receiver when the ability's `for 'l` was concrete at
+        // generalization (e.g. `NumAdd Int 'a` from `{x}->x+1`). The call site uses
+        // this instead of `typeVar` for the receiver position so the obligation
+        // fires (and rejects a bad receiver like Str) rather than resolving vacuously.
+        val concreteReceiver: MezzeType? = null
     )
 
     companion object {

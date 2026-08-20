@@ -1,8 +1,10 @@
 # Partial application (currying) tests
 # Basic partial application with closed records
-let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
+let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c -> 'c
 
-let add_five = add { x = 5 }  # expected: add_five : { y: Int } -> Int
+# Heterogeneous `+`: fixing the left operand to Int no longer forces the right
+# operand (or result) to Int — the NumAdd constraint stays open on the right.
+let add_five = add { x = 5 }  # expected: add_five : { y: 'a } with NumAdd 'a Int having 'out = 'b -> 'b
 
 let result1 = add_five { y = 10 }  # expected: result1 : Int
 
@@ -14,11 +16,11 @@ let sub_from_10 = sub { y = 10 }  # expected: sub_from_10 : { x: Int } -> Int
 let result2 = sub_from_10 { x = 15 }  # expected: result2 : Int
 
 # Chained partial application
-let add3 = { x, y, z } -> x + y + z  # expected: add3 : { x: 'a, y: 'a, z: 'a } with NumAdd 'a -> 'a
+let add3 = { x, y, z } -> x + y + z  # expected: add3 : { x: 'a, y: 'b, z: 'c } with NumAdd 'b 'a having 'out = 'e, NumAdd 'c 'e having 'out = 'd -> 'd
 
-let add_x = add3 { x = 1 }  # expected: add_x : { y: Int, z: Int } -> Int
+let add_x = add3 { x = 1 }  # expected: add_x : { y: 'a, z: 'b } with NumAdd 'a Int having 'out = 'd, NumAdd 'b 'd having 'out = 'c -> 'c
 
-let add_xy = add_x { y = 2 }  # expected: add_xy : { z: Int } -> Int
+let add_xy = add_x { y = 2 }  # expected: add_xy : { z: 'a } with NumAdd 'a Int having 'out = 'b -> 'b
 
 let result3 = add_xy { z = 3 }  # expected: result3 : Int
 

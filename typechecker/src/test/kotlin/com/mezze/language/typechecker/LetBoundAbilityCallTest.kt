@@ -155,9 +155,10 @@ class LetBoundAbilityCallTest {
     //
     // The cases above use a monomorphic `double : {n:Int} -> Int` — its return
     // is concretely Int at generation time. When the callee is polymorphic
-    // (`help : {a:'a,b:'a} with NumAdd 'a -> 'a`, pinned to Int only by its
-    // literal args during solving), the inherent method's target type can't be
-    // chosen statically. These exercise the deferred-dispatch path.
+    // (`help : {a:'l,b:'r} with NumAdd 'r 'l having 'out -> 'out`, whose 'out is
+    // pinned to Int only by its literal args during solving), the inherent
+    // method's target type can't be chosen statically. These exercise the
+    // deferred-dispatch path.
 
     @Test
     fun `parenthesized literal + to_str works`() {
@@ -220,8 +221,10 @@ class LetBoundAbilityCallTest {
 
     @Test
     fun `abs on a polymorphic call result (Int) works`() {
-        // `help {..}` returns `'a`, pinned to Int only by its literal args during
-        // solving; `.abs {}` must dispatch to Int.abs and the call type is Int.
+        // Under the class-parameter NumAdd ability, `help : {a:'l,b:'r} with
+        // NumAdd 'r 'l having 'out -> 'out`. `help { a = 5, b = 6 }` binds both
+        // 'l and 'r to Int, so the Int+Int impl resolves 'out to Int; `.abs {}`
+        // must then dispatch to Int.abs and the call type is Int.
         assertTypeChecks(
             """
             let help = { a, b } -> a + b
@@ -232,9 +235,9 @@ class LetBoundAbilityCallTest {
 
     @Test
     fun `abs on a polymorphic call result (Float) works`() {
-        // Same shape but the args pin `'a` to Float, so `.abs {}` dispatches to
-        // Float.abs whose return is Float. Proves the return type follows the
-        // solved receiver (the homogeneous-group heuristic couldn't do this).
+        // Same shape but the args pin 'l and 'r to Float, so the Float+Float impl
+        // resolves 'out to Float and `.abs {}` dispatches to Float.abs whose return
+        // is Float. Proves the return type follows the solved receiver.
         assertTypeChecks(
             """
             let help = { a, b } -> a + b

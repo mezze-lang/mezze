@@ -48,7 +48,7 @@ class GenericRecursiveFoldTest {
                 f,
               }
 
-            let sum = { tree } -> fold { tree, acc = 0, f = { acc, val } -> acc + val }
+            let sum = { tree: Tree Int } -> fold { tree, acc = 0, f = { acc, val } -> acc + val }
         """.trimIndent()
 
         val parsed = parser.parseParsedModule(source, "test.mz")
@@ -90,6 +90,15 @@ class GenericRecursiveFoldTest {
         //
         // fold : { tree: Tree 'a, acc: 'b, f: { acc: 'b, val: 'a } -> 'b } -> 'b
         // sum  : { tree: Tree Int } -> Int
+        //
+        // `sum`'s `tree` is annotated `Tree Int` to pin the element type. Under
+        // heterogeneous `+` (NumAdd 'r for 'l having 'out), `acc + val` no longer
+        // forces the accumulator and element onto the same type — with `acc = 0`
+        // fixing the left operand and the result to Int, the right operand `val`
+        // is left ambiguous (Int+Int and Int+Nat both give Int), so an
+        // unannotated `sum` would infer the more general `Tree 'a` element.
+        // Pinning `tree: Tree Int` keeps this test focused on alias preservation
+        // and the fold's element/accumulator non-collapse.
 
         // sum's `tree` should print as the in-scope alias `Tree Int`,
         // NOT the expanded inline variant. Same for `fold` — `tree`

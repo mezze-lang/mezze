@@ -343,9 +343,22 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         else -> bodyResult.abilityConstraints
             .distinctBy { it.abilityName to it.typeVar.id }
             .map { ab ->
+                // Carry the associated-type link (e.g. `having 'out = 'c`) onto the
+                // stored constraint so the call site can re-emit an
+                // AssociatedTypeResolution against the freshened `'out`. Without
+                // this, an inferred `{x,y}->x+y` stores `with NumAdd 'r 'l` but
+                // forgets that its return var IS the `'out`, so calling it leaves
+                // the result unresolved (`ans : 'a`). We match a body
+                // AssociatedTypeResolution to this constraint by ability + primary
+                // type var (the receiver `'l`).
+                val bindings = bodyResult.associatedTypeConstraints
+                    .filter { it.abilityName == ab.abilityName && it.primaryTypeVar.id == ab.typeVar.id }
+                    .flatMap { res -> res.associatedTypeVars.entries }
+                    .associate { (name, assocVar) -> name to (MezzeType.VarType(assocVar) as MezzeType) }
                 MezzeType.FunctionAbilityConstraint(
                     abilityName = ab.abilityName,
                     typeArgs = listOf<MezzeType>(MezzeType.VarType(ab.typeVar)) + ab.typeArgs,
+                    associatedTypeBindings = bindings,
                     abilityHash = ab.abilityHash
                 )
             }
@@ -925,6 +938,38 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                 } else null
             }
             collector.abilityConstraints.addAll(methodLevelConstraints)
+
+            // Re-emit an AssociatedTypeResolution for each called-fn ability
+            // obligation that carries associated-type bindings (`having 'out = 'c`).
+            // The AbilityRequired above only *checks* the obligation; it never pins
+            // the associated `'out` var to the matched impl's `having` type. So a
+            // call `my_func {x=5, y=8.6}` where `my_func : … with NumAdd 'r 'l
+            // having 'out = 'c -> 'c` would leave the result var `'c` unresolved
+            // (`ans : 'a`). This mirrors the direct-`+` path in
+            // ExprMethodConstraints; solveAssociatedTypeResolution then matches the
+            // impl by the full class-arg tuple and unifies `'out` with `Float`.
+            // Rejection of unimplemented pairs (e.g. Int+Str) stays with the
+            // unchanged AbilityRequired — this constraint only resolves, never
+            // accepts (it defers when no impl matches).
+            val associatedTypeResolutions = funcType.abilityConstraints.mapNotNull { constraint ->
+                if (constraint.associatedTypeBindings.isEmpty()) return@mapNotNull null
+                val primary = (constraint.typeArgs.firstOrNull() as? MezzeType.VarType)?.variable
+                    ?: return@mapNotNull null
+                val assocVars = constraint.associatedTypeBindings.mapNotNull { (name, bound) ->
+                    (bound as? MezzeType.VarType)?.let { name to it.variable }
+                }.toMap()
+                if (assocVars.isEmpty()) return@mapNotNull null
+                val classArgVars = constraint.typeArgs.mapNotNull { (it as? MezzeType.VarType)?.variable }
+                Constraint.AssociatedTypeResolution(
+                    abilityName = constraint.abilityName,
+                    primaryTypeVar = primary,
+                    associatedTypeVars = assocVars,
+                    classArgTypeVars = classArgVars,
+                    context = "Call-site associated type resolution for ${constraint.abilityName}",
+                    loc = expr.loc
+                )
+            }
+            collector.associatedTypeConstraints.addAll(associatedTypeResolutions)
         }
     }
 

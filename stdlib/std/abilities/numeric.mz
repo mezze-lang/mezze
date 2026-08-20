@@ -1,7 +1,12 @@
 ## Addition. Desugars the `+` operator.
-ability NumAdd for 'a where {
+##
+## `'r` is the right-operand type (a class parameter, so each ordered `(l, r)`
+## pair is a distinct impl) and `'out` the result. This lets heterogeneous
+## additions coexist — e.g. `Int + Float -> Float` — while the same-type impls
+## bind `'r`/`'out` to the receiver, so `Int + Int -> Int`.
+ability NumAdd 'r for 'l having 'out where {
   ## Add two values.
-  add: { it: 'a, r: 'a } -> 'a
+  add: { it: 'l, r: 'r } -> 'out
 }
 
 ## Subtraction and negation. Desugars `-` (binary and unary).

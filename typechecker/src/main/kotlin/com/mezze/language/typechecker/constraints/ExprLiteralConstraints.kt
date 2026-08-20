@@ -174,6 +174,47 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
                         )
                     }
 
+                    // When a class-param obligation's receiver was concrete at
+                    // generalization (`NumAdd Int 'a`, the `Int` from a literal), pin
+                    // the freshened receiver var to that concrete type so the
+                    // AbilityRequired above sees the real receiver and can REJECT a
+                    // bad one — e.g. `f {x = "s"}` must fail on the missing
+                    // `NumAdd Int Str` impl, not launder past an unresolved var.
+                    val concreteReceiverEqualities = instantiation.freshConstraints.mapNotNull { freshConstraint ->
+                        freshConstraint.concreteReceiver?.let { receiver ->
+                            Constraint.Equality(
+                                left = MezzeType.VarType(freshConstraint.typeVar),
+                                right = receiver,
+                                context = "Concrete ability receiver for ${freshConstraint.abilityName}",
+                                loc = expr.loc
+                            )
+                        }
+                    }
+
+                    // For each instantiated ability obligation carrying associated-type
+                    // bindings (`having 'out = 'c`), emit an AssociatedTypeResolution
+                    // over the freshened vars. This is what pins a called polymorphic
+                    // `+`-fn's result: `my_func {x=5, y=8.6}` resolves `'out` to Float
+                    // once the args make `'l`/`'r` concrete. AbilityRequired above still
+                    // enforces rejection of unimplemented pairs; this only resolves.
+                    val associatedTypeResolutions = instantiation.freshConstraints.mapNotNull { freshConstraint ->
+                        if (freshConstraint.associatedTypeBindings.isEmpty()) return@mapNotNull null
+                        val assocVars = freshConstraint.associatedTypeBindings.mapNotNull { (name, bound) ->
+                            (bound as? MezzeType.VarType)?.let { name.removePrefix("'") to it.variable }
+                        }.toMap()
+                        if (assocVars.isEmpty()) return@mapNotNull null
+                        val classArgVars = (listOf(MezzeType.VarType(freshConstraint.typeVar)) + freshConstraint.typeArgs)
+                            .mapNotNull { (it as? MezzeType.VarType)?.variable }
+                        Constraint.AssociatedTypeResolution(
+                            abilityName = freshConstraint.abilityName,
+                            primaryTypeVar = freshConstraint.typeVar,
+                            associatedTypeVars = assocVars,
+                            classArgTypeVars = classArgVars,
+                            context = "Call-site associated type resolution for ${freshConstraint.abilityName}",
+                            loc = expr.loc
+                        )
+                    }
+
                     val type = instantiation.type
                     val effects = when (type) {
                         is MezzeType.SuspendType -> type.effects.effects
@@ -188,10 +229,11 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
 
                     ConstraintResult(
                         type = type,
-                        constraints = emptyList(),
+                        constraints = concreteReceiverEqualities,
                         effects = effects,
                         effectInstances = effectInstances,
                         abilityConstraints = abilityConstraints,
+                        associatedTypeConstraints = associatedTypeResolutions,
                         usedVariables = setOf(lookupKeyString),
                         referencedBindings = setOf(referencedBinding)
                     )

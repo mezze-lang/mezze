@@ -278,7 +278,23 @@ class ExpressionConstraintGenerator {
         return when (type) {
             is MezzeType.VarType -> setOf(type.variable)
             is MezzeType.FunctionType -> {
-                getFreeTypeVariables(type.paramType) + getFreeTypeVariables(type.returnType)
+                // Include vars that appear ONLY in the ability constraints — both the
+                // class-arg vars and the associated-type binding vars (`having 'out =
+                // 'c`). Otherwise instantiation fails to freshen a stored `'out`, so
+                // two uses of a polymorphic `+`-fn share the same `'out` var and its
+                // resolution leaks across call sites. Collect the constraint vars
+                // DIRECTLY (they are always plain VarTypes) rather than recursing:
+                // an associated-type binding's value can be the function's own return
+                // var, which re-enters this FunctionType and — with no visited-set —
+                // recurses forever (OOM). The paramType/returnType recursion already
+                // covers any deeper structure.
+                val constraintVars = type.abilityConstraints.flatMap { ac ->
+                    (ac.typeArgs + ac.associatedTypeBindings.values).mapNotNull {
+                        (it as? MezzeType.VarType)?.variable
+                    }
+                }
+                getFreeTypeVariables(type.paramType) + getFreeTypeVariables(type.returnType) +
+                    constraintVars
             }
             is MezzeType.RecordType -> {
                 type.fields.values.flatMap { getFreeTypeVariables(it) }.toSet()
@@ -317,6 +333,14 @@ class ExpressionConstraintGenerator {
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
                         typeArgs = constraint.typeArgs.map { applyTypeVarSubstitution(it, substitution) },
+                        // Freshen the associated-type binding vars too (e.g. `'out = 'c`),
+                        // and never drop them: instantiation must carry the `having`
+                        // link so the call site can resolve `'out` against the freshened
+                        // return var. Dropping it here leaves a called `+`-fn's result
+                        // unresolved (`ans : 'a`).
+                        associatedTypeBindings = constraint.associatedTypeBindings.mapValues { (_, v) ->
+                            applyTypeVarSubstitution(v, substitution)
+                        },
                         abilityHash = constraint.abilityHash
                     )
                 }

@@ -55,7 +55,7 @@ class ShorthandFieldInferenceTest {
             result
             """.trimIndent(),
             "result",
-            "{ n: Int } -> Int"
+            "{ n: 'a } with NumAdd Int 'a -> Int"
         )
     }
 
@@ -81,7 +81,7 @@ class ShorthandFieldInferenceTest {
             caller
             """.trimIndent(),
             "caller",
-            "{ a: 'a, b: 'a } with NumAdd 'a -> 'a"
+            "{ a: 'a, b: 'b } with NumAdd 'b 'a having 'out = 'c -> 'c"
         )
     }
 
@@ -185,7 +185,7 @@ class ShorthandFieldInferenceTest {
             allShorthand
             """.trimIndent(),
             "allShorthand",
-            "{ x: 'a, y: 'a, z: 'a } with NumAdd 'a -> 'a"
+            "{ x: 'a, y: 'b, z: 'c } with NumAdd 'b 'a having 'out = 'e, NumAdd 'c 'e having 'out = 'd -> 'd"
         )
     }
 

@@ -429,12 +429,20 @@ class TypeApplicationExpansionTest {
 
     @Test
     fun `Error - type mismatch in parametric constructor`() {
+        // Under the class-parameter NumAdd ability, `val + "hello"` on an
+        // unconstrained `val: 'a` does not fail at the DEFINITION — `bad`
+        // generalizes to a polymorphic fn carrying `NumAdd Str 'a` (the obligation
+        // defers to the call site, the correct more-general behavior). The
+        // invariant "you can't add a Str to the payload" is enforced when `bad` is
+        // instantiated with a concrete payload: `Some { val = 5 }` needs
+        // `NumAdd Str Int`, which has no impl. Call it so the mismatch surfaces.
         val code = """
             type Option 'a = | None, Some { val: 'a } |
 
             let bad = {opt} -> match opt is
               Some { val } -> val + "hello"
               None -> 0
+            bad { opt = Some { val = 5 } }
         """.trimIndent()
 
         assertTypeCheckFails(code)

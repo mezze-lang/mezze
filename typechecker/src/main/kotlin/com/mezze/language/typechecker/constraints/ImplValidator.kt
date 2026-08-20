@@ -233,8 +233,27 @@ internal class ImplValidator(
             }
         }
 
-        val solver = ConstraintSolver(bodyContext, registry)
-        val solveResult = solver.solve(bodyResult.constraints)
+        // deferExistingAbilityImpls: an operator body (`+`, `<`, …) types its
+        // result as a fresh associated-type `'out` var, resolved via an
+        // AssociatedTypeResolution against the operand's ability impl. Feeding the
+        // body's ability + associated-type constraints into THIS isolated solve is
+        // what pins `'out` to a concrete type before the return-type check —
+        // otherwise `'out` stays a free var and unifies with the declared concrete
+        // return vacuously, silently accepting a lying body (the soundness hole:
+        // `impl Eq for Foo where { eq = {it,r} -> it.v + r.v }` — body Int, decl
+        // Bool). The top-level binding path (collectGlobalConstraints) already folds
+        // these in for the same reason; an impl op is just a function.
+        //
+        // The flag makes a merely-not-import-visible ability obligation defer to the
+        // top-level solve rather than reject here (e.g. `(it.compare {r}) < 0` over
+        // Int when the Int impl exists but isn't `use`d at this site). A
+        // genuinely-absent impl (`NumAdd Str`) still fails, leaving `'out`
+        // unresolved so the return check rejects — which is exactly the soundness
+        // guarantee we want.
+        val solver = ConstraintSolver(bodyContext, registry, deferExistingAbilityImpls = true)
+        val solveResult = solver.solve(
+            bodyResult.constraints + bodyResult.abilityConstraints + bodyResult.associatedTypeConstraints
+        )
 
         when (solveResult) {
             is ConstraintSolver.SolveResult.Failure -> {

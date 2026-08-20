@@ -3,8 +3,18 @@ use std::abilities::compare::{ Eq, Ord }
 use std::abilities::convert::{ Into, TryInto }
 use std::abilities::default::{ Default }
 
-impl NumAdd for Int where {
+impl NumAdd Int for Int having 'out = Int where {
   add = { it, r } -> __native_int_add { l = it, r = r }
+}
+
+## Int + Float -> Float (widen the Int operand).
+impl NumAdd Float for Int having 'out = Float where {
+  add = { it, r } -> it.to_float {} + r
+}
+
+## Int + Nat -> Int (widen the Nat operand).
+impl NumAdd Nat for Int having 'out = Int where {
+  add = { it, r } -> it + from_nat { n = r }
 }
 
 impl NumSub for Int where {

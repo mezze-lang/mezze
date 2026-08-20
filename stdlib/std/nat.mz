@@ -3,9 +3,20 @@ use std::abilities::compare::{ Eq, Ord }
 use std::abilities::convert::{ Into, TryInto }
 use std::abilities::default::{ Default }
 use std::int
+use std::float
 
-impl NumAdd for Nat where {
+impl NumAdd Nat for Nat having 'out = Nat where {
   add = { it, r } -> __native_nat_add { l = it, r = r }
+}
+
+## Nat + Int -> Int (widen the Nat receiver).
+impl NumAdd Int for Nat having 'out = Int where {
+  add = { it, r } -> std::int::from_nat { n = it } + r
+}
+
+## Nat + Float -> Float (widen the Nat receiver).
+impl NumAdd Float for Nat having 'out = Float where {
+  add = { it, r } -> std::float::from_nat { n = it } + r
 }
 
 impl NumMul for Nat where {

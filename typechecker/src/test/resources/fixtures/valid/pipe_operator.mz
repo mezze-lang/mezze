@@ -2,14 +2,14 @@
 # Basic pipe operator
 let square = { x } -> x * x  # expected: square : { x: 'a } with NumMul 'a -> 'a
 
-let add_ten = { x } -> x + 10  # expected: add_ten : { x: Int } -> Int
+let add_ten = { x } -> x + 10  # expected: add_ten : { x: 'a } with NumAdd Int 'a having 'out = Int -> Int
 
 let result1 = 5 |> square { x = @ }  # expected: result1 : Int
 
 let result2 = 5 |> add_ten { x = @ } |> square { x = @ }  # expected: result2 : Int
 
 # Pipe with partial application
-let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
+let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c -> 'c
 
 let multiply = { x, y } -> x * y  # expected: multiply : { x: 'a, y: 'a } with NumMul 'a -> 'a
 

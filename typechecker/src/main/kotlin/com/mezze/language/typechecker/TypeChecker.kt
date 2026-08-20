@@ -2,6 +2,7 @@ package com.mezze.language.typechecker
 
 import com.mezze.language.ast.*
 import com.mezze.language.ast.solving.Substitution
+import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parsedast.*
@@ -569,7 +570,13 @@ class TypeChecker(
                 transitiveAbilities[it.name] = it
             }
         }
-        val allAbilityDeclarations = transitiveAbilities + buildResult.registry.abilityDeclarations + importedAbilities
+        // Built-in ability decls (NumAdd, Ord, Eq, …) go in at LOWEST precedence so
+        // `2 + 3` resolves `.add` through the class-param-aware ability path even
+        // with no `use`. Map-`+` is right-biased: any real decl of the same name on
+        // the right wins, and DeclarationRegistry.from dedups the hash index (a
+        // built-in and an imported NumAdd share the same contentHash). See #231.
+        val allAbilityDeclarations = BuiltInAbilities.getRawAbilityDeclarations() +
+            transitiveAbilities + buildResult.registry.abilityDeclarations + importedAbilities
 
         return DeclarationRegistry.from(
             allTypeDeclarations, allAbilityDeclarations, allEffectDeclarations,

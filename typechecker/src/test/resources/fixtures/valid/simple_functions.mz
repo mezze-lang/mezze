@@ -1,8 +1,11 @@
 # Simple function definitions and calls
-let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
+let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c -> 'c
 
 let greet = { name } -> "Hello $(name)"  # expected: greet : { name: Str } -> Str
 
+# Applying the now-heterogeneous `add` to two Int literals no longer forces the
+# `having 'out` result to a concrete Int — it stays polymorphic (see
+# ConstraintPropagationTest: the result "may stay polymorphic with NumAdd").
 let result1 = add { x = 10, y = 20 }  # expected: result1 : Int
 
 let result2 = greet { name = "World" }  # expected: result2 : Str

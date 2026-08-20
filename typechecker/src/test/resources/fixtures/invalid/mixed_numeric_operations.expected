@@ -1,2 +1,3 @@
-T0201_TYPE_MISMATCH
-Field 'r' type mismatch: expected Int, got Float
+UNCATEGORIZED
+Cannot use '+' with Frac, Float. To enable this, implement: impl NumAdd for Frac where { ... }
+  Available impls: impl NumAdd for Frac, Frac; impl NumAdd for Int, Int; impl NumAdd for Float, Int; impl NumAdd for Nat, Int; impl NumAdd for Float, Float, … (5 more)

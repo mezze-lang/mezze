@@ -516,6 +516,22 @@ class ConstraintGenerator(
         }
 
         if (quantifiableVars.isNotEmpty() && !hasUserDefinedAbilityConstraints) {
+            // The solved function type still carries the `having 'out = 'c` link on
+            // its FunctionAbilityConstraints (stored at the lambda arrow). Pull those
+            // bindings across to the scheme's AbilityConstraint so a cross-decl call
+            // can resolve the associated type — TypeScheme.clearAbilityConstraints
+            // strips them from the stored type, so this parallel list is the only
+            // survivor. Match by ability name + primary (receiver) var.
+            val solvedAbilityConstraints =
+                (solvedType as? MezzeType.FunctionType)?.abilityConstraints ?: emptyList()
+            fun bindingsFor(abilityName: String, primaryVar: MezzeType.VarType?): Map<String, MezzeType> {
+                if (primaryVar == null) return emptyMap()
+                return solvedAbilityConstraints.firstOrNull { fac ->
+                    fac.abilityName == abilityName &&
+                        (fac.typeArgs.firstOrNull() as? MezzeType.VarType)?.variable?.id == primaryVar.variable.id
+                }?.associatedTypeBindings?.mapValues { (_, v) -> substitution.apply(v) } ?: emptyMap()
+            }
+
             val abilityConstraints = if (hasExplicitAbilityConstraints && authoritativeType is MezzeType.FunctionType) {
                 authoritativeType.abilityConstraints.mapNotNull { constraint ->
                     val typeVarArg = constraint.typeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
@@ -523,7 +539,9 @@ class ConstraintGenerator(
                         AbilityConstraint(
                             abilityName = constraint.abilityName,
                             typeParam = typeVarArg.variable.name,
-                            typeArgs = constraint.typeArgs
+                            typeArgs = constraint.typeArgs,
+                            associatedTypeBindings = constraint.associatedTypeBindings
+                                .mapValues { (_, v) -> substitution.apply(v) }
                         )
                     } else null
                 }
@@ -536,13 +554,34 @@ class ConstraintGenerator(
                     } else {
                         constraint.typeVar.id
                     }
-                    if (constraintVarId in quantifiableVarIds) {
+                    val resolvedTypeArgs = constraint.typeArgs.map { substitution.apply(it) }
+                    // Keep the constraint if the receiver OR ANY class-arg is
+                    // quantifiable. A class-param obligation like `NumAdd Int 'a`
+                    // (from `{x}->x+1`, where the literal `1` fixes the class-arg to
+                    // Int and the receiver `'a` is the generalized param) must be
+                    // carried even though the receiver alone might resolve to a
+                    // non-quantifiable var — otherwise calling the generalized fn
+                    // with a bad receiver type (`f {x = "s"}`) has NO obligation to
+                    // reject `NumAdd Int Str`, silently laundering the type error.
+                    val classArgQuantifiable = resolvedTypeArgs.any { arg ->
+                        collectFreeTypeVars(arg).any { it.id in quantifiableVarIds }
+                    }
+                    if (constraintVarId in quantifiableVarIds || classArgQuantifiable) {
                         val quantVar = quantifiableVars.find { it.id == constraintVarId }
-                        val resolvedTypeArgs = constraint.typeArgs.map { substitution.apply(it) }
+                        // If the receiver resolved to a CONCRETE type (not a var),
+                        // capture it — `typeParam` (a name) cannot, and losing it
+                        // would drop the obligation at the call site.
+                        val concreteReceiver = (resolvedConstraintVar as? MezzeType.VarType)?.let { null }
+                            ?: resolvedConstraintVar
                         AbilityConstraint(
                             abilityName = constraint.abilityName,
                             typeParam = quantVar?.name ?: constraint.typeVar.name,
-                            typeArgs = resolvedTypeArgs
+                            typeArgs = resolvedTypeArgs,
+                            associatedTypeBindings = bindingsFor(
+                                constraint.abilityName,
+                                resolvedConstraintVar as? MezzeType.VarType
+                            ),
+                            concreteReceiver = concreteReceiver
                         )
                     } else null
                 }

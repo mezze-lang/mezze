@@ -24,8 +24,9 @@ let inspectMatch = { opt } -> match opt is
 
 let inspectCond = { flag, x, y } -> if flag then x.to_dbg_str {} else y.to_dbg_str {}  # expected: inspectCond : { flag: Bool, x: 'a, y: 'b } with Inspect 'a, Inspect 'b -> Str
 
-# Combined with NumAdd: both constraints surface.
-let inspectAndAdd = { x, y } -> (x + y).to_dbg_str {}  # expected: inspectAndAdd : { x: 'a, y: 'a } with NumAdd 'a, Inspect 'a -> Str
+# Combined with NumAdd: both constraints surface. Heterogeneous `+` means x and y
+# may differ; the `having 'out` result var 'c is what must be Inspect-able.
+let inspectAndAdd = { x, y } -> (x + y).to_dbg_str {}  # expected: inspectAndAdd : { x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c, Inspect 'c -> Str
 
 let inspectField = { r } -> r.value.to_dbg_str {}  # expected: inspectField : { r: { value: 'a } } with Inspect 'a -> Str
 

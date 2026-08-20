@@ -32,7 +32,17 @@ class ConstraintSolver(
      * strict mode and enumerate the failure surface.
      */
     private val strictEffectRows: Boolean =
-        System.getenv("MEZZE_STRICT_EFFECT_ROWS") == "1"
+        System.getenv("MEZZE_STRICT_EFFECT_ROWS") == "1",
+    /**
+     * Impl-body validation mode. When an operator body (`+`, `<`, …) is solved
+     * in isolation to resolve its associated-type `'out` before the return-type
+     * check, an [Constraint.AbilityRequired] whose impl EXISTS somewhere but is
+     * not import-visible at this site must NOT fail — that obligation is properly
+     * checked at the use-site/top-level solve. A genuinely-ABSENT impl still
+     * fails, which is what lets the `'out` var stay unresolved and the return
+     * check reject (soundness). Only [ImplValidator] sets this.
+     */
+    private val deferExistingAbilityImpls: Boolean = false
 ) {
     private fun constraintPriority(c: Constraint): Int = when (c) {
         is Constraint.Equality -> 0
@@ -98,7 +108,7 @@ class ConstraintSolver(
         poisonedVars.addAll(constraintOriginVars(constraint))
     }
 
-    private val abilityChecker = AbilityChecker(context, registry)
+    private val abilityChecker = AbilityChecker(context, registry, deferExistingAbilityImpls)
 
     internal fun getGeneratedCodecImpls(): Collection<AbilityChecker.GeneratedCodecImpl> = abilityChecker.getGeneratedCodecImpls()
 
@@ -129,7 +139,6 @@ class ConstraintSolver(
         data class Success(
             val substitution: Substitution,
             val warnings: List<String> = emptyList(),
-            val resolvedAbilityConstraints: Set<Constraint.AbilityRequired> = emptySet(),
             val mustBeOpenTypes: Set<TypeVar> = emptySet(),
             val mustBeOpenRowVars: Set<RowVar> = emptySet(),
             val mustBeOpenBindings: Set<String> = emptySet(),
@@ -175,7 +184,6 @@ class ConstraintSolver(
         var substitution = Substitution.empty
         val errors = mutableListOf<ConstraintError>()
         val warnings = mutableListOf<String>()
-        val resolvedAbilities = mutableSetOf<Constraint.AbilityRequired>()
 
         val (inferredEqualities, inferenceErrors) = variantSolver.inferVariantTypes(constraints)
         collectInferenceErrors(inferenceErrors, constraints, errors)
@@ -190,7 +198,7 @@ class ConstraintSolver(
             it is Constraint.AbilityRequired || it is Constraint.AssociatedTypeResolution
         }
 
-        substitution = solveAbilityConstraints(abilityConstraints, substitution, warnings, errors, resolvedAbilities)
+        substitution = solveAbilityConstraints(abilityConstraints, substitution, warnings, errors)
 
         val hcResult = solveHasConstructorFixpoint(nonAbilityConstraints, substitution, warnings, errors)
         substitution = hcResult.substitution
@@ -231,7 +239,6 @@ class ConstraintSolver(
             SolveResult.Success(
                 substitution = substitution,
                 warnings = warnings,
-                resolvedAbilityConstraints = resolvedAbilities,
                 mustBeOpenTypes = mustBeOpenTypes.toSet(),
                 mustBeOpenRowVars = mustBeOpenRowVars.toSet(),
                 mustBeOpenBindings = mustBeOpenBindings.toSet(),
@@ -266,7 +273,6 @@ class ConstraintSolver(
         inputSubst: Substitution,
         warnings: MutableList<String>,
         errors: MutableList<ConstraintError>,
-        resolvedAbilities: MutableSet<Constraint.AbilityRequired>
     ): Substitution {
         var substitution = inputSubst
         for (constraint in abilityConstraints) {
@@ -277,11 +283,6 @@ class ConstraintSolver(
                 is ConstraintResult.Success -> {
                     substitution = result.substitution.compose(substitution)
                     warnings.addAll(result.warnings)
-                    if (appliedConstraint is Constraint.AbilityRequired) {
-                        if (result.warnings.none { it.contains("deferred") }) {
-                            resolvedAbilities.add(appliedConstraint)
-                        }
-                    }
                 }
                 is ConstraintResult.Failure -> {
                     if (!isCascade(constraint)) {

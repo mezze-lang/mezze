@@ -44,17 +44,16 @@ class DebugUnificationTest {
         assertNotNull(xType, "x type should not be null")
         assertNotNull(yType, "y type should not be null")
 
-        // Check if both parameters have the same type variable (this is the main achievement)
+        // Under heterogeneous `+` (NumAdd 'r for 'l having 'out), an unannotated
+        // {x, y} -> x + y infers {x:'l, y:'r} with NumAdd 'r 'l having 'out -> 'out,
+        // where x and y are DISTINCT type variables (they may differ, e.g. Int + Float).
         if (xType is MezzeType.VarType && yType is MezzeType.VarType) {
-            assertEquals(xType.variable.name, yType.variable.name,
-                        "x and y should have the same type variable. x: ${xType.variable.name}, y: ${yType.variable.name}")
-            println("SUCCESS: Both parameters use the same type variable: ${xType.variable.name}")
+            assertNotEquals(xType.variable.name, yType.variable.name,
+                        "x and y should have distinct type variables under heterogeneous +. x: ${xType.variable.name}, y: ${yType.variable.name}")
 
-            // Note: Return type unification is a separate concern and may use a different type variable
-            // The key achievement is that parameters are unified
-            println("INFO: Return type is: $returnType")
+            // The result type 'out is a separate type variable from the operands.
         } else {
-            fail("Expected both x and y to have the same type. x: $xType, y: $yType")
+            fail("Expected both x and y to be type variables. x: $xType, y: $yType")
         }
     }
 }

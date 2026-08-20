@@ -73,6 +73,11 @@ tasks.test {
 
     maxParallelForks = 1
 
+    // The suite runs in a single fork (maxParallelForks = 1) and the Truffle
+    // engine retains CallTargets across tests, so cumulative heap grows over a
+    // full 2000+ test run. Give the test JVM headroom.
+    maxHeapSize = "3g"
+
     systemProperty("junit.jupiter.execution.timeout.default", "60s")
     systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")
 
