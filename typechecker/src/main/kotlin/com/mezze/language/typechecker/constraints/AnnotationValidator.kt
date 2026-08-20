@@ -383,13 +383,29 @@ internal class AnnotationValidator(
         }
     }
 
-    /** Minimal annotation→type conversion for concrete `having` values (R2).
+    /** Annotation→type conversion for concrete `having` values (R2). Handles every
+     *  concrete annotation shape so the R2 check compares by [prettyPrintType]
+     *  equality instead of skipping. Only [ParsedFunctionType] (and any future
+     *  shape) still falls back to a fresh var — a function-typed associated value
+     *  is exotic and its structural comparison isn't worth the effort here; the
+     *  fresh var means "don't check" for that one case, never unsound (a missed
+     *  check only fails to REJECT a wrong `having`, and the impl body's own use of
+     *  the associated type is still checked separately, cf. #222).
      *  Public so the constraint generator can precompute impl-declared bindings. */
     fun publicAnnToMezze(annotation: ParsedTypeAnnotation): MezzeType = when (annotation) {
         is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
         is ParsedTypeApp -> WellKnownTypeApp.of(annotation.constructor, annotation.args.map { publicAnnToMezze(it) })
+        is ParsedQualifiedType -> WellKnownTypeApp.of(annotation.typeName, annotation.args.map { publicAnnToMezze(it) })
         is ParsedSeqType -> MezzeType.SeqType(publicAnnToMezze(annotation.elementType))
-        else -> MezzeType.VarType(TypeVar.fresh())  // conservative: treat unknown shapes as "don't check"
+        is ParsedRecordType -> MezzeType.RecordType(
+            fields = annotation.entries.associate { it.name to publicAnnToMezze(it.type) },
+            rowVar = if (annotation.isOpen) RowVar.fresh() else null,
+        )
+        is ParsedVariantType -> MezzeType.VariantType(
+            constructors = annotation.constructors.associate { it.name to it.dataType?.let { d -> publicAnnToMezze(d) } },
+            rowVar = if (annotation.isOpen) RowVar.fresh() else null,
+        )
+        is ParsedFunctionType -> MezzeType.VarType(TypeVar.fresh())  // exotic; not compared structurally
     }
 
     private fun collectTypeVars(type: MezzeType): Set<TypeVar> {

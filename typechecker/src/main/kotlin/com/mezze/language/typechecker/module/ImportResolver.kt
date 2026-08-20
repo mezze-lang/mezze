@@ -231,8 +231,28 @@ class ImportResolver(
 
                 val errors = mutableListOf<ModuleError>()
 
+                // #228: items this module re-exports via `pub use` are not in its own
+                // `exports` map (that map holds only its OWN declarations). Resolve them
+                // transitively and fold them into the import context so a downstream
+                // `use mid::{ greet }` sees `greet` that `mid` re-exports from `inner`.
+                val reexportedBindings = mutableMapOf<String, ImportedBinding>()
+
                 for (item in path.items) {
                     if (!module.exports.containsKey(item.name)) {
+                        val reexport = resolvePubUseReexport(module, item.name, mutableSetOf())
+                        if (reexport != null) {
+                            val (originModulePath, export) = reexport
+                            reexportedBindings[item.alias ?: item.name] = ImportedBinding(
+                                name = item.alias ?: item.name,
+                                originalName = export.originalName,
+                                modulePath = originModulePath,
+                                type = export.mezzeType,
+                                isQualified = false,
+                                contentHash = export.contentHash
+                            )
+                            continue
+                        }
+
                         val existsButPrivate = checkIfItemExistsButPrivate(module, item.name)
 
                         if (existsButPrivate) {
@@ -255,6 +275,10 @@ class ImportResolver(
 
                 if (errors.isNotEmpty()) {
                     return ProcessResult.Failure(errors)
+                }
+
+                if (reexportedBindings.isNotEmpty()) {
+                    context = context.merge(ModuleImportContext.empty().copy(importedBindings = reexportedBindings))
                 }
 
                 ProcessResult.Success(
@@ -583,6 +607,48 @@ class ImportResolver(
             effectsByHash = effectsByHash,
             abilitiesByHash = abilitiesByHash
         )
+    }
+
+    /**
+     * #228: resolve an item that `module` re-exports via `pub use`. A module's own
+     * `exports` map holds only its declarations, so `pub use inner::{ greet }` leaves
+     * `greet` invisible to importers. This walks `module`'s `pub use` decls: for each
+     * that could supply [wantedName] (a selective `pub use src::{ … greet … }`, or a
+     * bare `pub use src` glob), it loads `src`, resolves the item there (recursing so
+     * re-export chains work), and returns the (origin module path, export). `visited`
+     * breaks `pub use` cycles. Returns null if no re-export provides the name.
+     */
+    private fun resolvePubUseReexport(
+        module: LoadedModule,
+        wantedName: String,
+        visited: MutableSet<String>,
+    ): Pair<String, ExportedItem>? {
+        if (!visited.add(module.modulePath)) return null
+
+        for (pubUse in module.index.pubUseDeclarations) {
+            // What does this `pub use` bring into scope, and under what local name?
+            // For a Selective import the local name is the item's alias-or-name; the
+            // ORIGINAL name in the source module is item.name. A bare Module glob
+            // re-exports every source export under its own name.
+            val (srcSegments, originalName) = when (val p = pubUse.path) {
+                is ParsedUsePath.Selective -> {
+                    val match = p.items.firstOrNull { (it.alias ?: it.name) == wantedName }
+                        ?: continue
+                    p.modulePath.segments to match.name
+                }
+                is ParsedUsePath.Module -> p.path.segments to wantedName
+            }
+
+            val srcModule = when (val r = loader.loadModule(ModulePath(srcSegments))) {
+                is ModuleLoadResult.Success -> r.module
+                is ModuleLoadResult.Failure -> continue
+            }
+
+            srcModule.exports[originalName]?.let { return srcModule.modulePath to it }
+            // Chain: the source itself may re-export the item.
+            resolvePubUseReexport(srcModule, originalName, visited)?.let { return it }
+        }
+        return null
     }
 
     private fun checkIfItemExistsButPrivate(module: LoadedModule, itemName: String): Boolean {

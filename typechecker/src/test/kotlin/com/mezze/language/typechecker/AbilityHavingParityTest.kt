@@ -118,6 +118,72 @@ class AbilityHavingParityTest {
         assertNotNull(e, "produce resolves 'out=Str on a concrete Int; annotating Int must be rejected")
     }
 
+    /** #229: the wrong-`having` check must fire for EVERY concrete annotation
+     *  shape, not just named types. Before hardening, publicAnnToMezze returned a
+     *  fresh var (== "don't check") for record / variant / qualified `having`
+     *  values, so a wrong record-shaped `having` silently passed. Impl declares
+     *  `'out = Str`; annotating `having 'out = { x: Int }` must be rejected. */
+    @Test
+    fun `wrong record-shaped having on a generic annotation is a type error`() {
+        val e = err(
+            """
+            ability Producer for 'a having 'out where {
+              produce: { it: 'a } -> 'out
+            }
+            impl Producer for Int having 'out = Str where {
+              produce = { it } -> "x"
+            }
+            pub let bad: { x: 'a } with Producer 'a having 'out = { x: Int } -> 'out = { x } ->
+              x.produce {}
+            """.trimIndent()
+        )
+        assertNotNull(e, "impl declares 'out = Str; a record-shaped `having 'out = { x: Int }` must be rejected")
+    }
+
+    /** #229 sibling: a wrong `having` value naming a user VARIANT type must also be
+     *  rejected. This resolves through the named-type arm (not the record arm the
+     *  hardening added), so it's a belt-and-suspenders check that the wrong-having
+     *  rejection isn't specific to primitives — an inline `| A, B |` can't sit in a
+     *  `having` position (parser limit), so the variant is named via `type`. */
+    @Test
+    fun `wrong variant-typed having on a generic annotation is a type error`() {
+        val e = err(
+            """
+            type Color = | Red, Green |
+            ability Producer for 'a having 'out where {
+              produce: { it: 'a } -> 'out
+            }
+            impl Producer for Int having 'out = Str where {
+              produce = { it } -> "x"
+            }
+            pub let bad: { x: 'a } with Producer 'a having 'out = Color -> 'out = { x } ->
+              x.produce {}
+            """.trimIndent()
+        )
+        assertNotNull(e, "impl declares 'out = Str; a variant-typed `having 'out = Color` must be rejected")
+    }
+
+    /** #229 guard: the CORRECT `having` value (matching the impl) must still pass —
+     *  the hardened converter must not over-reject a right annotation. */
+    @Test
+    fun `correct having on a generic annotation still typechecks`() {
+        assertNull(
+            err(
+                """
+                ability Producer for 'a having 'out where {
+                  produce: { it: 'a } -> 'out
+                }
+                impl Producer for Int having 'out = Str where {
+                  produce = { it } -> "x"
+                }
+                pub let ok: { x: 'a } with Producer 'a having 'out = Str -> 'out = { x } ->
+                  x.produce {}
+                """.trimIndent()
+            ),
+            "the impl declares 'out = Str, so `having 'out = Str` must be accepted"
+        )
+    }
+
     // ─── ANNOTATION RULES: having optional; .try {} unaffected ───────────
 
     @Test

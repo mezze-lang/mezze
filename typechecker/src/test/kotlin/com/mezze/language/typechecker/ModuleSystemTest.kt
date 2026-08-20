@@ -731,4 +731,55 @@ class ModuleSystemTest {
             println("Module system issue (expected for now): ${e.message}")
         }
     }
+
+    // ── #228: `pub use` re-export ────────────────────────────────────────────
+    // A module's own `exports` map holds only its OWN declarations, so a re-export
+    // `pub use inner::{ greet }` was a no-op and a downstream `use mid::{ greet }`
+    // failed with M0803. These pin that the re-exported item resolves through the
+    // intermediary, honoring aliases, while a genuinely-absent name still fails.
+
+    private fun writeModule(name: String, body: String): Path {
+        val srcDir = tempDir.resolve("src")
+        Files.createDirectories(srcDir)
+        return Files.writeString(srcDir.resolve("$name.mz"), body.trimIndent())
+    }
+
+    @Test
+    fun `pub use re-export resolves through the intermediary module`() {
+        writeModule("inner", "pub let greet: { name: Str } -> Str = { name } -> \"hi\"")
+        writeModule("mid", "pub use inner::{ greet }")
+        val main = "use mid::{ greet }\nlet go: {} -> Str = { } -> greet { name = \"x\" }"
+        writeModule("main", main)
+
+        val parsed = parser.parseParsedModule(main.trimIndent(), "test.mz")
+        val typed = typeChecker.typeCheck(parsed, tempDir)
+        assertNotNull(typed, "downstream module must see `greet` re-exported by `mid`")
+    }
+
+    @Test
+    fun `pub use re-export honors an alias`() {
+        writeModule("inner", "pub let greet: { name: Str } -> Str = { name } -> \"hi\"")
+        writeModule("mid", "pub use inner::{ greet as hello }")
+        val main = "use mid::{ hello }\nlet go: {} -> Str = { } -> hello { name = \"x\" }"
+        writeModule("main", main)
+
+        val parsed = parser.parseParsedModule(main.trimIndent(), "test.mz")
+        val typed = typeChecker.typeCheck(parsed, tempDir)
+        assertNotNull(typed, "the re-export alias `hello` must be importable")
+    }
+
+    @Test
+    fun `importing a name no module re-exports still fails`() {
+        // Regression guard: the re-export path must NOT make every name resolve.
+        writeModule("inner", "pub let greet: { name: Str } -> Str = { name } -> \"hi\"")
+        writeModule("mid", "pub use inner::{ greet }")
+        val main = "use mid::{ nope }\nlet go: {} -> Str = { } -> \"x\""
+        writeModule("main", main)
+
+        val parsed = parser.parseParsedModule(main.trimIndent(), "test.mz")
+        // The missing import surfaces as M0803 ExportNotFound (a ModuleError), the
+        // same as any absent export — the re-export path must not swallow it.
+        val err = assertThrows(ModuleError.ExportNotFound::class.java) { typeChecker.typeCheck(parsed, tempDir) }
+        assertTrue(err.message.contains("nope"), "a name neither declared nor re-exported must still error")
+    }
 }

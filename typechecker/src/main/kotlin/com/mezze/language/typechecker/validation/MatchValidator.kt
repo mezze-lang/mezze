@@ -371,15 +371,19 @@ class MatchValidator(
      *    irrefutable record pattern (every listed entry irrefutable); OR
      *  - (S) partitioning the scrutinee's fields into FINITE (closed variant / Bool)
      *    and OPAQUE (everything else), every opaque field is irrefutably bound in
-     *    every arm AND either there are no finite fields, or there is exactly ONE
-     *    finite field and its constructors are fully covered across the arms.
+     *    every arm AND the finite fields are fully covered:
+     *      · no finite fields                → total (all opaque irrefutable);
+     *      · exactly ONE finite field        → its constructors covered across arms
+     *        (via [missingInVariantField], so nested payloads recurse for free);
+     *      · ≥2 finite fields (#220)         → every COMBINATION in the cartesian
+     *        product of the fields' constructor sets is covered by some arm
+     *        (see [recordProductExhaustivenessErrors]). This catches the product
+     *        hole `{a=T,b=T}` + `{a=F,b=F}` misses `{a=T,b=F}` WITHOUT demanding a
+     *        catch-all — a `_` is only required past [MAX_RECORD_PRODUCT] combos.
      *
-     * With ≥2 finite fields we do NOT reason per-field (that is the unsound PRODUCT
-     * case: `{a=T,b=T}` + `{a=F,b=F}` covers each field but misses `{a=T,b=F}`), so
-     * we conservatively require a catch-all. This never accepts a non-exhaustive
-     * match; it only asks for a `_` on the rare multi-variant-field record match.
-     * Guarded / if-let arms never count. Reuses [missingInVariantField] for the
-     * single finite field, so nested variant payloads recurse for free.
+     * Conservative throughout: a refutable payload under a constructor does NOT
+     * count as covering that field-constructor, so we may ask for more arms but
+     * never accept a hole. Guarded / if-let arms never count.
      */
     private fun recordExhaustivenessErrors(
         matchExpr: ParsedMatch,
