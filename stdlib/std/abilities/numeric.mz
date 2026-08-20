@@ -9,12 +9,10 @@ ability NumAdd 'r for 'l having 'out where {
   add: { it: 'l, r: 'r } -> 'out
 }
 
-## Subtraction and negation. Desugars `-` (binary and unary).
+## Subtraction. Desugars the binary `-` operator.
 ability NumSub for 'a where {
   ## Subtract r from it.
-  sub: { it: 'a, r: 'a } -> 'a,
-  ## Negate the value.
-  neg: { it: 'a } -> 'a
+  sub: { it: 'a, r: 'a } -> 'a
 }
 
 ## Multiplication. Desugars the `*` operator.

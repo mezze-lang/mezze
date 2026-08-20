@@ -54,7 +54,6 @@ pub let iff: { l: Bool, r: Bool } -> Bool = { l, r } ->
   }
 
 impl Bool where {
-  ## Logical negation — flips the boolean.
   not = { it } -> __native_bool_not { b = it },
   to_str = { it } -> __native_bool_to_str { b = it },
   to_int = { it } -> if it then 1 else 0,

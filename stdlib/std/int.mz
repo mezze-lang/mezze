@@ -19,7 +19,6 @@ impl NumAdd Nat for Int having 'out = Int where {
 
 impl NumSub for Int where {
   sub = { it, r } -> __native_int_subtract { l = it, r = r },
-  neg = { it } -> __native_int_neg { n = it },
 }
 
 impl NumMul for Int where {
@@ -146,6 +145,7 @@ pub let clamp: { n: Int, min: Int, max: Int } -> Int = { n, min, max } ->
 pub let to_nat: { n: Int } -> Option Nat = { n } -> __native_int_to_nat { n = n }
 
 impl Int where {
+  neg = { it } -> __native_int_neg { n = it },
   to_float = { it } -> __native_int_to_float { n = it },
   to_str = { it } -> __native_int_to_str { n = it },
   abs = { it } -> __native_int_abs { n = it },

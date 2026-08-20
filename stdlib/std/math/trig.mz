@@ -37,17 +37,17 @@ pub let radians_to_degrees = { radians: Float } -> radians * (180.0 / pi)
 ## Hyperbolic tangent.
 pub let tanh = { n: Float } -> do
   let exp_pos = core::exp { n = n }
-  let exp_neg = core::exp { n = -n }
+  let exp_neg = core::exp { n = n.neg {} }
   (exp_pos - exp_neg) / (exp_pos + exp_neg)
 
 ## Hyperbolic sine.
 pub let sinh = { n: Float } -> do
   let exp_pos = core::exp { n = n }
-  let exp_neg = core::exp { n = -n }
+  let exp_neg = core::exp { n = n.neg {} }
   (exp_pos - exp_neg) / 2.0
 
 ## Hyperbolic cosine.
 pub let cosh = { n: Float } -> do
   let exp_pos = core::exp { n = n }
-  let exp_neg = core::exp { n = -n }
+  let exp_neg = core::exp { n = n.neg {} }
   (exp_pos + exp_neg) / 2.0

@@ -2217,16 +2217,12 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
                     }
                 }
             } else {
-                // Not a literal, desugar to NumSub.neg call
-                val opStream = stream.advance()
-                val operand = unaryExpression(opStream)
-                when (operand) {
-                    is ParseResult.Success -> ParseResult.Success(
-                        desugarUnaryOperatorParsed(token.text, operand.value, opLoc.spanTo(operand.value.loc)),
-                        operand.remaining
-                    )
-                    is ParseResult.Failure -> operand
-                }
+                // The `-` prefix operator was removed: `-5` still folds into a
+                // negative literal (handled above), but `-x` on a non-literal
+                // must use the `.neg {}` method.
+                streamAfterMinus.failure(
+                    "Unary `-` on a non-literal is not supported — use `x.neg {}` to negate an expression."
+                )
             }
         } else if (token?.type == TokenType.NOT) {
             val file2 = currentFile ?: "<unknown>"

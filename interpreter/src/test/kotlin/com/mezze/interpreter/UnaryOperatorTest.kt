@@ -28,9 +28,9 @@ class UnaryOperatorTest {
 
     @Test
     fun `test negative expressions`() {
-        assertEquals(-8L, eval("let negSum = -(5 + 3)\nnegSum"))
-        assertEquals(-8L, eval("let negProduct = -(4 * 2)\nnegProduct"))
-        assertEquals(-7L, eval("let negDifference = -(10 - 3)\nnegDifference"))
+        assertEquals(-8L, eval("let negSum = (5 + 3).neg {}\nnegSum"))
+        assertEquals(-8L, eval("let negProduct = (4 * 2).neg {}\nnegProduct"))
+        assertEquals(-7L, eval("let negDifference = (10 - 3).neg {}\nnegDifference"))
     }
 
     @Test
@@ -77,7 +77,7 @@ class UnaryOperatorTest {
     fun `test negative with variables`() {
         val code = """
             let x = 7
-            let negX = -x
+            let negX = x.neg {}
             negX
         """
         assertEquals(-7L, eval(code))
@@ -87,7 +87,7 @@ class UnaryOperatorTest {
     fun `test double negative with variables`() {
         val code = """
             let y = -3
-            let negY = -y
+            let negY = y.neg {}
             negY
         """
         assertEquals(3L, eval(code))
@@ -124,7 +124,7 @@ class UnaryOperatorTest {
     fun `test negative in conditionals - abs value`() {
         val code = """
             let x = -5
-            if x < 0 then -x else x
+            if x < 0 then x.neg {} else x
         """
         assertEquals(5L, eval(code))
     }
@@ -142,7 +142,7 @@ class UnaryOperatorTest {
     fun `test negative with records - negated`() {
         val code = """
             let point = {x = -3, y = -4}
-            let negPoint = {x = -point.x, y = -point.y}
+            let negPoint = {x = point.x.neg {}, y = point.y.neg {}}
             negPoint.x
         """
         assertEquals(3L, eval(code))
@@ -151,7 +151,7 @@ class UnaryOperatorTest {
     @Test
     fun `test negative with pipe operator`() {
         val code = """
-            let negate = {x} -> -x
+            let negate = {x: Int} -> x.neg {}
             5 |> negate {x = @}
         """
         assertEquals(-5L, eval(code))
@@ -160,7 +160,7 @@ class UnaryOperatorTest {
     @Test
     fun `test negative with pipe operator - double negate`() {
         val code = """
-            let negate = {x} -> -x
+            let negate = {x: Int} -> x.neg {}
             -3 |> negate {x = @}
         """
         assertEquals(3L, eval(code))
@@ -169,7 +169,7 @@ class UnaryOperatorTest {
     @Test
     fun `test complex negative expressions - 1`() {
         val code = """
-            let complex1 = -(3 + 4) * -2
+            let complex1 = (3 + 4).neg {} * -2
             complex1
         """
         assertEquals(14L, eval(code)) // -(3+4) * -2 = -7 * -2 = 14
@@ -178,7 +178,7 @@ class UnaryOperatorTest {
     @Test
     fun `test complex negative expressions - 2`() {
         val code = """
-            let complex2 = -((5 * 2) - 3)
+            let complex2 = ((5 * 2) - 3).neg {}
             complex2
         """
         assertEquals(-7L, eval(code)) // -((5*2) - 3) = -(10-3) = -7
@@ -187,7 +187,7 @@ class UnaryOperatorTest {
     @Test
     fun `test complex negative expressions - 3`() {
         val code = """
-            let complex3 = -(10 / 2) + -(3 * 2)
+            let complex3 = (10 / 2).neg {} + (3 * 2).neg {}
             complex3
         """
         assertEquals(-11L, eval(code)) // -(10/2) + -(3*2) = -5 + -6 = -11

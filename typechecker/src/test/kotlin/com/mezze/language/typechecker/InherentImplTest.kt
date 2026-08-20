@@ -154,6 +154,25 @@ class InherentImplTest {
     // ========================================================================
 
     @Test
+    fun `inherent method call resolves on a field-access receiver`() {
+        // Regression: `point.x.neg {}` (or any inherent method on `record.field`)
+        // used to fail with T0205 "Cannot access field 'neg' on non-record type:
+        // Int" because getReceiverConcreteType didn't look through a field access.
+        val source = """
+            let point = { x = -3, y = -4 }
+            let result = point.x.neg {}
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.checkParsedModule(parsedModule)
+
+        assertTrue(
+            result is TypeChecker.TypeCheckResult.Success,
+            "point.x.neg {} should typecheck (was T0205): $result"
+        )
+    }
+
+    @Test
     fun `inherent method call typechecks with no args and annotated return type`() {
         val source = """
             type Color = | Red, Green, Blue |

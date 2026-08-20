@@ -107,7 +107,7 @@ pub let normal_pdf : { x: Float, mean: Float, std_dev: Float } -> Float = { x, m
   do
     let variance = std_dev * std_dev
     let coefficient = 1.0 / core::sqrt { n = 2.0 * trig::pi * variance }
-    let exponent = -((x - mean) * (x - mean)) / (2.0 * variance)
+    let exponent = ((x - mean) * (x - mean)).neg {} / (2.0 * variance)
     coefficient * core::exp { n = exponent }
 
 ## Approximate CDF for the normal distribution.
@@ -117,7 +117,7 @@ pub let normal_cdf_approx : { x: Float, mean: Float, std_dev: Float } -> Float =
     0.5 * (1.0 + trig::tanh { n = z * core::sqrt { n = 2.0 / trig::pi } })
 
 ## PDF for the exponential distribution.
-pub let exponential_pdf : { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else rate * core::exp { n = -rate * x }
+pub let exponential_pdf : { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else rate * core::exp { n = rate.neg {} * x }
 
 ## CDF for the exponential distribution.
-pub let exponential_cdf : { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else 1.0 - core::exp { n = -rate * x }
+pub let exponential_cdf : { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else 1.0 - core::exp { n = rate.neg {} * x }

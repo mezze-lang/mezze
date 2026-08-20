@@ -68,7 +68,7 @@ public class AbilityIntegrationTest {
     void testNumNegWithInt() {
         Object result = MezzeTestHelper.run("""
             let x = 42
-            -x
+            x.neg {}
             """);
         assertEquals(-42L, result);
     }
@@ -215,8 +215,7 @@ public class AbilityIntegrationTest {
             type Money = { cents: Int }
 
             impl NumSub for Money where {
-              sub = { it, r } -> { cents = it.cents - r.cents },
-              neg = { it } -> { cents = 0 - it.cents }
+              sub = { it, r } -> { cents = it.cents - r.cents }
             }
 
             let a: Money = { cents = 500 }

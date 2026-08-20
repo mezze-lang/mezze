@@ -9,7 +9,9 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for unary operators (negation).
+ * Tests for negation. Negative literals (`-5`) fold at parse time; negating a
+ * non-literal expression uses the `.neg {}` method (the `-` prefix operator
+ * was removed).
  * Uses V2 unboxed values directly.
  */
 class UnaryOperatorIntegrationTest {
@@ -45,9 +47,9 @@ class UnaryOperatorIntegrationTest {
     @Test
     void testNegativeExpressions() {
         var ctx = runAndGetContext("""
-            let negSum = -(5 + 3)
-            let negProduct = -(4 * 2)
-            let negDifference = -(10 - 3)
+            let negSum = (5 + 3).neg {}
+            let negProduct = (4 * 2).neg {}
+            let negDifference = (10 - 3).neg {}
             """);
         assertEquals(-8L, ctx.get("negSum"));
         assertEquals(-8L, ctx.get("negProduct"));
@@ -76,9 +78,9 @@ class UnaryOperatorIntegrationTest {
     void testNegativeWithVariables() {
         var ctx = runAndGetContext("""
             let x = 7
-            let negX = -x
+            let negX = x.neg {}
             let y = -3
-            let negY = -y
+            let negY = y.neg {}
             """);
         assertEquals(7L, ctx.get("x"));
         assertEquals(-7L, ctx.get("negX"));
@@ -102,7 +104,7 @@ class UnaryOperatorIntegrationTest {
         var ctx = runAndGetContext("""
             let x = -5
             let isNegative = if x < 0 then True else False
-            let absValue = if x < 0 then -x else x
+            let absValue = if x < 0 then x.neg {} else x
             """);
         assertEquals(-5L, ctx.get("x"));
         assertEquals(true, ctx.get("isNegative"));
@@ -113,7 +115,7 @@ class UnaryOperatorIntegrationTest {
     void testNegativeWithRecords() {
         var ctx = runAndGetContext("""
             let point = {x = -3, y = -4}
-            let negPoint = {x = -point.x, y = -point.y}
+            let negPoint = {x = point.x.neg {}, y = point.y.neg {}}
             """);
         var point = (MezzeRecord) ctx.get("point");
         assertEquals(-3L, point.getField("x"));
@@ -125,9 +127,9 @@ class UnaryOperatorIntegrationTest {
     }
 
     @Test
-    void testNegativeWithPipeOperatorDesugared() {
+    void testNegateInLambdaBody() {
         var ctx = runAndGetContext("""
-            let negate = {x} -> -x
+            let negate = {x: Int} -> x.neg {}
             let result1 = negate {x = 5}
             let result2 = negate {x = -3}
             """);
@@ -136,9 +138,9 @@ class UnaryOperatorIntegrationTest {
     }
 
     @Test
-    void testNegativeWithPipeOperator() {
+    void testNegateWithPipeOperator() {
         var ctx = runAndGetContext("""
-            let negate = {x} -> -x
+            let negate = {x: Int} -> x.neg {}
             let result1 = 5 |> negate {x = @}
             let result2 = -3 |> negate {x = @}
             """);
@@ -149,9 +151,9 @@ class UnaryOperatorIntegrationTest {
     @Test
     void testComplexNegativeExpressions() {
         var ctx = runAndGetContext("""
-            let complex1 = -(3 + 4) * -2
-            let complex2 = -((5 * 2) - 3)
-            let complex3 = -(10 / 2) + -(3 * 2)
+            let complex1 = (3 + 4).neg {} * -2
+            let complex2 = ((5 * 2) - 3).neg {}
+            let complex3 = (10 / 2).neg {} + (3 * 2).neg {}
             """);
         assertEquals(14L, ctx.get("complex1"));   // -(3+4) * -2 = -7 * -2 = 14
         assertEquals(-7L, ctx.get("complex2"));   // -((5*2) - 3) = -(10-3) = -7

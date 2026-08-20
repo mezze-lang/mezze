@@ -151,7 +151,7 @@ class ModuleTypePreservationFixtureTest {
             pub let max_int: Int = 2147483647
             pub let min_int: Int = -2147483648
             pub let is_positive: { n: Int } -> Bool = { n } -> n > 0
-            pub let abs: { n: Int } -> Int = { n } -> if n < 0 then -n else n
+            pub let abs: { n: Int } -> Int = { n } -> if n < 0 then n.neg {} else n
         """.trimIndent())
 
         // Import multiple items

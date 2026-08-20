@@ -510,7 +510,12 @@ internal fun ExpressionConstraintGenerator.isReceiverUnresolved(receiver: Parsed
  */
 internal fun ExpressionConstraintGenerator.receiverHasSolvableType(receiver: ParsedExpr, context: ConstraintContext): Boolean {
     return when (receiver) {
-        is ParsedFunctionCall, is ParsedParens -> true
+        // A call `f {..}`, a parenthesized `(e)`, or a field access `r.f` all
+        // produce a value whose type is pinned by solving (the field access via
+        // its record's field type), so deferring inherent-method dispatch to
+        // emit time is safe. Without ParsedMemberAccess here, `point.x.neg {}`
+        // fell through to a structural field-access constraint → T0205.
+        is ParsedFunctionCall, is ParsedParens, is ParsedMemberAccess -> true
         is ParsedIdentifier -> {
             if (receiver.qualifier != null) return false
             // A lambda param is monomorphic-but-unpinnable; not solvable.
@@ -577,6 +582,16 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
         is ParsedFunctionCall -> {
             val ret = calleeReturnType(receiver, context)
             return if (ret == null || ret is MezzeType.VarType) null else ret
+        }
+        // `r.f.method` — the receiver is a field access. When `r`'s concrete
+        // type is a record with field `f`, the receiver's type is that field's
+        // type. Resolves e.g. `point.x.neg {}` (point : {x: Int}) on Int rather
+        // than deferring on an unpinnable var. Struct-typed receivers only; a
+        // field whose type is itself a var stays unresolved (falls through).
+        is ParsedMemberAccess -> {
+            val recvType = getReceiverConcreteType(receiver.receiver, context)
+            val fieldType = (recvType as? MezzeType.RecordType)?.fields?.get(receiver.member)
+            return if (fieldType == null || fieldType is MezzeType.VarType) null else fieldType
         }
         else -> { /* fall through */ }
     }

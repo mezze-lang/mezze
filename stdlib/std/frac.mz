@@ -9,7 +9,6 @@ impl NumAdd Frac for Frac having 'out = Frac where {
 
 impl NumSub for Frac where {
   sub = { it, r } -> __native_frac_subtract { l = it, r = r },
-  neg = { it } -> __native_negate_frac { n = it },
 }
 
 impl NumMul for Frac where {
@@ -109,6 +108,7 @@ pub let abs: { n: Frac } -> Frac = { n } -> __native_abs_frac { n = n }
 pub let negate: { n: Frac } -> Frac = { n } -> __native_negate_frac { n = n }
 
 impl Frac where {
+  neg = { it } -> __native_negate_frac { n = it },
   to_float = { it } -> __native_frac_to_float { n = it },
   to_str = { it } -> __native_frac_to_str { n = it },
   abs = { it } -> __native_abs_frac { n = it },
