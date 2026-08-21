@@ -2112,6 +2112,23 @@ class TypedASTCompiler(
                             andAll(terms, src)
                         } else null
                     }
+                    is TypedSeqPattern -> {
+                        // B7: a top-level seq arm's REFUTABLE element sub-patterns
+                        // (`[Some {val=x}, ...rest]`) are bound (via collectNested-
+                        // SeqDestructuring → `__seq_tmp_$idx`) but never TESTED — the
+                        // arm matched on length alone, so `[None]` slipped through,
+                        // bound x=null, and crashed. Test each refutable element
+                        // against its already-bound temp slot.
+                        val terms = pat.elements.mapIndexedNotNull { idx, elem ->
+                            if (elem is TypedVarPattern || elem is TypedWildcardPattern) null
+                            else {
+                                val elemSlot = localsByName["__seq_tmp_$idx"]
+                                if (elemSlot == null) null
+                                else buildNestedTests(elem, ReadLocalIR(elemSlot, SlotKind.OBJECT, src), src)
+                            }
+                        }
+                        andAll(terms, src)
+                    }
                     else -> null
                 }
                 if (nestedTest != null) {
