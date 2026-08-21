@@ -121,6 +121,7 @@ class AuditBugRegressionTest {
     // same ctor both ways slips through and destructuring crashes at runtime.
     // A sound checker rejects the conflicting arities.
     // EXPECTED-CORRECT: accepted today under bug258 (Unification.kt:566).
+    // #258 fixed: both-open variant arity guard added to Unification.kt.
     @Test fun `bug258_both_open_constructor_arity_conflict_is_rejected`() {
         val m = err(
             """

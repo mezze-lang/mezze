@@ -563,6 +563,20 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
             val dataType1 = var1.constructors[constructorName]
             val dataType2 = var2.constructors[constructorName]
 
+            // #258: for a constructor present on BOTH open variants, a payload-arity
+            // disagreement (nullary on one side, payload-bearing on the other) is a
+            // hard conflict — the same guard the closed|closed branch already applies.
+            // A constructor unique to one side is fine (absorbed by the other's row
+            // var), so only check shared constructors.
+            if (constructorName in constructors1 && constructorName in constructors2 &&
+                (dataType1 == null) != (dataType2 == null)) {
+                return UnificationResult.Failure(
+                    message = "Constructor '$constructorName' data mismatch",
+                    type1 = var1,
+                    type2 = var2
+                )
+            }
+
             if (dataType1 != null && dataType2 != null) {
                 val appliedType1 = substitution.apply(dataType1)
                 val appliedType2 = substitution.apply(dataType2)
