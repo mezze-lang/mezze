@@ -236,14 +236,17 @@ class NatSuffixTypeInferenceTest {
     }
 
     @Test
-    fun `test Nat subtraction is not allowed`() {
-        // Nat - Nat is not allowed because the result can be negative
-        // Use nat::subtract_to_int instead which returns Int
-        assertTypeCheckFails(
+    fun `test Nat subtraction widens to Int`() {
+        // Nat - Nat -> Int: subtraction can underflow, so the result widens to
+        // Int (via the `NumSub Nat for Nat having 'out = Int` impl) rather than
+        // being rejected.
+        assertTypeChecks(
             """
             let result = 20n - 10n
             result
-            """.trimIndent()
+            """.trimIndent(),
+            "result",
+            "Int"
         )
     }
 

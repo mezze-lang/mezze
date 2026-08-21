@@ -22,6 +22,16 @@ impl NumSub Int for Int having 'out = Int where {
   sub = { it, r } -> __native_int_subtract { l = it, r = r }
 }
 
+## Int - Float -> Float (widen the Int operand).
+impl NumSub Float for Int having 'out = Float where {
+  sub = { it, r } -> it.to_float {} - r
+}
+
+## Int - Nat -> Int (widen the Nat operand).
+impl NumSub Nat for Int having 'out = Int where {
+  sub = { it, r } -> it - from_nat { n = r }
+}
+
 impl NumMul for Int where {
   mul = { it, r } -> __native_int_multiply { l = it, r = r }
 }

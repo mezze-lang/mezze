@@ -1,4 +1,4 @@
-use std::abilities::numeric::{ NumAdd, NumMul, NumDiv, NumMod, NumZero, NumOne }
+use std::abilities::numeric::{ NumAdd, NumSub, NumMul, NumDiv, NumMod, NumZero, NumOne }
 use std::abilities::compare::{ Eq, Ord }
 use std::abilities::convert::{ Into, TryInto }
 use std::abilities::default::{ Default }
@@ -17,6 +17,21 @@ impl NumAdd Int for Nat having 'out = Int where {
 ## Nat + Float -> Float (widen the Nat receiver).
 impl NumAdd Float for Nat having 'out = Float where {
   add = { it, r } -> std::float::from_nat { n = it } + r
+}
+
+## Nat - Nat -> Int (subtraction can underflow, so the result widens to Int).
+impl NumSub Nat for Nat having 'out = Int where {
+  sub = { it, r } -> subtract_to_int { l = it, r = r }
+}
+
+## Nat - Int -> Int (widen the Nat receiver).
+impl NumSub Int for Nat having 'out = Int where {
+  sub = { it, r } -> std::int::from_nat { n = it } - r
+}
+
+## Nat - Float -> Float (widen the Nat receiver).
+impl NumSub Float for Nat having 'out = Float where {
+  sub = { it, r } -> std::float::from_nat { n = it } - r
 }
 
 impl NumMul for Nat where {

@@ -175,16 +175,19 @@ class NatTypeValidationTest {
     }
 
     @Test
-    fun `test subtraction of Nat values is not allowed`() {
-        // Nat - Nat is not allowed because the result can be negative
-        // Use nat::subtract_to_int instead which returns Int
-        assertTypeCheckFails(
+    fun `test subtraction of Nat values widens to Int`() {
+        // Nat - Nat -> Int: subtraction can underflow, so the result widens to
+        // Int (via the `NumSub Nat for Nat having 'out = Int` impl) rather than
+        // being rejected.
+        assertTypeChecks(
             """
             let x = 10n
             let y = 5n
             let result = x - y
             result
-            """.trimIndent()
+            """.trimIndent(),
+            "result",
+            "Int"
         )
     }
 
