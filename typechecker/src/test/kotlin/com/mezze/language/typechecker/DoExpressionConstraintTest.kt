@@ -130,7 +130,14 @@ class DoExpressionConstraintTest {
         // Parameters should have types (could be concrete or type variables)
         assertNotNull(paramType.fields["a"], "a should have a type")
         assertNotNull(paramType.fields["b"], "b should have a type")
-        assertEquals(MezzeType.IntType, nestedType.returnType, "return should be Int (due to + 10 literal)")
+        // The body's outermost `+ 10` returns the `NumAdd` associated result
+        // (`having 'out`), which stays polymorphic in a,b — NOT frozen to Int by the
+        // literal (see B1: it would run as Float for Float args). It resolves at each
+        // concrete call.
+        assertTrue(
+            nestedType.returnType is MezzeType.VarType,
+            "return should stay polymorphic (having 'out), not frozen to Int; got ${nestedType.returnType}"
+        )
     }
 
     @Test

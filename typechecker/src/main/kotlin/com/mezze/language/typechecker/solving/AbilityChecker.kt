@@ -231,13 +231,56 @@ internal class AbilityChecker(
 
         // Resolve the full class-arg tuple (e.g. [ 'r, 'l ] for NumAdd) so we can
         // disambiguate impls that share a receiver type (see classArgTypeVars).
-        // Fall back to receiver-only matching when the tuple isn't available or any
-        // element is still unresolved.
-        val resolvedClassArgs = constraint.classArgTypeVars
+        val resolvedTupleArgs = constraint.classArgTypeVars
             .map { currentSubst.apply(MezzeType.VarType(it)) }
-            .takeIf { args -> args.isNotEmpty() && args.none { it is MezzeType.VarType } }
-        val matchingImplPair = if (resolvedClassArgs != null) {
-            findMatchingAbilityImplByArgs(abilityName, resolvedClassArgs)
+        val tupleFullyConcrete = resolvedTupleArgs.isNotEmpty() &&
+            resolvedTupleArgs.none { it is MezzeType.VarType }
+
+        // B1 (soundness): for a MULTI-parameter class ability, receiver-only matching
+        // freezes `having 'out` off the wrong operand while the receiver is still a
+        // var. In `pub let f = {x} -> x + 0` the class-arg tuple is [ 'r=Int, 'l=? ];
+        // matching by the co-operand `'r=Int` alone picks `NumAdd Int for Int` and
+        // bakes `out := Int` into f's generalized scheme — but `f {x=5.0}` RUNS as
+        // Float. We only freeze `out` from a FULLY-concrete tuple; otherwise we DEFER
+        // (keyed on the still-open tuple vars), leaving `out` a var linked to the
+        // receiver so it re-resolves at each call site once the receiver is pinned
+        // (ExprFunctionConstraints re-emits the AssociatedTypeResolution there).
+        // Single-param abilities have no co-operand to disambiguate, so receiver-only
+        // matching (`primaryType` IS the receiver) stays correct for them.
+        val isMultiParam = constraint.classArgTypeVars.size > 1
+        if (isMultiParam && !tupleFullyConcrete) {
+            // B1 containment (case B): the tuple isn't concrete, so we normally defer.
+            // But if the `out` var has been pinned to a CONCRETE type EXTERNALLY (e.g.
+            // `perform ExceptionToResult in (a / b)` unifies the body's `out` with
+            // `Result …`), we must verify some impl of this ability can actually
+            // PRODUCE that output type. No NumDiv impl yields `Result`, so a raw
+            // numeric result laundering into the Result wrapper is a real error —
+            // reject it here instead of deferring it away. Only fires when `out` is
+            // already concrete; a still-var `out` defers as before (genuine poly).
+            for ((_, outVar) in constraint.associatedTypeVars) {
+                val resolvedOut = currentSubst.apply(MezzeType.VarType(outVar))
+                if (resolvedOut !is MezzeType.VarType &&
+                    !abilityCanProduceOutput(abilityName, resolvedOut)
+                ) {
+                    return ConstraintSolver.ConstraintResult.Failure(
+                        "No implementation of ability '$abilityName' produces the required result type " +
+                            "'${prettyPrintType(resolvedOut)}'. The result was forced to that type externally " +
+                            "(e.g. by a `perform … in` handler expecting a wrapped value), but the operation " +
+                            "yields a different associated result — wrap it (e.g. with `Ok`/`Some`) or adjust the types."
+                    )
+                }
+            }
+            for (arg in resolvedTupleArgs) {
+                if (arg is MezzeType.VarType) {
+                    val queue = associatedTypeResolutionConstraints.getOrPut(arg.variable) { mutableListOf() }
+                    if (constraint !in queue) queue.add(constraint)
+                }
+            }
+            return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
+        }
+
+        val matchingImplPair = if (tupleFullyConcrete) {
+            findMatchingAbilityImplByArgs(abilityName, resolvedTupleArgs)
                 ?: findMatchingAbilityImpl(abilityName, primaryType)
         } else {
             findMatchingAbilityImpl(abilityName, primaryType)
@@ -303,6 +346,50 @@ internal class AbilityChecker(
             }
         }
         return typeAnnotationToMezzeType(annotation)
+    }
+
+    // B1 containment (case B): can ANY impl of [abilityName] produce a `having 'out`
+    // whose type could equal [required]? An impl whose declared output is a type
+    // PARAMETER (e.g. `having 'out = 'r`) can produce any type, so it's permissive;
+    // an impl with a concrete output (`having 'out = Int`) only matches that exact
+    // head. If no impl can produce [required], the result was forced to a type this
+    // ability never yields (e.g. a numeric op forced to `Result`), which is an error.
+    private fun abilityCanProduceOutput(abilityName: String, required: MezzeType): Boolean {
+        val impls = context.getAbilityImpls(abilityName)
+        if (impls.isEmpty()) return true  // unknown ability surface — don't over-reject
+        val requiredHead = typeHeadName(required)
+        for (impl in impls) {
+            for ((_, outAnnotation) in impl.associatedTypeBindings) {
+                // A type-parameter output (name maps to one of the impl's type vars, or
+                // starts with `'`) can produce anything.
+                if (outAnnotation is ParsedNamedType) {
+                    val n = outAnnotation.name
+                    if (n.startsWith("'") || n.removePrefix("'") in impl.typeVars) return true
+                }
+                val outType = typeAnnotationToMezzeType(outAnnotation)
+                if (outType is MezzeType.VarType) return true
+                if (typeHeadName(outType) == requiredHead) return true
+            }
+            // An impl with no `having` bindings imposes no output constraint.
+            if (impl.associatedTypeBindings.isEmpty()) return true
+        }
+        return false
+    }
+
+    // Head constructor name for a coarse "same shape" comparison (e.g. Result 'a 'b
+    // vs Result Int Exception both have head "Result"). Precise arg agreement is
+    // enforced later by unification; here we only rule out "no impl yields this shape".
+    private fun typeHeadName(type: MezzeType): String = when (type) {
+        is MezzeType.IntType -> "Int"
+        is MezzeType.FloatType -> "Float"
+        is MezzeType.NatType -> "Nat"
+        is MezzeType.StringType -> "Str"
+        is MezzeType.BoolType -> "Bool"
+        is MezzeType.TypeApplication -> type.constructor
+        is MezzeType.VariantType -> type.typeName ?: "|variant|"
+        is MezzeType.RecordType -> "{record}"
+        is MezzeType.FunctionType -> "{fn}"
+        else -> type::class.simpleName ?: "?"
     }
 
     private fun findMatchingAbilityImpl(

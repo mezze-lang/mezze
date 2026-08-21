@@ -183,8 +183,16 @@ class DoExpressionBasicTest {
         assertTrue(processDataType is MezzeType.FunctionType)
         assertTrue(funcType is MezzeType.FunctionType)
         
+        // The body `(input + 10) * 2` returns the `NumMul` associated result
+        // (`having 'out`), which stays polymorphic in `input` — it is NOT frozen to
+        // Int just because the literals fix one operand. `processData {input=5.0}`
+        // would run as Float, so the return type must stay a var (see B1). It
+        // resolves to Int/Float/… at each concrete call site.
         val funcTypeActual = processDataType as MezzeType.FunctionType
-        assertEquals(MezzeType.IntType, funcTypeActual.returnType)
+        assertTrue(
+            funcTypeActual.returnType is MezzeType.VarType,
+            "return type should stay polymorphic (having 'out), not frozen; got ${funcTypeActual.returnType}"
+        )
     }
 
     @Test

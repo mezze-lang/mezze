@@ -424,9 +424,32 @@ class ConstraintGenerator(
             val havingVars = com.mezze.language.ast.collectTypeVarsInOrder(preConvertedAnnotationType)
                 .filter { it.name.removePrefix("'") in havingVarNames }
                 .toSet()
+            // B1 containment: collect the ability associated-result (`having 'out`)
+            // vars this binding's inferred obligations left UNRESOLVED (still a var
+            // under the final substitution). If an annotation var resolves to one of
+            // these, the annotation is satisfied by an impl-computed associated type,
+            // not the var itself — over-claim; reject (see validatePolymorphismPreserved).
+            val unresolvedOutVarIds = result.associatedTypeConstraints
+                .flatMap { it.associatedTypeVars.values }
+                .mapNotNull { (substitution.apply(MezzeType.VarType(it)) as? MezzeType.VarType)?.variable?.id }
+                .toSet()
+            // …but an annotation var that IS an associated type BY NAME (e.g.
+            // `getFirst: {c:'c} with Container 'c -> Option 'item`, where `'item` is
+            // Container's associated type and the `with`-clause omits `having`) is a
+            // legitimate reference to that associated type, not an over-claim. Exempt
+            // annotation vars whose name matches a declared associated-type name.
+            val associatedTypeNameVars = com.mezze.language.ast.collectTypeVarsInOrder(preConvertedAnnotationType)
+                .filter { av ->
+                    val n = av.name.removePrefix("'")
+                    result.associatedTypeConstraints.any { atc ->
+                        atc.associatedTypeVars.keys.any { it.removePrefix("'") == n }
+                    }
+                }
+                .toSet()
             annotationValidator.validatePolymorphismPreserved(
                 preConvertedAnnotationType, substitution, varName,
-                item.value.loc, abilityConstrainedVars + havingVars
+                item.value.loc, abilityConstrainedVars + havingVars + associatedTypeNameVars,
+                unresolvedOutVarIds
             )
         }
 
@@ -524,11 +547,24 @@ class ConstraintGenerator(
             // survivor. Match by ability name + primary (receiver) var.
             val solvedAbilityConstraints =
                 (solvedType as? MezzeType.FunctionType)?.abilityConstraints ?: emptyList()
-            fun bindingsFor(abilityName: String, primaryVar: MezzeType.VarType?): Map<String, MezzeType> {
-                if (primaryVar == null) return emptyMap()
+            fun bindingsFor(abilityName: String, resolvedPrimary: MezzeType): Map<String, MezzeType> {
+                // Match the solved FunctionAbilityConstraint for this obligation and
+                // read back its (freshened) `having 'out = …` bindings. We match on
+                // the resolved PRIMARY type, not on it being a var: for a class-param
+                // ability like `NumAdd 'r for 'l` the primary is the co-operand `'r`,
+                // which is frequently CONCRETE (`Int` from a literal `0`). Keying on
+                // "primary must be a var" (the old behaviour) dropped `out` for exactly
+                // `{x} -> x + 0`, freezing the generalized result and re-opening B1.
+                val primaryVarId = (resolvedPrimary as? MezzeType.VarType)?.variable?.id
                 return solvedAbilityConstraints.firstOrNull { fac ->
-                    fac.abilityName == abilityName &&
-                        (fac.typeArgs.firstOrNull() as? MezzeType.VarType)?.variable?.id == primaryVar.variable.id
+                    if (fac.abilityName != abilityName) return@firstOrNull false
+                    val facPrimary = fac.typeArgs.firstOrNull()?.let { substitution.apply(it) }
+                        ?: return@firstOrNull false
+                    if (primaryVarId != null) {
+                        (facPrimary as? MezzeType.VarType)?.variable?.id == primaryVarId
+                    } else {
+                        facPrimary == resolvedPrimary
+                    }
                 }?.associatedTypeBindings?.mapValues { (_, v) -> substitution.apply(v) } ?: emptyMap()
             }
 
@@ -579,7 +615,7 @@ class ConstraintGenerator(
                             typeArgs = resolvedTypeArgs,
                             associatedTypeBindings = bindingsFor(
                                 constraint.abilityName,
-                                resolvedConstraintVar as? MezzeType.VarType
+                                resolvedConstraintVar
                             ),
                             concreteReceiver = concreteReceiver
                         )

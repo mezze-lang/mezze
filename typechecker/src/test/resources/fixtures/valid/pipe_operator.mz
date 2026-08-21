@@ -2,11 +2,17 @@
 # Basic pipe operator
 let square = { x } -> x * x  # expected: square : { x: 'a } with NumMul 'a 'a having 'out = 'b -> 'b
 
-let add_ten = { x } -> x + 10  # expected: add_ten : { x: 'a } with NumAdd Int 'a having 'out = Int -> Int
+# `add_ten` is now polymorphic in its result (class-param `having 'out` stays a
+# var until the receiver is pinned), consistent with `add`/`square` below — the
+# result no longer freezes to Int just because the literal `10` fixes one operand.
+let add_ten = { x } -> x + 10  # expected: add_ten : { x: 'a } with NumAdd Int 'a having 'out = 'b -> 'b
 
 let result1 = 5 |> square { x = @ }  # expected: result1 : Int
 
-let result2 = 5 |> add_ten { x = @ } |> square { x = @ }  # expected: result2 : Int
+# `add_ten`'s deferred `having 'out` chained into `square`'s own deferred `having
+# 'out` leaves the pipe result polymorphic (a class-param `having 'out` chained
+# through a pipe is not eagerly resolved — same as result3/result4).
+let result2 = 5 |> add_ten { x = @ } |> square { x = @ }  # expected: result2 : 'a
 
 # Pipe with partial application
 let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c -> 'c

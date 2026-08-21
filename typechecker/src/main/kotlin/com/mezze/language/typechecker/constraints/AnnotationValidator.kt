@@ -89,7 +89,16 @@ internal class AnnotationValidator(
         substitution: Substitution,
         varName: String,
         sourceLoc: Loc? = null,
-        abilityConstrainedTypeVars: Set<TypeVar> = emptySet()
+        abilityConstrainedTypeVars: Set<TypeVar> = emptySet(),
+        // B1 containment: type-var ids that are an ability's associated result
+        // (`having 'out`) left UNRESOLVED by this binding's solve. An annotation var
+        // that resolves to one of these is being satisfied by an associated type the
+        // impl computes — NOT by the annotation var itself — so the annotation
+        // over-claims (e.g. `f: {x:'a} -> 'a = {x} -> x + 1`: the result is
+        // `out(NumAdd Int 'a)`, which is Int for `'a = Nat`, not `'a`). Reject unless
+        // the annotation explicitly declares it via `having` (those are exempt through
+        // `abilityConstrainedTypeVars`, checked before this).
+        unresolvedAssociatedOutVarIds: Set<Int> = emptySet()
     ) {
         val annotationTypeVars = collectTypeVars(annotationType)
 
@@ -101,7 +110,19 @@ internal class AnnotationValidator(
             }
 
             val substituted = substitution.apply(MezzeType.VarType(typeVar))
-            if (substituted !is MezzeType.VarType) {
+            if (substituted is MezzeType.VarType) {
+                if (substituted.variable.id in unresolvedAssociatedOutVarIds) {
+                    throw TypeCheckError(
+                        "Type annotation mismatch for '$varName': Annotation declares type variable '${typeVar.name}' " +
+                        "but the implementation produces an associated result type (from a `having 'out` ability) that is " +
+                        "not guaranteed to equal '${typeVar.name}'. The result depends on the ability impl, so it may differ " +
+                        "from '${typeVar.name}' for some argument types.",
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("declare the result via `having 'out = ${typeVar.name}` if that is intended, or change the annotation/body to agree"),
+                    )
+                }
+            } else {
                 val substitutedTypeVars = collectTypeVars(substituted)
                 if (substitutedTypeVars.isEmpty()) {
                     throw TypeCheckError(

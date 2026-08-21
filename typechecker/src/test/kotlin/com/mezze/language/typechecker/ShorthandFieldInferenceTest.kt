@@ -55,7 +55,10 @@ class ShorthandFieldInferenceTest {
             result
             """.trimIndent(),
             "result",
-            "{ n: 'a } with NumAdd Int 'a -> Int"
+            // `f`'s `+ 1` result is the `NumAdd` associated type (`having 'out`),
+            // which stays polymorphic in the receiver — NOT frozen to Int by the
+            // literal (see B1: `f {x=5.0}` runs as Float). It resolves per call site.
+            "{ n: 'a } with NumAdd Int 'a having 'out = 'b -> 'b"
         )
     }
 

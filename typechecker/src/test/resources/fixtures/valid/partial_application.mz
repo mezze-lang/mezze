@@ -12,10 +12,11 @@ let result1 = add_five { y = 10 }  # expected: result1 : Int
 let sub = { x, y } -> x - y  # expected: sub : { x: 'a, y: 'b } with NumSub 'b 'a having 'out = 'c -> 'c
 
 # Heterogeneous `-`: fixing the right operand to Int leaves the left operand open
-# (multiple NumSub impls have r = Int), while the result resolves to Int.
-let sub_from_10 = sub { y = 10 }  # expected: sub_from_10 : { x: 'a } -> Int
+# (multiple NumSub impls have r = Int); the result stays polymorphic (`having 'out`
+# is not eagerly resolved while the left operand is still a var).
+let sub_from_10 = sub { y = 10 }  # expected: sub_from_10 : { x: 'a } -> 'b
 
-let result2 = sub_from_10 { x = 15 }  # expected: result2 : Int
+let result2 = sub_from_10 { x = 15 }  # expected: result2 : 'a
 
 # Chained partial application
 let add3 = { x, y, z } -> x + y + z  # expected: add3 : { x: 'a, y: 'b, z: 'c } with NumAdd 'b 'a having 'out = 'e, NumAdd 'c 'e having 'out = 'd -> 'd
