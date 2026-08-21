@@ -62,8 +62,18 @@ impl NumDiv Float for Nat having 'out = Float where {
   div = { it, r } -> std::float::from_nat { n = it } / r
 }
 
-impl NumMod for Nat where {
+impl NumMod Nat for Nat having 'out = Nat where {
   mod = { it, r } -> __native_nat_modulo { l = it, r = r }
+}
+
+## Nat % Int -> Int (widen the Nat receiver; still an integer remainder).
+impl NumMod Int for Nat having 'out = Int where {
+  mod = { it, r } -> std::int::from_nat { n = it } % r
+}
+
+## Nat % Float -> Float (widen the Nat receiver to a float remainder).
+impl NumMod Float for Nat having 'out = Float where {
+  mod = { it, r } -> std::float::from_nat { n = it } % r
 }
 
 impl Eq for Nat where {

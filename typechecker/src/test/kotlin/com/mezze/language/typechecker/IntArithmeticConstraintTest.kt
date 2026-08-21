@@ -89,7 +89,7 @@ class IntArithmeticConstraintTest {
         val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
-        // Should infer { left: 'a, right: 'a } with NumMod 'a -> 'a
+        // Should infer { left: 'a, right: 'b } with NumMod 'b 'a having 'out = 'c -> 'c
         assertTrue(paramType.fields.containsKey("left"), "Should have 'left' parameter")
         assertTrue(paramType.fields.containsKey("right"), "Should have 'right' parameter")
         assertTrue(functionType is MezzeType.FunctionType, "Should be a function type")

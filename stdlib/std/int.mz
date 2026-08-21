@@ -60,8 +60,18 @@ impl NumDiv Nat for Int having 'out = Int where {
   div = { it, r } -> it / from_nat { n = r }
 }
 
-impl NumMod for Int where {
+impl NumMod Int for Int having 'out = Int where {
   mod = { it, r } -> __native_int_modulo { l = it, r = r }
+}
+
+## Int % Float -> Float (widen the Int operand to a float remainder).
+impl NumMod Float for Int having 'out = Float where {
+  mod = { it, r } -> it.to_float {} % r
+}
+
+## Int % Nat -> Int (widen the Nat operand; still an integer remainder).
+impl NumMod Nat for Int having 'out = Int where {
+  mod = { it, r } -> it % from_nat { n = r }
 }
 
 impl Eq for Int where {

@@ -45,9 +45,16 @@ ability NumDiv 'r for 'l having 'out where {
 }
 
 ## Modulo. Desugars the `%` operator.
-ability NumMod for 'a where {
+##
+## `'r` is the right-operand type (a class parameter, so each ordered `(l, r)`
+## pair is a distinct impl) and `'out` the result. This lets heterogeneous
+## remainders coexist — e.g. `Int % Float -> Float` — while the same-type impls
+## bind `'r`/`'out` to the receiver. Integer types give an integer remainder
+## (`Int % Int -> Int`); a `Float` operand promotes to a float remainder
+## (`Int % Float -> Float`). (No `Frac` impl — modulo on rationals is undefined.)
+ability NumMod 'r for 'l having 'out where {
   ## Remainder of it divided by r.
-  mod: { it: 'a, r: 'a } -> 'a
+  mod: { it: 'l, r: 'r } -> 'out
 }
 
 ## Additive identity -- zero value and zero check.
