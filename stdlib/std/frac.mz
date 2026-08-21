@@ -108,15 +108,15 @@ pub let abs: { n: Frac } -> Frac = { n } -> __native_abs_frac { n = n }
 pub let negate: { n: Frac } -> Frac = { n } -> __native_negate_frac { n = n }
 
 impl Frac where {
-  neg = { it } -> __native_negate_frac { n = it },
+  neg: { it: Frac } -> Frac = { it } -> __native_negate_frac { n = it },
   to_float = { it } -> __native_frac_to_float { n = it },
   to_str = { it } -> __native_frac_to_str { n = it },
   abs = { it } -> __native_abs_frac { n = it },
   numerator = { it } -> __native_frac_numerator { n = it },
   denominator = { it } -> __native_frac_denominator { n = it },
-  is_zero = { it } -> __native_frac_equals { l = it, r = __native_int_to_frac { n = 0 } },
-  is_positive = { it } ->
+  is_zero: { it: Frac } -> Bool = { it } -> __native_frac_equals { l = it, r = __native_int_to_frac { n = 0 } },
+  is_positive: { it: Frac } -> Bool = { it } ->
     __native_frac_greater_than { l = it, r = __native_int_to_frac { n = 0 } },
-  is_negative = { it } -> __native_frac_less_than { l = it, r = __native_int_to_frac { n = 0 } },
-  reciprocal = { it } -> __native_frac_divide { l = __native_int_to_frac { n = 1 }, r = it },
+  is_negative: { it: Frac } -> Bool = { it } -> __native_frac_less_than { l = it, r = __native_int_to_frac { n = 0 } },
+  reciprocal: { it: Frac } -> Frac = { it } -> __native_frac_divide { l = __native_int_to_frac { n = 1 }, r = it },
 }

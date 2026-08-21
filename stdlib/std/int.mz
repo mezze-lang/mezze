@@ -2,6 +2,7 @@ use std::abilities::numeric::{ NumAdd, NumSub, NumMul, NumDiv, NumMod, NumZero, 
 use std::abilities::compare::{ Eq, Ord }
 use std::abilities::convert::{ Into, TryInto }
 use std::abilities::default::{ Default }
+use std::float
 
 impl NumAdd Int for Int having 'out = Int where {
   add = { it, r } -> __native_int_add { l = it, r = r }
@@ -145,8 +146,8 @@ pub let clamp: { n: Int, min: Int, max: Int } -> Int = { n, min, max } ->
 pub let to_nat: { n: Int } -> Option Nat = { n } -> __native_int_to_nat { n = n }
 
 impl Int where {
-  neg = { it } -> __native_int_neg { n = it },
-  to_float = { it } -> __native_int_to_float { n = it },
+  neg: { it: Int } -> Int = { it } -> __native_int_neg { n = it },
+  to_float: { it: Int } -> Float = { it } -> __native_int_to_float { n = it },
   to_str = { it } -> __native_int_to_str { n = it },
   abs = { it } -> __native_int_abs { n = it },
   sign = { it } -> __native_int_sign { n = it },

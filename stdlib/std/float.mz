@@ -119,7 +119,7 @@ pub let clamp: { n: Float, min: Float, max: Float } -> Float = { n, min, max } -
 pub let to_int: { n: Float } -> Option Int = { n } -> __native_float_to_int { n = n }
 
 impl Float where {
-  neg = { it } -> __native_float_neg { n = it },
+  neg: { it: Float } -> Float = { it } -> __native_float_neg { n = it },
   to_int = { it } -> __native_float_to_int { n = it },
   to_str = { it } -> __native_float_to_str { n = it },
   abs = { it } -> __native_float_abs { n = it },
@@ -128,10 +128,10 @@ impl Float where {
   min = { it, r } -> __native_float_min { l = it, r = r },
   max = { it, r } -> __native_float_max { l = it, r = r },
   is_nan = { it } -> __native_float_is_nan { n = it },
-  ceil = { it } -> __native_float_ceil { n = it },
-  floor = { it } -> __native_float_floor { n = it },
-  round = { it } -> __native_float_round { n = it },
+  ceil: { it: Float } -> Float = { it } -> __native_float_ceil { n = it },
+  floor: { it: Float } -> Float = { it } -> __native_float_floor { n = it },
+  round: { it: Float } -> Float = { it } -> __native_float_round { n = it },
   is_infinite = { it } -> __native_float_is_infinite { n = it },
   is_finite = { it } -> __native_float_is_finite { n = it },
-  sqrt = { it } -> __native_float_sqrt { n = it },
+  sqrt: { it: Float } -> Float = { it } -> __native_float_sqrt { n = it },
 }

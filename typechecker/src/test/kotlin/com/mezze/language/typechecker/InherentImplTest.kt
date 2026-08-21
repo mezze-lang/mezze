@@ -155,21 +155,22 @@ class InherentImplTest {
 
     @Test
     fun `inherent method call resolves on a field-access receiver`() {
-        // Regression: `point.x.neg {}` (or any inherent method on `record.field`)
-        // used to fail with T0205 "Cannot access field 'neg' on non-record type:
-        // Int" because getReceiverConcreteType didn't look through a field access.
+        // Regression, two bugs at once:
+        //  1. `point.x.neg {}` used to fail with T0205 "Cannot access field 'neg'
+        //     on non-record type: Int" (getReceiverConcreteType didn't look
+        //     through a field access).
+        //  2. Its result type used to infer as a free var `'a` instead of `Int`
+        //     (the native-backed `neg` method's return wasn't pinned). Both are
+        //     fixed, so the call resolves to a concrete Int with no annotation.
         val source = """
             let point = { x = -3, y = -4 }
             let result = point.x.neg {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val result = typeChecker.checkParsedModule(parsedModule)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertTrue(
-            result is TypeChecker.TypeCheckResult.Success,
-            "point.x.neg {} should typecheck (was T0205): $result"
-        )
+        assertEquals(MezzeType.IntType, result.getVariableType("result"))
     }
 
     @Test
