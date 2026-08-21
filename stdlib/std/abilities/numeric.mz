@@ -1,57 +1,28 @@
 ## Addition. Desugars the `+` operator.
-##
-## `'r` is the right-operand type (a class parameter, so each ordered `(l, r)`
-## pair is a distinct impl) and `'out` the result. This lets heterogeneous
-## additions coexist — e.g. `Int + Float -> Float` — while the same-type impls
-## bind `'r`/`'out` to the receiver, so `Int + Int -> Int`.
 ability NumAdd 'r for 'l having 'out where {
   ## Add two values.
   add: { it: 'l, r: 'r } -> 'out
 }
 
 ## Subtraction. Desugars the binary `-` operator.
-##
-## `'r` is the right-operand type (a class parameter, so each ordered `(l, r)`
-## pair is a distinct impl) and `'out` the result. This lets heterogeneous
-## subtractions coexist — e.g. `Int - Float -> Float` — while the same-type impls
-## bind `'r`/`'out` to the receiver, so `Int - Int -> Int`.
 ability NumSub 'r for 'l having 'out where {
   ## Subtract r from it.
   sub: { it: 'l, r: 'r } -> 'out
 }
 
 ## Multiplication. Desugars the `*` operator.
-##
-## `'r` is the right-operand type (a class parameter, so each ordered `(l, r)`
-## pair is a distinct impl) and `'out` the result. This lets heterogeneous
-## multiplications coexist — e.g. `Int * Float -> Float` — while the same-type
-## impls bind `'r`/`'out` to the receiver, so `Int * Int -> Int`.
 ability NumMul 'r for 'l having 'out where {
   ## Multiply two values.
   mul: { it: 'l, r: 'r } -> 'out
 }
 
-## Division. Desugars the `/` operator.
-##
-## `'r` is the right-operand type (a class parameter, so each ordered `(l, r)`
-## pair is a distinct impl) and `'out` the result. This lets heterogeneous
-## divisions coexist — e.g. `Int / Float -> Float` — while the same-type impls
-## bind `'r`/`'out` to the receiver. Integer division truncates toward zero
-## (`Int / Int -> Int`, `7 / 2 == 3`); a `Float` operand promotes to exact
-## division (`Int / Float -> Float`).
+## Division. Desugars the `/` operator. Integer division truncates toward zero.
 ability NumDiv 'r for 'l having 'out where {
   ## Divide it by r.
   div: { it: 'l, r: 'r } -> 'out
 }
 
 ## Modulo. Desugars the `%` operator.
-##
-## `'r` is the right-operand type (a class parameter, so each ordered `(l, r)`
-## pair is a distinct impl) and `'out` the result. This lets heterogeneous
-## remainders coexist — e.g. `Int % Float -> Float` — while the same-type impls
-## bind `'r`/`'out` to the receiver. Integer types give an integer remainder
-## (`Int % Int -> Int`); a `Float` operand promotes to a float remainder
-## (`Int % Float -> Float`). (No `Frac` impl — modulo on rationals is undefined.)
 ability NumMod 'r for 'l having 'out where {
   ## Remainder of it divided by r.
   mod: { it: 'l, r: 'r } -> 'out

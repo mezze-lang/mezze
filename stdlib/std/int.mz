@@ -8,12 +8,10 @@ impl NumAdd Int for Int having 'out = Int where {
   add = { it, r } -> __native_int_add { l = it, r = r }
 }
 
-## Int + Float -> Float (widen the Int operand).
 impl NumAdd Float for Int having 'out = Float where {
   add = { it, r } -> it.to_float {} + r
 }
 
-## Int + Nat -> Int (widen the Nat operand).
 impl NumAdd Nat for Int having 'out = Int where {
   add = { it, r } -> it + from_nat { n = r }
 }
@@ -22,12 +20,10 @@ impl NumSub Int for Int having 'out = Int where {
   sub = { it, r } -> __native_int_subtract { l = it, r = r }
 }
 
-## Int - Float -> Float (widen the Int operand).
 impl NumSub Float for Int having 'out = Float where {
   sub = { it, r } -> it.to_float {} - r
 }
 
-## Int - Nat -> Int (widen the Nat operand).
 impl NumSub Nat for Int having 'out = Int where {
   sub = { it, r } -> it - from_nat { n = r }
 }
@@ -36,12 +32,10 @@ impl NumMul Int for Int having 'out = Int where {
   mul = { it, r } -> __native_int_multiply { l = it, r = r }
 }
 
-## Int * Float -> Float (widen the Int operand).
 impl NumMul Float for Int having 'out = Float where {
   mul = { it, r } -> it.to_float {} * r
 }
 
-## Int * Nat -> Int (widen the Nat operand).
 impl NumMul Nat for Int having 'out = Int where {
   mul = { it, r } -> it * from_nat { n = r }
 }
@@ -50,12 +44,10 @@ impl NumDiv Int for Int having 'out = Int where {
   div = { it, r } -> __native_int_divide { l = it, r = r }
 }
 
-## Int / Float -> Float (widen the Int operand to exact division).
 impl NumDiv Float for Int having 'out = Float where {
   div = { it, r } -> it.to_float {} / r
 }
 
-## Int / Nat -> Int (widen the Nat operand; still truncating integer division).
 impl NumDiv Nat for Int having 'out = Int where {
   div = { it, r } -> it / from_nat { n = r }
 }
@@ -64,12 +56,10 @@ impl NumMod Int for Int having 'out = Int where {
   mod = { it, r } -> __native_int_modulo { l = it, r = r }
 }
 
-## Int % Float -> Float (widen the Int operand to a float remainder).
 impl NumMod Float for Int having 'out = Float where {
   mod = { it, r } -> it.to_float {} % r
 }
 
-## Int % Nat -> Int (widen the Nat operand; still an integer remainder).
 impl NumMod Nat for Int having 'out = Int where {
   mod = { it, r } -> it % from_nat { n = r }
 }
