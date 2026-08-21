@@ -6,7 +6,7 @@ import com.mezze.language.parsedast.diagnostics.WarningCode
 /**
  * #84 linter: purely-syntactic dead / redundant code lints. Walks the parsed
  * module (before any desugaring — `if` still exists as [ParsedIf], operators as
- * [ParsedBinaryOp]/[ParsedUnaryOp]) and flags patterns that are legal but almost
+ * [ParsedBinaryOp]) and flags patterns that are legal but almost
  * always a mistake. No type information is needed, so this runs independent of
  * constraint solving.
  *
@@ -55,7 +55,6 @@ object DeadCodeLinter {
         is ParsedStringLit, is ParsedCharLit -> true
         is ParsedIdentifier -> true
         is ParsedBinaryOp -> isPureValue(e.left) && isPureValue(e.right)
-        is ParsedUnaryOp -> isPureValue(e.operand)
         is ParsedParens -> isPureValue(e.expr)
         is ParsedMemberAccess -> isPureValue(e.receiver) // plain field access
         is ParsedRecordLit -> e.entries.all { entry ->

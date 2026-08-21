@@ -681,20 +681,6 @@ class TypedAstBuilder(
                 }
             }
 
-            is ParsedUnaryOp -> {
-                val op = OperatorMapping.getUnaryOp(expr.op)
-                if (op != null) {
-                    val desugared = ParsedFunctionCall(
-                        function = ParsedMemberAccess(expr.operand, op.method, expr.loc),
-                        arguments = ParsedRecordLit(emptyList(), expr.loc),
-                        loc = expr.loc
-                    )
-                    buildExpr(desugared, file, contextType)
-                } else {
-                    TypedIntLit(0, MezzeType.IntType, loc)
-                }
-            }
-
             is ParsedPipe -> {
                 val left = buildExpr(expr.left, file)
                 val right = buildExpr(expr.right, file, contextType)

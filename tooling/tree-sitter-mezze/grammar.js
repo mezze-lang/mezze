@@ -19,9 +19,13 @@
  *   4  == != < > <= >=
  *   5  + -
  *   6  * / %
- *   7  unary - !
- *   8  . (member access)
- *   9  :: (module qualification, atomic)
+ *   7  . (member access)
+ *   8  :: (module qualification, atomic)
+ *
+ * There is no unary-operator level: `!` is gone (boolean negation is the
+ * `.not {}` method) and `-` survives only as a leading sign inside numeric
+ * literals (see integer_literal / float_literal); negating an expression is
+ * the `.neg {}` method.
  */
 
 const PREC = {
@@ -31,7 +35,7 @@ const PREC = {
   compare: 4,
   add: 5,
   mul: 6,
-  unary: 7,
+  // 7 was the unary-operator level, now removed (no prefix operators).
   member: 8,
   qualified: 9,
   // Used to force the lambda-vs-record decision in favor of lambda when an
@@ -628,7 +632,6 @@ module.exports = grammar({
     _expression: $ => choice(
       $.lambda_expression,
       $.binary_expression,
-      $.unary_expression,
       $.pipe_expression,
       $.member_access,
       $.method_call,
@@ -692,11 +695,6 @@ module.exports = grammar({
         field('right', $._expression),
       ))),
     ),
-
-    unary_expression: $ => prec.right(PREC.unary, seq(
-      field('operator', choice('-', '!')),
-      field('operand', $._expression),
-    )),
 
     // value |> f {x = @}
     pipe_expression: $ => prec.left(PREC.pipe, seq(

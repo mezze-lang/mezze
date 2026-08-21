@@ -66,7 +66,6 @@ class ExpressionConstraintGenerator {
         is ParsedMatch -> generateMatch(expr, context)
         is ParsedDo -> generateDo(expr, context)
         is ParsedBinaryOp -> generateBinaryOp(expr, context)
-        is ParsedUnaryOp -> generateUnaryOp(expr, context)
         is ParsedPerform -> generatePerform(expr, context)
         is ParsedEffectCall -> generateEffectCall(expr, context)
     }

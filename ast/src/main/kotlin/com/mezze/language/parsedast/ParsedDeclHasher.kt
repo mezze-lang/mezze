@@ -269,7 +269,6 @@ object ParsedDeclHasher {
                 appendExpr(b, expr.arguments)
             }
             is ParsedBinaryOp -> { b.append(byteArrayOf(HashTags.FUNCTION_CALL)); b.append(expr.op); appendExpr(b, expr.left); appendExpr(b, expr.right) }
-            is ParsedUnaryOp -> { b.append(byteArrayOf(HashTags.FUNCTION_CALL, 0x01)); b.append(expr.op); appendExpr(b, expr.operand) }
             is ParsedParens -> appendExpr(b, expr.expr)
             is ParsedMatchCase -> { b.append(byteArrayOf(HashTags.MATCH, 0x01)); Unit }
             is ParsedIfLetGuard -> { b.append(byteArrayOf(HashTags.IF_ELSE, 0x01)); appendPattern(b, expr.pattern); appendExpr(b, expr.expr) }

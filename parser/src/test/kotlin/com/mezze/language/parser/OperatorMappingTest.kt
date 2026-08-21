@@ -43,35 +43,7 @@ class OperatorMappingTest {
     }
 
     @Test
-    fun `test unary minus uses NumSub neg`() {
-        val op = OperatorMapping.getUnaryOp("-")
-        assertNotNull(op)
-        assertEquals("NumSub", op!!.ability)
-        assertEquals("neg", op.method)
-        assertEquals("n", op.fieldName)
-    }
-
-    @Test
-    fun `test unary not operator was removed`() {
-        // `!` is no longer an operator — boolean negation is the `.not {}`
-        // method on Bool.
-        assertNull(OperatorMapping.getUnaryOp("!"))
-    }
-
-    @Test
-    fun `test unknown unary operator returns null`() {
-        assertNull(OperatorMapping.getUnaryOp("+"))
-        assertNull(OperatorMapping.getUnaryOp("~"))
-    }
-
-    @Test
     fun `test fraction slash is NOT an operator`() {
         assertNull(OperatorMapping.getBinaryOp("//"))
-    }
-
-    @Test
-    fun `test unary minus uses NumSub not NumNeg`() {
-        val unaryMinus = OperatorMapping.getUnaryOp("-")
-        assertEquals("NumSub", unaryMinus?.ability)
     }
 }

@@ -134,10 +134,6 @@ class PerformValidator(
                 errors.addAll(validatePerformExpressionsInExpression(expr.right, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is ParsedUnaryOp -> {
-                errors.addAll(validatePerformExpressionsInExpression(expr.operand, implDeclarations, effectDeclarations, functionDefinitions))
-            }
-
             is ParsedIdentifier,
             is ParsedIntLit,
             is ParsedNatLit,
@@ -320,7 +316,6 @@ class PerformValidator(
                 is ParsedParens -> traverse(e.expr)
 
                 is ParsedBinaryOp -> { traverse(e.left); traverse(e.right) }
-                is ParsedUnaryOp -> traverse(e.operand)
 
                 is ParsedIdentifier,
                 is ParsedIntLit,

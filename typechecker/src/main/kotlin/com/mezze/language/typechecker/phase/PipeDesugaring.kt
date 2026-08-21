@@ -37,7 +37,6 @@ internal fun desugarPipesInParsedModule(module: ParsedModule): ParsedModule {
         }
         is ParsedEffectCall -> hasPipes(expr.arguments)
         is ParsedBinaryOp -> hasPipes(expr.left) || hasPipes(expr.right)
-        is ParsedUnaryOp -> hasPipes(expr.operand)
         else -> false
     }
     val hasAnyPipes = module.decls.any { decl ->
@@ -94,7 +93,6 @@ internal fun desugarPipesInParsedModule(module: ParsedModule): ParsedModule {
             }
         })
         is ParsedBinaryOp -> expr.copy(left = desugar(expr.left), right = desugar(expr.right))
-        is ParsedUnaryOp -> expr.copy(operand = desugar(expr.operand))
         else -> expr
     }
 
@@ -160,7 +158,6 @@ private fun replaceParsedPlaceholder(expr: ParsedExpr, replacement: ParsedExpr):
         left = replaceParsedPlaceholder(expr.left, replacement),
         right = replaceParsedPlaceholder(expr.right, replacement)
     )
-    is ParsedUnaryOp -> expr.copy(operand = replaceParsedPlaceholder(expr.operand, replacement))
     is ParsedPipe -> expr.copy(
         left = replaceParsedPlaceholder(expr.left, replacement),
         right = replaceParsedPlaceholder(expr.right, replacement)

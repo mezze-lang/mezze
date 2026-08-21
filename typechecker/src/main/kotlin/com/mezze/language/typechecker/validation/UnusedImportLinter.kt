@@ -154,7 +154,6 @@ object UnusedImportLinter {
             }
             is ParsedFunctionCall -> { collectExprRefs(expr.function, into); collectExprRefs(expr.arguments, into) }
             is ParsedBinaryOp -> { collectExprRefs(expr.left, into); collectExprRefs(expr.right, into) }
-            is ParsedUnaryOp -> collectExprRefs(expr.operand, into)
             is ParsedPipe -> { collectExprRefs(expr.left, into); collectExprRefs(expr.right, into) }
             is ParsedParens -> collectExprRefs(expr.expr, into)
             is ParsedMemberAccess -> collectExprRefs(expr.receiver, into)

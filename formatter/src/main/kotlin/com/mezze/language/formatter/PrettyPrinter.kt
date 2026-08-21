@@ -505,7 +505,6 @@ class PrettyPrinter {
             is ParsedLambda -> printLambda(expr)
             is ParsedFunctionCall -> printFunctionCall(expr)
             is ParsedBinaryOp -> printBinaryOp(expr)
-            is ParsedUnaryOp -> printUnaryOp(expr)
             is ParsedIf -> printIf(expr)
             is ParsedMatch -> printMatch(expr)
             is ParsedDo -> printDo(expr)
@@ -713,14 +712,6 @@ class PrettyPrinter {
         if (needsParensRight) append("(")
         printExpr(expr.right)
         if (needsParensRight) append(")")
-    }
-
-    private fun printUnaryOp(expr: ParsedUnaryOp) {
-        append(expr.op)
-        val needsParens = expr.operand is ParsedFunctionCall || expr.operand is ParsedIf || expr.operand is ParsedBinaryOp
-        if (needsParens) append("(")
-        printExpr(expr.operand)
-        if (needsParens) append(")")
     }
 
     private data class MethodChainSegment(val method: String, val args: ParsedExpr)
@@ -1264,7 +1255,6 @@ class PrettyPrinter {
         is ParsedMemberAccess -> estimateExprWidth(expr.receiver) + expr.member.length + 1
         is ParsedFunctionCall -> estimateExprWidth(expr.function) + estimateExprWidth(expr.arguments) + 1
         is ParsedBinaryOp -> estimateExprWidth(expr.left) + expr.op.length + 2 + estimateExprWidth(expr.right)
-        is ParsedUnaryOp -> expr.op.length + estimateExprWidth(expr.operand)
         is ParsedRecordLit -> estimateRecordLitWidth(expr)
         is ParsedParens -> estimateExprWidth(expr.expr) + 2
         is ParsedPipe -> estimateExprWidth(expr.left) + estimateExprWidth(expr.right) + 4

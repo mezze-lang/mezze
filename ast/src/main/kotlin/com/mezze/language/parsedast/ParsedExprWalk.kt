@@ -39,7 +39,6 @@ fun ParsedExpr.children(): List<ParsedExpr> = when (this) {
     is ParsedLambda -> listOf(body)
     is ParsedFunctionCall -> listOf(function, arguments)
     is ParsedBinaryOp -> listOf(left, right)
-    is ParsedUnaryOp -> listOf(operand)
     is ParsedPipe -> listOf(left, right)
     is ParsedIf -> listOf(condition, thenBranch, elseBranch)
     is ParsedMatch -> listOf(scrutinee) +

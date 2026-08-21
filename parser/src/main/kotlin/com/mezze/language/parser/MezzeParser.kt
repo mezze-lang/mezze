@@ -973,7 +973,6 @@ internal fun tokenDescription(type: TokenType): String = when (type) {
     TokenType.GTE -> "'>='"
     TokenType.AND -> "'&&'"
     TokenType.OR -> "'||'"
-    TokenType.NOT -> "'!'"
 
     // Keywords - show the keyword
     TokenType.LET -> "'let'"

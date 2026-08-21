@@ -1,8 +1,8 @@
 error[T0201]: String interpolation requires String type, but expression has type Int
-  --> annotation-mismatch.mz:1:47
+  --> annotation-mismatch.mz:1:58
    |
  1 | let greet: { name: Int } -> Str = { name } -> "Goodbye $(name)"
-                                                   ^^^^^^^^^^^^^^^^^
+                                                              ^^^^
  2 | 
    |
   = hint: interpolated expressions must produce a `Str` (use `.to_str {}` or `.to_dbg_str {}`)

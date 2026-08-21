@@ -4,8 +4,6 @@ object OperatorMapping {
 
     data class BinaryOp(val ability: String, val method: String)
 
-    data class UnaryOp(val ability: String, val method: String, val fieldName: String)
-
     val BINARY_OPERATORS: Map<String, BinaryOp> = mapOf(
         "+" to BinaryOp("NumAdd", "add"),
         "-" to BinaryOp("NumSub", "sub"),
@@ -22,11 +20,5 @@ object OperatorMapping {
         "||" to BinaryOp("LogicalOr", "or")
     )
 
-    val UNARY_OPERATORS: Map<String, UnaryOp> = mapOf(
-        "-" to UnaryOp("NumSub", "neg", "n")
-    )
-
     fun getBinaryOp(operator: String): BinaryOp? = BINARY_OPERATORS[operator]
-
-    fun getUnaryOp(operator: String): UnaryOp? = UNARY_OPERATORS[operator]
 }

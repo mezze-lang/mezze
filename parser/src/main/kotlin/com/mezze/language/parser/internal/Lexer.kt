@@ -23,7 +23,7 @@ enum class TokenType {
     // Operators
     PLUS, MINUS, STAR, SLASH, PERCENT,
     EQ, NEQ, LT, GT, LTE, GTE,
-    AND, OR, NOT,
+    AND, OR,
     PIPE, PIPE_OP, DOUBLE_COLON,  // PIPE is |, PIPE_OP is |>
 
     // Delimiters
@@ -51,7 +51,6 @@ private object InternedTokens {
     const val PERCENT = "%"
     const val LT = "<"
     const val GT = ">"
-    const val NOT = "!"
     const val PIPE = "|"
     const val AT = "@"
     const val LPAREN = "("
@@ -276,7 +275,6 @@ class Lexer(
             '%' -> TokenType.PERCENT to InternedTokens.PERCENT
             '<' -> TokenType.LT to InternedTokens.LT
             '>' -> TokenType.GT to InternedTokens.GT
-            '!' -> TokenType.NOT to InternedTokens.NOT
             '|' -> TokenType.PIPE to InternedTokens.PIPE
             '@' -> TokenType.AT to InternedTokens.AT
             '(' -> TokenType.LPAREN to InternedTokens.LPAREN

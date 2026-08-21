@@ -123,19 +123,6 @@ data class ParsedBinaryOp(
     override val loc: Loc
 ) : ParsedExpr
 
-/**
- * Unary operator expression: `-x`, `!flag`
- *
- * Preserved from source — NOT desugared to method calls.
- */
-@Serializable
-data class ParsedUnaryOp(
-    val op: String,
-    val operand: ParsedExpr,
-    override val loc: Loc
-) : ParsedExpr
-
-
 /** Pipe expression: `value |> f { param = @ }` */
 @Serializable
 data class ParsedPipe(

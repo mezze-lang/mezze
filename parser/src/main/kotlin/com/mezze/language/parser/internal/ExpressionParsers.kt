@@ -1790,7 +1790,6 @@ internal fun countPipePlaceholders(expr: ParsedExpr): Int {
         is ParsedParens -> countPipePlaceholders(expr.expr)
         is ParsedPipe -> countPipePlaceholders(expr.left) + countPipePlaceholders(expr.right)
         is ParsedBinaryOp -> countPipePlaceholders(expr.left) + countPipePlaceholders(expr.right)
-        is ParsedUnaryOp -> countPipePlaceholders(expr.operand)
         is ParsedEffectCall -> countPipePlaceholders(expr.arguments)
         is ParsedStringLit -> expr.parts.sumOf { part ->
             if (part is ParsedStringPart.Interpolation) countPipePlaceholders(part.expr) else 0
@@ -1840,7 +1839,6 @@ internal fun findPipePlaceholderLocations(expr: ParsedExpr): List<Loc> {
         is ParsedParens -> findPipePlaceholderLocations(expr.expr)
         is ParsedPipe -> findPipePlaceholderLocations(expr.left) + findPipePlaceholderLocations(expr.right)
         is ParsedBinaryOp -> findPipePlaceholderLocations(expr.left) + findPipePlaceholderLocations(expr.right)
-        is ParsedUnaryOp -> findPipePlaceholderLocations(expr.operand)
         is ParsedEffectCall -> findPipePlaceholderLocations(expr.arguments)
         is ParsedStringLit -> expr.parts.flatMap { part ->
             if (part is ParsedStringPart.Interpolation) findPipePlaceholderLocations(part.expr) else emptyList()
@@ -1892,7 +1890,6 @@ internal fun pipePlaceholderInReceiverPosition(expr: ParsedExpr): Loc? = when (e
     is ParsedParens -> pipePlaceholderInReceiverPosition(expr.expr)
     is ParsedPipe -> pipePlaceholderInReceiverPosition(expr.left) ?: pipePlaceholderInReceiverPosition(expr.right)
     is ParsedBinaryOp -> pipePlaceholderInReceiverPosition(expr.left) ?: pipePlaceholderInReceiverPosition(expr.right)
-    is ParsedUnaryOp -> pipePlaceholderInReceiverPosition(expr.operand)
     is ParsedEffectCall -> pipePlaceholderInReceiverPosition(expr.arguments)
     is ParsedStringLit -> expr.parts.firstNotNullOfOrNull { part ->
         if (part is ParsedStringPart.Interpolation) pipePlaceholderInReceiverPosition(part.expr) else null
@@ -2181,60 +2178,31 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
             val streamAfterMinus = skipNewlines(stream.advance())
             val literalToken = streamAfterMinus.current()
 
-            if (literalToken?.type == TokenType.INTEGER || literalToken?.type == TokenType.FLOAT || literalToken?.type == TokenType.FRACTION) {
-
-                when (literalToken.type) {
-                    TokenType.INTEGER -> ParseResult.Success(
-                        ParsedIntLit(-literalToken.text.toLong(), opLoc),
-                        streamAfterMinus.advance()
-                    )
-                    TokenType.FLOAT -> ParseResult.Success(
-                        ParsedFloatLit(-literalToken.text.toDouble(), opLoc),
-                        streamAfterMinus.advance()
-                    )
-                    TokenType.FRACTION -> {
-                        val parts = literalToken.text.split("//")
-                        if (parts.size == 2) {
-                            ParseResult.Success(
-                                ParsedFracLit(-parts[0].toLong(), parts[1].toLong(), opLoc),
-                                streamAfterMinus.advance()
-                            )
-                        } else {
-                            streamAfterMinus.failure("Invalid fraction literal '${literalToken.text}'. Expected format: numerator//denominator (e.g., 3//4)")
-                        }
-                    }
-                    else -> {
-                        // Should not reach here given the check above
-                        val opStream = stream.advance()
-                        val operand = unaryExpression(opStream)
-                        when (operand) {
-                            is ParseResult.Success -> ParseResult.Success(
-                                desugarUnaryOperatorParsed(token.text, operand.value, opLoc.spanTo(operand.value.loc)),
-                                operand.remaining
-                            )
-                            is ParseResult.Failure -> operand
-                        }
+            // `-` is not a prefix operator: `-5` folds into a negative literal;
+            // `-x` on a non-literal must use `x.neg {}`.
+            when (literalToken?.type) {
+                TokenType.INTEGER -> ParseResult.Success(
+                    ParsedIntLit(-literalToken.text.toLong(), opLoc),
+                    streamAfterMinus.advance()
+                )
+                TokenType.FLOAT -> ParseResult.Success(
+                    ParsedFloatLit(-literalToken.text.toDouble(), opLoc),
+                    streamAfterMinus.advance()
+                )
+                TokenType.FRACTION -> {
+                    val parts = literalToken.text.split("//")
+                    if (parts.size == 2) {
+                        ParseResult.Success(
+                            ParsedFracLit(-parts[0].toLong(), parts[1].toLong(), opLoc),
+                            streamAfterMinus.advance()
+                        )
+                    } else {
+                        streamAfterMinus.failure("Invalid fraction literal '${literalToken.text}'. Expected format: numerator//denominator (e.g., 3//4)")
                     }
                 }
-            } else {
-                // The `-` prefix operator was removed: `-5` still folds into a
-                // negative literal (handled above), but `-x` on a non-literal
-                // must use the `.neg {}` method.
-                streamAfterMinus.failure(
+                else -> streamAfterMinus.failure(
                     "Unary `-` on a non-literal is not supported — use `x.neg {}` to negate an expression."
                 )
-            }
-        } else if (token?.type == TokenType.NOT) {
-            val file2 = currentFile ?: "<unknown>"
-            val opLoc = tokenLoc(token, file2)
-            val opStream = stream.advance()
-            val operand = unaryExpression(opStream) // Right-associative: !(!x) is valid
-            when (operand) {
-                is ParseResult.Success -> ParseResult.Success(
-                    desugarUnaryOperatorParsed(token.text, operand.value, opLoc.spanTo(operand.value.loc)),
-                    operand.remaining
-                )
-                is ParseResult.Failure -> operand
             }
         } else {
             postfixExpression(stream)
@@ -2684,14 +2652,6 @@ internal fun MezzeParser.desugarBinaryOperatorParsed(
     loc: Loc
 ): ParsedExpr {
     return ParsedBinaryOp(operator, left, right, loc)
-}
-
-internal fun MezzeParser.desugarUnaryOperatorParsed(
-    operator: String,
-    operand: ParsedExpr,
-    loc: Loc
-): ParsedExpr {
-    return ParsedUnaryOp(operator, operand, loc)
 }
 
 internal fun MezzeParser.parseParsedInterpolatedString(

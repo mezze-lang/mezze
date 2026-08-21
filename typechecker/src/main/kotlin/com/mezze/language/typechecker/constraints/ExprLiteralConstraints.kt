@@ -28,25 +28,6 @@ internal fun ExpressionConstraintGenerator.generateBinaryOp(expr: ParsedBinaryOp
     return generate(desugared, context)
 }
 
-internal fun ExpressionConstraintGenerator.generateUnaryOp(expr: ParsedUnaryOp, context: ConstraintContext): ConstraintResult {
-    val op = OperatorMapping.getUnaryOp(expr.op)
-        ?: throw TypeCheckError(
-            "Unknown operator: ${expr.op}", expr.loc,
-            code = ErrorCode.T0401_UNKNOWN_OPERATOR,
-            hints = listOf("unary operators desugar to method calls; check that `${expr.op}` is a known operator"),
-        )
-
-    val desugared = ParsedFunctionCall(
-        function = ParsedMemberAccess(expr.operand, op.method, expr.loc),
-        arguments = ParsedRecordLit(emptyList(), expr.loc),
-        loc = expr.loc
-    )
-
-    SyntaxMetadata.markAsOperator(expr.loc, expr.op)
-
-    return generate(desugared, context)
-}
-
 internal fun ExpressionConstraintGenerator.generateIntLiteral(expr: ParsedIntLit, context: ConstraintContext) = ConstraintResult.simple(MezzeType.IntType)
 internal fun ExpressionConstraintGenerator.generateNatLiteral(expr: ParsedNatLit, context: ConstraintContext) = ConstraintResult.simple(MezzeType.NatType)
 internal fun ExpressionConstraintGenerator.generateFloatLiteral(expr: ParsedFloatLit, context: ConstraintContext) = ConstraintResult.simple(MezzeType.FloatType)
