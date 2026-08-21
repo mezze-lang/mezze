@@ -38,6 +38,16 @@ impl NumMul Nat for Nat having 'out = Nat where {
   mul = { it, r } -> __native_nat_multiply { l = it, r = r }
 }
 
+## Nat * Int -> Int (widen the Nat receiver).
+impl NumMul Int for Nat having 'out = Int where {
+  mul = { it, r } -> std::int::from_nat { n = it } * r
+}
+
+## Nat * Float -> Float (widen the Nat receiver).
+impl NumMul Float for Nat having 'out = Float where {
+  mul = { it, r } -> std::float::from_nat { n = it } * r
+}
+
 impl NumDiv for Nat where {
   div = { it, r } -> __native_nat_divide { l = it, r = r }
 }

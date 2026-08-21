@@ -35,6 +35,16 @@ impl NumMul Float for Float having 'out = Float where {
   mul = { it, r } -> __native_float_multiply { l = it, r = r }
 }
 
+## Float * Int -> Float (widen the Int operand).
+impl NumMul Int for Float having 'out = Float where {
+  mul = { it, r } -> it * r.to_float {}
+}
+
+## Float * Nat -> Float (widen the Nat operand).
+impl NumMul Nat for Float having 'out = Float where {
+  mul = { it, r } -> it * from_nat { n = r }
+}
+
 impl NumDiv for Float where {
   div = { it, r } -> __native_float_divide { l = it, r = r }
 }

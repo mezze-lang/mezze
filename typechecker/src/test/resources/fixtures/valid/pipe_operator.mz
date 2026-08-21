@@ -13,9 +13,12 @@ let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'b } with NumAdd 'b '
 
 let multiply = { x, y } -> x * y  # expected: multiply : { x: 'a, y: 'b } with NumMul 'b 'a having 'out = 'c -> 'c
 
-let double = multiply { x = 2 }  # expected: double : { y: Int } -> Int
+let double = multiply { x = 2 }  # expected: double : { y: 'a } with NumMul 'a Int having 'out = 'b -> 'b
 
-let result3 = 7 |> add { x = @, y = 3 } |> double { y = @ }  # expected: result3 : Int
+# `double` is now polymorphic (NumMul 'a Int having 'out), so piping a deferred
+# result through it leaves the pipe result polymorphic (same as result4 — a
+# class-param `having 'out` chained through a pipe is not eagerly resolved).
+let result3 = 7 |> add { x = @, y = 3 } |> double { y = @ }  # expected: result3 : 'a
 
 # Pipe with arithmetic precedence. `5 + 3` feeds a deferred NumAdd `having 'out`
 # result into `square`, whose own NumMul `having 'out` stays deferred too, so the
