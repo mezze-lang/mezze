@@ -278,6 +278,58 @@ object DuplicateDeclarationValidator {
                 )
             }
         }
+
+        // Same check for ability method signatures. Bound-tyvars set:
+        //   ability.typeParams      (includes the receiver — parser flattens)
+        //   ability.associatedTypes (declared via `having 'x`)
+        //   this op's with-constraint tyargs (`with X 'y` introduces 'y)
+        // Anything else in the op's param/return/effect row is a "magic tyvar"
+        // that gets silently generalized per call — the exact pattern that
+        // bit codec's `Encode for 'a where { encode : ... -> Result 'out ... }`.
+        for (abilityDecl in module.decls.filterIsInstance<ParsedAbilityDecl>()) {
+            val abilityLevelBinders = (abilityDecl.typeParams + abilityDecl.associatedTypes)
+                .map { it.removePrefix("'") }
+                .toSet()
+            for (op in abilityDecl.operations) {
+                val opLevelBinders = op.abilityConstraints
+                    .flatMap { it.typeArgs }
+                    .flatMap { collectTypeVariablesFromParsedAnnotation(it) }
+                    .map { it.first }
+                    .toSet()
+                val bound = abilityLevelBinders + opLevelBinders
+
+                val used = mutableListOf<Pair<String, Loc?>>()
+                used.addAll(collectTypeVariablesFromParsedAnnotation(op.paramType))
+                used.addAll(collectTypeVariablesFromParsedAnnotation(op.returnType))
+                // NB: effects rows are excluded — the row-var machinery handles
+                // those separately (`<...>` etc).
+
+                val freeVars = used.filter { it.first !in bound }
+                if (freeVars.isNotEmpty()) {
+                    val freeVarList = freeVars.map { it.first }.distinct().sorted()
+                        .joinToString(", ") { "'$it" }
+                    val loc = freeVars.firstNotNullOfOrNull { it.second } ?: op.loc
+                    val suggestion = if (freeVars.map { it.first }.distinct().size == 1) {
+                        val name = freeVars.first().first
+                        "Add it as a parameter of ability '${abilityDecl.name}' " +
+                            "(e.g. `ability ${abilityDecl.name} '$name for '${abilityDecl.receiverTypeParam?.removePrefix("'") ?: "a"} where { ... }`), " +
+                            "as an associated type (`having '$name`), " +
+                            "or introduce it in a per-op constraint (`with Something '$name`)."
+                    } else {
+                        val names = freeVars.map { it.first }.distinct().sorted()
+                            .joinToString(" ") { "'$it" }
+                        "Add them as parameters of ability '${abilityDecl.name}', " +
+                            "as associated types (`having $names`), or via per-op `with` constraints."
+                    }
+                    throw TypeCheckError(
+                        "Ability '${abilityDecl.name}' operation '${op.name}' has undeclared type variable(s): $freeVarList. $suggestion",
+                        loc,
+                        code = ErrorCode.T0301_UNBOUND_TYPE_VAR,
+                        hints = listOf("every tyvar in an ability method must be bound at the ability level or by a per-op `with` constraint"),
+                    )
+                }
+            }
+        }
     }
 
     private fun collectTypeVariablesWithLocation(definition: ParsedTypeDef): List<Pair<String, Loc?>> = when (definition) {

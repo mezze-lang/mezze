@@ -82,22 +82,28 @@ ability DecodeFormat 'repr for 'fmt where {
 }
 
 ## Encode a value to an intermediate representation.
-ability EncodeRepr for 'a where {
+## SCHEDULED FOR REDESIGN (task #86) — 'fmt and 'repr should become
+## an ability parameter + associated type. Bound here via `having` for
+## T0301 compliance until the codec redesign lands.
+ability EncodeRepr for 'a having 'fmt, 'repr where {
   encode_repr: { fmt: 'fmt, config: CodecConfig } -> Result 'repr EncodeError
 }
 
 ## Encode a value directly to an output type (Bytes, Str, etc).
-ability Encode for 'a where {
+## SCHEDULED FOR REDESIGN (task #86) — see EncodeRepr note above.
+ability Encode for 'a having 'fmt, 'out where {
   encode: { fmt: 'fmt, config: CodecConfig } -> Result 'out EncodeError
 }
 
 ## Decode a value from an intermediate representation.
-ability DecodeRepr 'a for 'repr where {
+## SCHEDULED FOR REDESIGN (task #86) — see EncodeRepr note above.
+ability DecodeRepr 'a for 'repr having 'fmt where {
   decode_repr: { fmt: 'fmt, config: CodecConfig } -> Result 'a DecodeError
 }
 
 ## Decode a value from an input type (Bytes, Str, etc).
-ability Decode 'a for 'in where {
+## SCHEDULED FOR REDESIGN (task #86) — see EncodeRepr note above.
+ability Decode 'a for 'in having 'fmt where {
   decode: { fmt: 'fmt, config: CodecConfig } -> Result 'a DecodeError
 }
 
@@ -154,12 +160,14 @@ ability StreamDecodeFormat for 'fmt where {
 }
 
 ## Streaming encode — writes a value directly to a ByteBuffer.
-ability StreamEncode for 'a where {
+## SCHEDULED FOR REDESIGN (task #86) — 'fmt bound via having until redesign.
+ability StreamEncode for 'a having 'fmt where {
   stream_encode: { fmt: 'fmt, buffer: ByteBuffer, config: CodecConfig } -> Result ByteBuffer EncodeError
 }
 
 ## Streaming decode — reads a value directly from Bytes.
-ability StreamDecode 'a for 'bytes where {
+## SCHEDULED FOR REDESIGN (task #86) — 'fmt bound via having until redesign.
+ability StreamDecode 'a for 'bytes having 'fmt where {
   stream_decode: { offset: Int, fmt: 'fmt, config: CodecConfig } -> Result { value: 'a, offset: Int } DecodeError
 }
 
