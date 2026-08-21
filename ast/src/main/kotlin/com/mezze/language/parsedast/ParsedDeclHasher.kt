@@ -333,7 +333,16 @@ object ParsedDeclHasher {
     private fun appendTypeAnnotation(b: MezzeHashBuilder, ann: ParsedTypeAnnotation) {
         when (ann) {
             is ParsedNamedType -> { b.append(byteArrayOf(HashTags.TYPE_VAR)); b.append(ann.name); Unit }
-            is ParsedQualifiedType -> { b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR)); b.append(ann.modulePath.joinToString("::")); b.append(ann.typeName); Unit }
+            is ParsedQualifiedType -> {
+                b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR))
+                b.append(ann.modulePath.joinToString("::"))
+                b.append(ann.typeName)
+                // `args` distinguishes e.g. `codec::Entry Str Json` from
+                // `codec::Entry Bool Xml`; without them these collide on the content
+                // hash (mirrors the ParsedTypeApp branch, which already hashes args).
+                b.appendInt(ann.args.size)
+                for (arg in ann.args) appendTypeAnnotation(b, arg)
+            }
             is ParsedTypeApp -> {
                 b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x01))
                 b.append(ann.constructor)
@@ -354,7 +363,39 @@ object ParsedDeclHasher {
                     c.dataType?.let { b.appendBoolean(true); appendTypeAnnotation(b, it) } ?: b.appendBoolean(false)
                 }
             }
-            is ParsedFunctionType -> { b.append(byteArrayOf(HashTags.FUNCTION_TYPE)); appendTypeAnnotation(b, ann.paramType); appendTypeAnnotation(b, ann.returnType) }
+            is ParsedFunctionType -> {
+                b.append(byteArrayOf(HashTags.FUNCTION_TYPE))
+                appendTypeAnnotation(b, ann.paramType)
+                appendTypeAnnotation(b, ann.returnType)
+                // `effects` and `abilityConstraints` are semantically significant —
+                // `{p}->Str <FileSystem>` vs `{p}->Str` (pure), and `… with Eq 'a` vs
+                // unconstrained, are DIFFERENT types. Dropping them let effectful and
+                // pure / constrained and unconstrained signatures collide on the
+                // content hash (which keys by-hash registries + import merge).
+                // NB: ParsedEffectRow is NOT a ParsedTypeAnnotation, so we hash its
+                // fields inline (the `is ParsedEffectRow` case below is unreachable).
+                ann.effects?.let { row ->
+                    b.appendBoolean(true)
+                    b.appendInt(row.effects.size)
+                    for (e in row.effects.sorted()) b.append(e)
+                    b.appendInt(row.effectAnnotations.size)
+                    for (ea in row.effectAnnotations.sortedBy { it.name }) {
+                        b.append(ea.name)
+                        b.appendInt(ea.associatedTypes.size)
+                        for ((k, v) in ea.associatedTypes.toSortedMap()) { b.append(k); appendTypeAnnotation(b, v) }
+                    }
+                    b.appendBoolean(row.isPolymorphic)
+                    b.appendBoolean(row.isPerformed)
+                } ?: b.appendBoolean(false)
+                b.appendInt(ann.abilityConstraints.size)
+                for (c in ann.abilityConstraints) {
+                    b.append(c.abilityName)
+                    b.appendInt(c.typeArgs.size)
+                    for (t in c.typeArgs) appendTypeAnnotation(b, t)
+                    b.appendInt(c.associatedTypeBindings.size)
+                    for ((k, v) in c.associatedTypeBindings.toSortedMap()) { b.append(k); appendTypeAnnotation(b, v) }
+                }
+            }
             is ParsedSeqType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE)); appendTypeAnnotation(b, ann.elementType) }
             is ParsedEffectRow -> {
                 b.append(byteArrayOf(HashTags.PERFORM, 0x02))
