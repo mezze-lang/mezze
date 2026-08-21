@@ -143,7 +143,6 @@ class AuditBugRegressionTest {
     // treat multi-field payloads as a product (like the #220 record routine),
     // so this is non-exhaustive and rejected.
     // EXPECTED-CORRECT: accepted today under bug259 (MatchValidator.kt:559).
-    @Disabled("known-bug #259: nested variant-payload exhaustiveness not product-checked; enable when fixed")
     @Test fun `bug259_nested_product_diagonal_only_is_non_exhaustive`() {
         val m = err(
             """

@@ -556,12 +556,37 @@ class MatchValidator(
             }
             if (opaque || armFieldPatterns.isEmpty()) continue
 
+            fun subFor(arm: Map<String, ParsedPattern?>, field: String): ParsedPattern? =
+                if (arm.containsKey(field)) arm[field] else ParsedWildcardPattern(matchExpr.loc)
+
+            // #259: with ≥2 FINITE (closed-variant, incl. Bool) fields, checking each
+            // field independently accepts a diagonal-only match (`Wrap { a = True, b =
+            // True }` + `Wrap { a = False, b = False }` misses `{ True, False }`). Reuse
+            // the top-level #220 cartesian-product routine, prefixing each missing combo
+            // with the outer constructor so the message reads `Ctor { a = …, b = … }`.
+            val finiteFields = payloadRecord.fields.filter { resolveClosedVariant(it.value) != null }
+            if (finiteFields.size >= 2) {
+                when (val res = recordProductExhaustivenessErrors(matchExpr, finiteFields, armFieldPatterns, ::subFor)) {
+                    is ValidationResult.Failure -> res.errors.forEach { err ->
+                        errors.add(
+                            when (err) {
+                                is ValidationError.NonExhaustiveMatch -> ValidationError.NonExhaustiveMatch(
+                                    coveredConstructors = err.coveredConstructors,
+                                    missingConstructors = err.missingConstructors.map { "$ctorName $it" },
+                                    loc = err.loc,
+                                )
+                                else -> err
+                            }
+                        )
+                    }
+                    is ValidationResult.Success -> {}
+                }
+            }
+
             for ((fieldName, fieldType) in payloadRecord.fields) {
                 // Collect each arm's sub-pattern for this field (a missing key is
                 // an irrefutable bind → whole field covered).
-                val subPatterns = armFieldPatterns.map { arm ->
-                    if (arm.containsKey(fieldName)) arm[fieldName] else ParsedWildcardPattern(matchExpr.loc)
-                }
+                val subPatterns = armFieldPatterns.map { subFor(it, fieldName) }
 
                 // B3: a nested NON-ENUMERABLE PRIMITIVE field (Int/Str/…) pinned to
                 // literals across arms is only exhaustive with a catch-all sub-pattern
@@ -583,7 +608,11 @@ class MatchValidator(
                     continue
                 }
 
+                // A single finite field is fully handled by the per-field recursion
+                // below; ≥2 were already product-checked above, so skip them here to
+                // avoid double-reporting (the product check subsumes per-field).
                 val fieldVariant = resolveClosedVariant(fieldType) ?: continue
+                if (finiteFields.size >= 2) continue
                 errors.addAll(missingInVariantField(fieldVariant, subPatterns, matchExpr.loc, "$ctorName { $fieldName = ", " }"))
             }
         }
