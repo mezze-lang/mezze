@@ -17,8 +17,8 @@ impl NumAdd Nat for Float having 'out = Float where {
   add = { it, r } -> it + from_nat { n = r }
 }
 
-impl NumSub for Float where {
-  sub = { it, r } -> __native_float_subtract { l = it, r = r },
+impl NumSub Float for Float having 'out = Float where {
+  sub = { it, r } -> __native_float_subtract { l = it, r = r }
 }
 
 impl NumMul for Float where {

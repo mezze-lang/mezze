@@ -64,11 +64,13 @@ class ArithmeticWithFunctionsTest {
         """.trimIndent()
 
         val error = typeCheckShouldFail(code)
-        // Either the old error format or the new unification error format is acceptable
+        // Either the old error format or the new unification error format is acceptable.
+        // Heterogeneous NumSub emits "Cannot use '-' with a function. Functions cannot implement NumSub."
         assertTrue(
             error.contains("Cannot apply arithmetic operator") ||
             error.contains("Type mismatch") ||
-            error.contains("type mismatch"),
+            error.contains("type mismatch") ||
+            error.contains("Cannot use '-' with a function"),
             "Expected arithmetic/unification error but got: $error"
         )
     }
@@ -160,11 +162,15 @@ class ArithmeticWithFunctionsTest {
         """.trimIndent()
 
         val error = typeCheckShouldFail(code)
-        // Either the old error format or the new unification error format is acceptable
+        // Either the old error format or the new unification/ability error format is
+        // acceptable. The `* f` sub-expression emits
+        // "Cannot use '*' with a function. Functions cannot implement NumMul."
         assertTrue(
             error.contains("Cannot apply arithmetic operator") ||
             error.contains("Type mismatch") ||
-            error.contains("type mismatch"),
+            error.contains("type mismatch") ||
+            error.contains("Cannot use '*' with a function") ||
+            error.contains("Cannot use '-' with a function"),
             "Expected arithmetic/unification error but got: $error"
         )
     }

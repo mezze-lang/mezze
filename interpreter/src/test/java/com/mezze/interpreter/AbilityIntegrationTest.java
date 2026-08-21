@@ -214,7 +214,7 @@ public class AbilityIntegrationTest {
 
             type Money = { cents: Int }
 
-            impl NumSub for Money where {
+            impl NumSub Money for Money having 'out = Money where {
               sub = { it, r } -> { cents = it.cents - r.cents }
             }
 

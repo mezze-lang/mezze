@@ -18,8 +18,8 @@ impl NumAdd Nat for Int having 'out = Int where {
   add = { it, r } -> it + from_nat { n = r }
 }
 
-impl NumSub for Int where {
-  sub = { it, r } -> __native_int_subtract { l = it, r = r },
+impl NumSub Int for Int having 'out = Int where {
+  sub = { it, r } -> __native_int_subtract { l = it, r = r }
 }
 
 impl NumMul for Int where {

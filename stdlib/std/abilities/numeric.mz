@@ -10,9 +10,14 @@ ability NumAdd 'r for 'l having 'out where {
 }
 
 ## Subtraction. Desugars the binary `-` operator.
-ability NumSub for 'a where {
+##
+## `'r` is the right-operand type (a class parameter, so each ordered `(l, r)`
+## pair is a distinct impl) and `'out` the result. This lets heterogeneous
+## subtractions coexist — e.g. `Int - Float -> Float` — while the same-type impls
+## bind `'r`/`'out` to the receiver, so `Int - Int -> Int`.
+ability NumSub 'r for 'l having 'out where {
   ## Subtract r from it.
-  sub: { it: 'a, r: 'a } -> 'a
+  sub: { it: 'l, r: 'r } -> 'out
 }
 
 ## Multiplication. Desugars the `*` operator.

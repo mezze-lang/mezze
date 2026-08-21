@@ -7,8 +7,8 @@ impl NumAdd Frac for Frac having 'out = Frac where {
   add = { it, r } -> __native_frac_add { l = it, r = r }
 }
 
-impl NumSub for Frac where {
-  sub = { it, r } -> __native_frac_subtract { l = it, r = r },
+impl NumSub Frac for Frac having 'out = Frac where {
+  sub = { it, r } -> __native_frac_subtract { l = it, r = r }
 }
 
 impl NumMul for Frac where {
