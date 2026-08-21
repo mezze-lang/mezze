@@ -269,22 +269,46 @@ object DuplicateDeclarationValidator {
         val abilityImplKeys = mutableSetOf<String>()
 
         for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
-            val abilityTypeArgNames = impl.abilityTypeArgs.map { parsedTypeAnnotationToString(it) }
             val targetTypeNames = impl.targetTypes.map { parsedTypeAnnotationToString(it) }
-            val allTypeNames = abilityTypeArgNames + targetTypeNames
             val implLabel = impl.abilityName ?: "inherent"
-            val key = "${implLabel}_${allTypeNames.joinToString("_")}"
+            // Overlap key = ability + the STRUCTURE of its type args. It must NOT
+            // include the impl bodies (two impls of the same ability+types overlap
+            // regardless of body — that's the coherence rule), and it must NOT be a
+            // lossy underscore-join: `parsedTypeAnnotationToString` flattens nested
+            // type-app args with `_`, so the separator BETWEEN target types was
+            // indistinguishable from the one INSIDE a nested application — e.g.
+            // `Conv for Foo [Bar]` (1 target) and `Conv for Foo Array Bar` (3 targets)
+            // both rendered "Foo_Array_Bar" and collided. `structuralTypeKey`
+            // length-delimits each type so distinct shapes stay distinct.
+            val key = "${implLabel}::" +
+                impl.abilityTypeArgs.joinToString(",") { structuralTypeKey(it) } + "|" +
+                impl.targetTypes.joinToString(",") { structuralTypeKey(it) }
 
             if (key in abilityImplKeys) {
                 throw TypeCheckError(
                     "Duplicate ${if (impl.isInherent) "inherent" else "ability"} implementation: '${implLabel}' is already implemented " +
-                    "for type(s) ${allTypeNames.joinToString(", ")}",
+                    "for type(s) ${targetTypeNames.joinToString(", ")}",
                     impl.loc,
                     code = ErrorCode.V0407_OVERLAPPING_INSTANCE,
                 )
             }
             abilityImplKeys.add(key)
         }
+    }
+
+    /**
+     * An unambiguous, length-delimited rendering of a type annotation's STRUCTURE
+     * (constructor + arg count + recursively each arg). Unlike
+     * [parsedTypeAnnotationToString], the `(arity:...)` delimiters make the boundary
+     * between distinct target types distinguishable from args inside one nested
+     * application, so `Foo [Bar]` and `Foo Array Bar` get different keys.
+     */
+    private fun structuralTypeKey(ann: ParsedTypeAnnotation): String = when (ann) {
+        is ParsedTypeApp -> "${ann.constructor}(${ann.args.size}:${ann.args.joinToString(",") { structuralTypeKey(it) }})"
+        is ParsedQualifiedType -> "${ann.modulePath.joinToString("::")}::${ann.typeName}(${ann.args.size}:${ann.args.joinToString(",") { structuralTypeKey(it) }})"
+        is ParsedNamedType -> "N:${ann.name}"
+        is ParsedSeqType -> "Seq(${structuralTypeKey(ann.elementType)})"
+        else -> "raw:${parsedTypeAnnotationToString(ann)}"
     }
 
         private fun validateDuplicateInherentMethods(module: ParsedModule) {

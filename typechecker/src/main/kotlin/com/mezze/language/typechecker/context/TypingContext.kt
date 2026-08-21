@@ -248,8 +248,15 @@ data class TypingContext(
     }
 
     fun findAnonymousMethod(typeName: String, methodName: String): InherentMethodInfo? {
-        val key = "$typeName::$methodName"
-        return anonymousImplMethods[key] ?: parent?.findAnonymousMethod(typeName, methodName)
+        // Direct plain-name key (builtins / hashless), then fall back to a by-name
+        // scan — entries whose target type has a content hash are stored under a
+        // hash-qualified key (see extendWithAnonymousMethod), so the plain key
+        // misses them. The scan matches on the info's targetTypeName + methodName.
+        anonymousImplMethods["$typeName::$methodName"]?.let { return it }
+        anonymousImplMethods.values.firstOrNull {
+            it.targetTypeName == typeName && it.methodName == methodName
+        }?.let { return it }
+        return parent?.findAnonymousMethod(typeName, methodName)
     }
 
     fun findAnonymousMethodByHash(typeHash: Hash, methodName: String): InherentMethodInfo? {
@@ -269,7 +276,14 @@ data class TypingContext(
     }
 
     fun extendWithAnonymousMethod(info: InherentMethodInfo): TypingContext {
-        val key = "${info.targetTypeName}::${info.methodName}"
+        // Hash-qualify the registry key when the target type has a content hash, so
+        // two same-named types from different modules keep DISTINCT entries instead
+        // of one overwriting the other (last-writer-wins → silent mis-dispatch).
+        // Builtins with no decl hash keep the plain-name key. Readers: by-name scans
+        // (findAnonymousMethodsByName / findAnonymousMethod fallback) match on the
+        // info's fields regardless of key. See project_classparam_runtime_dispatch_tuple.
+        val keyType = info.targetTypeHash?.hex ?: info.targetTypeName
+        val key = "$keyType::${info.methodName}"
         val existingMethods = anonymousImplMethodsByType[info.targetTypeName] ?: emptyList()
         val newHashIndex = if (info.targetTypeHash != null) {
             val hashKey = Hash.computeOpHash(info.targetTypeHash, info.methodName)

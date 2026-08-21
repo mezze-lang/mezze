@@ -636,6 +636,11 @@ class ContextBuilder {
                 targetTypeName = targetTypeName, methodName = op.name,
                 methodType = MezzeType.FunctionType(paramType = paramType, returnType = returnType),
                 implContentHash = implKey,
+                // Content hash of the TARGET type. Populates the hash index so member
+                // dispatch can disambiguate two same-named types from different modules
+                // (name stays the fallback for builtins with no decl hash). Additive —
+                // the name-keyed maps are unchanged. project_classparam_runtime_dispatch_tuple.
+                targetTypeHash = currentTypeDecls[targetTypeName]?.contentHash,
                 implStartLine = implDecl.loc.startLine, implStartCol = implDecl.loc.startCol,
                 implSourceFile = implDecl.loc.file
             ))
@@ -700,6 +705,9 @@ class ContextBuilder {
                 targetTypeName = targetTypeName, methodName = op.name,
                 methodType = MezzeType.FunctionType(paramType = alignedParamType, returnType = returnType, effects = opEffects[op.name]),
                 implContentHash = implKey,
+                // See addAnonymousImpl — populate the target type's content hash for
+                // hash-preferring dispatch (currentTypeDecls covers imported types).
+                targetTypeHash = currentTypeDecls[targetTypeName]?.contentHash,
                 implStartLine = implDecl.loc.startLine, implStartCol = implDecl.loc.startCol,
                 implSourceFile = implDecl.loc.file, isImported = true
             ))

@@ -670,12 +670,20 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
 
     val receiverTypeName = resolveReceiverTypeName(receiverType)
         ?: lookupConstructorTypeName(memberAccess.receiver, context)
+    // Prefer the resolved receiver's CONTENT HASH to disambiguate two same-named
+    // inherent-method impls from different modules (name-only matching would pick
+    // by load order → silent mis-dispatch). Falls back to name when the receiver
+    // has no type hash (builtins). See project_classparam_runtime_dispatch_tuple.
+    val receiverTypeHash = (receiverType as? MezzeType.VariantType)?.typeHash
+        ?: (receiverType as? MezzeType.TypeApplication)?.typeHash
     val methodInfo = if (deferImplByReceiver) {
         // Homogeneous candidates — any is a valid signature representative; the
         // concrete impl is picked from candidateImpls at emit time.
         inherentMethods.first()
     } else if (inherentMethods.size == 1) {
         inherentMethods.first()
+    } else if (receiverTypeHash != null && inherentMethods.any { it.targetTypeHash == receiverTypeHash }) {
+        inherentMethods.first { it.targetTypeHash == receiverTypeHash }
     } else if (receiverTypeName != null) {
         inherentMethods.firstOrNull { it.targetTypeName == receiverTypeName }
     } else {

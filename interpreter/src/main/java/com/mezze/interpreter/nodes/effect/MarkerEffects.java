@@ -32,7 +32,7 @@ public final class MarkerEffects {
      * this and breaks the build if they drift.
      */
     public static final String MUT_EFFECT_HASH_HEX =
-        "05d9e70c83972f84e21da6095c1c22600854cc8c081877a5f7f49c689da6fb7265fdfdacc76b16d0561ad9be50bd32ff300977d466fbb16e98f988b41fbb6dba";
+        "a0170b84db725d0a7e5e84a1bf06b194c340122a89494fc6d33703c2186e89cad5eb0bfe52761a0875aed1c919b2d26aaba004bbe21bb489edd2c27d58368429";
 
     /**
      * True if {@code hash} is the Mut effect hash. Cheap O(1) — the
