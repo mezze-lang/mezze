@@ -32,7 +32,7 @@ impl NumSub Nat for Int having 'out = Int where {
   sub = { it, r } -> it - from_nat { n = r }
 }
 
-impl NumMul for Int where {
+impl NumMul Int for Int having 'out = Int where {
   mul = { it, r } -> __native_int_multiply { l = it, r = r }
 }
 

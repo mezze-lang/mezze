@@ -13,7 +13,7 @@ class PolymorphicDebugTest {
         val testCases = listOf(
             "let complex = {x, y, z} -> x + y" to "{ x: 'a, y: 'a, z: 'b } with NumAdd 'a -> 'a",
             "let addTwo = { x } -> x + x" to "{ x: 'a } with NumAdd 'a -> 'a",
-            "let square = { x } -> x * x" to "{ x: 'a } with NumMul 'a -> 'a"
+            "let square = { x } -> x * x" to "{ x: 'a } with NumMul 'a 'a having 'out -> 'out"
         )
 
         // Bidirectional detection always returns false in the new system

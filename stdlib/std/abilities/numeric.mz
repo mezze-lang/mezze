@@ -21,9 +21,14 @@ ability NumSub 'r for 'l having 'out where {
 }
 
 ## Multiplication. Desugars the `*` operator.
-ability NumMul for 'a where {
+##
+## `'r` is the right-operand type (a class parameter, so each ordered `(l, r)`
+## pair is a distinct impl) and `'out` the result. This lets heterogeneous
+## multiplications coexist — e.g. `Int * Float -> Float` — while the same-type
+## impls bind `'r`/`'out` to the receiver, so `Int * Int -> Int`.
+ability NumMul 'r for 'l having 'out where {
   ## Multiply two values.
-  mul: { it: 'a, r: 'a } -> 'a
+  mul: { it: 'l, r: 'r } -> 'out
 }
 
 ## Division. Desugars the `/` operator.

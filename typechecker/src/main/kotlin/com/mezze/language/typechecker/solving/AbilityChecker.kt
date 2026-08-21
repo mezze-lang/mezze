@@ -89,6 +89,19 @@ internal class AbilityChecker(
                     // the codec-only closing that already existed.
                     val closedTypeArgs = concreteTypeArgs.map { closeOpenRecords(it) }
 
+                    // Hard-reject a function operand even when a SIBLING position is
+                    // still an unresolved var. A concrete FunctionType is monotonic —
+                    // no later substitution turns it into something else — and no impl
+                    // targets a function at a concrete slot, so its unimplementability
+                    // is decidable now, independent of the other operands. Without this,
+                    // `(10 + 20) * f` (whose `(10+20)` co-operand is a not-yet-resolved
+                    // class-param `having 'out` var) slips through the all-or-nothing
+                    // `allConcrete` gate below into the defer/absorb branch and the
+                    // obligation evaporates unchecked (the class-param fn-operand hole).
+                    if (functionOperandHasNoImpl(abilityName, closedTypeArgs, tracked.abilityHash)) {
+                        return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs, errorLoc), errorLoc)
+                    }
+
                     val allConcrete = closedTypeArgs.all { isConcrete(it) }
 
                     if (allConcrete) {
@@ -176,6 +189,15 @@ internal class AbilityChecker(
 
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
         } else {
+            // Even with a sibling still unresolved, a concrete function operand that no
+            // impl accepts at its slot is already unsatisfiable — reject eagerly rather
+            // than deferring into the finalize absorb path (the class-param fn-operand
+            // hole). See functionOperandHasNoImpl.
+            if (functionOperandHasNoImpl(abilityName, trackingArgs, constraint.abilityHash)) {
+                return ConstraintSolver.ConstraintResult.Failure(
+                    generateAbilityErrorMessage(abilityName, trackingArgs, constraint.loc)
+                )
+            }
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
         }
     }
@@ -895,6 +917,44 @@ internal class AbilityChecker(
             Substitution(substitutionMap)
         } else {
             null
+        }
+    }
+
+    /**
+     * True when some position of [typeArgs] holds a concrete [MezzeType.FunctionType]
+     * that no impl of [abilityName] can accept at THAT index — i.e. the obligation is
+     * already unsatisfiable regardless of how the other (possibly still-var) positions
+     * resolve. A function value is monotonic and can never implement an ability whose
+     * impls target concrete named types, so this verdict is stable.
+     *
+     * Positionally exact: an impl with a generic type-var slot at the function's index
+     * (`impl A for 'a`) MATCHES (TypeAnnotationMatcher returns true for a var slot), so
+     * this correctly does NOT fire — a function passed where a fully-generic slot is
+     * declared is legal. Var positions in [typeArgs] are skipped, mirroring
+     * [tryBidirectionalInference]. Returns false if there is no function operand.
+     */
+    private fun functionOperandHasNoImpl(abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): Boolean {
+        val fnIndices = typeArgs.indices.filter { typeArgs[it] is MezzeType.FunctionType }
+        if (fnIndices.isEmpty()) return false
+
+        val impls = if (abilityHash != null) {
+            val byHash = context.getAbilityImplsByDeclHash(abilityHash)
+            if (byHash.isNotEmpty()) byHash else context.getAbilityImpls(abilityName)
+        } else {
+            context.getAbilityImpls(abilityName)
+        }
+
+        // Reject if EVERY function position fails to match EVERY arity-compatible impl at
+        // its own index. (A single function operand that matches no impl at its slot is
+        // enough to make the whole obligation unsatisfiable.)
+        return fnIndices.any { i ->
+            impls.none { implInfo ->
+                val annotations = implInfo.targetTypeAnnotations ?: return@none false
+                if (annotations.size != typeArgs.size) return@none false
+                TypeAnnotationMatcher.typeMatchesAnnotation(
+                    typeArgs[i], annotations[i], registry.typeDeclarations, implInfo.typeVars
+                )
+            }
         }
     }
 

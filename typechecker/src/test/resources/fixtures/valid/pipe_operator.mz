@@ -1,6 +1,6 @@
 # Pipe operator tests
 # Basic pipe operator
-let square = { x } -> x * x  # expected: square : { x: 'a } with NumMul 'a -> 'a
+let square = { x } -> x * x  # expected: square : { x: 'a } with NumMul 'a 'a having 'out = 'b -> 'b
 
 let add_ten = { x } -> x + 10  # expected: add_ten : { x: 'a } with NumAdd Int 'a having 'out = Int -> Int
 
@@ -11,13 +11,16 @@ let result2 = 5 |> add_ten { x = @ } |> square { x = @ }  # expected: result2 : 
 # Pipe with partial application
 let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c -> 'c
 
-let multiply = { x, y } -> x * y  # expected: multiply : { x: 'a, y: 'a } with NumMul 'a -> 'a
+let multiply = { x, y } -> x * y  # expected: multiply : { x: 'a, y: 'b } with NumMul 'b 'a having 'out = 'c -> 'c
 
 let double = multiply { x = 2 }  # expected: double : { y: Int } -> Int
 
 let result3 = 7 |> add { x = @, y = 3 } |> double { y = @ }  # expected: result3 : Int
 
-# Pipe with arithmetic precedence
-let result4 = 5 + 3 |> square { x = @ }  # expected: result4 : Int
+# Pipe with arithmetic precedence. `5 + 3` feeds a deferred NumAdd `having 'out`
+# result into `square`, whose own NumMul `having 'out` stays deferred too, so the
+# pipe result is left polymorphic (same as the NumAdd `having 'out` behavior — a
+# class-param `having 'out` chained through a pipe is not eagerly resolved).
+let result4 = 5 + 3 |> square { x = @ }  # expected: result4 : 'a
 
 result1

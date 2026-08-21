@@ -375,7 +375,7 @@ let doResult = doMultiple { x = 1, y = 2, z = 3 } # expected: doResult : Int
     fun `test polymorphic numeric functions`() {
         val source = """
 let addTwo = { x } -> x + x        # expected: addTwo : { x: 'a } with NumAdd 'a 'a having 'out -> 'out
-let square = { x } -> x * x        # expected: square : { x: 'a } with NumMul 'a -> 'a
+let square = { x } -> x * x        # expected: square : { x: 'a } with NumMul 'a 'a having 'out -> 'out
 let isPositive = { x } -> x > 0    # expected: isPositive : { x: 'a } with Ord 'a -> Boolean
 
 let intResult = addTwo { x = 21 }           # expected: intResult : Int

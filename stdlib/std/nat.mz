@@ -34,7 +34,7 @@ impl NumSub Float for Nat having 'out = Float where {
   sub = { it, r } -> std::float::from_nat { n = it } - r
 }
 
-impl NumMul for Nat where {
+impl NumMul Nat for Nat having 'out = Nat where {
   mul = { it, r } -> __native_nat_multiply { l = it, r = r }
 }
 

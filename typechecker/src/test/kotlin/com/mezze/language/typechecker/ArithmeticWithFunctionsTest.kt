@@ -84,12 +84,15 @@ class ArithmeticWithFunctionsTest {
         """.trimIndent()
 
         val error = typeCheckShouldFail(code)
-        // Either the old error format or the new unification/ability error format is acceptable
+        // Either the old error format or the new unification/ability error format is
+        // acceptable. Heterogeneous NumMul emits
+        // "Cannot use '*' with a function. Functions cannot implement NumMul."
         assertTrue(
             error.contains("Cannot apply arithmetic operator") ||
             error.contains("Type mismatch") ||
             error.contains("type mismatch") ||
-            error.contains("No implementation of NumMul"),
+            error.contains("No implementation of NumMul") ||
+            error.contains("Cannot use '*' with a function"),
             "Expected arithmetic/unification error but got: $error"
         )
     }
@@ -156,6 +159,11 @@ class ArithmeticWithFunctionsTest {
 
     @Test
     fun `should reject function in complex arithmetic expression`() {
+        // Regression guard for the class-param fn-operand obligation-drop hole:
+        // `(10 + 20)` is a class-param NumAdd `having 'out` result that is still an
+        // unresolved var when the `* f` obligation is validated. The function operand
+        // `f` must be rejected anyway — a concrete function can never implement NumMul
+        // regardless of how its co-operand resolves (see AbilityChecker.functionOperandHasNoImpl).
         val code = """
             let f = {x: Int} -> x + 1
             let result = (10 + 20) * f - 5

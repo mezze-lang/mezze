@@ -1,7 +1,7 @@
 # Polymorphic numeric functions using ability constraints
 let addTwo = { x } -> x + x  # expected: addTwo : { x: 'a } with NumAdd 'a -> 'a
 
-let square = { x } -> x * x  # expected: square : { x: 'a } with NumMul 'a -> 'a
+let square = { x } -> x * x  # expected: square : { x: 'a } with NumMul 'a 'a having 'out = 'b -> 'b
 
 let isPositive = { x } -> x > 0  # expected: isPositive : { x: 'a } with Ord 'a -> Bool
 
