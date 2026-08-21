@@ -1,5 +1,6 @@
-# In-process timing of native fused Seq fold. Matches list_fold_compare's
-# shape so numbers are directly comparable.
+# In-process timing of native fused Seq fold, with three input patterns
+# to match the Java baseline test: sequential, constant, and scrambled.
+# Scrambled uses a cheap arithmetic hash so no Random effect is needed.
 use std::effects::log::{println, Console}
 use std::effects::time::{Time, SystemTime, monotonic}
 use std::datetime::{duration_to_nanos, sub_duration}
@@ -18,15 +19,11 @@ let time_k = {xs, k, acc} -> if k == 0
       let r = time_one {xs = xs}
       time_k {xs = xs, k = k - 1, acc = seq::push {xs = acc, x = r.ns}}
 
-let main = {} -> perform Console in perform SystemTime in do
-    let n = 1000000
-    let xs = seq::range {start = 0, end = n}
-
+let stats = {label, xs} -> perform Console in perform SystemTime in do
     let _w = time_k {xs = xs, k = 3, acc = []}
     let times = time_k {xs = xs, k = 10, acc = []}
     let sorted = seq::sort {xs = times}
     let n_times = seq::size {xs = sorted}
-
     let min_ns = match seq::get {xs = sorted, i = 0} is
         Some {val} -> val
         None -> 0
@@ -36,8 +33,20 @@ let main = {} -> perform Console in perform SystemTime in do
     let max_ns = match seq::get {xs = sorted, i = n_times - 1} is
         Some {val} -> val
         None -> 0
+    println { msg = "$(label): min=$(min_ns.to_str{}) med=$(med_ns.to_str{}) max=$(max_ns.to_str{})" }
 
-    println { msg = "seq-fused fold N=$(n.to_str{}) — per-fold ns min/med/max:" }
-    println { msg = "  min = $(min_ns.to_str{})" }
-    println { msg = "  med = $(med_ns.to_str{})" }
-    println { msg = "  max = $(max_ns.to_str{})" }
+let main = {} -> perform Console in perform SystemTime in do
+    let n = 1000000
+    println { msg = "seq-fused fold N=$(n.to_str{}) — per-fold ns:" }
+
+    # Sequential 0..n-1
+    let seq_arr = seq::range {start = 0, end = n}
+    stats {label = "sequential", xs = seq_arr}
+
+    # Constant value
+    let const_arr = seq::map {xs = seq::range {start = 0, end = n}, f = {x} -> 42}
+    stats {label = "constant  ", xs = const_arr}
+
+    # Scrambled — cheap hash, non-sequential access pattern for values
+    let rand_arr = seq::map {xs = seq::range {start = 0, end = n}, f = {x} -> x * 2654435761}
+    stats {label = "scrambled ", xs = rand_arr}
