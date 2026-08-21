@@ -2429,7 +2429,18 @@ class TypedASTCompiler(
                 val wildcardCase = CaseIR(PatternIR.Wildcard(-1), emptyList(), null, BoolLitIR(false, src), src)
                 MatchIR(accessExpr, listOf(matchCase, wildcardCase), src)
             }
-            else -> null // seq / string-interp nested sub-patterns: separate gaps
+            is TypedSeqPattern, is TypedStringInterpPattern -> {
+                // B4/B6: a nested seq / string-interpolation sub-pattern needs a
+                // runtime shape test (length/prefix), or the enclosing arm would
+                // match on the outer tag/field-presence alone and fire wrongly.
+                // Build a nested match over the field value: `<pattern> -> true,
+                // _ -> false`, reusing compilePattern for the PatternIR + its slot
+                // allocation (mirrors the TypedVariantPattern case above).
+                val patIR = compilePattern(pattern)
+                val trueCase = CaseIR(patIR, emptyList(), null, BoolLitIR(true, src), src)
+                val wildcardCase = CaseIR(PatternIR.Wildcard(-1), emptyList(), null, BoolLitIR(false, src), src)
+                MatchIR(accessExpr, listOf(trueCase, wildcardCase), src)
+            }
         }
     }
 
