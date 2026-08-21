@@ -9,13 +9,13 @@ impl Default for SortedMap 'k 'v where {
 }
 
 ## Structural equality for sorted maps.
-impl Eq 'k 'v for SortedMap 'k 'v where {
+impl Eq for SortedMap 'k 'v where {
   eq = { it, r } -> __native_sorted_map_equals { m1 = it, m2 = r },
   neq = { it, r } -> if __native_sorted_map_equals { m1 = it, m2 = r } then False else True,
 }
 
 ## Lexicographic ordering for sorted maps.
-impl Ord 'k 'v for SortedMap 'k 'v where {
+impl Ord for SortedMap 'k 'v where {
   lt: { it: SortedMap 'k 'v, r: SortedMap 'k 'v } with Ord 'k, Ord 'v -> Bool = { it, r } -> __native_sorted_map_compare { m1 = it, m2 = r } == (0 - 1),
   le: { it: SortedMap 'k 'v, r: SortedMap 'k 'v } with Ord 'k, Ord 'v -> Bool = { it, r } -> __native_sorted_map_compare { m1 = it, m2 = r } != 1,
   gt: { it: SortedMap 'k 'v, r: SortedMap 'k 'v } with Ord 'k, Ord 'v -> Bool = { it, r } -> __native_sorted_map_compare { m1 = it, m2 = r } == 1,
@@ -158,7 +158,7 @@ impl SortedMap 'k 'v where {
   to_list = { it } -> to_list { m = it },
 }
 
-impl Sized 'k 'v for SortedMap 'k 'v where {
+impl Sized for SortedMap 'k 'v where {
   size = { it } -> size { m = it },
   is_empty = { it } -> is_empty { m = it },
 }

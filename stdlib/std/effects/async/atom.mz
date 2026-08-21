@@ -4,7 +4,7 @@ use std::effects::async::{ Async }
 ## Lock-free atomic reference for shared mutable state.
 pub newtype Atom 'a = Atom __NativeAtomicRef
 
-impl Eq 'a for Atom 'a where {
+impl Eq for Atom 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }

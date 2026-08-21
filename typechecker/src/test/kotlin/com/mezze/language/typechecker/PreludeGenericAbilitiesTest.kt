@@ -145,6 +145,24 @@ class PreludeGenericAbilitiesTest {
     }
 
     // ------------------------------------------------------------------
+    // NonEmptyListable
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `nel wraps Int into a singleton NonEmptyList`() {
+        val r = checkWithPrelude("""let y = 42.nel {}""")
+        val ty = r.getVariableType("y")
+        assertNotNull(ty)
+        assertTrue(ty.toString().contains("NonEmptyList"), "expected NonEmptyList, got: $ty")
+    }
+
+    @Test
+    fun `nel wraps Str into a singleton NonEmptyList`() {
+        val r = checkWithPrelude("""let y = "hi".nel {}""")
+        assertNotNull(r.getVariableType("y"))
+    }
+
+    // ------------------------------------------------------------------
     // Coherence: user cannot re-impl any of these
     // ------------------------------------------------------------------
 
@@ -203,5 +221,78 @@ class PreludeGenericAbilitiesTest {
             """
         )
         assertNotNull(r.getVariableType("ys"))
+    }
+
+    // ------------------------------------------------------------------
+    // Okable — x.ok {} → Ok { val = x }
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `ok wraps Int and result is Result Int _`() {
+        val r = checkWithPrelude("""let y = 42.ok {}""")
+        val ty = r.getVariableType("y")
+        assertNotNull(ty)
+        val s = ty.toString()
+        assertTrue(s.contains("Result"), "expected Result, got: $s")
+    }
+
+    @Test
+    fun `ok wraps Str`() {
+        val r = checkWithPrelude("""let y = "hi".ok {}""")
+        assertNotNull(r.getVariableType("y"))
+    }
+
+    @Test
+    fun `ok result usable at a caller-picked error type`() {
+        // Bidirectional inference should propagate: takes_str_err wants
+        // Result Int Str, so 'e in .ok {} should pin to Str.
+        val r = checkWithPrelude(
+            """
+            let takes_str_err : { r: Result Int Str } -> Int = { r } -> match r is
+                Ok { val } -> val
+                Err { error = _ } -> 0
+
+            let a = takes_str_err { r = 42.ok {} }
+            """
+        )
+        assertNotNull(r.getVariableType("a"))
+    }
+
+    @Test
+    fun `ok error type inferred from function body without annotation`() {
+        val r = checkWithPrelude(
+            """
+            let takes_err = { r } -> match r is
+                Ok { val } -> val
+                Err { error } -> error
+
+            let a = takes_err { r = 42.ok {} }
+            """
+        )
+        assertNotNull(r.getVariableType("a"))
+    }
+
+    // ------------------------------------------------------------------
+    // Errable — x.err {} → Err { error = x }
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `err wraps Str and result is Result _ Str`() {
+        val r = checkWithPrelude("""let y = "boom".err {}""")
+        val ty = r.getVariableType("y")
+        assertNotNull(ty)
+        val s = ty.toString()
+        assertTrue(s.contains("Result"), "expected Result, got: $s")
+    }
+
+    @Test
+    fun `err with user variant`() {
+        val r = checkWithPrelude(
+            """
+            type ParseError = | Missing, Invalid |
+            let y = Missing.err {}
+            """
+        )
+        assertNotNull(r.getVariableType("y"))
     }
 }

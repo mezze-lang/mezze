@@ -3,13 +3,13 @@ use std::abilities::sized::{ Sized }
 use std::int
 
 ## Structural equality for non-empty lists.
-impl Eq 'a for NonEmptyList 'a where {
+impl Eq for NonEmptyList 'a where {
   eq = { it, r } -> __native_nel_equals { xs = it, ys = r },
   neq = { it, r } -> if __native_nel_equals { xs = it, ys = r } then False else True,
 }
 
 ## Lexicographic ordering for non-empty lists.
-impl Ord 'a for NonEmptyList 'a where {
+impl Ord for NonEmptyList 'a where {
   lt: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } -> __native_nel_compare { xs = it, ys = r } == (0 - 1),
   le: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } -> __native_nel_compare { xs = it, ys = r } != 1,
   gt: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } -> __native_nel_compare { xs = it, ys = r } == 1,
@@ -141,7 +141,17 @@ impl NonEmptyList 'a where {
 }
 
 ## NonEmptyList is never empty, so is_empty always returns False.
-impl Sized 'a for NonEmptyList 'a where {
+impl Sized for NonEmptyList 'a where {
   size = { it } -> size { xs = it },
   is_empty = { it } -> False,
+}
+
+## Wrap any value in a singleton NonEmptyList via method syntax:
+## `x.nel {}` → single-element `NonEmptyList 'a`. Generic — covers every type.
+ability NonEmptyListable for 'a where {
+  nel : { it: 'a } -> NonEmptyList 'a
+}
+
+impl NonEmptyListable for 'a where {
+  nel = { it } -> singleton { x = it }
 }

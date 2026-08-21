@@ -9,7 +9,7 @@ impl Default for List 'a where {
 }
 
 ## Structural equality for lists.
-impl Eq 'a for List 'a where {
+impl Eq for List 'a where {
   eq = { it, r } -> __native_list_equals { xs = it, ys = r },
   neq = { it, r } -> if __native_list_equals { xs = it, ys = r } then False else True,
 }
@@ -19,7 +19,7 @@ impl Eq 'a for List 'a where {
 ## preconditions `List T < List T` would type-check for a T with no Ord and
 ## crash at runtime (#224). The body delegates to the native compare, so the
 ## precondition can't be inferred from the body and must be explicit.
-impl Ord 'a for List 'a where {
+impl Ord for List 'a where {
   lt: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } -> __native_list_compare { xs = it, ys = r } == (0 - 1),
   le: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } -> __native_list_compare { xs = it, ys = r } != 1,
   gt: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } -> __native_list_compare { xs = it, ys = r } == 1,
@@ -451,7 +451,7 @@ impl List 'a where {
   to_set = { it } -> to_set { xs = it },
 }
 
-impl Sized 'a for List 'a where {
+impl Sized for List 'a where {
   size = { it } -> size { xs = it },
   is_empty = { it } -> is_empty { xs = it },
 }

@@ -19,7 +19,7 @@ pub let promise_eq : { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
 pub let promise_neq : { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
   __native_ref_neq { l = l, r = r }
 
-impl Eq 'a for Promise 'a where {
+impl Eq for Promise 'a where {
   eq  = { it, r } -> promise_eq  { l = it, r = r },
   neq = { it, r } -> promise_neq { l = it, r = r },
 }
@@ -30,7 +30,7 @@ pub let scope_eq : { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
 pub let scope_neq : { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
   __native_ref_neq { l = l, r = r }
 
-impl Eq 'a for Scope 'a where {
+impl Eq for Scope 'a where {
   eq  = { it, r } -> scope_eq  { l = it, r = r },
   neq = { it, r } -> scope_neq { l = it, r = r },
 }

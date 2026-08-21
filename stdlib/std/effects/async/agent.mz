@@ -4,7 +4,7 @@ use std::effects::async::{ Async }
 ## Serialized async state agent -- actions are queued and applied one at a time.
 pub newtype Agent 'a = Agent __NativeAgent
 
-impl Eq 'a for Agent 'a where {
+impl Eq for Agent 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }

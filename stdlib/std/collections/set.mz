@@ -9,7 +9,7 @@ impl Default for Set 'a where {
 }
 
 ## Structural equality for sets.
-impl Eq 'a for Set 'a where {
+impl Eq for Set 'a where {
   eq = { it, r } -> __native_set_equals { s1 = it, s2 = r },
   neq = { it, r } -> if __native_set_equals { s1 = it, s2 = r } then False else True,
 }
@@ -206,7 +206,7 @@ impl Set 'a where {
   to_list = { it } -> to_list { s = it },
 }
 
-impl Sized 'a for Set 'a where {
+impl Sized for Set 'a where {
   size = { it } -> size { s = it },
   is_empty = { it } -> is_empty { s = it },
 }

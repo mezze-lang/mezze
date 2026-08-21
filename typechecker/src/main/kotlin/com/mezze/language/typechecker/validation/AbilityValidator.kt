@@ -64,9 +64,13 @@ object AbilityValidator {
                 code = ErrorCode.V0401_ABILITY_NOT_DEFINED,
             )
 
-        val concreteAbilityTypeArgCount = impl.abilityTypeArgs
-            .count { it !is ParsedNamedType || !it.name.startsWith("'") }
-        val totalTypeParams = concreteAbilityTypeArgCount + impl.targetTypes.size
+        // Every ability type arg fills one slot — whether concrete (`Str`) or
+        // tyvar (`'e`). A tyvar arg is a forall introduction that fills its
+        // slot with a fresh unknown, which the impl body typechecks against.
+        // Previously this only counted concrete args, which prevented fully
+        // generic multi-param impls like `impl Okable 'e for 'a` from
+        // validating against `ability Okable 'e for 'a`.
+        val totalTypeParams = impl.abilityTypeArgs.size + impl.targetTypes.size
         if (totalTypeParams != abilityDeclaration.typeParams.size) {
             throw TypeCheckError(
                 "Type parameter count mismatch in ability implementation for '${abilityName}': " +
@@ -199,11 +203,13 @@ object AbilityValidator {
 
             val sourceLocation = implOp.loc
 
-            val allowedTypeVars = impl.abilityTypeArgs
-                .filterIsInstance<ParsedNamedType>()
-                .filter { it.name.startsWith("'") }
-                .map { it.name }
-                .toSet()
+            // Tyvars in scope for the impl's op signatures: every tyvar that
+            // appears in the impl header (both `abilityTypeArgs` and
+            // `targetTypes`). The parser flattens both into `forallVars`, so
+            // we can just use that. Previously this only pulled from
+            // `abilityTypeArgs`, which forced the redundant leading-tyvar
+            // form (`impl Ord 'a for Option 'a`) as the only working syntax.
+            val allowedTypeVars = impl.forallVars.toSet()
 
             if (implOp.paramType != null && hasTypeVariables(actualParamType, allowedTypeVars)) {
                 throw TypeCheckError(

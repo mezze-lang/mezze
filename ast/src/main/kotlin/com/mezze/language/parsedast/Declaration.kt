@@ -237,17 +237,17 @@ data class ParsedImplAbilityDecl(
     val abilityRef: ParsedQualifiedRef? get() = (target as? ParsedImplTarget.Named)?.ability
 
     /**
-     * All type arguments combined: concrete abilityTypeArgs (before 'for') + targetTypes (after 'for').
+     * All type arguments combined: abilityTypeArgs (before 'for') + targetTypes (after 'for').
      * Maps positionally to the ability's type params (extra params first, self last).
      *
-     * Type variable abilityTypeArgs are quantifiers (not type arguments), so they are excluded.
+     * Every arg fills one slot — whether concrete (`Str`) or tyvar (`'e`). A
+     * tyvar arg is a forall introduction that fills its slot with a fresh
+     * unknown, which the impl body typechecks against. Previously this
+     * dropped tyvar args, causing `impl Okable 'e for 'a` (Okable is 2-param
+     * `'e, 'a`) to expose only 1 slot to dispatch, so caller-provided
+     * `'e = Str` could never match.
      */
-    val allTypeArgs: List<ParsedTypeAnnotation> get() {
-        val concreteArgs = abilityTypeArgs.filter {
-            it !is ParsedNamedType || !it.name.startsWith("'")
-        }
-        return concreteArgs + targetTypes
-    }
+    val allTypeArgs: List<ParsedTypeAnnotation> get() = abilityTypeArgs + targetTypes
 }
 
 /**

@@ -157,7 +157,7 @@ class OrdDerivationSoundnessTest {
     // A top-level fn already infers `with Ord 'a` from a body that calls the
     // element `<`. An impl operation is just a function, so its body must infer
     // the SAME residual and record it as the impl's PRECONDITION — even with no
-    // explicit `with Ord 'a` written. Otherwise `impl Ord 'a for Wrap 'a where
+    // explicit `with Ord 'a` written. Otherwise `impl Ord for Wrap 'a where
     // { lt = {it,r} -> it.v < r.v }` accepts `Wrap Color` (Color has no Ord) and
     // crashes in the element compare, exactly the #201/#224 family of holes.
 
@@ -168,7 +168,7 @@ class OrdDerivationSoundnessTest {
             use std::abilities::compare::{ Ord }
             type Color = | Red, Green |
             type Wrap 'a = { v: 'a }
-            impl Ord 'a for Wrap 'a where {
+            impl Ord for Wrap 'a where {
               lt = { it, r } -> it.v < r.v,
               le = { it, r } -> True,
               gt = { it, r } -> False,
@@ -184,7 +184,7 @@ class OrdDerivationSoundnessTest {
         assertNull(err("""
             use std::abilities::compare::{ Ord }
             type Wrap 'a = { v: 'a }
-            impl Ord 'a for Wrap 'a where {
+            impl Ord for Wrap 'a where {
               lt = { it, r } -> it.v < r.v,
               le = { it, r } -> True,
               gt = { it, r } -> False,
@@ -201,7 +201,7 @@ class OrdDerivationSoundnessTest {
             use std::abilities::compare::{ Ord }
             type Color = | Red, Green |
             type Opt 'a = | Non, Jus { v: 'a } |
-            impl Ord 'a for Opt 'a where {
+            impl Ord for Opt 'a where {
               lt = { it, r } -> match it is
                 Non -> True
                 Jus { v = l } -> match r is

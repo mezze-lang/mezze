@@ -197,10 +197,21 @@ class TypeValidator(
             if (!hasConstrainedTypeInArgs) implTypeParts.add(0, typeName)
 
             val resolvedTypeArgs = constraint.typeArgs.map { substitution.apply(it) }
-            val concreteTypes = when {
-                resolvedTypeArgs.any { it == concreteType } -> resolvedTypeArgs
-                resolvedTypeArgs.isEmpty() -> listOf(concreteType)
-                else -> listOf(concreteType) + resolvedTypeArgs
+            // Determine if the primary typeVar ALSO appears among typeArgs by
+            // variable identity (not by substituted value). Some constraints
+            // (e.g. `with Sized 'a` — 1-param ability, typeArg is same tyvar
+            // as receiver) duplicate the receiver in typeArgs and should
+            // dedup. Real multi-param constraints (e.g. Okable's `[e]` +
+            // primary `a` where 'e ≠ 'a) must NOT dedup even if both happen
+            // to unify to the same concrete type — the impl stores separate
+            // slots and we need to match each.
+            val primaryAlreadyInTypeArgs = constraint.typeArgs.any { arg ->
+                arg is MezzeType.VarType && arg.variable == constraint.typeVar
+            }
+            val concreteTypes = if (primaryAlreadyInTypeArgs) {
+                resolvedTypeArgs
+            } else {
+                listOf(concreteType) + resolvedTypeArgs
             }
 
             val abilityImpls = context.getAbilityImpls(abilityName)

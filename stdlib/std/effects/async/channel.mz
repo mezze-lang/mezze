@@ -5,7 +5,7 @@ use std::effects::async::atom::{ atom, deref, reset }
 ## Typed channel for thread-safe message passing.
 pub newtype Chan 'a = Chan __NativeChannel
 
-impl Eq 'a for Chan 'a where {
+impl Eq for Chan 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }

@@ -9,7 +9,7 @@ impl Default for ['a] where {
 }
 
 ## Structural equality for sequences.
-impl Eq 'a for ['a] where {
+impl Eq for ['a] where {
   eq = { it, r } -> __native_seq_equals { l = it, r = r },
   neq = { it, r } -> if __native_seq_equals { l = it, r = r } then False else True,
 }
@@ -18,7 +18,7 @@ impl Eq 'a for ['a] where {
 ## `__native_seq_compare` compares elements, so the `with Ord 'a` preconditions
 ## are load-bearing: without them `[T] < [T]` would type-check for a T with no
 ## Ord and crash at runtime (#224). The native-delegating body can't infer this.
-impl Ord 'a for ['a] where {
+impl Ord for ['a] where {
   lt: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } -> __native_seq_compare { xs = it, ys = r } == (0 - 1),
   le: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } -> __native_seq_compare { xs = it, ys = r } != 1,
   gt: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } -> __native_seq_compare { xs = it, ys = r } == 1,
@@ -481,7 +481,7 @@ impl Seq 'a where {
   to_set = { it } -> to_set { xs = it },
 }
 
-impl Sized 'a for ['a] where {
+impl Sized for ['a] where {
   size = { it } -> size { xs = it },
   is_empty = { it } -> is_empty { xs = it },
 }

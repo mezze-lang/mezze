@@ -16,7 +16,7 @@ impl Tryable for Option 'a having 'inner = 'a where {
     None -> Exception.throw { error = NoneOpt }
 }
 
-impl Eq 'a for Option 'a where {
+impl Eq for Option 'a where {
   eq = { it, r } -> match it is
     Some { val = l } -> match r is
       Some { val = r_val } -> l == r_val
@@ -36,7 +36,7 @@ impl Eq 'a for Option 'a where {
 ## Lexicographic ordering for options, requiring the element to be Ord.
 ## `None < Some _`. The `with Ord 'a` preconditions prevent `Option T < Option T`
 ## from type-checking for a T with no Ord and crashing in the element compare (#224).
-impl Ord 'a for Option 'a where {
+impl Ord for Option 'a where {
   lt: { it: Option 'a, r: Option 'a } with Ord 'a -> Bool = { it, r } -> match it is
     None -> match r is
       Some { val = _ } -> True

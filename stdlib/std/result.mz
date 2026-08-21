@@ -15,7 +15,7 @@ impl Tryable for Result 'a 'e having 'inner = 'a where {
     Err { error } -> Exception.throw { error = error }
 }
 
-impl Eq 'a 'e for Result 'a 'e where {
+impl Eq for Result 'a 'e where {
   eq = { it, r } -> match it is
     Ok { val = l } -> match r is
       Ok { val = r_val } -> l == r_val
@@ -156,4 +156,26 @@ impl Result 'a 'e where {
   fold = { it, on_err, on_ok } -> fold { result = it, on_err = on_err, on_ok = on_ok },
   flatten = { it } -> flatten { result = it },
   to_list = { it } -> to_list { result = it },
+}
+
+## Wrap any value in Ok via method syntax: `x.ok {}` → `Ok { val = x }`.
+## `'e` (error type) is an ability parameter — it stays polymorphic until
+## pinned by context (return-type annotation or downstream match arm).
+ability Okable 'e for 'a where {
+  ok : { it: 'a } -> Result 'a 'e
+}
+
+impl Okable 'e for 'a where {
+  ok = { it } -> Ok { val = it }
+}
+
+## Wrap any value in Err via method syntax: `x.err {}` → `Err { error = x }`.
+## `'a` (success type) is an ability parameter — stays polymorphic until
+## pinned by context. Receiver is the error value.
+ability Errable 'a for 'e where {
+  err : { it: 'e } -> Result 'a 'e
+}
+
+impl Errable 'a for 'e where {
+  err = { it } -> Err { error = it }
 }

@@ -54,12 +54,12 @@ internal class ImplValidator(
                 code = ErrorCode.V0401_ABILITY_NOT_DEFINED,
             )
 
-        val allTypeArgs: List<ParsedTypeAnnotation> = run {
-            val concreteArgs = impl.abilityTypeArgs.filter {
-                it !is ParsedNamedType || !it.name.startsWith("'")
-            }
-            concreteArgs + impl.targetTypes
-        }
+        // Include EVERY ability type arg (concrete OR tyvar) — tyvar args
+        // are forall introductions that fill their slot with a fresh unknown.
+        // Previously this dropped tyvar args, causing `impl Okable 'e for 'a`
+        // (Okable has 2 typeParams `'e, 'a`) to zip against only 1 arg
+        // (the target), silently losing the `'e` slot binding.
+        val allTypeArgs: List<ParsedTypeAnnotation> = impl.abilityTypeArgs + impl.targetTypes
 
         val paramSubstitution = abilityDeclaration.typeParams.zip(allTypeArgs).associate { (param, targetType) ->
             param to convertTypeAnnotation(targetType)

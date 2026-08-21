@@ -9,13 +9,13 @@ impl Default for Deque 'a where {
 }
 
 ## Structural equality for deques.
-impl Eq 'a for Deque 'a where {
+impl Eq for Deque 'a where {
   eq = { it, r } -> __native_deque_equals { d1 = it, d2 = r },
   neq = { it, r } -> if __native_deque_equals { d1 = it, d2 = r } then False else True,
 }
 
 ## Lexicographic ordering for deques.
-impl Ord 'a for Deque 'a where {
+impl Ord for Deque 'a where {
   lt: { it: Deque 'a, r: Deque 'a } with Ord 'a -> Bool = { it, r } -> __native_deque_compare { d1 = it, d2 = r } == (0 - 1),
   le: { it: Deque 'a, r: Deque 'a } with Ord 'a -> Bool = { it, r } -> __native_deque_compare { d1 = it, d2 = r } != 1,
   gt: { it: Deque 'a, r: Deque 'a } with Ord 'a -> Bool = { it, r } -> __native_deque_compare { d1 = it, d2 = r } == 1,
@@ -231,7 +231,7 @@ impl Deque 'a where {
   to_seq = { it } -> to_seq { d = it },
 }
 
-impl Sized 'a for Deque 'a where {
+impl Sized for Deque 'a where {
   size = { it } -> size { d = it },
   is_empty = { it } -> is_empty { d = it },
 }

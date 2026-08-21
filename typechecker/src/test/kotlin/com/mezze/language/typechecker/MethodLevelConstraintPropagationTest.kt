@@ -407,7 +407,7 @@ class MethodLevelConstraintPropagationTest {
 
     @Test
     fun `generic impl for seq type matches concrete seq`() {
-        // impl Eq 'a for ['a] with method-level constraint
+        // impl Eq for ['a] with method-level constraint
         // When checking Eq [Int], should match if Eq Int is satisfied
         val code = """
             ability MyEq for 'a where {
@@ -418,7 +418,7 @@ class MethodLevelConstraintPropagationTest {
                 my_eq = {r} -> True
             }
 
-            impl MyEq 'a for ['a] where {
+            impl MyEq for ['a] where {
                 my_eq: {r: ['a]} with MyEq 'a -> Bool = {r} -> True
             }
 
@@ -430,7 +430,7 @@ class MethodLevelConstraintPropagationTest {
 
     @Test
     fun `generic impl fails when element type lacks ability`() {
-        // impl MyEq 'a for ['a] requires MyEq 'a
+        // impl MyEq for ['a] requires MyEq 'a
         // If MyEq is NOT implemented for the element type, should fail
         val code = """
             type Wrapper = { val: Int }
@@ -441,7 +441,7 @@ class MethodLevelConstraintPropagationTest {
 
             # No impl MyEq for Wrapper!
 
-            impl MyEq 'a for ['a] where {
+            impl MyEq for ['a] where {
                 my_eq: {r: ['a]} with MyEq 'a -> Bool = {r} -> True
             }
 
@@ -463,7 +463,7 @@ class MethodLevelConstraintPropagationTest {
 
             impl MyEq for Int where { my_eq = {r} -> True }
 
-            impl MyEq 'a for Option 'a where {
+            impl MyEq for Option 'a where {
                 my_eq: {r: Option 'a} with MyEq 'a -> Bool = {r} -> True
             }
 
@@ -481,7 +481,7 @@ class MethodLevelConstraintPropagationTest {
                 len: {} -> Int
             }
 
-            impl HasLength 'a for ['a] where {
+            impl HasLength for ['a] where {
                 len = {} -> 0
             }
 

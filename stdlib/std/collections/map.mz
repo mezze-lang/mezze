@@ -9,7 +9,7 @@ impl Default for Map 'k 'v where {
 }
 
 ## Structural equality for maps.
-impl Eq 'k 'v for Map 'k 'v where {
+impl Eq for Map 'k 'v where {
   eq = { it, r } -> __native_map_equals { m1 = it, m2 = r },
   neq = { it, r } -> if __native_map_equals { m1 = it, m2 = r } then False else True,
 }
@@ -236,7 +236,7 @@ impl Map 'k 'v where {
   to_list = { it } -> to_list { m = it },
 }
 
-impl Sized 'k 'v for Map 'k 'v where {
+impl Sized for Map 'k 'v where {
   size = { it } -> size { m = it },
   is_empty = { it } -> is_empty { m = it },
 }

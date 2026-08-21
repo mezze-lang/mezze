@@ -6,7 +6,7 @@ use std::effects::async::{ Async, park }
 ## Transactional variable -- can only be read/written inside STM transactions.
 pub newtype TVar 'a = TVar __NativeTVar
 
-impl Eq 'a for TVar 'a where {
+impl Eq for TVar 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
@@ -142,7 +142,7 @@ pub let write_all : { pairs: [{ var: TVar 'a, val: 'a }] } -> {} <STM> = { pairs
 ## Useful for synchronization, one-shot events, and locks.
 pub newtype TMVar 'a = TMVar TVar (Option 'a)
 
-impl Eq 'a for TMVar 'a where {
+impl Eq for TMVar 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
@@ -241,7 +241,7 @@ pub let is_empty_tmvar : { var: TMVar 'a } -> Bool <STM> = { var } -> do
 ## Unbounded transactional FIFO queue.
 pub newtype TQueue 'a = TQueue TVar { read: List 'a, write: List 'a }
 
-impl Eq 'a for TQueue 'a where {
+impl Eq for TQueue 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
@@ -372,7 +372,7 @@ pub let size_tqueue : { q: TQueue 'a } -> Int <STM> = { q } -> do
 ## Bounded transactional FIFO queue that blocks on write when full.
 pub newtype TBQueue 'a = TBQueue TVar { read: List 'a, write: List 'a, size: Int, capacity: Int }
 
-impl Eq 'a for TBQueue 'a where {
+impl Eq for TBQueue 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }

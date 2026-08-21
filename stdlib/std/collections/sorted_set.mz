@@ -9,13 +9,13 @@ impl Default for SortedSet 'a where {
 }
 
 ## Structural equality for sorted sets.
-impl Eq 'a for SortedSet 'a where {
+impl Eq for SortedSet 'a where {
   eq = { it, r } -> __native_sorted_set_equals { s1 = it, s2 = r },
   neq = { it, r } -> if __native_sorted_set_equals { s1 = it, s2 = r } then False else True,
 }
 
 ## Lexicographic ordering for sorted sets.
-impl Ord 'a for SortedSet 'a where {
+impl Ord for SortedSet 'a where {
   lt: { it: SortedSet 'a, r: SortedSet 'a } with Ord 'a -> Bool = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } == (0 - 1),
   le: { it: SortedSet 'a, r: SortedSet 'a } with Ord 'a -> Bool = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } != 1,
   gt: { it: SortedSet 'a, r: SortedSet 'a } with Ord 'a -> Bool = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } == 1,
@@ -194,7 +194,7 @@ impl SortedSet 'a where {
   to_seq = { it } -> to_seq { s = it },
 }
 
-impl Sized 'a for SortedSet 'a where {
+impl Sized for SortedSet 'a where {
   size = { it } -> size { s = it },
   is_empty = { it } -> is_empty { s = it },
 }
