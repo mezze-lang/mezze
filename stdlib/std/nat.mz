@@ -48,8 +48,18 @@ impl NumMul Float for Nat having 'out = Float where {
   mul = { it, r } -> std::float::from_nat { n = it } * r
 }
 
-impl NumDiv for Nat where {
+impl NumDiv Nat for Nat having 'out = Nat where {
   div = { it, r } -> __native_nat_divide { l = it, r = r }
+}
+
+## Nat / Int -> Int (widen the Nat receiver; still truncating integer division).
+impl NumDiv Int for Nat having 'out = Int where {
+  div = { it, r } -> std::int::from_nat { n = it } / r
+}
+
+## Nat / Float -> Float (widen the Nat receiver to exact division).
+impl NumDiv Float for Nat having 'out = Float where {
+  div = { it, r } -> std::float::from_nat { n = it } / r
 }
 
 impl NumMod for Nat where {

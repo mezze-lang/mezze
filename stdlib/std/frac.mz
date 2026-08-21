@@ -15,7 +15,7 @@ impl NumMul Frac for Frac having 'out = Frac where {
   mul = { it, r } -> __native_frac_multiply { l = it, r = r }
 }
 
-impl NumDiv for Frac where {
+impl NumDiv Frac for Frac having 'out = Frac where {
   div = { it, r } -> __native_frac_divide { l = it, r = r }
 }
 

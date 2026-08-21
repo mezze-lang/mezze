@@ -32,9 +32,16 @@ ability NumMul 'r for 'l having 'out where {
 }
 
 ## Division. Desugars the `/` operator.
-ability NumDiv for 'a where {
+##
+## `'r` is the right-operand type (a class parameter, so each ordered `(l, r)`
+## pair is a distinct impl) and `'out` the result. This lets heterogeneous
+## divisions coexist — e.g. `Int / Float -> Float` — while the same-type impls
+## bind `'r`/`'out` to the receiver. Integer division truncates toward zero
+## (`Int / Int -> Int`, `7 / 2 == 3`); a `Float` operand promotes to exact
+## division (`Int / Float -> Float`).
+ability NumDiv 'r for 'l having 'out where {
   ## Divide it by r.
-  div: { it: 'a, r: 'a } -> 'a
+  div: { it: 'l, r: 'r } -> 'out
 }
 
 ## Modulo. Desugars the `%` operator.
