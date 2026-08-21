@@ -12,7 +12,7 @@ import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.module.ModuleImportContext
-import com.mezze.language.typechecker.module.TypedModule
+import com.mezze.language.typechecker.module.TypedModuleResult
 import com.mezze.language.typechecker.validation.TypeValidator
 
 /**
@@ -24,7 +24,7 @@ internal fun checkUndefinedVariables(
     context: TypingContext,
     registry: DeclarationRegistry,
     implDeclarations: Map<String, ParsedPerformerDecl>,
-    loadedModules: Map<ModulePath, TypedModule>,
+    loadedModules: Map<ModulePath, TypedModuleResult>,
     importContext: ModuleImportContext?,
 ): List<TypeChecker.TypeCheckError> {
     val undefinedVars = constraintResults.values.flatMap { it.undefinedVariables }
@@ -141,7 +141,7 @@ internal data class PrivateItemResult(val message: String, val declModulePath: S
  */
 internal fun checkIfPrivateQualifiedItem(
     undefinedVar: ConstraintResult.UndefinedVariable,
-    loadedModules: Map<ModulePath, TypedModule>,
+    loadedModules: Map<ModulePath, TypedModuleResult>,
     importContext: ModuleImportContext?
 ): PrivateItemResult? {
     if (!undefinedVar.isQualified) return null
@@ -191,7 +191,7 @@ internal fun checkIfPrivateQualifiedItem(
 /**
  * Check if an item exists in a module's program but isn't exported.
  */
-private fun checkIfItemExistsInModule(module: TypedModule, itemName: String): Boolean {
+private fun checkIfItemExistsInModule(module: TypedModuleResult, itemName: String): Boolean {
     if (module.exports.containsKey(itemName)) {
         return false
     }

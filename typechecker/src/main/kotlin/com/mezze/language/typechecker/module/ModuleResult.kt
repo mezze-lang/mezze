@@ -12,7 +12,7 @@ import com.mezze.language.typechecker.ProgramIndex
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.dependencies.DependencyGraph
 import com.mezze.language.typedast.Hash
-import com.mezze.language.typedast.TypedModule as V2TypedModule
+import com.mezze.language.typedast.TypedModule
 
 sealed class ModuleLoadResult {
     data class Success(
@@ -159,7 +159,7 @@ sealed class ModuleError(override val message: String) : Exception(message) {
 }
 sealed class ModuleTypeCheckResult {
     data class Success(
-        val module: TypedModule
+        val module: TypedModuleResult
     ) : ModuleTypeCheckResult()
 
     data class Failure(
@@ -174,13 +174,13 @@ sealed class ModuleTypeCheckResult {
     )
 }
 
-data class TypedModule(
+data class TypedModuleResult(
     val modulePath: String,
     val exports: Map<String, ExportedItem>,
     val context: TypingContext,
     val substitution: Substitution,
     val dependencyGraph: DependencyGraph = DependencyGraph.EMPTY,
-    val typedModule: V2TypedModule? = null,
+    val typedModule: TypedModule? = null,
     val parsedModule: ParsedModule? = null,
     val typeContext: Map<String, MezzeType> = emptyMap(),
     val filePath: String? = null,
@@ -189,7 +189,7 @@ data class TypedModule(
 sealed class ImportResolutionResult {
     data class Success(
         val importContext: ModuleImportContext,
-        val loadedModules: Map<ModulePath, TypedModule>
+        val loadedModules: Map<ModulePath, TypedModuleResult>
     ) : ImportResolutionResult()
 
     data class Failure(

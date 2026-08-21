@@ -11,7 +11,7 @@ import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.ModuleError
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.PrecompiledStdlib
-import com.mezze.language.typedast.TypedModule as V2TypedModule
+import com.mezze.language.typedast.TypedModule
 
 class ModuleTypeChecker(
     private val baseContext: TypingContext = TypingContext.empty,
@@ -22,7 +22,7 @@ class ModuleTypeChecker(
         private val typeCheckingStack = mutableSetOf<String>()
         private val stackLock = Any()
 
-        private val globalCache = mutableMapOf<String, TypedModule>()
+        private val globalCache = mutableMapOf<String, TypedModuleResult>()
         private val globalCacheLock = Any()
 
         @JvmStatic
@@ -38,40 +38,40 @@ class ModuleTypeChecker(
             } catch (_: Exception) { /* PrecompiledStdlib not initialized yet */ }
         }
 
-        private fun getFromGlobalCache(modulePath: String): TypedModule? {
+        private fun getFromGlobalCache(modulePath: String): TypedModuleResult? {
             synchronized(globalCacheLock) {
                 return globalCache[modulePath]
             }
         }
 
-        private fun putInGlobalCache(modulePath: String, module: TypedModule) {
+        private fun putInGlobalCache(modulePath: String, module: TypedModuleResult) {
             synchronized(globalCacheLock) {
                 globalCache[modulePath] = module
             }
         }
 
         @JvmStatic
-        fun getAllCachedModules(): Map<String, TypedModule> {
+        fun getAllCachedModules(): Map<String, TypedModuleResult> {
             synchronized(globalCacheLock) {
                 return globalCache.toMap()
             }
         }
 
         @JvmStatic
-        fun preloadIntoGlobalCache(modulePath: String, module: TypedModule) {
+        fun preloadIntoGlobalCache(modulePath: String, module: TypedModuleResult) {
             putInGlobalCache(modulePath, module)
         }
 
         @JvmStatic
         fun hydrateFromV2Module(
             modulePath: String,
-            v2Module: V2TypedModule
+            v2Module: TypedModule
         ) {
             val typeContext = mutableMapOf<String, MezzeType>()
             for ((name, export) in v2Module.exports) {
                 typeContext[name] = export.type
             }
-            val wrapper = TypedModule(
+            val wrapper = TypedModuleResult(
                 modulePath = modulePath,
                 exports = emptyMap(),  // checker-side ExportedItem; not the same shape as v2 ExportEntry
                 context = TypingContext.empty,
@@ -173,7 +173,7 @@ class ModuleTypeChecker(
 
                     val resolvedModule = result.resolvedParsedModule ?: parsedModule
 
-                    val typedModule = TypedModule(
+                    val typedModule = TypedModuleResult(
                         modulePath = module.modulePath,
                         exports = updatedExports,
                         context = moduleContext,

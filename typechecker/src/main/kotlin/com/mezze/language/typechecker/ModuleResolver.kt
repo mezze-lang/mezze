@@ -21,6 +21,7 @@ import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.util.StringDistance
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
+import com.mezze.language.typechecker.util.parsedUsePathToCore
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.Files
@@ -925,25 +926,15 @@ class ModuleResolver(
                     is ParsedPubUseDecl -> decl.path to decl.alias
                     else -> continue
                 }
-                val v1Path = parsedUsePathToV1(path)
+                val corePath = parsedUsePathToCore(path)
                 add(ModuleDependency(
-                    modulePath = pathToString(v1Path),
-                    usePath = v1Path,
+                    modulePath = pathToString(corePath),
+                    usePath = corePath,
                     alias = alias
                 ))
             }
         }
 
-    private fun parsedUsePathToV1(path: ParsedUsePath): UsePath {
-        return when (path) {
-            is ParsedUsePath.Module -> ModulePath(path.path.segments)
-            is ParsedUsePath.Selective -> SelectivePath(
-                module = path.modulePath.segments,
-                items = path.items.map { ImportItem(name = it.name, alias = it.alias) }
-            )
-        }
-    }
-    
     private fun pathToString(path: UsePath): String = when (path) {
         is ModulePath -> path.fullPath
         is SelectivePath -> ModulePath(path.module).fullPath

@@ -43,7 +43,7 @@ object PrecompiledStdlib {
     val compiledPrelude: CompiledModuleInterface
     val preludeImportContext: ModuleImportContext
 
-    var loadedModules: Map<ModulePath, TypedModule>
+    var loadedModules: Map<ModulePath, TypedModuleResult>
         private set
 
     var stdlibTypedModules: Map<Hash, TypedAstModule>
@@ -185,12 +185,12 @@ object PrecompiledStdlib {
             if (cached != null) {
                 stdlibTypedModules = cached
             } else {
-                val v2 = mutableMapOf<Hash, TypedAstModule>()
-                for ((_, v1Module) in loadedModules) {
-                    val typedMod = v1Module.typedModule
-                    if (typedMod != null) v2[typedMod.hash] = typedMod
+                val byHash = mutableMapOf<Hash, TypedAstModule>()
+                for ((_, wrapper) in loadedModules) {
+                    val typedMod = wrapper.typedModule
+                    if (typedMod != null) byHash[typedMod.hash] = typedMod
                 }
-                stdlibTypedModules = v2
+                stdlibTypedModules = byHash
             }
 
             val preloaded = tryLoadPreloweredFromStore() ?: tryLoadPreloweredFromSqlite()

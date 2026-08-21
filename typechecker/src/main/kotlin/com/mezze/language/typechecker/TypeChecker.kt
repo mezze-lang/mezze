@@ -61,7 +61,7 @@ class TypeChecker(
         return loadPreludeModulesInternal(importResolver, ModuleImportContext.empty())
     }
 
-    internal fun getCachedPreludeLoadedModules(): Map<ModulePath, TypedModule>? {
+    internal fun getCachedPreludeLoadedModules(): Map<ModulePath, TypedModuleResult>? {
         return cachedPreludeLoadedModules
     }
 
@@ -137,7 +137,7 @@ class TypeChecker(
             val substitution: Substitution,
             val importContext: ModuleImportContext? = null,
             val warnings: List<TypeCheckWarning> = emptyList(),
-            val loadedModules: Map<ModulePath, TypedModule> = emptyMap(),
+            val loadedModules: Map<ModulePath, TypedModuleResult> = emptyMap(),
             val abilityImpls: Map<Hash, TypingContext.AbilityImplInfo> = emptyMap(),
             val typedModule: TypedAstModule? = null,
             val loweredFunctions: List<FunctionIR>? = null,
@@ -194,7 +194,7 @@ class TypeChecker(
         }
 
         var importContext: ModuleImportContext? = null
-        var loadedModules: Map<ModulePath, TypedModule> = emptyMap()
+        var loadedModules: Map<ModulePath, TypedModuleResult> = emptyMap()
         val shouldInjectPrelude = !ModulePathConventions.isStdlib(currentModulePath)
         val hasUserImports = hasImportsParsed(module)
         val precompiled = try { PrecompiledStdlib } catch (_: Exception) { null }
@@ -518,7 +518,7 @@ class TypeChecker(
     }
 
     private fun buildFullRegistry(
-        loadedModules: Map<ModulePath, TypedModule>,
+        loadedModules: Map<ModulePath, TypedModuleResult>,
         buildResult: ContextBuilder.BuildResult,
         importContext: ModuleImportContext?,
     ): DeclarationRegistry {
@@ -709,7 +709,7 @@ class TypeChecker(
 
     data class ParsedModuleCheckResult(
         val module: TypedAstModule,
-        val loadedModules: Map<ModulePath, TypedModule>
+        val loadedModules: Map<ModulePath, TypedModuleResult>
     )
 
     fun checkParsedModuleToTyped(
@@ -755,7 +755,7 @@ class TypeChecker(
 
         @Volatile
         @JvmStatic
-        var cachedPreludeLoadedModules: Map<ModulePath, TypedModule>? = null
+        var cachedPreludeLoadedModules: Map<ModulePath, TypedModuleResult>? = null
 
         private fun createInitialContext(): TypingContext {
             val crashType = MezzeType.FunctionType(

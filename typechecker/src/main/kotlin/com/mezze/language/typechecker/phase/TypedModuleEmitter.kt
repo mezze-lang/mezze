@@ -16,15 +16,15 @@ import com.mezze.language.typechecker.emit.EntryFunctionBuilder
 import com.mezze.language.typechecker.emit.TypedAstBuilder
 import com.mezze.language.typechecker.module.ModuleImportContext
 import com.mezze.language.typechecker.module.ModuleTypeChecker
-import com.mezze.language.typechecker.module.TypedModule
+import com.mezze.language.typechecker.module.TypedModuleResult
 import com.mezze.language.typechecker.mono.MonoDriver
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.validation.AnonymousConstructorShapeValidator
 import com.mezze.language.typedast.*
-import com.mezze.language.typedast.TypedModule as OutputTypedModule
+import com.mezze.language.typedast.TypedModule
 
 internal data class EmitResult(
-    val typedModule: OutputTypedModule?,
+    val typedModule: TypedModule?,
     val loweredFunctions: List<FunctionIR>?,
     val loweredPerformers: List<Array<String>>,
 )
@@ -39,7 +39,7 @@ internal fun emitTypedModuleAndLower(
     importContext: ModuleImportContext?,
     registry: DeclarationRegistry,
     solver: ConstraintSolver,
-    loadedModules: Map<ModulePath, TypedModule>,
+    loadedModules: Map<ModulePath, TypedModuleResult>,
     tailCallLocations: Set<Loc>,
     mustBeOpenRowVars: Set<RowVar>,
     methodCallResolutions: Map<Pair<Loc, String>, ConstraintResult.MethodCallInfo>,
@@ -48,7 +48,7 @@ internal fun emitTypedModuleAndLower(
     isStdlibModule: Boolean,
     currentModulePath: String?,
 ): EmitResult {
-    var emittedTypedModule: OutputTypedModule? = null
+    var emittedTypedModule: TypedModule? = null
     var loweredFns: List<FunctionIR>? = null
     var loweredPerformers: List<Array<String>> = emptyList()
 
@@ -141,7 +141,7 @@ internal fun emitTypedModuleAndLower(
 private fun validateAnonymousConstructorShapes(
     module: ParsedModule,
     importContext: ModuleImportContext?,
-    typedModule: OutputTypedModule,
+    typedModule: TypedModule,
 ) {
     val declaredCtors = mutableSetOf<String>()
     declaredCtors.addAll(BuiltinTypes.coreVariantConstructors)
@@ -181,8 +181,8 @@ private data class CompileResult(
 )
 
 private fun compileModule(
-    typedModule: OutputTypedModule,
-    loadedModules: Map<ModulePath, TypedModule>,
+    typedModule: TypedModule,
+    loadedModules: Map<ModulePath, TypedModuleResult>,
     substitution: Substitution,
 ): CompileResult {
     val wrapped = EntryFunctionBuilder.wrapTopLevel(typedModule)
@@ -209,7 +209,7 @@ private fun compileModule(
     preludeHashes.addAll(PrecompiledStdlib.stdlibDeclHashes)
 
     val preludeModuleHashes = PrecompiledStdlib.stdlibModuleHashes
-    val importedModules = mutableListOf<OutputTypedModule>()
+    val importedModules = mutableListOf<TypedModule>()
     val importedPerformers = mutableListOf<TypedPerformerDecl>()
     val seenHashes = mutableSetOf<Hash>()
     for ((_, v1Module) in loadedModules) {

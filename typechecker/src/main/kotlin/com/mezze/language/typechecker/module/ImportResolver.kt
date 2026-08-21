@@ -6,6 +6,7 @@ import com.mezze.language.parsedast.Visibility
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedLambda
 import com.mezze.language.typedast.TypedModule as TypedAstModule
+import com.mezze.language.typechecker.util.parsedUsePathToCore
 
 class ImportResolver(
     private val loader: ModuleLoader,
@@ -14,16 +15,16 @@ class ImportResolver(
     fun resolveImports(module: ParsedModule): ImportResolutionResult {
         val errors = mutableListOf<ModuleError>()
         var importContext = ModuleImportContext.empty()
-        val loadedModules = mutableMapOf<ModulePath, TypedModule>()
+        val loadedModules = mutableMapOf<ModulePath, TypedModuleResult>()
 
         for (decl in module.decls) {
             val (usePath, alias, isPublic, loc) = when (decl) {
                 is ParsedUseDecl -> UseInfo(
-                    parsedUsePathToV1(decl.path), decl.alias, false,
+                    parsedUsePathToCore(decl.path), decl.alias, false,
                     decl.loc
                 )
                 is ParsedPubUseDecl -> UseInfo(
-                    parsedUsePathToV1(decl.path), decl.alias, true,
+                    parsedUsePathToCore(decl.path), decl.alias, true,
                     decl.loc
                 )
                 else -> continue
@@ -51,20 +52,6 @@ class ImportResolver(
         val isPublic: Boolean,
         val loc: Loc?
     )
-
-    private fun parsedUsePathToV1(path: ParsedUsePath): UsePath {
-        return when (path) {
-            is ParsedUsePath.Module ->
-                ModulePath(path.path.segments)
-            is ParsedUsePath.Selective ->
-                SelectivePath(
-                    module = path.modulePath.segments,
-                    items = path.items.map { item ->
-                        ImportItem(name = item.name, alias = item.alias)
-                    }
-                )
-        }
-    }
 
     private fun processUseDeclaration(
         usePath: UsePath,
@@ -768,7 +755,7 @@ class ImportResolver(
     private sealed class ProcessResult {
         data class Success(
             val context: ModuleImportContext,
-            val module: TypedModule? = null
+            val module: TypedModuleResult? = null
         ) : ProcessResult()
 
         data class Failure(

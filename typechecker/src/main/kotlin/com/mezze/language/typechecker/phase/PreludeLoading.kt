@@ -6,13 +6,13 @@ import com.mezze.language.typechecker.module.ImportResolutionResult
 import com.mezze.language.typechecker.module.ImportResolver
 import com.mezze.language.ast.ModulePath
 import com.mezze.language.typechecker.module.ModuleImportContext
-import com.mezze.language.typechecker.module.TypedModule
+import com.mezze.language.typechecker.module.TypedModuleResult
 
 internal fun loadPreludeModules(
     importResolver: ImportResolver,
     userImportContext: ModuleImportContext,
     cachedPreludeContext: ModuleImportContext?,
-    onPreludeLoaded: (ModuleImportContext, Map<ModulePath, TypedModule>) -> Unit,
+    onPreludeLoaded: (ModuleImportContext, Map<ModulePath, TypedModuleResult>) -> Unit,
 ): ModuleImportContext {
     cachedPreludeContext?.let { return it }
 
