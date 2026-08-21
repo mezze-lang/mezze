@@ -57,7 +57,10 @@ class InvalidOperatorErrorTest {
     }
 
     @Test
-    fun `-- surfaces the targeted error with a different suggestion`() {
+    fun `adjacent -- surfaces the targeted error with a different suggestion`() {
+        // `1 -- 2` (no gap) reads as the `--` operator, which Mezze does not
+        // have — reject it with the targeted error. (A SPACED `1 - -2` is the
+        // legitimate "subtract a negative" and parses; see the parser test.)
         val source = """let x = 1 -- 2"""
         val ex = assertThrows(ParseException::class.java) {
             parser.parseParsedModule(source)

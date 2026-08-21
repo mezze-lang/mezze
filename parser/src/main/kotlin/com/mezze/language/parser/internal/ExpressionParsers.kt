@@ -2056,8 +2056,17 @@ internal val MezzeParser.additiveExpression: Parser<ParsedExpr>
                 val opStream = currentStream.advance()
                 val nextToken = opStream.current()
 
-                // But allow +- or -+ which mean "add negative" or "subtract negative"
-                if (nextToken?.type == op.type) {
+                // `--`/`++` written adjacently (no gap: `x -- y`, `x ++ y`) is a
+                // typo — reject it. But `x - -5` / `x + -5` with a SPACE is a
+                // legit "subtract/add a negative operand": the second `-`/`+` is
+                // the sign of the operand, folded by unaryExpression. Distinguish
+                // by source adjacency, since the lexer discards the whitespace and
+                // both forms produce the same MINUS MINUS token stream.
+                val adjacent = nextToken != null &&
+                    nextToken.line == op.line &&
+                    nextToken.column == op.column + op.text.length
+
+                if (nextToken?.type == op.type && adjacent) {
                     val doubleOp = op.text + nextToken.text
                     result = ParseResult.Failure(
                         "'$doubleOp' is not a valid operator in Mezze. " +
@@ -2180,22 +2189,24 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
 
             // `-` is not a prefix operator: `-5` folds into a negative literal;
             // `-x` on a non-literal must use `x.neg {}`.
+            // Fold `-N` into a signed literal, then run the postfix continuation
+            // so members attach: `-5.abs {}`, `-5.to_float {}`, etc. (B9).
             when (literalToken?.type) {
-                TokenType.INTEGER -> ParseResult.Success(
+                TokenType.INTEGER -> continuePostfix(ParseResult.Success(
                     ParsedIntLit(-literalToken.text.toLong(), opLoc),
                     streamAfterMinus.advance()
-                )
-                TokenType.FLOAT -> ParseResult.Success(
+                ))
+                TokenType.FLOAT -> continuePostfix(ParseResult.Success(
                     ParsedFloatLit(-literalToken.text.toDouble(), opLoc),
                     streamAfterMinus.advance()
-                )
+                ))
                 TokenType.FRACTION -> {
                     val parts = literalToken.text.split("//")
                     if (parts.size == 2) {
-                        ParseResult.Success(
+                        continuePostfix(ParseResult.Success(
                             ParsedFracLit(-parts[0].toLong(), parts[1].toLong(), opLoc),
                             streamAfterMinus.advance()
-                        )
+                        ))
                     } else {
                         streamAfterMinus.failure("Invalid fraction literal '${literalToken.text}'. Expected format: numerator//denominator (e.g., 3//4)")
                     }
@@ -2211,8 +2222,14 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
 
     // Handles: f {x = 1}, obj.field, f {x = 1}.field, etc.
 internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
-    get() = { stream ->
-        var result: ParseResult<ParsedExpr> = primaryExpression(stream)
+    get() = { stream -> continuePostfix(primaryExpression(stream)) }
+
+    // Runs the postfix-continuation loop (`.field`, `.method {}`, call-args,
+    // etc.) starting from an ALREADY-parsed seed expression. Extracted so a
+    // signed numeric literal folded in unaryExpression (`-5`) can still grow
+    // postfix members like `-5.abs {}` / `(-5).neg {}` instead of returning bare.
+    internal fun MezzeParser.continuePostfix(seed: ParseResult<ParsedExpr>): ParseResult<ParsedExpr> {
+        var result: ParseResult<ParsedExpr> = seed
 
         // Stream-advancement guard: every iteration must move the stream
         // forward. Without this guard, certain expression shapes (notably
@@ -2433,7 +2450,7 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
             }
         }
 
-        result
+        return result
     }
 
 

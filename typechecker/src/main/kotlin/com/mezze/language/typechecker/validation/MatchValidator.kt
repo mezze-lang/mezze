@@ -557,12 +557,33 @@ class MatchValidator(
             if (opaque || armFieldPatterns.isEmpty()) continue
 
             for ((fieldName, fieldType) in payloadRecord.fields) {
-                val fieldVariant = resolveClosedVariant(fieldType) ?: continue
                 // Collect each arm's sub-pattern for this field (a missing key is
                 // an irrefutable bind → whole field covered).
                 val subPatterns = armFieldPatterns.map { arm ->
                     if (arm.containsKey(fieldName)) arm[fieldName] else ParsedWildcardPattern(matchExpr.loc)
                 }
+
+                // B3: a nested NON-ENUMERABLE PRIMITIVE field (Int/Str/…) pinned to
+                // literals across arms is only exhaustive with a catch-all sub-pattern
+                // — mirror the top-level primitive rule (line ~205). Without this the
+                // field was silently treated as covered (resolveClosedVariant returns
+                // null for a primitive → the `?: continue` below skipped it), so
+                // `Wrap { n = 0 } / Wrap { n = 1 }` type-checked then trapped at runtime.
+                if (isNonEnumerablePrimitive(fieldType)) {
+                    val hasCatchAll = subPatterns.any { it == null || isCatchAllPattern(it) }
+                    if (!hasCatchAll) {
+                        errors.add(ValidationError.NonExhaustiveMatch(
+                            coveredConstructors = emptyList(),
+                            missingConstructors = listOf(
+                                "$ctorName { $fieldName = _ } (a ${prettyPrintType(fieldType)} field cannot be exhausted by listing values — add a wildcard/variable)"
+                            ),
+                            loc = matchExpr.loc
+                        ))
+                    }
+                    continue
+                }
+
+                val fieldVariant = resolveClosedVariant(fieldType) ?: continue
                 errors.addAll(missingInVariantField(fieldVariant, subPatterns, matchExpr.loc, "$ctorName { $fieldName = ", " }"))
             }
         }
