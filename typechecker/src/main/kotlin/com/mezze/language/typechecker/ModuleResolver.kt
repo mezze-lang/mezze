@@ -908,7 +908,11 @@ class ModuleResolver(
                 is ParsedImplAbilityDecl -> {}
 
                 is ParsedPubUseDecl -> {
-                    // TODO: re-export the transitive items from the imported module
+                    // Re-exported items are not surfaced into this exports map, so a
+                    // glob `use mid` can't see what `mid` re-exports. The consumer-side
+                    // resolver (ImportResolver.resolvePubUseReexport) handles only
+                    // selective imports of re-exported *functions*; types/abilities/
+                    // effects/impls stay invisible downstream. Tracked as task #275.
                 }
 
                 else -> {}
