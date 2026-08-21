@@ -26,6 +26,7 @@
 
 use std::abilities::compare::{ Eq, Ord }
 use std::abilities::default::{ Default }
+use std::abilities::numeric::{ NumAdd, NumSub }
 use std::abilities::sized::{ Sized }
 use std::int
 use std::result
@@ -216,6 +217,37 @@ pub let instant_to_seconds : { i: Instant } -> Int = { i } ->
 ## instant_to_seconds gives the full-precision representation.
 pub let instant_nano_of_second : { i: Instant } -> Int = { i } ->
   __native_instant_nano_of_second { i = i }
+
+## ==================================================================
+## Numeric-operator instances
+## ==================================================================
+## `+` and `-` on the time algebra, mirroring the named helpers below:
+##   Instant  + Duration → Instant   (shift forward)
+##   Instant  - Duration → Instant   (shift back)
+##   Instant  - Instant  → Duration  (elapsed; `end - start`, may be negative)
+##   Duration + Duration → Duration
+##   Duration - Duration → Duration  (may be negative)
+## Adding two Instants is intentionally NOT defined (no meaning).
+
+impl NumAdd Duration for Instant having 'out = Instant where {
+  add = { it, r } -> __native_instant_add { i = it, d = r }
+}
+
+impl NumSub Duration for Instant having 'out = Instant where {
+  sub = { it, r } -> __native_instant_sub_duration { i = it, d = r }
+}
+
+impl NumSub Instant for Instant having 'out = Duration where {
+  sub = { it, r } -> __native_instant_diff { end = it, start = r }
+}
+
+impl NumAdd Duration for Duration having 'out = Duration where {
+  add = { it, r } -> __native_duration_add { a = it, b = r }
+}
+
+impl NumSub Duration for Duration having 'out = Duration where {
+  sub = { it, r } -> __native_duration_sub { a = it, b = r }
+}
 
 ## ==================================================================
 ## Instant arithmetic

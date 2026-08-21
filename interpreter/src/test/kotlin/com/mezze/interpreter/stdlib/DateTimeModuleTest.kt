@@ -423,4 +423,84 @@ class DateTimeModuleTest {
         assertEquals(true, r.getField("a_lt_b"))
         assertEquals(false, r.getField("a_gt_b"))
     }
+
+    // ==================== `+` / `-` operators ====================
+    // NumAdd/NumSub class-param impls on the time algebra.
+
+    @Test
+    fun `instant plus duration via operator`() {
+        val code = """
+            use std::datetime::{ instant_from_millis, duration_seconds, instant_to_millis }
+            let i = instant_from_millis { n = 1000 }
+            let d = duration_seconds { n = 5 }
+            instant_to_millis { i = i + d }
+        """.trimIndent()
+        assertEquals(6000L, eval(code))
+    }
+
+    @Test
+    fun `instant minus duration via operator`() {
+        val code = """
+            use std::datetime::{ instant_from_millis, duration_seconds, instant_to_millis }
+            let i = instant_from_millis { n = 10_000 }
+            let d = duration_seconds { n = 3 }
+            instant_to_millis { i = i - d }
+        """.trimIndent()
+        assertEquals(7000L, eval(code))
+    }
+
+    @Test
+    fun `instant minus instant is a duration`() {
+        val code = """
+            use std::datetime::{ instant_from_millis, duration_to_millis }
+            let e = instant_from_millis { n = 5000 }
+            let s = instant_from_millis { n = 2000 }
+            duration_to_millis { d = e - s }
+        """.trimIndent()
+        assertEquals(3000L, eval(code))
+    }
+
+    @Test
+    fun `instant minus instant can be negative`() {
+        val code = """
+            use std::datetime::{ instant_from_millis, duration_to_millis }
+            let s = instant_from_millis { n = 5000 }
+            let e = instant_from_millis { n = 2000 }
+            duration_to_millis { d = e - s }
+        """.trimIndent()
+        assertEquals(-3000L, eval(code))
+    }
+
+    @Test
+    fun `duration plus duration via operator`() {
+        val code = """
+            use std::datetime::{ duration_seconds, duration_to_millis }
+            let a = duration_seconds { n = 4 }
+            let b = duration_seconds { n = 6 }
+            duration_to_millis { d = a + b }
+        """.trimIndent()
+        assertEquals(10_000L, eval(code))
+    }
+
+    @Test
+    fun `duration minus duration via operator`() {
+        val code = """
+            use std::datetime::{ duration_seconds, duration_to_millis }
+            let a = duration_seconds { n = 4 }
+            let b = duration_seconds { n = 10 }
+            duration_to_millis { d = a - b }
+        """.trimIndent()
+        assertEquals(-6000L, eval(code))
+    }
+
+    @Test
+    fun `shift instant forward then back is identity`() {
+        val code = """
+            use std::datetime::{ instant_from_millis, duration_seconds, instant_to_millis }
+            let i = instant_from_millis { n = 1_700_000_000_000 }
+            let d = duration_seconds { n = 90 }
+            instant_to_millis { i = (i + d) - d }
+        """.trimIndent()
+        assertEquals(1_700_000_000_000L, eval(code))
+    }
 }

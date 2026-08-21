@@ -1263,7 +1263,7 @@ class TypedASTCompiler(
             // the type variable wasn't fully substituted but only one impl exists),
             // and if that fails, try arg-based resolution (concrete types in the arg
             // record can pin the ability's type parameter — see #346).
-            val opHashConcrete = tryResolveAbilityOp(methodName, receiverType)
+            val opHashConcrete = tryResolveAbilityOp(methodName, receiverType, expr.arg)
             val opHash = opHashConcrete
                 ?: if (receiverType is VarType) {
                     val candidates = abilityOpIndex[methodName]
@@ -2625,12 +2625,47 @@ class TypedASTCompiler(
             receiverType
         }
 
-    private fun tryResolveAbilityOp(methodName: String, receiverType: MezzeType): Hash? {
+    private fun tryResolveAbilityOp(
+        methodName: String,
+        receiverType: MezzeType,
+        argRecord: TypedExpr? = null,
+    ): Hash? {
         val effectiveType = receiverTypeForDispatch(methodName, receiverType)
         val candidates = abilityOpIndex[methodName] ?: return null
-        val match = candidates.firstOrNull { op ->
-            op.targetTypes.any { typeMatchesTarget(effectiveType, it) }
+        // `AbilityOp.targetTypes` is the impl's full class-arg tuple, positional to the
+        // ability's type params with the receiver ("self") LAST (extra class params
+        // first). Match the receiver against the receiver POSITION only, so a class-param
+        // co-operand of the same type (e.g. `NumAdd Duration for Instant`, tuple
+        // [Duration, Instant]) is not spuriously selected for a Duration receiver.
+        // See project_classparam_runtime_dispatch_tuple.
+        val receiverMatches = candidates.filter { op ->
+            val recvTarget = op.targetTypes.lastOrNull() ?: return@filter false
+            typeMatchesTarget(effectiveType, recvTarget)
         }
+        // Several impls share the receiver — a class-param ability like `NumSub 'r for
+        // 'l` with both `NumSub Duration for Instant` and `NumSub Instant for Instant`.
+        // The receiver alone can't disambiguate; pick the impl whose CO-OPERAND (the
+        // tuple slot before the receiver) matches the arg's `r` field type. Content
+        // comparison only — no positions-as-identity, no Loc, no strings.
+        if (receiverMatches.size > 1 && argRecord is TypedRecord) {
+            val coOperandType = argRecord.entries
+                .filterIsInstance<TypedRecordEntry.Field>()
+                .firstOrNull { it.name == Keywords.R }
+                ?.let { substitution.apply(it.value.type) }
+                ?.takeIf { it !is VarType }
+            if (coOperandType != null) {
+                val byCoOperand = receiverMatches.filter { op ->
+                    val coTarget = op.targetTypes.getOrNull(op.targetTypes.size - 2)
+                    coTarget != null && typeMatchesTarget(coOperandType, coTarget)
+                }
+                // Dedup by resolved impl (opHash): the index may register the same impl
+                // more than once (e.g. across module-load passes). A unique WINNING
+                // impl is what matters, not a unique index entry.
+                val uniqueHashes = byCoOperand.map { it.opHash }.distinct()
+                if (uniqueHashes.size == 1) return uniqueHashes.first()
+            }
+        }
+        val match = receiverMatches.firstOrNull()
         if (match != null) return match.opHash
         // Fallback: if there's exactly one candidate and the receiver is a variant/type-application,
         // use it. This handles user-defined type aliases where the variant type's constructors
@@ -2678,8 +2713,13 @@ class TypedASTCompiler(
     private fun findAbilityOpBody(methodName: String, receiverType: MezzeType): TypedExpr? {
         val effectiveType = receiverTypeForDispatch(methodName, receiverType)
         for (impl in abilityImpls) {
+            // Match the receiver POSITION (self is last in the class-arg tuple), not
+            // any element — a class-param co-operand of the same type must not select
+            // this impl's body. Used only for the receiver-param name (uniform across
+            // impls), but kept precise regardless.
+            val recvTarget = impl.targetTypes.lastOrNull()
             if (impl.operations.containsKey(methodName) &&
-                impl.targetTypes.any { typeMatchesTarget(effectiveType, it) }) {
+                recvTarget != null && typeMatchesTarget(effectiveType, recvTarget)) {
                 return impl.operations[methodName]
             }
         }

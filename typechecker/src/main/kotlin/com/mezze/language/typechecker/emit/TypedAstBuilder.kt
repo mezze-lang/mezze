@@ -333,7 +333,14 @@ class TypedAstBuilder(
             is ParsedImplTarget.Inherent -> Hash.ZERO
         }
 
-        val targetTypes = decl.targetTypes.map { convertParsedTypeAnnotation(it) }
+        // Full class-arg tuple (concrete `abilityTypeArgs` before `for` + `targetTypes`
+        // after), positional to the ability's type params ("extra params first, self
+        // last"). Carrying the whole tuple lets the runtime op index disambiguate
+        // class-param abilities whose impls share a receiver but differ in the
+        // co-operand — e.g. `NumSub Duration for Instant` vs `NumSub Instant for
+        // Instant`. Receiver-only matchers still work: the receiver stays present at
+        // the ability's `receiverTypeParam` index. See project_classparam_runtime_dispatch_tuple.
+        val targetTypes = decl.allTypeArgs.map { convertParsedTypeAnnotation(it) }
 
         val assocTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
             convertParsedTypeAnnotation(ann)
