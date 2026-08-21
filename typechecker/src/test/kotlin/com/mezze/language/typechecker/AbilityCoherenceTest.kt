@@ -7,21 +7,20 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Paths
 
 /**
- * Ability-impl COHERENCE: what happens when impls overlap, and how a blanket
- * `impl X for 'a` behaves. These pin the CURRENT observed behaviour so a future
- * change to dispatch/coherence is caught.
+ * Ability-impl COHERENCE under the strict "no specialization" rule (#96).
  *
- * Observed contract (as of this test):
- *   - A blanket `impl X for 'a` is ACCEPTED at declaration but is INERT for
- *     dispatch — it does not make any concrete type satisfy `X`. A concrete
- *     receiver with only a blanket impl in scope errors "T does not implement X".
- *   - A concrete `impl X for Int` alongside a blanket does NOT extend coverage to
- *     other types (`Str` still fails); only the concretely-implemented type works.
- *   - Two impls for the SAME concrete type is a hard error (duplicate).
+ * Contract:
+ *   - A generic `impl X for 'a` is ACCEPTED at declaration.
+ *   - A generic `impl X for 'a` DOES make any concrete type satisfy `X` —
+ *     dispatch instantiates `'a := T` for whatever T shows up at the call.
+ *   - You CANNOT coexist a generic `impl X for 'a` and a concrete
+ *     `impl X for T` for the same ability in a single compilation.
+ *     That's the strict coherence rule (matches Rust stable — no
+ *     specialization). Overlap is reported by V0407.
+ *   - Two impls for the SAME concrete type is a duplicate — V0407.
  *
- * (Whether a silently-inert blanket impl SHOULD instead be a declaration-time
- *  error is a design question — this test documents today's behaviour, not a
- *  preference. If the design changes, update these expectations deliberately.)
+ * Previously this file pinned pre-#96 "blanket impls are inert" behaviour.
+ * Rewritten 2026-08-21 to match the current strict-coherence design.
  */
 class AbilityCoherenceTest {
     private lateinit var parser: MezzeParser
@@ -36,51 +35,59 @@ class AbilityCoherenceTest {
         try { tc.typeCheck(parser.parseParsedModule(b, "t.mz"), Paths.get("."), enablePrelude = true); null }
         catch (e: TypeCheckError) { e.message }
 
-    // ── blanket `impl X for 'a` ──────────────────────────────────────────
+    // ── generic `impl X for 'a` ──────────────────────────────────────────
 
     @Test
-    fun `a blanket impl is accepted at declaration`() {
+    fun `a generic impl is accepted at declaration`() {
         assertNull(err("""
             ability Sz for 'a where { sz: { it: 'a } -> Int }
             impl Sz for 'a where { sz = { it } -> 999 }
             pub let g = { x } -> x
-        """.trimIndent()), "a blanket `impl Sz for 'a` should be accepted at declaration")
+        """.trimIndent()), "a generic `impl Sz for 'a` should be accepted at declaration")
     }
 
     @Test
-    fun `a blanket impl is inert - a concrete call still fails`() {
-        val e = err("""
-            ability Sz for 'a where { sz: { it: 'a } -> Int }
-            impl Sz for 'a where { sz = { it } -> 999 }
-            pub let f = {} -> (5).sz {}
-        """.trimIndent())
-        assertNotNull(e, "a blanket impl does not make Int satisfy Sz")
-        assertTrue(e!!.contains("Int") && e.contains("Sz"),
-            "error should say Int doesn't implement Sz, got: $e")
-    }
-
-    // ── concrete + blanket ───────────────────────────────────────────────
-
-    @Test
-    fun `concrete plus blanket - the concrete type dispatches`() {
+    fun `a generic impl dispatches on any concrete receiver`() {
+        // Under strict coherence, the generic impl covers every type
+        // (there can't be a concrete override), so `(5).sz {}` succeeds.
         assertNull(err("""
             ability Sz for 'a where { sz: { it: 'a } -> Int }
-            impl Sz for Int where { sz = { it } -> 111 }
             impl Sz for 'a where { sz = { it } -> 999 }
             pub let f = {} -> (5).sz {}
-        """.trimIndent()), "Int (the concretely-implemented type) must dispatch")
+        """.trimIndent()), "a generic impl should dispatch on Int")
     }
 
     @Test
-    fun `concrete plus blanket - an unimplemented type still fails`() {
+    fun `a generic impl dispatches on Str too - no exclusions`() {
+        assertNull(err("""
+            ability Sz for 'a where { sz: { it: 'a } -> Int }
+            impl Sz for 'a where { sz = { it } -> 999 }
+            pub let f = {} -> ("hi").sz {}
+        """.trimIndent()), "a generic impl covers Str just like Int")
+    }
+
+    // ── concrete + generic in the same module — strict overlap ───────────
+
+    @Test
+    fun `concrete plus generic - concrete-after-generic is rejected`() {
+        val e = err("""
+            ability Sz for 'a where { sz: { it: 'a } -> Int }
+            impl Sz for 'a where { sz = { it } -> 999 }
+            impl Sz for Int where { sz = { it } -> 111 }
+        """.trimIndent())
+        assertNotNull(e, "concrete impl after generic must be rejected")
+        assertTrue(e!!.contains("Overlapping"), "error should say Overlapping, got: $e")
+    }
+
+    @Test
+    fun `concrete plus generic - generic-after-concrete is rejected`() {
         val e = err("""
             ability Sz for 'a where { sz: { it: 'a } -> Int }
             impl Sz for Int where { sz = { it } -> 111 }
             impl Sz for 'a where { sz = { it } -> 999 }
-            pub let f = {} -> ("hi").sz {}
         """.trimIndent())
-        assertNotNull(e, "the blanket impl does not extend Sz to Str")
-        assertTrue(e!!.contains("Str"), "error should name Str, got: $e")
+        assertNotNull(e, "generic impl after concrete must be rejected")
+        assertTrue(e!!.contains("Overlapping"), "error should say Overlapping, got: $e")
     }
 
     // ── duplicate concrete impls ─────────────────────────────────────────
@@ -94,6 +101,17 @@ class AbilityCoherenceTest {
             pub let f = {} -> (5).sz {}
         """.trimIndent())
         assertNotNull(e, "duplicate `impl Sz for Int` must be rejected")
-        assertTrue(e!!.lowercase().contains("duplicate"), "error should mention duplicate, got: $e")
+        assertTrue(e!!.lowercase().contains("duplicate") || e.contains("already"),
+            "error should mention duplicate/already, got: $e")
+    }
+
+    @Test
+    fun `two generic impls of the same ability is a duplicate error`() {
+        val e = err("""
+            ability Sz for 'a where { sz: { it: 'a } -> Int }
+            impl Sz for 'a where { sz = { it } -> 1 }
+            impl Sz for 'a where { sz = { it } -> 2 }
+        """.trimIndent())
+        assertNotNull(e, "duplicate generic `impl Sz for 'a` must be rejected")
     }
 }
