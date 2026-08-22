@@ -442,11 +442,13 @@ class StringInterpolationTypeCheckerTest {
 
     @Test
     fun `test arithmetic result converted to string in interpolation`() {
+        // Post-#109: user code cannot call __native_* directly; use stdlib `int::to_str`.
         assertTypeChecks("""
+            use std::int
             let x = 10
             let y = 5
             let sum = x + y
-            let result = "Sum: $(__native_int_to_str {n = sum})"
+            let result = "Sum: $(int::to_str {n = sum})"
             result
         """.trimIndent())
     }

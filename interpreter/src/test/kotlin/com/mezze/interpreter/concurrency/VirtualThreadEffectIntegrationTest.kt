@@ -34,15 +34,29 @@ class VirtualThreadEffectIntegrationTest {
         com.mezze.language.typechecker.ModuleResolver.clearCache()
     }
 
-    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+    // Runs `body` inside `perform LoomAsync in do` with stdlib Async
+    // imported and top-level `spawn`/`await`/`sleep` wrappers around
+    // Async.spawn + stdlib await (unwrapped from Result 'a AsyncError)
+    // + stdlib async::sleep.
+    private fun eval(body: String): Any {
+        val code = """
+use std::effects::async::{ Async, LoomAsync, await as await_result, sleep as async_sleep }
 
-    // Setup code for Loom virtual thread primitives
-    private val loomSetup = """
-        newtype Promise 'a = Promise __NativePromise
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_async_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_promise_await {p = p}
-        let sleep: {ms: Int} -> {} = {ms} -> __native_async_sleep {ms = ms}
-    """.trimIndent()
+let unwrap_async = {r} -> match r is
+    Ok { val } -> val
+    Err { error = _ } -> crash { msg = "await failed" }
+
+let spawn = {f} -> Async.spawn {f = f}
+let await = {p} -> unwrap_async {r = await_result {p = p}}
+let sleep = {ms} -> async_sleep {ms = ms}
+
+perform LoomAsync in do
+$body
+        """.trimIndent()
+        return MezzeTestHelper.run(code)
+    }
+
+    private val loomSetup = ""
 
     // =============================================================================
     // Basic Effect Operations in Virtual Threads
@@ -51,7 +65,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should execute simple computation in virtual thread`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> "Hello from virtual thread"}
             await {p = thread}
@@ -63,7 +76,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should chain computations across virtual threads`() {
         val code = """
-            $loomSetup
 
             let t1 = spawn {f = {} -> "Hello"}
             let r1 = await {p = t1}
@@ -81,7 +93,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle effect state with integer operations`() {
         val code = """
-            $loomSetup
 
             let counter = 0
             let t1 = spawn {f = {} -> 1}
@@ -105,7 +116,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should execute parallel computations`() {
         val code = """
-            $loomSetup
 
             # Spawn 5 threads that each do some work
             let t1 = spawn {f = {} -> do
@@ -145,7 +155,6 @@ class VirtualThreadEffectIntegrationTest {
     fun `should complete parallel tasks faster than sequential`() {
         // This test verifies parallel execution by timing
         val code = """
-            $loomSetup
 
             let t1 = spawn {f = {} -> do
                 let _ = sleep {ms = 50}
@@ -184,7 +193,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle nested virtual thread spawning`() {
         val code = """
-            $loomSetup
 
             let outer = spawn {f = {} -> do
                 let inner = spawn {f = {} -> 21}
@@ -199,7 +207,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle deeply nested virtual threads`() {
         val code = """
-            $loomSetup
 
             let level3 = spawn {f = {} ->
                 spawn {f = {} ->
@@ -224,7 +231,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle record values in virtual threads`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> {x = 10, y = 20, z = 12}}
             let result = await {p = thread}
@@ -237,7 +243,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle closures in virtual threads`() {
         val code = """
-            $loomSetup
 
             let multiplier = 7
             let thread = spawn {f = {} -> multiplier * 6}
@@ -250,7 +255,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle function calls in virtual threads`() {
         val code = """
-            $loomSetup
 
             let compute = {n: Int} -> n * n + n
 
@@ -274,7 +278,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should preserve values across suspension points`() {
         val code = """
-            $loomSetup
 
             let value = 21
 
@@ -294,7 +297,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle multiple values across threads`() {
         val code = """
-            $loomSetup
 
             let a = 10
             let b = 20
@@ -321,7 +323,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should support fork-join pattern`() {
         val code = """
-            $loomSetup
 
             # Fork: spawn multiple workers
             let worker1 = spawn {f = {} -> do
@@ -351,7 +352,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should support pipeline pattern`() {
         val code = """
-            $loomSetup
 
             # Stage 1: produce value
             let stage1 = spawn {f = {} -> 7}
@@ -376,7 +376,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle successful completion`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> 42}
             let result = await {p = thread}
@@ -389,7 +388,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle boolean results`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> True}
             await {p = thread}
@@ -401,7 +399,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle unit results`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> {}}
             let _ = await {p = thread}
@@ -418,7 +415,6 @@ class VirtualThreadEffectIntegrationTest {
     @Test
     fun `should handle many concurrent effect operations`() {
         val code = """
-            $loomSetup
 
             # Spawn 10 concurrent threads
             let t1 = spawn {f = {} -> 1}

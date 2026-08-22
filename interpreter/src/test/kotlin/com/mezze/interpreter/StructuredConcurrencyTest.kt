@@ -23,15 +23,32 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class StructuredConcurrencyTest {
-    // Common setup code - uses stdlib
-    private val setupCode = """
-        use std::collections::seq
+    // Runs a test body wrapped in `perform LoomAsync in do` with stdlib
+    // Async imported. Top-level user-space wrappers `spawn`/`await` map
+    // to Async.spawn / stdlib await + unwrap of Result 'a AsyncError so
+    // pre-existing test bodies (which treat the awaited value as raw 'a)
+    // keep working.
+    private fun runAsync(body: String): Any {
+        val code = """
+use std::collections::seq
+use std::effects::async::{ Async, LoomAsync, await as await_result }
 
-        newtype Promise 'a = Promise __NativePromise
+let unwrap_async = {r} -> match r is
+    Ok { val } -> val
+    Err { error = _ } -> crash { msg = "await failed" }
 
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_async_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_promise_await {p = p}
-    """.trimIndent()
+let spawn = {f} -> Async.spawn {f = f}
+let await = {p} -> unwrap_async {r = await_result {p = p}}
+
+perform LoomAsync in do
+$body
+        """.trimIndent()
+        return MezzeTestHelper.run(code)
+    }
+
+    // Placeholder kept so tests that concatenate `$setupCode` still work
+    // during migration. All tests should now use `runAsync(body)`.
+    private val setupCode = ""
 
     // =============================================================================
     // Basic Concurrent Execution Tests
@@ -40,7 +57,6 @@ class StructuredConcurrencyTest {
     @Test
     fun testSimpleSpawn() {
         val code = """
-            $setupCode
 
             let test = {} -> do
                 let promise = spawn {f = {} -> 42}
@@ -48,7 +64,7 @@ class StructuredConcurrencyTest {
 
             test {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(42L, result)
     }
 
@@ -56,7 +72,6 @@ class StructuredConcurrencyTest {
     // Previously disabled for flakiness - now fixed with sequential execution
     fun testMultipleConcurrentTasks() {
         val code = """
-            $setupCode
 
             let test = {} -> do
                 let p1 = spawn {f = {} -> 10}
@@ -71,7 +86,7 @@ class StructuredConcurrencyTest {
 
             test {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(60L, result)
     }
 
@@ -79,7 +94,6 @@ class StructuredConcurrencyTest {
     // Previously disabled for flakiness - now fixed with sequential execution
     fun testConcurrentComputations() {
         val code = """
-            $setupCode
 
             let test = {} -> do
                 let p1 = spawn {f = {} -> 5 * 5}
@@ -94,7 +108,7 @@ class StructuredConcurrencyTest {
 
             test {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(55L, result)
     }
 
@@ -105,9 +119,8 @@ class StructuredConcurrencyTest {
     @Test
     fun testParallelExecutionSimple() {
         val code = """
-            $setupCode
 
-            let parallel_sum: {} -> Int = {} -> do
+            let parallel_sum: {} -> Int <Async> = {} -> do
                 let tasks = [{} -> 10, {} -> 20, {} -> 30]
 
                 let promises = seq::map {xs = tasks, f = {x} -> spawn {f = x}}
@@ -117,16 +130,15 @@ class StructuredConcurrencyTest {
 
             parallel_sum {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(60L, result)
     }
 
     @Test
     fun testParallelMap() {
         val code = """
-            $setupCode
 
-            let parallel_map: {fn: {x: Int} -> Int, items: [Int]} -> [Int] = {fn, items} -> do
+            let parallel_map: {fn: {x: Int} -> Int, items: [Int]} -> [Int] <Async> = {fn, items} -> do
                 let promises = items |> seq::map {xs = @, f = {x} -> spawn {f = {} -> fn {x = x}}}
                 promises |> seq::map {xs = @, f = {x} -> await {p =x}}
 
@@ -135,7 +147,7 @@ class StructuredConcurrencyTest {
 
             parallel_map {fn = double, items = items}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result::class.java}")
         val seq = result as MezzeSeq<*>
         assertEquals(5, seq.size())
@@ -146,9 +158,8 @@ class StructuredConcurrencyTest {
     @Test
     fun testParallelFilter() {
         val code = """
-            $setupCode
 
-            let parallel_filter: {pred: {x: Int} -> Bool, items: [Int]} -> [Int] = {pred, items} -> do
+            let parallel_filter: {pred: {x: Int} -> Bool, items: [Int]} -> [Int] <Async> = {pred, items} -> do
                 let promises = items |> seq::map {xs = @, f = {x} -> spawn {f = {} ->
                     if pred {x = x} then [x] else []
                 }}
@@ -160,7 +171,7 @@ class StructuredConcurrencyTest {
 
             parallel_filter {pred = is_even, items = items}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result::class.java}")
         val seq = result as MezzeSeq<*>
         assertEquals(3, seq.size())
@@ -173,7 +184,6 @@ class StructuredConcurrencyTest {
     @Test
     fun testNestedSpawns() {
         val code = """
-            $setupCode
 
             let test = {} -> do
                 let outer = spawn {f = {} -> do
@@ -185,14 +195,13 @@ class StructuredConcurrencyTest {
 
             test {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(42L, result)
     }
 
     @Test
     fun testDeepNesting() {
         val code = """
-            $setupCode
 
             let test = {} -> do
                 let l1 = spawn {f = {} -> do
@@ -208,7 +217,7 @@ class StructuredConcurrencyTest {
 
             test {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(13L, result)
     }
 
@@ -219,7 +228,6 @@ class StructuredConcurrencyTest {
     @Test
     fun testSimplePipeline() {
         val code = """
-            $setupCode
 
             let pipeline = {} -> do
                 let stage1 = spawn {f = {} -> 10}
@@ -233,16 +241,15 @@ class StructuredConcurrencyTest {
 
             pipeline {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(25L, result)
     }
 
     @Test
     fun testMultiStagePipeline() {
         val code = """
-            $setupCode
 
-            let pipeline: {input: Int} -> Int = {input} -> do
+            let pipeline: {input: Int} -> Int <Async> = {input} -> do
                 let stage1 = spawn {f = {} -> input + 5}
                 let r1 = await {p =stage1}
 
@@ -257,7 +264,7 @@ class StructuredConcurrencyTest {
 
             pipeline {input = 5}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(51L, result)  // (5+5)*2-3 = 20-3 = 17, then 17*3 = 51
     }
 
@@ -268,7 +275,6 @@ class StructuredConcurrencyTest {
     @Test
     fun testFanOutFanIn() {
         val code = """
-            $setupCode
 
             let fan_out_fan_in = {} -> do
                 let p1 = spawn {f = {} -> 10}
@@ -283,16 +289,15 @@ class StructuredConcurrencyTest {
 
             fan_out_fan_in {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(60L, result)
     }
 
     @Test
     fun testComplexFanOut() {
         val code = """
-            $setupCode
 
-            let complex_fan_out: {} -> Int = {} -> do
+            let complex_fan_out: {} -> Int <Async> = {} -> do
                 let workers = [1, 2, 3, 4, 5]
                 let promises = workers |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x * x}}
                 let results = promises |> seq::map {xs = @, f = {x} -> await {p =x}}
@@ -300,7 +305,7 @@ class StructuredConcurrencyTest {
 
             complex_fan_out {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(55L, result)
     }
 
@@ -311,9 +316,8 @@ class StructuredConcurrencyTest {
     @Test
     fun testRecursiveSpawn() {
         val code = """
-            $setupCode
 
-            let recursive_spawn: {n: Int} -> Int = {n} -> do
+            let recursive_spawn: {n: Int} -> Int <Async> = {n} -> do
                 if n <= 0
                 then 0
                 else do
@@ -323,16 +327,15 @@ class StructuredConcurrencyTest {
 
             recursive_spawn {n = 5}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(15L, result)
     }
 
     @Test
     fun testRecursiveParallel() {
         val code = """
-            $setupCode
 
-            let parallel_sum: {n: Int, acc: Int} -> Int = {n, acc} ->
+            let parallel_sum: {n: Int, acc: Int} -> Int <Async> = {n, acc} ->
                 if n <= 0
                 then acc
                 else do
@@ -342,7 +345,7 @@ class StructuredConcurrencyTest {
 
             parallel_sum {n = 10, acc = 0}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(55L, result)
     }
 
@@ -353,16 +356,15 @@ class StructuredConcurrencyTest {
     @Test
     fun testBatchProcessing() {
         val code = """
-            $setupCode
 
-            let process_batch: {items: [Int]} -> [Int] = {items} -> do
+            let process_batch: {items: [Int]} -> [Int] <Async> = {items} -> do
                 let promises = items |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x * 2}}
                 promises |> seq::map {xs = @, f = {x} -> await {p =x}}
 
             let items = [1, 2, 3, 4, 5]
             process_batch {items = items}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result::class.java}")
         val seq = result as MezzeSeq<*>
         assertEquals(5, seq.size())
@@ -371,9 +373,8 @@ class StructuredConcurrencyTest {
     @Test
     fun testDataAggregation() {
         val code = """
-            $setupCode
 
-            let aggregate: {} -> Int = {} -> do
+            let aggregate: {} -> Int <Async> = {} -> do
                 let sources = [10, 20, 30, 40, 50]
                 let promises = sources |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x}}
                 let results = promises |> seq::map {xs = @, f = {x} -> await {p =x}}
@@ -381,16 +382,15 @@ class StructuredConcurrencyTest {
 
             aggregate {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(150L, result)
     }
 
     @Test
     fun testMapReduce() {
         val code = """
-            $setupCode
 
-            let map_reduce: {data: [Int]} -> Int = {data} -> do
+            let map_reduce: {data: [Int]} -> Int <Async> = {data} -> do
                 let map_promises = data |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x * x}}
                 let mapped = map_promises |> seq::map {xs = @, f = {x} -> await {p =x}}
 
@@ -401,7 +401,7 @@ class StructuredConcurrencyTest {
 
             map_reduce {data = [1, 2, 3, 4, 5]}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(55L, result)
     }
 
@@ -414,7 +414,6 @@ class StructuredConcurrencyTest {
         // Simplified test that doesn't rely on cross-thread closure capture
         // The original test captured parallel_result in a closure across threads
         val code = """
-            $setupCode
 
             let double = {x} -> x * 2
 
@@ -432,16 +431,15 @@ class StructuredConcurrencyTest {
 
             test {}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(60L, result)
     }
 
     @Test
     fun testConditionalConcurrency() {
         val code = """
-            $setupCode
 
-            let conditional: {use_parallel: Bool} -> Int = {use_parallel} ->
+            let conditional: {use_parallel: Bool} -> Int <Async> = {use_parallel} ->
                 if use_parallel
                 then do
                     let p = spawn {f = {} -> 100}
@@ -452,30 +450,29 @@ class StructuredConcurrencyTest {
             let r2 = conditional {use_parallel = False}
             r1 + r2
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(150L, result)
     }
 
     @Test
     fun testDynamicConcurrency() {
         val code = """
-            $setupCode
 
-            let spawn_tasks: {n: Int, promises: [Promise Int]} -> [Promise Int] = {n, promises} ->
+            let spawn_tasks: {n: Int, promises: [Promise Int]} -> [Promise Int] <Async> = {n, promises} ->
                 if n <= 0
                 then promises
                 else do
                     let p = spawn {f = {} -> n}
                     spawn_tasks {n = n - 1, promises = seq::concat {xs = promises, ys = [p]}}
 
-            let dynamic: {count: Int} -> Int = {count} -> do
+            let dynamic: {count: Int} -> Int <Async> = {count} -> do
                 let promises = spawn_tasks {n = count, promises = []}
                 let results = promises |> seq::map {xs = @, f = {x} -> await {p = x}}
                 results |> seq::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             dynamic {count = 5}
         """
-        val result = MezzeTestHelper.run(code)
+        val result = runAsync(code)
         assertEquals(15L, result)
     }
 }

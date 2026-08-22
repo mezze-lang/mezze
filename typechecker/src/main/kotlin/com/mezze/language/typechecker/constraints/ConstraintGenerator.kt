@@ -1168,9 +1168,11 @@ class ConstraintGenerator(
             performerAddedEffects: Map<String, Set<String>> = emptyMap(),
             abilityNames: Set<String> = emptySet(),
             effectNames: Set<String> = emptySet(),
+            isStdlibModule: Boolean = false,
         ): ConstraintGenerator {
             val expressionGen = ExpressionConstraintGenerator()
             expressionGen.registry = registry
+            expressionGen.isStdlibModule = isStdlibModule
             val patternGen = PatternConstraintGenerator()
 
             return ConstraintGenerator(

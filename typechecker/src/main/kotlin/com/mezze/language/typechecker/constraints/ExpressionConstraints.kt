@@ -32,6 +32,13 @@ class ExpressionConstraintGenerator {
     // stay monomorphic (safe fallback).
     var registry: DeclarationRegistry? = null
 
+    // #109: `__native_*` intrinsic references are stdlib-only. User code that
+    // writes `__native_str_eq {...}` gets treated as undefined (bypassing the
+    // fresh-type-var fast path in ExprLiteralConstraints). Set by
+    // ConstraintGenerator.create from the module path. Default false = safe
+    // (user code can't touch natives in bare/test construction either).
+    var isStdlibModule: Boolean = false
+
     fun generate(expr: ParsedExpr, context: ConstraintContext): ConstraintResult {
         val raw = generateImpl(expr, context)
         return when (val t = raw.type) {

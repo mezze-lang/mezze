@@ -29,15 +29,30 @@ class SimpleLoomTest {
         com.mezze.language.typechecker.ModuleResolver.clearCache()
     }
 
-    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+    // Runs `body` inside `perform LoomAsync in do` with stdlib Async
+    // imported and top-level `spawn`/`await`/`sleep` wrappers around
+    // Async.spawn + stdlib await (unwrapped from Result 'a AsyncError)
+    // + stdlib async::sleep. Pre-existing test bodies treat the awaited
+    // value as raw 'a; the unwrap keeps that shape.
+    private fun eval(body: String): Any {
+        val code = """
+use std::effects::async::{ Async, LoomAsync, await as await_result, sleep as async_sleep }
 
-    // Setup code for Loom virtual thread primitives
-    private val loomSetup = """
-        newtype Promise 'a = Promise __NativePromise
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_async_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_promise_await {p = p}
-        let sleep: {ms: Int} -> {} = {ms} -> __native_async_sleep {ms = ms}
-    """.trimIndent()
+let unwrap_async = {r} -> match r is
+    Ok { val } -> val
+    Err { error = _ } -> crash { msg = "await failed" }
+
+let spawn = {f} -> Async.spawn {f = f}
+let await = {p} -> unwrap_async {r = await_result {p = p}}
+let sleep = {ms} -> async_sleep {ms = ms}
+
+perform LoomAsync in do
+$body
+        """.trimIndent()
+        return MezzeTestHelper.run(code)
+    }
+
+    private val loomSetup = ""
 
     // =============================================================================
     // Basic Virtual Thread Operations
@@ -46,7 +61,6 @@ class SimpleLoomTest {
     @Test
     fun `should spawn virtual thread and await result`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> "Hello from virtual thread"}
             await {p = thread}
@@ -58,7 +72,6 @@ class SimpleLoomTest {
     @Test
     fun `should spawn virtual thread with integer computation`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> 42}
             await {p = thread}
@@ -70,7 +83,6 @@ class SimpleLoomTest {
     @Test
     fun `should spawn multiple virtual threads`() {
         val code = """
-            $loomSetup
 
             let t1 = spawn {f = {} -> 1}
             let t2 = spawn {f = {} -> 2}
@@ -87,7 +99,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle sleep in virtual thread`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> do
                 let _ = sleep {ms = 10}
@@ -106,7 +117,6 @@ class SimpleLoomTest {
     @Test
     fun `should compose multiple virtual threads`() {
         val code = """
-            $loomSetup
 
             let t1 = spawn {f = {} -> 10}
             let t2 = spawn {f = {} -> 20}
@@ -125,7 +135,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle nested virtual thread spawn`() {
         val code = """
-            $loomSetup
 
             let outer = spawn {f = {} -> do
                 let inner = spawn {f = {} -> 21}
@@ -140,7 +149,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle complex computation in virtual thread`() {
         val code = """
-            $loomSetup
 
             let compute = {n: Int} -> n * n + n
 
@@ -166,7 +174,6 @@ class SimpleLoomTest {
     @Test
     fun `should execute threads concurrently`() {
         val code = """
-            $loomSetup
 
             # Spawn threads that each sleep briefly
             let t1 = spawn {f = {} -> do
@@ -195,7 +202,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle many concurrent threads`() {
         val code = """
-            $loomSetup
 
             # Spawn 10 threads, each returning a value
             let t1 = spawn {f = {} -> 1}
@@ -233,7 +239,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle thread returning record`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> {x = 10, y = 20}}
             let result = await {p = thread}
@@ -246,7 +251,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle thread with closure`() {
         val code = """
-            $loomSetup
 
             let multiplier = 5
             let thread = spawn {f = {} -> multiplier * 10}
@@ -259,7 +263,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle thread passing data between threads`() {
         val code = """
-            $loomSetup
 
             let t1 = spawn {f = {} -> 21}
             let value = await {p = t1}
@@ -278,7 +281,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle thread returning unit`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> {}}
             let _ = await {p = thread}
@@ -291,7 +293,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle thread with zero sleep`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> do
                 let _ = sleep {ms = 0}
@@ -306,7 +307,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle thread returning boolean`() {
         val code = """
-            $loomSetup
 
             let thread = spawn {f = {} -> True}
             await {p = thread}
@@ -318,7 +318,6 @@ class SimpleLoomTest {
     @Test
     fun `should handle thread with string operations`() {
         val code = """
-            $loomSetup
 
             let t1 = spawn {f = {} -> "Hello"}
             let t2 = spawn {f = {} -> " World"}

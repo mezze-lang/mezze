@@ -293,6 +293,7 @@ class TypeChecker(
             performerAddedEffects = buildResult.performerAddedEffects,
             abilityNames = abilityNames,
             effectNames = effectNames,
+            isStdlibModule = ModulePathConventions.isStdlib(currentModulePath),
         )
 
         val inScopeAliasNames = buildResult.registry.typeNames +

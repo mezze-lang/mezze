@@ -51,21 +51,27 @@ class MinimalTypeVarTest {
 
     @Test
     fun testTypeVarsWithEffectSystem() {
-        // Test type variables with the effect system using direct native loom calls.
-        // Uses the same native primitives as TruffleAndLoomIntegrationTest to avoid
-        // pulling in the heavy std::effects::async module (which causes OOM).
+        // Same shape as testMinimalCase / testTypeVarsWithLoomAsync but
+        // exercises type-variable propagation across the awaited value
+        // being coerced through user-space wrappers over stdlib Async.
         val code = """
-            newtype Promise 'a = Promise __NativePromise
-            let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_async_spawn {f = f}
-            let await: {p: Promise 'a} -> 'a = {p} -> __native_promise_await {p = p}
+            use std::effects::async::{ Async, LoomAsync, await as await_result }
 
-            let p1 = spawn {f = {} -> 1 * 2}
-            let p2 = spawn {f = {} -> 2 * 2}
-            let p3 = spawn {f = {} -> 3 * 2}
-            let r1 = await {p = p1}
-            let r2 = await {p = p2}
-            let r3 = await {p = p3}
-            [r1, r2, r3]
+            let unwrap_async = {r} -> match r is
+                Ok { val } -> val
+                Err { error = _ } -> crash { msg = "await failed" }
+
+            let spawn = {f} -> Async.spawn {f = f}
+            let await = {p} -> unwrap_async {r = await_result {p = p}}
+
+            perform LoomAsync in do
+                let p1 = spawn {f = {} -> 1 * 2}
+                let p2 = spawn {f = {} -> 2 * 2}
+                let p3 = spawn {f = {} -> 3 * 2}
+                let r1 = await {p = p1}
+                let r2 = await {p = p2}
+                let r3 = await {p = p3}
+                [r1, r2, r3]
         """
         val result = eval(code)
         assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result?.javaClass?.name}")

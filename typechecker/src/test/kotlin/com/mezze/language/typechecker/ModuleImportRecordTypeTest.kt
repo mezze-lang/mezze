@@ -44,9 +44,11 @@ class ModuleImportRecordTypeTest {
     }
 
     @Test
-    fun `test function calling native function with same record parameters`() {
+    fun `test function calling stdlib function with same record parameters`() {
+        // Post-#109: user code cannot call __native_* directly; delegate to stdlib.
         val source = """
-            let myAdd = { l: Int, r: Int } -> __native_int_add { l = l, r = r }
+            use std::int
+            let myAdd = { l: Int, r: Int } -> int::add { l = l, r = r }
             let result = myAdd { l = 5, r = 3 }
         """.trimIndent()
 

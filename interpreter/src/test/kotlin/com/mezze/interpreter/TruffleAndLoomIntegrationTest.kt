@@ -19,16 +19,34 @@ import org.junit.jupiter.api.Assertions.*
  * Migrated from V1 to V2 with unboxed values.
  */
 class TruffleAndLoomIntegrationTest {
-    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+    // Runs `body` inside `perform LoomAsync in do` with stdlib Async
+    // imported and top-level `spawn`/`await` wrappers around Async.spawn
+    // + stdlib await + unwrap of Result 'a AsyncError so the pre-existing
+    // test bodies (which treat the awaited value as raw 'a) keep working.
+    // `header` (optional) is spliced at the top level — put local
+    // effect / impl declarations there since Mezze doesn't allow them
+    // inside `do` blocks.
+    private fun eval(body: String, header: String = ""): Any {
+        val code = """
+use std::collections::seq
+use std::effects::async::{ Async, LoomAsync, await as await_result }
 
-    private val setupCode = """
-        use std::collections::seq
+let unwrap_async = {r} -> match r is
+    Ok { val } -> val
+    Err { error = _ } -> crash { msg = "await failed" }
 
-        newtype Promise 'a = Promise __NativePromise
+let spawn = {f} -> Async.spawn {f = f}
+let await = {p} -> unwrap_async {r = await_result {p = p}}
 
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_async_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_promise_await {p = p}
-    """.trimIndent()
+$header
+
+perform LoomAsync in do
+$body
+        """.trimIndent()
+        return MezzeTestHelper.run(code)
+    }
+
+    private val setupCode = ""
 
     // =============================================================================
     // Truffle Functions + Loom Concurrency
@@ -37,7 +55,6 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testTruffleFunctionInLoomThread() {
         val code = """
-            $setupCode
 
             let factorial = {n} ->
                 if n <= 1
@@ -57,7 +74,6 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testConcurrentRecursiveFunctions() {
         val code = """
-            $setupCode
 
             let fib = {n} ->
                 if n <= 1
@@ -103,9 +119,8 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testHigherOrderFunctionsConcurrent() {
         val code = """
-            $setupCode
 
-            let test: {} -> [Int] = {} -> do
+            let test: {} -> [Int] <Async> = {} -> do
                 let double = {x} -> x * 2
                 let data = [1, 2, 3, 4, 5]
 
@@ -127,7 +142,6 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testClosureInSpawnedThread() {
         val code = """
-            $setupCode
 
             let test = {} -> do
                 let x = 100
@@ -142,10 +156,9 @@ class TruffleAndLoomIntegrationTest {
 
     @Test
     fun testNestedClosuresWithConcurrency() {
-        // Simplified test - compute results separately, don't rely on cross-thread closure capture
+        // Simplified test - compute results separately, don't rely on cross-thread closure capture.
+        // No spawn/await here, so bypass eval()'s LoomAsync wrap.
         val code = """
-            $setupCode
-
             let makeAdder = {x} -> {y} -> x + y
 
             let test = {} -> do
@@ -159,16 +172,15 @@ class TruffleAndLoomIntegrationTest {
 
             test {}
         """
-        val result = eval(code)
+        val result = MezzeTestHelper.run(code)
         assertEquals(40L, result)
     }
 
     @Test
     fun testClosureFactoryWithConcurrency() {
-        // Simplified test - compute results separately, don't rely on cross-thread closure capture
+        // Simplified test - compute results separately, don't rely on cross-thread closure capture.
+        // No spawn/await here, so bypass eval()'s LoomAsync wrap.
         val code = """
-            $setupCode
-
             let makeMultiplier = {factor} -> {value} -> value * factor
 
             let test = {} -> do
@@ -183,7 +195,7 @@ class TruffleAndLoomIntegrationTest {
 
             test {}
         """
-        val result = eval(code)
+        val result = MezzeTestHelper.run(code)
         assertEquals(50L, result)
     }
 
@@ -191,7 +203,6 @@ class TruffleAndLoomIntegrationTest {
     fun testSharedClosureState() {
         // Test concurrent computation where closure captures from outer scope
         val code = """
-            $setupCode
 
             let test = {} -> do
                 # base_value is captured by the compute closure
@@ -221,9 +232,7 @@ class TruffleAndLoomIntegrationTest {
 
     @Test
     fun testEffectsInConcurrentContext() {
-        val code = """
-            $setupCode
-
+        val header = """
             effect Math where {
                 compute: {x: Int, y: Int} -> Int <Math>
             }
@@ -231,7 +240,8 @@ class TruffleAndLoomIntegrationTest {
             impl Math for Calculator where {
                 compute: {x: Int, y: Int} -> Int = {x, y} -> x + y
             }
-
+        """
+        val body = """
             let test = {} -> do
                 let promise = spawn {f = {} ->
                     perform Calculator in Math.compute {x = 10, y = 32}
@@ -240,15 +250,13 @@ class TruffleAndLoomIntegrationTest {
 
             test {}
         """
-        val result = eval(code)
+        val result = eval(body, header)
         assertEquals(42L, result)
     }
 
     @Test
     fun testConcurrentEffectCalls() {
-        val code = """
-            $setupCode
-
+        val header = """
             effect Math where {
                 mul: {x: Int, y: Int} -> Int <Math>
             }
@@ -256,7 +264,8 @@ class TruffleAndLoomIntegrationTest {
             impl Math for Calculator where {
                 mul: {x: Int, y: Int} -> Int = {x, y} -> x * y
             }
-
+        """
+        val body = """
             let test = {} -> do
                 let p1 = spawn {f = {} ->
                     perform Calculator in Math.mul {x = 5, y = 2}
@@ -272,7 +281,7 @@ class TruffleAndLoomIntegrationTest {
 
             test {}
         """
-        val result = eval(code)
+        val result = eval(body, header)
         assertEquals(22L, result)
     }
 
@@ -283,7 +292,6 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testPatternMatchingInConcurrency() {
         val code = """
-            $setupCode
 
             let processValue = {v} ->
                 match v is
@@ -309,7 +317,6 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testConcurrentDataProcessingWithPatternMatch() {
         val code = """
-            $setupCode
 
             let process = {data} ->
                 seq::fold {xs = data, init = 0, f = {acc, x} -> acc + x}
@@ -339,7 +346,6 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testRecordAccessInConcurrency() {
         val code = """
-            $setupCode
 
             let test = {} -> do
                 let point = {x = 10, y = 20}
@@ -361,7 +367,6 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testRecordUpdateWithConcurrency() {
         val code = """
-            $setupCode
 
             let test = {} -> do
                 let point = {x = 5, y = 10}
@@ -394,9 +399,8 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testParallelDataPipeline() {
         val code = """
-            $setupCode
 
-            let pipeline: {data: [Int]} -> Int = {data} -> do
+            let pipeline: {data: [Int]} -> Int <Async> = {data} -> do
                 let promises = data |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x * 2}}
                 let results = promises |> seq::map {xs = @, f = {x} -> await {p =x}}
                 results |> seq::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
@@ -411,9 +415,8 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testConcurrentMapReduce() {
         val code = """
-            $setupCode
 
-            let map_phase: {data: [Int]} -> [Int] = {data} -> do
+            let map_phase: {data: [Int]} -> [Int] <Async> = {data} -> do
                 let promises = data |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x * x}}
                 promises |> seq::map {xs = @, f = {x} -> await {p =x}}
 
@@ -436,7 +439,6 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testNestedConcurrencyWithClosures() {
         val code = """
-            $setupCode
 
             let test = {} -> do
                 let outer_value = 100
@@ -461,9 +463,7 @@ class TruffleAndLoomIntegrationTest {
 
     @Test
     fun testConcurrentEffectsWithClosures() {
-        val code = """
-            $setupCode
-
+        val header = """
             effect Compute where {
                 calculate: {x: Int, y: Int} -> Int <Compute>
             }
@@ -471,7 +471,8 @@ class TruffleAndLoomIntegrationTest {
             impl Compute for SimpleCalc where {
                 calculate: {x: Int, y: Int} -> Int = {x, y} -> x + y
             }
-
+        """
+        val body = """
             let test = {} -> do
                 let base = 100
 
@@ -490,15 +491,13 @@ class TruffleAndLoomIntegrationTest {
 
             test {}
         """
-        val result = eval(code)
+        val result = eval(body, header)
         assertEquals(230L, result)
     }
 
     @Test
     fun testComplexDataFlowWithAllFeatures() {
-        val code = """
-            $setupCode
-
+        val header = """
             effect Logger where {
                 log: {msg: Str} -> {} <Logger>
             }
@@ -512,7 +511,8 @@ class TruffleAndLoomIntegrationTest {
                     Red -> 1
                     Blue {val} -> val
                     _ -> 0
-
+        """
+        val body = """
             let test = {} -> do
                 let items = [Red, Blue {val = 10}, Blue {val = 20}]
 
@@ -526,7 +526,7 @@ class TruffleAndLoomIntegrationTest {
 
             test {}
         """
-        val result = eval(code)
+        val result = eval(body, header)
         assertEquals(31L, result) // 1 + 10 + 20
     }
 
@@ -534,7 +534,6 @@ class TruffleAndLoomIntegrationTest {
     fun testConcurrentStateManipulation() {
         // Tests concurrent computations - simplified to avoid cross-thread closure capture issues
         val code = """
-            $setupCode
 
             # Worker function that computes based on id (no cross-thread closure capture)
             let worker = {base, id} -> base + id * 2
@@ -560,9 +559,8 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testRecursiveConcurrentProcessing() {
         val code = """
-            $setupCode
 
-            let parallel_sum: {n: Int, acc: Int} -> Int = {n, acc} ->
+            let parallel_sum: {n: Int, acc: Int} -> Int <Async> = {n, acc} ->
                 if n <= 0
                 then acc
                 else do
@@ -579,7 +577,6 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testComplexClosureChainWithConcurrency() {
         val code = """
-            $setupCode
 
             let makeAdder = {x} -> {y} -> {z} -> x + y + z
 
@@ -603,9 +600,7 @@ class TruffleAndLoomIntegrationTest {
 
     @Test
     fun testFullStackIntegration() {
-        val code = """
-            $setupCode
-
+        val header = """
             effect Math where {
                 square: {x: Int} -> Int <Math>
             }
@@ -613,7 +608,8 @@ class TruffleAndLoomIntegrationTest {
             impl Math for Calculator where {
                 square: {x: Int} -> Int = {x} -> x * x
             }
-
+        """
+        val body = """
             let processInParallel = {items} -> do
                 let promises = items |> seq::map {xs = @, f = {x} ->
                     spawn {f = {} ->
@@ -629,7 +625,7 @@ class TruffleAndLoomIntegrationTest {
 
             test {}
         """
-        val result = eval(code)
+        val result = eval(body, header)
         assertEquals(55L, result) // 1+4+9+16+25 = 55
     }
 }

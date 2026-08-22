@@ -25,15 +25,29 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class LoomConcurrencyTest {
-    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+    // Runs a test body wrapped in `perform LoomAsync in do` with stdlib
+    // Async imported. Top-level user-space wrappers `spawn`/`await` map
+    // to Async.spawn / stdlib await + unwrap of Result 'a AsyncError so
+    // the pre-existing test bodies (which treat awaited value as raw 'a)
+    // keep working.
+    private fun eval(body: String): Any {
+        val code = """
+use std::effects::async::{ Async, LoomAsync, await as await_result }
 
-    // Common setup code - uses same field names as std::async
-    private val setupCode = """
-        newtype Promise 'a = Promise __NativePromise
+let unwrap_async = {r} -> match r is
+    Ok { val } -> val
+    Err { error = _ } -> crash { msg = "await failed" }
 
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_async_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_promise_await {p = p}
-    """.trimIndent()
+let spawn = {f} -> Async.spawn {f = f}
+let await = {p} -> unwrap_async {r = await_result {p = p}}
+
+perform LoomAsync in do
+$body
+        """.trimIndent()
+        return MezzeTestHelper.run(code)
+    }
+
+    private val setupCode = ""
 
     // Stdlib functions for tests that need them
     private val stdlibCode = """
@@ -65,7 +79,7 @@ class LoomConcurrencyTest {
         val code = """
             $setupCode
 
-            let test: {} -> Int = {} -> do
+            let test: {} -> Int <Async> = {} -> do
                 let promise = spawn {f = {} -> 42}
                 await {p =promise}
 
@@ -203,7 +217,7 @@ class LoomConcurrencyTest {
         val code = """
             $setupCode
 
-            let pipeline: {input: Int} -> Int = {input} -> do
+            let pipeline: {input: Int} -> Int <Async> = {input} -> do
                 let stage1 = spawn {f = {} -> input + 5}
                 let r1 = await {p =stage1}
 
@@ -227,7 +241,7 @@ class LoomConcurrencyTest {
         val code = """
             $setupCode
 
-            let spawn_workers: {remaining: Int, acc: Int} -> Int = {remaining, acc} ->
+            let spawn_workers: {remaining: Int, acc: Int} -> Int <Async> = {remaining, acc} ->
                 if remaining <= 0
                 then acc
                 else do
@@ -235,7 +249,7 @@ class LoomConcurrencyTest {
                     let result = await {p =promise}
                     spawn_workers {remaining = remaining - 1, acc = acc + result}
 
-            let fan_out_fan_in: {n: Int} -> Int = {n} ->
+            let fan_out_fan_in: {n: Int} -> Int <Async> = {n} ->
                 spawn_workers {remaining = n, acc = 0}
 
             fan_out_fan_in {n = 5}
@@ -254,7 +268,7 @@ class LoomConcurrencyTest {
         val code = """
             $setupCode
 
-            let recursive_spawn: {n: Int} -> Int = {n} -> do
+            let recursive_spawn: {n: Int} -> Int <Async> = {n} -> do
                 if n <= 0
                 then 0
                 else do
@@ -273,7 +287,7 @@ class LoomConcurrencyTest {
         val code = """
             $setupCode
 
-            let parallel_sum: {n: Int, acc: Int} -> Int = {n, acc} ->
+            let parallel_sum: {n: Int, acc: Int} -> Int <Async> = {n, acc} ->
                 if n <= 0
                 then acc
                 else do
@@ -362,7 +376,7 @@ class LoomConcurrencyTest {
         val code = """
             $setupCode
 
-            let conditional: {use_async: Bool} -> Int = {use_async} ->
+            let conditional: {use_async: Bool} -> Int <Async> = {use_async} ->
                 if use_async
                 then do
                     let p = spawn {f = {} -> 100}

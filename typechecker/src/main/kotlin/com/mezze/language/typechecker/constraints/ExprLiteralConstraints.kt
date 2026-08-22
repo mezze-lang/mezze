@@ -223,7 +223,14 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
         }
         is TypingContext.LookupResult.NotFound -> {
 
-            if (expr.localName.startsWith("__native_") || expr.localName == "crash") {
+            // #109: `__native_*` intrinsics are stdlib-only. User code that
+            // references one falls through to the normal "undefined variable"
+            // error path, preventing the type-check bypass (fresh-var fast
+            // path) that was silently accepting `__native_str_eq { l = u, r = u }`
+            // where u: UserId — leaking nominal opacity through the native
+            // boundary. `crash` remains available everywhere (universal panic).
+            if (expr.localName == "crash" ||
+                (expr.localName.startsWith("__native_") && isStdlibModule)) {
                 val freshType = MezzeType.VarType(TypeVar.fresh())
                 return ConstraintResult(
                     type = freshType,

@@ -29,9 +29,8 @@ class JsonCodecInterpreterTest {
     @Test
     fun `parse simple JSON string`() {
         val source = """
-            # Direct native call for parsing
-            let result = __native_json_parse {s = "\"hello\""}
-            result
+            use std::codec::json
+            json::parse_str { s = "\"hello\"" }
         """.trimIndent()
 
         val result = eval(source)
@@ -53,8 +52,8 @@ class JsonCodecInterpreterTest {
     @Test
     fun `parse JSON integer`() {
         val source = """
-            let result = __native_json_parse {s = "42"}
-            result
+            use std::codec::json
+            json::parse_str { s = "42" }
         """.trimIndent()
 
         val result = eval(source)
@@ -75,8 +74,8 @@ class JsonCodecInterpreterTest {
     @Test
     fun `parse JSON float`() {
         val source = """
-            let result = __native_json_parse {s = "3.14"}
-            result
+            use std::codec::json
+            json::parse_str { s = "3.14" }
         """.trimIndent()
 
         val result = eval(source)
@@ -97,8 +96,8 @@ class JsonCodecInterpreterTest {
     @Test
     fun `parse JSON boolean true`() {
         val source = """
-            let result = __native_json_parse {s = "true"}
-            result
+            use std::codec::json
+            json::parse_str { s = "true" }
         """.trimIndent()
 
         val result = eval(source)
@@ -119,8 +118,8 @@ class JsonCodecInterpreterTest {
     @Test
     fun `parse JSON boolean false`() {
         val source = """
-            let result = __native_json_parse {s = "false"}
-            result
+            use std::codec::json
+            json::parse_str { s = "false" }
         """.trimIndent()
 
         val result = eval(source)
@@ -141,8 +140,8 @@ class JsonCodecInterpreterTest {
     @Test
     fun `parse JSON null`() {
         val source = """
-            let result = __native_json_parse {s = "null"}
-            result
+            use std::codec::json
+            json::parse_str { s = "null" }
         """.trimIndent()
 
         val result = eval(source)
@@ -160,8 +159,8 @@ class JsonCodecInterpreterTest {
     @Test
     fun `parse JSON array`() {
         val source = """
-            let result = __native_json_parse {s = "[1, 2, 3]"}
-            result
+            use std::codec::json
+            json::parse_str { s = "[1, 2, 3]" }
         """.trimIndent()
 
         val result = eval(source)
@@ -182,8 +181,8 @@ class JsonCodecInterpreterTest {
     @Test
     fun `parse JSON object`() {
         val source = """
-            let result = __native_json_parse {s = "{\"name\": \"Alice\", \"age\": 30}"}
-            result
+            use std::codec::json
+            json::parse_str { s = "{\"name\": \"Alice\", \"age\": 30}" }
         """.trimIndent()
 
         val result = eval(source)
@@ -204,8 +203,8 @@ class JsonCodecInterpreterTest {
     @Test
     fun `parse invalid JSON returns error`() {
         val source = """
-            let result = __native_json_parse {s = "invalid json {{"}
-            result
+            use std::codec::json
+            json::parse_str { s = "invalid json {{" }
         """.trimIndent()
 
         val result = eval(source)
@@ -227,156 +226,93 @@ class JsonCodecInterpreterTest {
     @Test
     fun `serialize JString`() {
         val source = """
-            # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str } |
-            let json: Json = JString {val = "hello"}
-            let result = __native_json_serialize {json = json, pretty = False}
-            result
+            use std::codec::json::{ Json, to_str }
+            let j: Json = JString {val = "hello"}
+            to_str { json = j }
         """.trimIndent()
 
         val result = eval(source)
-
-        assertTrue(result is MezzeVariant)
-        val okVariant = result as MezzeVariant
-        assertEquals("Ok", okVariant.constructorName)
-
-        val innerRecord = okVariant.payloadValue as MezzeRecord
-        val jsonString = innerRecord.getField("val") as String
-        assertEquals("\"hello\"", jsonString)
+        assertEquals("\"hello\"", result)
     }
 
     @Test
     fun `serialize JInt`() {
         val source = """
-            # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str } |
-            let json: Json = JInt {val = 42}
-            let result = __native_json_serialize {json = json, pretty = False}
-            result
+            use std::codec::json::{ Json, to_str }
+            let j: Json = JInt {val = 42}
+            to_str { json = j }
         """.trimIndent()
 
         val result = eval(source)
-
-        assertTrue(result is MezzeVariant)
-        val okVariant = result as MezzeVariant
-        assertEquals("Ok", okVariant.constructorName)
-
-        val innerRecord = okVariant.payloadValue as MezzeRecord
-        val jsonString = innerRecord.getField("val") as String
-        assertEquals("42", jsonString)
+        assertEquals("42", result)
     }
 
     @Test
     fun `serialize JFloat`() {
         val source = """
-            # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str } |
-            let json: Json = JFloat {val = 3.14}
-            let result = __native_json_serialize {json = json, pretty = False}
-            result
+            use std::codec::json::{ Json, to_str }
+            let j: Json = JFloat {val = 3.14}
+            to_str { json = j }
         """.trimIndent()
 
         val result = eval(source)
-
-        assertTrue(result is MezzeVariant)
-        val okVariant = result as MezzeVariant
-        assertEquals("Ok", okVariant.constructorName)
-
-        val innerRecord = okVariant.payloadValue as MezzeRecord
-        val jsonString = innerRecord.getField("val") as String
-        assertEquals("3.14", jsonString)
+        assertEquals("3.14", result)
     }
 
     @Test
     fun `serialize JBool true`() {
         val source = """
-            # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str } |
-            let json: Json = JBool {val = True}
-            let result = __native_json_serialize {json = json, pretty = False}
-            result
+            use std::codec::json::{ Json, to_str }
+            let j: Json = JBool {val = True}
+            to_str { json = j }
         """.trimIndent()
 
         val result = eval(source)
-
-        assertTrue(result is MezzeVariant)
-        val okVariant = result as MezzeVariant
-        assertEquals("Ok", okVariant.constructorName)
-
-        val innerRecord = okVariant.payloadValue as MezzeRecord
-        val jsonString = innerRecord.getField("val") as String
-        assertEquals("true", jsonString)
+        assertEquals("true", result)
     }
 
     @Test
     fun `serialize JNull`() {
         val source = """
-            # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str } |
-            let json: Json = JNull
-            let result = __native_json_serialize {json = json, pretty = False}
-            result
+            use std::codec::json::{ Json, to_str }
+            let j: Json = JNull
+            to_str { json = j }
         """.trimIndent()
 
         val result = eval(source)
-
-        assertTrue(result is MezzeVariant)
-        val okVariant = result as MezzeVariant
-        assertEquals("Ok", okVariant.constructorName)
-
-        val innerRecord = okVariant.payloadValue as MezzeRecord
-        val jsonString = innerRecord.getField("val") as String
-        assertEquals("null", jsonString)
+        assertEquals("null", result)
     }
 
     @Test
     fun `serialize JArray`() {
         val source = """
-            # Define Json type locally for testing (with Seq for items)
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str }, JArray { items: [Json] } |
+            use std::codec::json::{ Json, to_str }
             let items: [Json] = [JInt {val = 1}, JInt {val = 2}, JInt {val = 3}]
-            let json: Json = JArray {items = items}
-            let result = __native_json_serialize {json = json, pretty = False}
-            result
+            let j: Json = JArray {items = items}
+            to_str { json = j }
         """.trimIndent()
 
         val result = eval(source)
-
-        assertTrue(result is MezzeVariant)
-        val okVariant = result as MezzeVariant
-        assertEquals("Ok", okVariant.constructorName)
-
-        val innerRecord = okVariant.payloadValue as MezzeRecord
-        val jsonString = innerRecord.getField("val") as String
-        assertEquals("[1,2,3]", jsonString)
+        assertEquals("[1,2,3]", result)
     }
 
     @Test
     fun `serialize JObject`() {
         val source = """
-            # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str }, JArray { items: [Json] }, JObject { fields: [{key: Str, value: Json}] } |
+            use std::codec::json::{ Json, to_str }
             let fields: [{key: Str, value: Json}] = [
                 {key = "name", value = JString {val = "Alice"}},
                 {key = "age", value = JInt {val = 30}}
             ]
-            let json: Json = JObject {fields = fields}
-            let result = __native_json_serialize {json = json, pretty = False}
-            result
+            let j: Json = JObject {fields = fields}
+            to_str { json = j }
         """.trimIndent()
 
-        val result = eval(source)
-
-        assertTrue(result is MezzeVariant)
-        val okVariant = result as MezzeVariant
-        assertEquals("Ok", okVariant.constructorName)
-
-        val innerRecord = okVariant.payloadValue as MezzeRecord
-        val jsonString = innerRecord.getField("val") as String
+        val result = eval(source) as String
         // JSON object order may vary, check contains
-        assertTrue(jsonString.contains("\"name\""))
-        assertTrue(jsonString.contains("\"Alice\""))
-        assertTrue(jsonString.contains("\"age\""))
-        assertTrue(jsonString.contains("30"))
+        assertTrue(result.contains("\"name\""))
+        assertTrue(result.contains("\"Alice\""))
+        assertTrue(result.contains("\"age\""))
+        assertTrue(result.contains("30"))
     }
 }

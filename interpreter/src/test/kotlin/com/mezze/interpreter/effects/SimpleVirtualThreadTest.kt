@@ -28,15 +28,32 @@ class SimpleVirtualThreadTest {
         com.mezze.language.typechecker.ModuleResolver.clearCache()
     }
 
-    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+    // Runs `body` inside `perform LoomAsync in do` with stdlib Async
+    // imported and top-level `spawn`/`await`/`sleep` wrappers around
+    // Async.spawn + stdlib await (unwrapped from Result 'a AsyncError)
+    // + stdlib async::sleep. `header` (optional) holds local
+    // effect/impl decls since those must live at top level.
+    private fun eval(body: String, header: String = ""): Any {
+        val code = """
+use std::effects::async::{ Async, LoomAsync, await as await_result, sleep as async_sleep }
 
-    // Setup code for virtual thread primitives
-    private val threadSetup = """
-        newtype Promise 'a = Promise __NativePromise
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_async_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_promise_await {p = p}
-        let sleep: {ms: Int} -> {} = {ms} -> __native_async_sleep {ms = ms}
-    """.trimIndent()
+let unwrap_async = {r} -> match r is
+    Ok { val } -> val
+    Err { error = _ } -> crash { msg = "await failed" }
+
+let spawn = {f} -> Async.spawn {f = f}
+let await = {p} -> unwrap_async {r = await_result {p = p}}
+let sleep = {ms} -> async_sleep {ms = ms}
+
+$header
+
+perform LoomAsync in do
+$body
+        """.trimIndent()
+        return MezzeTestHelper.run(code)
+    }
+
+    private val threadSetup = ""
 
     // =============================================================================
     // Basic Effect Context Tests (through language API)
@@ -47,7 +64,6 @@ class SimpleVirtualThreadTest {
         // V1 tested: assertNotNull(effectContext.concurrencyManager)
         // V2 tests that we can spawn and await a virtual thread
         val code = """
-            $threadSetup
 
             let thread = spawn {f = {} -> "Hello Virtual Threads"}
             await {p = thread}
@@ -61,7 +77,6 @@ class SimpleVirtualThreadTest {
         // V1 tested: CancellationToken and EffectCancellationException
         // V2 tests that spawned threads can complete and don't hang
         val code = """
-            $threadSetup
 
             let t1 = spawn {f = {} -> 1}
             let t2 = spawn {f = {} -> 2}
@@ -80,7 +95,6 @@ class SimpleVirtualThreadTest {
         // V1 tested: effectContext.createChildContext("child-test")
         // V2 tests nested virtual thread spawning
         val code = """
-            $threadSetup
 
             let outer = spawn {f = {} -> do
                 let inner = spawn {f = {} -> "child-context-value"}
@@ -101,7 +115,6 @@ class SimpleVirtualThreadTest {
         // V1 tested: effectContext.withVirtualThreadFuture() and getVirtualThreadFuture()
         // V2 tests that Promise/Future-like semantics work
         val code = """
-            $threadSetup
 
             let future = spawn {f = {} -> "test-result"}
             let result = await {p = future}
@@ -114,7 +127,6 @@ class SimpleVirtualThreadTest {
     @Test
     fun `should handle multiple futures concurrently`() {
         val code = """
-            $threadSetup
 
             let f1 = spawn {f = {} -> 10}
             let f2 = spawn {f = {} -> 20}
@@ -139,7 +151,6 @@ class SimpleVirtualThreadTest {
         // V1 tested: EffectStateMachineBuilder with compute states
         // V2 tests sequential computation in virtual threads
         val code = """
-            $threadSetup
 
             let stateMachine = spawn {f = {} -> do
                 let state1 = "Hello"
@@ -158,7 +169,6 @@ class SimpleVirtualThreadTest {
     fun `should execute multi-state computation`() {
         // V1 tested: EffectStateMachine with multiple states
         val code = """
-            $threadSetup
 
             let compute = spawn {f = {} -> do
                 let step1 = 10
@@ -178,8 +188,8 @@ class SimpleVirtualThreadTest {
 
     @Test
     fun `should handle effects with virtual threads`() {
-        // V1 tested: SimpleEffectHandler with VirtualThreadEffectOperation
-        // V2 tests effect handlers
+        // V1 tested: SimpleEffectHandler with VirtualThreadEffectOperation.
+        // No spawn/await here — bypass eval()'s LoomAsync wrap.
         val code = """
             effect Greet where {
                 greet: {name: Str} -> Str <Greet>
@@ -191,16 +201,14 @@ class SimpleVirtualThreadTest {
 
             perform Greeter in Greet.greet {name = "Mezze"}
         """
-        val result = eval(code)
+        val result = MezzeTestHelper.run(code)
         assertEquals("Hello, Mezze!", result)
     }
 
     @Test
     fun `should handle effects in spawned virtual threads`() {
-        // Tests that effect handling works inside virtual threads
-        val code = """
-            $threadSetup
-
+        // Tests that effect handling works inside virtual threads.
+        val header = """
             effect Counter where {
                 increment: {value: Int} -> Int <Counter>
             }
@@ -208,13 +216,14 @@ class SimpleVirtualThreadTest {
             impl Counter for Incrementer where {
                 increment: {value: Int} -> Int = {value} -> value + 1
             }
-
+        """
+        val body = """
             let thread = spawn {f = {} ->
                 perform Incrementer in Counter.increment {value = 41}
             }
             await {p = thread}
         """
-        val result = eval(code)
+        val result = eval(body, header)
         assertEquals(42L, result)
     }
 
@@ -227,7 +236,6 @@ class SimpleVirtualThreadTest {
         // V1 tested: CancellationToken.isCancelled() and cancel()
         // V2 tests that threads complete properly (no hanging = implicit not cancelled)
         val code = """
-            $threadSetup
 
             let t1 = spawn {f = {} -> 1}
             let t2 = spawn {f = {} -> 2}
@@ -248,7 +256,6 @@ class SimpleVirtualThreadTest {
         // V1 tested: parentToken.createChild() and parent cancellation propagation
         // V2 tests nested thread completion (child completes before parent)
         val code = """
-            $threadSetup
 
             let parent = spawn {f = {} -> do
                 let child1 = spawn {f = {} -> 10}
@@ -272,7 +279,6 @@ class SimpleVirtualThreadTest {
     @Test
     fun `should coordinate multiple threads with sleep`() {
         val code = """
-            $threadSetup
 
             let t1 = spawn {f = {} -> do
                 let _ = sleep {ms = 5}
@@ -295,7 +301,6 @@ class SimpleVirtualThreadTest {
     @Test
     fun `should handle deeply nested virtual threads`() {
         val code = """
-            $threadSetup
 
             let level1 = spawn {f = {} -> do
                 let level2 = spawn {f = {} -> do
@@ -314,7 +319,6 @@ class SimpleVirtualThreadTest {
     fun `should handle thread with closure capturing`() {
         // V1 tested context sharing
         val code = """
-            $threadSetup
 
             let multiplier = 7
             let addend = 1
@@ -333,7 +337,6 @@ class SimpleVirtualThreadTest {
     @Test
     fun `should handle fan-out fan-in pattern`() {
         val code = """
-            $threadSetup
 
             # Fan out
             let t1 = spawn {f = {} -> 1}
@@ -358,7 +361,6 @@ class SimpleVirtualThreadTest {
     @Test
     fun `should handle thread returning record`() {
         val code = """
-            $threadSetup
 
             let thread = spawn {f = {} -> {x = 10, y = 32}}
             let result = await {p = thread}
@@ -371,7 +373,6 @@ class SimpleVirtualThreadTest {
     @Test
     fun `should handle thread returning boolean`() {
         val code = """
-            $threadSetup
 
             let thread = spawn {f = {} -> True}
             await {p = thread}
@@ -383,7 +384,6 @@ class SimpleVirtualThreadTest {
     @Test
     fun `should handle thread returning unit`() {
         val code = """
-            $threadSetup
 
             let thread = spawn {f = {} -> {}}
             let _ = await {p = thread}
