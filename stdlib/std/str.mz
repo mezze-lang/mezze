@@ -26,8 +26,6 @@ impl Default for Str where {
 }
 
 impl Str where {
-  size = { it } -> size { s = it },
-  is_empty = { it } -> is_empty { s = it },
   to_upper = { it } -> to_upper { s = it },
   to_lower = { it } -> to_lower { s = it },
   trim = { it } -> trim { s = it },

@@ -191,7 +191,8 @@ class ContextBuilder {
         validateAbilities(
             module, abilityDecls, abilityImplDecls,
             typeDecls, importedTypes, importedAbilities,
-            effectDecls, currentModulePath
+            effectDecls, currentModulePath,
+            context = ctx,
         )
 
         val performerAddedEffectsMap = (resolvedParsedPerformerDecls + importedImpls.values).associate { perf ->
@@ -236,6 +237,9 @@ class ContextBuilder {
         importedAbilities: Map<String, ParsedAbilityDecl>,
         effectDecls: Map<String, ParsedEffectDecl>,
         currentModulePath: String?,
+        // Fully-assembled context (local + prelude/imported impls). Used by F4 to see
+        // inherent methods across modules when checking ability-impl shadowing.
+        context: TypingContext,
     ) {
         val allParsedAbilityDecls = abilityDecls + importedAbilities
         val allParsedTypeDecls = typeDecls + importedTypes
@@ -251,7 +255,8 @@ class ContextBuilder {
         for (abilityImplDecl in abilityImplDecls) {
             AbilityValidator.validateAbilityImplementation(
                 impl = abilityImplDecl,
-                registry = implValidationRegistry
+                registry = implValidationRegistry,
+                context = context,
             )
         }
 

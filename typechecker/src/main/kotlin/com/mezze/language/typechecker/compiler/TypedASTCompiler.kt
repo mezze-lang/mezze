@@ -2752,6 +2752,16 @@ class TypedASTCompiler(
             concreteType is MapType && targetType is TypeApplication && targetType.constructor == "Map" -> true
             concreteType is SortedSetType && targetType is TypeApplication && targetType.constructor == "SortedSet" -> true
             concreteType is SortedMapType && targetType is TypeApplication && targetType.constructor == "SortedMap" -> true
+            // Structural-to-structural: an impl written `for ['a]` / `for {Map,Set,…} 'a` has a
+            // STRUCTURAL target (SeqType/MapType/…), so a same-kind receiver must match element-
+            // agnostically (the target's element is a VarType). Without this, `impl Sized for ['a]`
+            // never dispatches to a seq receiver and `seq.size {}` degrades to a field read (#279).
+            concreteType is SeqType && targetType is SeqType -> true
+            concreteType is ListType && targetType is ListType -> true
+            concreteType is SetType && targetType is SetType -> true
+            concreteType is MapType && targetType is MapType -> true
+            concreteType is SortedSetType && targetType is SortedSetType -> true
+            concreteType is SortedMapType && targetType is SortedMapType -> true
             concreteType is RecordType && targetType is TypeApplication &&
                 concreteType.typeName == targetType.constructor -> true
             // VariantType to VariantType: match if constructors overlap or type names match

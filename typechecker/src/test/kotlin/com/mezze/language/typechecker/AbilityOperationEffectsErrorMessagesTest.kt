@@ -172,15 +172,15 @@ class AbilityOperationEffectsErrorMessagesTest {
             }
 
             ability Mutable for 'c where {
-                set: {i: Int} -> Bool <Mut>
+                put: {i: Int} -> Bool <Mut>
             }
 
             impl Mutable for [Int] where {
                 # No explicit type - should inherit <Mut> from ability
-                set = {i} -> True
+                put = {i} -> True
             }
 
-            [1, 2, 3].set {i = 0}
+            [1, 2, 3].put {i = 0}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -197,15 +197,15 @@ class AbilityOperationEffectsErrorMessagesTest {
             }
 
             ability Mutable for 'c where {
-                set: {i: Int} -> Bool <Mut>
+                put: {i: Int} -> Bool <Mut>
             }
 
             impl Mutable for [Int] where {
                 # Explicit matching signature
-                set: {i: Int} -> Bool <Mut> = {i} -> True
+                put: {i: Int} -> Bool <Mut> = {i} -> True
             }
 
-            [1, 2, 3].set {i = 0}
+            [1, 2, 3].put {i = 0}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -229,12 +229,12 @@ class AbilityOperationEffectsErrorMessagesTest {
             }
 
             ability Mutable for 'c where {
-                set: {i: Int} -> Bool <Mut>
+                put: {i: Int} -> Bool <Mut>
             }
 
             impl Mutable for [Int] where {
                 # WRONG: declares <Log> but ability says <Mut>
-                set: {i: Int} -> Bool <Log> = {i} -> True
+                put: {i: Int} -> Bool <Log> = {i} -> True
             }
         """.trimIndent()
 
@@ -263,12 +263,12 @@ class AbilityOperationEffectsErrorMessagesTest {
             }
 
             ability Mutable for 'c where {
-                set: {i: Int} -> Bool <Mut>
+                put: {i: Int} -> Bool <Mut>
             }
 
             impl Mutable for [Int] where {
                 # WRONG: declares pure <> but ability says <Mut>
-                set: {i: Int} -> Bool <> = {i} -> True
+                put: {i: Int} -> Bool <> = {i} -> True
             }
         """.trimIndent()
 

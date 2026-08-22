@@ -45,17 +45,17 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint with having clause specifies associated type`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {it: 'c, index: Int} -> (Option 'item),
+                fetch: {it: 'c, index: Int} -> (Option 'item),
                 size: {it: 'c} -> Int,
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {it, index} -> Some { val = 0 },
+                fetch = {it, index} -> Some { val = 0 },
                 size = {it} -> 0,
             }
 
             let getFirst: {c: 'c} with Container 'c having 'item = Int -> (Option Int) = {c} ->
-                c.get {index = 0}
+                c.fetch {index = 0}
         """.trimIndent()
 
         val program = typeCheck(code)
@@ -71,17 +71,17 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint without having clause infers associated type`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {it: 'c, index: Int} -> (Option 'item),
+                fetch: {it: 'c, index: Int} -> (Option 'item),
                 size: {it: 'c} -> Int,
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {it, index} -> Some { val = 0 },
+                fetch = {it, index} -> Some { val = 0 },
                 size = {it} -> 0,
             }
 
             let getFirst: {c: 'c} with Container 'c -> (Option 'item) = {c} ->
-                c.get {index = 0}
+                c.fetch {index = 0}
         """.trimIndent()
 
         val program = typeCheck(code)
@@ -94,17 +94,17 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint without having clause works with concrete usage`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {it: 'c, index: Int} -> (Option 'item),
+                fetch: {it: 'c, index: Int} -> (Option 'item),
                 size: {it: 'c} -> Int,
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {it, index} -> Some { val = 0 },
+                fetch = {it, index} -> Some { val = 0 },
                 size = {it} -> 0,
             }
 
             let arr: [Int] = [1, 2, 3]
-            let result = arr.get {index = 0}
+            let result = arr.fetch {index = 0}
         """.trimIndent()
 
         val program = typeCheck(code)
@@ -304,15 +304,15 @@ class AbilityConstraintAnnotationsTest {
     fun `test mismatch between return type and ability associated type annotation fails`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {index: Int} -> (Option 'item),
+                fetch: {index: Int} -> (Option 'item),
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {index} -> Some { val = 0 },
+                fetch = {index} -> Some { val = 0 },
             }
 
             let getFirst: {c: 'c} with Container 'c having 'item = Int -> (Option Str) = {c} ->
-                c.get {index = 0}
+                c.fetch {index = 0}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
@@ -325,15 +325,15 @@ class AbilityConstraintAnnotationsTest {
     fun `test correct ability associated type annotation matches inferred type`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {index: Int} -> (Option 'item),
+                fetch: {index: Int} -> (Option 'item),
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {index} -> Some { val = 0 },
+                fetch = {index} -> Some { val = 0 },
             }
 
             let getFirst: {c: 'c} with Container 'c having 'item = Int -> (Option Int) = {c} ->
-                c.get {index = 0}
+                c.fetch {index = 0}
         """.trimIndent()
 
         assertDoesNotThrow {
@@ -349,15 +349,15 @@ class AbilityConstraintAnnotationsTest {
     fun `test error message mentions types on ability associated type mismatch`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {index: Int} -> (Option 'item),
+                fetch: {index: Int} -> (Option 'item),
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {index} -> Some { val = 0 },
+                fetch = {index} -> Some { val = 0 },
             }
 
             let getFirst: {c: 'c} with Container 'c having 'item = Int -> (Option Str) = {c} ->
-                c.get {index = 0}
+                c.fetch {index = 0}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
@@ -377,15 +377,15 @@ class AbilityConstraintAnnotationsTest {
     fun `test error message for complex ability associated type mismatch`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {it: 'c, index: Int} -> 'item,
+                fetch: {it: 'c, index: Int} -> 'item,
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {it, index} -> 0,
+                fetch = {it, index} -> 0,
             }
 
             let getFirst: {c: 'c} with Container 'c having 'item = Int -> Str = {c} ->
-                c.get {index = 0}
+                c.fetch {index = 0}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")

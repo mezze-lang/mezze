@@ -176,8 +176,6 @@ impl SortedSet 'a where {
   add = { it, x } -> add { s = it, x = x },
   remove = { it, x } -> remove { s = it, x = x },
   contains = { it, x } -> contains { s = it, x = x },
-  size = { it } -> size { s = it },
-  is_empty = { it } -> is_empty { s = it },
   union = { it, s2 } -> union { s1 = it, s2 = s2 },
   intersect = { it, s2 } -> intersect { s1 = it, s2 = s2 },
   difference = { it, s2 } -> difference { s1 = it, s2 = s2 },

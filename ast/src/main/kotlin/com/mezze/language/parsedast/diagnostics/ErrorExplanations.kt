@@ -263,6 +263,13 @@ fun ErrorCode.explain(): String = when (this) {
     ErrorCode.V0419_IMPL_METHOD_FIELD_CONFLICT ->
         "An impl method name conflicts with a record field of the same name."
 
+    ErrorCode.V0420_ABILITY_METHOD_SHADOWS_BUILTIN_OPERATOR ->
+        "An ability impl declares a method that the target type already resolves through a " +
+        "more-authoritative provider, so the impl's method could never run. Either the name " +
+        "is a built-in operator (add, sub, mul, div, mod, eq, neq, lt, le, gt, ge, and, or) — " +
+        "which a call compiles to directly, bypassing the impl — or the type already has an " +
+        "inherent method of that name (e.g. neg/not on Int/Bool). Rename the ability method."
+
     ErrorCode.V0501_EFFECT_NOT_HANDLED ->
         "A performed effect is not handled. " +
         "Wrap the expression in a `handle` block that provides a handler for this effect."

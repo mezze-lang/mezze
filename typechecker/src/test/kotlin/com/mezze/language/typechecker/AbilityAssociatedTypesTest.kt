@@ -45,13 +45,13 @@ class AbilityAssociatedTypesTest {
         val source = """
             ability Collection for 'c having 'item where {
                 empty: {} -> 'c,
-                add: {it: 'c, element: 'item} -> 'c,
+                append: {it: 'c, element: 'item} -> 'c,
                 size: {it: 'c} -> Int,
             }
 
             impl Collection for [Int] having 'item = Int where {
                 empty = {} -> [],
-                add = {it, element} -> it,
+                append = {it, element} -> it,
                 size = {it} -> 0,
             }
         """.trimIndent()
@@ -89,14 +89,14 @@ class AbilityAssociatedTypesTest {
         val source = """
             ability Container for 'c having 'item where {
                 empty: {} -> 'c,
-                add: {it: 'c, element: 'item} -> 'c,
-                contains: {it: 'c, element: 'item} with Eq 'item -> Bool,
+                append: {it: 'c, element: 'item} -> 'c,
+                has_element: {it: 'c, element: 'item} with Eq 'item -> Bool,
             }
 
             impl Container for [Int] having 'item = Int where {
                 empty = {} -> [],
-                add = {it, element} -> it,
-                contains = {it, element} -> False,
+                append = {it, element} -> it,
+                has_element = {it, element} -> False,
             }
         """.trimIndent()
 
@@ -107,8 +107,8 @@ class AbilityAssociatedTypesTest {
         assertEquals("'item", ability.associatedTypes.firstOrNull())
         // (Ability-level constraints/dependencies were removed in #212 —
         // they're now a parse error.)
-        // Method-level constraint on 'contains'
-        val containsOp = ability.operations.find { it.name == "contains" }
+        // Method-level constraint on 'has_element'
+        val containsOp = ability.operations.find { it.name == "has_element" }
         assertNotNull(containsOp)
         assertEquals(1, containsOp!!.abilityConstraints.size)
         assertEquals("Eq", containsOp.abilityConstraints[0].abilityName)
@@ -119,17 +119,17 @@ class AbilityAssociatedTypesTest {
         val source = """
             ability Collection for 'c having 'item where {
                 empty: {} -> 'c,
-                add: {it: 'c, element: 'item} -> 'c,
+                append: {it: 'c, element: 'item} -> 'c,
             }
 
             impl Collection for [Int] having 'item = Int where {
                 empty = {} -> [],
-                add = {it, element} -> it,
+                append = {it, element} -> it,
             }
 
             impl Collection for [Str] having 'item = Str where {
                 empty = {} -> [],
-                add = {it, element} -> it,
+                append = {it, element} -> it,
             }
         """.trimIndent()
 
@@ -602,15 +602,15 @@ class AbilityAssociatedTypesTest {
     fun `test associated type resolves to concrete type in method return`() {
         val source = """
             ability Container for 'c having 'item where {
-                get: {it: 'c, index: Int} -> (Option 'item),
+                fetch: {it: 'c, index: Int} -> (Option 'item),
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {it, index} -> Some { val = 0 },
+                fetch = {it, index} -> Some { val = 0 },
             }
 
             let arr: [Int] = [1, 2, 3]
-            let result = arr.get {index = 0}
+            let result = arr.fetch {index = 0}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -734,15 +734,15 @@ class AbilityAssociatedTypesTest {
     fun `test associated type resolution error when wrong type passed`() {
         val source = """
             ability Container for 'c having 'item where {
-                add: {it: 'c, element: 'item} -> 'c,
+                append: {it: 'c, element: 'item} -> 'c,
             }
 
             impl Container for [Int] having 'item = Int where {
-                add = {it, element} -> it,
+                append = {it, element} -> it,
             }
 
             let arr: [Int] = [1, 2, 3]
-            let result = arr.add {element = "wrong"}
+            let result = arr.append {element = "wrong"}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

@@ -111,7 +111,6 @@ impl Frac where {
   abs = { it } -> __native_abs_frac { n = it },
   numerator = { it } -> __native_frac_numerator { n = it },
   denominator = { it } -> __native_frac_denominator { n = it },
-  is_zero: { it: Frac } -> Bool = { it } -> __native_frac_equals { l = it, r = __native_int_to_frac { n = 0 } },
   is_positive: { it: Frac } -> Bool = { it } ->
     __native_frac_greater_than { l = it, r = __native_int_to_frac { n = 0 } },
   is_negative: { it: Frac } -> Bool = { it } -> __native_frac_less_than { l = it, r = __native_int_to_frac { n = 0 } },

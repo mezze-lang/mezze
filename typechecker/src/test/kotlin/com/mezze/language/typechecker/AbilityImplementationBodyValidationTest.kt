@@ -123,14 +123,14 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability with conditional should pass`() {
         val source = """
             ability Sign for 'a where {
-              sign: {it: 'a} -> Str
+              sign_of: {it: 'a} -> Str
             }
 
             impl Sign for Int where {
-              sign = {it} -> if it > 0 then "positive" else "non-positive"
+              sign_of = {it} -> if it > 0 then "positive" else "non-positive"
             }
 
-            let getSign = {x} -> x.sign {}
+            let getSign = {x} -> x.sign_of {}
 
             getSign {x = 5}
         """.trimIndent()

@@ -102,6 +102,15 @@ internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean 
         if (concrete.constructors.keys == target.constructors.keys) return true
         if (concrete.constructors.keys.all { it in target.constructors }) return true
     }
+    // Structural-to-structural: an impl `for ['a]` / `for {Map,Set,…} 'a` has a STRUCTURAL
+    // target, so a same-kind receiver matches element-agnostically. Mirrors the compiler's
+    // typeMatchesTarget so mono dispatch agrees (#279 — else `seq.size {}` degrades to a field read).
+    if (concrete is MezzeType.SeqType && target is MezzeType.SeqType) return true
+    if (concrete is MezzeType.ListType && target is MezzeType.ListType) return true
+    if (concrete is MezzeType.SetType && target is MezzeType.SetType) return true
+    if (concrete is MezzeType.MapType && target is MezzeType.MapType) return true
+    if (concrete is MezzeType.SortedSetType && target is MezzeType.SortedSetType) return true
+    if (concrete is MezzeType.SortedMapType && target is MezzeType.SortedMapType) return true
     return false
 }
 

@@ -124,7 +124,6 @@ pub let sort_by : { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Int <...> } ->
 impl NonEmptyList 'a where {
   head = { it } -> head { xs = it },
   tail = { it } -> tail { xs = it },
-  size = { it } -> size { xs = it },
   last = { it } -> last { xs = it },
   map = { it, f } -> map { xs = it, f = f },
   flat_map = { it, f } -> flat_map { xs = it, f = f },

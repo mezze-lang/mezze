@@ -145,8 +145,6 @@ impl SortedMap 'k 'v where {
   insert = { it, k, v } -> insert { m = it, k = k, v = v },
   remove = { it, k } -> remove { m = it, k = k },
   contains_key = { it, k } -> contains_key { m = it, k = k },
-  size = { it } -> size { m = it },
-  is_empty = { it } -> is_empty { m = it },
   keys = { it } -> keys { m = it },
   values = { it } -> values { m = it },
   min_key = { it } -> min_key { m = it },

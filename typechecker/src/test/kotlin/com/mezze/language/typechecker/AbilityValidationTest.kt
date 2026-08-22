@@ -169,17 +169,17 @@ class AbilityValidationTest {
         val source = """
             ability Container for 'c having 'item where {
               show: {it: 'c} -> Str,
-              get: {it: 'c, index: Int} -> 'item
+              fetch: {it: 'c, index: Int} -> 'item
             }
 
             impl Container for [Int] having 'item = Int where {
               show = {it} -> "array of integers",
-              get = {it, index} -> 42
+              fetch = {it, index} -> 42
             }
 
             impl Container for [Str] having 'item = Str where {
               show = {it} -> "array of strings",
-              get = {it, index} -> "hello"
+              fetch = {it, index} -> "hello"
             }
 
             let intArray = [1, 2, 3]

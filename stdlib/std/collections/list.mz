@@ -416,10 +416,8 @@ pub let binary_search_by : { xs: List 'a, target: 'a, cmp: { a: 'a, b: 'a } -> I
 
 ## Method implementations for List.
 impl List 'a where {
-  is_empty = { it } -> is_empty { xs = it },
   head = { it } -> head { xs = it },
   tail = { it } -> tail { xs = it },
-  size = { it } -> size { xs = it },
   push = { it, x } -> push { x = x, xs = it },
   append = { it, ys } -> append { xs = it, ys = ys },
   get = { it, index } -> get { xs = it, index = index },

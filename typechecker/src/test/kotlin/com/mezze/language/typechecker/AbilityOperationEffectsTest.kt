@@ -82,14 +82,14 @@ class AbilityOperationEffectsTest {
             }
 
             ability Mutable for 'c where {
-                set: {it: 'c, i: Int, v: Int} -> Bool <Mut>
+                put: {it: 'c, i: Int, v: Int} -> Bool <Mut>
             }
 
             impl Mutable for [Int] where {
-                set = {it, i, v} -> True
+                put = {it, i, v} -> True
             }
 
-            [1, 2, 3].set {i = 0, v = 42}
+            [1, 2, 3].put {i = 0, v = 42}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -135,14 +135,14 @@ class AbilityOperationEffectsTest {
 
             ability Container for 'c having 'elem where {
                 len: {it: 'c} -> Int,
-                get: {it: 'c, i: Int} -> Option 'elem,
-                set: {it: 'c, i: Int, v: 'elem} -> Bool <Mut>
+                fetch: {it: 'c, i: Int} -> Option 'elem,
+                put: {it: 'c, i: Int, v: 'elem} -> Bool <Mut>
             }
 
             impl Container for [Int] having 'elem = Int where {
                 len = {it} -> 0,
-                get = {it, i} -> None,
-                set = {it, i, v} -> True
+                fetch = {it, i} -> None,
+                put = {it, i, v} -> True
             }
 
             let arr = [1, 2, 3]
@@ -304,16 +304,16 @@ class AbilityOperationEffectsTest {
             }
 
             ability Mutable for 'c where {
-                set: {it: 'c, i: Int, v: Int} -> Bool <Mut>
+                put: {it: 'c, i: Int, v: Int} -> Bool <Mut>
             }
 
             impl Mutable for [Int] where {
-                set = {it, i, v} -> True
+                put = {it, i, v} -> True
             }
 
             # Just call the ability method - don't worry about effect handling for now
             let arr = [1, 2, 3]
-            arr.set {i = 0, v = 99}
+            arr.put {i = 0, v = 99}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -355,15 +355,15 @@ class AbilityOperationEffectsTest {
             }
 
             ability Mutable for 'c where {
-                set: {it: 'c, i: Int, v: Int} -> Bool <Mut>
+                put: {it: 'c, i: Int, v: Int} -> Bool <Mut>
             }
 
             impl Mutable for [Int] where {
                 # Implementation should also have <Mut> effect
-                set = {it, i, v} -> True
+                put = {it, i, v} -> True
             }
 
-            [1, 2, 3].set {i = 0, v = 42}
+            [1, 2, 3].put {i = 0, v = 42}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

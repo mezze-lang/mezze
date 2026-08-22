@@ -4,13 +4,58 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.TypeCheckError
+import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.context.DeclarationRegistry
+import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.solving.UnificationResult
 import com.mezze.language.typechecker.solving.unify
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
 
 object AbilityValidator {
+
+    // ── #279/F4: built-in OPERATOR ability recognition ───────────────────
+    // A method call `x.add {r=y}` on a primitive is folded to a hardware op by
+    // the compiler (InlineOps) — bypassing impl dispatch entirely. So a USER
+    // ability that reuses a built-in operator's method name (`add`/`eq`/`lt`/…)
+    // and is impl'd for a type with that operator would be SILENTLY dead: the
+    // built-in wins and the user's method never runs. We forbid the collision at
+    // the impl site (below). The reserved names are DERIVED from the built-in
+    // operator abilities' own declarations — not a hardcoded list — so they can
+    // never drift from the abilities that actually own them.
+    //
+    // An operator ability is recognised by its content-hash identity (rename-safe,
+    // never by name-string matching): NumAdd/NumSub/NumMul/NumDiv/NumMod/Eq/Ord/
+    // LogicalAnd/LogicalOr. Note `neg`/`not` are NOT ability methods — they are
+    // inherent methods on Int/Bool/Float/Frac — so those collisions are caught by
+    // the inherent-method check, not here. See [[project_native_hof_scalar_abi_fusion]]
+    // and [[feedback_no_name_string_dispatch_ever]].
+
+    /** True iff `abilityName` resolves (by canonical content hash) to a built-in
+     *  operator ability whose methods the compiler inlines on primitives. */
+    private fun isBuiltinOperatorAbility(abilityName: String): Boolean {
+        val hash = WellKnownHashConstants.resolveAbilityHash(abilityName)
+        return WellKnownHashConstants.isNumAdd(hash) ||
+            WellKnownHashConstants.isNumSub(hash) ||
+            WellKnownHashConstants.isNumMul(hash) ||
+            WellKnownHashConstants.isNumDiv(hash) ||
+            WellKnownHashConstants.isNumMod(hash) ||
+            WellKnownHashConstants.isEq(hash) ||
+            WellKnownHashConstants.isOrd(hash) ||
+            (hash != null && hash == WellKnownHashConstants.ABILITY_LOGICALAND) ||
+            (hash != null && hash == WellKnownHashConstants.ABILITY_LOGICALOR)
+    }
+
+    /** Method names owned by the built-in operator abilities, derived from those
+     *  abilities' own parsed declarations (e.g. NumAdd→{add}, Eq→{eq,neq},
+     *  Ord→{lt,le,gt,ge}). Computed once; the source is the stdlib ability files. */
+    private val builtinOperatorMethodNames: Set<String> by lazy {
+        BuiltInAbilities.getRawAbilityDeclarations()
+            .filterKeys { isBuiltinOperatorAbility(it) }
+            .values
+            .flatMap { decl -> decl.operations.map { it.name } }
+            .toSet()
+    }
 
     fun validateAbilityDeclaration(ability: ParsedAbilityDecl) {
         val sourceLocation = ability.loc
@@ -40,7 +85,8 @@ object AbilityValidator {
 
     fun validateAbilityImplementation(
         impl: ParsedImplAbilityDecl,
-        registry: DeclarationRegistry
+        registry: DeclarationRegistry,
+        context: TypingContext? = null,
     ) {
         val abilityDeclarations = registry.abilityDeclarations
         val typeDeclarations = registry.typeDeclarations
@@ -51,6 +97,17 @@ object AbilityValidator {
             validateInherentImplTargetType(impl, typeDeclarations, sourceLocation)
             return
         }
+
+        // #279/F4: a user ability's impl must not shadow a name the target type
+        // already resolves through a MORE-AUTHORITATIVE provider — otherwise the
+        // method is silently dead (dispatch picks the other one). Two cases:
+        //   (a) built-in OPERATOR method name (add/eq/lt/…): the compiler inlines
+        //       it on primitives, so the user's method never runs.
+        //   (b) an INHERENT-impl method of the target type (fields are already
+        //       covered by validateNoFieldMethodConflict / V0419).
+        // Exempt the built-in operator abilities THEMSELVES — impl'ing NumAdd/Eq/Ord
+        // for your type is the intended way to get `+`/`==`/`<`.
+        validateNoBuiltinShadowing(impl, sourceLocation, context)
 
         val abilityName = impl.abilityName!!
         val abilityQualifier = impl.abilityRef?.qualifier
@@ -606,6 +663,65 @@ object AbilityValidator {
                         "define the impl in the same module as one of the receiver's nominal types",
                     ),
                 )
+            }
+        }
+    }
+
+    /**
+     * #279/F4: reject an ability impl whose method name is silently shadowed by a
+     * more-authoritative provider on the target type — so the method can never run.
+     *
+     * Two shadow sources (fields are handled separately by [validateNoFieldMethodConflict]):
+     *   (a) a built-in OPERATOR method name (add/sub/mul/div/mod/eq/neq/lt/le/gt/ge/
+     *       and/or): the compiler folds `x.<op> {r=y}` on a primitive to a hardware
+     *       op, bypassing dispatch — so `impl UserAbility for Int { add = … }` never
+     *       runs. Only checked when the impl's OWN ability is not itself a built-in
+     *       operator ability (impl'ing NumAdd/Eq/Ord for your type is the intended way).
+     *   (b) an INHERENT-impl method of the target type (incl. imported/prelude ones,
+     *       e.g. `neg`/`not` on Int/Bool): the inherent method wins, so the ability's
+     *       same-named method is dead. Looked up through the parent-walking context
+     *       so cross-module inherent impls are seen (impls are globally coherent).
+     */
+    private fun validateNoBuiltinShadowing(
+        impl: ParsedImplAbilityDecl,
+        sourceLocation: Loc,
+        context: TypingContext?,
+    ) {
+        val abilityName = impl.abilityName ?: return
+        val implMethodNames = impl.operations.map { it.name }
+
+        // (a) built-in operator collision — skip when the impl IS a builtin operator ability.
+        if (!isBuiltinOperatorAbility(abilityName)) {
+            val opClash = implMethodNames.firstOrNull { it in builtinOperatorMethodNames }
+            if (opClash != null) {
+                throw TypeCheckError(
+                    "Ability '$abilityName' declares method '$opClash', which is a built-in " +
+                        "operator method. A `$opClash` call is compiled to the built-in operator, so " +
+                        "this impl's '$opClash' would never run (it is silently shadowed). Rename the " +
+                        "method to a name that is not a built-in operator.",
+                    sourceLocation,
+                    code = ErrorCode.V0420_ABILITY_METHOD_SHADOWS_BUILTIN_OPERATOR,
+                )
+            }
+        }
+
+        // (b) inherent-method collision on the target type (global, via parent chain).
+        if (context != null) {
+            for (targetType in impl.targetTypes) {
+                val typeName = getTypeNameFromParsedAnnotation(targetType)
+                val clash = implMethodNames.firstOrNull { name ->
+                    context.findAnonymousMethod(typeName, name) != null
+                }
+                if (clash != null) {
+                    throw TypeCheckError(
+                        "Ability '$abilityName' declares method '$clash' for type '$typeName', but " +
+                            "'$typeName' already has an inherent method '$clash'. The inherent method " +
+                            "takes precedence, so this impl's '$clash' would never run. Rename the " +
+                            "ability method or the inherent method.",
+                        sourceLocation,
+                        code = ErrorCode.V0420_ABILITY_METHOD_SHADOWS_BUILTIN_OPERATOR,
+                    )
+                }
             }
         }
     }

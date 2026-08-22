@@ -49,14 +49,16 @@ class AbilityValidationBugTest {
 
     @Test
     fun `valid ability with multiple params`() {
+        // NB: the ability method must not be named `add` — that collides with the
+        // built-in NumAdd operator on Int (#279), which would silently shadow it.
         val result = eval("""
-            ability Add for 'a where {
-              add: {it: 'a, r: 'a} -> 'a
+            ability Combine for 'a where {
+              combine: {it: 'a, r: 'a} -> 'a
             }
-            impl Add for Int where {
-              add = {it, r} -> it + r
+            impl Combine for Int where {
+              combine = {it, r} -> it + r
             }
-            3.add {r = 4}
+            3.combine {r = 4}
         """.trimIndent())
         assertEquals(7L, result)
     }

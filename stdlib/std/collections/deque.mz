@@ -216,8 +216,6 @@ impl Deque 'a where {
   pop_back = { it } -> pop_back { d = it },
   peek_front = { it } -> peek_front { d = it },
   peek_back = { it } -> peek_back { d = it },
-  is_empty = { it } -> is_empty { d = it },
-  size = { it } -> size { d = it },
   map = { it, f } -> map { d = it, f = f },
   filter = { it, p } -> filter { d = it, p = p },
   fold = { it, init, f } -> fold { d = it, init = init, f = f },
