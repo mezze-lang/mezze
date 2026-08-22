@@ -599,12 +599,21 @@ class TypedAstBuilder(
                 )
             }
             is ParsedRecordLit -> {
+                // #261: if the record's expected type is a concrete record (e.g.
+                // this record is a call argument and `contextType` is the callee's
+                // param type), thread each field's expected type down to its value.
+                // A field whose value is a lambda then gets its param types pushed
+                // from the declaration, so an untyped callback param is stamped
+                // concrete for ability-method dispatch.
+                val expectedFields = (substitution.apply(contextType) as? MezzeType.RecordType)?.fields
                 val entries = expr.entries.map { entry ->
                     when (entry) {
                         is ParsedRecordEntry.Field -> {
                             val entryValue = entry.value
+                            val expectedFieldType = expectedFields?.get(entry.name)
                             val fieldExpr = if (entryValue != null) {
-                                buildExpr(entryValue, file)
+                                if (expectedFieldType != null) buildExpr(entryValue, file, expectedFieldType)
+                                else buildExpr(entryValue, file)
                             } else {
                                 val type = resolveIdentifierType(entry.name, null)
                                 val binding = resolveBinding(entry.name, null)
@@ -760,7 +769,16 @@ class TypedAstBuilder(
         }
 
         val fn = buildExpr(expr.function, file)
-        val argExpr = buildExpr(expr.arguments, file)
+        // #261: thread the callee's PARAM type into the argument so an untyped
+        // callback param whose type is pushed from a declared fn type
+        // (`apply: { f: { x: Int } -> Str }` ⇒ `apply { f = { x } -> … }`) is
+        // stamped CONCRETE at emit. Without this, the arg record — and the lambda
+        // inside it — is built context-free, the pushed `Int` never reaches the
+        // param, and an ability-method call on it emits an uncached CallIndirect
+        // that crashes at runtime (mono's methodReceiverNotConcrete bail).
+        val fnParamType = (substitution.apply(fn.type) as? MezzeType.FunctionType)?.paramType
+        val argExpr = if (fnParamType != null) buildExpr(expr.arguments, file, fnParamType)
+            else buildExpr(expr.arguments, file)
 
         val solvedReturn = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
         val callType = solvedReturn
