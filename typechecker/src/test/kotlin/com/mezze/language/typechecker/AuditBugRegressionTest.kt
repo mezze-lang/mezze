@@ -181,7 +181,6 @@ class AuditBugRegressionTest {
     // correctly rejected; the alias form must be too.
     // EXPECTED-CORRECT: accepted today under bug260 (ConstraintSolver.kt:1029 /
     // TypeAliasBuilder expands with RowVar.fresh() not userOpen()).
-    @Disabled("known-bug #260: open named-record-alias param invents fields; enable when fixed")
     @Test fun `bug260_open_alias_field_invention_is_rejected`() {
         val m = err(
             """

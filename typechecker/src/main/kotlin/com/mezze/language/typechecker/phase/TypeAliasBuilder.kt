@@ -33,7 +33,13 @@ internal fun buildTypeAliasesFromParsedModule(
                 }
                 MezzeType.RecordType(
                     fields = fields,
-                    rowVar = if (def.isOpen) RowVar.fresh() else null,
+                    // #260: a user-written open record alias (`type Foo = { a, ... }`)
+                    // must carry a USER-open row, exactly like the inline annotation
+                    // path (TypeAnnotationConverter uses RowVar.userOpen()). With a
+                    // plain fresh row the solveHasField gate (ConstraintSolver.kt:1029)
+                    // treated it as solver-inferred and let `f.zzz` invent an unlisted
+                    // field; userOpen() makes reading an absent field an error.
+                    rowVar = if (def.isOpen) RowVar.userOpen() else null,
                     typeName = typeDecl.name
                 )
             }

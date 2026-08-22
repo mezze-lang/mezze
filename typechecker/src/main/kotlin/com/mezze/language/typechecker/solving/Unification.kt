@@ -1089,7 +1089,11 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, r
 
     return MezzeType.RecordType(
         fields = fields,
-        rowVar = if (recordDef.isOpen) RowVar.fresh() else null
+        // #260: expanding an OPEN record alias (`type Foo = { a, ... }`) at a use
+        // site must produce a USER-open row (like the inline annotation path), so
+        // solveHasField (ConstraintSolver.kt:1029) rejects reading an unlisted field
+        // (`f.zzz`) instead of inventing it. A plain fresh row read as solver-inferred.
+        rowVar = if (recordDef.isOpen) RowVar.userOpen() else null
     )
 }
 
