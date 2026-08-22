@@ -11,14 +11,14 @@ import java.nio.file.Paths
  * Let-generalization soundness and the value-restriction boundary.
  *
  * Rules pinned here (verified against the real checker):
- *  - Top-level `let` generalizes freely (even non-lambda RHS): `let e = []` gets
- *    `['a]` and is usable at many element types.
- *  - Inside a `do` block, only LAMBDA bindings generalize (#76 guard #1); a
- *    do-block `let` bound to `[]` or a CALL RESULT stays monomorphic — locked to
- *    its first use.
- *  - Generalizing `[]` is SOUND because `[]` is an immutable Seq (`['a]`): each
- *    use is a distinct value (COW), so there is no shared mutable cell to corrupt
- *    — the classic value-restriction exploit is not expressible.
+ *  - #257 value restriction (UNIFORM, everywhere including top level): ONLY a
+ *    LAMBDA binding generalizes. A non-lambda RHS (`[]`, `None`, a call result,
+ *    a literal, a variable) is monomorphic — its type is pinned at the first use,
+ *    and a later use at a different type is a TYPE ERROR. `let x = []; y:[Int]=x;
+ *    z:[Str]=x` rejects the second view (x is already [Int]). No exception for
+ *    "immutable" data — one rule for everything.
+ *  - A lambda like `{} -> []` still generalizes, because it returns a FRESH value
+ *    per call, so each call site instantiates its own element type.
  *  - The soundness-critical cases (a value used at two incompatible types; a
  *    binding that captures an outer monomorphic type var) are rejected.
  *
@@ -104,12 +104,11 @@ class LetGeneralizationSoundnessTest {
         """))
     }
 
-    // ── the value restriction inside a do block (conservative but sound) ──
+    // ── the value restriction: a non-lambda binding is monomorphic ──────
 
     @Test fun `an empty seq bound in a do block does NOT generalize (value restriction)`() {
-        // Deliberate: `[]` is a non-lambda RHS, so a do-block `let e = []` stays
-        // monomorphic and locks to the first use. Sound (never unsafe), just less
-        // complete than full let-polymorphism. #76 guard #1 "lambda-only".
+        // `[]` is a non-lambda RHS, so `let e = []` stays monomorphic and locks to
+        // the first use — a later use at a different element type is an error.
         assertNotNull(err("""
             let g = {} -> do
               let e = []
@@ -163,34 +162,33 @@ class LetGeneralizationSoundnessTest {
         """), "an empty-seq-returning lambda is polymorphic per call site")
     }
 
-    // ── top-level non-lambda generalization + its soundness ──────────────
+    // ── top-level non-lambda is MONOMORPHIC (#257 value restriction) ─────
 
-    @Test fun `a top-level empty seq generalizes and is an immutable Seq`() {
+    @Test fun `a top-level empty seq is a seq type`() {
         val t = typeOf("e", "let e = []")
         assertNotNull(t)
         assertTrue(t!!.contains("[") || t.contains("Seq"),
-            "top-level [] should be an (immutable) seq type, got: $t")
+            "top-level [] should be a seq type, got: $t")
     }
 
-    @Test fun `top-level empty seq used at two element types is accepted`() {
-        // Sound because [] is immutable: each use is a distinct empty value.
-        assertNull(err("""
+    @Test fun `top-level empty seq used at two element types is rejected`() {
+        // #257: `[]` is a non-lambda RHS → monomorphic. The first annotation pins
+        // `e` to Seq Int; viewing it as Seq Str is a type error (`e` is Seq Int).
+        assertNotNull(err("""
             let e = []
             let a: Seq Int = e
             let b: Seq Str = e
-        """))
+        """), "a top-level non-lambda binding is monomorphic — the second view must be rejected")
     }
 
-    @Test fun `pushing into an empty seq at one type does not leak that type to another view`() {
-        // The value-restriction exploit shape, made harmless by immutability:
-        // pushing an Int produces a NEW Seq Int; the original `e` is untouched, so
-        // reading `e` as Seq Str stays consistent (no Int observed as Str).
+    @Test fun `wrapping the empty seq in a lambda makes it usable at two element types`() {
+        // The escape hatch: a lambda returns a FRESH value per call, so each call
+        // site instantiates its own element type — this is the sound way to get
+        // polymorphism from `[]` (the user's `let x = {} -> []` example).
         assertNull(err("""
-            use std::collections::seq::{ push }
-            let e = []
-            let ints: Seq Int = push { xs = e, x = 1 }
-            let strs: Seq Str = push { xs = e, x = "a" }
-            ints
-        """), "immutable push must not couple the two element-type views of `e`")
+            let x = {} -> []
+            let a: Seq Int = x {}
+            let b: Seq Str = x {}
+        """), "a lambda returning [] is polymorphic per call site")
     }
 }

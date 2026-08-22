@@ -503,16 +503,29 @@ class ConstraintGenerator(
         substitution: Substitution,
         authoritativeType: MezzeType,
     ): TypingContext.Binding {
-        val freeVars = collectFreeTypeVars(solvedType)
-        val contextVars = getContextFreeVars(currentContext, excludeBindings = setOf(bindingKey))
-        val quantifiableVars = freeVars - contextVars
+        val isLambdaBinding = item.value is ParsedLambda
+
+        // #257 value restriction (relaxed): a binding generalizes iff it is a
+        // FUNCTION VALUE. A function — whether written as a lambda or PRODUCED by a
+        // partial application (`add { x = 5 }` : `{ y } -> …`) — is safe to
+        // generalize: it holds no mutable cell observable across instantiations
+        // (each call re-enters fresh, closures capture args by value). Anything
+        // whose type is NOT a function (`[]` : Seq 'a, `tvar {…}` : TVar 'a,
+        // `None`, a literal, a plain variable) is monomorphic — pinned at the first
+        // use, so a later use at a different type is an error (`let x = []; y:[Int]
+        // = x; z:[Str] = x` rejects the 2nd view). Keying on the SOLVED TYPE being a
+        // function (not on syntax or type names) is the uniform rule: it keeps
+        // curried partial applications polymorphic AND closes the mutable-cell
+        // soundness hole, since a mutable cell's type is never a function.
+        val generalizes = isLambdaBinding || solvedType is MezzeType.FunctionType
+        val quantifiableVars =
+            if (generalizes) collectFreeTypeVars(solvedType) - getContextFreeVars(currentContext, excludeBindings = setOf(bindingKey))
+            else emptySet()
 
         val hasExplicitAbilityConstraints = when (val annotation = item.typeAnnotation) {
             is ParsedFunctionType -> annotation.abilityConstraints.isNotEmpty()
             else -> false
         }
-
-        val isLambdaBinding = item.value is ParsedLambda
 
         val hasUserDefinedAbilityConstraints = if (hasExplicitAbilityConstraints || isLambdaBinding) {
             false

@@ -56,16 +56,18 @@ class PolyAuditProbeTest {
         """))
     }
 
-    @Test fun `a top-level empty seq is usable at two element types (immutable, sound)`() {
-        // `[]` is an IMMUTABLE Seq; each use is a distinct empty value, so
-        // generalizing its element type is sound (no shared mutable cell). This is
-        // the contrast case to the TVar exploit below.
-        assertNull(err("""
+    @Test fun `a top-level empty seq bound to a non-lambda is monomorphic`() {
+        // #257 value restriction: `[]` is a non-lambda RHS → its type is not a
+        // function → monomorphic. The first annotation pins `e` to Seq Int; the
+        // Seq Str view is a type error (`e` is Seq Int). Uniform rule — no
+        // "immutable so it's fine" exception. To get polymorphism, wrap in a
+        // lambda (`let e = {} -> []`), which returns a fresh value per call.
+        assertNotNull(err("""
             let e = []
             let a: Seq Int = e
             let b: Seq Str = e
             a
-        """))
+        """), "a non-lambda top-level binding is monomorphic — the second view must be rejected")
     }
 
     // ── (2) the value-restriction hole with a real mutable cell (TVar) ───

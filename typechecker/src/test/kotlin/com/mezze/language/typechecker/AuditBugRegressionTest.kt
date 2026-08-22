@@ -83,15 +83,27 @@ class AuditBugRegressionTest {
         )
     }
 
-    // ── bug257 (audit #8): missing value restriction on a mutable cell ────
-    // A top-level `tvar { init = [] }` generalizes the cell's ELEMENT type var,
-    // so the one physical cell can be viewed at two incompatible element types
-    // (Seq Int and Seq Str). That is unsound — the value-restriction gate must
-    // NOT generalize a mutable-cell-carrying binding, so the second view is a
-    // type error.
-    // EXPECTED-CORRECT: accepted today under bug257 (ConstraintGenerator.kt:541).
-    @Disabled("known-bug #257: no value restriction; polymorphic mutable cell wrongly generalized; enable when fixed")
-    @Test fun `bug257_value_restriction_blocks_polymorphic_mutable_cell`() {
+    // ── bug257 (audit #8): value restriction — non-lambda `let` is monomorphic ──
+    // #257: ONLY a lambda binding generalizes. A non-lambda RHS (`[]`, `None`, a
+    // call result like `tvar {…}`) is monomorphic — pinned at the first use, so a
+    // later use at a different type is a type error. This is uniform (no exception
+    // for immutable data) and closes the mutable-cell soundness hole as a plain
+    // consequence: a top-level `tvar {…}` no longer generalizes its element var.
+    @Test fun `bug257_value_restriction_seq`() {
+        // `let x = []` then two element-type views: the 2nd is an error (x is [Int]).
+        val m = err(
+            """
+            let x = []
+            let y: Seq Int = x
+            let z: Seq Str = x
+            """
+        )
+        assertNotNull(m, "a non-lambda `let x = []` is monomorphic — the Seq Str view must be rejected")
+    }
+
+    @Test fun `bug257_value_restriction_mutable_cell`() {
+        // The soundness-critical case: ONE physical STM cell viewed at two element
+        // types would let you write Int, read Str. Must be rejected.
         val m = err(
             """
             use std::effects::stm::{ TVar, tvar }
@@ -101,10 +113,19 @@ class AuditBugRegressionTest {
             let asStr: TVar (Seq Str) = box
             """
         )
-        assertNotNull(
-            m,
-            "one mutable cell must not be viewable at both TVar (Seq Int) and TVar (Seq Str)",
+        assertNotNull(m, "one mutable cell must not be viewable at both TVar (Seq Int) and TVar (Seq Str)")
+    }
+
+    @Test fun `bug257_lambda_still_generalizes`() {
+        // The escape hatch stays sound: a lambda returns a FRESH value per call.
+        val m = err(
+            """
+            let x = {} -> []
+            let a: Seq Int = x {}
+            let b: Seq Str = x {}
+            """
         )
+        assertNull(m, "a lambda returning [] is polymorphic per call site")
     }
 
     // ── bug257 control: pinned cell stays monomorphic (should already pass) ──
