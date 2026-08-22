@@ -769,6 +769,44 @@ class ModuleSystemTest {
     }
 
     @Test
+    fun `pub use re-export of an effect wires its operations`() {
+        // #275: a re-exported effect's OPS must reach the consumer, not just its
+        // name — else `Log.log` fails with "Cannot access field 'log' on variant".
+        writeModule("ieff", "effect Log where { log: { m: Str } -> {} <Log> }")
+        writeModule("meff", "pub use ieff::{ Log }")
+        val main = "use meff::{ Log }\nlet f = {} -> Log.log { m = \"x\" }\nf"
+        writeModule("main", main)
+        val typed = typeChecker.typeCheck(parser.parseParsedModule(main.trimIndent(), "test.mz"), tempDir)
+        assertNotNull(typed, "a re-exported effect's operation `Log.log` must dispatch")
+    }
+
+    @Test
+    fun `pub use re-export of an ability wires its methods`() {
+        // #275: same for abilities — `Greet.greet` on a re-exported ability.
+        writeModule("iab", "ability Greet for 'a where { greet: { it: 'a } -> Str }")
+        writeModule("mab", "pub use iab::{ Greet }")
+        val main = "use mab::{ Greet }\n" +
+            "let f: { it: 'a } with Greet 'a -> Str = { it } -> Greet.greet { it = it }\nf"
+        writeModule("main", main)
+        val typed = typeChecker.typeCheck(parser.parseParsedModule(main.trimIndent(), "test.mz"), tempDir)
+        assertNotNull(typed, "a re-exported ability's method `Greet.greet` must dispatch")
+    }
+
+    @Test
+    fun `pub use re-export carries an ability's impls`() {
+        // #275: the impl declared alongside the ability in the origin must reach
+        // the consumer so `Greet.greet { it = 5 }` resolves against `impl Greet for Int`.
+        writeModule("iimpl",
+            "ability Greet for 'a where { greet: { it: 'a } -> Str }\n" +
+            "impl Greet for Int where { greet = { it } -> \"n\" }")
+        writeModule("mimpl", "pub use iimpl::{ Greet }")
+        val main = "use mimpl::{ Greet }\nlet r = Greet.greet { it = 5 }\nr"
+        writeModule("main", main)
+        val typed = typeChecker.typeCheck(parser.parseParsedModule(main.trimIndent(), "test.mz"), tempDir)
+        assertNotNull(typed, "a re-exported ability's impl must resolve at the consumer")
+    }
+
+    @Test
     fun `importing a name no module re-exports still fails`() {
         // Regression guard: the re-export path must NOT make every name resolve.
         writeModule("inner", "pub let greet: { name: Str } -> Str = { name } -> \"hi\"")

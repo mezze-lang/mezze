@@ -223,20 +223,53 @@ class ImportResolver(
                 // transitively and fold them into the import context so a downstream
                 // `use mid::{ greet }` sees `greet` that `mid` re-exports from `inner`.
                 val reexportedBindings = mutableMapOf<String, ImportedBinding>()
+                // #275: a re-exported ABILITY/EFFECT needs more than a binding — its
+                // DECL (+ ops, + impls) must reach the consumer's registries, else
+                // `Ability.method` / `Effect.op` fails ("Cannot access field … on
+                // variant type"). We read them from the ORIGIN module's index (the
+                // intermediary that re-exports it doesn't declare it).
+                val reexportedAbilities = mutableMapOf<String, ParsedAbilityDecl>()
+                val reexportedEffects = mutableMapOf<String, ParsedEffectDecl>()
+                val reexportedAbilitiesByHash = mutableMapOf<Hash, ParsedAbilityDecl>()
+                val reexportedEffectsByHash = mutableMapOf<Hash, ParsedEffectDecl>()
+                val reexportedAbilityImpls = mutableMapOf<Hash, ParsedImplAbilityDecl>()
 
                 for (item in path.items) {
                     if (!module.exports.containsKey(item.name)) {
                         val reexport = resolvePubUseReexport(module, item.name, mutableSetOf())
                         if (reexport != null) {
                             val (originModulePath, export) = reexport
-                            reexportedBindings[item.alias ?: item.name] = ImportedBinding(
-                                name = item.alias ?: item.name,
+                            val localName = item.alias ?: item.name
+                            reexportedBindings[localName] = ImportedBinding(
+                                name = localName,
                                 originalName = export.originalName,
                                 modulePath = originModulePath,
                                 type = export.mezzeType,
                                 isQualified = false,
                                 contentHash = export.contentHash
                             )
+                            // #275: fold the re-exported ability/effect decl (and, for
+                            // an ability, every impl the origin knows) into the context
+                            // so its operations dispatch downstream.
+                            val originModule = loader.getModule(originModulePath)
+                            when (export.type) {
+                                ExportedItemType.ABILITY -> {
+                                    originModule?.index?.abilityDeclarations?.get(export.originalName)?.let { ab ->
+                                        reexportedAbilities[localName] = ab
+                                        ab.contentHash?.let { reexportedAbilitiesByHash[it] = ab }
+                                    }
+                                    // Impls of a re-exported ability are keyed by hash,
+                                    // not name — carry them all so use-site dispatch finds them.
+                                    originModule?.index?.abilityImplsByHash?.let { reexportedAbilityImpls.putAll(it) }
+                                }
+                                ExportedItemType.EFFECT -> {
+                                    originModule?.index?.effectDeclarations?.get(export.originalName)?.let { eff ->
+                                        reexportedEffects[localName] = eff
+                                        eff.contentHash?.let { reexportedEffectsByHash[it] = eff }
+                                    }
+                                }
+                                else -> {}
+                            }
                             continue
                         }
 
@@ -264,8 +297,17 @@ class ImportResolver(
                     return ProcessResult.Failure(errors)
                 }
 
-                if (reexportedBindings.isNotEmpty()) {
-                    context = context.merge(ModuleImportContext.empty().copy(importedBindings = reexportedBindings))
+                if (reexportedBindings.isNotEmpty() || reexportedAbilities.isNotEmpty() || reexportedEffects.isNotEmpty()) {
+                    context = context.merge(
+                        ModuleImportContext.empty().copy(
+                            importedBindings = reexportedBindings,
+                            importedAbilities = reexportedAbilities,
+                            importedEffects = reexportedEffects,
+                            importedAbilityImpls = reexportedAbilityImpls,
+                            abilitiesByHash = reexportedAbilitiesByHash,
+                            effectsByHash = reexportedEffectsByHash,
+                        )
+                    )
                 }
 
                 ProcessResult.Success(
