@@ -19,7 +19,6 @@ fun receiverTypeName(type: MezzeType): String? = when (type) {
     is MezzeType.FracType -> "Frac"
     is MezzeType.CharType -> "Char"
     is MezzeType.BytesType -> "Bytes"
-    is MezzeType.OrderingType -> "Ordering"
     is MezzeType.SeqType -> "Seq"
     is MezzeType.ListType -> "List"
     is MezzeType.SetType -> "Set"

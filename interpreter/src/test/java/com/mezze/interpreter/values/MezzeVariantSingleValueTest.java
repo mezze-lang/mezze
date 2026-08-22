@@ -129,22 +129,6 @@ public class MezzeVariantSingleValueTest {
     }
 
     @Test
-    void testOrderingVariantsCached() {
-        MezzeVariant lt1 = MezzeVariant.lt();
-        MezzeVariant lt2 = MezzeVariant.lt();
-        assertSame(lt1, lt2, "LT should be cached");
-        assertFalse(lt1.usesSingleValueStorage());
-
-        MezzeVariant gt1 = MezzeVariant.gt();
-        MezzeVariant gt2 = MezzeVariant.gt();
-        assertSame(gt1, gt2, "GT should be cached");
-
-        MezzeVariant eq1 = MezzeVariant.eq();
-        MezzeVariant eq2 = MezzeVariant.eq();
-        assertSame(eq1, eq2, "EQ should be cached");
-    }
-
-    @Test
     void testEqualsWithSingleValueStorage() {
         MezzeVariant.TagRegistry registry = new MezzeVariant.TagRegistry(new String[]{"Some"});
         MezzeVariant some1 = MezzeVariant.singlePayload(registry, 0, "hello");

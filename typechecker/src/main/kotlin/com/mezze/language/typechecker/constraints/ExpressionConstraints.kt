@@ -319,7 +319,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.NewtypeType -> getFreeTypeVariables(type.wrappedType)
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
             is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+            is MezzeType.BytesType, is MezzeType.ByteBufferType,
             is MezzeType.CharType, is MezzeType.EffectRow -> emptySet()
         }
     }
@@ -402,7 +402,7 @@ class ExpressionConstraintGenerator {
             )
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
             is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+            is MezzeType.BytesType, is MezzeType.ByteBufferType,
             is MezzeType.CharType, is MezzeType.EffectRow -> type
         }
     }
@@ -645,7 +645,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
             is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
-            is MezzeType.FracType, is MezzeType.OrderingType, is MezzeType.BytesType,
+            is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.ByteBufferType, is MezzeType.CharType -> {}
         }
     }

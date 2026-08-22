@@ -301,7 +301,6 @@ internal fun ExpressionConstraintGenerator.extractEffectsFromType(type: MezzeTyp
         is MezzeType.NatType,
         is MezzeType.FracType,
         is MezzeType.CharType,
-        is MezzeType.OrderingType,
         is MezzeType.BytesType,
         is MezzeType.ByteBufferType,
         is MezzeType.NewtypeType -> ExtractedEffects(emptySet(), false)
@@ -330,7 +329,6 @@ internal fun ExpressionConstraintGenerator.hasPerformedMarkerInType(type: MezzeT
         is MezzeType.NatType,
         is MezzeType.FracType,
         is MezzeType.CharType,
-        is MezzeType.OrderingType,
         is MezzeType.BytesType,
         is MezzeType.ByteBufferType,
         is MezzeType.NewtypeType -> false

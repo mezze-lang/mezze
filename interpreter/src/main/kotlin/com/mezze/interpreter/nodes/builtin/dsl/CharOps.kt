@@ -71,12 +71,6 @@ object CharOps {
         listOf(Param("a", SlotKind.OBJECT), Param("b", SlotKind.OBJECT)), SlotKind.BOOLEAN
     ) { args -> CharNatives.eq(args.string(0), args.string(1)) }
 
-    // CharNatives.compare returns Ordering (MezzeVariant); compareInt
-    // returns a plain Int. Both are exposed.
-    private val COMPARE = NativeOp("__native_char_compare",
-        listOf(Param("a", SlotKind.OBJECT), Param("b", SlotKind.OBJECT)), SlotKind.OBJECT
-    ) { args -> CharNatives.compare(args.string(0), args.string(1)) }
-
     private val COMPARE_INT = NativeOp("__native_char_compare_int",
         listOf(Param("a", SlotKind.OBJECT), Param("b", SlotKind.OBJECT)), SlotKind.LONG
     ) { args -> CharNatives.compareInt(args.string(0), args.string(1)) }

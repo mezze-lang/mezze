@@ -338,7 +338,7 @@ internal fun ExpressionConstraintGenerator.substituteAssociatedTypesInType(
         )
         is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
         is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-        is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+        is MezzeType.BytesType, is MezzeType.ByteBufferType,
         is MezzeType.CharType, is MezzeType.EffectRow -> type
     }
 }

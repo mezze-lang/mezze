@@ -39,13 +39,9 @@ object PrimitiveTypes {
         return primitiveType == type
     }
 
-    private val extendedNameToType: Map<String, MezzeType> = nameToType + mapOf(
-        "Ordering" to MezzeType.OrderingType
-    )
-
     // Returns null if not a built-in type, true/false if it is and matches/doesn't
     fun matchesBuiltinType(name: String, type: MezzeType): Boolean? {
-        val builtinType = extendedNameToType[name] ?: return null
+        val builtinType = nameToType[name] ?: return null
         if (builtinType == type) return true
         if (builtinType is MezzeType.BoolType && isBoolVariant(type)) return true
         return false

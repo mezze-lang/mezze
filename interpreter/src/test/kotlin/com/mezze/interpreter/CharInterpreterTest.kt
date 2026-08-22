@@ -226,25 +226,6 @@ class CharInterpreterTest {
         assertEquals(false, result)
     }
 
-    @Test
-    fun `compare returns correct ordering`() {
-        val result = eval("""
-            use std::char
-            let a_opt = char::from_int { code = 65 }
-            let b_opt = char::from_int { code = 66 }
-            match a_opt is
-                Some { val = a_char } -> match b_opt is
-                    Some { val = b_char } ->
-                        match char::compare { a = a_char, b = b_char } is
-                            LT -> 1
-                            EQ -> 0
-                            GT -> -1
-                    None -> -2
-                None -> -2
-        """)
-        assertEquals(1L, result) // 'A' < 'B' => LT
-    }
-
     // ========================================
     // Digit Operations Tests
     // ========================================

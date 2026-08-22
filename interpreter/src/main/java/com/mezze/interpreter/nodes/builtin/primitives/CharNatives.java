@@ -121,31 +121,6 @@ public final class CharNatives {
     }
 
     /**
-     * Compare two characters, returning an Ordering variant (LT, EQ, GT).
-     * This matches the expected Mezze Ordering type.
-     */
-    @TruffleBoundary
-    public static MezzeVariant compare(String c1, String c2) {
-        if (c1 == null || c1.isEmpty()) {
-            if (c2 == null || c2.isEmpty()) {
-                return MezzeVariant.eq();
-            }
-            return MezzeVariant.lt();
-        }
-        if (c2 == null || c2.isEmpty()) {
-            return MezzeVariant.gt();
-        }
-        int cmp = c1.charAt(0) - c2.charAt(0);
-        if (cmp < 0) {
-            return MezzeVariant.lt();
-        } else if (cmp > 0) {
-            return MezzeVariant.gt();
-        } else {
-            return MezzeVariant.eq();
-        }
-    }
-
-    /**
      * Compare two characters, returning -1, 0, or 1 as a long.
      * Used by Ord ability impl which compares against integers.
      */

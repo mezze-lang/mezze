@@ -756,8 +756,7 @@ class ImportResolver(
             is MezzeType.StringType,
             is MezzeType.BytesType,
             is MezzeType.ByteBufferType,
-            is MezzeType.CharType,
-            is MezzeType.OrderingType -> {}
+            is MezzeType.CharType -> {}
         }
     }
 

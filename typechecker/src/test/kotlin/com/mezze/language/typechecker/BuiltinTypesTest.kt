@@ -65,18 +65,4 @@ class BuiltinTypesTest {
         }
     }
     
-    @Test
-    fun testOrderingTypeIsBuiltIn() {
-        val source = """
-            let x = LT
-            x
-        """.trimIndent()
-        
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-        
-        // Should not throw an exception if Ordering type is available
-        assertDoesNotThrow {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
-    }
 }

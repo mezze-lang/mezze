@@ -31,7 +31,6 @@ class CodecGeneratorTest {
         assertTrue(generator.isSerializable(MezzeType.NatType))
         assertTrue(generator.isSerializable(MezzeType.FracType))
         assertTrue(generator.isSerializable(MezzeType.CharType))
-        assertTrue(generator.isSerializable(MezzeType.OrderingType))
     }
 
     @Test

@@ -1447,21 +1447,6 @@ public final class SeqNatives {
         return true;
     }
 
-    // ==================== Comparison Operations ====================
-
-    @TruffleBoundary
-    public static MezzeVariant lexicographicCompare(MezzeSeq seq1, MezzeSeq seq2) {
-        int minLen = Math.min(seq1.size(), seq2.size());
-        for (int i = 0; i < minLen; i++) {
-            int cmp = compare(seq1.get(i), seq2.get(i));
-            if (cmp < 0) return MezzeVariant.lt();
-            if (cmp > 0) return MezzeVariant.gt();
-        }
-        if (seq1.size() < seq2.size()) return MezzeVariant.lt();
-        if (seq1.size() > seq2.size()) return MezzeVariant.gt();
-        return MezzeVariant.eq();
-    }
-
     // ==================== Advanced Binary Search ====================
 
     @TruffleBoundary

@@ -44,11 +44,6 @@ object BuiltinTypes {
      */
     val coreVariantConstructors = setOf(SOME, NONE, OK, ERR, TRUE, FALSE, CONS, NIL)
 
-    // Ordering constructors used by Ord ability (returned from Ord.compare + created via
-    // MezzeVariant.lt/gt/eq). These share the same runtime "collide across ADTs" contract
-    // as coreVariantConstructors — the ordering ADT is nominally shared with native code.
-    private val orderingConstructors = setOf("LT", "GT", "EQ")
-
     // Standard record field names for built-in types
     const val VAL_FIELD = "val"      // Used in Option.Some and Result.Ok
     const val ERROR_FIELD = "error"  // Used in Result.Err

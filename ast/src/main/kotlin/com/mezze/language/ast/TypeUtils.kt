@@ -101,7 +101,7 @@ private fun collectTypeVarsRecursive(type: MezzeType, collector: MutableList<Typ
         is MezzeType.NewtypeType -> collectTypeVarsRecursive(type.wrappedType, collector, sortFields)
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
         is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-        is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+        is MezzeType.BytesType, is MezzeType.ByteBufferType,
         is MezzeType.CharType, is MezzeType.EffectRow -> { }
     }
 }

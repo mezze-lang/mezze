@@ -783,10 +783,6 @@ class ContextBuilder {
         syntheticVariant(BuiltinTypes.RESULT, listOf("a", "e"), listOf(
             ParsedVariantCtorDef(BuiltinTypes.OK, payloadField(BuiltinTypes.VAL_FIELD, "a"), loc = loc),
             ParsedVariantCtorDef(BuiltinTypes.ERR, payloadField(BuiltinTypes.ERROR_FIELD, "e"), loc = loc)))
-        syntheticVariant("Ordering", emptyList(), listOf(
-            ParsedVariantCtorDef("LT", null, loc = loc),
-            ParsedVariantCtorDef("EQ", null, loc = loc),
-            ParsedVariantCtorDef("GT", null, loc = loc)))
     }
 
     private fun ensureContentHash(decl: ParsedImplAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): ParsedImplAbilityDecl {

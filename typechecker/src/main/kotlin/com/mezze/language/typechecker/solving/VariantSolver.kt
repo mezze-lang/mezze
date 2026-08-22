@@ -233,7 +233,6 @@ internal class VariantSolver(
                 constraint.isPatternContext, currentSubst
             )
             is MezzeType.BoolType -> solveBoolConstructor(constructorName, expectedPayloadType)
-            is MezzeType.OrderingType -> solveOrderingConstructor(constructorName, expectedPayloadType)
             is MezzeType.VariantType -> solveConstructorOnVariant(
                 variantType, constructorName, expectedPayloadType,
                 currentSubst, originalConstraint
@@ -280,23 +279,6 @@ internal class VariantSolver(
         return ConstraintSolver.ConstraintResult.Success(
             Substitution.single(typeVar, boolType)
         )
-    }
-
-    private fun solveOrderingConstructor(
-        constructorName: String,
-        expectedPayloadType: MezzeType?
-    ): ConstraintSolver.ConstraintResult {
-        if (constructorName != "LT" && constructorName != "EQ" && constructorName != "GT") {
-            return ConstraintSolver.ConstraintResult.Failure(
-                "Ordering type only has constructors 'LT', 'EQ', and 'GT', not '$constructorName'"
-            )
-        }
-        if (expectedPayloadType != null) {
-            return ConstraintSolver.ConstraintResult.Failure(
-                "Constructor '$constructorName' does not have a payload"
-            )
-        }
-        return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
     }
 
     private fun solveConsNilOnVar(
@@ -657,7 +639,6 @@ internal class VariantSolver(
             is MezzeType.BoolType,
             is MezzeType.NatType,
             is MezzeType.FracType,
-            is MezzeType.OrderingType,
             is MezzeType.BytesType,
             is MezzeType.ByteBufferType,
             is MezzeType.CharType,

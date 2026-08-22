@@ -53,7 +53,6 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.FracType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x08))
         is MezzeType.BytesType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x09))
         is MezzeType.ByteBufferType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x0A))
-        is MezzeType.OrderingType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x0B))
         is MezzeType.SeqType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE)); appendTypeInScope(b, type.elementType) }
         is MezzeType.ListType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x01)); appendTypeInScope(b, type.elementType) }
         is MezzeType.SetType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x02)); appendTypeInScope(b, type.elementType) }

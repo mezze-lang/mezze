@@ -256,7 +256,6 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
 
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
-    is MezzeType.OrderingType -> "Ordering"
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
     // #271: a type printer must NEVER throw — it is frequently called WHILE
     // formatting a TypeCheckError, so an uncaught exception here masks the real

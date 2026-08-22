@@ -1947,8 +1947,6 @@ public final class NativeDispatch extends MezzeNode {
             CharNatives.digitToInt(getString(r, "c"), getLong(r, "radix")));
         HANDLERS.put("__native_char_eq", (r, c) ->
             CharNatives.eq(getString(r, "a"), getString(r, "b")));
-        HANDLERS.put("__native_char_compare", (r, c) ->
-            CharNatives.compare(getString(r, "a"), getString(r, "b")));
         HANDLERS.put("__native_char_compare_int", (r, c) ->
             CharNatives.compareInt(getString(r, "a"), getString(r, "b")));
     }
@@ -1986,8 +1984,6 @@ public final class NativeDispatch extends MezzeNode {
             FracNatives.lessThan(getRecord(r, "l"), getRecord(r, "r")));
         HANDLERS.put("__native_frac_greater_than", (r, c) ->
             FracNatives.greaterThan(getRecord(r, "l"), getRecord(r, "r")));
-        HANDLERS.put("__native_frac_compare", (r, c) ->
-            FracNatives.compare(getRecord(r, "l"), getRecord(r, "r")));
         HANDLERS.put("__native_frac_to_float", (r, c) ->
             FracNatives.toFloat(getRecord(r, "n")));
         HANDLERS.put("__native_frac_to_str", (r, c) ->

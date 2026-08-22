@@ -79,7 +79,6 @@ object BuiltinAbilities {
         "List" to setOf(EQ, ORD, INSPECT),   // if element type has these abilities
         "Map" to setOf(EQ, INSPECT),         // if key and value types have these abilities
         "Set" to setOf(EQ, INSPECT),         // if element type has these abilities
-        "Ordering" to setOf(EQ, ORD, INSPECT)
     )
 
     /**
@@ -101,7 +100,6 @@ object BuiltinAbilities {
             is MezzeType.BoolType -> hasAutomaticImplementation("Bool", abilityName)
             is MezzeType.NatType -> hasAutomaticImplementation("Nat", abilityName)
             is MezzeType.FracType -> hasAutomaticImplementation("Frac", abilityName)
-            is MezzeType.OrderingType -> hasAutomaticImplementation("Ordering", abilityName)
 
             // Parameterized types - check if element types support the ability
             is MezzeType.TypeApplication -> {

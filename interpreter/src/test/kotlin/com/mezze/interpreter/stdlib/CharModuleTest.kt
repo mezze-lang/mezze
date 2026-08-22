@@ -269,65 +269,6 @@ class CharModuleTest {
         assertEquals(false, result)
     }
 
-    // === Compare ===
-
-    @Test
-    fun `test char compare - less than`() {
-        val result = eval("""
-            use std::char
-            let c1 = char::from_int { code = 65 }
-            let c2 = char::from_int { code = 66 }
-            match c1 is
-                Some { val = a } -> match c2 is
-                    Some { val = b } ->
-                        match char::compare { a = a, b = b } is
-                            LT -> 1
-                            EQ -> 0
-                            GT -> -1
-                    None -> -2
-                None -> -2
-        """)
-        assertEquals(1L, result) // LT
-    }
-
-    @Test
-    fun `test char compare - equal`() {
-        val result = eval("""
-            use std::char
-            let c1 = char::from_int { code = 65 }
-            let c2 = char::from_int { code = 65 }
-            match c1 is
-                Some { val = a } -> match c2 is
-                    Some { val = b } ->
-                        match char::compare { a = a, b = b } is
-                            LT -> 1
-                            EQ -> 0
-                            GT -> -1
-                    None -> -2
-                None -> -2
-        """)
-        assertEquals(0L, result) // EQ
-    }
-
-    @Test
-    fun `test char compare - greater than`() {
-        val result = eval("""
-            use std::char
-            let c1 = char::from_int { code = 66 }
-            let c2 = char::from_int { code = 65 }
-            match c1 is
-                Some { val = a } -> match c2 is
-                    Some { val = b } ->
-                        match char::compare { a = a, b = b } is
-                            LT -> 1
-                            EQ -> 0
-                            GT -> -1
-                    None -> -2
-                None -> -2
-        """)
-        assertEquals(-1L, result) // GT
-    }
-
     // === Digit Operations ===
 
     @Test

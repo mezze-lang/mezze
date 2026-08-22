@@ -46,7 +46,6 @@ class CodecGenerator {
             is MezzeType.NatType -> true
             is MezzeType.FracType -> true
             is MezzeType.CharType -> true
-            is MezzeType.OrderingType -> true
             is MezzeType.BytesType -> true
             is MezzeType.ByteBufferType -> false
             is MezzeType.FunctionType -> false

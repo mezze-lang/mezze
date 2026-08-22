@@ -65,7 +65,7 @@ sealed interface MezzeType {
         is SuspendType -> predicate(valueType)
         is NewtypeType -> predicate(wrappedType)
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
-        is NatType, is FracType, is OrderingType, is BytesType, is ByteBufferType,
+        is NatType, is FracType, is BytesType, is ByteBufferType,
         is CharType, is EffectRow -> false
     }
 
@@ -84,7 +84,7 @@ sealed interface MezzeType {
         is SuspendType -> copy(valueType = f(valueType))
         is NewtypeType -> copy(wrappedType = f(wrappedType))
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
-        is NatType, is FracType, is OrderingType, is BytesType, is ByteBufferType,
+        is NatType, is FracType, is BytesType, is ByteBufferType,
         is CharType, is EffectRow -> this
     }
 
@@ -249,10 +249,6 @@ sealed interface MezzeType {
             fullContent = { if (args.isEmpty()) constructor else "$constructor ${args.joinToString(" ")}" }
         )
     }
-
-    // Built-in ordering type for comparisons
-    @Serializable
-    object OrderingType : MezzeType
 
     // Seq types (for [] syntax)
     @Serializable

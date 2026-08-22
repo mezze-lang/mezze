@@ -260,7 +260,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         type1 is MezzeType.BoolType && type2 is MezzeType.BoolType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.NatType && type2 is MezzeType.NatType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.FracType && type2 is MezzeType.FracType -> UnificationResult.Success(Substitution.empty)
-        type1 is MezzeType.OrderingType && type2 is MezzeType.OrderingType -> UnificationResult.Success(Substitution.empty)
 
         type1 is MezzeType.NewtypeType && type2 is MezzeType.NewtypeType -> {
             // #278/F0: newtypes are NOMINAL, module-opaque — same type only if same
@@ -282,11 +281,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
                 )
             }
         }
-        type1 is MezzeType.OrderingType && type2 is MezzeType.VariantType ->
-            unifyOrderingWithVariant(type2, type1, type2)
-        type1 is MezzeType.VariantType && type2 is MezzeType.OrderingType ->
-            unifyOrderingWithVariant(type1, type1, type2)
-
         type1 is MezzeType.BytesType && type2 is MezzeType.BytesType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.ByteBufferType && type2 is MezzeType.ByteBufferType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.CharType && type2 is MezzeType.CharType -> UnificationResult.Success(Substitution.empty)
@@ -1022,8 +1016,6 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
  * method-call inference), foregrounds the shape so the user sees what they
  * needed to pass.
  */
-private val ORDERING_CONSTRUCTORS = setOf("LT", "EQ", "GT")
-
 private fun unifyKeyValue(
     key1: MezzeType, val1: MezzeType,
     key2: MezzeType, val2: MezzeType,
@@ -1043,24 +1035,6 @@ private fun unifyKeyValue(
             }
         }
         is UnificationResult.Failure -> keyResult
-    }
-}
-
-private fun unifyOrderingWithVariant(variant: MezzeType.VariantType, type1: MezzeType, type2: MezzeType): UnificationResult {
-    val exactMatch = variant.constructors.keys == ORDERING_CONSTRUCTORS &&
-                   variant.constructors.all { (_, payload) -> payload == null } &&
-                   variant.rowVar == null
-    val subsetWithOpenRow = variant.constructors.keys.all { it in ORDERING_CONSTRUCTORS } &&
-                   variant.constructors.all { (_, payload) -> payload == null } &&
-                   variant.rowVar != null
-    return if (exactMatch || subsetWithOpenRow) {
-        UnificationResult.Success(Substitution.empty)
-    } else {
-        UnificationResult.Failure(
-            message = "Type mismatch: expected ${prettyPrintType(type2)}, but got ${prettyPrintType(type1)}",
-            type1 = type1,
-            type2 = type2
-        )
     }
 }
 

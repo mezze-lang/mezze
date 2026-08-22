@@ -342,7 +342,7 @@ object TypeAnnotationConverter {
             is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
             is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
-            is MezzeType.FracType, is MezzeType.OrderingType, is MezzeType.BytesType,
+            is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.ByteBufferType, is MezzeType.CharType -> {}
         }
     }
@@ -388,7 +388,7 @@ object TypeAnnotationConverter {
             is MezzeType.EffectRow -> type.copy(caughtByAncestor = type.caughtByAncestor + caught)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
             is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
-            is MezzeType.FracType, is MezzeType.OrderingType, is MezzeType.BytesType,
+            is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.ByteBufferType, is MezzeType.CharType -> type
         }
     }
@@ -447,7 +447,7 @@ object TypeAnnotationConverter {
         is MezzeType.EffectRow, is MezzeType.VarType,
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
         is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-        is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+        is MezzeType.BytesType, is MezzeType.ByteBufferType,
         is MezzeType.CharType -> type
     }
 }

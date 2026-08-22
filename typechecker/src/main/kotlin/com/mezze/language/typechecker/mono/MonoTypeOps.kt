@@ -54,7 +54,7 @@ internal fun isConcrete(t: MezzeType): Boolean = when (t) {
     is MezzeType.SuspendType -> isConcrete(t.valueType)
     is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
     is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-    is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+    is MezzeType.BytesType, is MezzeType.ByteBufferType,
     is MezzeType.CharType, is MezzeType.EffectRow -> true
 }
 
@@ -159,7 +159,7 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
             pattern.args.zip(v.args).all { (p2, v2) -> unify(p2, v2, bindings) }
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
         is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-        is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+        is MezzeType.BytesType, is MezzeType.ByteBufferType,
         is MezzeType.CharType -> pattern == v
         is MezzeType.EffectRow -> v is MezzeType.EffectRow
         is MezzeType.VarType -> error("VarType handled above")

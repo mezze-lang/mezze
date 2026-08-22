@@ -129,51 +129,6 @@ class FracModuleTest {
     }
 
     @Test
-    fun `test frac compare - GT`() {
-        val source = """
-            use std::frac
-            let a = frac::make { numerator = 1, denominator = 2 }
-            let b = frac::make { numerator = 1, denominator = 4 }
-            match frac::compare { l = a, r = b } is
-                GT -> "GT"
-                LT -> "LT"
-                EQ -> "EQ"
-        """.trimIndent()
-
-        assertEquals("GT", eval(source))
-    }
-
-    @Test
-    fun `test frac compare - LT`() {
-        val source = """
-            use std::frac
-            let a = frac::make { numerator = 1, denominator = 4 }
-            let b = frac::make { numerator = 1, denominator = 2 }
-            match frac::compare { l = a, r = b } is
-                GT -> "GT"
-                LT -> "LT"
-                EQ -> "EQ"
-        """.trimIndent()
-
-        assertEquals("LT", eval(source))
-    }
-
-    @Test
-    fun `test frac compare - EQ`() {
-        val source = """
-            use std::frac
-            let a = frac::make { numerator = 1, denominator = 2 }
-            let c = frac::make { numerator = 2, denominator = 4 }
-            match frac::compare { l = a, r = c } is
-                GT -> "GT"
-                LT -> "LT"
-                EQ -> "EQ"
-        """.trimIndent()
-
-        assertEquals("EQ", eval(source))
-    }
-
-    @Test
     fun `test frac to_float`() {
         val source = """
             use std::frac

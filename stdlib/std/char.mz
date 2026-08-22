@@ -79,9 +79,6 @@ pub let is_lower: { c: Char } -> Bool = { c } -> __native_char_is_lower { c = c 
 ## True if two characters are equal.
 pub let eq: { a: Char, b: Char } -> Bool = { a, b } -> __native_char_eq { a = a, b = b }
 
-## Compare two characters, returning an Ordering.
-pub let compare: { a: Char, b: Char } -> Ordering = { a, b } -> __native_char_compare { a = a, b = b }
-
 ## Convert a digit char to its numeric value in the given radix. Returns None if invalid.
 pub let digit_to_int: { c: Char, radix: Int } -> Option Int = { c, radix } -> __native_char_digit_to_int { c = c, radix = radix }
 
