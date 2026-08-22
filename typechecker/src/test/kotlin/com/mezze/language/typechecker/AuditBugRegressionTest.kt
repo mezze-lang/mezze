@@ -312,7 +312,6 @@ class AuditBugRegressionTest {
     // it is the only arm covering B, so the match is exhaustive and must be
     // ACCEPTED. The current unreachability check flags arm 2 as dead.
     // EXPECTED-CORRECT: wrongly rejected today.
-    @Disabled("known-bug #270: or-pattern redundancy false-positive rejects legal exhaustive match; enable when fixed")
     @Test fun `bug270_or_pattern_partial_overlap_is_accepted`() {
         val m = err(
             """

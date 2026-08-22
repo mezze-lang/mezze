@@ -741,16 +741,28 @@ class MatchValidator(
             // A guard/if-let arm may not fire even when its shape repeats, so it
             // neither closes off future arms nor counts as covering a key.
             if (case.guard == null && case.ifLetBindings.isEmpty()) {
+                // #270: `case.patterns` are the OR-alternatives of one arm
+                // (`R | G` → [R, G]). The arm is unreachable only when EVERY
+                // alternative that has a duplicable key is already covered — a
+                // fresh alternative (e.g. `B` in `G | B`) keeps the arm live.
+                // Reporting per-alternative wrongly flagged a partially-overlapping
+                // or-arm as unreachable.
+                val keyed = case.patterns.mapNotNull { duplicableKey(it) }
+                val armIsDuplicate = case.patterns.isNotEmpty() &&
+                    keyed.size == case.patterns.size &&   // every alternative is a duplicable-key shape…
+                    keyed.all { it in coveredKeys }        // …and all already covered.
+                if (armIsDuplicate) {
+                    errors.add(ValidationError.UnreachablePattern(
+                        pattern = case.patterns.first(),
+                        reason = "This case is already handled by an earlier arm; it will never execute.",
+                        loc = case.loc,
+                        removableArmLoc = case.loc
+                    ))
+                }
+                // Record every alternative's key as covered for later arms, and
+                // note exhaustion if any alternative is a catch-all.
                 for (pattern in case.patterns) {
-                    val key = duplicableKey(pattern)
-                    if (key != null && !coveredKeys.add(key)) {
-                        errors.add(ValidationError.UnreachablePattern(
-                            pattern = pattern,
-                            reason = "This case is already handled by an earlier arm; it will never execute.",
-                            loc = case.loc,
-                            removableArmLoc = case.loc
-                        ))
-                    }
+                    duplicableKey(pattern)?.let { coveredKeys.add(it) }
                     if (pattern is ParsedWildcardPattern || pattern is ParsedVariablePattern) {
                         isExhausted = true
                     }
