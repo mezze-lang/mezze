@@ -258,7 +258,10 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     }
     is MezzeType.OrderingType -> "Ordering"
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
-    else -> throw IllegalArgumentException("Unexpected type in prettyPrintTypeWithMapping: $type")
+    // #271: a type printer must NEVER throw — it is frequently called WHILE
+    // formatting a TypeCheckError, so an uncaught exception here masks the real
+    // error with a compiler crash. Degrade to the type's simple name instead.
+    else -> type::class.simpleName ?: "<type>"
 }
 }
 
@@ -457,7 +460,8 @@ private fun prettyPrintTypeWithAliasesRecursive(
         "$valueTypeStr ${prettyPrintEffectRow(type.effects, typeVarMapping)}"
     }
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
-    else -> throw IllegalArgumentException("Unexpected type in prettyPrintTypeWithAliasesRecursive: $type")
+    // #271: never throw while printing a type — see prettyPrintTypeWithMapping.
+    else -> type::class.simpleName ?: "<type>"
 }
 }
 
