@@ -43,15 +43,22 @@ class AuditBugRegressionTest {
         }
 
     // ── bug256 (audit #5): effect-row callback laundering ─────────────────
-    // A `<...>`-row callback PARAM whose HOF return row is closed swallows the
-    // callback's performed effects. `launder` calls its effectful callback but
-    // its own signature is pure, so `go`/`main` perform Boom with NO handler and
-    // the unhandled effect escapes typed as pure. A sound checker unifies the
-    // callback's effect row into the enclosing fn's return row, so the whole
-    // program must be REJECTED (Boom performed, never handled).
-    // EXPECTED-CORRECT: accepted today under bug256 (ExpressionConstraints.kt:599).
-    @Disabled("known-bug #256: effect-row <...>-callback laundering not yet rejected; enable when fixed")
-    @Test fun `bug256_effect_callback_laundering_is_rejected`() {
+    // An un-annotated wrapper `launder` that CALLS a `<...>`-row callback param
+    // used to infer a PURE return row, silently swallowing the callback's effects
+    // — so `go`/`main` were typed pure despite performing Boom. The fix ties the
+    // callback param's row var into the wrapper's own inferred return row (real
+    // row polymorphism: `launder: {f: ..<r>} -> _ <r>`), matching how the stdlib
+    // writes `spawn: {f: {}->'a <...>} -> Promise 'a <Async, ...>` by hand and how
+    // the ANNOTATED version of this pattern already behaves (EffectSoundnessSweep
+    // "a HOF forwarding an effectful callback surfaces the effect to a pure
+    // caller"). A top-level effectful FUNCTION is a legal definition (see
+    // TopLevelEffectRestrictionsTest); the soundness property is that the effect
+    // is NOT laundered to pure — verified by feeding the wrapper's result into a
+    // pure callback slot, which must be rejected.
+    @Test fun `bug256_effect_callback_laundering_surfaces_not_hidden`() {
+        // The wrapper's result carries the effect (Boom), so putting it in a PURE
+        // slot `g: {} -> Int` must be rejected. Pre-fix, `go` was typed pure and
+        // this was silently accepted — the launder.
         val m = err(
             """
             effect Boom where {
@@ -64,13 +71,15 @@ class AuditBugRegressionTest {
 
             let go = {} -> launder { f = leaky }
 
-            let main = {} -> go {}
+            let usePure = { g: {} -> Int } -> g {}
+
+            let bad = {} -> usePure { g = go }
             """
         )
         assertNotNull(
             m,
-            "performing Boom through a <...>-row callback with no handler must be rejected, " +
-                "not laundered to a pure type",
+            "an effectful wrapper result (Boom via <...>-callback) must not launder " +
+                "into a pure callback slot",
         )
     }
 

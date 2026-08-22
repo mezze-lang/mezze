@@ -277,11 +277,33 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
 
     val (mergedEffectInstances, effectMergeConstraints) = mergeEffectInstances(bodyResult.effectInstances, expr.body.loc)
 
-    val effectRow = if (bodyResult.effects.isNotEmpty() || mergedEffectInstances.isNotEmpty() || bodyResult.performed) {
+    // #256: if the body calls a callback param whose effect row is open (`<r>`),
+    // that row var flows out via bodyResult.effectRowVars. The lambda's OWN return
+    // row must carry it, tying param row to return row (`{f: ..<r>} -> _ <r>`) —
+    // real row polymorphism, matching how stdlib writes `spawn: {f: {}->'a <...>}
+    // -> Promise 'a <Async, ...>` by hand. Without this, an un-annotated wrapper
+    // (`launder`) infers a pure return and silently launders the callback's
+    // effects (bug #256). We reuse the SAME var (must match the param); the single
+    // distinct-var case is #256 and the common case. If the body has several
+    // distinct open tails, the effect row can hold only one; we take the first and
+    // the rest still contribute their concrete effect NAMES via the paths above,
+    // so no named effect is lost (a fully-polymorphic 2nd tail is the rare gap).
+    //
+    // ONLY for UN-annotated lambdas. When the lambda has an explicit annotation
+    // (`with_rollback : {f: {} -> Int <Rollback, ...>} -> Int <Db, ...>`), the
+    // return row is fixed by the annotation and the strict declared-callback-row
+    // check runs at the call site via unifyEffectRows/stampCaughtOnCallbackRows —
+    // injecting the body's row var here would disturb that reconciliation and let
+    // a callback that fails to perform a declared effect slip through
+    // (CallbackContravariantRowTest). The launder hole is specifically the
+    // inference (no-annotation) case.
+    val bodyRowVar = if (expectedFunctionType == null) bodyResult.effectRowVars.firstOrNull() else null
+    val effectRow = if (bodyResult.effects.isNotEmpty() || mergedEffectInstances.isNotEmpty() ||
+        bodyResult.performed || bodyRowVar != null) {
         MezzeType.EffectRow(
             effects = bodyResult.effects,
             effectInstances = mergedEffectInstances,
-            rowVar = null,
+            rowVar = bodyRowVar,
             performed = bodyResult.performed
         )
     } else {
@@ -830,6 +852,10 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
             }
             collector.effects.addAll(effectRow.effects + rowVarEffects)
             collector.effectInstances.addAll(effectRow.effectInstances)
+            // #256: the callee's own effect row var flows out to the enclosing
+            // scope. Carrying it lets an un-annotated wrapper fn (`launder`) infer
+            // an OPEN return row instead of silently dropping the callback's tail.
+            effectRow.rowVar?.let { collector.effectRowVars.add(it) }
             collector.performed = collector.performed || effectRow.performed
 
             if (tailCallLocation != null) collector.tailCalls.add(tailCallLocation)
@@ -912,6 +938,14 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     if (functionResult.type is MezzeType.FunctionType) {
         val fnType = functionResult.type as MezzeType.FunctionType
         collector.effects.addAll(fnType.effects?.effects ?: emptySet())
+        // #256: calling a value whose effect row has a row var (e.g. a callback
+        // PARAM `f: {..} -> _ <r>`) flows that row var out. Carrying it here lets
+        // the enclosing un-annotated wrapper infer an OPEN return row and tie its
+        // param row to its return row, instead of silently inferring pure and
+        // laundering the callback's real effects. A named-effect handler
+        // (caughtByOp2) does NOT discharge an unknown polymorphic tail, so this
+        // propagates regardless of caughtByOp2.
+        fnType.effects?.rowVar?.let { collector.effectRowVars.add(it) }
         collector.performed = collector.performed || (fnType.effects?.performed ?: false)
     }
     // Row subtraction extends to any effects that flowed up via

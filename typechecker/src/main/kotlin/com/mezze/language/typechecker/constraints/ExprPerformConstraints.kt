@@ -248,6 +248,12 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         constraints = allConstraints,
         effects = remainingEffects,
         effectInstances = remainingEffectInstances,
+        // #256: a handler for specific NAMED effects does not discharge a
+        // polymorphic tail `<r>` (it could be instantiated with effects the
+        // handler doesn't cover), so carry the row var through unchanged. Sound
+        // over-approximation: may keep an open tail that's actually closed, never
+        // the reverse.
+        effectRowVars = exprResult.effectRowVars,
         performed = true,
         abilityConstraints = exprResult.abilityConstraints,
         associatedTypeConstraints = exprResult.associatedTypeConstraints,

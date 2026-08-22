@@ -75,6 +75,10 @@ class ExpressionConstraintGenerator {
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val effects = mutableSetOf<String>()
         val effectInstances = mutableSetOf<MezzeType.EffectInstance>()
+        // #256/#268: row vars that flow OUT of this expression's effect row —
+        // e.g. calling a callback param `f: {..} -> _ <r>` contributes `r` so the
+        // enclosing lambda carries it in its OWN row. OR-merged like `performed`.
+        val effectRowVars = mutableSetOf<RowVar>()
         var performed = false
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
@@ -96,6 +100,7 @@ class ExpressionConstraintGenerator {
             undefinedVars.addAll(result.undefinedVariables)
             effects.addAll(result.effects)
             effectInstances.addAll(result.effectInstances)
+            effectRowVars.addAll(result.effectRowVars)
             performed = performed || result.performed
             abilityConstraints.addAll(result.abilityConstraints)
             associatedTypeConstraints.addAll(result.associatedTypeConstraints)
@@ -113,6 +118,7 @@ class ExpressionConstraintGenerator {
             constraints = constraints,
             effects = effects,
             effectInstances = effectInstances,
+            effectRowVars = effectRowVars,
             performed = performed,
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,

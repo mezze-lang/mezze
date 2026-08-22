@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.constraints
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.ModulePath
+import com.mezze.language.ast.RowVar
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.parsedast.ParsedPerform
@@ -209,6 +210,14 @@ data class ConstraintResult(
     val effects: Set<String> = emptySet(),
     val effectInstances: Set<MezzeType.EffectInstance> = emptySet(),
     val performed: Boolean = false,
+    // #256/#268: row vars flowing OUT of this expression's inferred effect row.
+    // When a lambda body calls a callback param `f: {..} -> _ <r>`, calling `f`
+    // contributes `r` here so the enclosing lambda's own effect row can carry it
+    // — i.e. `launder: {f: ..<r>} -> _ <r>` (real row polymorphism), instead of
+    // silently inferring `launder` pure and laundering the callback's effects.
+    // This is a pure inference-time annotation; it never enters
+    // Substitution.rowVarMappings (that path is #268 Stage 2+).
+    val effectRowVars: Set<RowVar> = emptySet(),
     val abilityConstraints: List<Constraint.AbilityRequired> = emptyList(),
     val associatedTypeConstraints: List<Constraint.AssociatedTypeResolution> = emptyList(),
     val undefinedVariables: List<UndefinedVariable> = emptyList(),
