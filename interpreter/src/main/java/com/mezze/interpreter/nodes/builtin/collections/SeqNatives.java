@@ -39,7 +39,7 @@ public final class SeqNatives {
     private static final String[] FIELD_PASS_FAIL = {"pass", "fail"};
     private static final String[] FIELD_KEY_VALUES = {"key", "values"};
     private static final String[] FIELD_L_R = {"l", "r"};
-    private static final String[] FIELD_LOWER_UPPER = {"lower", "upper"};
+    private static final String[] FIELD_START_END = {"start", "end"};
     private static final String[] FIELD_FST_SND_THD = {"fst", "snd", "thd"};
     private static final String[] FIELD_FST_SND_THD_FTH = {"fst", "snd", "thd", "fth"};
 
@@ -1500,7 +1500,7 @@ public final class SeqNatives {
     @TruffleBoundary
     public static MezzeRecord equalRange(MezzeSeq seq, Object target) {
         return MezzeRecord.fromFields(
-            FIELD_LOWER_UPPER,
+            FIELD_START_END,
             new Object[]{lowerBound(seq, target), upperBound(seq, target)}
         );
     }

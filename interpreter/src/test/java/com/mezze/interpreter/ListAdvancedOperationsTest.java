@@ -998,7 +998,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 4, 4, 4, 5, 6] }
             let range = list::equal_range { xs = xs, target = 4 }
-            range.upper - range.lower
+            range.end - range.start
             """);
         assertEquals(3L, result);  // Three 4s
     }
@@ -1009,7 +1009,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5] }
             let range = list::equal_range { xs = xs, target = 3 }
-            range.upper - range.lower
+            range.end - range.start
             """);
         assertEquals(1L, result);  // One 3
     }
@@ -1020,7 +1020,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 4, 5] }
             let range = list::equal_range { xs = xs, target = 3 }
-            range.upper - range.lower
+            range.end - range.start
             """);
         assertEquals(0L, result);  // No 3s
     }
@@ -1031,7 +1031,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 4, 4, 4, 5, 6] }
             let range = list::equal_range { xs = xs, target = 4 }
-            range.lower
+            range.start
             """);
         assertEquals(2L, result);
     }
@@ -1042,7 +1042,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 4, 4, 4, 5, 6] }
             let range = list::equal_range { xs = xs, target = 4 }
-            range.upper
+            range.end
             """);
         assertEquals(5L, result);
     }

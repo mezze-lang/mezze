@@ -1476,17 +1476,17 @@ public final class ListNatives {
 
     /**
      * Find equal range: both lower and upper bound at once.
-     * Returns {lower: Int, upper: Int} representing [lower, upper) half-open interval.
+     * Returns {start: Int, end: Int} representing [start, end) half-open interval.
      * All elements in this range are equal to target.
      * List MUST be sorted.
      */
     @TruffleBoundary
     public static MezzeRecord equalRange(MezzeList list, Object target) {
-        long lower = lowerBound(list, target);
-        long upper = upperBound(list, target);
+        long start = lowerBound(list, target);
+        long end = upperBound(list, target);
         return MezzeRecord.fromFields(
-            new String[]{"lower", "upper"},
-            new Object[]{lower, upper}
+            new String[]{"start", "end"},
+            new Object[]{start, end}
         );
     }
 

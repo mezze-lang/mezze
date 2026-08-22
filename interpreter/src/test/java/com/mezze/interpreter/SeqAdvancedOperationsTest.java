@@ -733,7 +733,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let range = seq::equal_range { xs = [1, 2, 2, 2, 3], x = 2 }
-            range.lower
+            range.start
             """);
         assertEquals(1L, result);
     }
@@ -743,7 +743,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let range = seq::equal_range { xs = [1, 2, 2, 2, 3], x = 2 }
-            range.upper
+            range.end
             """);
         assertEquals(4L, result);
     }
@@ -753,7 +753,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let range = seq::equal_range { xs = [1, 3, 5], x = 2 }
-            range.lower == range.upper
+            range.start == range.end
             """);
         assertEquals(true, result);
     }

@@ -378,7 +378,7 @@ pub let lower_bound: { xs: ['a], x: 'a } -> Int = { xs, x } -> __native_seq_lowe
 ## Returns the last index where x could be inserted in a sorted sequence.
 pub let upper_bound: { xs: ['a], x: 'a } -> Int = { xs, x } -> __native_seq_upper_bound { xs = xs, x = x }
 
-## Returns {lower, upper} bounds for x in a sorted sequence.
+## Returns {start, end} bounds for x in a sorted sequence.
 pub let equal_range: { xs: ['a], x: 'a } -> { start: Int, end: Int } = { xs, x } -> __native_seq_equal_range { xs = xs, x = x }
 
 ## Counts the number of occurrences of an element.

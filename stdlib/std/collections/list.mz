@@ -406,8 +406,8 @@ pub let lower_bound : { xs: List 'a, target: 'a } -> Int = { xs, target } ->
 pub let upper_bound : { xs: List 'a, target: 'a } -> Int = { xs, target } ->
   __native_list_upper_bound { xs = xs, target = target }
 
-## Returns {lower, upper} bounds for target in a sorted list.
-pub let equal_range : { xs: List 'a, target: 'a } -> { lower: Int, upper: Int } = { xs, target } ->
+## Returns {start, end} bounds for target in a sorted list.
+pub let equal_range : { xs: List 'a, target: 'a } -> { start: Int, end: Int } = { xs, target } ->
   __native_list_equal_range { xs = xs, target = target }
 
 ## Binary search with a custom comparator.
