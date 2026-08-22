@@ -117,6 +117,14 @@ internal class VariantSolver(
             return null
         }
 
+        // #263: a closed candidate that only PARTIALLY covers the constructor set
+        // must not abort the scan — a later candidate may fully cover it (two
+        // imported variants can share a constructor name). Remember the first
+        // partial-cover failure and only return it once every candidate is
+        // exhausted with no full match, so acceptance no longer depends on
+        // candidate/import order. See project_tc_audit_2026-08 (#12).
+        var deferredFailure: VariantInferenceResult.Failure? = null
+
         for ((typeDecl, definition) in candidateVariants) {
             val typeName = typeDecl.name
             val declaredConstructors = definition.constructors.map { it.name }.toSet()
@@ -159,16 +167,20 @@ internal class VariantSolver(
                 val invalidConstructors = constructors - declaredConstructors
 
                 if (invalidConstructors.isNotEmpty()) {
-                    val suggestions = invalidConstructors.map { invalid ->
-                        val suggestion = StringDistance.suggestDidYouMean(
-                            invalid,
-                            declaredConstructors.toList()
-                        )
-                        if (suggestion != null) "'$invalid' ($suggestion)" else "'$invalid'"
+                    // Partial cover — defer the failure and try the next candidate.
+                    if (deferredFailure == null) {
+                        val suggestions = invalidConstructors.map { invalid ->
+                            val suggestion = StringDistance.suggestDidYouMean(
+                                invalid,
+                                declaredConstructors.toList()
+                            )
+                            if (suggestion != null) "'$invalid' ($suggestion)" else "'$invalid'"
+                        }
+                        val errorMsg = "Constructor(s) ${suggestions.joinToString()} not found in closed variant '$typeName'. " +
+                                      "Available constructors: ${declaredConstructors.joinToString()}"
+                        deferredFailure = VariantInferenceResult.Failure(errorMsg)
                     }
-                    val errorMsg = "Constructor(s) ${suggestions.joinToString()} not found in closed variant '$typeName'. " +
-                                  "Available constructors: ${declaredConstructors.joinToString()}"
-                    return VariantInferenceResult.Failure(errorMsg)
+                    continue
                 }
 
                 val variantType = if (freshArgs.isNotEmpty()) {
@@ -180,7 +192,9 @@ internal class VariantSolver(
             }
         }
 
-        return null
+        // No candidate fully covered the constructor set: surface the deferred
+        // partial-cover failure if we saw one, else fall through (null = unresolved).
+        return deferredFailure
     }
 
     fun solveHasConstructor(
