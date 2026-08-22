@@ -519,7 +519,14 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
             occursCheck(typeVar, type.valueType)
 
         is MezzeType.SuspendType ->
-            occursCheck(typeVar, type.valueType)
+            // #264: also recurse into the effect row — a var that lives only in a
+            // suspend's effect-instance associated types (e.g. `<Exception having
+            // 'error='a>`) must still trip the occurs-check, exactly as the
+            // FunctionType branch does. The substitution engine substitutes into
+            // these rows, so an occurs-check that ignored them could bind a var to a
+            // type that still contains it (an ill-formed cyclic type).
+            occursCheck(typeVar, type.valueType) ||
+            occursCheckEffectRow(typeVar, type.effects)
 
         is MezzeType.NewtypeType -> occursCheck(typeVar, type.wrappedType)
 
@@ -543,6 +550,14 @@ private fun occursCheckEffectRow(typeVar: TypeVar, effectRow: MezzeType.EffectRo
         instance.associatedTypes.values.any { occursCheck(typeVar, it) }
     }
 }
+
+/** #264: free vars living in an effect row's effect-instance associated types
+ *  (mirrors [occursCheckEffectRow]). Used by collectFreeTypeVars for SuspendType
+ *  and standalone EffectRow so generalization accounts for them. */
+private fun collectFreeTypeVarsInEffectRow(effectRow: MezzeType.EffectRow): Set<TypeVar> =
+    effectRow.effectInstances
+        .flatMap { instance -> instance.associatedTypes.values.flatMap { collectFreeTypeVars(it) } }
+        .toSet()
 
 fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
     return when (type) {
@@ -579,11 +594,15 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
         is MezzeType.MapType ->
             collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
 
-        is MezzeType.SuspendType -> collectFreeTypeVars(type.valueType)
+        // #264: include vars living in the suspend's effect-instance associated
+        // types (mirrors occursCheckEffectRow), so generalization counts them and
+        // can't quantify a var that's actually free in a suspended effect row.
+        is MezzeType.SuspendType ->
+            collectFreeTypeVars(type.valueType) + collectFreeTypeVarsInEffectRow(type.effects)
 
         is MezzeType.NewtypeType -> collectFreeTypeVars(type.wrappedType)
 
-        is MezzeType.EffectRow -> emptySet()
+        is MezzeType.EffectRow -> collectFreeTypeVarsInEffectRow(type)
 
         is MezzeType.IntType,
         is MezzeType.FloatType,

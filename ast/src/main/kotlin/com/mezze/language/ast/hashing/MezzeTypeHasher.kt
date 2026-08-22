@@ -86,6 +86,9 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.RecordType -> {
             b.append(byteArrayOf(HashTags.RECORD_TYPE))
             type.typeHash?.let { b.appendBoolean(true); b.append(it.hex) } ?: b.appendBoolean(false)
+            // #264: openness marker — an open `{x, ...}` and a closed `{x}` are
+            // distinct types (different runtime shapes) and must not collide.
+            b.appendBoolean(type.rowVar != null)
             b.appendInt(type.fields.size)
             for (name in type.fields.keys.sorted()) {
                 b.append(name); appendTypeInScope(b, type.fields[name]!!)
@@ -94,6 +97,10 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.VariantType -> {
             b.append(byteArrayOf(HashTags.VARIANT_TYPE))
             type.typeHash?.let { b.appendBoolean(true); b.append(it.hex) } ?: b.appendBoolean(false)
+            // #264: openness + nominal-wall markers — same-constructor variants that
+            // differ only in these flags are distinct types.
+            b.appendBoolean(type.rowVar != null)
+            b.appendBoolean(type.nominalWall)
             b.appendInt(type.constructors.size)
             for (name in type.constructors.keys.sorted()) {
                 b.append(name)
