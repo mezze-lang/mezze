@@ -108,7 +108,6 @@ class EmptyLiteralInferenceTest {
 
     // ===== empty record `{}` where a field is demanded =====
 
-    @Disabled("known-bug (newly surfaced by this audit): field access on empty record `{}` not rejected; file a fix task before enabling")
     @Test fun `field access on an empty record literal is rejected`() {
         // `{}` has no fields; reading `.a` off it must fail — the checker may not
         // invent the field to satisfy the access.
@@ -157,7 +156,6 @@ class EmptyLiteralInferenceTest {
         )
     }
 
-    @Disabled("known-bug (newly surfaced by this audit): empty-seq element type not enforced after pinning; file a fix task before enabling")
     @Test fun `unannotated empty seq pinned to Int cannot then take a Str element`() {
         // EXPECTED-CORRECT: a sound checker must reject the conflicting second pin.
         // Once `xs` is fixed to `[Int]` by the first use, prepending a Str is a clash.

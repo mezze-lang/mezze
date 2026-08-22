@@ -363,14 +363,25 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
         else -> t
     }
 
-    val shouldValidate = if (expr.receiver is ParsedIdentifier) {
-        val rcvr = expr.receiver as ParsedIdentifier
-        val rcvrKey = BindingKey(qualifier = rcvr.qualifier?.segments?.lastOrNull(), localName = rcvr.localName).toKeyString()
-        rcvrKey in context.recordLiteralBindings
-    } else if (expr.receiver is ParsedMemberAccess) {
-        receiverResult.type is MezzeType.RecordType
-    } else {
-        false
+    // #277: validate a field access whenever the receiver's type is ALREADY a
+    // concrete record (a RecordType, or a TypeApplication of a declared record) —
+    // i.e. its shape is known, so an undeclared field is a definite error. Keyed
+    // on the receiver's resolved TYPE, not on a binding-name set: `let r = {}` /
+    // `r.a` and `let r = {b=1}` / `r.a` are rejected because `r`'s type is a
+    // concrete record lacking the field, regardless of how `r` was bound. An
+    // unannotated param `{r} -> r.a` is NOT validated here — its receiver type is
+    // still a VarType (the shape is being DISCOVERED by this very access), so the
+    // HasField constraint grows the row instead.
+    val receiverIsConcreteRecord = when (val t = receiverResult.type) {
+        is MezzeType.RecordType -> true
+        is MezzeType.TypeApplication ->
+            (context.typeDeclarations[t.constructor]?.definition as? ParsedRecordDef) != null
+        else -> false
+    }
+    val shouldValidate = when (expr.receiver) {
+        is ParsedIdentifier -> receiverIsConcreteRecord
+        is ParsedMemberAccess -> receiverResult.type is MezzeType.RecordType
+        else -> false
     }
 
     if (shouldValidate) {
@@ -387,7 +398,12 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
             else -> emptySet<String>() to false
         }
 
-        if (fieldNames.isNotEmpty() && expr.member !in fieldNames) {
+        // #277: `shouldValidate` guarantees the receiver is a CONCRETE record, so
+        // `fieldNames` is its real field set — an EMPTY set means a genuinely
+        // empty record (`{}`), where every access is undeclared. Don't short-
+        // circuit on emptiness (the old `fieldNames.isNotEmpty()` gate let `{}`.a
+        // and unknown fields on empty records slip through).
+        if (expr.member !in fieldNames) {
             val suggestion = findClosestMatch(expr.member, fieldNames)
             val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
             val memberLoc = memberAccessFieldLoc(expr)
