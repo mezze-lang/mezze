@@ -201,6 +201,11 @@ sealed interface Constraint {
         val targetTypeName: String,
         val methodType: MezzeType,
         val implContentHash: Hash,
+        // #280/F2: the target type's declaration content hash, so the deferred
+        // solve picks the impl by the SOLVED receiver's hash (rename-safe,
+        // module-distinct) rather than by bare `targetTypeName`. `null` for
+        // builtins with no hash — selection falls back to the name then.
+        val targetTypeHash: Hash? = null,
     )
 }
 
@@ -285,6 +290,10 @@ data class ConstraintResult(
     data class InherentImplCandidate(
         val targetTypeName: String,
         val implContentHash: Hash,
+        // #280/F1: target type's declaration content hash, so emit picks the impl
+        // by the SOLVED receiver's hash (rename-safe, module-distinct) rather than
+        // by bare `targetTypeName`. `null` for builtins — falls back to name.
+        val targetTypeHash: Hash? = null,
     )
     data class UndefinedVariable(
         val name: String,

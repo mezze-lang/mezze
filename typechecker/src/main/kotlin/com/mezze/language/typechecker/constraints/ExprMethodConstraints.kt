@@ -770,7 +770,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             // receiver type.
             candidateImpls = if (deferImplByReceiver) {
                 inherentMethods.map {
-                    ConstraintResult.InherentImplCandidate(it.targetTypeName, it.implContentHash)
+                    ConstraintResult.InherentImplCandidate(it.targetTypeName, it.implContentHash, it.targetTypeHash)
                 }
             } else emptyList(),
         )
@@ -857,6 +857,7 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
                     targetTypeName = mi.targetTypeName,
                     methodType = fnType,
                     implContentHash = mi.implContentHash,
+                    targetTypeHash = mi.targetTypeHash,
                 )
             },
             argsType = argumentResult.type,
@@ -902,7 +903,7 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
         implSourceFile = resolvedCandidates.first().first.implSourceFile,
         methodFunctionType = syntheticFnType,
         candidateImpls = resolvedCandidates.map { (mi, _) ->
-            ConstraintResult.InherentImplCandidate(mi.targetTypeName, mi.implContentHash)
+            ConstraintResult.InherentImplCandidate(mi.targetTypeName, mi.implContentHash, mi.targetTypeHash)
         },
     )
 

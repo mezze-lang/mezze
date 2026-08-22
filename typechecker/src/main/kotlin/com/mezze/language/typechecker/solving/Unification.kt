@@ -751,22 +751,18 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
 }
 
 private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeType.TypeApplication, registry: DeclarationRegistry): UnificationResult {
-    // #280/F8: `typeHash` (the declaration content hash, added "for rename-safe
-    // identity") is the authoritative nominal identity. When BOTH sides carry a
-    // hash, it DECIDES: equal hash ⇒ same declaration ⇒ match; DIFFERENT hash ⇒
-    // distinct declarations (two modules' same-named `Widget`, or a version skew)
-    // ⇒ NOT a name match — fall through to the expand / #148 in-scope nominal
-    // barrier below, which structurally compares or rejects. Previously the bare
-    // `app1.constructor == app2.constructor` name clause won FIRST, so same-named
-    // distinct types unified before the hash could reject them. The name is used
-    // only when a hash is absent (builtins / pre-hash construction).
-    val h1 = app1.typeHash
-    val h2 = app2.typeHash
-    val constructorsMatch = if (h1 != null && h2 != null) {
-        h1 == h2
-    } else {
-        app1.constructor == app2.constructor
-    }
+    // #280/F8: a NAME match unifies (as before), and an equal typeHash on
+    // differing names ALSO unifies (a rename-safe alias). Note: we do NOT reject
+    // a name match whose hashes DIFFER — `typeHash` is not stable across a
+    // RECURSIVE self-reference (e.g. `type Json = | … JArray {items:[Json]} |`,
+    // where the inner and outer `Json` can carry different hashes), so a hash
+    // mismatch is not a reliable "distinct declaration" signal. The cross-module
+    // same-name collision the audit worried about is instead caught structurally
+    // by the #148 in-scope nominal barrier below (and by NewtypeType/#278 for the
+    // opaque case). Keying rejection on hash inequality here over-rejects legal
+    // recursive types — see JsonCodecInterpreterTest.
+    val constructorsMatch = app1.constructor == app2.constructor ||
+        (app1.typeHash != null && app2.typeHash != null && app1.typeHash == app2.typeHash)
 
     if (!constructorsMatch) {
         val expanded1 = expandTypeApplicationToVariant(app1, registry)

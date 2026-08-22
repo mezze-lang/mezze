@@ -821,9 +821,20 @@ class TypedAstBuilder(
         val resolvedImplHash: Hash? = run {
             if (methodInfo.candidateImpls.isEmpty()) return@run methodInfo.implContentHash
             val solvedReceiver = substitution.apply(receiverExpr.type)
-            val name = receiverTypeName(solvedReceiver)
-            methodInfo.candidateImpls.firstOrNull { it.targetTypeName == name }?.implContentHash
-                ?: methodInfo.implContentHash
+            // #280/F1: prefer the SOLVED receiver's declaration hash — it is the
+            // rename-safe, module-distinct identity, so two same-named inherent
+            // impls from different modules pick correctly instead of by first-name-
+            // match (silent wrong-body dispatch). Name only when the receiver has
+            // no hash (builtins). Mirrors ExprMethodConstraints' resolution.
+            val receiverHash = (solvedReceiver as? MezzeType.VariantType)?.typeHash
+                ?: (solvedReceiver as? MezzeType.TypeApplication)?.typeHash
+            val byHash = if (receiverHash != null) {
+                methodInfo.candidateImpls.firstOrNull { it.targetTypeHash == receiverHash }?.implContentHash
+            } else null
+            byHash ?: run {
+                val name = receiverTypeName(solvedReceiver)
+                methodInfo.candidateImpls.firstOrNull { it.targetTypeName == name }?.implContentHash
+            } ?: methodInfo.implContentHash
         }
 
         val receiverFieldName = methodInfo.receiverFieldName

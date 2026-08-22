@@ -21,34 +21,29 @@ class NominalHashIdentityTest {
     private val hashA = Hash("aaaa000000000000000000000000000000000000000000000000000000000000")
     private val hashB = Hash("bbbb000000000000000000000000000000000000000000000000000000000000")
 
-    // ---- F8: TypeApplication (the LIVE path — user ADTs/newtypes are TypeApplication) ----
+    // ---- F8: TypeApplication ----
+    // NOTE: the hash-first REJECT for TypeApplication was reverted — `typeHash` is
+    // not stable across recursive self-references (e.g. `type Json = | … JArray
+    // {items:[Json]} |`), so a hash mismatch is not a reliable "distinct decl"
+    // signal and over-rejected legal recursive types (JsonCodecInterpreterTest).
+    // TypeApplication now unifies by NAME (or equal hash). Cross-module same-name
+    // distinct-decl safety for TypeApps is provided structurally by the #148
+    // in-scope nominal barrier, not by hash-reject here.
 
-    @Test fun `same-named type applications with DIFFERENT hashes do not unify`() {
+    @Test fun `same-named type applications unify by name even when hashes differ`() {
         val app1 = MezzeType.TypeApplication("Widget", emptyList(), typeHash = hashA)
         val app2 = MezzeType.TypeApplication("Widget", emptyList(), typeHash = hashB)
         val result = unify(app1, app2)
-        assertIs<UnificationResult.Failure>(
-            result,
-            "two distinct declarations named 'Widget' (different typeHash) must NOT unify",
-        )
+        // Name match wins; hash inequality does NOT reject (recursive-type safety).
+        assertIs<UnificationResult.Success>(result)
     }
 
-    @Test fun `same-named type applications with the SAME hash unify`() {
+    @Test fun `differently-named type applications with the SAME hash unify (rename-safe alias)`() {
+        // The hash clause ADDS matches: a rename-safe alias (name differs, hash same).
         val app1 = MezzeType.TypeApplication("Widget", emptyList(), typeHash = hashA)
-        val app2 = MezzeType.TypeApplication("Widget", emptyList(), typeHash = hashA)
+        val app2 = MezzeType.TypeApplication("Gadget", emptyList(), typeHash = hashA)
         val result = unify(app1, app2)
-        assertIs<UnificationResult.Success>(
-            result,
-            "the same declaration (equal typeHash) must unify with itself",
-        )
-    }
-
-    @Test fun `same-named type applications with NO hash fall back to name (builtins)`() {
-        // Builtins carry no typeHash; name is the only identity — must still unify.
-        val app1 = MezzeType.TypeApplication("List", listOf(MezzeType.IntType))
-        val app2 = MezzeType.TypeApplication("List", listOf(MezzeType.IntType))
-        val result = unify(app1, app2)
-        assertIs<UnificationResult.Success>(result, "builtins with no hash unify by name")
+        assertIs<UnificationResult.Success>(result, "equal typeHash on differing names is a rename-safe alias")
     }
 
     // ---- F0: NewtypeType (defensive — currently near-unreachable, but hardened) ----

@@ -762,8 +762,15 @@ class ConstraintSolver(
             return ConstraintResult.Deferred("Waiting for receiver type of .${constraint.methodName} to resolve")
         }
 
+        // #280/F2: prefer the SOLVED receiver's declaration hash (rename-safe,
+        // module-distinct) so two same-named inherent-method candidates from
+        // different modules pick correctly instead of by first-name-match. Name
+        // only when the receiver has no hash (builtins).
+        val receiverHash = (receiver as? MezzeType.VariantType)?.typeHash
+            ?: (receiver as? MezzeType.TypeApplication)?.typeHash
         val typeName = receiverTypeName(receiver)
-        val picked = typeName?.let { name -> constraint.candidates.firstOrNull { it.targetTypeName == name } }
+        val picked = (receiverHash?.let { h -> constraint.candidates.firstOrNull { it.targetTypeHash == h } })
+            ?: typeName?.let { name -> constraint.candidates.firstOrNull { it.targetTypeName == name } }
         if (picked == null) {
             val shown = typeName ?: prettyPrintType(receiver)
             val known = constraint.candidates.map { it.targetTypeName }.distinct().joinToString(", ")
