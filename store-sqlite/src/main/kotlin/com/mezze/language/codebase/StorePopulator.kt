@@ -35,6 +35,24 @@ data class PopulateDelta(
 object StorePopulator {
 
     /**
+     * #280/F11: a stable, collision-free key for an ability impl's target
+     * type(s), used as the `ability_impls.target_type` index cell. Each target
+     * type is content-hashed (via MezzeTypeHasher, which #278 wired to fold a
+     * NewtypeType/TypeApplication's declaration hash in), and ALL targets are
+     * joined so multi-param impls keep distinct identity. Replaces the old
+     * lossy `targetTypes.firstOrNull().toString()` that collided distinct types
+     * and dropped extra params.
+     */
+    private fun abilityImplTargetKey(targetTypes: List<com.mezze.language.ast.MezzeType>): String {
+        if (targetTypes.isEmpty()) return "unknown"
+        return targetTypes.joinToString(",") { t ->
+            val b = com.mezze.language.ast.hashing.MezzeHashBuilder()
+            com.mezze.language.ast.hashing.appendType(b, t)
+            b.buildHash().hex
+        }
+    }
+
+    /**
      * Scatter a TypeCheckResult into the store, skipping definitions whose
      * content hash already exists. Returns the delta.
      *
@@ -584,7 +602,16 @@ object StorePopulator {
                     StoreSerialization.serializeTypedAbilityImpl(impl), null)
                 store.addEdge(impl.hash, impl.abilityHash, EdgeKind.IMPLEMENTS)
             }
-            val targetType = impl.targetTypes.firstOrNull()?.toString() ?: "unknown"
+            // #280/F11: key the target-type index cell on the CONTENT HASH of the
+            // target type(s), NOT `MezzeType.toString()`. toString() is
+            // depth-truncated & lossy (two distinct types can print identically —
+            // see project_mezzetype_tostring_lossy), so a toString-keyed cell
+            // silently collided distinct targets (INSERT OR REPLACE shadowing) and
+            // dropped all but `firstOrNull()` of a multi-param impl's targets. The
+            // content hash is stable and collision-free; joining ALL target hashes
+            // preserves multi-param identity. Column stays a String, now holding a
+            // hash-hex key (like the ability_hash/hash columns beside it).
+            val targetType = abilityImplTargetKey(impl.targetTypes)
             store.putAbilityImpl(impl.hash, impl.abilityHash, targetType, modulePath)
         }
 

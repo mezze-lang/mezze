@@ -286,10 +286,8 @@ data class Substitution(
                 effects = applyToEffectRowWithVisited(type.effects, visitedVars, chainCache)
             )
 
-            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-                type.name,
-                type.constructor,
-                applyWithVisited(type.wrappedType, visitedVars, chainCache)
+            is MezzeType.NewtypeType -> type.copy(
+                wrappedType = applyWithVisited(type.wrappedType, visitedVars, chainCache)
             )
 
             is MezzeType.EffectRow -> applyToEffectRowWithVisited(type, visitedVars, chainCache)
@@ -462,10 +460,8 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         valueType = closeGeneratedRowVars(type.valueType, mustBeOpenRowVars),
         effects = type.effects
     )
-    is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-        type.name,
-        type.constructor,
-        closeGeneratedRowVars(type.wrappedType, mustBeOpenRowVars)
+    is MezzeType.NewtypeType -> type.copy(
+        wrappedType = closeGeneratedRowVars(type.wrappedType, mustBeOpenRowVars)
     )
     is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
     is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,

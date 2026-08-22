@@ -397,10 +397,8 @@ class ExpressionConstraintGenerator {
                 args = type.args.map { applyTypeVarSubstitution(it, substitution) },
                 typeHash = type.typeHash
             )
-            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-                type.name,
-                type.constructor,
-                applyTypeVarSubstitution(type.wrappedType, substitution)
+            is MezzeType.NewtypeType -> type.copy(
+                wrappedType = applyTypeVarSubstitution(type.wrappedType, substitution)
             )
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
             is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,

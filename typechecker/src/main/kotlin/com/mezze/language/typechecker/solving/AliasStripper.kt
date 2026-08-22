@@ -90,8 +90,7 @@ object AliasStripper {
             valueType = stripImpl(type.valueType, inScope, registry, recursionGuard),
             effects = stripEffectRow(type.effects, inScope, registry, recursionGuard)
         )
-        is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-            name = type.name, constructor = type.constructor,
+        is MezzeType.NewtypeType -> type.copy(
             wrappedType = stripImpl(type.wrappedType, inScope, registry, recursionGuard)
         )
         is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,

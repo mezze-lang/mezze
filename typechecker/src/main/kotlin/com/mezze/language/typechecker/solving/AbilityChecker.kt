@@ -1060,7 +1060,14 @@ internal class AbilityChecker(
     private fun typeMatchesMezzeType(expected: MezzeType, actual: MezzeType): Boolean {
         if (expected == actual) return true
         if (expected is MezzeType.TypeApplication && actual is MezzeType.TypeApplication) {
-            return expected.constructor == actual.constructor
+            // #280/F8: prefer the declaration hash (rename-safe nominal identity).
+            // When BOTH carry a hash it decides — a hash mismatch on equal names
+            // means distinct declarations and must NOT match. Name only as the
+            // builtin/pre-hash fallback. Mirrors unifyTypeApplications.
+            val h1 = expected.typeHash
+            val h2 = actual.typeHash
+            return if (h1 != null && h2 != null) h1 == h2
+                   else expected.constructor == actual.constructor
         }
         return false
     }

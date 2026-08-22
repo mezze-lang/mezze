@@ -647,10 +647,8 @@ internal class VariantSolver(
                     effects = type.effects
                 )
             }
-            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-                type.name,
-                type.constructor,
-                closeRowVarsInType(type.wrappedType, rowVarsToClose)
+            is MezzeType.NewtypeType -> type.copy(
+                wrappedType = closeRowVarsInType(type.wrappedType, rowVarsToClose)
             )
             is MezzeType.VarType,
             is MezzeType.IntType,

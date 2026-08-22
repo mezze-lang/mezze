@@ -70,6 +70,12 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.NewtypeType -> {
             b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x10))
             b.append(type.name); b.append(type.constructor)
+            // #278/F0: fold the declaration hash into the structural hash when
+            // present, so two same-named newtypes from different declarations hash
+            // DISTINCTLY here too (mirrors the TypeApplication case below). Without
+            // this, `MezzeTypeHasher` collapses them and any hash-based identity
+            // downstream re-opens the collision F0 closes in unification.
+            type.typeHash?.let { b.appendBoolean(true); b.append(it.hex) } ?: b.appendBoolean(false)
             appendTypeInScope(b, type.wrappedType)
         }
         is MezzeType.TypeApplication -> {

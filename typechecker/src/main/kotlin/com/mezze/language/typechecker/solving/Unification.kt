@@ -263,7 +263,16 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         type1 is MezzeType.OrderingType && type2 is MezzeType.OrderingType -> UnificationResult.Success(Substitution.empty)
 
         type1 is MezzeType.NewtypeType && type2 is MezzeType.NewtypeType -> {
-            if (type1.name == type2.name) {
+            // #278/F0: newtypes are NOMINAL, module-opaque — same type only if same
+            // DECLARATION. Key on the declaration content hash when BOTH sides carry
+            // one; a hash mismatch means distinct declarations (two modules' same-named
+            // `Token`, or a version skew) and MUST fail, even when the names match.
+            // Fall back to the bare name only when a hash is absent (builtins /
+            // pre-hash construction). Mirrors the TypeApplication hash-first fix (F8).
+            val h1 = type1.typeHash
+            val h2 = type2.typeHash
+            val sameDeclaration = if (h1 != null && h2 != null) h1 == h2 else type1.name == type2.name
+            if (sameDeclaration) {
                 unify(type1.wrappedType, type2.wrappedType, registry)
             } else {
                 UnificationResult.Failure(
@@ -742,8 +751,22 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
 }
 
 private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeType.TypeApplication, registry: DeclarationRegistry): UnificationResult {
-    val constructorsMatch = app1.constructor == app2.constructor ||
-        (app1.typeHash != null && app2.typeHash != null && app1.typeHash == app2.typeHash)
+    // #280/F8: `typeHash` (the declaration content hash, added "for rename-safe
+    // identity") is the authoritative nominal identity. When BOTH sides carry a
+    // hash, it DECIDES: equal hash ⇒ same declaration ⇒ match; DIFFERENT hash ⇒
+    // distinct declarations (two modules' same-named `Widget`, or a version skew)
+    // ⇒ NOT a name match — fall through to the expand / #148 in-scope nominal
+    // barrier below, which structurally compares or rejects. Previously the bare
+    // `app1.constructor == app2.constructor` name clause won FIRST, so same-named
+    // distinct types unified before the hash could reject them. The name is used
+    // only when a hash is absent (builtins / pre-hash construction).
+    val h1 = app1.typeHash
+    val h2 = app2.typeHash
+    val constructorsMatch = if (h1 != null && h2 != null) {
+        h1 == h2
+    } else {
+        app1.constructor == app2.constructor
+    }
 
     if (!constructorsMatch) {
         val expanded1 = expandTypeApplicationToVariant(app1, registry)

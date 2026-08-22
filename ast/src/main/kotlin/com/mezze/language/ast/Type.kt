@@ -197,7 +197,16 @@ sealed interface MezzeType {
     data class NewtypeType(
         val name: String,            // Type name: "UserId"
         val constructor: String,     // Constructor name: "UserId"
-        val wrappedType: MezzeType   // Inner type: IntType, RecordType, etc.
+        val wrappedType: MezzeType,  // Inner type: IntType, RecordType, etc.
+        // #278/F0: content hash of the DECLARATION (carries module context) for
+        // rename-safe, module-distinct nominal identity — mirrors
+        // VariantType.typeHash / TypeApplication.typeHash. A newtype is a nominal,
+        // module-opaque type, so two newtypes are the same type only if they are
+        // the same declaration. Unification keys on this hash when present (name is
+        // display/fallback only), so two modules each declaring `newtype Token =
+        // Token Str` no longer silently unify. `null` for builtins / pre-hash
+        // construction; unification falls back to name only then.
+        val typeHash: com.mezze.language.typedast.Hash? = null
     ) : MezzeType {
         override fun toString(): String = safeToString(
             name,
