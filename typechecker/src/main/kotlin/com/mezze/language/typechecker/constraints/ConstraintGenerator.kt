@@ -1191,7 +1191,7 @@ class ConstraintGenerator(
 
 
 internal fun bodyContainsNativeCall(expr: ParsedExpr): Boolean = when (expr) {
-    is ParsedIdentifier -> expr.localName.startsWith("__native_")
+    is ParsedIdentifier -> expr.localName.startsWith(com.mezze.language.ast.MagicParams.NATIVE_PREFIX)
     is ParsedLambda -> bodyContainsNativeCall(expr.body)
     is ParsedFunctionCall -> bodyContainsNativeCall(expr.function)
     is ParsedDo -> bodyContainsNativeCall(expr.result) || expr.statements.any { stmt ->

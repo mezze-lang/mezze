@@ -54,7 +54,7 @@ object InvariantChecker {
         for ((key, result) in constraintResults) {
             val freeVars = collectFreeTypeVars(result.type)
             for (tv in freeVars) {
-                if (tv.name.startsWith("__internal_")) {
+                if (tv.name.startsWith(com.mezze.language.ast.MagicParams.INTERNAL_PREFIX)) {
                     throw InvariantViolation(
                         "[$phase] Internal type variable leaked into constraint result for '$key': $tv"
                     )

@@ -1423,7 +1423,7 @@ class TypedAstBuilder(
             return BindingRef.ByHash(binding.contentHash)
         }
 
-        if (name.startsWith("__native_") || name == "crash") {
+        if (com.mezze.language.ast.MagicParams.isIntrinsicSymbol(name)) {
             return BindingRef.Native(name)
         }
 

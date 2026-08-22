@@ -33,4 +33,33 @@ object MagicParams {
     /** Strip the prefix off a dict-param name, returning the method name. */
     fun dictMethodOf(paramName: String): String? =
         if (paramName.startsWith(DICT_PREFIX)) paramName.removePrefix(DICT_PREFIX) else null
+
+    // ── Compiler-internal magic IDENTIFIER prefixes / sentinels ──────────────
+    // Same "one source of truth" intent as the params above: these are a private
+    // typechecker↔interpreter naming contract (no user rename), but the contract
+    // used to be enforced by scattered `startsWith("__native_")` / `== "crash"`
+    // string literals across ~6 files. Routing them through these predicates keeps
+    // the convention in one place so a change can't silently desync copies.
+
+    /** Native FFI-bridge symbols, e.g. `__native_int_add`. Given a fresh/bottom
+     *  type and treated as an intrinsic (no undefined-variable error). */
+    const val NATIVE_PREFIX = "__native_"
+
+    /** The `crash` intrinsic — like a native symbol, returns bottom. */
+    const val CRASH = "crash"
+
+    /** Record-spread sentinel field: a `{...rest}` entry lowers to a field named
+     *  `__spread__` carrying the spread source (recognised at record-build/merge). */
+    const val SPREAD_FIELD = "__spread__"
+
+    /** Synthetic top-level bare-expression decl, e.g. `__toplevel_expr_0`. */
+    const val TOPLEVEL_EXPR_PREFIX = "__toplevel_expr_"
+
+    /** Internal solver-injected type-var name prefix (invariant checks skip these). */
+    const val INTERNAL_PREFIX = "__internal_"
+
+    /** True if [name] is an intrinsic symbol the FFI bridge owns (native or crash),
+     *  which the typechecker types as fresh/bottom and exempts from undefined-var. */
+    fun isIntrinsicSymbol(name: String): Boolean =
+        name.startsWith(NATIVE_PREFIX) || name == CRASH
 }

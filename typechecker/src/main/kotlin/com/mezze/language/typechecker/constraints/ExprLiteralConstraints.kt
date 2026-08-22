@@ -229,8 +229,11 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
             // path) that was silently accepting `__native_str_eq { l = u, r = u }`
             // where u: UserId — leaking nominal opacity through the native
             // boundary. `crash` remains available everywhere (universal panic).
-            if (expr.localName == "crash" ||
-                (expr.localName.startsWith("__native_") && isStdlibModule)) {
+            // #281: recognise the intrinsic names via MagicParams constants
+            // (single-sourced) rather than raw string literals, but keep the
+            // #109 stdlib-only gate on the native prefix.
+            if (expr.localName == com.mezze.language.ast.MagicParams.CRASH ||
+                (expr.localName.startsWith(com.mezze.language.ast.MagicParams.NATIVE_PREFIX) && isStdlibModule)) {
                 val freshType = MezzeType.VarType(TypeVar.fresh())
                 return ConstraintResult(
                     type = freshType,

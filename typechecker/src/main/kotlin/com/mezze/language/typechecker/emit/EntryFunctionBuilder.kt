@@ -21,7 +21,7 @@ object EntryFunctionBuilder {
 
         for (i in decls.indices) {
             val decl = decls[i]
-            if (decl.name.startsWith("__toplevel_expr_")) {
+            if (decl.name.startsWith(com.mezze.language.ast.MagicParams.TOPLEVEL_EXPR_PREFIX)) {
                 if (i == decls.lastIndex) {
                     lastExprValue = decl.value
                     lastType = decl.scheme.type

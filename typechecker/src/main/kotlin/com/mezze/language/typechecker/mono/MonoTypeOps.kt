@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.mono
 
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.VariantAliases
 
@@ -78,16 +79,12 @@ internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean 
     if (concrete is MezzeType.TypeApplication && target is MezzeType.TypeApplication) {
         return concrete.constructor == target.constructor
     }
-    // Container-to-TypeApp aliases
+    // Container-to-TypeApp aliases. The structural-container name mapping is the
+    // single source in BuiltinTypes.builtinConstructorName (must agree with the
+    // compiler's typeMatchesTarget). RecordType/VariantType keep their own rules.
     if (target is MezzeType.TypeApplication) {
+        BuiltinTypes.builtinConstructorName(concrete)?.let { return it == target.constructor }
         return when (concrete) {
-            is MezzeType.SeqType -> target.constructor == "Seq"
-            is MezzeType.ListType -> target.constructor == "List"
-            is MezzeType.SetType -> target.constructor == "Set"
-            is MezzeType.MapType -> target.constructor == "Map"
-            is MezzeType.SortedSetType -> target.constructor == "SortedSet"
-            is MezzeType.SortedMapType -> target.constructor == "SortedMap"
-            is MezzeType.BytesType -> target.constructor == "Bytes"
             is MezzeType.RecordType -> concrete.typeName == target.constructor
             is MezzeType.VariantType -> {
                 if (concrete.typeName == target.constructor) return true

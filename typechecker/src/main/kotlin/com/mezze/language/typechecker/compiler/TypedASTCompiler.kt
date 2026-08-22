@@ -972,7 +972,7 @@ class TypedASTCompiler(
                 expr.entries.map { entry ->
                     when (entry) {
                         is TypedRecordEntry.Field -> FieldIR(entry.name, compileExpr(entry.value))
-                        is TypedRecordEntry.Spread -> FieldIR("__spread__", compileExpr(entry.expr))
+                        is TypedRecordEntry.Spread -> FieldIR(com.mezze.language.ast.MagicParams.SPREAD_FIELD, compileExpr(entry.expr))
                     }
                 }, src
             )
@@ -984,7 +984,7 @@ class TypedASTCompiler(
                 expr.updates.map { entry ->
                     when (entry) {
                         is TypedRecordEntry.Field -> FieldIR(entry.name, compileExpr(entry.value))
-                        is TypedRecordEntry.Spread -> FieldIR("__spread__", compileExpr(entry.expr))
+                        is TypedRecordEntry.Spread -> FieldIR(com.mezze.language.ast.MagicParams.SPREAD_FIELD, compileExpr(entry.expr))
                     }
                 }, src
             )
@@ -1504,7 +1504,7 @@ class TypedASTCompiler(
                     val sig = com.mezze.language.truffleir.NativeSignatures
                         .signatureOf(binding.name)
                     if (sig != null && argIR is MakeRecordIR &&
-                        argIR.fields.none { it.name == "__spread__" }
+                        argIR.fields.none { it.name == com.mezze.language.ast.MagicParams.SPREAD_FIELD }
                     ) {
                         // Build positional args[] by looking up each declared
                         // param in the user's MakeRecordIR. Bail to the
@@ -1705,7 +1705,7 @@ class TypedASTCompiler(
                     val wrappedValue = tryWrapDictFunction(entry.value, siblingConcreteTypes, src)
                     FieldIR(entry.name, wrappedValue ?: compileExpr(entry.value))
                 }
-                is TypedRecordEntry.Spread -> FieldIR("__spread__", compileExpr(entry.expr))
+                is TypedRecordEntry.Spread -> FieldIR(com.mezze.language.ast.MagicParams.SPREAD_FIELD, compileExpr(entry.expr))
             }
         }
         return MakeRecordIR(fields, src)
@@ -2745,13 +2745,11 @@ class TypedASTCompiler(
                 concreteType.typeName == targetType.constructor ||
                     VariantAliases.aliasFor(concreteType.constructors.keys) == targetType.constructor
             }
-            concreteType is SeqType && targetType is TypeApplication && targetType.constructor == "Seq" -> true
-            concreteType is BytesType && targetType is TypeApplication && targetType.constructor == "Bytes" -> true
-            concreteType is ListType && targetType is TypeApplication && targetType.constructor == "List" -> true
-            concreteType is SetType && targetType is TypeApplication && targetType.constructor == "Set" -> true
-            concreteType is MapType && targetType is TypeApplication && targetType.constructor == "Map" -> true
-            concreteType is SortedSetType && targetType is TypeApplication && targetType.constructor == "SortedSet" -> true
-            concreteType is SortedMapType && targetType is TypeApplication && targetType.constructor == "SortedMap" -> true
+            // A structural container receiver (SeqType/MapType/…) matches an
+            // `impl … for Seq`/`Map`/… whose target is TypeApplication("Seq"/…).
+            // Name mapping is the single source in BuiltinTypes.builtinConstructorName.
+            targetType is TypeApplication &&
+                com.mezze.language.ast.BuiltinTypes.builtinConstructorName(concreteType) == targetType.constructor -> true
             // Structural-to-structural: an impl written `for ['a]` / `for {Map,Set,…} 'a` has a
             // STRUCTURAL target (SeqType/MapType/…), so a same-kind receiver must match element-
             // agnostically (the target's element is a VarType). Without this, `impl Sized for ['a]`
@@ -2918,7 +2916,7 @@ class TypedASTCompiler(
         val calleeParams = if (scalarDisabled) null else paramNamesForHash(targetHash)
         if (calleeParams != null && argIR is MakeRecordIR) {
             val fields = argIR.fields
-            val hasSpread = fields.any { it.name == "__spread__" }
+            val hasSpread = fields.any { it.name == com.mezze.language.ast.MagicParams.SPREAD_FIELD }
             if (!hasSpread) {
                 val callerNames = fields.map { it.name }
                 if (callerNames.size == calleeParams.size && callerNames.toSet() == calleeParams.toSet()) {
@@ -3058,7 +3056,7 @@ class TypedASTCompiler(
         // bypass that lowering and try to invoke a non-function value.
         val isInlineOpShape = fnIR is com.mezze.language.truffleir.ReadFieldIR
         if (!isInlineOpShape && argIR is MakeRecordIR && argIR.fields.isNotEmpty()
-                && argIR.fields.none { it.name == "__spread__" }) {
+                && argIR.fields.none { it.name == com.mezze.language.ast.MagicParams.SPREAD_FIELD }) {
             // Emit scalar IR for any field-arity ≥ 1. The runtime handles ordering:
             // it computes a permutation from caller field-name order to callee
             // param-name order at inline-cache time. Typecheck has guaranteed the

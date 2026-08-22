@@ -15,6 +15,7 @@ object BuiltinTypes {
     const val SORTED_SET = "SortedSet"
     const val DEQUE = "Deque"
     const val NON_EMPTY_LIST = "NonEmptyList"
+    const val BYTES = "Bytes"
 
     val coreTypeNames = setOf(OPTION, RESULT, LIST, MAP, SET, SEQ, SORTED_MAP, SORTED_SET, DEQUE, NON_EMPTY_LIST)
     val primitiveTypeNames = PrimitiveTypes.allNames
@@ -50,6 +51,30 @@ object BuiltinTypes {
 
     fun isBuiltinTypeName(typeName: String): Boolean {
         return typeName in allBuiltinTypeNames
+    }
+
+    /**
+     * The canonical builtin constructor name for a STRUCTURAL container type
+     * (`SeqType` -> "Seq", `MapType` -> "Map", …), or null for any other type.
+     *
+     * Single source of truth for the container-variant ↔ builtin-name mapping.
+     * Impl-target matchers (`TypedASTCompiler.typeMatchesTarget`,
+     * `MonoTypeOps.typeMatchesTarget`) bridge a structural `SeqType`/`MapType`/…
+     * receiver to a `TypeApplication("Seq"/"Map"/…)` impl target through this —
+     * so the name lives here once instead of being re-spelled in each matcher
+     * (they must agree; a divergent copy silently mis-resolves impls). Note only
+     * `NonEmptyList` has no structural variant (it is always a TypeApplication),
+     * so it is intentionally absent.
+     */
+    fun builtinConstructorName(type: MezzeType): String? = when (type) {
+        is MezzeType.SeqType -> SEQ
+        is MezzeType.ListType -> LIST
+        is MezzeType.SetType -> SET
+        is MezzeType.MapType -> MAP
+        is MezzeType.SortedSetType -> SORTED_SET
+        is MezzeType.SortedMapType -> SORTED_MAP
+        is MezzeType.BytesType -> BYTES
+        else -> null
     }
 
     /**

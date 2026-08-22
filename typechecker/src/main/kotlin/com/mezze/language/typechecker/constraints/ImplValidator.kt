@@ -221,7 +221,7 @@ internal class ImplValidator(
         if (onUndefinedVars != null) {
             if (onUndefinedVars(bodyResult)) return
         } else {
-            val realUndefined = bodyResult.undefinedVariables.filter { !it.name.startsWith("__native_") }
+            val realUndefined = bodyResult.undefinedVariables.filter { !it.name.startsWith(com.mezze.language.ast.MagicParams.NATIVE_PREFIX) }
             if (realUndefined.isNotEmpty()) {
                 val undefinedVar = realUndefined.first()
                 throw TypeCheckError(
