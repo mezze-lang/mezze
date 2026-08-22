@@ -1387,7 +1387,7 @@ public final class SeqNatives {
     @TruffleBoundary
     public static MezzeVariant stddev(MezzeSeq seq) {
         MezzeVariant var = variance(seq);
-        if (var.getConstructorName().equals("None")) {
+        if (var.isNone()) {
             return var;
         }
         double v = (Double) ((MezzeRecord) var.getPayloadValue()).getField("val");

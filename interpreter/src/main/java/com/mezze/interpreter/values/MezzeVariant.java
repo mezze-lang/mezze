@@ -60,6 +60,18 @@ public final class MezzeVariant implements TruffleObject {
     // Cached None instance - singleton since it has no payload
     private static volatile MezzeVariant CACHED_NONE = null;
 
+    // Canonical builtin-constructor tags, cached once. Variant tags are a pure
+    // deterministic function of the constructor name (TagRegistry.getOrCreateTag /
+    // BuiltinTypes.computeVariantTag hash the name), so the same name yields the
+    // same tag in EVERY registry. isSome()/isNone() therefore dispatch on the tag
+    // int (like user pattern matches: getTag() == expectedTag) instead of reverse-
+    // resolving the tag to a String and comparing spellings. See name-dispatch
+    // audit F9 — the tag is the structural identity; the name is only for display.
+    private static final int SOME_TAG =
+        com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(com.mezze.language.ast.BuiltinTypes.SOME, null);
+    private static final int NONE_TAG =
+        com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
+
     /**
      * TagRegistry defines the mapping from constructor names to integer tags.
      * Shared across all variants of the same type.
@@ -68,6 +80,17 @@ public final class MezzeVariant implements TruffleObject {
      * 1. Uses both array (for tag→name) and ConcurrentHashMap (for name→tag)
      * 2. Lock-free tag allocation using CAS operations (20-50% faster under contention)
      * 3. O(1) lookups in both directions
+     *
+     * DESIGN NOTE (name-dispatch audit F10): tags are INTENTIONALLY interned by
+     * constructor NAME, globally — two same-named constructors in different user
+     * ADTs deliberately share one tag. This is the correct seam, not a name-dispatch
+     * hazard: it maps names → stable ints ONCE so all downstream match dispatch is
+     * int-based (`getTag() == expectedTag`), and per-declaration tag uniqueness is
+     * NOT needed because the typechecker guarantees the scrutinee's type before a
+     * match runs — cross-ADT tag collisions are made benign by three TC layers
+     * (duplicate-constructor rejection, stdlib-constructor shadow protection, and
+     * row-poly closure at match sites; see BuiltinTypes.computeVariantTag and
+     * VariantTagCollisionSoundnessTest). Do NOT re-key tags on a declaring-type hash.
      */
     public static final class TagRegistry {
         // Global registry for dynamic tag allocation
@@ -365,14 +388,14 @@ public final class MezzeVariant implements TruffleObject {
      * Check if this is a Some variant.
      */
     public boolean isSome() {
-        return "Some".equals(getConstructorName());
+        return tag == SOME_TAG;
     }
 
     /**
      * Check if this is a None variant.
      */
     public boolean isNone() {
-        return "None".equals(getConstructorName());
+        return tag == NONE_TAG;
     }
 
     /**
