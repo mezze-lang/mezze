@@ -435,6 +435,57 @@ private fun unifyAssociatedTypeMaps(
     return UnificationResult.Success(subst)
 }
 
+/**
+ * #268 Stage 1 — the "unify shared member payloads, thread the composed
+ * substitution" loop shared by record and variant unification (records unify
+ * field types; variants unify constructor payloads). Extracted verbatim from the
+ * four copies (unifyRecords both-open + both-closed; unifyVariants both-open,
+ * one-open, both-closed) so the compose-ordering and short-circuit are stated
+ * ONCE. This is NOT the tail-binding or the nominal/effect-specific branch
+ * policies — those stay per-caller (variant nominal wall, effect caughtByAncestor,
+ * record exact-set-equality). Effects don't call this: their "members" span three
+ * fields and unify associated-types, not a single MezzeType payload.
+ *
+ * For each key in [keys]:
+ *   - `arityConflict(name)` runs first; if it returns a Failure, that is returned.
+ *   - When BOTH sides have a payload, the payloads are unified under the running
+ *     substitution and composed (new-on-left, matching every original site).
+ *   - A key present on only one side is skipped here (openness/missing-member
+ *     policy is the caller's job, applied before/around this loop).
+ */
+private inline fun unifyMemberPayloads(
+    keys: Set<String>,
+    member1: (String) -> MezzeType?,
+    member2: (String) -> MezzeType?,
+    registry: DeclarationRegistry,
+    outer1: MezzeType,
+    outer2: MezzeType,
+    arityConflict: (String) -> UnificationResult.Failure? = { null },
+    mismatchMessage: (name: String, applied1: MezzeType, applied2: MezzeType, inner: String) -> String,
+): UnificationResult {
+    var substitution = Substitution.empty
+    for (name in keys) {
+        arityConflict(name)?.let { return it }
+
+        val payload1 = member1(name)
+        val payload2 = member2(name)
+        if (payload1 != null && payload2 != null) {
+            val applied1 = substitution.apply(payload1)
+            val applied2 = substitution.apply(payload2)
+            val memberSubst = when (val memberResult = unify(applied1, applied2, registry)) {
+                is UnificationResult.Success -> memberResult.substitution
+                is UnificationResult.Failure -> return UnificationResult.Failure(
+                    message = mismatchMessage(name, applied1, applied2, memberResult.message),
+                    type1 = outer1,
+                    type2 = outer2,
+                )
+            }
+            substitution = memberSubst.compose(substitution)
+        }
+    }
+    return UnificationResult.Success(substitution)
+}
+
 private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType, registry: DeclarationRegistry): UnificationResult {
     val fields1 = rec1.fields.keys
     val fields2 = rec2.fields.keys
@@ -442,52 +493,34 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
     if (rec1.rowVar != null || rec2.rowVar != null) {
         val allFields = (fields1 + fields2).toSet()
 
-        var substitution = Substitution.empty
+        // A field declared on ONE record but absent from the OTHER is only sound
+        // if the ABSENT side is OPEN — its row variable can absorb that field. If
+        // the absent side is CLOSED, the field is genuinely missing: `{ a, b, ... }`
+        // still REQUIRES `b`, so a closed `{ a }` value (no `b`) must fail — the
+        // `...` only admits EXTRA fields beyond the declared ones, it doesn't make
+        // them optional. (Openness policy — the caller's job, run before the shared
+        // payload loop below.)
         for (fieldName in allFields) {
-            val fieldType1 = rec1.fields[fieldName]
-            val fieldType2 = rec2.fields[fieldName]
-
-            when {
-                fieldType1 != null && fieldType2 != null -> {
-                    val appliedType1 = substitution.apply(fieldType1)
-                    val appliedType2 = substitution.apply(fieldType2)
-
-                    val fieldSubst = when (val fieldResult = unify(appliedType1, appliedType2, registry)) {
-                        is UnificationResult.Success -> fieldResult.substitution
-                        is UnificationResult.Failure -> return UnificationResult.Failure(
-                            message = formatFieldMismatch(fieldName, appliedType2, appliedType1, fieldResult.message),
-                            type1 = rec1,
-                            type2 = rec2
-                        )
-                    }
-                    substitution = fieldSubst.compose(substitution)
-                }
-                // A field declared on ONE record but absent from the OTHER is
-                // only sound if the ABSENT side is OPEN — its row variable can
-                // absorb that field. If the absent side is CLOSED, the field is
-                // genuinely missing: `{ a, b, ... }` still REQUIRES `b`, so a
-                // closed `{ a }` value (no `b`) must fail — the `...` only admits
-                // EXTRA fields beyond the declared ones, it doesn't make them
-                // optional.
-                fieldType1 != null && fieldType2 == null && rec2.rowVar == null -> {
-                    return UnificationResult.Failure(
-                        message = "record fields don't match: missing '$fieldName'",
-                        type1 = rec1,
-                        type2 = rec2
-                    )
-                }
-                fieldType2 != null && fieldType1 == null && rec1.rowVar == null -> {
-                    return UnificationResult.Failure(
-                        message = "record fields don't match: missing '$fieldName'",
-                        type1 = rec1,
-                        type2 = rec2
-                    )
-                }
-                else -> {}
+            val missingOnClosedRight = fieldName in fields1 && fieldName !in fields2 && rec2.rowVar == null
+            val missingOnClosedLeft = fieldName in fields2 && fieldName !in fields1 && rec1.rowVar == null
+            if (missingOnClosedRight || missingOnClosedLeft) {
+                return UnificationResult.Failure(
+                    message = "record fields don't match: missing '$fieldName'",
+                    type1 = rec1,
+                    type2 = rec2
+                )
             }
         }
 
-        return UnificationResult.Success(substitution)
+        return unifyMemberPayloads(
+            keys = allFields,
+            member1 = { rec1.fields[it] },
+            member2 = { rec2.fields[it] },
+            registry = registry,
+            outer1 = rec1,
+            outer2 = rec2,
+            mismatchMessage = { name, a1, a2, inner -> formatFieldMismatch(name, a2, a1, inner) },
+        )
     }
 
     if (fields1 != fields2) {
@@ -507,25 +540,16 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
         )
     }
 
-    val sharedFields = fields1
-
-    var substitution = Substitution.empty
-    for (fieldName in sharedFields) {
-        val fieldType1 = substitution.apply(rec1.fields[fieldName]!!)
-        val fieldType2 = substitution.apply(rec2.fields[fieldName]!!)
-
-        val fieldSubst = when (val fieldResult = unify(fieldType1, fieldType2, registry)) {
-            is UnificationResult.Success -> fieldResult.substitution
-            is UnificationResult.Failure -> return UnificationResult.Failure(
-                message = formatFieldMismatch(fieldName, fieldType2, fieldType1, fieldResult.message),
-                type1 = rec1,
-                type2 = rec2
-            )
-        }
-        substitution = fieldSubst.compose(substitution)
-    }
-
-    return UnificationResult.Success(substitution)
+    // Field sets are equal here; unify the shared field types pairwise.
+    return unifyMemberPayloads(
+        keys = fields1,
+        member1 = { rec1.fields[it] },
+        member2 = { rec2.fields[it] },
+        registry = registry,
+        outer1 = rec1,
+        outer2 = rec2,
+        mismatchMessage = { name, a1, a2, inner -> formatFieldMismatch(name, a2, a1, inner) },
+    )
 }
 
 // #148: nominal wall if nominalWall=true or typeName is in caller's in-scope set.
@@ -560,43 +584,26 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
 
     if (var1.rowVar != null && var2.rowVar != null) {
         val allConstructors = (constructors1 + constructors2).toSet()
-
-        var substitution = Substitution.empty
-        for (constructorName in allConstructors) {
-            val dataType1 = var1.constructors[constructorName]
-            val dataType2 = var2.constructors[constructorName]
-
-            // #258: for a constructor present on BOTH open variants, a payload-arity
-            // disagreement (nullary on one side, payload-bearing on the other) is a
-            // hard conflict — the same guard the closed|closed branch already applies.
-            // A constructor unique to one side is fine (absorbed by the other's row
-            // var), so only check shared constructors.
-            if (constructorName in constructors1 && constructorName in constructors2 &&
-                (dataType1 == null) != (dataType2 == null)) {
-                return UnificationResult.Failure(
-                    message = "Constructor '$constructorName' data mismatch",
-                    type1 = var1,
-                    type2 = var2
-                )
-            }
-
-            if (dataType1 != null && dataType2 != null) {
-                val appliedType1 = substitution.apply(dataType1)
-                val appliedType2 = substitution.apply(dataType2)
-
-                val constructorSubst = when (val constructorResult = unify(appliedType1, appliedType2, registry)) {
-                    is UnificationResult.Success -> constructorResult.substitution
-                    is UnificationResult.Failure -> return UnificationResult.Failure(
-                        message = "Constructor '$constructorName' type mismatch: ${constructorResult.message}",
-                        type1 = var1,
-                        type2 = var2
-                    )
-                }
-                substitution = constructorSubst.compose(substitution)
-            }
-        }
-
-        return UnificationResult.Success(substitution)
+        // #258: a constructor present on BOTH open variants with a payload-arity
+        // disagreement (nullary on one side, payload-bearing on the other) is a hard
+        // conflict. A constructor unique to one side is fine (absorbed by the other's
+        // row var), so only check shared constructors.
+        return unifyMemberPayloads(
+            keys = allConstructors,
+            member1 = { var1.constructors[it] },
+            member2 = { var2.constructors[it] },
+            registry = registry,
+            outer1 = var1,
+            outer2 = var2,
+            arityConflict = { name ->
+                if (name in constructors1 && name in constructors2 &&
+                    (var1.constructors[name] == null) != (var2.constructors[name] == null)
+                ) {
+                    UnificationResult.Failure("Constructor '$name' data mismatch", var1, var2)
+                } else null
+            },
+            mismatchMessage = { name, _, _, inner -> "Constructor '$name' type mismatch: $inner" },
+        )
     }
 
     if (var1.rowVar != null || var2.rowVar != null) {
@@ -627,28 +634,15 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
             }
         }
 
-        var substitution = Substitution.empty
-        for (constructorName in closedCtors) {
-            val dataType1 = var1.constructors[constructorName]
-            val dataType2 = var2.constructors[constructorName]
-
-            if (dataType1 != null && dataType2 != null) {
-                val appliedType1 = substitution.apply(dataType1)
-                val appliedType2 = substitution.apply(dataType2)
-
-                val constructorSubst = when (val constructorResult = unify(appliedType1, appliedType2, registry)) {
-                    is UnificationResult.Success -> constructorResult.substitution
-                    is UnificationResult.Failure -> return UnificationResult.Failure(
-                        message = "Constructor '$constructorName' type mismatch: ${constructorResult.message}",
-                        type1 = var1,
-                        type2 = var2
-                    )
-                }
-                substitution = constructorSubst.compose(substitution)
-            }
-        }
-
-        return UnificationResult.Success(substitution)
+        return unifyMemberPayloads(
+            keys = closedCtors,
+            member1 = { var1.constructors[it] },
+            member2 = { var2.constructors[it] },
+            registry = registry,
+            outer1 = var1,
+            outer2 = var2,
+            mismatchMessage = { name, _, _, inner -> "Constructor '$name' type mismatch: $inner" },
+        )
     }
 
     // — but only if at least one of those names is in scope at the use site (#148). An alias
@@ -709,39 +703,23 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     }
 
     val allConstructors = (constructors1 + constructors2).toSet()
-
-    var substitution = Substitution.empty
-    for (constructorName in allConstructors) {
-        val dataType1 = var1.constructors[constructorName]
-        val dataType2 = var2.constructors[constructorName]
-
-        if (constructorName in constructors1 && constructorName in constructors2) {
-            if ((dataType1 == null) != (dataType2 == null)) {
-                return UnificationResult.Failure(
-                    message = "Constructor '$constructorName' data mismatch",
-                    type1 = var1,
-                    type2 = var2
-                )
-            }
-
-            if (dataType1 != null && dataType2 != null) {
-                val appliedType1 = substitution.apply(dataType1)
-                val appliedType2 = substitution.apply(dataType2)
-
-                val constructorSubst = when (val constructorResult = unify(appliedType1, appliedType2, registry)) {
-                    is UnificationResult.Success -> constructorResult.substitution
-                    is UnificationResult.Failure -> return UnificationResult.Failure(
-                        message = "Constructor '$constructorName' type mismatch: ${constructorResult.message}",
-                        type1 = var1,
-                        type2 = var2
-                    )
-                }
-                substitution = constructorSubst.compose(substitution)
-            }
-        }
-    }
-
-    return UnificationResult.Success(substitution)
+    // Same arity guard as the both-open branch, gated on shared constructors.
+    return unifyMemberPayloads(
+        keys = allConstructors,
+        member1 = { var1.constructors[it] },
+        member2 = { var2.constructors[it] },
+        registry = registry,
+        outer1 = var1,
+        outer2 = var2,
+        arityConflict = { name ->
+            if (name in constructors1 && name in constructors2 &&
+                (var1.constructors[name] == null) != (var2.constructors[name] == null)
+            ) {
+                UnificationResult.Failure("Constructor '$name' data mismatch", var1, var2)
+            } else null
+        },
+        mismatchMessage = { name, _, _, inner -> "Constructor '$name' type mismatch: $inner" },
+    )
 }
 
 private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeType.TypeApplication, registry: DeclarationRegistry): UnificationResult {
