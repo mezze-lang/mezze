@@ -289,6 +289,23 @@ public final class BytecodeCompiler {
         this.externalResolver = externalResolver;
     }
 
+    /**
+     * True iff {@code target} is a {@link TrampolineRootNode} whose inner
+     * BDSL root has not yet been attached. Such a target cannot be
+     * executed — {@link TrampolineRootNode#execute} throws
+     * "executed before attachInner" — so callers must route via a
+     * {@link LazyStubRootNode} instead. This condition arises when the
+     * trampoline is pre-registered for self-recursion resolution
+     * ({@link #compileWithCallees}) or eagerly published by an outer
+     * emit whose callee is still mid-compile (SVM AOT loses the JVM's
+     * lucky ordering that hides this bug).
+     */
+    static boolean isUnattachedTrampoline(CallTarget target) {
+        return target instanceof com.oracle.truffle.api.RootCallTarget rct
+                && rct.getRootNode() instanceof TrampolineRootNode t
+                && t.getInnerTarget() == null;
+    }
+
     /** Look up a callee CallTarget: local map first, then external resolver. */
     private CallTarget resolveCallTarget(Hash hash) {
         CallTarget ct = compiledCallTargets.get(hash);
@@ -586,23 +603,40 @@ public final class BytecodeCompiler {
             // LazyStub. Under MEZZE_EAGER (default on), most callees are
             // pre-published; falling back to LazyStub only for the residual
             // few not yet in the slot table when supportsNode fires.
-            if (resolveCallTarget(c.getTargetHash()) == null) {
+            // #514: treat unattached trampolines as unresolved when they
+            // came from an EXTERNAL source (SlotTable/externalResolver) —
+            // those are foreign compiles whose attachInner may race with
+            // execute under SVM AOT. A locally-pre-registered trampoline
+            // (see compileWithCallees) is safe — its attachInner runs
+            // synchronously before the enclosing compile() returns, so
+            // any self-tail-call site baking it will find it attached at
+            // execute time.
+            boolean local = compiledCallTargets.containsKey(c.getTargetHash());
+            CallTarget existing = resolveCallTarget(c.getTargetHash());
+            boolean needSwap = existing == null
+                    || (!local && isUnattachedTrampoline(existing));
+            if (needSwap) {
                 CallTarget ct = null;
                 if (language != null) {
                     com.mezze.interpreter.runtime.SlotEntry slot =
                             language.getSlotTable().get(c.getTargetHash());
-                    if (slot != null && slot.isPublished()) {
+                    if (slot != null && slot.isPublished()
+                            && !isUnattachedTrampoline(slot.getCallTarget())) {
                         ct = slot.getCallTarget();
                     }
-                }
-                if (ct == null) {
-                    ct = language.getOrMintUserStub(c.getTargetHash(), "callee");
+                    if (ct == null) {
+                        ct = language.getOrMintUserStub(c.getTargetHash(), "callee");
+                    }
                 }
                 if (ct != null) {
                     compiledCallTargets.put(c.getTargetHash(), ct);
-                } else {
+                } else if (existing == null) {
                     markReject(node, "target-not-compiled"); return false;
                 }
+                // If existing was an unattached trampoline and we couldn't
+                // upgrade it (stub not mintable — e.g., language null in
+                // tests), keep the trampoline — it may attach before
+                // execute. Emit will re-check.
             }
             for (NodeIR arg : c.getArgs()) {
                 if (!supportsNode(arg, argCount)) return false;
@@ -677,24 +711,34 @@ public final class BytecodeCompiler {
             // branch) so the null is never actually read.
             // #391 Step 6: prefer eager SlotTable CT before minting LazyStub
             // (same pattern as CallDirect above).
-            if (resolveCallTarget(ml.getFunctionHash()) == null) {
+            // #514: treat unattached trampolines as unresolved when they
+            // came from an EXTERNAL source — see matching notes at the
+            // CallDirectIR supports path.
+            boolean localMl = compiledCallTargets.containsKey(ml.getFunctionHash());
+            CallTarget existingMl = resolveCallTarget(ml.getFunctionHash());
+            boolean needSwapMl = existingMl == null
+                    || (!localMl && isUnattachedTrampoline(existingMl));
+            if (needSwapMl) {
                 CallTarget ct = null;
                 if (language != null) {
                     com.mezze.interpreter.runtime.SlotEntry slot =
                             language.getSlotTable().get(ml.getFunctionHash());
-                    if (slot != null && slot.isPublished()) {
+                    if (slot != null && slot.isPublished()
+                            && !isUnattachedTrampoline(slot.getCallTarget())) {
                         ct = slot.getCallTarget();
                     }
-                }
-                if (ct == null) {
-                    ct = language.getOrMintUserStub(ml.getFunctionHash(), "lambda");
+                    if (ct == null) {
+                        ct = language.getOrMintUserStub(ml.getFunctionHash(), "lambda");
+                    }
                 }
                 if (ct != null) {
                     compiledCallTargets.put(ml.getFunctionHash(), ct);
-                } else {
+                } else if (existingMl == null) {
                     markReject(node, "target-not-compiled");
                     return false;
                 }
+                // Same as CallDirect: keep unattached trampoline if we
+                // couldn't upgrade (language null in tests). Emit re-checks.
             }
             return true;
         }
@@ -1549,17 +1593,34 @@ public final class BytecodeCompiler {
             // etc.) is already rewritten to IterChainIR by IterCanonicalizer,
             // handled above. The old pattern-matching tryEmitFusedFold path
             // was removed in this phase.
+            // #514: route BOTH the missing-callee case AND the FOREIGN
+            // unattached-trampoline case through the LazyStub. Baking an
+            // unattached trampoline as the CallDirectN operand appeared
+            // safe on JVM because BFS ordering happened to attach the
+            // inner before any execute reached the site. Under SVM AOT
+            // there's no such ordering guarantee: `main` was emitted with
+            // `compute`'s bare trampoline shell, execute ran before
+            // `compute`'s Phase 2 emit completed attachInner,
+            // TrampolineRootNode.execute threw "executed before
+            // attachInner". LazyStub inflates on first execute by
+            // compiling the callee IR fresh — always yields a fully-
+            // attached target regardless of outer emit ordering.
+            //
+            // BUT: a locally-pre-registered trampoline (compileWithCallees
+            // for a self-recursive callee) must be kept — its attachInner
+            // runs synchronously before compile() returns, and self-tail-
+            // calls must bake the trampoline itself so TailCallException
+            // is caught by the trampoline's own loop rather than escaping
+            // through a LazyStub wrapper that has no trampoline.
+            boolean localTarget = compiledCallTargets.containsKey(c.getTargetHash());
             CallTarget target = resolveCallTarget(c.getTargetHash());
-            if (target == null && language != null) {
-                // #513: mirror supportsNode's fallback (line 589-605). When
-                // eagerCompileReachable emits `main` in Phase 2 BFS order
-                // before a callee like `compute` is published in the slot
-                // table, resolveCallTarget returns null. Minting a LazyStub
-                // gives us a stable CallTarget identity that inflates via
-                // the AST path on first execute.
-                target = language.getOrMintUserStub(c.getTargetHash(), "callee");
-                if (target != null) {
-                    compiledCallTargets.put(c.getTargetHash(), target);
+            boolean needSwap = target == null
+                    || (!localTarget && isUnattachedTrampoline(target));
+            if (needSwap && language != null) {
+                CallTarget stub = language.getOrMintUserStub(c.getTargetHash(), "callee");
+                if (stub != null) {
+                    target = stub;
+                    compiledCallTargets.put(c.getTargetHash(), stub);
                 }
             }
             if (target == null) {
@@ -1952,15 +2013,22 @@ public final class BytecodeCompiler {
             // #391 Step 4b Q1 — count closureless vs total MakeLambda sites.
             MAKELAMBDA_TOTAL.incrementAndGet();
             if (ml.getCaptures().isEmpty()) MAKELAMBDA_CLOSURELESS.incrementAndGet();
+            // #514: mirror the CallDirectIR emit fix — treat an unattached
+            // trampoline the same as a missing callee, EXCEPT when it was
+            // locally pre-registered (self-recursion): those attach before
+            // compile() returns. A MakeLambda that bakes a foreign
+            // unattached target would produce a MezzeFunction whose
+            // eventual invoke path routes to TrampolineRootNode.execute
+            // before attachInner completes (SVM AOT).
+            boolean localTargetMl = compiledCallTargets.containsKey(ml.getFunctionHash());
             CallTarget target = resolveCallTarget(ml.getFunctionHash());
-            if (target == null && language != null) {
-                // #513: same fallback as CallDirectIR emit. Eager BFS may
-                // not have published this lambda's target yet when the
-                // enclosing fn is being emitted; mint a LazyStub so the
-                // MakeLambda op has a stable CallTarget to bake.
-                target = language.getOrMintUserStub(ml.getFunctionHash(), "lambda");
-                if (target != null) {
-                    compiledCallTargets.put(ml.getFunctionHash(), target);
+            boolean needSwapMl = target == null
+                    || (!localTargetMl && isUnattachedTrampoline(target));
+            if (needSwapMl && language != null) {
+                CallTarget stub = language.getOrMintUserStub(ml.getFunctionHash(), "lambda");
+                if (stub != null) {
+                    target = stub;
+                    compiledCallTargets.put(ml.getFunctionHash(), stub);
                 }
             }
             if (target == null) {
