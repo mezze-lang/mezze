@@ -1,0 +1,12 @@
+[package]
+name = "steady_state_probe"
+version = "0.1.0"
+
+[[app]]
+name = "steady_state_probe"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

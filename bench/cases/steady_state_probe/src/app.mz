@@ -1,0 +1,45 @@
+## Steady-state probe: how many iters until JIT warms up? Does it warm up at all
+## for small workloads?
+##
+## No pre-warmup: for each size, run 10 iters cold and print each timing so we
+## can see the transition. Report ns/element.
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::seq
+
+let compute : { n: Int } -> Int = { n } -> do
+    let half = n / 2
+    seq::range { start = 0, end = n }
+        .filter { p = {x: Int} -> x < half }
+        .map { f = {x: Int} -> x * 2 }
+        .fold { init = 0, f = {acc: Int, x: Int} -> acc + x }
+
+let time_once = {n} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let r = compute {n = n}
+    let t1 = monotonic {}
+    { r = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let loop_iters : {n: Int, k: Int, i: Int} -> Int = {n, k, i} -> perform Console in perform SystemTime in
+    if i == k
+        then 0
+        else do
+            let out = time_once {n = n}
+            let ns_per_elem = if n == 0 then 0 else out.ns / n
+            println { msg = "  N=$(n.to_str{}) iter=$(i.to_str{}) ns=$(out.ns.to_str{}) ns_per_elem=$(ns_per_elem.to_str{})" }
+            loop_iters {n = n, k = k, i = i + 1}
+
+let main = {} -> perform Console in perform SystemTime in do
+    println { msg = "== steady_state_probe (10 cold iters per size, no warmup) ==" }
+
+    println { msg = "-- N=1000 --" }
+    let _a = loop_iters {n = 1000, k = 10, i = 0}
+
+    println { msg = "-- N=100000 --" }
+    let _b = loop_iters {n = 100000, k = 10, i = 0}
+
+    println { msg = "-- N=10000000 --" }
+    let _c = loop_iters {n = 10000000, k = 10, i = 0}
+
+    println { msg = "== done ==" }

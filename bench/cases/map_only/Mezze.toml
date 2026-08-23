@@ -1,0 +1,12 @@
+[package]
+name = "bench_map_only"
+version = "0.1.0"
+
+[[app]]
+name = "bench_map_only"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

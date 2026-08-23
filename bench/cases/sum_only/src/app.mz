@@ -1,0 +1,32 @@
+## sum_only bench: `seq::range{0..N}.fold(+)` — simpler than filter_map_fold.
+## 3 warmup + 5 measured iters at N=10M.
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::seq
+
+let compute : { n: Int } -> Int = { n } ->
+    seq::range { start = 0, end = n }
+        .fold { init = 0, f = {acc: Int, x: Int} -> acc + x }
+
+let time_once = {n} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let r = compute {n = n}
+    let t1 = monotonic {}
+    { r = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let loop_iters : {n: Int, k: Int, i: Int, warmup: Bool} -> Int = {n, k, i, warmup} -> perform Console in perform SystemTime in
+    if i == k
+        then 0
+        else do
+            let out = time_once {n = n}
+            let tag = if warmup then "warmup" else "measure"
+            println { msg = "  [$(tag)] iter=$(i.to_str{}) ns=$(out.ns.to_str{})" }
+            loop_iters {n = n, k = k, i = i + 1, warmup = warmup}
+
+let main = {} -> perform Console in perform SystemTime in do
+    let n = 10000000
+    println { msg = "== sum_only N=$(n.to_str{}) 3 warmup + 5 measured ==" }
+    let _w = loop_iters {n = n, k = 3, i = 0, warmup = True}
+    let _m = loop_iters {n = n, k = 5, i = 0, warmup = False}
+    println { msg = "== done ==" }

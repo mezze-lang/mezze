@@ -62,6 +62,38 @@ object MezzeAppMain {
         com.mezze.interpreter.standalone.EmbeddedAppLoader.touch()
 
         try {
+            // Cache-shell mode: if MEZZE_APP_CBOR points at a sidecar CBOR
+            // pair on disk, decode and install into EmbeddedApp at startup.
+            // This lets a single "shell" native binary run any user app by
+            // pointing the env var at that app's serialized CBOR — no
+            // per-project native-image rebuild required. MEZZE_FORCE_SIDECAR=1
+            // overrides any build-time-embedded app so an existing native
+            // binary can be reused as the shell.
+            val sidecar = System.getenv("MEZZE_APP_CBOR")
+            val forceSidecar = System.getenv("MEZZE_FORCE_SIDECAR") == "1"
+            if (sidecar != null && (!com.mezze.interpreter.standalone.EmbeddedApp.present || forceSidecar)) {
+                val fnsFile = java.io.File(sidecar)
+                val metaFile = java.io.File("$sidecar.meta")
+                if (fnsFile.exists() && metaFile.exists()) {
+                    val fnBytes = fnsFile.readBytes()
+                    val metaBytes = metaFile.readBytes()
+                    com.mezze.interpreter.standalone.EmbeddedApp.functions =
+                        com.mezze.language.store.StoreSerialization.deserializeFunctionIRList(fnBytes)
+                    val desc = com.mezze.language.store.StoreSerialization.deserializeEmbeddedAppMeta(metaBytes)
+                    com.mezze.interpreter.standalone.EmbeddedApp.appName = desc.appName
+                    com.mezze.interpreter.standalone.EmbeddedApp.entryName = desc.entryName
+                    com.mezze.interpreter.standalone.EmbeddedApp.performerRecords = desc.performerRecords
+                    com.mezze.interpreter.standalone.EmbeddedApp.present = true
+                    mark("sidecar CBOR loaded from $sidecar")
+                } else {
+                    System.err.println(
+                        "Error: MEZZE_APP_CBOR set but sidecar files missing: " +
+                        "$sidecar and/or $sidecar.meta"
+                    )
+                    kotlin.system.exitProcess(1)
+                }
+            }
+
             if (!com.mezze.interpreter.standalone.EmbeddedApp.present) {
                 System.err.println(
                     "Error: this native binary has no embedded Mezze app. " +
