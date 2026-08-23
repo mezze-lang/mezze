@@ -1,0 +1,22 @@
+## Fusion showcase: (0..N).filter(x < N/2).map(x * 2).fold(+)
+##
+## Should fire IterCanonicalizer + BDSL emit's fused loop path — the whole
+## chain should compile to ONE loop over range with no intermediate seqs.
+##
+## Uses < (Ord) instead of % because class-param NumMod resolution is
+## currently broken (2026-08-22 branch state).
+use std::effects::log::{println, Console}
+use std::collections::seq
+
+let compute : { n: Int } -> Int = { n } -> do
+    let half = n / 2
+    seq::range { start = 0, end = n }
+        .filter { p = {x: Int} -> x < half }
+        .map { f = {x: Int} -> x * 2 }
+        .fold { init = 0, f = {acc: Int, x: Int} -> acc + x }
+
+let main = {} -> perform Console in do
+    let a = compute {n = 1000000}
+    println { msg = "filter_map_fold 0..1M = $(a.to_str{})" }
+    let b = compute {n = 10000000}
+    println { msg = "filter_map_fold 0..10M = $(b.to_str{})" }

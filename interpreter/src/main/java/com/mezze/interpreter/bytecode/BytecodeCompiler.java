@@ -1550,6 +1550,18 @@ public final class BytecodeCompiler {
             // handled above. The old pattern-matching tryEmitFusedFold path
             // was removed in this phase.
             CallTarget target = resolveCallTarget(c.getTargetHash());
+            if (target == null && language != null) {
+                // #513: mirror supportsNode's fallback (line 589-605). When
+                // eagerCompileReachable emits `main` in Phase 2 BFS order
+                // before a callee like `compute` is published in the slot
+                // table, resolveCallTarget returns null. Minting a LazyStub
+                // gives us a stable CallTarget identity that inflates via
+                // the AST path on first execute.
+                target = language.getOrMintUserStub(c.getTargetHash(), "callee");
+                if (target != null) {
+                    compiledCallTargets.put(c.getTargetHash(), target);
+                }
+            }
             if (target == null) {
                 throw new IllegalStateException(
                     "CallDirectIR references unknown target hash "
@@ -1941,8 +1953,17 @@ public final class BytecodeCompiler {
             MAKELAMBDA_TOTAL.incrementAndGet();
             if (ml.getCaptures().isEmpty()) MAKELAMBDA_CLOSURELESS.incrementAndGet();
             CallTarget target = resolveCallTarget(ml.getFunctionHash());
+            if (target == null && language != null) {
+                // #513: same fallback as CallDirectIR emit. Eager BFS may
+                // not have published this lambda's target yet when the
+                // enclosing fn is being emitted; mint a LazyStub so the
+                // MakeLambda op has a stable CallTarget to bake.
+                target = language.getOrMintUserStub(ml.getFunctionHash(), "lambda");
+                if (target != null) {
+                    compiledCallTargets.put(ml.getFunctionHash(), target);
+                }
+            }
             if (target == null) {
-                // supports() should have rejected — defensive.
                 throw new IllegalStateException(
                     "MakeLambdaIR references unknown target hash "
                     + ml.getFunctionHash().getHex() + " — callee must be compiled first");
