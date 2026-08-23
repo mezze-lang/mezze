@@ -416,7 +416,7 @@ pub let drop_while : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...
 
 ## Returns True if no element matches the predicate.
 pub let none : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
-  ! any { xs = xs, p = p }
+  __native_list_none { xs = xs, p = p }
 
 ## Counts elements matching the predicate.
 pub let count : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p } ->
