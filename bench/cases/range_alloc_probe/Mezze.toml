@@ -1,0 +1,12 @@
+[package]
+name = "bench_range_alloc_probe"
+version = "0.1.0"
+
+[[app]]
+name = "bench_range_alloc_probe"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

@@ -19,7 +19,7 @@ import java.util.Arrays;
 public final class LongSeqStorage implements SeqStorage {
 
     @CompilationFinal(dimensions = 1)
-    private final long[] data;
+    private long[] data;  // NOT final: lazy-range materializes here on demand
 
     @CompilationFinal
     private final int length;  // logical size (may be < data.length when spare capacity exists)
@@ -27,24 +27,73 @@ public final class LongSeqStorage implements SeqStorage {
     /** COW ownership token for O(1) amortized append chains. */
     private final Object[] ownerToken;
 
+    // Lazy-range fields (env-gated MEZZE_LAZY_RANGE=1). When lazy != null, data is null
+    // and elements are computed as lazyStart + i*lazyStep. First array-access materializes.
+    private final long lazyStart;
+    private final long lazyStep;
+    private final boolean isLazy;
+
     public LongSeqStorage(long[] data) {
         this.data = data;
         this.length = data.length;
         this.ownerToken = null;
+        this.lazyStart = 0;
+        this.lazyStep = 0;
+        this.isLazy = false;
     }
 
     private LongSeqStorage(long[] data, int length, Object[] ownerToken) {
         this.data = data;
         this.length = length;
         this.ownerToken = ownerToken;
+        this.lazyStart = 0;
+        this.lazyStep = 0;
+        this.isLazy = false;
     }
 
+    /**
+     * Lazy-range constructor. Elements computed as start + i*step on demand.
+     * size = length. Materializes to data[] only on first array-touching op.
+     */
+    public static LongSeqStorage lazyRange(long start, long end, long step) {
+        long span;
+        if (step > 0) span = (end - start + step - 1) / step;
+        else span = (start - end + (-step) - 1) / (-step);
+        int len = (int) span;
+        return new LongSeqStorage(start, step, len);
+    }
+
+    private LongSeqStorage(long start, long step, int length) {
+        this.data = null;
+        this.length = length;
+        this.ownerToken = null;
+        this.lazyStart = start;
+        this.lazyStep = step;
+        this.isLazy = true;
+    }
+
+    /** Materializes lazy range into data[] on demand. Idempotent. */
+    @TruffleBoundary
+    private void materialize() {
+        if (data != null) return;
+        long[] arr = new long[length];
+        long v = lazyStart;
+        for (int i = 0; i < length; i++) {
+            arr[i] = v;
+            v += lazyStep;
+        }
+        this.data = arr;
+    }
+
+    public boolean isLazyRange() { return isLazy && data == null; }
+
     private boolean isOwner() {
-        return ownerToken != null && ownerToken[0] == this;
+        return ownerToken != null && data != null && ownerToken[0] == this;
     }
 
     /** Returns a trimmed array (length == data.length) for external use. */
     private long[] trimmedData() {
+        if (data == null) materialize();
         if (length == data.length) return data;
         return Arrays.copyOf(data, length);
     }
@@ -63,6 +112,10 @@ public final class LongSeqStorage implements SeqStorage {
      * Unboxed access - no boxing overhead.
      */
     public long getLong(int index) {
+        if (data == null) {
+            // Lazy path: compute without materializing.
+            return lazyStart + (long) index * lazyStep;
+        }
         return data[index];
     }
 
@@ -79,6 +132,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Unboxed update - returns new storage with updated value.
      */
     public LongSeqStorage updateLong(int index, long value) {
+        if (data == null) materialize();
         long[] newData = Arrays.copyOf(data, length);
         newData[index] = value;
         return new LongSeqStorage(newData);
@@ -97,6 +151,7 @@ public final class LongSeqStorage implements SeqStorage {
      * O(1) amortized in chains like s = s.append(1).append(2).append(3).
      */
     public LongSeqStorage appendLong(long value) {
+        if (data == null) materialize();
         if (isOwner() && length < data.length) {
             // O(1): write into spare capacity, transfer ownership
             data[length] = value;
@@ -127,6 +182,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Unboxed prepend.
      */
     public LongSeqStorage prependLong(long value) {
+        if (data == null) materialize();
         long[] newData = new long[length + 1];
         newData[0] = value;
         System.arraycopy(data, 0, newData, 1, length);
@@ -143,6 +199,11 @@ public final class LongSeqStorage implements SeqStorage {
         }
         if (start == 0 && end == length) {
             return this;
+        }
+        if (data == null) {
+            // Slice of a lazy range is another lazy range.
+            long newStart = lazyStart + (long) start * lazyStep;
+            return new LongSeqStorage(newStart, lazyStep, end - start);
         }
         return new LongSeqStorage(Arrays.copyOfRange(data, start, end));
     }
@@ -162,6 +223,8 @@ public final class LongSeqStorage implements SeqStorage {
      * Concat two long storages - stays unboxed.
      */
     public LongSeqStorage concatLong(LongSeqStorage other) {
+        if (data == null) materialize();
+        if (other.data == null) other.materialize();
         long[] newData = new long[length + other.length];
         System.arraycopy(data, 0, newData, 0, length);
         System.arraycopy(other.data, 0, newData, length, other.length);
@@ -195,6 +258,7 @@ public final class LongSeqStorage implements SeqStorage {
      */
     @ExplodeLoop
     public long sumSmall(int knownSize) {
+        if (data == null) materialize();
         long result = 0;
         for (int i = 0; i < knownSize; i++) {
             result += data[i];
@@ -241,6 +305,7 @@ public final class LongSeqStorage implements SeqStorage {
      */
     @ExplodeLoop
     public int indexOfSmall(long value, int knownSize) {
+        if (data == null) materialize();
         for (int i = 0; i < knownSize; i++) {
             if (data[i] == value) {
                 return i;
@@ -275,6 +340,7 @@ public final class LongSeqStorage implements SeqStorage {
      */
     @ExplodeLoop(kind = ExplodeLoop.LoopExplosionKind.FULL_UNROLL_UNTIL_RETURN)
     public LongSeqStorage reverse() {
+        if (data == null) materialize();
         long[] newData = new long[length];
         for (int i = 0; i < length; i++) {
             newData[i] = data[length - 1 - i];
@@ -286,6 +352,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Sort in ascending order.
      */
     public LongSeqStorage sort() {
+        if (data == null) materialize();
         long[] newData = Arrays.copyOf(data, length);
         Arrays.sort(newData);
         return new LongSeqStorage(newData);
@@ -296,8 +363,16 @@ public final class LongSeqStorage implements SeqStorage {
      */
     private ObjectSeqStorage transitionToObject() {
         Object[] objects = new Object[length];
-        for (int i = 0; i < length; i++) {
-            objects[i] = data[i];
+        if (data == null) {
+            long v = lazyStart;
+            for (int i = 0; i < length; i++) {
+                objects[i] = v;
+                v += lazyStep;
+            }
+        } else {
+            for (int i = 0; i < length; i++) {
+                objects[i] = data[i];
+            }
         }
         return new ObjectSeqStorage(objects);
     }
@@ -326,6 +401,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Used by to_mut to get a fresh copy that can be mutated.
      */
     public LongSeqStorage copyToMutable() {
+        if (data == null) materialize();
         return new LongSeqStorage(Arrays.copyOf(data, length));
     }
 
@@ -334,6 +410,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutSet(int index, long value) {
+        if (data == null) materialize();
         data[index] = value;
     }
 
@@ -342,6 +419,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutSwap(int i, int j) {
+        if (data == null) materialize();
         long tmp = data[i];
         data[i] = data[j];
         data[j] = tmp;
@@ -352,6 +430,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutIncr(int index, long delta) {
+        if (data == null) materialize();
         data[index] += delta;
     }
 
@@ -360,6 +439,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutSort() {
+        if (data == null) materialize();
         Arrays.sort(data, 0, length);
     }
 
@@ -368,6 +448,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutReverse() {
+        if (data == null) materialize();
         int left = 0;
         int right = length - 1;
         while (left < right) {
@@ -384,6 +465,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutFill(long value) {
+        if (data == null) materialize();
         Arrays.fill(data, 0, length, value);
     }
 
@@ -392,6 +474,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutFillRange(int start, int end, long value) {
+        if (data == null) materialize();
         Arrays.fill(data, start, end, value);
     }
 }

@@ -185,6 +185,9 @@ public final class SeqStorageFactory {
         if (start >= end) {
             throw new IllegalArgumentException("Start must be less than end");
         }
+        if (LAZY_RANGE) {
+            return LongSeqStorage.lazyRange(start, end, 1L);
+        }
         int size = (int) (end - start);
         long[] data = new long[size];
         for (int i = 0; i < size; i++) {
@@ -192,6 +195,9 @@ public final class SeqStorageFactory {
         }
         return new LongSeqStorage(data);
     }
+
+    // Env-gated: MEZZE_LAZY_RANGE=1 enables lazy RangeSeq for seq::range.
+    private static final boolean LAZY_RANGE = "1".equals(System.getenv("MEZZE_LAZY_RANGE"));
 
     /**
      * Create a range with step.
@@ -202,6 +208,9 @@ public final class SeqStorageFactory {
         }
         if ((step > 0 && start >= end) || (step < 0 && start <= end)) {
             throw new IllegalArgumentException("Invalid range");
+        }
+        if (LAZY_RANGE) {
+            return LongSeqStorage.lazyRange(start, end, step);
         }
 
         int size = (int) ((end - start + step - Long.signum(step)) / step);

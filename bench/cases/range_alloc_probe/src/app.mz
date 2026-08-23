@@ -1,0 +1,27 @@
+# range_alloc_probe: measures cost of seq::range creation and .size call
+# on a 10M-element range. With MEZZE_LAZY_RANGE=1, creation should be
+# ~microseconds and .size should be O(1) — no 80MB long[] alloc.
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::seq
+
+let main = {} -> perform Console in perform SystemTime in do
+    let n = 10000000
+    # 3 warmup
+    let _w1 = seq::range { start = 0, end = n }
+    let _w2 = seq::range { start = 0, end = n }
+    let _w3 = seq::range { start = 0, end = n }
+    # measured
+    let t0 = monotonic {}
+    let r1 = seq::range { start = 0, end = n }
+    let t1 = monotonic {}
+    let r2 = seq::range { start = 0, end = n }
+    let t2 = monotonic {}
+    let sz = seq::size {xs = r1}
+    let t3 = monotonic {}
+    println { msg = "size = $(sz.to_str{})" }
+    println { msg = "r2 size = $(seq::size{xs=r2}.to_str{})" }
+    println { msg = "range creation iter1 ns: $((duration_to_nanos {d = sub_duration {a = t1, b = t0}}).to_str{})" }
+    println { msg = "range creation iter2 ns: $((duration_to_nanos {d = sub_duration {a = t2, b = t1}}).to_str{})" }
+    println { msg = "size call ns: $((duration_to_nanos {d = sub_duration {a = t3, b = t2}}).to_str{})" }
