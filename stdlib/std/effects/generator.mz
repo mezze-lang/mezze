@@ -32,7 +32,7 @@ pub let to_seq : { stream: Stream 'a } -> [ 'a ] = { stream } ->
   match stream is
     Stream { next } -> match next {} is
       None -> []
-      Some { val, rest } -> [val, ...to_seq { stream = rest }]
+      Some { val, rest } -> seq::push_front { xs = to_seq { stream = rest }, x = val }
 
 ## Convert a `Generator`-using body into a lazy `Stream`. Each call to
 ## `Stream.next` runs the body up to the next yield (or to completion).
