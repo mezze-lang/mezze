@@ -231,6 +231,25 @@ class Lexer(
             return Token(TokenType.NEQ, InternedTokens.NEQ, start, startLine, startColumn)
         }
 
+        // Lone '!' has no meaning in Mezze — unary logical NOT is not a
+        // prefix operator (use `.not{}` on Bool values or `bool::not{b=...}`).
+        // Emit a descriptive ERROR token so `parseParsedModule`'s upfront
+        // ERROR-check surfaces a helpful message instead of the character
+        // itself. Without this, stdlib compile silently accepts `! any {...}`
+        // and produces a malformed AST that cascades to cryptic downstream
+        // errors like "Int, Int does not implement NumAdd" in user code. See #512.
+        if (char == '!') {
+            advance()
+            return Token(
+                TokenType.ERROR,
+                "Unexpected character '!' — unary '!' (logical NOT) is not supported. " +
+                    "Use `.not {}` on a Bool value (e.g. `b.not {}`) or `bool::not { b = b }`.",
+                start,
+                startLine,
+                startColumn
+            )
+        }
+
         if (char == '<' && peek() == '=') {
             advance(2)
             return Token(TokenType.LTE, InternedTokens.LTE, start, startLine, startColumn)

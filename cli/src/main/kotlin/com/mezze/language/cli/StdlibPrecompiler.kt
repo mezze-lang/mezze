@@ -161,11 +161,25 @@ fun main(args: Array<String>) {
                 if (loadResult is com.mezze.language.typechecker.module.ModuleLoadResult.Success) {
                     typeChecker.typeCheckModule(loadResult.module)
                     eagerCount++
+                } else if (loadResult is com.mezze.language.typechecker.module.ModuleLoadResult.Failure) {
+                    // A parse or module-load failure inside stdlib is never
+                    // "best-effort" — the file WILL be re-parsed at user-code
+                    // typecheck time (transitively through imports) and will
+                    // fail there anyway, or worse: it produces a malformed
+                    // AST that silently corrupts ability resolution for user
+                    // code (see #512). Fail loud at compile time. Individual
+                    // "work-in-progress" files should be excluded via the
+                    // manifest, not by silently swallowing errors here.
+                    val msg = loadResult.errors.joinToString("; ") { it.message ?: it.javaClass.simpleName }
+                    System.err.println("[StdlibPrecompiler] $modPath failed to load: $msg")
+                    throw RuntimeException("Stdlib module '$modPath' failed to load: $msg")
                 }
-            } catch (_: Throwable) {
-                // Best-effort. Some stdlib modules may legitimately fail
-                // (work-in-progress files); we still want the others
-                // indexed.
+            } catch (e: Throwable) {
+                // Surface (don't swallow). A parse error at this stage means
+                // downstream compilation will use a broken AST — see #512 where
+                // a stdlib `!` slipped past this silent catch and cascaded.
+                System.err.println("[StdlibPrecompiler] $modPath eager-typecheck failed: ${e.javaClass.simpleName}: ${e.message}")
+                throw e
             }
         }
         println("Eagerly typechecked $eagerCount stdlib modules " +
