@@ -2573,6 +2573,7 @@ public final class BytecodeCompiler {
         // own emit slot in the loop body.
         InlineOp mapperOp = null;
         long mapperRhsLit = 0L;
+        NodeIR mapperRhsNode = null; // #515 captured RHS lifted to outer frame
         Hash mapperCallHash = null;
         boolean mapperCallScalarABI = false;
         String mapperCallFieldName = null;
@@ -2607,6 +2608,7 @@ public final class BytecodeCompiler {
                     }
                     mapperOp = shape.op;
                     mapperRhsLit = shape.rhsLit;
+                    mapperRhsNode = shape.rhsNode;
                 }
             } else if (stage instanceof StageIR.Filter filterStage) {
                 filterCount++;
@@ -2620,8 +2622,8 @@ public final class BytecodeCompiler {
                     return false;
                 }
                 filterPeel = new FilterPeel(
-                    predShape.preOp, predShape.preRhs,
-                    predShape.cmpOp, predShape.cmpRhs,
+                    predShape.preOp, predShape.preRhs, predShape.preRhsNode,
+                    predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
                     predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
                     /*innerXs=*/ null /* unused for canon path */);
             }
@@ -2686,7 +2688,7 @@ public final class BytecodeCompiler {
             emitRangeFusedLoop(b, argCount, localMap,
                     accSlot, iSlot, xSlot,
                     rangeStart, rangeEnd, initExpr,
-                    op, mapperOp, mapperRhsLit,
+                    op, mapperOp, mapperRhsLit, mapperRhsNode,
                     mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
                     filterPeel);
             b.endBlock();
@@ -2728,18 +2730,20 @@ public final class BytecodeCompiler {
             b.endStoreLocal();
             if (filterPeel != null) {
                 b.beginIfThen();
-                  emitPredicateCheck(b, xSlot, filterPeel);
+                  emitPredicateCheck(b, xSlot, filterPeel, argCount, localMap);
                   b.beginBlock();
-                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit,
-                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName);
+                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
+                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                        argCount, localMap);
                     b.beginStoreLocal(accSlot);
                     emitInlineOpTwoLocals(op, accSlot, xSlot, b);
                     b.endStoreLocal();
                   b.endBlock();
                 b.endIfThen();
             } else {
-                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit,
-                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName);
+                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
+                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                    argCount, localMap);
                 b.beginStoreLocal(accSlot);
                 emitInlineOpTwoLocals(op, accSlot, xSlot, b);
                 b.endStoreLocal();
@@ -2844,7 +2848,7 @@ public final class BytecodeCompiler {
                                     NodeIR rangeStart, NodeIR rangeEnd,
                                     Runnable initEmit,
                                     InlineOp op,
-                                    InlineOp mapperOp, long mapperRhsLit,
+                                    InlineOp mapperOp, long mapperRhsLit, NodeIR mapperRhsNode,
                                     Hash mapperCallHash,
                                     boolean mapperCallScalarABI,
                                     String mapperCallFieldName,
@@ -2870,18 +2874,20 @@ public final class BytecodeCompiler {
             b.endStoreLocal();
             if (filter != null) {
                 b.beginIfThen();
-                  emitPredicateCheck(b, xSlot, filter);
+                  emitPredicateCheck(b, xSlot, filter, argCount, localMap);
                   b.beginBlock();
-                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit,
-                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName);
+                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
+                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                        argCount, localMap);
                     b.beginStoreLocal(accSlot);
                     emitInlineOpTwoLocals(op, accSlot, xSlot, b);
                     b.endStoreLocal();
                   b.endBlock();
                 b.endIfThen();
             } else {
-                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit,
-                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName);
+                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
+                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                    argCount, localMap);
                 b.beginStoreLocal(accSlot);
                 emitInlineOpTwoLocals(op, accSlot, xSlot, b);
                 b.endStoreLocal();
@@ -2920,10 +2926,12 @@ public final class BytecodeCompiler {
      */
     private void emitMapperStep(MezzeBytecodeRootNodeGen.Builder b,
                                 com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
-                                InlineOp mapperOp, long mapperRhsLit,
+                                InlineOp mapperOp, long mapperRhsLit, NodeIR mapperRhsNode,
                                 Hash mapperCallHash,
                                 boolean mapperCallScalarABI,
-                                String mapperCallFieldName) {
+                                String mapperCallFieldName,
+                                int argCount,
+                                com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
         if (mapperCallHash != null) {
             var target = resolveCallTarget(mapperCallHash);
             if (target != null) {
@@ -2953,8 +2961,11 @@ public final class BytecodeCompiler {
             // Inline op is safe as-is: the emitted op reads xSlot on the
             // BDSL stack, applies the op, produces a value. No callee =
             // no frame-slot aliasing risk.
+            // #515 — mapperRhsNode wins over mapperRhsLit when non-null
+            // (captured RHS lifted to outer-frame slot).
             b.beginStoreLocal(xSlot);
-            emitInlineOpLocalLit(mapperOp, xSlot, mapperRhsLit, b);
+            emitInlineOpLocalRhs(mapperOp, xSlot, mapperRhsLit, mapperRhsNode,
+                                 argCount, localMap, b);
             b.endStoreLocal();
         }
     }
@@ -3019,7 +3030,9 @@ public final class BytecodeCompiler {
      */
     private void emitPredicateCheck(MezzeBytecodeRootNodeGen.Builder b,
                                     com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
-                                    FilterPeel filter) {
+                                    FilterPeel filter,
+                                    int argCount,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
         if (filter.callHash != null) {
             // #442 Day 9 — call form: user_pred(xSlot) produces Bool on
             // the stack, becoming the IfThen condition. Stage the arg
@@ -3043,11 +3056,13 @@ public final class BytecodeCompiler {
         }
         if (filter.preOp == null) {
             // Simple: xSlot cmpOp cmpRhs.
-            emitInlineOpLocalLit(filter.cmpOp, xSlot, filter.cmpRhs, b);
+            emitInlineOpLocalRhs(filter.cmpOp, xSlot, filter.cmpRhs, filter.cmpRhsNode,
+                                 argCount, localMap, b);
         } else {
             // Compound: (xSlot preOp preRhs) cmpOp cmpRhs.
-            emitCompareInnerLitLit(b, filter.preOp, xSlot, filter.preRhs,
-                                   filter.cmpOp, filter.cmpRhs);
+            emitCompareInnerRhs(b, filter.preOp, xSlot, filter.preRhs, filter.preRhsNode,
+                                filter.cmpOp, filter.cmpRhs, filter.cmpRhsNode,
+                                argCount, localMap);
         }
     }
 
@@ -3074,6 +3089,35 @@ public final class BytecodeCompiler {
     }
 
     /**
+     * #515 — like {@link #emitCompareInnerLitLit} but each RHS may be
+     * supplied as a {@link NodeIR} (typically {@link ReadLocalIR} of an
+     * outer-frame capture slot). NodeIR wins over long when non-null.
+     */
+    private void emitCompareInnerRhs(MezzeBytecodeRootNodeGen.Builder b,
+                                     InlineOp preOp,
+                                     com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+                                     long preRhs, NodeIR preRhsNode,
+                                     InlineOp cmpOp, long cmpRhs, NodeIR cmpRhsNode,
+                                     int argCount,
+                                     com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
+        Runnable emitPreOp = () -> emitInlineOpLocalRhs(preOp, xSlot, preRhs, preRhsNode,
+                                                        argCount, localMap, b);
+        Runnable emitCmpRhs = () -> {
+            if (cmpRhsNode != null) emitNode(cmpRhsNode, b, argCount, localMap);
+            else b.emitLoadLongConstant(cmpRhs);
+        };
+        switch (cmpOp) {
+            case EQ  -> { b.beginDirectEqual(); emitPreOp.run(); emitCmpRhs.run(); b.endDirectEqual(); }
+            case NEQ -> { b.beginDirectNotEqual(); emitPreOp.run(); emitCmpRhs.run(); b.endDirectNotEqual(); }
+            case LT  -> { b.beginDirectLessThan(); emitPreOp.run(); emitCmpRhs.run(); b.endDirectLessThan(); }
+            case LE  -> { b.beginDirectLessThanOrEqual(); emitPreOp.run(); emitCmpRhs.run(); b.endDirectLessThanOrEqual(); }
+            case GT  -> { b.beginDirectGreaterThan(); emitPreOp.run(); emitCmpRhs.run(); b.endDirectGreaterThan(); }
+            case GE  -> { b.beginDirectGreaterThanOrEqual(); emitPreOp.run(); emitCmpRhs.run(); b.endDirectGreaterThanOrEqual(); }
+            default -> throw new IllegalStateException("emitCompareInnerRhs: unsupported cmp " + cmpOp);
+        }
+    }
+
+    /**
      * Overload for the folder path — init is an arbitrary NodeIR.
      */
     private void emitRangeFusedLoop(MezzeBytecodeRootNodeGen.Builder b,
@@ -3084,7 +3128,7 @@ public final class BytecodeCompiler {
                                     com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
                                     NodeIR rangeStart, NodeIR rangeEnd, NodeIR initExpr,
                                     InlineOp op,
-                                    InlineOp mapperOp, long mapperRhsLit,
+                                    InlineOp mapperOp, long mapperRhsLit, NodeIR mapperRhsNode,
                                     Hash mapperCallHash,
                                     boolean mapperCallScalarABI,
                                     String mapperCallFieldName,
@@ -3092,7 +3136,7 @@ public final class BytecodeCompiler {
         emitRangeFusedLoop(b, argCount, localMap, accSlot, iSlot, xSlot,
                 rangeStart, rangeEnd,
                 () -> emitNode(initExpr, b, argCount, localMap),
-                op, mapperOp, mapperRhsLit,
+                op, mapperOp, mapperRhsLit, mapperRhsNode,
                 mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
                 filter);
     }
@@ -3124,6 +3168,35 @@ public final class BytecodeCompiler {
     }
 
     /**
+     * #515 — like {@link #emitInlineOpLocalLit} but RHS may be a
+     * {@link NodeIR} (typically {@link ReadLocalIR} on an outer-frame
+     * capture slot). NodeIR wins over long when non-null.
+     */
+    private void emitInlineOpLocalRhs(InlineOp op,
+                                      com.oracle.truffle.api.bytecode.BytecodeLocal x,
+                                      long lit, NodeIR rhsNode,
+                                      int argCount,
+                                      com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap,
+                                      MezzeBytecodeRootNodeGen.Builder b) {
+        if (rhsNode == null) { emitInlineOpLocalLit(op, x, lit, b); return; }
+        Runnable emitRhs = () -> emitNode(rhsNode, b, argCount, localMap);
+        switch (op) {
+            case ADD -> { b.beginDirectAdd(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectAdd(); }
+            case SUB -> { b.beginDirectSubtract(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectSubtract(); }
+            case MUL -> { b.beginDirectMultiply(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectMultiply(); }
+            case DIV -> { b.beginDirectDivide(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectDivide(); }
+            case MOD -> { b.beginDirectModulo(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectModulo(); }
+            case EQ  -> { b.beginDirectEqual(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectEqual(); }
+            case NEQ -> { b.beginDirectNotEqual(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectNotEqual(); }
+            case LT  -> { b.beginDirectLessThan(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectLessThan(); }
+            case LE  -> { b.beginDirectLessThanOrEqual(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectLessThanOrEqual(); }
+            case GT  -> { b.beginDirectGreaterThan(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectGreaterThan(); }
+            case GE  -> { b.beginDirectGreaterThanOrEqual(); b.emitLoadLocal(x); emitRhs.run(); b.endDirectGreaterThanOrEqual(); }
+            default -> throw new IllegalStateException("emitInlineOpLocalRhs: unsupported op " + op);
+        }
+    }
+
+    /**
      * Predicate peeled from a seq::filter. Three forms:
      * <ul>
      *   <li><b>Simple inline</b> ({@code preOp==null, callHash==null}):
@@ -3140,8 +3213,15 @@ public final class BytecodeCompiler {
      *   </li>
      * </ul>
      */
-    private record FilterPeel(InlineOp preOp, long preRhs,
-                              InlineOp cmpOp, long cmpRhs,
+    /**
+     * #515 — extended with optional NodeIR forms for the RHS of preOp/cmpOp.
+     * When {@code preRhsNode != null} it is emitted via {@link #emitNode}
+     * (typically a {@link ReadLocalIR} pointing at an outer-frame capture
+     * slot) INSTEAD of {@code preRhs}. Same for {@code cmpRhsNode}.
+     * If both a Node and lit are set, Node wins.
+     */
+    private record FilterPeel(InlineOp preOp, long preRhs, NodeIR preRhsNode,
+                              InlineOp cmpOp, long cmpRhs, NodeIR cmpRhsNode,
                               Hash callHash, boolean callScalarABI, String callFieldName,
                               NodeIR innerXs) {}
 
@@ -3154,6 +3234,12 @@ public final class BytecodeCompiler {
      */
     private static final class UnaryLitShape {
         final InlineOp op; final long rhsLit;
+        /** #515 — when non-null, RHS is emitted via {@link #emitNode} instead
+         *  of a raw long literal. Used to plumb captured RHS operands
+         *  (e.g. {@code {x} -> x * factor} where {@code factor} is captured).
+         *  Set to a {@link ReadLocalIR} pointing at the outer frame slot
+         *  the lambda's capture[idx].slot refers to. */
+        final NodeIR rhsNode;
         /** #442 Day 9 — non-null when the mapper body is a call to a pure
          *  user function (rather than {@code x <op> lit}). When set,
          *  {@code op} is null and {@code rhsLit} is ignored;
@@ -3165,11 +3251,15 @@ public final class BytecodeCompiler {
         final boolean callScalarABI;
         final String callFieldName;
         UnaryLitShape(InlineOp op, long rhsLit) {
-            this.op = op; this.rhsLit = rhsLit;
+            this.op = op; this.rhsLit = rhsLit; this.rhsNode = null;
+            this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
+        }
+        UnaryLitShape(InlineOp op, NodeIR rhsNode) {
+            this.op = op; this.rhsLit = 0L; this.rhsNode = rhsNode;
             this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
         }
         UnaryLitShape(Hash callHash, boolean callScalarABI, String callFieldName) {
-            this.op = null; this.rhsLit = 0L;
+            this.op = null; this.rhsLit = 0L; this.rhsNode = null;
             this.callHash = callHash;
             this.callScalarABI = callScalarABI;
             this.callFieldName = callFieldName;
@@ -3184,8 +3274,8 @@ public final class BytecodeCompiler {
      * pre-transform op restricted to arith ADD/SUB/MUL/DIV/MOD.
      */
     private static final class PredShape {
-        final InlineOp preOp; final long preRhs;
-        final InlineOp cmpOp; final long cmpRhs;
+        final InlineOp preOp; final long preRhs; final NodeIR preRhsNode;
+        final InlineOp cmpOp; final long cmpRhs; final NodeIR cmpRhsNode;
         /** #442 Day 9 — non-null when predicate body is a call to a pure
          *  Bool-returning user function. Other fields null/0 in that case;
          *  {@code callScalarABI} and {@code callFieldName} describe the
@@ -3194,26 +3284,38 @@ public final class BytecodeCompiler {
         final boolean callScalarABI;
         final String callFieldName;
         PredShape(InlineOp preOp, long preRhs, InlineOp cmpOp, long cmpRhs) {
-            this.preOp = preOp; this.preRhs = preRhs;
-            this.cmpOp = cmpOp; this.cmpRhs = cmpRhs;
+            this(preOp, preRhs, null, cmpOp, cmpRhs, null);
+        }
+        /** #515 — extended constructor lifting Node forms for captured RHSs. */
+        PredShape(InlineOp preOp, long preRhs, NodeIR preRhsNode,
+                  InlineOp cmpOp, long cmpRhs, NodeIR cmpRhsNode) {
+            this.preOp = preOp; this.preRhs = preRhs; this.preRhsNode = preRhsNode;
+            this.cmpOp = cmpOp; this.cmpRhs = cmpRhs; this.cmpRhsNode = cmpRhsNode;
             this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
         }
         PredShape(Hash callHash, boolean callScalarABI, String callFieldName) {
-            this.preOp = null; this.preRhs = 0L;
-            this.cmpOp = null; this.cmpRhs = 0L;
+            this.preOp = null; this.preRhs = 0L; this.preRhsNode = null;
+            this.cmpOp = null; this.cmpRhs = 0L; this.cmpRhsNode = null;
             this.callHash = callHash;
             this.callScalarABI = callScalarABI;
             this.callFieldName = callFieldName;
         }
     }
     private PredShape classifyUnaryPredicateLambda(MakeLambdaIR ml, MezzeLanguage language) {
-        if (!ml.getCaptures().isEmpty()) return null;
+        // #515 — captures OK: RHS resolution below lifts ReadCaptureIR(i)
+        // to a ReadLocalIR(ml.captures[i].slot) at emit time. Call-form
+        // (Shape D) still refuses captures — a captured user_pred callee
+        // isn't safe to inline as an if-condition without further work.
+        var caps = ml.getCaptures();
         var fnIR = language.lookupFunctionIR(ml.getFunctionHash());
         if (fnIR == null) return null;
-        if (!fnIR.getCaptureSlots().isEmpty()) return null;
+        if (fnIR.getCaptureSlots().size() != caps.size()) return null;
         if (fnIR.getParamSlots().size() != 1) return null;
         if (!fnIR.getLocalSlots().isEmpty()) return null;
-        int paramSlot = 0;
+        // Zero captures + one param → param slot = 0.
+        // N captures + one param → param slot = captureCount (frame layout
+        //   is [captures..., params..., locals...]). Adjust below.
+        int paramSlot = caps.size();
         NodeIR body = fnIR.getBody();
         // #442 Day 9 — Shape D first: arbitrary pure single-arg call.
         //   {x} -> user_pred { arg = x }   returning Bool
@@ -3223,7 +3325,7 @@ public final class BytecodeCompiler {
         // as an `if` condition, so a non-Bool would crash at emit time in
         // BDSL's IfThen. In practice the typechecker rejected the source
         // before we got here if the predicate wasn't Bool-valued.
-        if (body instanceof CallDirectIR call && call.getTargetHash() != null) {
+        if (caps.isEmpty() && body instanceof CallDirectIR call && call.getTargetHash() != null) {
             if (call.isScalarABI() && call.getArgs().size() == 1
                     && call.getArgs().get(0) instanceof ReadLocalIR llp1
                     && llp1.getSlot() == paramSlot
@@ -3242,9 +3344,13 @@ public final class BytecodeCompiler {
                     /*callFieldName=*/ mrp.getFields().get(0).getName());
             }
         }
-        // Extract outer op: (LHS <cmpOp> LongLit). LHS is either
+        // Extract outer op: (LHS <cmpOp> LongLit-or-Capture). LHS is either
         // ReadLocal(paramSlot) [simple] or another binary op [compound].
-        var outer = matchBinaryOpAgainstLongLit(body);
+        // The inner matcher uses paramSlot=0; rebuild body with param slot
+        // shift so `leftIsParam` picks up the correct slot when captures
+        // are present. Simpler: adjust the check below to also accept
+        // ReadLocal(paramSlot).
+        var outer = matchBinaryOpAgainstConstOrCapture(body, caps, paramSlot);
         if (outer == null) return null;
         // Outer must be a comparison op — predicate produces Bool.
         switch (outer.op) {
@@ -3253,17 +3359,82 @@ public final class BytecodeCompiler {
         }
         // Simple form: LHS is ReadLocal(paramSlot).
         if (outer.leftIsParam) {
-            return new PredShape(null, 0L, outer.op, outer.rhsLit);
+            return new PredShape(null, 0L, null, outer.op, outer.rhsLit, outer.rhsNode);
         }
-        // Compound form: LHS is another binary op against a LongLit whose
-        // LHS is ReadLocal(paramSlot).
-        var inner = matchBinaryOpAgainstLongLit(outer.leftNode);
+        // Compound form: LHS is another binary op with the same shape.
+        var inner = matchBinaryOpAgainstConstOrCapture(outer.leftNode, caps, paramSlot);
         if (inner == null || !inner.leftIsParam) return null;
         switch (inner.op) {
             case ADD, SUB, MUL, DIV, MOD -> {}
             default -> { return null; }
         }
-        return new PredShape(inner.op, inner.rhsLit, outer.op, outer.rhsLit);
+        return new PredShape(inner.op, inner.rhsLit, inner.rhsNode,
+                             outer.op, outer.rhsLit, outer.rhsNode);
+    }
+
+    /**
+     * #515 — matcher for {@code (ReadLocal(paramSlot) <op> rhs)} where
+     * {@code rhs} is a {@link LongLitIR} or a {@link ReadCaptureIR}.
+     * The pre-existing {@link #matchBinaryOpAgainstLongLit} assumed
+     * paramSlot=0 for its {@code leftIsParam} flag; with captures, the
+     * param sits at slot {@code captures.size()}. This version threads
+     * paramSlot and capture-lifting through.
+     */
+    private BinaryLitMatch matchBinaryOpAgainstConstOrCapture(
+            NodeIR n,
+            java.util.List<com.mezze.language.truffleir.CaptureIR> caps,
+            int paramSlot) {
+        // Shape A: InlineBinaryOp(?, rhs).
+        if (n instanceof InlineBinaryOpIR bin) {
+            NodeIR right = bin.getRight();
+            boolean lp = bin.getLeft() instanceof ReadLocalIR l && l.getSlot() == paramSlot;
+            if (right instanceof LongLitIR rr) {
+                return new BinaryLitMatch(bin.getOp(), rr.getValue(), lp, lp ? null : bin.getLeft());
+            }
+            NodeIR lifted = liftCaptureRhs(right, caps);
+            if (lifted != null) {
+                return new BinaryLitMatch(bin.getOp(), lifted, lp, lp ? null : bin.getLeft());
+            }
+        }
+        // Shape B: CallDirect (scalar-ABI) to a KnownArithOps target.
+        if (n instanceof CallDirectIR call
+                && call.isScalarABI()
+                && call.getArgs().size() == 2) {
+            var op = KnownArithOps.lookup(call.getTargetHash());
+            if (op == null) return null;
+            NodeIR right = call.getArgs().get(1);
+            boolean lp = call.getArgs().get(0) instanceof ReadLocalIR l && l.getSlot() == paramSlot;
+            if (right instanceof LongLitIR rr) {
+                return new BinaryLitMatch(op, rr.getValue(), lp, lp ? null : call.getArgs().get(0));
+            }
+            NodeIR lifted = liftCaptureRhs(right, caps);
+            if (lifted != null) {
+                return new BinaryLitMatch(op, lifted, lp, lp ? null : call.getArgs().get(0));
+            }
+        }
+        // Shape C: CallIndirect(function=ReadField(?, opName), arg=MakeRecord{it, r=LongLit-or-Capture}).
+        if (n instanceof CallIndirectIR ind
+                && ind.getFunction() instanceof ReadFieldIR rf
+                && ind.getArg() instanceof MakeRecordIR argMr
+                && argMr.getFields().size() == 2) {
+            var op = ABILITY_OP_NAMES.get(rf.getFieldName());
+            if (op == null) return null;
+            NodeIR rExpr = null;
+            for (var fld : argMr.getFields()) {
+                if ("r".equals(fld.getName())) rExpr = fld.getValue();
+            }
+            if (rExpr == null) return null;
+            NodeIR lhs = rf.getRecord();
+            boolean lp = lhs instanceof ReadLocalIR ll && ll.getSlot() == paramSlot;
+            if (rExpr instanceof LongLitIR ll2) {
+                return new BinaryLitMatch(op, ll2.getValue(), lp, lp ? null : lhs);
+            }
+            NodeIR lifted = liftCaptureRhs(rExpr, caps);
+            if (lifted != null) {
+                return new BinaryLitMatch(op, lifted, lp, lp ? null : lhs);
+            }
+        }
+        return null;
     }
 
     /**
@@ -3271,31 +3442,61 @@ public final class BytecodeCompiler {
      * {@link #leftIsParam} true iff LHS is {@code ReadLocal(paramSlot=0)}
      * — in that case {@link #leftNode} is not set (null); otherwise
      * {@link #leftNode} is the LHS NodeIR for further inspection.
+     *
+     * <p>#515 — RHS may also be a {@link ReadCaptureIR} lifted to a
+     * {@code ReadLocalIR} on the outer frame. When {@link #rhsNode} is
+     * non-null it wins over {@link #rhsLit}.
      */
     private static final class BinaryLitMatch {
-        final InlineOp op; final long rhsLit;
+        final InlineOp op; final long rhsLit; final NodeIR rhsNode;
         final boolean leftIsParam; final NodeIR leftNode;
         BinaryLitMatch(InlineOp op, long rhsLit, boolean leftIsParam, NodeIR leftNode) {
-            this.op = op; this.rhsLit = rhsLit;
+            this.op = op; this.rhsLit = rhsLit; this.rhsNode = null;
+            this.leftIsParam = leftIsParam; this.leftNode = leftNode;
+        }
+        BinaryLitMatch(InlineOp op, NodeIR rhsNode, boolean leftIsParam, NodeIR leftNode) {
+            this.op = op; this.rhsLit = 0L; this.rhsNode = rhsNode;
             this.leftIsParam = leftIsParam; this.leftNode = leftNode;
         }
     }
-    private BinaryLitMatch matchBinaryOpAgainstLongLit(NodeIR n) {
-        // Shape A: InlineBinaryOp(?, LongLit).
-        if (n instanceof InlineBinaryOpIR bin
-                && bin.getRight() instanceof LongLitIR rr) {
-            boolean lp = bin.getLeft() instanceof ReadLocalIR l && l.getSlot() == 0;
-            return new BinaryLitMatch(bin.getOp(), rr.getValue(), lp, lp ? null : bin.getLeft());
+    /**
+     * #515 — matcher for {@code (lhs <op> rhs)} where {@code rhs} is
+     * either a {@link LongLitIR} or a {@link ReadCaptureIR} that we
+     * resolve against {@code capturesOnEnclosing} into a
+     * {@link ReadLocalIR} on the outer frame. Pass an empty list to
+     * refuse capture-based RHS.
+     */
+    private BinaryLitMatch matchBinaryOpAgainstLongLit(NodeIR n,
+                                                       java.util.List<com.mezze.language.truffleir.CaptureIR> capturesOnEnclosing) {
+        // Shape A: InlineBinaryOp(?, LongLit) — inline arith on a long RHS.
+        if (n instanceof InlineBinaryOpIR bin) {
+            NodeIR right = bin.getRight();
+            NodeIR liftedRhs = liftCaptureRhs(right, capturesOnEnclosing);
+            if (right instanceof LongLitIR rr) {
+                boolean lp = bin.getLeft() instanceof ReadLocalIR l && l.getSlot() == 0;
+                return new BinaryLitMatch(bin.getOp(), rr.getValue(), lp, lp ? null : bin.getLeft());
+            }
+            if (liftedRhs != null) {
+                boolean lp = bin.getLeft() instanceof ReadLocalIR l && l.getSlot() == 0;
+                return new BinaryLitMatch(bin.getOp(), liftedRhs, lp, lp ? null : bin.getLeft());
+            }
         }
         // Shape B: CallDirect (scalar-ABI) to a KnownArithOps target with 2 args.
         if (n instanceof CallDirectIR call
                 && call.isScalarABI()
-                && call.getArgs().size() == 2
-                && call.getArgs().get(1) instanceof LongLitIR rr) {
+                && call.getArgs().size() == 2) {
             var op = KnownArithOps.lookup(call.getTargetHash());
             if (op == null) return null;
-            boolean lp = call.getArgs().get(0) instanceof ReadLocalIR l && l.getSlot() == 0;
-            return new BinaryLitMatch(op, rr.getValue(), lp, lp ? null : call.getArgs().get(0));
+            NodeIR right = call.getArgs().get(1);
+            if (right instanceof LongLitIR rr) {
+                boolean lp = call.getArgs().get(0) instanceof ReadLocalIR l && l.getSlot() == 0;
+                return new BinaryLitMatch(op, rr.getValue(), lp, lp ? null : call.getArgs().get(0));
+            }
+            NodeIR liftedRhs = liftCaptureRhs(right, capturesOnEnclosing);
+            if (liftedRhs != null) {
+                boolean lp = call.getArgs().get(0) instanceof ReadLocalIR l && l.getSlot() == 0;
+                return new BinaryLitMatch(op, liftedRhs, lp, lp ? null : call.getArgs().get(0));
+            }
         }
         // Shape C: CallIndirect(function=ReadField(?, opName), arg=MakeRecord{it, r=LongLit}).
         if (n instanceof CallIndirectIR ind
@@ -3315,39 +3516,76 @@ public final class BytecodeCompiler {
         }
         return null;
     }
+    /** Convenience: refuse captures. */
+    private BinaryLitMatch matchBinaryOpAgainstLongLit(NodeIR n) {
+        return matchBinaryOpAgainstLongLit(n, java.util.Collections.emptyList());
+    }
+
+    /**
+     * #515 — if {@code rhs} is {@link ReadCaptureIR(idx)}, resolve
+     * capture[idx] against the enclosing lambda's declared captures and
+     * return a {@link ReadLocalIR} that reads from the outer frame slot.
+     * Returns null if not a capture, or index is out of range.
+     */
+    private NodeIR liftCaptureRhs(NodeIR rhs,
+                                  java.util.List<com.mezze.language.truffleir.CaptureIR> capturesOnEnclosing) {
+        if (!(rhs instanceof ReadCaptureIR rc)) return null;
+        if (capturesOnEnclosing == null) return null;
+        int idx = rc.getIndex();
+        if (idx < 0 || idx >= capturesOnEnclosing.size()) return null;
+        var cap = capturesOnEnclosing.get(idx);
+        // capturesOnEnclosing[i].slot is a frame slot in the ENCLOSING
+        // function's `[captures..., params..., locals...]` layout. A
+        // plain ReadLocalIR(slot) at emit time thus loads whichever
+        // arg/local held the captured value at the MakeLambda site.
+        return new ReadLocalIR(cap.getSlot(), cap.getKind(), rc.getSrc(), null);
+    }
 
     private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
                                                      MezzeLanguage language) {
-        if (!ml.getCaptures().isEmpty()) return null;
+        // #515 — accept captures for Shape A/B/C only. Call-form (Shape D)
+        // still refuses captures — a captured user_fn callee isn't safe
+        // to inline as a mapper without further work.
+        var caps = ml.getCaptures();
         var fnIR = language.lookupFunctionIR(ml.getFunctionHash());
         if (fnIR == null) return null;
-        if (!fnIR.getCaptureSlots().isEmpty()) return null;
+        if (fnIR.getCaptureSlots().size() != caps.size()) return null;
         if (fnIR.getParamSlots().size() != 1) return null;
         if (!fnIR.getLocalSlots().isEmpty()) return null;
-        // Zero captures + one param → param occupies slot 0.
-        int paramSlot = 0;
+        // Frame layout: [captures..., params..., locals...] so the single
+        // param sits at slot equal to captures.size().
+        int paramSlot = caps.size();
         NodeIR body = fnIR.getBody();
-        // Shape A: InlineBinaryOp(ReadLocal(paramSlot), LongLit)
+        // Shape A: InlineBinaryOp(ReadLocal(paramSlot), rhs) where rhs is
+        // LongLit OR ReadCapture(i).
         if (body instanceof InlineBinaryOpIR bin
                 && bin.getLeft() instanceof ReadLocalIR l
-                && l.getSlot() == paramSlot
-                && bin.getRight() instanceof LongLitIR r) {
-            return new UnaryLitShape(bin.getOp(), r.getValue());
+                && l.getSlot() == paramSlot) {
+            NodeIR right = bin.getRight();
+            if (right instanceof LongLitIR r) {
+                return new UnaryLitShape(bin.getOp(), r.getValue());
+            }
+            NodeIR lifted = liftCaptureRhs(right, caps);
+            if (lifted != null) return new UnaryLitShape(bin.getOp(), lifted);
         }
         // Shape B: CallDirect (scalar-ABI) to a KnownArithOps target with
-        // (ReadLocal(paramSlot), LongLit) — mono-desugared arith.
+        // (ReadLocal(paramSlot), LongLit|ReadCapture) — mono-desugared arith.
         if (body instanceof CallDirectIR call
                 && call.isScalarABI()
                 && call.getArgs().size() == 2
                 && call.getArgs().get(0) instanceof ReadLocalIR ll
-                && ll.getSlot() == paramSlot
-                && call.getArgs().get(1) instanceof LongLitIR rr) {
+                && ll.getSlot() == paramSlot) {
             var op = KnownArithOps.lookup(call.getTargetHash());
             if (op == null) return null;
-            return new UnaryLitShape(op, rr.getValue());
+            NodeIR right = call.getArgs().get(1);
+            if (right instanceof LongLitIR rr) {
+                return new UnaryLitShape(op, rr.getValue());
+            }
+            NodeIR lifted = liftCaptureRhs(right, caps);
+            if (lifted != null) return new UnaryLitShape(op, lifted);
         }
         // Shape C: mono-not-fired — CallIndirectIR(function=ReadField(receiver,opName),
-        //          arg=MakeRecord{it=receiver, r=LongLit}). Same as
+        //          arg=MakeRecord{it=receiver, r=LongLit|ReadCapture}). Same as
         //          classifyFolderBody's Shape C.
         if (body instanceof CallIndirectIR ind
                 && ind.getFunction() instanceof ReadFieldIR rf
@@ -3357,24 +3595,19 @@ public final class BytecodeCompiler {
                 && argMr.getFields().size() == 2) {
             var op = ABILITY_OP_NAMES.get(rf.getFieldName());
             if (op == null) return null;
-            LongLitIR rLit = null;
+            NodeIR rExpr = null;
             for (var fld : argMr.getFields()) {
-                if ("r".equals(fld.getName()) && fld.getValue() instanceof LongLitIR ll2) rLit = ll2;
+                if ("r".equals(fld.getName())) rExpr = fld.getValue();
             }
-            if (rLit == null) return null;
-            return new UnaryLitShape(op, rLit.getValue());
+            if (rExpr == null) return null;
+            if (rExpr instanceof LongLitIR ll2) return new UnaryLitShape(op, ll2.getValue());
+            NodeIR lifted = liftCaptureRhs(rExpr, caps);
+            if (lifted != null) return new UnaryLitShape(op, lifted);
         }
-        // #442 Day 9 — Shape D: arbitrary pure single-arg call.
-        //   {x} -> user_fn { arg = x }
-        // Recognized shapes at IR level:
-        //   D1 scalar-ABI: CallDirect(hash, [ReadLocal(paramSlot)])
-        //   D2 record-ABI: CallDirect(hash, [MakeRecord{someField = ReadLocal(paramSlot)}])
-        //                  — one-field record wrapping our param
-        // Purity gate: callee body must not contain any PerformOpIR
-        // (transitively) — otherwise fusion would change execution order
-        // for filtered-out elements. Uses the existing canYieldSuspended
-        // predicate as a conservative approximation.
-        if (body instanceof CallDirectIR call) {
+        // #442 Day 9 — Shape D: arbitrary pure single-arg call. Refuse
+        // when captures are present — the callee inlining path doesn't
+        // know how to thread outer captures through.
+        if (caps.isEmpty() && body instanceof CallDirectIR call) {
             if (call.getTargetHash() == null) return null;
             if (call.isScalarABI() && call.getArgs().size() == 1
                     && call.getArgs().get(0) instanceof ReadLocalIR ll3

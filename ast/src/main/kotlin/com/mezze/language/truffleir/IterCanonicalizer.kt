@@ -343,13 +343,26 @@ object IterCanonicalizer {
         node: NodeIR,
         classifier: IterHofClassifier,
     ): Pair<MakeLambdaIR, NodeIR>? {
+        if (node is CallNativeIR && node.name == "__native_seq_map" && !node.isScalarABI) {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var xs: NodeIR? = null; var f: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                "xs" -> xs = fld.value
+                "f"  -> f  = fld.value
+            }
+            val xsInner = xs ?: return null
+            val fLambda = f as? MakeLambdaIR ?: return null
+            // Captures are OK: emit-side classifier + emit remap captured
+            // reads to the enclosing frame slots (captures[i].slot).
+            return fLambda to xsInner
+        }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
         if (callee.kind != IterHofClassifier.HofKind.MAP) return null
         val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = "f") ?: return null
         val (srcInner, fRaw) = extracted
         val fLambda = fRaw as? MakeLambdaIR ?: return null
-        if (fLambda.captures.isNotEmpty()) return null
+        // Captures OK; see comment above.
         return fLambda to srcInner
     }
 
@@ -357,13 +370,25 @@ object IterCanonicalizer {
         node: NodeIR,
         classifier: IterHofClassifier,
     ): Pair<MakeLambdaIR, NodeIR>? {
+        if (node is CallNativeIR && node.name == "__native_seq_filter" && !node.isScalarABI) {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var xs: NodeIR? = null; var p: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                "xs" -> xs = fld.value
+                "p"  -> p  = fld.value
+            }
+            val xsInner = xs ?: return null
+            val pLambda = p as? MakeLambdaIR ?: return null
+            // Captures OK; see comment on tryPeelIterMap.
+            return pLambda to xsInner
+        }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
         if (callee.kind != IterHofClassifier.HofKind.FILTER) return null
         val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = "p") ?: return null
         val (srcInner, pRaw) = extracted
         val pLambda = pRaw as? MakeLambdaIR ?: return null
-        if (pLambda.captures.isNotEmpty()) return null
+        // Captures OK; see comment above.
         return pLambda to srcInner
     }
 
