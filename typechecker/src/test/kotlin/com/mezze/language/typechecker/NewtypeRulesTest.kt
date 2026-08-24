@@ -166,6 +166,13 @@ class NewtypeRulesTest {
         """, "DoesNotExist")
     }
 
+    @Test fun `RULE disambiguation - Transparent alias dot-parens is REJECTED with newtype hint`() {
+        reject("disambig.alias", """
+            type MyInt = Int
+            pub let f = {} -> MyInt.(42)
+        """, "transparent type alias")
+    }
+
     // ── PARSER DIAGNOSTICS ──────────────────────────────────────────────
 
     @Test fun `RULE parser - unclosed paren on newtype construction`() {
