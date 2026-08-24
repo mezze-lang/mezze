@@ -2474,40 +2474,40 @@ match xs is
   _ -> 0
 
 # === 515
-newtype Action = Action { } -> {} <Log>
+newtype Action = { } -> {} <Log>
 
 # === 516
 newtype Email =
-    Email String
+    String
 
 # === 517
-newtype Email = Email String
+newtype Email = String
 
 # === 518
-newtype Email = Email String
-newtype UserId = UserId Int
-newtype Name = Name String
+newtype Email = String
+newtype UserId = Int
+newtype Name = String
 
 # === 519
-newtype EmailAddress = MkEmail String
+newtype EmailAddress = String
 
 # === 520
-newtype Handler = Handler { x: Int } -> String
+newtype Handler = { x: Int } -> String
 
 # === 521
-newtype Names = Names [String]
+newtype Names = [String]
 
 # === 522
-newtype Option 'a = Option 'a
+newtype Option 'a = 'a
 
 # === 523
-newtype Pair 'a 'b = Pair { first: 'a, second: 'b }
+newtype Pair 'a 'b = { first: 'a, second: 'b }
 
 # === 524
-newtype Point = Point { x: Float, y: Float }
+newtype Point = { x: Float, y: Float }
 
 # === 525
-newtype UserId = UserId {value: Int,}
+newtype UserId = {value: Int,}
 
 # === 526
 perform
@@ -2598,7 +2598,7 @@ pub let promise_from
   = { setup } -> setup
 
 # === 550
-pub newtype UserId = UserId Int
+pub newtype UserId = Int
 
 # === 551
 pub type Option 'a = | Some { val: 'a }, None |

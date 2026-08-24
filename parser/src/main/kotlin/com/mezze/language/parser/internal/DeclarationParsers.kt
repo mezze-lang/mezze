@@ -515,23 +515,42 @@ internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility
 
                                 when (wrappedType) {
                                     is ParseResult.Success -> {
-                                        val file = currentFile ?: "<unknown>"
-                                        val loc = spanLocTo(newtypeToken.value, wrappedType.remaining, file)
-                                        val defLoc = spanLocTo(assign.value, wrappedType.remaining, file)
-                                        ParseResult.Success(
-                                            ParsedTypeDecl(
-                                                name = typeName.value.text,
-                                                visibility = visibility,
-                                                typeParams = typeParams,
-                                                definition = ParsedNewtypeDef(
-                                                    constructor = typeName.value.text,
-                                                    wrappedType = wrappedType.value,
-                                                    loc = defLoc
+                                        // Reject the OLD redundant-constructor form
+                                        // `newtype UserId = UserId Int` — the leading
+                                        // name is the newtype's own name repeated,
+                                        // which is a legacy syntax we no longer accept.
+                                        // Modern form is `newtype UserId = Int`.
+                                        val declName = typeName.value.text
+                                        val innerName: String? = when (val w = wrappedType.value) {
+                                            is ParsedNamedType -> if (w.name == declName) declName else null
+                                            is ParsedTypeApp -> if (w.constructor == declName) declName else null
+                                            else -> null
+                                        }
+                                        if (innerName != null) {
+                                            stream4.failure(
+                                                "Old-syntax `newtype $declName = $declName …` is no longer accepted — " +
+                                                    "the constructor name is now inferred from the declaration name. " +
+                                                    "Rewrite as `newtype $declName = <wrapped-type>` (drop the leading `$declName`)."
+                                            )
+                                        } else {
+                                            val file = currentFile ?: "<unknown>"
+                                            val loc = spanLocTo(newtypeToken.value, wrappedType.remaining, file)
+                                            val defLoc = spanLocTo(assign.value, wrappedType.remaining, file)
+                                            ParseResult.Success(
+                                                ParsedTypeDecl(
+                                                    name = declName,
+                                                    visibility = visibility,
+                                                    typeParams = typeParams,
+                                                    definition = ParsedNewtypeDef(
+                                                        constructor = declName,
+                                                        wrappedType = wrappedType.value,
+                                                        loc = defLoc
+                                                    ),
+                                                    loc = loc
                                                 ),
-                                                loc = loc
-                                            ),
-                                            wrappedType.remaining
-                                        )
+                                                wrappedType.remaining
+                                            )
+                                        }
                                     }
                                     is ParseResult.Failure -> wrappedType
                                 }

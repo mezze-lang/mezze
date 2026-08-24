@@ -129,7 +129,10 @@ data class ParsedVariantCtorDef(
 )
 
 /**
- * Newtype definition: `newtype UserId Wrap Int`
+ * Newtype definition: `newtype UserId = Int`. The constructor name always
+ * equals the type name — the parser rejects the old-syntax
+ * `newtype UserId = UserId Int` form. Runtime treats the newtype as fully
+ * erased; only the typechecker sees the nominal wall.
  */
 @Serializable
 data class ParsedNewtypeDef(

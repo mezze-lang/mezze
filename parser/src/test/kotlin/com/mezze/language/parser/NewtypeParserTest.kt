@@ -185,20 +185,40 @@ class NewtypeParserTest {
     }
 
     @Test
-    fun `test newtype constructor different from type name`() {
-        val source = "newtype EmailAddress = MkEmail String"
+    fun `test newtype rejects OLD redundant-constructor form with rename hint`() {
+        // Old-syntax `newtype UserId = UserId Int` must be rejected — modern
+        // syntax is `newtype UserId = Int`.
+        val ex = try {
+            parser.parseParsedModule("newtype UserId = UserId Int")
+            null
+        } catch (e: Exception) { e }
+        assertNotNull(ex, "old-syntax `newtype UserId = UserId Int` must be rejected")
+        val msg = ex!!.message ?: ""
+        assertTrue(msg.contains("no longer accepted"),
+            "error should say the syntax is deprecated; got: $msg")
+        assertTrue(msg.contains("UserId"),
+            "error should name the offending type; got: $msg")
+    }
+
+    @Test
+    fun `test newtype constructor always equals type name`() {
+        // Modern syntax: `newtype UserId = Int`. The constructor name is
+        // ALWAYS the type name — the old form `newtype UserId = UserId Int`
+        // with the leading repeat is rejected by the parser, and any other
+        // leading name (`newtype UserId = MkUser Int`) parses the RHS as a
+        // type application, not as a differing constructor.
+        val source = "newtype UserId = Int"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
         assertEquals(1, module.decls.size)
 
         val typeDecl = module.decls[0] as ParsedTypeDecl
-        assertEquals("EmailAddress", typeDecl.name)
+        assertEquals("UserId", typeDecl.name)
 
         val newtypeDef = typeDecl.definition as ParsedNewtypeDef
-        assertEquals("MkEmail", newtypeDef.constructor)
-
-        println("✅ Newtype with different constructor name parsed successfully!")
+        assertEquals("UserId", newtypeDef.constructor,
+            "Newtype constructor name must always equal the type declaration name")
     }
 
     @Test

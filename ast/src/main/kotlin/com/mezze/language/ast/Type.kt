@@ -188,7 +188,7 @@ sealed interface MezzeType {
     }
 
     // Newtype — compile-time wrapper, erased at runtime.
-    // newtype UserId = UserId Int → NewtypeType("UserId", "UserId", IntType)
+    // newtype UserId = Int → NewtypeType("UserId", "UserId", IntType)
     // newtype Point = Point {x: Float, y: Float} → NewtypeType("Point", "Point", RecordType({x: Float, y: Float}))
     // At runtime, UserId 42 is just 42. Point {x=1.0, y=2.0} is just {x=1.0, y=2.0}.
     // Does NOT auto-derive Eq/Ord/Codec — requires explicit impl.

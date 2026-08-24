@@ -39,10 +39,6 @@ class TypeAliasFormatTest {
     }
 
     @Test fun `newtype and type alias coexist in one module`() {
-        // Formatter roundtrip: `type` alias stays as-is; `newtype` currently
-        // re-emits with the ctor-form `UserId UserId Int` (pre-existing
-        // behaviour, not part of the alias work). This test pins that BOTH
-        // decls are present and neither is dropped — mixing them must work.
         val input = """
             type MyInt = Int
             newtype UserId = Int
@@ -50,7 +46,17 @@ class TypeAliasFormatTest {
         val output = formatter.format(input)
         assertTrue(output.contains("type MyInt = Int"),
             "type alias must survive round-trip; got: $output")
-        assertTrue(output.contains("newtype UserId"),
-            "newtype must survive round-trip; got: $output")
+        assertTrue(output.contains("newtype UserId = Int"),
+            "newtype must NOT double-print its constructor; got: $output")
+    }
+
+    @Test fun `newtype with primitive RHS roundtrips without double-ctor`() {
+        val input = "newtype Age = Int\n"
+        assertEquals(input, formatter.format(input))
+    }
+
+    @Test fun `parametric newtype roundtrips without double-ctor`() {
+        val input = "newtype Wrap 'a = Seq 'a\n"
+        assertEquals(input, formatter.format(input))
     }
 }
