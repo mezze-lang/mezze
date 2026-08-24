@@ -11,7 +11,7 @@ import com.mezze.interpreter.values.MezzeRecord
  * Migrated from V1 to V2 with unboxed values.
  */
 class NewtypeInterpreterTest {
-    private fun eval(source: Str): Any = MezzeTestHelper.run(source)
+    private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========== Basic Construction Tests ==========
 

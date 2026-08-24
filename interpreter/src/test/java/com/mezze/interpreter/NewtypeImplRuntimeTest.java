@@ -459,17 +459,17 @@ class NewtypeImplRuntimeTest {
             Object result = MezzeTestHelper.run("""
                 use std::abilities::compare::{Eq}
 
-                newtype UserId = UserId Int
+                newtype UserId = Int
 
                 impl Eq for UserId where {
                     eq = {it, r} -> match it is
-                        UserId {val = a} -> match r is
-                            UserId {val = b} -> a == b,
+                        UserId.(a) -> match r is
+                            UserId.(b) -> a == b,
                     neq = {it, r} -> it.eq {r = r}.not {}
                 }
 
-                let u1 = UserId {val = 42}
-                let u2 = UserId {val = 42}
+                let u1 = UserId.(42)
+                let u2 = UserId.(42)
                 u1 == u2
                 """);
             assertEquals(true, result);
@@ -480,17 +480,17 @@ class NewtypeImplRuntimeTest {
             Object result = MezzeTestHelper.run("""
                 use std::abilities::compare::{Eq}
 
-                newtype UserId = UserId Int
+                newtype UserId = Int
 
                 impl Eq for UserId where {
                     eq = {it, r} -> match it is
-                        UserId {val = a} -> match r is
-                            UserId {val = b} -> a == b,
+                        UserId.(a) -> match r is
+                            UserId.(b) -> a == b,
                     neq = {it, r} -> it.eq {r = r}.not {}
                 }
 
-                let u1 = UserId {value = 42}
-                let u2 = UserId {value = 99}
+                let u1 = UserId.(42)
+                let u2 = UserId.(99)
                 u1 != u2
                 """);
             assertEquals(true, result);
@@ -501,17 +501,17 @@ class NewtypeImplRuntimeTest {
             Object result = MezzeTestHelper.run("""
                 use std::abilities::compare::{Eq}
 
-                newtype UserId = UserId Int
+                newtype UserId = Int
 
                 impl Eq for UserId where {
                     eq = {it, r} -> match it is
-                        UserId {val = a} -> match r is
-                            UserId {val = b} -> a == b,
+                        UserId.(a) -> match r is
+                            UserId.(b) -> a == b,
                     neq = {it, r} -> it.eq {r = r}.not {}
                 }
 
-                let u1 = UserId {value = 42}
-                let u2 = UserId {value = 42}
+                let u1 = UserId.(42)
+                let u2 = UserId.(42)
                 u1 != u2
                 """);
             assertEquals(false, result);

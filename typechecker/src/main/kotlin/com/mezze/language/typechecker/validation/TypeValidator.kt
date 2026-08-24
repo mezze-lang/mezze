@@ -86,13 +86,17 @@ class TypeValidator(
             }
         }
         for (decl in module.decls) {
-            val expr = when (decl) {
-                is ParsedLetDecl -> decl.value
-                is ParsedTopLevelExpr -> decl.expression
-                else -> null
-            } ?: continue
+            val (expr, currentDeclName) = when (decl) {
+                is ParsedLetDecl -> {
+                    val name = if (decl.isSimpleBinding) decl.variableName else null
+                    decl.value to name
+                }
+                is ParsedTopLevelExpr -> decl.expression to null
+                else -> null to null
+            }
+            if (expr == null) continue
             errors.addAll(performValidator.validatePerformExpressionsInExpression(expr, implDeclarations, effectDeclarations, parsedFunctionDefs))
-            errors.addAll(matchValidator.validateParsedMatchesInExpr(expr, substitution, constraintResults))
+            errors.addAll(matchValidator.validateParsedMatchesInExpr(expr, substitution, constraintResults, currentDeclName))
         }
 
         return if (errors.isEmpty()) {

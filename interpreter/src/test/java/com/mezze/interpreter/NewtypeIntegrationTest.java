@@ -16,11 +16,11 @@ class NewtypeIntegrationTest {
     @Test
     void simpleNewtypeWithString() {
         Object result = MezzeTestHelper.run("""
-            newtype Email = Email String
+            newtype Email = Str
 
-            let email = Email {value = "test@example.com"}
+            let email = Email.("test@example.com")
             match email is
-                Email {value} -> value
+                Email.(value) -> value
             """);
         assertEquals("test@example.com", result);
     }
@@ -28,11 +28,11 @@ class NewtypeIntegrationTest {
     @Test
     void simpleNewtypeWithInt() {
         Object result = MezzeTestHelper.run("""
-            newtype UserId = UserId Int
+            newtype UserId = Int
 
-            let userId = UserId {value = 42}
+            let userId = UserId.(42)
             match userId is
-                UserId {value} -> value
+                UserId.(value) -> value
             """);
         assertEquals(42L, result);
     }
@@ -40,11 +40,11 @@ class NewtypeIntegrationTest {
     @Test
     void simpleNewtypeWithFloat() {
         Object result = MezzeTestHelper.run("""
-            newtype Temperature = Temperature Float
+            newtype Temperature = Float
 
-            let temp = Temperature {value = 98.6}
+            let temp = Temperature.(98.6)
             match temp is
-                Temperature {value} -> value
+                Temperature.(value) -> value
             """);
         assertEquals(98.6, (Double) result, 0.001);
     }
@@ -54,11 +54,11 @@ class NewtypeIntegrationTest {
     @Test
     void newtypeWithRecordType() {
         Object result = MezzeTestHelper.run("""
-            newtype Point = Point { x: Float, y: Float }
+            newtype Point = { x: Float, y: Float }
 
-            let point = Point {x = 3.0, y = 4.0}
+            let point = Point.({x = 3.0, y = 4.0})
             match point is
-                Point {x, y} -> x + y
+                Point.({x, y}) -> x + y
             """);
         assertEquals(7.0, (Double) result, 0.001);
     }
@@ -68,12 +68,12 @@ class NewtypeIntegrationTest {
     @Test
     void newtypePatternMatching() {
         Object result = MezzeTestHelper.run("""
-            newtype Email = Email String
+            newtype Email = Str
 
             let extractEmail = {e} -> match e is
-                Email {value} -> value
+                Email.(value) -> value
 
-            let email = Email {value = "alice@example.com"}
+            let email = Email.("alice@example.com")
             extractEmail {e = email}
             """);
         assertEquals("alice@example.com", result);
@@ -82,12 +82,12 @@ class NewtypeIntegrationTest {
     @Test
     void newtypePatternMatchingWithRecord() {
         Object result = MezzeTestHelper.run("""
-            newtype Point = Point { x: Float, y: Float }
+            newtype Point = { x: Float, y: Float }
 
             let getX = {p} -> match p is
-                Point {x, y} -> x
+                Point.({x, y}) -> x
 
-            let point = Point {x = 5.0, y = 12.0}
+            let point = Point.({x = 5.0, y = 12.0})
             getX {p = point}
             """);
         assertEquals(5.0, (Double) result, 0.001);
@@ -98,11 +98,11 @@ class NewtypeIntegrationTest {
     @Test
     void newtypeWithConstructorHelperFunction() {
         Object result = MezzeTestHelper.run("""
-            newtype Email = Email String
+            newtype Email = Str
 
-            let mkEmail = {s} -> Email {value = s}
+            let mkEmail = {s} -> Email.(s)
             let unwrapEmail = {e} -> match e is
-                Email {value} -> value
+                Email.(value) -> value
 
             let email = mkEmail {s = "bob@test.com"}
             unwrapEmail {e = email}
@@ -113,15 +113,15 @@ class NewtypeIntegrationTest {
     @Test
     void newtypeWithValidationFunction() {
         Object result = MezzeTestHelper.run("""
-            newtype Age = Age Int
+            newtype Age = Int
 
             let mkAge = {n} ->
                 if n >= 0
-                then Age {value = n}
-                else Age {value = 0}
+                then Age.(n)
+                else Age.(0)
 
             let unwrapAge = {a} -> match a is
-                Age {value} -> value
+                Age.(value) -> value
 
             let invalidAge = mkAge {n = -5}
             unwrapAge {a = invalidAge}
@@ -134,14 +134,14 @@ class NewtypeIntegrationTest {
     @Test
     void multipleDistinctNewtypes() {
         Object result = MezzeTestHelper.run("""
-            newtype Email = Email String
-            newtype UserId = UserId Int
-            newtype Name = Name String
+            newtype Email = Str
+            newtype UserId = Int
+            newtype Name = Str
 
             let unwrapUserId = {uid} -> match uid is
-                UserId {value} -> value
+                UserId.(value) -> value
 
-            let userId = UserId {value = 123}
+            let userId = UserId.(123)
             unwrapUserId {uid = userId}
             """);
         assertEquals(123L, result);
@@ -150,17 +150,17 @@ class NewtypeIntegrationTest {
     @Test
     void newtypeTypeSafetyWithDistinctWrappers() {
         Object result = MezzeTestHelper.run("""
-            newtype Email = Email String
-            newtype Name = Name String
+            newtype Email = Str
+            newtype Name = Str
 
             let processEmail = {e} -> match e is
-                Email {value} -> value
+                Email.(value) -> value
 
             let processName = {n} -> match n is
-                Name {value} -> value
+                Name.(value) -> value
 
-            let email = Email {value = "test@example.com"}
-            let name = Name {value = "Alice"}
+            let email = Email.("test@example.com")
+            let name = Name.("Alice")
 
             processEmail {e = email}
             """);
@@ -172,13 +172,13 @@ class NewtypeIntegrationTest {
     @Test
     void nestedNewtypeConstruction() {
         Object result = MezzeTestHelper.run("""
-            newtype UserId = UserId Int
-            newtype User = User { id: UserId, name: String }
+            newtype UserId = Int
+            newtype User = { id: UserId, name: Str }
 
-            let userId = UserId {value = 456}
-            let user = User {id = userId, name = "Bob"}
+            let userId = UserId.(456)
+            let user = User.({id = userId, name = "Bob"})
             match user is
-                User {id, name} -> name
+                User.({id, name}) -> name
             """);
         assertEquals("Bob", result);
     }
@@ -186,17 +186,17 @@ class NewtypeIntegrationTest {
     @Test
     void nestedNewtypePatternMatching() {
         Object result = MezzeTestHelper.run("""
-            newtype UserId = UserId Int
-            newtype User = User { id: UserId, name: String }
+            newtype UserId = Int
+            newtype User = { id: UserId, name: Str }
 
             let unwrapUserId = {uid} -> match uid is
-                UserId {value} -> value
+                UserId.(value) -> value
 
             let getUserId = {u} -> match u is
-                User {id, name} -> unwrapUserId {uid = id}
+                User.({id, name}) -> unwrapUserId {uid = id}
 
-            let userId = UserId {value = 789}
-            let user = User {id = userId, name = "Charlie"}
+            let userId = UserId.(789)
+            let user = User.({id = userId, name = "Charlie"})
             getUserId {u = user}
             """);
         assertEquals(789L, result);
@@ -207,15 +207,15 @@ class NewtypeIntegrationTest {
     @Test
     void newtypeAsFunctionParameter() {
         Object result = MezzeTestHelper.run("""
-            newtype Distance = Distance Float
+            newtype Distance = Float
 
             let double = {d} -> match d is
-                Distance {value} -> Distance {value = value * 2.0}
+                Distance.(value) -> Distance.(value * 2.0)
 
             let unwrapDistance = {d} -> match d is
-                Distance {value} -> value
+                Distance.(value) -> value
 
-            let dist = Distance {value = 10.0}
+            let dist = Distance.(10.0)
             let doubled = double {d = dist}
             unwrapDistance {d = doubled}
             """);
@@ -225,11 +225,11 @@ class NewtypeIntegrationTest {
     @Test
     void newtypeAsFunctionReturnValue() {
         Object result = MezzeTestHelper.run("""
-            newtype Result = Result String
+            newtype Result = Str
 
-            let createResult = {msg} -> Result {value = msg}
+            let createResult = {msg} -> Result.(msg)
             let unwrapResult = {r} -> match r is
-                Result {value} -> value
+                Result.(value) -> value
 
             let res = createResult {msg = "Success"}
             unwrapResult {r = res}
@@ -242,20 +242,20 @@ class NewtypeIntegrationTest {
     @Test
     void newtypeWithComplexBusinessLogic() {
         Object result = MezzeTestHelper.run("""
-            newtype Price = Price Float
-            newtype Quantity = Quantity Float
-            newtype Total = Total Float
+            newtype Price = Float
+            newtype Quantity = Float
+            newtype Total = Float
 
             let calculateTotal = {price, qty} ->
                 match price is
-                    Price {value = p} -> match qty is
-                        Quantity {value = q} -> Total {value = p * q}
+                    Price.(p) -> match qty is
+                        Quantity.(q) -> Total.(p * q)
 
             let unwrapTotal = {t} -> match t is
-                Total {value} -> value
+                Total.(value) -> value
 
-            let price = Price {value = 19.99}
-            let qty = Quantity {value = 3.0}
+            let price = Price.(19.99)
+            let qty = Quantity.(3.0)
             let total = calculateTotal {price = price, qty = qty}
             unwrapTotal {t = total}
             """);
@@ -265,23 +265,23 @@ class NewtypeIntegrationTest {
     @Test
     void newtypeWithConditionalLogic() {
         Object result = MezzeTestHelper.run("""
-            newtype Score = Score Int
-            newtype Grade = Grade String
+            newtype Score = Int
+            newtype Grade = Str
 
             let calculateGrade = {s} -> match s is
-                Score {value} ->
+                Score.(value) ->
                     if value >= 90
-                    then Grade {value = "A"}
+                    then Grade.("A")
                     else if value >= 80
-                    then Grade {value = "B"}
+                    then Grade.("B")
                     else if value >= 70
-                    then Grade {value = "C"}
-                    else Grade {value = "F"}
+                    then Grade.("C")
+                    else Grade.("F")
 
             let unwrapGrade = {g} -> match g is
-                Grade {value} -> value
+                Grade.(value) -> value
 
-            let score = Score {value = 95}
+            let score = Score.(95)
             let grade = calculateGrade {s = score}
             unwrapGrade {g = grade}
             """);
