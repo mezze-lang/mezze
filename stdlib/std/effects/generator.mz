@@ -24,13 +24,13 @@ pub let yield = { value } -> Generator.yield { value }
 
 ## Lazy stream of `'a`. The thunk returns `None` when exhausted, or
 ## `Some { val, rest }` with the next element and a continuation stream.
-pub newtype Stream 'a = Stream { next: {} -> Option { val: 'a, rest: Stream 'a } }
+pub newtype Stream 'a = { next: {} -> Option { val: 'a, rest: Stream 'a } }
 
 ## Materialize a stream eagerly into a finite Seq. Stops at the first
 ## `None` (so unsafe to call on infinite streams).
 pub let to_seq : { stream: Stream 'a } -> [ 'a ] = { stream } ->
   match stream is
-    Stream { next } -> match next {} is
+    Stream.({ next }) -> match next {} is
       None -> []
       Some { val, rest } -> seq::push_front { xs = to_seq { stream = rest }, x = val }
 
@@ -44,7 +44,7 @@ pub let to_seq : { stream: Stream 'a } -> [ 'a ] = { stream } ->
 ## return value, which becomes the stream's next value.
 impl Generator for AsStream where {
   yield = { value } ->
-    abort { val = Some { val = value, rest = Stream { next = {} -> resume { val = {} } } } }
+    abort { val = Some { val = value, rest = Stream.({ next = {} -> resume { val = {} } }) } }
 }
 
 ## Convenience: build a `Stream` from a generator body.
@@ -56,7 +56,7 @@ impl Generator for AsStream where {
 ##
 ## Use `to_seq` on the returned stream to materialize all values.
 pub let make_stream : { f: {} -> Option { val: 'a, rest: Stream 'a } <Generator, ...> } -> Stream 'a =
-  { f } -> Stream { next = {} -> perform AsStream in f {} }
+  { f } -> Stream.({ next = {} -> perform AsStream in f {} })
 
 ## Convenience: run a generator body and return all values as a Seq.
 ## Equivalent to `to_seq { stream = make_stream { f = f } }`.

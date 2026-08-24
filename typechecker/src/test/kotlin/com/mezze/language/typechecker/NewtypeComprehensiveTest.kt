@@ -16,8 +16,8 @@ import org.junit.jupiter.api.Nested
  * Only Inspect is universally available.
  *
  * Syntax:
- *   newtype UserId = UserId Int
- *   newtype Point = Point { x: Float, y: Float }
+ *   newtype UserId = Int
+ *   newtype Point = { x: Float, y: Float }
  *
  * Construction:
  *   UserId 42              → at runtime: 42
@@ -50,8 +50,8 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype wrapping Int type-checks`() {
             val source = """
-                newtype UserId = UserId Int
-                let uid = UserId {value = 42}
+                newtype UserId = Int
+                let uid = UserId.(42)
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
@@ -60,8 +60,8 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype wrapping String type-checks`() {
             val source = """
-                newtype Email = Email String
-                let email = Email {value = "test@example.com"}
+                newtype Email = String
+                let email = Email.("test@example.com")
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
@@ -70,7 +70,7 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype wrapping record type-checks`() {
             val source = """
-                newtype Point = Point { x: Float, y: Float }
+                newtype Point = { x: Float, y: Float }
                 let p = Point { x = 3.0, y = 4.0 }
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
@@ -80,10 +80,10 @@ class NewtypeComprehensiveTest {
         @Test
         fun `multiple newtypes wrapping same type are distinct`() {
             val source = """
-                newtype UserId = UserId Int
-                newtype Age = Age Int
-                let uid = UserId {value = 42}
-                let age = Age {value = 25}
+                newtype UserId = Int
+                newtype Age = Int
+                let uid = UserId.(42)
+                let age = Age.(25)
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
@@ -100,10 +100,10 @@ class NewtypeComprehensiveTest {
         @Test
         fun `pattern match unwraps newtype with Int`() {
             val source = """
-                newtype UserId = UserId Int
-                let uid = UserId {value = 42}
+                newtype UserId = Int
+                let uid = UserId.(42)
                 let val = match uid is
-                    UserId {value} -> value
+                    UserId.(value) -> value
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
@@ -112,7 +112,7 @@ class NewtypeComprehensiveTest {
         @Test
         fun `pattern match unwraps newtype with record`() {
             val source = """
-                newtype Point = Point { x: Float, y: Float }
+                newtype Point = { x: Float, y: Float }
                 let p = Point { x = 3.0, y = 4.0 }
                 let x_val = match p is
                     Point { x, y } -> x
@@ -124,10 +124,10 @@ class NewtypeComprehensiveTest {
         @Test
         fun `pattern match in function parameter`() {
             val source = """
-                newtype Email = Email String
+                newtype Email = String
                 let unwrap = {e} -> match e is
-                    Email {value} -> value
-                let result = unwrap {e = Email {value = "test"}}
+                    Email.(value) -> value
+                let result = unwrap {e = Email.("test")}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
@@ -144,7 +144,7 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype does NOT auto-derive Eq`() {
             val source = """
-                newtype UserId = UserId Int
+                newtype UserId = Int
                 let same = {a: UserId, b: UserId} -> a == b
             """.trimIndent()
             assertThrows<TypeCheckError> {
@@ -155,7 +155,7 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype does NOT auto-derive Ord`() {
             val source = """
-                newtype UserId = UserId Int
+                newtype UserId = Int
                 let cmp = {a: UserId, b: UserId} -> a < b
             """.trimIndent()
             assertThrows<TypeCheckError> {
@@ -166,7 +166,7 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype DOES have Inspect (universal)`() {
             val source = """
-                newtype Email = Email String
+                newtype Email = String
                 let dbg = {e: Email} -> e.to_dbg_str {}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
@@ -176,7 +176,7 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype with explicit Eq impl works`() {
             val source = """
-                newtype UserId = UserId Int
+                newtype UserId = Int
 
                 ability Eq for 'a where {
                     eq: {it: 'a, r: 'a} -> Bool
@@ -185,8 +185,8 @@ class NewtypeComprehensiveTest {
                 impl Eq for UserId where {
                     eq = {it, r} ->
                         match it is
-                            UserId {val = a} -> match r is
-                                UserId {val = b} -> a == b
+                            UserId.(a) -> match r is
+                                UserId.(b) -> a == b
                 }
 
                 let same = {a: UserId, b: UserId} -> a.eq {r = b}
@@ -236,7 +236,7 @@ class NewtypeComprehensiveTest {
         @Test
         fun `cannot assign Int to newtype parameter`() {
             val source = """
-                newtype UserId = UserId Int
+                newtype UserId = Int
                 let process = {uid: UserId} -> uid
                 let result = process {uid = 42}
             """.trimIndent()
@@ -248,10 +248,10 @@ class NewtypeComprehensiveTest {
         @Test
         fun `cannot mix different newtypes`() {
             val source = """
-                newtype UserId = UserId Int
-                newtype Age = Age Int
+                newtype UserId = Int
+                newtype Age = Int
                 let process = {uid: UserId} -> uid
-                let result = process {uid = Age {value = 25}}
+                let result = process {uid = Age.(25)}
             """.trimIndent()
             assertThrows<TypeCheckError> {
                 typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
@@ -261,11 +261,11 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype function return type is the newtype not inner type`() {
             val source = """
-                newtype UserId = UserId Int
-                let mkUser = {n: Int} -> UserId {value = n}
+                newtype UserId = Int
+                let mkUser = {n: Int} -> UserId.(n)
                 let uid = mkUser {n = 42}
                 let val = match uid is
-                    UserId {value} -> value
+                    UserId.(value) -> value
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
@@ -282,9 +282,9 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype wrapping another newtype`() {
             val source = """
-                newtype UserId = UserId Int
-                newtype User = User { id: UserId, name: String }
-                let uid = UserId {value = 42}
+                newtype UserId = Int
+                newtype User = { id: UserId, name: String }
+                let uid = UserId.(42)
                 let user = User { id = uid, name = "Alice" }
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
@@ -294,13 +294,13 @@ class NewtypeComprehensiveTest {
         @Test
         fun `nested newtype pattern matching`() {
             val source = """
-                newtype UserId = UserId Int
-                newtype User = User { id: UserId, name: String }
-                let uid = UserId {value = 42}
+                newtype UserId = Int
+                newtype User = { id: UserId, name: String }
+                let uid = UserId.(42)
                 let user = User { id = uid, name = "Alice" }
                 let getId = {u} -> match u is
                     User { id, name } -> match id is
-                        UserId {value} -> value
+                        UserId.(value) -> value
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
@@ -321,13 +321,13 @@ class NewtypeComprehensiveTest {
         fun `cannot construct imported newtype from another module`() {
             // Define newtype in one module
             java.nio.file.Files.writeString(tempDir.resolve("types.mz"), """
-                pub newtype UserId = UserId Int
+                pub newtype UserId = Int
             """.trimIndent())
 
             // Try to construct it from another module — should fail
             java.nio.file.Files.writeString(tempDir.resolve("user.mz"), """
                 use types::{UserId}
-                let uid = UserId {value = 42}
+                let uid = UserId.(42)
             """.trimIndent())
 
             val userParsedModule = parser.parseParsedModule(
@@ -342,8 +342,8 @@ class NewtypeComprehensiveTest {
         fun `can use imported newtype as parameter type`() {
             // Define newtype in one module
             java.nio.file.Files.writeString(tempDir.resolve("types.mz"), """
-                pub newtype UserId = UserId Int
-                pub let make_user_id = {n: Int} -> UserId {val = n}
+                pub newtype UserId = Int
+                pub let make_user_id = {n: Int} -> UserId.(n)
             """.trimIndent())
 
             // Use the type (but not construct/destruct)

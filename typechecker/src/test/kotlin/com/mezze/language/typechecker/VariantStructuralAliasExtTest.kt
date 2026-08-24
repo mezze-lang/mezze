@@ -303,8 +303,8 @@ class VariantStructuralAliasExtTest {
     @Test
     fun `newtype stays nominal across module boundary`() {
         writeModule("id_lib", """
-            pub newtype UserId = UserId Int
-            pub let make : { n: Int } -> UserId = { n } -> UserId { val = n }
+            pub newtype UserId = Int
+            pub let make : { n: Int } -> UserId = { n } -> UserId.(n)
         """)
         val main = """
             use id_lib::{ make }

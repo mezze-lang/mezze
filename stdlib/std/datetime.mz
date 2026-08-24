@@ -37,14 +37,14 @@ use std::result
 
 ## Moment in wall-clock time — nanosecond precision since Unix epoch.
 ## Not monotonic; can jump on NTP sync, DST, admin clock changes.
-pub newtype Instant = Instant __NativeInstant
+pub newtype Instant = __NativeInstant
 
 ## Length of time. Also used for monotonic-clock readings (as a delta
 ## from an arbitrary origin).
-pub newtype Duration = Duration __NativeDuration
+pub newtype Duration = __NativeDuration
 
 ## IANA timezone identifier. Cheap to share; construct once, use everywhere.
-pub newtype Zone = Zone __NativeZone
+pub newtype Zone = __NativeZone
 
 ## Decomposed date/time in a specific zone. Plain record so it works
 ## with pattern matching, spread, and codec.
@@ -472,7 +472,7 @@ pub let zone_decode : { s: Str } -> Result Zone Str = { s } ->
 ## std::effects::time to run tests where sleep advances the clock.
 ## ==================================================================
 
-pub newtype TestClock = TestClock __NativeTestClock
+pub newtype TestClock = __NativeTestClock
 
 ## Build a fresh TestClock starting at the given Instant.
 pub let test_clock_at : { i: Instant } -> TestClock = { i } ->

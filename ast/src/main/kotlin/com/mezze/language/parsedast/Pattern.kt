@@ -39,6 +39,18 @@ data class ParsedConstructorPattern(
 ) : ParsedPattern
 
 /**
+ * Newtype destructuring pattern: `Email.(val)`, `Point.({ x, y })`
+ *
+ * Only valid in the module that defines the newtype.
+ */
+@Serializable
+data class ParsedNewtypePattern(
+    val typeName: String,
+    val inner: ParsedPattern,
+    override val loc: Loc
+) : ParsedPattern
+
+/**
  * Record pattern: `{ x, y }`, `{ x = a, y = b }`, `{ x, ... }`
  *
  * - Punning: `{ x }` means `{ x = x }` (pattern=null on entry)
@@ -110,6 +122,7 @@ fun ParsedPattern.isIrrefutable(): Boolean = when (this) {
     is ParsedWildcardPattern -> true
     is ParsedRecordPattern -> entries.all { it.pattern?.isIrrefutable() ?: true }
     is ParsedConstructorPattern -> false
+    is ParsedNewtypePattern -> false
     is ParsedLiteralPattern -> false
     is ParsedSeqPattern -> false
     is ParsedStringInterpPattern -> false
@@ -120,6 +133,7 @@ fun ParsedPattern.extractBindings(): List<String> = when (this) {
     is ParsedWildcardPattern -> emptyList()
     is ParsedRecordPattern -> entries.flatMap { it.pattern?.extractBindings() ?: listOf(it.name) }
     is ParsedConstructorPattern -> payload?.extractBindings() ?: emptyList()
+    is ParsedNewtypePattern -> inner.extractBindings()
     is ParsedLiteralPattern -> emptyList()
     is ParsedSeqPattern -> {
         // "_" is the tail-ignoring rest (`..._`) — it matches but binds nothing.
@@ -135,6 +149,7 @@ fun ParsedPattern.kindDescription(): String = when (this) {
     is ParsedWildcardPattern -> "wildcard pattern"
     is ParsedRecordPattern -> "record pattern"
     is ParsedConstructorPattern -> "constructor pattern"
+    is ParsedNewtypePattern -> "newtype pattern"
     is ParsedLiteralPattern -> "literal pattern"
     is ParsedSeqPattern -> "seq pattern"
     is ParsedStringInterpPattern -> "string interpolation pattern"

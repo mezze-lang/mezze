@@ -3,7 +3,7 @@ use std::effects::async::{ Async, park }
 use std::int
 
 ## Resettable counter for waiting on a group of tasks to complete.
-pub newtype WaitGroup = WaitGroup __NativeWaitGroup
+pub newtype WaitGroup = __NativeWaitGroup
 
 impl Eq for WaitGroup where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },

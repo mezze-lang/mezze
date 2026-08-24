@@ -145,28 +145,28 @@ class AbilityCombinationMatrixTest {
 
     @Test fun `newtype - single-param ability on a bare newtype literal`() {
         assertNull(err("""
-            newtype Money = Money Int
+            newtype Money = Int
             ability Show1 for 'a where { show1: { it: 'a } -> Int }
             impl Show1 for Money where { show1 = { it } -> 0 }
-            pub let f = {} -> (Money { val = 5 }).show1 {}
+            pub let f = {} -> (Money.(5)).show1 {}
         """.trimIndent()))
     }
     @Test fun `newtype - multi-param having ability on a bare newtype literal`() {
         assertNull(err("""
-            newtype Money = Money Int
+            newtype Money = Int
             ability ScaleMoney 'b for 'a having 'out where { times: { it: 'a, by: 'b } -> 'out }
             impl ScaleMoney Int for Money having 'out = Money where {
-              times = { it, by } -> match it is Money { val } -> Money { val = val }
+              times = { it, by } -> match it is Money.(val) -> Money.(val)
             }
-            pub let f = {} -> (Money { val = 5 }).times { by = 3 }
+            pub let f = {} -> (Money.(5)).times { by = 3 }
         """.trimIndent()))
     }
     @Test fun `newtype - via annotated parameter`() {
         assertNull(err("""
-            newtype Money = Money Int
+            newtype Money = Int
             ability ScaleMoney 'b for 'a having 'out where { times: { it: 'a, by: 'b } -> 'out }
             impl ScaleMoney Int for Money having 'out = Money where {
-              times = { it, by } -> match it is Money { val } -> Money { val = val }
+              times = { it, by } -> match it is Money.(val) -> Money.(val)
             }
             pub let f = { m: Money } -> m.times { by = 3 }
         """.trimIndent()))

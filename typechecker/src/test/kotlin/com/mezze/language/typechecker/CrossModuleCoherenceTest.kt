@@ -194,7 +194,7 @@ class CrossModuleCoherenceTest {
             """
             use std::abilities::compare::{ Eq }
 
-            newtype UserId = UserId Int
+            newtype UserId = Int
 
             impl Eq for UserId where {
               eq  = { it, r } -> True,

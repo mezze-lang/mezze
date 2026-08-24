@@ -366,12 +366,12 @@ class TypecheckerSoundnessTest {
     @Test
     fun `newtype from another module cannot structurally unify with payload`() {
         val source = """
-            newtype UserId = UserId Int
-            newtype Age = Age Int
+            newtype UserId = Int
+            newtype Age = Int
 
             # These two newtypes wrap the same type but should not unify
             let takeUserId = {uid: UserId} -> uid
-            let myAge = Age { value = 25 }
+            let myAge = Age.(25)
         """
 
         // This should typecheck because we're not trying to unify them
@@ -380,11 +380,11 @@ class TypecheckerSoundnessTest {
 
         // Now try to pass Age where UserId is expected — should fail
         val badSource = """
-            newtype UserId = UserId Int
-            newtype Age = Age Int
+            newtype UserId = Int
+            newtype Age = Int
 
             let takeUserId = {uid: UserId} -> uid
-            let myAge = Age { value = 25 }
+            let myAge = Age.(25)
             let bad = takeUserId { uid = myAge }
         """
 
@@ -554,11 +554,11 @@ class TypecheckerSoundnessTest {
     @Test
     fun `nominal newtype does not structurally unify with another newtype`() {
         val source = """
-            newtype Meters = Meters Int
-            newtype Seconds = Seconds Int
+            newtype Meters = Int
+            newtype Seconds = Int
 
             let takeMeters = {m: Meters} -> m
-            let s = Seconds { value = 10 }
+            let s = Seconds.(10)
 
             # Passing Seconds where Meters is expected should fail
             let bad = takeMeters { m = s }

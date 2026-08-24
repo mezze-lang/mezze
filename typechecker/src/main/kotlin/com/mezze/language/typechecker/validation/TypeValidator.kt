@@ -514,6 +514,7 @@ class TypeValidator(
 
     private fun validateLetPattern(pattern: ParsedPattern, scrutineeType: MezzeType): List<ValidationError> = when (pattern) {
         is ParsedRecordPattern -> validateRecordPattern(pattern, scrutineeType)
+        is ParsedNewtypePattern -> validateLetPattern(pattern.inner, scrutineeType)
         else -> emptyList()
     }
 
@@ -555,6 +556,7 @@ class TypeValidator(
                 for (case in expr.cases) { recurse(case.body); case.guard?.let { recurse(it) } }
             }
             is ParsedVariantConstruct -> expr.value?.let { recurse(it) }
+            is ParsedNewtypeConstruct -> recurse(expr.value)
             is ParsedMemberAccess -> recurse(expr.receiver)
             is ParsedSeqLit -> expr.elements.forEach { when (it) {
                 is ParsedSeqElement.Regular -> recurse(it.expr)

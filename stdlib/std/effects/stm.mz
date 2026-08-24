@@ -4,7 +4,7 @@ use std::abilities::compare::{ Eq }
 use std::effects::async::{ Async, park }
 
 ## Transactional variable -- can only be read/written inside STM transactions.
-pub newtype TVar 'a = TVar __NativeTVar
+pub newtype TVar 'a = __NativeTVar
 
 impl Eq for TVar 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
@@ -140,7 +140,7 @@ pub let write_all : { pairs: [{ var: TVar 'a, val: 'a }] } -> {} <STM> = { pairs
 
 ## Blocking transactional variable (can be empty or full).
 ## Useful for synchronization, one-shot events, and locks.
-pub newtype TMVar 'a = TMVar TVar (Option 'a)
+pub newtype TMVar 'a = TVar (Option 'a)
 
 impl Eq for TMVar 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
@@ -158,18 +158,18 @@ impl TMVar 'a where {
 }
 
 let unwrap_tmvar : { var: TMVar 'a } -> TVar (Option 'a) = { var } -> match var is
-  TMVar { val } -> val
+  TMVar.(val) -> val
 
 
 ## Create an empty TMVar.
 pub let tmvar_empty : {} -> TMVar 'a = {} -> do
   let inner = tvar { init = None }
-  TMVar { val = inner }
+  TMVar.(inner)
 
 ## Create a TMVar with an initial value.
 pub let tmvar : { init: 'a } -> TMVar 'a = { init } -> do
   let inner = tvar { init = Some { val = init } }
-  TMVar { val = inner }
+  TMVar.(inner)
 
 ## Take the value from a TMVar (blocks if empty, empties the TMVar).
 pub let take_tmvar : { var: TMVar 'a } -> 'a <STM> = { var } -> do
@@ -239,7 +239,7 @@ pub let is_empty_tmvar : { var: TMVar 'a } -> Bool <STM> = { var } -> do
 
 
 ## Unbounded transactional FIFO queue.
-pub newtype TQueue 'a = TQueue TVar { read: List 'a, write: List 'a }
+pub newtype TQueue 'a = TVar { read: List 'a, write: List 'a }
 
 impl Eq for TQueue 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
@@ -257,20 +257,20 @@ impl TQueue 'a where {
 
 let unwrap_tqueue : { q: TQueue 'a } -> TVar { read: List 'a, write: List 'a } = { q } ->
   match q is
-    TQueue { val } -> val
+    TQueue.(val) -> val
 
 
 ## Create an empty TQueue.
 pub let tqueue : {} -> TQueue 'a = {} -> do
   let empty_list = list::empty {}
   let inner = tvar { init = { read = empty_list, write = empty_list } }
-  TQueue { val = inner }
+  TQueue.(inner)
 
 ## Create a TQueue pre-populated with items.
 pub let tqueue_from_list : { items: List 'a } -> TQueue 'a = { items } -> do
   let empty_list = list::empty {}
   let inner = tvar { init = { read = items, write = empty_list } }
-  TQueue { val = inner }
+  TQueue.(inner)
 
 ## Write a value to the back of a TQueue.
 pub let write_tqueue : { q: TQueue 'a, val: 'a } -> {} <STM> = { q, val } -> do
@@ -370,7 +370,7 @@ pub let size_tqueue : { q: TQueue 'a } -> Int <STM> = { q } -> do
   list::size { xs = state.read } + list::size { xs = state.write }
 
 ## Bounded transactional FIFO queue that blocks on write when full.
-pub newtype TBQueue 'a = TBQueue TVar { read: List 'a, write: List 'a, size: Int, capacity: Int }
+pub newtype TBQueue 'a = TVar { read: List 'a, write: List 'a, size: Int, capacity: Int }
 
 impl Eq for TBQueue 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
@@ -391,7 +391,7 @@ impl TBQueue 'a where {
 
 let unwrap_tbqueue : { q: TBQueue 'a } -> TVar { read: List 'a, write: List 'a, size: Int, capacity: Int } = { q } ->
   match q is
-    TBQueue { val } -> val
+    TBQueue.(val) -> val
 
 
 ## Create a bounded TBQueue with the given capacity.
@@ -405,7 +405,7 @@ pub let tbqueue : { capacity: Int } -> TBQueue 'a = { capacity } -> do
       capacity = capacity,
     },
   }
-  TBQueue { val = inner }
+  TBQueue.(inner)
 
 ## Write to a TBQueue (blocks if full).
 pub let write_tbqueue : { q: TBQueue 'a, val: 'a } -> {} <STM> = { q, val } -> do

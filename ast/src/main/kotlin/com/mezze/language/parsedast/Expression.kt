@@ -185,6 +185,15 @@ data class ParsedVariantConstruct(
 ) : ParsedExpr
 
 
+/** Newtype construction: `Email.("foo")`, `Point.({ x = 1.0, y = 2.0 })` */
+@Serializable
+data class ParsedNewtypeConstruct(
+    val typeName: String,
+    val value: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr
+
+
 /** If expression: `if cond then a else b` */
 @Serializable
 data class ParsedIf(

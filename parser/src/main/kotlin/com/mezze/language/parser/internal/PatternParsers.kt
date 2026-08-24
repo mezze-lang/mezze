@@ -400,6 +400,33 @@ internal val MezzeParser.constructorPattern: Parser<ParsedPattern>
                     val next = stream1.current()
 
                     when {
+                        // Newtype pattern: Name.(inner_pattern)
+                        next?.type == TokenType.DOT && stream1.advance().current()?.type == TokenType.LPAREN -> {
+                            val afterDotLparen = stream1.advance().advance()
+                            val innerPat = patternParser(afterDotLparen)
+                            when (innerPat) {
+                                is ParseResult.Success -> {
+                                    val rparen = tok(TokenType.RPAREN)(skipNewlines(innerPat.remaining))
+                                    when (rparen) {
+                                        is ParseResult.Success -> {
+                                            val loc = spanLoc(ident.value, rparen.value, file)
+                                            ParseResult.Success(
+                                                ParsedNewtypePattern(ident.value.text, innerPat.value, loc),
+                                                rparen.remaining
+                                            )
+                                        }
+                                        is ParseResult.Failure -> ParseResult.Failure(
+                                            "Expected ')' to close newtype pattern '${ident.value.text}.(...)'",
+                                            rparen.position, rparen.line, rparen.column
+                                        )
+                                    }
+                                }
+                                is ParseResult.Failure -> ParseResult.Failure(
+                                    "Expected pattern inside newtype destructuring '${ident.value.text}.(...)'",
+                                    innerPat.position, innerPat.line, innerPat.column
+                                )
+                            }
+                        }
                         next?.type == TokenType.LBRACE -> {
                             // Has record pattern: Some {value = x}
                             val recordPat = recordPatternParser(stream1)

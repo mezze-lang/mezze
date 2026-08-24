@@ -2,7 +2,7 @@ use std::abilities::compare::{ Eq }
 use std::effects::async::{ Async, park }
 
 ## Reentrant mutual exclusion lock.
-pub newtype Mutex = Mutex __NativeLock
+pub newtype Mutex = __NativeLock
 
 impl Eq for Mutex where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },

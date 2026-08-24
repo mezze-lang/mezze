@@ -73,7 +73,7 @@ pub type FsError = |
 ## (LocalDisk) or in-memory byte buffer (MemoryFS). Users don't inspect
 ## it — they pass it to read_chunk / write_chunk / close, or use the
 ## with_read / with_write scope helpers below.
-pub newtype FileHandle = FileHandle __NativeFileHandle
+pub newtype FileHandle = __NativeFileHandle
 
 ## ==================================================================
 ## Effect — 13 primitive ops in 4 groups.

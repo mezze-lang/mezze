@@ -231,6 +231,10 @@ object ParsedDeclHasher {
                 expr.value?.let { b.appendBoolean(true); appendExpr(b, it) } ?: b.appendBoolean(false)
                 Unit
             }
+            is ParsedNewtypeConstruct -> {
+                b.append(byteArrayOf(HashTags.VARIANT_CONSTRUCTOR, 0x01)); b.append(expr.typeName)
+                appendExpr(b, expr.value)
+            }
             is ParsedIf -> { b.append(byteArrayOf(HashTags.IF_ELSE)); appendExpr(b, expr.condition); appendExpr(b, expr.thenBranch); appendExpr(b, expr.elseBranch) }
             is ParsedMatch -> {
                 b.append(byteArrayOf(HashTags.MATCH)); appendExpr(b, expr.scrutinee)
@@ -314,6 +318,10 @@ object ParsedDeclHasher {
                 b.append(byteArrayOf(HashTags.CONSTRUCTOR_PATTERN)); b.append(pattern.constructor)
                 pattern.payload?.let { b.appendBoolean(true); appendPattern(b, it) } ?: b.appendBoolean(false)
                 Unit
+            }
+            is ParsedNewtypePattern -> {
+                b.append(byteArrayOf(HashTags.CONSTRUCTOR_PATTERN, 0x01)); b.append(pattern.typeName)
+                appendPattern(b, pattern.inner)
             }
             is ParsedRecordPattern -> {
                 b.append(byteArrayOf(HashTags.RECORD_PATTERN))

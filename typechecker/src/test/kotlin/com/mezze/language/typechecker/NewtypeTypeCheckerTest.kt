@@ -25,11 +25,11 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test simple newtype declaration typechecks`() {
         val source = """
-            newtype Email = Email String
+            newtype Email = String
 
-            let mkEmail = {s} -> Email {value = s}
+            let mkEmail = {s} -> Email.(s)
             let unwrapEmail = {e} -> match e is
-                Email {value} -> value
+                Email.(value) -> value
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -42,9 +42,9 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test public newtype declaration typechecks`() {
         val source = """
-            pub newtype UserId = UserId Int
+            pub newtype UserId = Int
 
-            let mkUserId = {id} -> UserId {value = id}
+            let mkUserId = {id} -> UserId.(id)
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -57,7 +57,7 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype with record type typechecks`() {
         val source = """
-            newtype Point = Point { x: Float, y: Float }
+            newtype Point = { x: Float, y: Float }
 
             let origin = Point {x = 0.0, y = 0.0}
         """.trimIndent()
@@ -72,11 +72,11 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype with type parameter typechecks`() {
         val source = """
-            newtype Box 'a = Box 'a
+            newtype Box 'a = 'a
 
-            let box = {value} -> Box {value = value}
+            let box = {value} -> Box.(value)
             let unbox = {b} -> match b is
-                Box {value} -> value
+                Box.(value) -> value
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -89,9 +89,9 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype with function type typechecks`() {
         val source = """
-            newtype Handler = Handler { x: Int } -> Str
+            newtype Handler = { x: Int } -> Str
 
-            let mkHandler = {f} -> Handler {fn = f}
+            let mkHandler = {f} -> Handler.(f)
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -104,9 +104,9 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype with array type typechecks`() {
         val source = """
-            newtype Names = Names { list: [Str] }
+            newtype Names = { list: [Str] }
 
-            let mkNames = {ns} -> Names {list = ns}
+            let mkNames = {ns} -> Names.(ns)
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -119,13 +119,13 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test multiple newtype declarations typecheck`() {
         val source = """
-            newtype Email = Email String
-            newtype UserId = UserId Int
-            newtype Name = Name String
+            newtype Email = String
+            newtype UserId = Int
+            newtype Name = String
 
-            let mkEmail = {s} -> Email {value = s}
-            let mkUserId = {i} -> UserId {value = i}
-            let mkName = {n} -> Name {value = n}
+            let mkEmail = {s} -> Email.(s)
+            let mkUserId = {i} -> UserId.(i)
+            let mkName = {n} -> Name.(n)
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -168,9 +168,9 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype allows same name for type and constructor`() {
         val source = """
-            newtype Email = Email String
+            newtype Email = String
 
-            let mkEmail = {s} -> Email {value = s}
+            let mkEmail = {s} -> Email.(s)
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -200,10 +200,10 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype constructor is a function`() {
         val source = """
-            newtype Email = Email String
+            newtype Email = String
 
             # Constructor can be used directly
-            let email = Email {value = "test@example.com"}
+            let email = Email.("test@example.com")
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -216,17 +216,17 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype provides type safety`() {
         val source = """
-            newtype Email = Email String
-            newtype Name = Name String
+            newtype Email = String
+            newtype Name = String
 
-            let email = Email {value = "test@example.com"}
-            let name = Name {value = "John Doe"}
+            let email = Email.("test@example.com")
+            let name = Name.("John Doe")
 
             # Email and Name are distinct types even though both wrap String
             let processEmail = {e} -> match e is
-                Email {value} -> value
+                Email.(value) -> value
             let processName = {n} -> match n is
-                Name {value} -> value
+                Name.(value) -> value
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -239,10 +239,10 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype with nested types typechecks`() {
         val source = """
-            newtype UserId = UserId Int
-            newtype User = User { id: UserId, name: Str }
+            newtype UserId = Int
+            newtype User = { id: UserId, name: Str }
 
-            let userId = UserId {value = 123}
+            let userId = UserId.(123)
             let user = User {id = userId, name = "Alice"}
         """.trimIndent()
 
@@ -256,7 +256,7 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype works with pattern matching on wrapper value`() {
         val source = """
-            newtype Point = Point { x: Float, y: Float }
+            newtype Point = { x: Float, y: Float }
 
             let origin = Point {x = 0.0, y = 0.0}
 

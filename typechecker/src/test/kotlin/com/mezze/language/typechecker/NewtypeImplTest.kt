@@ -359,18 +359,18 @@ class NewtypeImplTest {
             checkPasses("""
                 use std::abilities::compare::{Eq}
 
-                newtype UserId = UserId Int
+                newtype UserId = Int
 
                 impl Eq for UserId where {
                     eq = {it, r} -> match it is
-                        UserId {val = a} -> match r is
-                            UserId {val = b} -> a == b,
+                        UserId.(a) -> match r is
+                            UserId.(b) -> a == b,
                     neq = {it, r} -> it.eq {r = r}.not {}
                 }
 
-                let u1 = UserId {value = 42}
-                let u2 = UserId {value = 42}
-                let u3 = UserId {value = 99}
+                let u1 = UserId.(42)
+                let u2 = UserId.(42)
+                let u3 = UserId.(99)
                 let same = u1 == u2
                 let diff = u1 != u3
             """.trimIndent(), "UserId Eq with neq via not")

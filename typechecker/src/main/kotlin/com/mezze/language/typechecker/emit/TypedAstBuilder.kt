@@ -499,6 +499,10 @@ class TypedAstBuilder(
                 }
                 TypedStringLit(parts, MezzeType.StringType, loc)
             }
+            is ParsedNewtypeConstruct -> {
+                // Runtime erasure: newtype construction is identity.
+                buildExpr(expr.value, file, contextType)
+            }
             is ParsedVariantConstruct -> {
                 if (expr.constructor == "True" && expr.value == null) {
                     TypedBoolLit(true, MezzeType.BoolType, loc)
@@ -1154,6 +1158,10 @@ class TypedAstBuilder(
                     type = MezzeType.StringType,
                     loc = loc
                 )
+            is ParsedNewtypePattern -> {
+                // Runtime erasure: newtype destructuring is identity.
+                buildPattern(pattern.inner, file)
+            }
         }
     }
 

@@ -19,7 +19,7 @@ import kotlin.test.assertFails
  * Constructors live in BOTH namespaces because they appear in type
  * definitions AND can be invoked as values.
  *
- * Self-naming (`type Foo = | Foo {…} |`, `newtype Foo = Foo Native`)
+ * Self-naming (`type Foo = | Foo {…} |`, `newtype Foo = Native`)
  * is one logical declaration — the type name and its eponymous
  * constructor share the slot, no collision.
  */
@@ -133,7 +133,7 @@ class NamespaceSeparationTest {
     fun `newtype constructor and effect with same name collide`() {
         assertRejects(
             """
-                newtype Box = Box Int
+                newtype Box = Int
                 effect Box where {
                   op : {} -> {} <Box>
                 }
@@ -186,7 +186,7 @@ class NamespaceSeparationTest {
         assertAccepts(
             """
                 type Box = | Box { val: Int } |
-                let b = Box { val = 5 }
+                let b = Box.(5)
             """.trimIndent()
         )
     }
@@ -196,8 +196,8 @@ class NamespaceSeparationTest {
         // Newtype constructors take {val = …} syntax to wrap the inner value.
         assertAccepts(
             """
-                newtype Box = Box Int
-                let b : Box = Box { val = 42 }
+                newtype Box = Int
+                let b : Box = Box.(42)
             """.trimIndent()
         )
     }
@@ -221,7 +221,7 @@ class NamespaceSeparationTest {
     @Test
     fun `record type alias used as record construction works`() {
         // The user's motivating example.  Box is just a type alias for the
-        // record shape; `Box {val = 5}` resolves as record construction, not
+        // record shape; `Box.(5)` resolves as record construction, not
         // a constructor invocation.
         assertAccepts(
             """
