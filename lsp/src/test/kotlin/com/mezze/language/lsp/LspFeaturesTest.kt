@@ -3284,6 +3284,72 @@ class LspFeaturesTest {
         )
     }
 
+    // ===== Type-alias + newtype hover / diagnostics =====================
+
+    @Test
+    fun `hover on a transparent type alias shows the aliased type`() {
+        val (uri, _) = openSingleFile("""
+            type MyInt = Int
+            let x : MyInt = 42
+        """.trimIndent())
+        // Hover over `MyInt` at its declaration (line 0, char 5 = start of name).
+        val hover = hoverAt(uri, line = 0, character = 5)
+        assertNotNull(hover, "expected a Hover for the alias name")
+        val content = hoverText(hover!!)
+        assertTrue(
+            content.contains("type MyInt = Int"),
+            "hover should show `type MyInt = Int`, got: $content"
+        )
+    }
+
+    @Test
+    fun `hover on a newtype declaration shows the wrapped type`() {
+        val (uri, _) = openSingleFile("""
+            newtype UserId = Str
+            let u : UserId = UserId.("alice")
+        """.trimIndent())
+        // Hover over `UserId` at its decl (line 0, char 8 = start of name).
+        val hover = hoverAt(uri, line = 0, character = 8)
+        assertNotNull(hover, "expected a Hover for the newtype name")
+        val content = hoverText(hover!!)
+        assertTrue(
+            content.contains("newtype UserId = Str"),
+            "hover should show `newtype UserId = Str`, got: $content"
+        )
+    }
+
+    @Test
+    fun `dot-parens on a transparent alias surfaces the alias-vs-newtype diagnostic`() {
+        val (uri, _) = openSingleFile("""
+            type MyInt = Int
+            let y = {} -> MyInt.(42)
+        """.trimIndent())
+        val diags = client.awaitDiagnostics(uri, 5_000)?.diagnostics ?: emptyList()
+        val hit = diags.firstOrNull { it.message.contains("transparent type alias") }
+            ?: fail("expected the alias-vs-newtype diagnostic, got: ${diags.map { it.message }}")
+        assertTrue(
+            hit.message.contains("newtype"),
+            "diagnostic should mention `newtype` as the alternative, got: ${hit.message}"
+        )
+    }
+
+    @Test
+    fun `dot-parens on a lowercase LHS surfaces the case-rule diagnostic`() {
+        val (uri, _) = openSingleFile("""
+            let x = 42
+            let y = x.("hi")
+        """.trimIndent())
+        val diags = client.awaitDiagnostics(uri, 5_000)?.diagnostics ?: emptyList()
+        val hit = diags.firstOrNull {
+            it.message.contains("uppercase") || it.message.contains("not a type")
+        } ?: fail("expected the case-rule diagnostic, got: ${diags.map { it.message }}")
+        assertTrue(
+            hit.message.contains("newtype") || hit.message.contains("module") ||
+                hit.message.contains("method"),
+            "diagnostic should suggest an alternative call form, got: ${hit.message}"
+        )
+    }
+
     // ===== Helpers =====================================================
 
     private fun mkProject(vararg files: Pair<String, String>): Path {

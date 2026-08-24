@@ -1356,9 +1356,22 @@ class MezzeTextDocumentService(
                     val (doc, meta) = resolveDoc(state, result, lookup.name)
                     // A synthetic VarType named after a type decl (e.g. `Log`)
                     // renders as a bare type var — show `type Log` instead.
-                    if (lookup.type is MezzeType.VarType &&
-                        state.parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.any { it.name == lookup.name } == true) {
-                        return appendDoc(codeBlock("type ${lookup.name}"), doc, meta)
+                    if (lookup.type is MezzeType.VarType) {
+                        val matchingDecl = state.parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()
+                            ?.firstOrNull { it.name == lookup.name }
+                        if (matchingDecl != null) {
+                            // Show the aliased/wrapped type when possible so
+                            // `type MyInt = Int` and `newtype UserId = Str`
+                            // render usefully instead of a bare `type MyInt`.
+                            val header = when (val def = matchingDecl.definition) {
+                                is com.mezze.language.parsedast.ParsedTypeAliasDef ->
+                                    "type ${lookup.name} = ${formatTypeAnnotation(def.aliasedType)}"
+                                is com.mezze.language.parsedast.ParsedNewtypeDef ->
+                                    "newtype ${lookup.name} = ${formatTypeAnnotation(def.wrappedType)}"
+                                else -> "type ${lookup.name}"
+                            }
+                            return appendDoc(codeBlock(header), doc, meta)
+                        }
                     }
                     return appendDoc(codeBlock("${lookup.name} : $typeStr"), doc, meta)
                 }
