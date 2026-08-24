@@ -21,17 +21,26 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
     val newtypeDef = typeDecl?.definition as? ParsedNewtypeDef
 
     if (newtypeDef == null) {
-        val abilityNames = context.abilityNames
-        val effectNames = context.effectNames
+        // Use MAPS (source-of-truth) rather than Set<String> — the latter is
+        // frequently empty at expression sites even when the ability/effect
+        // is in scope via `use` imports.
+        val isAbility = expr.typeName in context.abilityDeclarations ||
+            expr.typeName in context.abilityNames ||
+            BuiltInAbilities.isBuiltInAbility(expr.typeName)
+        val isEffect = expr.typeName in context.effectDeclarations ||
+            expr.typeName in context.effectNames
         val variantDecl = typeDecl?.definition as? ParsedVariantDef
+        val recordDecl = typeDecl?.definition as? ParsedRecordDef
         val message = when {
-            expr.typeName in abilityNames || BuiltInAbilities.isBuiltInAbility(expr.typeName) ->
+            isAbility ->
                 "'${expr.typeName}' is an ability, not a newtype. Did you mean an ability method like '${expr.typeName}.<method> { ... }' or a constraint like 'with ${expr.typeName} 'a'?"
-            expr.typeName in effectNames ->
+            isEffect ->
                 "'${expr.typeName}' is an effect, not a newtype. Did you mean 'perform ${expr.typeName} in do { ... }' or an effect op call like '${expr.typeName}.<op> { ... }'?"
             variantDecl != null ->
                 "'${expr.typeName}' is a variant type, not a newtype. Construct with '${expr.typeName} { <field> = <value> }'."
-            expr.typeName in setOf("Int", "Nat", "Float", "Str", "Bool", "Char") ->
+            recordDecl != null ->
+                "'${expr.typeName}' is a record type, not a newtype. Construct with '${expr.typeName} { <fields> = <values> }'."
+            expr.typeName in setOf("Int", "Nat", "Float", "Str", "Bool", "Char", "Bytes", "Frac", "ByteBuffer") ->
                 "'${expr.typeName}' is a primitive type, not a newtype. Only newtypes can be constructed with '.(...)'. If you meant a module function, use '${expr.typeName.lowercase()}::<function> { ... }'."
             else -> "Unknown type '${expr.typeName}'. Did you forget to import it?"
         }
