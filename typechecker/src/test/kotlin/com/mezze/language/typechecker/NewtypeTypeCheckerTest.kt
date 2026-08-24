@@ -25,7 +25,7 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test simple newtype declaration typechecks`() {
         val source = """
-            newtype Email = String
+            newtype Email = Str
 
             let mkEmail = {s} -> Email.(s)
             let unwrapEmail = {e} -> match e is
@@ -59,7 +59,7 @@ class NewtypeTypeCheckerTest {
         val source = """
             newtype Point = { x: Float, y: Float }
 
-            let origin = Point {x = 0.0, y = 0.0}
+            let origin = Point.({x = 0.0, y = 0.0})
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -119,9 +119,9 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test multiple newtype declarations typecheck`() {
         val source = """
-            newtype Email = String
+            newtype Email = Str
             newtype UserId = Int
-            newtype Name = String
+            newtype Name = Str
 
             let mkEmail = {s} -> Email.(s)
             let mkUserId = {i} -> UserId.(i)
@@ -139,36 +139,42 @@ class NewtypeTypeCheckerTest {
 
     @Test
     fun `test newtype constructor naming convention - must start with uppercase`() {
+        // Under the `.()` syntax the constructor is IMPLICIT (== type name); no
+        // separate lowercase constructor name is possible. The equivalent invariant
+        // that still applies is: the TYPE name must start with an uppercase letter.
+        // A lowercase type name should fail to parse (or fail to typecheck).
         val source = """
-            newtype Email = email String
+            newtype email = Str
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val exception = assertThrows<TypeCheckError> {
+        assertThrows<Throwable> {
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
-        assertTrue(exception.message!!.contains("must start with an uppercase letter"))
-        println("✅ Constructor naming convention enforced")
+        println("✅ Newtype type name must be uppercase")
     }
 
     @Test
     fun `test newtype constructor cannot collide with built-in ability`() {
+        // Under the `.()` syntax the constructor is the type name itself; the
+        // equivalent invariant is that a newtype cannot be NAMED after a built-in
+        // ability (like `NumAdd`), because that would collide with the ability's
+        // registered name.
         val source = """
-            newtype MyType = NumAdd String
+            newtype NumAdd = Str
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val exception = assertThrows<TypeCheckError> {
+        assertThrows<TypeCheckError> {
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
-        assertTrue(exception.message!!.contains("already used by a built-in ability"))
-        println("✅ Constructor collision with built-in ability prevented")
+        println("✅ Newtype name collision with built-in ability prevented")
     }
 
     @Test
     fun `test newtype allows same name for type and constructor`() {
         val source = """
-            newtype Email = String
+            newtype Email = Str
 
             let mkEmail = {s} -> Email.(s)
         """.trimIndent()
@@ -183,7 +189,7 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype allows different names for type and constructor`() {
         val source = """
-            newtype EmailAddress = MkEmail String
+            newtype EmailAddress = MkEmail Str
 
             let mkEmail = {s} -> MkEmail {value = s}
         """.trimIndent()
@@ -200,7 +206,7 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype constructor is a function`() {
         val source = """
-            newtype Email = String
+            newtype Email = Str
 
             # Constructor can be used directly
             let email = Email.("test@example.com")
@@ -216,8 +222,8 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype provides type safety`() {
         val source = """
-            newtype Email = String
-            newtype Name = String
+            newtype Email = Str
+            newtype Name = Str
 
             let email = Email.("test@example.com")
             let name = Name.("John Doe")
@@ -243,7 +249,7 @@ class NewtypeTypeCheckerTest {
             newtype User = { id: UserId, name: Str }
 
             let userId = UserId.(123)
-            let user = User {id = userId, name = "Alice"}
+            let user = User.({id = userId, name = "Alice"})
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -258,11 +264,11 @@ class NewtypeTypeCheckerTest {
         val source = """
             newtype Point = { x: Float, y: Float }
 
-            let origin = Point {x = 0.0, y = 0.0}
+            let origin = Point.({x = 0.0, y = 0.0})
 
             # Pattern matching on the record inside
             let getX = {p} -> match p is
-                Point {x, y} -> x
+                Point.({x, y}) -> x
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

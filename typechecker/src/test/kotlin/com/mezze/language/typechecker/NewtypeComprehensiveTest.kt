@@ -60,7 +60,7 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype wrapping String type-checks`() {
             val source = """
-                newtype Email = String
+                newtype Email = Str
                 let email = Email.("test@example.com")
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
@@ -71,7 +71,7 @@ class NewtypeComprehensiveTest {
         fun `newtype wrapping record type-checks`() {
             val source = """
                 newtype Point = { x: Float, y: Float }
-                let p = Point { x = 3.0, y = 4.0 }
+                let p = Point.({ x = 3.0, y = 4.0 })
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
@@ -113,9 +113,9 @@ class NewtypeComprehensiveTest {
         fun `pattern match unwraps newtype with record`() {
             val source = """
                 newtype Point = { x: Float, y: Float }
-                let p = Point { x = 3.0, y = 4.0 }
+                let p = Point.({ x = 3.0, y = 4.0 })
                 let x_val = match p is
-                    Point { x, y } -> x
+                    Point.({ x, y }) -> x
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
@@ -124,7 +124,7 @@ class NewtypeComprehensiveTest {
         @Test
         fun `pattern match in function parameter`() {
             val source = """
-                newtype Email = String
+                newtype Email = Str
                 let unwrap = {e} -> match e is
                     Email.(value) -> value
                 let result = unwrap {e = Email.("test")}
@@ -166,7 +166,7 @@ class NewtypeComprehensiveTest {
         @Test
         fun `newtype DOES have Inspect (universal)`() {
             val source = """
-                newtype Email = String
+                newtype Email = Str
                 let dbg = {e: Email} -> e.to_dbg_str {}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
@@ -283,9 +283,9 @@ class NewtypeComprehensiveTest {
         fun `newtype wrapping another newtype`() {
             val source = """
                 newtype UserId = Int
-                newtype User = { id: UserId, name: String }
+                newtype User = { id: UserId, name: Str }
                 let uid = UserId.(42)
-                let user = User { id = uid, name = "Alice" }
+                let user = User.({ id = uid, name = "Alice" })
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
@@ -295,11 +295,11 @@ class NewtypeComprehensiveTest {
         fun `nested newtype pattern matching`() {
             val source = """
                 newtype UserId = Int
-                newtype User = { id: UserId, name: String }
+                newtype User = { id: UserId, name: Str }
                 let uid = UserId.(42)
-                let user = User { id = uid, name = "Alice" }
+                let user = User.({ id = uid, name = "Alice" })
                 let getId = {u} -> match u is
-                    User { id, name } -> match id is
+                    User.({ id, name }) -> match id is
                         UserId.(value) -> value
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))

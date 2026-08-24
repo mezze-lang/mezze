@@ -518,9 +518,9 @@ class AbilityValidationTest {
               show = {it} -> it
             }
 
-            # Missing Eq String implementation
+            # Missing Eq implementation for undeclared type MissingT
 
-            let compare: {x: Str, y: Str} with Show Str, Eq String -> Str = {x, y} ->
+            let compare: {x: Str, y: Str} with Show Str, Eq MissingT -> Str = {x, y} ->
               if x.eq {r = y} then
                 "Equal: $(x.show {})"
               else

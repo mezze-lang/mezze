@@ -28,7 +28,7 @@ class AuditProbeTest {
     @Test fun `A generic ord fn called at record type`() {
         val e = err("""
             type P = { x: Int }
-            pub let cmp = { a: 'a, b: 'a } with Ord 'a -> a < b
+            pub let cmp : { a: 'a, b: 'a } with Ord 'a -> Bool = { a, b } -> a < b
             pub let g = {} -> cmp { a = { x = 1 }, b = { x = 2 } }
         """.trimIndent())
         writeProbe("PROBE A (want reject): " + (e ?: "ACCEPTED"))
@@ -38,8 +38,8 @@ class AuditProbeTest {
     @Test fun `B ord obligation through hof`() {
         val e = err("""
             type P = { x: Int }
-            pub let apply2 = { f: { a: 'a, b: 'a } -> Bool, x: 'a, y: 'a } -> f { a = x, b = y }
-            pub let cmp = { a: 'a, b: 'a } with Ord 'a -> a < b
+            pub let apply2 : { f: { a: 'a, b: 'a } -> Bool, x: 'a, y: 'a } -> Bool = { f, x, y } -> f { a = x, b = y }
+            pub let cmp : { a: 'a, b: 'a } with Ord 'a -> Bool = { a, b } -> a < b
             pub let g = {} -> apply2 { f = cmp, x = { x = 1 }, y = { x = 2 } }
         """.trimIndent())
         writeProbe("PROBE B (want reject): " + (e ?: "ACCEPTED"))
@@ -48,7 +48,7 @@ class AuditProbeTest {
     // PROBE C: sanity - the same generic ord fn at Int (has Ord) should be accepted.
     @Test fun `C generic ord fn at int accepted`() {
         val e = err("""
-            pub let cmp = { a: 'a, b: 'a } with Ord 'a -> a < b
+            pub let cmp : { a: 'a, b: 'a } with Ord 'a -> Bool = { a, b } -> a < b
             pub let g = {} -> cmp { a = 1, b = 2 }
         """.trimIndent())
         writeProbe("PROBE C (want accept): " + (e ?: "ACCEPTED"))
@@ -57,7 +57,7 @@ class AuditProbeTest {
     // PROBE D: container Ord needs element Ord (option.mz pattern). Option of record.
     @Test fun `D option lt on record element`() {
         val e = err("""
-            use std::option::{ Option, Some, None }
+            use std::option::{ Option }
             type P = { x: Int }
             pub let g = { a: Option P, b: Option P } -> a < b
         """.trimIndent())
@@ -70,7 +70,7 @@ class AuditProbeTest {
             ability Conv 'from for 'to where { conv: { it: 'to, from: 'from } -> 'to }
             impl Conv Int for Int where { conv = { it, from } -> it }
             type Bad = { z: Int }
-            pub let useit = { x: 'to } with Conv Int 'to -> x
+            pub let useit : { x: 'to } with Conv Int 'to -> 'to = { x } -> x
             pub let g = {} -> useit { x = { z = 5 } }
         """.trimIndent())
         writeProbe("PROBE E (want reject - no Conv Int Bad): " + (e ?: "ACCEPTED"))

@@ -37,13 +37,13 @@ class NewtypeConstructionSoundnessTest {
             "wrong wrapped type must be rejected regardless of the field spelling")
     }
     @Test fun `record newtype rejects a wrong-typed field`() {
-        assertNotNull(err("newtype Point = { x: Int, y: Int }\nlet p = Point { x = \"no\", y = 2 }"))
+        assertNotNull(err("newtype Point = { x: Int, y: Int }\nlet p = Point.({ x = \"no\", y = 2 })"))
     }
     @Test fun `correct scalar newtype is accepted`() {
         assertNull(err("newtype Meters = Int\nlet a = Meters.(5)"))
     }
     @Test fun `correct record newtype is accepted`() {
-        assertNull(err("newtype Point = { x: Int, y: Int }\nlet p = Point { x = 1, y = 2 }"))
+        assertNull(err("newtype Point = { x: Int, y: Int }\nlet p = Point.({ x = 1, y = 2 })"))
     }
     @Test fun `generic newtype accepts any element type`() {
         assertNull(err("newtype Box 'a = 'a\nlet a = Box.(5)"))

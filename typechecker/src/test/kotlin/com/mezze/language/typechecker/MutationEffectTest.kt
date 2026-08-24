@@ -1150,14 +1150,14 @@ class MutationEffectTest {
             newtype Counter = { count: MutInt }
 
             # Construct using record field names directly
-            let make_counter = {n} -> Counter {count = int_to_mut {n = n}}
+            let make_counter = {n} -> Counter.({count = int_to_mut {n = n}})
 
             # Unwrap with match
             let get = {c: Counter} -> match c is
-                Counter {count = m} -> read_int {n = m}
+                Counter.({count = m}) -> read_int {n = m}
 
             let tick = {c: Counter} -> match c is
-                Counter {count = m} -> incr {n = m, delta = 1}
+                Counter.({count = m}) -> incr {n = m, delta = 1}
 
             let test = {} -> perform LocalMut in do
                 let c = make_counter {n = 0}
@@ -1180,13 +1180,13 @@ class MutationEffectTest {
             # User-defined buffer newtype wrapping a record
             newtype Buffer 'a = { data: MutSeq 'a }
 
-            let make_buffer = {xs} -> Buffer.(seq_to_mut {seq = xs)}
+            let make_buffer = {xs} -> Buffer.({ data = seq_to_mut {seq = xs} })
 
             let freeze = {buf: Buffer Int} -> match buf is
-                Buffer.(s) -> seq_to_immut {seq = s}
+                Buffer.({ data = s }) -> seq_to_immut {seq = s}
 
             let sort_buffer = {buf: Buffer Int} -> match buf is
-                Buffer.(s) -> sort {seq = s}
+                Buffer.({ data = s }) -> sort {seq = s}
 
             let test = {} -> perform LocalMut in do
                 let buf = make_buffer {xs = [3, 1, 2]}
