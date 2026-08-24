@@ -42,6 +42,10 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
                 "'${expr.typeName}' is a record type, not a newtype. Construct with '${expr.typeName} { <fields> = <values> }'."
             expr.typeName in setOf("Int", "Nat", "Float", "Str", "Bool", "Char", "Bytes", "Frac", "ByteBuffer") ->
                 "'${expr.typeName}' is a primitive type, not a newtype. Only newtypes can be constructed with '.(...)'. If you meant a module function, use '${expr.typeName.lowercase()}::<function> { ... }'."
+            expr.typeName.firstOrNull()?.isLowerCase() == true ->
+                "'${expr.typeName}' starts with a lowercase letter, so it's a value or module — not a type. " +
+                "`X.(y)` is newtype construction and only works when X is an uppercase type name. " +
+                "Did you mean a module call `${expr.typeName}::<function> { ... }` or an inherent method call `${expr.typeName}.<method> { ... }`?"
             else -> "Unknown type '${expr.typeName}'. Did you forget to import it?"
         }
         throw TypeCheckError(
