@@ -557,28 +557,31 @@ internal val MezzeParser.typeDefinitionParser: Parser<ParsedTypeDef> get() = { s
                     variantResult
                 } else {
                     val recordResult = recordTypeParser(stream)
-                    when (recordResult) {
-                        is ParseResult.Success -> recordResult
-                        is ParseResult.Failure -> {
-                            // Fall through to a TRUE type alias: `type MyInt = Int`,
-                            // `type Ids = Seq Int`. Records + variants have their own
-                            // ParsedTypeDef cases above; this fires only when neither
-                            // matched.
-                            val firstTok = stream.current()
-                            if (firstTok == null) recordResult
-                            else {
-                                val aliasResult = typeAnnotationParser(stream)
-                                when (aliasResult) {
-                                    is ParseResult.Success -> {
-                                        val file = currentFile ?: "<unknown>"
-                                        val loc = spanLocTo(firstTok, aliasResult.remaining, file)
-                                        ParseResult.Success(
-                                            ParsedTypeAliasDef(aliasResult.value, loc),
-                                            aliasResult.remaining
-                                        )
-                                    }
-                                    is ParseResult.Failure -> recordResult
+                    // If record parsing succeeded but the next token is `->`,
+                    // this was really the parameter of a function-typed alias
+                    // (`type Producer 'a = {} -> 'a`). Discard the record
+                    // parse and fall through to the alias annotation parser.
+                    val recordConsumedByFuncArrow = recordResult is ParseResult.Success &&
+                        recordResult.remaining.current()?.type == TokenType.ARROW
+                    if (recordResult is ParseResult.Success && !recordConsumedByFuncArrow) {
+                        recordResult
+                    } else {
+                        // Fall through to a TRUE type alias: `type MyInt = Int`,
+                        // `type Ids = Seq Int`, `type Producer 'a = {} -> 'a`.
+                        val firstTok = stream.current()
+                        if (firstTok == null) recordResult
+                        else {
+                            val aliasResult = typeAnnotationParser(stream)
+                            when (aliasResult) {
+                                is ParseResult.Success -> {
+                                    val file = currentFile ?: "<unknown>"
+                                    val loc = spanLocTo(firstTok, aliasResult.remaining, file)
+                                    ParseResult.Success(
+                                        ParsedTypeAliasDef(aliasResult.value, loc),
+                                        aliasResult.remaining
+                                    )
                                 }
+                                is ParseResult.Failure -> recordResult
                             }
                         }
                     }

@@ -757,8 +757,14 @@ class ContextBuilder {
         resolveTypeAlias = { name ->
             // Transparent alias inlining: only fires for `type X = ...`.
             // `newtype` and record/variant `type` decls return null so the
-            // converter falls through to the labeled TypeApp path.
-            (currentTypeDecls[name]?.definition as? ParsedTypeAliasDef)?.aliasedType
+            // converter falls through to the labeled TypeApp path. Returns the
+            // aliased annotation + declared type-param names so a parametric
+            // alias (`type Wrap 'a = Seq 'a`) can be substituted at use sites.
+            currentTypeDecls[name]?.let { decl ->
+                (decl.definition as? ParsedTypeAliasDef)?.let { alias ->
+                    alias.aliasedType to decl.typeParams
+                }
+            }
         },
     )
 
