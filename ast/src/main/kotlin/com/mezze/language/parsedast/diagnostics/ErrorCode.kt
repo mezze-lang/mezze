@@ -73,6 +73,7 @@ enum class ErrorCode {
     T0209_ABILITY_AS_VALUE,
     T0210_ANNOTATION_VS_BODY_MISMATCH,
     T0211_CALLBACK_PARAM_NAMES_MISMATCH, // `f = { acc, i } -> ...` where sig wants `{ acc, x }` — lambda param names ARE record destructuring, must match the caller's field names
+    T0212_NOT_A_NEWTYPE, // `Foo.(x)` where Foo isn't a newtype (ability, effect, variant, record, primitive, or unknown)
 
     // ─── Typechecker: inference & binding (T03xx) ────────────────────────
     T0301_UNBOUND_TYPE_VAR,

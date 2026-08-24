@@ -146,6 +146,10 @@ object UnusedImportLinter {
                 into.add(expr.constructor)
                 expr.value?.let { collectExprRefs(it, into) }
             }
+            is ParsedNewtypeConstruct -> {
+                into.add(expr.typeName)
+                collectExprRefs(expr.value, into)
+            }
             is ParsedLambda -> {
                 (expr.params as? ParsedLambdaParams.Typed)?.fields?.forEach { collectTypeRefs(it.type, into) }
                 expr.returnType?.let { collectTypeRefs(it, into) }

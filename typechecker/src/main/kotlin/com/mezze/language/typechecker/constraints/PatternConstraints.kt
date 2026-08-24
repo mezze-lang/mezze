@@ -24,7 +24,104 @@ class PatternConstraintGenerator {
             is ParsedLiteralPattern -> generateLiteral(pattern, scrutineeType, context, sourceLoc)
             is ParsedSeqPattern -> generateSeq(pattern, scrutineeType, context, sourceLoc)
             is ParsedStringInterpPattern -> generateStringInterpolation(pattern, scrutineeType, context, sourceLoc)
+            is ParsedNewtypePattern -> generateNewtype(pattern, scrutineeType, context, sourceLoc)
         }
+    }
+
+    private fun generateNewtype(
+        pattern: ParsedNewtypePattern,
+        scrutineeType: MezzeType,
+        context: ConstraintContext,
+        sourceLoc: Loc? = null,
+    ): PatternConstraintResult {
+        val typeDecl = context.typeDeclarations[pattern.typeName]
+        val newtypeDef = typeDecl?.definition as? ParsedNewtypeDef
+
+        if (newtypeDef == null) {
+            val abilityNames = context.abilityNames
+            val effectNames = context.effectNames
+            val variantDecl = typeDecl?.definition as? ParsedVariantDef
+            val message = when {
+                pattern.typeName in abilityNames || com.mezze.language.typechecker.abilities.BuiltInAbilities.isBuiltInAbility(pattern.typeName) ->
+                    "'${pattern.typeName}' is an ability, not a newtype; cannot destructure with '.(...)'."
+                pattern.typeName in effectNames ->
+                    "'${pattern.typeName}' is an effect, not a newtype; cannot destructure with '.(...)'."
+                variantDecl != null ->
+                    "'${pattern.typeName}' is a variant type, not a newtype. Destructure with '${pattern.typeName} { <field> = <pat> }'."
+                pattern.typeName in setOf("Int", "Nat", "Float", "Str", "Bool", "Char") ->
+                    "'${pattern.typeName}' is a primitive type, not a newtype; cannot destructure with '.(...)'."
+                else -> "Unknown type '${pattern.typeName}'. Did you forget to import it?"
+            }
+            throw TypeCheckError(
+                message = message,
+                loc = sourceLoc ?: pattern.loc,
+                errorType = ErrorType.UNDEFINED_VARIABLE,
+                code = ErrorCode.T0212_NOT_A_NEWTYPE,
+            )
+        }
+
+        val constructorBinding = context.typingContext.lookup(com.mezze.language.ast.BindingKey.unqualified(newtypeDef.constructor))
+        if (constructorBinding is com.mezze.language.typechecker.context.TypingContext.LookupResult.NotFound) {
+            throw TypeCheckError(
+                message = "Cannot destructure newtype '${pattern.typeName}' — its constructor is private to the defining module. " +
+                    "Use the module's public API to unwrap (or check whether one exists).",
+                loc = sourceLoc ?: pattern.loc,
+                errorType = ErrorType.MISSING_FIELD,
+                code = ErrorCode.M0803_NOT_EXPORTED,
+                hints = listOf(
+                    "newtype constructors are not exported; look for a `pub` factory function in the defining module"
+                ),
+            )
+        }
+
+        val wrappedType = MezzeType.VarType(TypeVar.fresh())
+
+        val constructorBindingVal = (constructorBinding as? com.mezze.language.typechecker.context.TypingContext.LookupResult.Found)?.binding
+        val newtypeType: MezzeType
+        val paramConstraints: List<Constraint>
+        if (constructorBindingVal != null) {
+            val instantiated = when (constructorBindingVal) {
+                is com.mezze.language.typechecker.context.TypingContext.Binding.Polymorphic -> constructorBindingVal.scheme.instantiate().type
+                is com.mezze.language.typechecker.context.TypingContext.Binding.Monomorphic -> constructorBindingVal.type
+            }
+            val fnType = instantiated as? MezzeType.FunctionType
+            if (fnType != null) {
+                newtypeType = fnType.returnType
+                paramConstraints = listOf(
+                    Constraint.Equality(
+                        left = wrappedType,
+                        right = fnType.paramType,
+                        context = "Newtype pattern '${pattern.typeName}' inner type",
+                        loc = sourceLoc ?: pattern.loc,
+                    )
+                )
+            } else {
+                newtypeType = MezzeType.NewtypeType(pattern.typeName, newtypeDef.constructor, wrappedType)
+                paramConstraints = emptyList()
+            }
+        } else {
+            newtypeType = MezzeType.NewtypeType(pattern.typeName, newtypeDef.constructor, wrappedType)
+            paramConstraints = emptyList()
+        }
+
+        val constraints = mutableListOf<Constraint>(
+            Constraint.Equality(
+                left = scrutineeType,
+                right = newtypeType,
+                context = "Newtype pattern '${pattern.typeName}' must match scrutinee type",
+                loc = sourceLoc ?: pattern.loc,
+            )
+        )
+        constraints.addAll(paramConstraints)
+
+        val innerResult = generate(pattern.inner, wrappedType, context, sourceLoc)
+        constraints.addAll(innerResult.constraints)
+
+        return PatternConstraintResult(
+            bindings = innerResult.bindings,
+            constraints = constraints,
+            bindingLocations = innerResult.bindingLocations,
+        )
     }
 
     private fun generateWildcard(

@@ -108,22 +108,67 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
                 }
                 TokenType.DOT -> {
                     val dotStream = currentStream.advance()
-                    val member = memberIdentifierParser(dotStream)
-                    result = when (member) {
-                        is ParseResult.Success -> {
-                            val file = currentFile ?: "<unknown>"
-                            val memberTokenLoc = tokenLoc(member.value, file)
-                            ParseResult.Success(
-                                ParsedMemberAccess(
-                                    result.value,
-                                    member.value.text,
-                                    loc = result.value.loc.spanTo(memberTokenLoc),
-                                    memberLoc = memberTokenLoc
-                                ),
-                                member.remaining
+                    // Newtype construction: Name.(expr)
+                    if (dotStream.current()?.type == TokenType.LPAREN) {
+                        val receiver = result.value
+                        val typeName = when {
+                            receiver is ParsedIdentifier -> receiver.localName
+                            receiver is ParsedVariantConstruct && receiver.value == null -> receiver.constructor
+                            else -> null
+                        }
+                        if (typeName != null) {
+                            val afterLparen = skipNewlines(dotStream.advance())
+                            val innerExpr = expression(afterLparen)
+                            result = when (innerExpr) {
+                                is ParseResult.Success -> {
+                                    val rparen = tok(TokenType.RPAREN)(skipNewlines(innerExpr.remaining))
+                                    when (rparen) {
+                                        is ParseResult.Success -> {
+                                            val file = currentFile ?: "<unknown>"
+                                            ParseResult.Success(
+                                                ParsedNewtypeConstruct(
+                                                    typeName = typeName,
+                                                    value = innerExpr.value,
+                                                    loc = receiver.loc.spanTo(tokenLoc(rparen.value, file))
+                                                ),
+                                                rparen.remaining
+                                            )
+                                        }
+                                        is ParseResult.Failure -> ParseResult.Failure(
+                                            "Expected ')' to close newtype construction '$typeName.(...)'",
+                                            rparen.position, rparen.line, rparen.column
+                                        )
+                                    }
+                                }
+                                is ParseResult.Failure -> ParseResult.Failure(
+                                    "Expected expression inside newtype construction '$typeName.(...)'",
+                                    innerExpr.position, innerExpr.line, innerExpr.column
+                                )
+                            }
+                        } else {
+                            result = ParseResult.Failure(
+                                "Newtype construction '.(' requires a type name on the left, but got an expression. Did you mean to call a method? Use '.method_name {}' instead.",
+                                currentStream.getSourcePosition(), currentStream.getSourceLine(), currentStream.getSourceColumn()
                             )
                         }
-                        is ParseResult.Failure -> break
+                    } else {
+                        val member = memberIdentifierParser(dotStream)
+                        result = when (member) {
+                            is ParseResult.Success -> {
+                                val file = currentFile ?: "<unknown>"
+                                val memberTokenLoc = tokenLoc(member.value, file)
+                                ParseResult.Success(
+                                    ParsedMemberAccess(
+                                        result.value,
+                                        member.value.text,
+                                        loc = result.value.loc.spanTo(memberTokenLoc),
+                                        memberLoc = memberTokenLoc
+                                    ),
+                                    member.remaining
+                                )
+                            }
+                            is ParseResult.Failure -> break
+                        }
                     }
                 }
                 else -> break
@@ -1787,6 +1832,7 @@ internal fun countPipePlaceholders(expr: ParsedExpr): Int {
         is ParsedPerform -> countPipePlaceholders(expr.body)
         is ParsedMemberAccess -> countPipePlaceholders(expr.receiver)
         is ParsedVariantConstruct -> expr.value?.let { countPipePlaceholders(it) } ?: 0
+        is ParsedNewtypeConstruct -> countPipePlaceholders(expr.value)
         is ParsedParens -> countPipePlaceholders(expr.expr)
         is ParsedPipe -> countPipePlaceholders(expr.left) + countPipePlaceholders(expr.right)
         is ParsedBinaryOp -> countPipePlaceholders(expr.left) + countPipePlaceholders(expr.right)
@@ -1836,6 +1882,7 @@ internal fun findPipePlaceholderLocations(expr: ParsedExpr): List<Loc> {
         is ParsedPerform -> findPipePlaceholderLocations(expr.body)
         is ParsedMemberAccess -> findPipePlaceholderLocations(expr.receiver)
         is ParsedVariantConstruct -> expr.value?.let { findPipePlaceholderLocations(it) } ?: emptyList()
+        is ParsedNewtypeConstruct -> findPipePlaceholderLocations(expr.value)
         is ParsedParens -> findPipePlaceholderLocations(expr.expr)
         is ParsedPipe -> findPipePlaceholderLocations(expr.left) + findPipePlaceholderLocations(expr.right)
         is ParsedBinaryOp -> findPipePlaceholderLocations(expr.left) + findPipePlaceholderLocations(expr.right)
@@ -1887,6 +1934,7 @@ internal fun pipePlaceholderInReceiverPosition(expr: ParsedExpr): Loc? = when (e
     }
     is ParsedPerform -> pipePlaceholderInReceiverPosition(expr.body)
     is ParsedVariantConstruct -> expr.value?.let { pipePlaceholderInReceiverPosition(it) }
+    is ParsedNewtypeConstruct -> pipePlaceholderInReceiverPosition(expr.value)
     is ParsedParens -> pipePlaceholderInReceiverPosition(expr.expr)
     is ParsedPipe -> pipePlaceholderInReceiverPosition(expr.left) ?: pipePlaceholderInReceiverPosition(expr.right)
     is ParsedBinaryOp -> pipePlaceholderInReceiverPosition(expr.left) ?: pipePlaceholderInReceiverPosition(expr.right)
@@ -2294,22 +2342,66 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                 }
                 TokenType.DOT -> {
                     val dotStream = currentStream.advance()
-                    val member = memberIdentifierParser(dotStream)
-                    result = when (member) {
-                        is ParseResult.Success -> {
-                            val file = currentFile ?: "<unknown>"
-                            val memberTokenLoc = tokenLoc(member.value, file)
-                            ParseResult.Success(
-                                ParsedMemberAccess(
-                                    result.value,
-                                    member.value.text,
-                                    loc = result.value.loc.spanTo(memberTokenLoc),
-                                    memberLoc = memberTokenLoc
-                                ),
-                                member.remaining
+                    if (dotStream.current()?.type == TokenType.LPAREN) {
+                        val receiver = result.value
+                        val typeName = when {
+                            receiver is ParsedIdentifier -> receiver.localName
+                            receiver is ParsedVariantConstruct && receiver.value == null -> receiver.constructor
+                            else -> null
+                        }
+                        if (typeName != null) {
+                            val afterLparen = skipNewlines(dotStream.advance())
+                            val innerExpr = expression(afterLparen)
+                            result = when (innerExpr) {
+                                is ParseResult.Success -> {
+                                    val rparen = tok(TokenType.RPAREN)(skipNewlines(innerExpr.remaining))
+                                    when (rparen) {
+                                        is ParseResult.Success -> {
+                                            val file = currentFile ?: "<unknown>"
+                                            ParseResult.Success(
+                                                ParsedNewtypeConstruct(
+                                                    typeName = typeName,
+                                                    value = innerExpr.value,
+                                                    loc = receiver.loc.spanTo(tokenLoc(rparen.value, file))
+                                                ),
+                                                rparen.remaining
+                                            )
+                                        }
+                                        is ParseResult.Failure -> ParseResult.Failure(
+                                            "Expected ')' to close newtype construction '$typeName.(...)'",
+                                            rparen.position, rparen.line, rparen.column
+                                        )
+                                    }
+                                }
+                                is ParseResult.Failure -> ParseResult.Failure(
+                                    "Expected expression inside newtype construction '$typeName.(...)'",
+                                    innerExpr.position, innerExpr.line, innerExpr.column
+                                )
+                            }
+                        } else {
+                            result = ParseResult.Failure(
+                                "Newtype construction '.(' requires a type name on the left, but got an expression. Did you mean to call a method? Use '.method_name {}' instead.",
+                                currentStream.getSourcePosition(), currentStream.getSourceLine(), currentStream.getSourceColumn()
                             )
                         }
-                        is ParseResult.Failure -> break  // Not a member access
+                    } else {
+                        val member = memberIdentifierParser(dotStream)
+                        result = when (member) {
+                            is ParseResult.Success -> {
+                                val file = currentFile ?: "<unknown>"
+                                val memberTokenLoc = tokenLoc(member.value, file)
+                                ParseResult.Success(
+                                    ParsedMemberAccess(
+                                        result.value,
+                                        member.value.text,
+                                        loc = result.value.loc.spanTo(memberTokenLoc),
+                                        memberLoc = memberTokenLoc
+                                    ),
+                                    member.remaining
+                                )
+                            }
+                            is ParseResult.Failure -> break  // Not a member access
+                        }
                     }
                 }
                 TokenType.NEWLINE -> {

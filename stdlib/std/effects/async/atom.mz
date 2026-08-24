@@ -2,7 +2,7 @@ use std::abilities::compare::{ Eq }
 use std::effects::async::{ Async }
 
 ## Lock-free atomic reference for shared mutable state.
-pub newtype Atom 'a = Atom __NativeAtomicRef
+pub newtype Atom 'a = __NativeAtomicRef
 
 impl Eq for Atom 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },

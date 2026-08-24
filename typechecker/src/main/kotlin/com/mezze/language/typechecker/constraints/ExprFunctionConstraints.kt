@@ -12,17 +12,121 @@ import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
 
+// ========================================================================
+// NEWTYPES — `Email.("foo")` syntax
+// ========================================================================
+
+internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: ParsedNewtypeConstruct, context: ConstraintContext): ConstraintResult {
+    val typeDecl = context.typeDeclarations[expr.typeName]
+    val newtypeDef = typeDecl?.definition as? ParsedNewtypeDef
+
+    if (newtypeDef == null) {
+        val abilityNames = context.abilityNames
+        val effectNames = context.effectNames
+        val variantDecl = typeDecl?.definition as? ParsedVariantDef
+        val message = when {
+            expr.typeName in abilityNames || BuiltInAbilities.isBuiltInAbility(expr.typeName) ->
+                "'${expr.typeName}' is an ability, not a newtype. Did you mean an ability method like '${expr.typeName}.<method> { ... }' or a constraint like 'with ${expr.typeName} 'a'?"
+            expr.typeName in effectNames ->
+                "'${expr.typeName}' is an effect, not a newtype. Did you mean 'perform ${expr.typeName} in do { ... }' or an effect op call like '${expr.typeName}.<op> { ... }'?"
+            variantDecl != null ->
+                "'${expr.typeName}' is a variant type, not a newtype. Construct with '${expr.typeName} { <field> = <value> }'."
+            expr.typeName in setOf("Int", "Nat", "Float", "Str", "Bool", "Char") ->
+                "'${expr.typeName}' is a primitive type, not a newtype. Only newtypes can be constructed with '.(...)'. If you meant a module function, use '${expr.typeName.lowercase()}::<function> { ... }'."
+            else -> "Unknown type '${expr.typeName}'. Did you forget to import it?"
+        }
+        throw TypeCheckError(
+            message = message,
+            loc = expr.loc,
+            errorType = ErrorType.UNDEFINED_VARIABLE,
+            code = ErrorCode.T0212_NOT_A_NEWTYPE,
+        )
+    }
+
+    val constructorBindingLu = context.typingContext.lookup(BindingKey.unqualified(newtypeDef.constructor))
+    if (constructorBindingLu is TypingContext.LookupResult.NotFound) {
+        throw TypeCheckError(
+            message = "Cannot construct newtype '${expr.typeName}' — its constructor is private to the defining module. " +
+                "Use the module's public API instead.",
+            loc = expr.loc,
+            errorType = ErrorType.MISSING_FIELD,
+            code = ErrorCode.M0803_NOT_EXPORTED,
+            hints = listOf(
+                "newtype constructors are not exported; look for a `pub` factory function in the defining module"
+            ),
+        )
+    }
+
+    val valueResult = generate(expr.value, context)
+
+    val constructorScheme = (constructorBindingLu as? TypingContext.LookupResult.Found)?.binding
+    if (constructorScheme != null) {
+        val instantiated = when (constructorScheme) {
+            is TypingContext.Binding.Polymorphic -> constructorScheme.scheme.instantiate().type
+            is TypingContext.Binding.Monomorphic -> constructorScheme.type
+        }
+        val fnType = instantiated as? MezzeType.FunctionType
+        if (fnType != null) {
+            val constraints = valueResult.constraints + listOf(
+                Constraint.Equality(
+                    left = valueResult.type,
+                    right = fnType.paramType,
+                    context = "Newtype construction ${expr.typeName}.(...)",
+                    loc = expr.loc,
+                )
+            )
+            return ConstraintResult(
+                type = fnType.returnType,
+                constraints = constraints,
+                effects = valueResult.effects,
+                effectInstances = valueResult.effectInstances,
+                performed = valueResult.performed,
+                abilityConstraints = valueResult.abilityConstraints,
+                associatedTypeConstraints = valueResult.associatedTypeConstraints,
+                undefinedVariables = valueResult.undefinedVariables,
+                usedVariables = valueResult.usedVariables,
+                referencedBindings = valueResult.referencedBindings,
+                methodCallResolutions = valueResult.methodCallResolutions,
+                callReturnTypes = valueResult.callReturnTypes,
+            )
+        }
+    }
+
+    val newtypeType = MezzeType.NewtypeType(
+        name = expr.typeName,
+        constructor = newtypeDef.constructor,
+        wrappedType = valueResult.type,
+    )
+    return ConstraintResult(
+        type = newtypeType,
+        constraints = valueResult.constraints,
+        effects = valueResult.effects,
+        effectInstances = valueResult.effectInstances,
+        performed = valueResult.performed,
+        abilityConstraints = valueResult.abilityConstraints,
+        associatedTypeConstraints = valueResult.associatedTypeConstraints,
+        undefinedVariables = valueResult.undefinedVariables,
+        usedVariables = valueResult.usedVariables,
+        referencedBindings = valueResult.referencedBindings,
+        methodCallResolutions = valueResult.methodCallResolutions,
+        callReturnTypes = valueResult.callReturnTypes,
+    )
+}
+
 internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: ParsedVariantConstruct, context: ConstraintContext): ConstraintResult {
 
     val constructorBinding = context.typingContext.lookup(BindingKey.unqualified(expr.constructor))
-    if (constructorBinding is TypingContext.LookupResult.NotFound) {
-        val newtypeDecl = context.typeDeclarations.values.find {
-            it.definition is ParsedNewtypeDef && (it.definition as ParsedNewtypeDef).constructor == expr.constructor
-        }
-        if (newtypeDecl != null) {
+
+    // Newtype migration diagnostic: `Email { value = "hi" }` (old record-wrap syntax)
+    // is no longer supported. Newtype constructors use `Email.("hi")` syntax now.
+    val newtypeDeclForName = context.typeDeclarations.values.find {
+        it.definition is ParsedNewtypeDef && (it.definition as ParsedNewtypeDef).constructor == expr.constructor
+    }
+    if (newtypeDeclForName != null) {
+        if (constructorBinding is TypingContext.LookupResult.NotFound) {
             throw TypeCheckError(
                 message = "Cannot construct newtype '${expr.constructor}' — its constructor is private to the defining module. " +
-                    "Use a public constructor function from the module instead.",
+                    "Use the module's public API instead.",
                 loc = expr.loc,
                 errorType = ErrorType.MISSING_FIELD,
                 code = ErrorCode.M0803_NOT_EXPORTED,
@@ -31,6 +135,13 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
                 ),
             )
         }
+        // In the defining module, refuse old syntax and point to `.()`.
+        throw TypeCheckError(
+            message = "Newtype '${expr.constructor}' is not a record. Construct with '${expr.constructor}.(...)' — e.g., ${expr.constructor}.(<value>). Field-record construction was replaced with the .() syntax.",
+            loc = expr.loc,
+            errorType = ErrorType.TYPE_MISMATCH,
+            code = ErrorCode.T0212_NOT_A_NEWTYPE,
+        )
     }
 
     val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(expr.constructor)

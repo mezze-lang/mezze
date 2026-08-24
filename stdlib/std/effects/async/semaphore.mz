@@ -2,7 +2,7 @@ use std::abilities::compare::{ Eq }
 use std::effects::async::{ Async, park }
 
 ## Counting semaphore for limiting concurrent access.
-pub newtype Semaphore = Semaphore __NativeSemaphore
+pub newtype Semaphore = __NativeSemaphore
 
 impl Eq for Semaphore where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },

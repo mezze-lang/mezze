@@ -511,37 +511,29 @@ internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility
                         when (assign) {
                             is ParseResult.Success -> {
                                 val stream4 = skipNewlines(assign.remaining)
-                                val constructor = identifierParser(stream4)
+                                val wrappedType = typeAnnotationParser(stream4)
 
-                                when (constructor) {
+                                when (wrappedType) {
                                     is ParseResult.Success -> {
-                                        val stream5 = skipNewlines(constructor.remaining)
-                                        val wrappedType = typeAnnotationParser(stream5)
-
-                                        when (wrappedType) {
-                                            is ParseResult.Success -> {
-                                                val file = currentFile ?: "<unknown>"
-                                                val loc = spanLocTo(newtypeToken.value, wrappedType.remaining, file)
-                                                val defLoc = spanLocTo(constructor.value, wrappedType.remaining, file)
-                                                ParseResult.Success(
-                                                    ParsedTypeDecl(
-                                                        name = typeName.value.text,
-                                                        visibility = visibility,
-                                                        typeParams = typeParams,
-                                                        definition = ParsedNewtypeDef(
-                                                            constructor = constructor.value.text,
-                                                            wrappedType = wrappedType.value,
-                                                            loc = defLoc
-                                                        ),
-                                                        loc = loc
-                                                    ),
-                                                    wrappedType.remaining
-                                                )
-                                            }
-                                            is ParseResult.Failure -> wrappedType
-                                        }
+                                        val file = currentFile ?: "<unknown>"
+                                        val loc = spanLocTo(newtypeToken.value, wrappedType.remaining, file)
+                                        val defLoc = spanLocTo(assign.value, wrappedType.remaining, file)
+                                        ParseResult.Success(
+                                            ParsedTypeDecl(
+                                                name = typeName.value.text,
+                                                visibility = visibility,
+                                                typeParams = typeParams,
+                                                definition = ParsedNewtypeDef(
+                                                    constructor = typeName.value.text,
+                                                    wrappedType = wrappedType.value,
+                                                    loc = defLoc
+                                                ),
+                                                loc = loc
+                                            ),
+                                            wrappedType.remaining
+                                        )
                                     }
-                                    is ParseResult.Failure -> constructor
+                                    is ParseResult.Failure -> wrappedType
                                 }
                             }
                             is ParseResult.Failure -> assign

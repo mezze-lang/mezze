@@ -8,10 +8,10 @@ use std::int
 use std::bool
 
 ## Opaque promise representing an asynchronous computation.
-pub newtype Promise 'a = Promise __NativePromise
+pub newtype Promise 'a = __NativePromise
 
 ## Opaque scope for structured concurrency.
-pub newtype Scope 'a = Scope __NativeScope
+pub newtype Scope 'a = __NativeScope
 
 pub let promise_eq : { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
   __native_ref_eq { l = l, r = r }
@@ -763,7 +763,7 @@ pub let join_on_first : { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <As
 # ============================================================================
 
 ## Cooperative cancellation token supporting hierarchical cancellation.
-pub newtype CancellationToken = CancellationToken __NativeCancellationToken
+pub newtype CancellationToken = __NativeCancellationToken
 
 impl Eq for CancellationToken where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },

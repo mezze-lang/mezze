@@ -10,7 +10,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test simple newtype with primitive type`() {
-        val source = "newtype Email = Email String"
+        val source = "newtype Email = String"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -30,7 +30,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test public newtype`() {
-        val source = "pub newtype UserId = UserId Int"
+        val source = "pub newtype UserId = Int"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -48,7 +48,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with record type`() {
-        val source = "newtype Point = Point { x: Float, y: Float }"
+        val source = "newtype Point = { x: Float, y: Float }"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -69,7 +69,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with type parameter`() {
-        val source = "newtype Option 'a = Option 'a"
+        val source = "newtype Option 'a = 'a"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -87,7 +87,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with multiple type parameters`() {
-        val source = "newtype Pair 'a 'b = Pair { first: 'a, second: 'b }"
+        val source = "newtype Pair 'a 'b = { first: 'a, second: 'b }"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -106,7 +106,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with function type`() {
-        val source = "newtype Handler = Handler { x: Int } -> String"
+        val source = "newtype Handler = { x: Int } -> String"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -126,7 +126,7 @@ class NewtypeParserTest {
     fun `test newtype with multiline formatting`() {
         val source = """
             newtype Email =
-                Email String
+                String
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -145,9 +145,9 @@ class NewtypeParserTest {
     @Test
     fun `test multiple newtype declarations`() {
         val source = """
-            newtype Email = Email String
-            newtype UserId = UserId Int
-            newtype Name = Name String
+            newtype Email = String
+            newtype UserId = Int
+            newtype Name = String
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -168,7 +168,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with Array type`() {
-        val source = "newtype Names = Names [String]"
+        val source = "newtype Names = [String]"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -203,7 +203,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with effects in wrapped type`() {
-        val source = "newtype Action = Action { } -> {} <Log>"
+        val source = "newtype Action = { } -> {} <Log>"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)

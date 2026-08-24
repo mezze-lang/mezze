@@ -98,6 +98,10 @@ class PerformValidator(
                 }
             }
 
+            is ParsedNewtypeConstruct -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.value, implDeclarations, effectDeclarations, functionDefinitions))
+            }
+
             is ParsedMemberAccess -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.receiver, implDeclarations, effectDeclarations, functionDefinitions))
             }
@@ -291,6 +295,7 @@ class PerformValidator(
                 }
 
                 is ParsedVariantConstruct -> e.value?.let { traverse(it) }
+                is ParsedNewtypeConstruct -> traverse(e.value)
                 is ParsedMemberAccess -> traverse(e.receiver)
                 is ParsedSeqLit -> e.elements.forEach { element ->
                     when (element) {

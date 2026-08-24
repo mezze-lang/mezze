@@ -22,34 +22,34 @@ impl Mut for DebugLocalMut where {
 }
 
 ## Mutable sequence wrapping a native mutable array.
-pub newtype MutSeq 'a = MutSeq __NativeMutSeq
+pub newtype MutSeq 'a = __NativeMutSeq
 
 ## Mutable map wrapping a native mutable hash map.
-pub newtype MutMap 'k 'v = MutMap __NativeMutMap
+pub newtype MutMap 'k 'v = __NativeMutMap
 
 ## Mutable set wrapping a native mutable hash set.
-pub newtype MutSet 'a = MutSet __NativeMutSet
+pub newtype MutSet 'a = __NativeMutSet
 
 ## Mutable byte array.
-pub newtype MutBytes = MutBytes __NativeMutBytes
+pub newtype MutBytes = __NativeMutBytes
 
 ## Mutable double-ended queue.
-pub newtype MutDeque 'a = MutDeque __NativeMutDeque
+pub newtype MutDeque 'a = __NativeMutDeque
 
 ## Mutable Int for counters and accumulators.
-pub newtype MutInt = MutInt __NativeMutInt
+pub newtype MutInt = __NativeMutInt
 
 ## Mutable Float for accumulators.
-pub newtype MutFloat = MutFloat __NativeMutFloat
+pub newtype MutFloat = __NativeMutFloat
 
 ## Mutable Bool for flags.
-pub newtype MutBool = MutBool __NativeMutBool
+pub newtype MutBool = __NativeMutBool
 
 ## Mutable String for string building.
-pub newtype MutString = MutString __NativeMutString
+pub newtype MutString = __NativeMutString
 
 ## Mutable Char for character manipulation.
-pub newtype MutChar = MutChar __NativeMutChar
+pub newtype MutChar = __NativeMutChar
 
 ## Convert immutable sequence to mutable (copies).
 pub let seq_to_mut : { seq: ['a] } -> MutSeq 'a <Mut> = { seq } ->

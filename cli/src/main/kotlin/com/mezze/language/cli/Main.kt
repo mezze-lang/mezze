@@ -538,6 +538,7 @@ private fun prettyPrintParsedExpr(expr: ParsedExpr): String {
             if (expr.value != null) "${expr.constructor} ${prettyPrintParsedExpr(expr.value!!)}"
             else expr.constructor
         }
+        is ParsedNewtypeConstruct -> "${expr.typeName}.(${prettyPrintParsedExpr(expr.value)})"
         is ParsedIf -> "if ${prettyPrintParsedExpr(expr.condition)} then ${prettyPrintParsedExpr(expr.thenBranch)} else ${prettyPrintParsedExpr(expr.elseBranch)}"
         is ParsedMatch -> "match ${prettyPrintParsedExpr(expr.scrutinee)} is ..."
         is ParsedDo -> "do ... ${prettyPrintParsedExpr(expr.result)}"

@@ -1147,7 +1147,7 @@ class MutationEffectTest {
             use std::effects::mutation::{Mut, LocalMut, MutInt, int_to_mut, read_int, incr}
 
             # User-defined newtype wrapping a record with a mutable field
-            newtype Counter = Counter { count: MutInt }
+            newtype Counter = { count: MutInt }
 
             # Construct using record field names directly
             let make_counter = {n} -> Counter {count = int_to_mut {n = n}}
@@ -1178,15 +1178,15 @@ class MutationEffectTest {
             use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_to_mut, seq_to_immut, sort}
 
             # User-defined buffer newtype wrapping a record
-            newtype Buffer 'a = Buffer { data: MutSeq 'a }
+            newtype Buffer 'a = { data: MutSeq 'a }
 
-            let make_buffer = {xs} -> Buffer {data = seq_to_mut {seq = xs}}
+            let make_buffer = {xs} -> Buffer.(seq_to_mut {seq = xs)}
 
             let freeze = {buf: Buffer Int} -> match buf is
-                Buffer {data = s} -> seq_to_immut {seq = s}
+                Buffer.(s) -> seq_to_immut {seq = s}
 
             let sort_buffer = {buf: Buffer Int} -> match buf is
-                Buffer {data = s} -> sort {seq = s}
+                Buffer.(s) -> sort {seq = s}
 
             let test = {} -> perform LocalMut in do
                 let buf = make_buffer {xs = [3, 1, 2]}

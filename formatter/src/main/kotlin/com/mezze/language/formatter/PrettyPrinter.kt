@@ -502,6 +502,7 @@ class PrettyPrinter {
             is ParsedSeqLit -> printSeqLit(expr)
             is ParsedMemberAccess -> { printExpr(expr.receiver); append("."); append(expr.member) }
             is ParsedVariantConstruct -> printVariantConstruct(expr)
+            is ParsedNewtypeConstruct -> { append(expr.typeName); append(".("); printExpr(expr.value); append(")") }
             is ParsedLambda -> printLambda(expr)
             is ParsedFunctionCall -> printFunctionCall(expr)
             is ParsedBinaryOp -> printBinaryOp(expr)
@@ -918,6 +919,7 @@ class PrettyPrinter {
                 append(pattern.constructor)
                 pattern.payload?.let { append(" "); printPattern(it) }
             }
+            is ParsedNewtypePattern -> { append(pattern.typeName); append(".("); printPattern(pattern.inner); append(")") }
             is ParsedRecordPattern -> printRecordPattern(pattern)
             is ParsedLiteralPattern -> printLiteralValue(pattern.value)
             is ParsedSeqPattern -> printSeqPattern(pattern)

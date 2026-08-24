@@ -402,7 +402,7 @@ class TrailingCommaTest {
 
     @Test
     fun `parse newtype with trailing comma`() {
-        val code = """newtype UserId = UserId {value: Int,}"""
+        val code = """newtype UserId = {value: Int,}"""
 
         val module = parser.parseParsedModule(code)
         assertNotNull(module)

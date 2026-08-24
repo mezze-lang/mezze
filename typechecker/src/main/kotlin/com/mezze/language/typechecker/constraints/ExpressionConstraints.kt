@@ -67,6 +67,7 @@ class ExpressionConstraintGenerator {
         is ParsedRecordLit -> generateRecordLiteral(expr, context)
         is ParsedMemberAccess -> generateMemberAccess(expr, context)
         is ParsedVariantConstruct -> generateVariantConstruction(expr, context)
+        is ParsedNewtypeConstruct -> generateNewtypeConstruction(expr, context)
         is ParsedLambda -> generateLambda(expr, context)
         is ParsedFunctionCall -> generateFunctionCall(expr, context)
         is ParsedIf -> generateMatch(expr.toMatchExpr(), context)
