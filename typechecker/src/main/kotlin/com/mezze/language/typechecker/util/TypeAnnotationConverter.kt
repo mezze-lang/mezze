@@ -27,13 +27,16 @@ object TypeAnnotationConverter {
         val stripTickFromTypeVars: Boolean = false,
         /**
          * Transparent-alias resolver. Given a type name, returns the aliased
-         * `ParsedTypeAnnotation` iff the name refers to a `type X = ...`
-         * declaration (NOT a `newtype`, NOT a record/variant alias). The
-         * converter inlines the aliased annotation at every use site so
-         * `MyInt` and `Int` unify without the solver ever seeing the alias
-         * name. Return `null` for anything that isn't a transparent alias.
+         * `ParsedTypeAnnotation` PLUS the alias's declared type parameter
+         * names iff the name refers to a `type X 'a ... = ...` declaration
+         * (NOT a `newtype`, NOT a record/variant alias). The converter
+         * inlines the aliased annotation at every use site — with type-var
+         * substitution when the alias was declared with parameters — so
+         * `MyInt` and `Int`, or `Wrap Int` and `Seq Int`, unify without the
+         * solver ever seeing the alias label. Return `null` for anything
+         * that isn't a transparent alias.
          */
-        val resolveTypeAlias: (String) -> ParsedTypeAnnotation? = { null },
+        val resolveTypeAlias: (String) -> Pair<ParsedTypeAnnotation, List<String>>? = { null },
     )
 
     fun convertWith(
@@ -70,7 +73,10 @@ object TypeAnnotationConverter {
                     // whole semantic difference between `type` (transparent)
                     // and `newtype` (nominal) — for `newtype`, resolveTypeAlias
                     // returns null so we fall through to the labeled TypeApp.
-                    config.resolveTypeAlias(name)?.let { aliased -> return recurse(aliased) }
+                    // Zero-arg use of a parametric alias (`type Wrap 'a = …`
+                    // referenced as bare `Wrap`) still inlines but its 'a stays
+                    // free — the solver picks it up as an ordinary TypeVar.
+                    config.resolveTypeAlias(name)?.let { (aliased, _) -> return recurse(aliased) }
                     WellKnownTypeApp.of(name, emptyList(), config.resolveTypeHash(name))
                 }
             }
@@ -147,6 +153,20 @@ object TypeAnnotationConverter {
             }
 
             is ParsedTypeApp -> {
+                // Parametric transparent alias: `type Wrap 'a = Seq 'a` used as
+                // `Wrap Int` becomes `Seq Int`. We convert the arg annotations
+                // first (independent of the alias), then re-convert the aliased
+                // annotation with the alias's tyvars substituted by the arg
+                // MezzeTypes. This handles `type X 'a 'b = …`, alias-of-alias,
+                // and aliases whose RHS is a record/variant/function type.
+                config.resolveTypeAlias(annotation.constructor)?.let { (aliased, paramNames) ->
+                    val convertedArgs = annotation.args.map { recurse(it) }
+                    val substituted = paramNames.zip(convertedArgs).toMap()
+                    val extendedSubst = (config.typeParamSubst ?: emptyMap()) + substituted +
+                        substituted.mapKeys { "'" + it.key.removePrefix("'") }
+                    val extendedConfig = config.copy(typeParamSubst = extendedSubst)
+                    return convertInternal(aliased, extendedConfig, typeVarCache, sharedRowVar)
+                }
                 val args = annotation.args.map { recurse(it) }
                 if (config.resolveCollectionTypes) {
                     resolveWellKnownTypeApp(annotation.constructor, args, config.resolveTypeHash(annotation.constructor))
@@ -178,11 +198,21 @@ object TypeAnnotationConverter {
         annotation: ParsedTypeAnnotation,
         faithful: Boolean = true,
         includeAbilityConstraints: Boolean = true,
-        typeVarCache: MutableMap<String, TypeVar>? = null
+        typeVarCache: MutableMap<String, TypeVar>? = null,
+        /**
+         * Optional transparent-alias resolver — mirrors ConversionConfig.resolveTypeAlias.
+         * Given a type name, returns (aliased annotation, declared type-param names)
+         * if the name is a `type X = ...` alias; null otherwise. When present,
+         * `Foo` in an annotation is recursively converted as the aliased type.
+         */
+        resolveTypeAlias: (String) -> Pair<ParsedTypeAnnotation, List<String>>? = { null }
     ): MezzeType {
         return when (annotation) {
             is ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
+                resolveTypeAlias(annotation.name)?.let { (aliased, _) ->
+                    return convert(aliased, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias)
+                }
                 if (faithful) {
                     MezzeType.VarType(
                         if (typeVarCache != null) {
@@ -237,10 +267,21 @@ object TypeAnnotationConverter {
                 }
             }
             is ParsedTypeApp -> {
+                // Parametric transparent alias at the static-convert entry
+                // point: substitute the arg-annotations into the aliased
+                // annotation and recurse. Since this `convert()` doesn't have
+                // a `typeParamSubst` field like `convertWith` does, we perform
+                // the substitution as a naive parsed-annotation rewrite before
+                // recursing. Alias-of-alias falls out naturally.
+                resolveTypeAlias(annotation.constructor)?.let { (aliased, paramNames) ->
+                    val subst = paramNames.zip(annotation.args).toMap()
+                    val rewritten = substituteTypeVarsInAnnotation(aliased, subst)
+                    return convert(rewritten, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias)
+                }
                 if (faithful) {
                     MezzeType.TypeApplication(
                         annotation.constructor,
-                        annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache) }
+                        annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias) }
                     )
                 } else {
                     MezzeType.VarType(TypeVar.fresh())
@@ -464,5 +505,41 @@ object TypeAnnotationConverter {
         is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
         is MezzeType.BytesType, is MezzeType.ByteBufferType,
         is MezzeType.CharType -> type
+    }
+
+    /**
+     * Substitute type variables in a ParsedTypeAnnotation. Used by the
+     * parametric-alias path in [convert]: given `type Wrap 'a = Seq 'a`
+     * used as `Wrap Int`, we rewrite the aliased annotation `Seq 'a` to
+     * `Seq Int` by substituting `'a → Int`, then recurse into the plain
+     * converter. Keeps the substitution parsed-AST-only so downstream
+     * conversion semantics are unaffected.
+     */
+    private fun substituteTypeVarsInAnnotation(
+        annotation: ParsedTypeAnnotation,
+        subst: Map<String, ParsedTypeAnnotation>
+    ): ParsedTypeAnnotation {
+        if (subst.isEmpty()) return annotation
+        fun rec(a: ParsedTypeAnnotation): ParsedTypeAnnotation = when (a) {
+            is ParsedNamedType -> {
+                // Type-var names come with or without the leading tick in
+                // different code paths — check both.
+                val stripped = a.name.removePrefix("'")
+                subst[a.name] ?: subst[stripped] ?: subst["'$stripped"] ?: a
+            }
+            is ParsedTypeApp -> a.copy(args = a.args.map { rec(it) })
+            is ParsedRecordType -> a.copy(entries = a.entries.map { it.copy(type = rec(it.type)) })
+            is ParsedVariantType -> a.copy(constructors = a.constructors.map { c ->
+                c.copy(dataType = c.dataType?.let { rec(it) })
+            })
+            is ParsedFunctionType -> a.copy(
+                paramType = rec(a.paramType),
+                returnType = rec(a.returnType),
+            )
+            is ParsedSeqType -> a.copy(elementType = rec(a.elementType))
+            is ParsedEffectRow -> a
+            is ParsedQualifiedType -> a.copy(args = a.args.map { rec(it) })
+        }
+        return rec(annotation)
     }
 }

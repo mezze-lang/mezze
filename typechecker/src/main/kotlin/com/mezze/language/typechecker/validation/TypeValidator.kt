@@ -360,7 +360,15 @@ class TypeValidator(
         val parsedAnnotation = decl.typeAnnotation ?: return emptyList()
         if (!decl.isSimpleBinding) return emptyList()
         val inferredType = constraintResults[decl.variableName]?.type ?: return emptyList()
-        val annotatedType = try { TypeAnnotationConverter.convert(parsedAnnotation) } catch (_: Exception) { return emptyList() }
+        val annotatedType = try {
+            TypeAnnotationConverter.convert(parsedAnnotation, resolveTypeAlias = { name ->
+                registry.lookupType(name)?.let { d ->
+                    (d.definition as? ParsedTypeAliasDef)?.let { alias ->
+                        alias.aliasedType to d.typeParams
+                    }
+                }
+            })
+        } catch (_: Exception) { return emptyList() }
         val finalType = substitution.apply(inferredType)
         if (!alphaEquivalent(annotatedType, finalType, mutableMapOf())) {
             return listOf(ValidationError.AnnotationMismatch(

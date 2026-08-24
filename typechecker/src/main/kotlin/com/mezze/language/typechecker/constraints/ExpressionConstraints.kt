@@ -687,7 +687,13 @@ class ExpressionConstraintGenerator {
         inlineVariantNaming = true,
         resolveTypeAlias = { name ->
             // Transparent-alias inlining at expression-annotation sites.
-            (registry?.lookupType(name)?.definition as? ParsedTypeAliasDef)?.aliasedType
+            // Returns (aliased annotation, declared type-param names) so
+            // parametric aliases can be substituted at their use sites.
+            registry?.lookupType(name)?.let { decl ->
+                (decl.definition as? ParsedTypeAliasDef)?.let { alias ->
+                    alias.aliasedType to decl.typeParams
+                }
+            }
         },
     )
 

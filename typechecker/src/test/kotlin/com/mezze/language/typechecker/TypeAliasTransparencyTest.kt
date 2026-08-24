@@ -114,4 +114,39 @@ class TypeAliasTransparencyTest {
             pub let call = { x: MyInt2 } -> take { n = x }
         """)
     }
+
+    // ── PARAMETRIC ALIASES ─────────────────────────────────────────────
+
+    @Test fun `parametric alias over Seq unifies with the aliased shape`() {
+        ok("param.seq", """
+            use std::collections::seq
+            type Ids 'a = Seq 'a
+            pub let take : { xs: Seq Int } -> Seq Int = { xs } -> xs
+            pub let call = { xs: Ids Int } -> take { xs = xs }
+        """)
+    }
+
+    @Test fun `parametric alias with two type params`() {
+        ok("param.two", """
+            type Pair 'a 'b = { first: 'a, second: 'b }
+            pub let mk : {} -> Pair Int Str = {} -> { first = 1, second = "hi" }
+        """)
+    }
+
+    @Test fun `parametric alias-of-alias resolves transitively`() {
+        ok("param.alias-of-alias", """
+            use std::collections::seq
+            type Ids 'a = Seq 'a
+            type Bag 'a = Ids 'a
+            pub let take : { xs: Seq Int } -> Seq Int = { xs } -> xs
+            pub let call = { xs: Bag Int } -> take { xs = xs }
+        """)
+    }
+
+    @Test fun `parametric alias inlines through a function type`() {
+        ok("param.function-rhs", """
+            type Producer 'a = {} -> 'a
+            pub let mk : Producer Int = {} -> 42
+        """)
+    }
 }

@@ -65,7 +65,11 @@ class ConstraintGenerator(
         inlineVariantNaming = true,
         convertEffectAnnotations = true,
         resolveTypeAlias = { name ->
-            (registry.lookupType(name)?.definition as? ParsedTypeAliasDef)?.aliasedType
+            registry.lookupType(name)?.let { decl ->
+                (decl.definition as? ParsedTypeAliasDef)?.let { alias ->
+                    alias.aliasedType to decl.typeParams
+                }
+            }
         },
     )
 
