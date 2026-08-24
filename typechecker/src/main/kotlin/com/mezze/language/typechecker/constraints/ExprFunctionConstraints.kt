@@ -31,6 +31,7 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
             expr.typeName in context.effectNames
         val variantDecl = typeDecl?.definition as? ParsedVariantDef
         val recordDecl = typeDecl?.definition as? ParsedRecordDef
+        val aliasDecl = typeDecl?.definition as? ParsedTypeAliasDef
         val message = when {
             isAbility ->
                 "'${expr.typeName}' is an ability, not a newtype. Did you mean an ability method like '${expr.typeName}.<method> { ... }' or a constraint like 'with ${expr.typeName} 'a'?"
@@ -40,6 +41,8 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
                 "'${expr.typeName}' is a variant type, not a newtype. Construct with '${expr.typeName} { <field> = <value> }'."
             recordDecl != null ->
                 "'${expr.typeName}' is a record type, not a newtype. Construct with '${expr.typeName} { <fields> = <values> }'."
+            aliasDecl != null ->
+                "'${expr.typeName}' is a transparent type alias, not a newtype. Just construct the aliased type directly — the value is interchangeable. If you want a distinct nominal type, declare `newtype ${expr.typeName} = ...` instead of `type`."
             expr.typeName in setOf("Int", "Nat", "Float", "Str", "Bool", "Char", "Bytes", "Frac", "ByteBuffer") ->
                 "'${expr.typeName}' is a primitive type, not a newtype. Only newtypes can be constructed with '.(...)'. If you meant a module function, use '${expr.typeName.lowercase()}::<function> { ... }'."
             expr.typeName.firstOrNull()?.isLowerCase() == true ->

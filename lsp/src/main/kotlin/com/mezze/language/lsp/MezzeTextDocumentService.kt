@@ -1444,7 +1444,16 @@ class MezzeTextDocumentService(
         // 3. Look up type declarations from parsed module
         val typeDecl = parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.find { it.name == word }
         if (typeDecl != null) {
-            return appendDoc(codeBlock("type $word"), typeDecl.docComment, typeDecl.metadata)
+            // For transparent aliases show the aliased type: `type MyInt = Int`
+            // is more informative than just `type MyInt` at hover.
+            val header = when (val def = typeDecl.definition) {
+                is com.mezze.language.parsedast.ParsedTypeAliasDef ->
+                    "type $word = ${formatTypeAnnotation(def.aliasedType)}"
+                is com.mezze.language.parsedast.ParsedNewtypeDef ->
+                    "newtype $word = ${formatTypeAnnotation(def.wrappedType)}"
+                else -> "type $word"
+            }
+            return appendDoc(codeBlock(header), typeDecl.docComment, typeDecl.metadata)
         }
 
         // 4-5. Look up ability declarations from parsed module or imports
