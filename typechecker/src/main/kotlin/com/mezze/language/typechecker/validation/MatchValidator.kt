@@ -17,16 +17,29 @@ class MatchValidator(
     fun validateParsedMatchesInExpr(
         expr: ParsedExpr,
         substitution: Substitution,
-        constraintResults: Map<String, ConstraintResult>
+        constraintResults: Map<String, ConstraintResult>,
+        currentDeclName: String? = null,
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
+        // Restrict scrutinee-type inference to the CURRENT declaration's constraints.
+        // Without this filter, `extractParamType` scans ALL decls' function types
+        // and grabs the first that happens to have a parameter with the matching
+        // name — silently picking up an unrelated decl's `var` param (e.g. `deref`'s
+        // `var: TVar 'a` matches `unwrap_tmvar`'s `var: TMVar 'a`), so the wrong type
+        // reaches exhaustiveness and demands wrong constructors.
+        val scopedResults: Map<String, ConstraintResult> =
+            if (currentDeclName != null && constraintResults.containsKey(currentDeclName)) {
+                mapOf(currentDeclName to constraintResults.getValue(currentDeclName))
+            } else {
+                constraintResults
+            }
         walkParsedExpr(expr) { node ->
             if (node is ParsedMatch) {
                 val hasConstructorPattern = node.cases.any { case ->
                     case.patterns.any { it is ParsedConstructorPattern }
                 }
                 if (!hasConstructorPattern) {
-                    val scrutineeType = inferParsedScrutineeType(node, substitution, constraintResults)
+                    val scrutineeType = inferParsedScrutineeType(node, substitution, scopedResults)
                     if (scrutineeType != null) {
                         val result = validateParsedExhaustiveness(node, scrutineeType)
                         if (result is ValidationResult.Failure) errors.addAll(result.errors)
