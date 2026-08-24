@@ -180,4 +180,70 @@ class TypeAliasTransparencyTest {
             pub let call = { w: Wrap Int } -> take { xs = w }
         """, "")
     }
+
+    // ── ALIAS INTEROP: mixing alias names with the raw type at boundaries ──
+    //
+    // The whole point of transparent aliases is that call sites can freely
+    // mix the alias name and the aliased type. These tests pin the common
+    // patterns where a user has a value typed as `MyInt` but the callee is
+    // annotated with `Int` (or vice versa), and the value flows through
+    // records, sequences, higher-order callbacks, and stdlib functions.
+
+    @Test fun `MyInt value flows into function annotated with bare Int`() {
+        ok("interop.value-to-bare", """
+            type MyInt = Int
+            pub let mk : {} -> MyInt = {} -> 42
+            pub let sink : { n: Int } -> Int = { n } -> n
+            pub let go = {} -> sink { n = mk {} }
+        """)
+    }
+
+    @Test fun `bare Int value flows into function annotated with MyInt`() {
+        ok("interop.bare-to-value", """
+            type MyInt = Int
+            pub let take : { n: MyInt } -> MyInt = { n } -> n
+            pub let go = {} -> take { n = 5 }
+        """)
+    }
+
+    @Test fun `alias flows through a record field type`() {
+        // Bare inline records: {n: MyInt} must be interchangeable with
+        // {n: Int} at every boundary because MyInt inlines to Int.
+        // (Record ALIASES `type Wrap = { … }` are a separate nominal/adoption
+        // story per [[project_type_alias_adoption]] — not covered here.)
+        ok("interop.record-field", """
+            type MyInt = Int
+            pub let take : { w: { n: Int } } -> Int = { w } -> w.n
+            pub let go = { w: { n: MyInt } } -> take { w = w }
+        """)
+    }
+
+    @Test fun `alias flows through a Seq element boundary`() {
+        ok("interop.seq-element", """
+            use std::collections::seq
+            type MyInt = Int
+            pub let mk : {} -> Seq MyInt = {} -> seq::empty {}
+            pub let take : { xs: Seq Int } -> Seq Int = { xs } -> xs
+            pub let go = {} -> take { xs = mk {} }
+        """)
+    }
+
+    @Test fun `alias flows into a stdlib map callback typed with bare Int`() {
+        ok("interop.hof-callback", """
+            use std::collections::seq
+            type MyInt = Int
+            pub let mk : {} -> Seq MyInt = {} -> seq::empty {}
+            pub let go = {} -> seq::map { xs = mk {}, f = { x: Int } -> x + 1 }
+        """)
+    }
+
+    @Test fun `Option MyInt and Option Int are interchangeable`() {
+        ok("interop.option-arg", """
+            type MyInt = Int
+            pub let take : { o: Option Int } -> Int = { o } -> match o is
+                Some { val = n } -> n
+                None -> 0
+            pub let go = { m: Option MyInt } -> take { o = m }
+        """)
+    }
 }
