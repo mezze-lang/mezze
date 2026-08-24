@@ -26,9 +26,9 @@ type Color = | Red, Green, Blue, Custom {r: Int, g: Int, b: Int} |
 type ExtensibleEnum = | A, B, C, ... |
 
 # Newtype declarations
-newtype Email = Email String
-pub newtype UserId = UserId Int
-newtype Point3D = Point3D { x: Float, y: Float, z: Float }
+newtype Email = String
+pub newtype UserId = Int
+newtype Point3D = { x: Float, y: Float, z: Float }
 
 # ==========================================
 # Effect Declarations

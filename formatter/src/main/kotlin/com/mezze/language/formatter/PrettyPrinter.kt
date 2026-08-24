@@ -147,12 +147,15 @@ class PrettyPrinter {
         if (decl.visibility == Visibility.PUBLIC) append("pub ")
         when (val def = decl.definition) {
             is ParsedNewtypeDef -> {
+                // The parser sets constructor == decl.name, so the old
+                // formatter form `newtype X = X <wrappedType>` double-printed
+                // the name whenever wrappedType was a bare `ParsedTypeApp(X, …)`
+                // (old syntax `newtype UserId = UserId Int`). New syntax is
+                // `newtype X = <wrappedType>` — just print the wrapped type.
                 append("newtype ")
                 append(decl.name)
                 printTypeParams(decl.typeParams)
                 append(" = ")
-                append(def.constructor)
-                append(" ")
                 printTypeAnnotation(def.wrappedType)
             }
             else -> {
