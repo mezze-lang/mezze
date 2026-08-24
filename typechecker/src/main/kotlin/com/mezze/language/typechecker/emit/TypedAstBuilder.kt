@@ -271,6 +271,9 @@ class TypedAstBuilder(
                 wrappedType = convertParsedTypeAnnotation(d.wrappedType),
                 derivedAbilities = emptyList()
             )
+            is ParsedTypeAliasDef -> TypedAliasDef(
+                aliasedType = convertParsedTypeAnnotation(d.aliasedType)
+            )
         }
 
         val isPublic = decl.visibility == ParsedVisibility.PUBLIC

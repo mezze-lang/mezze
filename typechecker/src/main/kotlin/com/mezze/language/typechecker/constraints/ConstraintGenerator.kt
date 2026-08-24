@@ -64,6 +64,9 @@ class ConstraintGenerator(
         honorOpenRowVars = true,
         inlineVariantNaming = true,
         convertEffectAnnotations = true,
+        resolveTypeAlias = { name ->
+            (registry.lookupType(name)?.definition as? ParsedTypeAliasDef)?.aliasedType
+        },
     )
 
     private val implValidator = ImplValidator(

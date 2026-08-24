@@ -5536,6 +5536,7 @@ class MezzeTextDocumentService(
                             createDocumentSymbol(c.name, SymbolKind.EnumMember, c.loc)
                         }
                     is com.mezze.language.parsedast.ParsedNewtypeDef -> SymbolKind.Struct to emptyList()
+                    is com.mezze.language.parsedast.ParsedTypeAliasDef -> SymbolKind.TypeParameter to emptyList()
                 }
                 val symbol = createDocumentSymbol(decl.name, kind, decl.loc, children = children)
                 if (symbol != null) symbols.add(Either.forRight(symbol))

@@ -460,6 +460,10 @@ object ParsedDeclHasher {
                 b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x02))
                 appendTypeAnnotation(b, def.wrappedType)
             }
+            is ParsedTypeAliasDef -> {
+                b.append(byteArrayOf(HashTags.TYPE_ALIAS, 0x01))
+                appendTypeAnnotation(b, def.aliasedType)
+            }
         }
     }
 }

@@ -25,6 +25,15 @@ object TypeAnnotationConverter {
         val typeParamSubst: Map<String, MezzeType>? = null,
         val convertEffectAnnotations: Boolean = false,
         val stripTickFromTypeVars: Boolean = false,
+        /**
+         * Transparent-alias resolver. Given a type name, returns the aliased
+         * `ParsedTypeAnnotation` iff the name refers to a `type X = ...`
+         * declaration (NOT a `newtype`, NOT a record/variant alias). The
+         * converter inlines the aliased annotation at every use site so
+         * `MyInt` and `Int` unify without the solver ever seeing the alias
+         * name. Return `null` for anything that isn't a transparent alias.
+         */
+        val resolveTypeAlias: (String) -> ParsedTypeAnnotation? = { null },
     )
 
     fun convertWith(
@@ -56,6 +65,12 @@ object TypeAnnotationConverter {
                     val typeVar = typeVarCache.getOrPut(varName) { TypeVar.freshWithName(varName) }
                     MezzeType.VarType(typeVar)
                 } else {
+                    // Transparent-alias inlining: if `name` is `type X = Y`,
+                    // recursively convert the aliased annotation. This is the
+                    // whole semantic difference between `type` (transparent)
+                    // and `newtype` (nominal) — for `newtype`, resolveTypeAlias
+                    // returns null so we fall through to the labeled TypeApp.
+                    config.resolveTypeAlias(name)?.let { aliased -> return recurse(aliased) }
                     WellKnownTypeApp.of(name, emptyList(), config.resolveTypeHash(name))
                 }
             }

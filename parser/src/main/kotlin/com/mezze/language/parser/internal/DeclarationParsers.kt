@@ -556,7 +556,32 @@ internal val MezzeParser.typeDefinitionParser: Parser<ParsedTypeDef> get() = { s
                 if (variantResult.message.startsWith("Invalid variant syntax:")) {
                     variantResult
                 } else {
-                    recordTypeParser(stream)
+                    val recordResult = recordTypeParser(stream)
+                    when (recordResult) {
+                        is ParseResult.Success -> recordResult
+                        is ParseResult.Failure -> {
+                            // Fall through to a TRUE type alias: `type MyInt = Int`,
+                            // `type Ids = Seq Int`. Records + variants have their own
+                            // ParsedTypeDef cases above; this fires only when neither
+                            // matched.
+                            val firstTok = stream.current()
+                            if (firstTok == null) recordResult
+                            else {
+                                val aliasResult = typeAnnotationParser(stream)
+                                when (aliasResult) {
+                                    is ParseResult.Success -> {
+                                        val file = currentFile ?: "<unknown>"
+                                        val loc = spanLocTo(firstTok, aliasResult.remaining, file)
+                                        ParseResult.Success(
+                                            ParsedTypeAliasDef(aliasResult.value, loc),
+                                            aliasResult.remaining
+                                        )
+                                    }
+                                    is ParseResult.Failure -> recordResult
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

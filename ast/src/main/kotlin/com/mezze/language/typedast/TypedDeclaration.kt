@@ -234,3 +234,16 @@ data class TypedNewtypeDef(
     val wrappedType: MezzeType,
     val derivedAbilities: List<String>
 ) : TypedTypeDef
+
+/**
+ * Transparent type alias: `type MyInt = Int`.
+ *
+ * Aliases are inlined at every use site by the typechecker — the aliased
+ * type is what unification sees. This node exists so downstream consumers
+ * (LSP hover, docs, serialization) can still show the alias name; it
+ * carries no runtime semantics of its own.
+ */
+@Serializable
+data class TypedAliasDef(
+    val aliasedType: MezzeType
+) : TypedTypeDef

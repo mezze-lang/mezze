@@ -685,6 +685,10 @@ class ExpressionConstraintGenerator {
         resolveCollectionTypes = true,
         honorOpenRowVars = true,
         inlineVariantNaming = true,
+        resolveTypeAlias = { name ->
+            // Transparent-alias inlining at expression-annotation sites.
+            (registry?.lookupType(name)?.definition as? ParsedTypeAliasDef)?.aliasedType
+        },
     )
 
     internal fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {

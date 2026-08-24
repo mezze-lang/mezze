@@ -280,6 +280,15 @@ class AbilityResolver(
                     is ParsedNewtypeDef -> {
                         checkNewtypeAbilityForTypeApplication(type, abilityName, typeArgs, definition, abilityHash)
                     }
+                    is ParsedTypeAliasDef -> {
+                        // Transparent aliases should have been inlined by the
+                        // converter; if we see one here it means the label
+                        // survived. Delegate to the aliased type's ability
+                        // check to keep transparency intact.
+                        AbilityCheckResult.Unsatisfied(
+                            reason = "Alias ${type.constructor} was not inlined before ability check"
+                        )
+                    }
                 }
             }
         }

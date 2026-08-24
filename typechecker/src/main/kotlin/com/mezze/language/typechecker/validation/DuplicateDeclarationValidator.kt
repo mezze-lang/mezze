@@ -208,6 +208,8 @@ object DuplicateDeclarationValidator {
                         recordShapeToType[shapeKey] = typeDecl.name
                     }
                 }
+                is ParsedNewtypeDef -> { /* handled separately in validateNewtypeConstructors */ }
+                is ParsedTypeAliasDef -> { /* transparent alias — no ctors/fields to dup-check */ }
             }
         }
     }
@@ -358,6 +360,7 @@ object DuplicateDeclarationValidator {
         }
         is ParsedRecordDef -> definition.fields.flatMap { collectTypeVariablesFromParsedAnnotation(it.type) }
         is ParsedNewtypeDef -> collectTypeVariablesFromParsedAnnotation(definition.wrappedType)
+        is ParsedTypeAliasDef -> collectTypeVariablesFromParsedAnnotation(definition.aliasedType)
     }
 
     private fun collectTypeVariablesFromParsedAnnotation(annotation: ParsedTypeAnnotation): List<Pair<String, Loc?>> = when (annotation) {
