@@ -55,7 +55,7 @@ class NewtypeDerivingTest {
     @Test
     fun `test newtype Inspect always works`() {
         val source = """
-            newtype Email = String
+            newtype Email = Str
             let show = {e: Email} -> e.to_dbg_str {}
         """.trimIndent()
 

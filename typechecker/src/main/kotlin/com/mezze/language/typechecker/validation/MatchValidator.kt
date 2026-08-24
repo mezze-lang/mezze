@@ -234,6 +234,14 @@ class MatchValidator(
                             ))
                         }
                     }
+                    is ParsedNewtypePattern -> {
+                        // A newtype expanded to a synthetic single-ctor variant by
+                        // expandTypeApplicationToVariant: the `Name.(inner)` pattern
+                        // covers that lone constructor (whose synthetic name is the
+                        // newtype's `constructor` field == typeName). Match on typeName
+                        // — that's what the expander stores as the variant ctor.
+                        if (case.guard == null && case.ifLetBindings.isEmpty()) coveredConstructors.add(pattern.typeName)
+                    }
                     is ParsedWildcardPattern, is ParsedVariablePattern -> {
                         if (case.guard == null && case.ifLetBindings.isEmpty()) hasWildcard = true
                     }

@@ -186,7 +186,7 @@ class NamespaceSeparationTest {
         assertAccepts(
             """
                 type Box = | Box { val: Int } |
-                let b = Box.(5)
+                let b = Box { val = 5 }
             """.trimIndent()
         )
     }
