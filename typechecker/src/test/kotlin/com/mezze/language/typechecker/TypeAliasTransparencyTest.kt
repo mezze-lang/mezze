@@ -149,4 +149,35 @@ class TypeAliasTransparencyTest {
             pub let mk : Producer Int = {} -> 42
         """)
     }
+
+    // ── PARAMETRIC NEWTYPES (contrast) ─────────────────────────────────
+    //
+    // Parametric newtypes stay nominal at every use site — the same way
+    // non-parametric ones do. The wrapped type parameter propagates through
+    // construction and destructuring, but the nominal wall remains up.
+
+    @Test fun `parametric newtype construct + destruct threads the type param`() {
+        ok("newtype.param.roundtrip", """
+            use std::collections::seq
+            newtype Wrap 'a = Seq 'a
+            pub let w : Wrap Int = Wrap.(seq::empty {})
+            pub let unwrap : { w: Wrap Int } -> Seq Int = { w } -> match w is Wrap.(xs) -> xs
+        """)
+    }
+
+    @Test fun `parametric newtype over record wraps a record shape`() {
+        ok("newtype.param.record", """
+            newtype Box 'a = { val: 'a }
+            pub let b : Box Int = Box.({ val = 42 })
+        """)
+    }
+
+    @Test fun `parametric newtype stays nominal - Wrap Int does NOT unify with Seq Int`() {
+        reject("newtype.param.nominal", """
+            use std::collections::seq
+            newtype Wrap 'a = Seq 'a
+            pub let take : { xs: Seq Int } -> Seq Int = { xs } -> xs
+            pub let call = { w: Wrap Int } -> take { xs = w }
+        """, "")
+    }
 }
