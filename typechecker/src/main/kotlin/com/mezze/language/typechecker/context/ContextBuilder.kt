@@ -306,6 +306,7 @@ class ContextBuilder {
                 collectTypeVariables(constructorType, typeVars)
                 result = result.extendPoly(definition.constructor, TypeScheme(typeVars.toList(), emptyList(), constructorType))
             }
+            is ParsedTypeAliasDef -> { /* transparent alias — no constructor to bind */ }
         }
         return result
     }
@@ -322,6 +323,7 @@ class ContextBuilder {
                         }
                         is ParsedRecordDef -> emptyMap()
                         is ParsedNewtypeDef -> emptyMap()
+                        is ParsedTypeAliasDef -> emptyMap()
                     }
                     MezzeType.VariantType(
                         constructors = constructors, rowVar = null,
@@ -752,6 +754,12 @@ class ContextBuilder {
         resolveCollectionTypes = true,
         honorOpenRowVars = false,
         stripTickFromTypeVars = true,
+        resolveTypeAlias = { name ->
+            // Transparent alias inlining: only fires for `type X = ...`.
+            // `newtype` and record/variant `type` decls return null so the
+            // converter falls through to the labeled TypeApp path.
+            (currentTypeDecls[name]?.definition as? ParsedTypeAliasDef)?.aliasedType
+        },
     )
 
     fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {

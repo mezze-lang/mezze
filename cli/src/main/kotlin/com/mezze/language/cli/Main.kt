@@ -569,6 +569,7 @@ private fun prettyPrintParsedTypeDef(def: ParsedTypeDef): String {
         is ParsedRecordDef -> "{ ${def.fields.joinToString(", ") { "${it.name}: ${prettyPrintParsedType(it.type)}" }} }"
         is ParsedVariantDef -> "| ${def.constructors.joinToString(", ") { it.name }} |"
         is ParsedNewtypeDef -> "${def.constructor} ${prettyPrintParsedType(def.wrappedType)}"
+        is ParsedTypeAliasDef -> prettyPrintParsedType(def.aliasedType)
     }
 }
 

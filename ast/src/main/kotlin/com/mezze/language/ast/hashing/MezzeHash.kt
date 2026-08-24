@@ -141,6 +141,7 @@ object HashTags {
     const val ABILITY_CONSTRAINT: Byte = 0x38
     const val SUSPENDED_TYPE: Byte = 0x39
     const val NEWTYPE: Byte = 0x3A
+    const val TYPE_ALIAS: Byte = 0x3B
 
     // Declarations
     const val LET_BINDING: Byte = 0x40

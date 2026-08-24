@@ -43,6 +43,12 @@ internal fun buildTypeAliasesFromParsedModule(
                     typeName = typeDecl.name
                 )
             }
+            is ParsedTypeAliasDef -> {
+                // Transparent alias: store the aliased MezzeType directly. Any
+                // downstream site that resolves `MyInt` looks this up and
+                // substitutes the aliased type unchanged.
+                contextBuilder.convertParsedTypeAnnotation(def.aliasedType)
+            }
             else -> null
         }
         if (definitionType != null) {

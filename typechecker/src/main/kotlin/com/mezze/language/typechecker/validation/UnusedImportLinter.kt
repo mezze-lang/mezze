@@ -133,6 +133,7 @@ object UnusedImportLinter {
             is ParsedRecordDef -> for (f in def.fields) collectTypeRefs(f.type, into)
             is ParsedVariantDef -> for (c in def.constructors) c.dataType?.let { collectTypeRefs(it, into) }
             is ParsedNewtypeDef -> collectTypeRefs(def.wrappedType, into)
+            is ParsedTypeAliasDef -> collectTypeRefs(def.aliasedType, into)
         }
     }
 

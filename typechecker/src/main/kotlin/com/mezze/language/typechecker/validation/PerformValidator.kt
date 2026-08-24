@@ -429,6 +429,7 @@ class PerformValidator(
                         rowVar = if (def.isOpen) RowVar.fresh() else null)
                     is ParsedRecordDef -> MezzeType.RecordType(fields = def.fields.associate { it.name to TypeAnnotationConverter.convert(it.type) })
                     is ParsedNewtypeDef -> TypeAnnotationConverter.convert(def.wrappedType)
+                    is ParsedTypeAliasDef -> TypeAnnotationConverter.convert(def.aliasedType)
                 } else MezzeType.VarType(TypeVar.freshWithName(annotation.name))
             }
             is ParsedTypeApp -> {

@@ -178,6 +178,7 @@ class PrettyPrinter {
             is ParsedRecordDef -> printRecordDef(def)
             is ParsedVariantDef -> printVariantDef(def)
             is ParsedNewtypeDef -> { /* handled in printTypeDecl */ }
+            is ParsedTypeAliasDef -> printTypeAnnotation(def.aliasedType)
         }
     }
 

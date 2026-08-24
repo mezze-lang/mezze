@@ -1175,6 +1175,14 @@ internal fun expandTypeApplication(
                 TypeExpansionResult.NotFound
             }
         }
+        is ParsedTypeAliasDef -> {
+            // Transparent aliases are inlined at the annotation converter, so
+            // a TypeApplication of an alias name should never reach here in
+            // normal flow. If one leaks through (e.g. via a code path that
+            // hasn't been ported yet) treat it as NotFound rather than
+            // hallucinating record/variant/newtype shape.
+            TypeExpansionResult.NotFound
+        }
     }
 }
 
