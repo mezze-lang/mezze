@@ -209,13 +209,37 @@ class TypeAliasTransparencyTest {
     @Test fun `alias flows through a record field type`() {
         // Bare inline records: {n: MyInt} must be interchangeable with
         // {n: Int} at every boundary because MyInt inlines to Int.
-        // (Record ALIASES `type Wrap = { … }` are a separate nominal/adoption
-        // story per [[project_type_alias_adoption]] — not covered here.)
         ok("interop.record-field", """
             type MyInt = Int
             pub let take : { w: { n: Int } } -> Int = { w } -> w.n
             pub let go = { w: { n: MyInt } } -> take { w = w }
         """)
+    }
+
+    @Test fun `record alias label is currently kept — documented follow-up`() {
+        // `type Wrap = { n: MyInt }` used where bare `{ n: Int }` is expected
+        // currently REJECTS because the record alias label (`Wrap`) stays
+        // attached at same-module use sites. AliasStripper only fires for
+        // IMPORTED types (ImportContextMerger), and changing same-module
+        // record-alias behavior would break the existing RecordAliasAdoptionTest
+        // adoption story [[project_type_alias_adoption]].
+        //
+        // Workaround for users today: pass a bare record literal
+        // `take { r = { n = w.n } }` or annotate the destination as `Wrap`.
+        //
+        // Follow-up: extend AliasStripper to run at unification-point for
+        // same-module record aliases, gated to avoid regressing adoption.
+        val e = err("""
+            type MyInt = Int
+            type Wrap = { n: MyInt }
+            pub let take : { r: { n: Int } } -> Int = { r } -> r.n
+            pub let go = { w: Wrap } -> take { r = w }
+        """)
+        assertTrue(e != null, "expected the current observed rejection")
+        assertTrue(
+            e.contains("Wrap"),
+            "diagnostic should name Wrap to guide the user to the mismatch, got: $e",
+        )
     }
 
     @Test fun `alias flows through a Seq element boundary`() {
