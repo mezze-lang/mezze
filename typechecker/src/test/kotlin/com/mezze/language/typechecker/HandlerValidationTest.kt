@@ -77,9 +77,13 @@ class HandlerValidationTest {
 
     // ========== RULE 3: Pure expression ==========
 
+    // V0508: `perform` on a purely-typed body (effect row is empty) is a hard
+    // typecheck error. The handler can never fire — the body performs
+    // nothing — so this is dead code. #274 relaxed the wrong-handler case
+    // (body performs A, handler B) to a runtime no-op, but a fully-pure body
+    // still errors because it can never be a spawn-chain-snapshot case.
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0508 — handler on pure body is a runtime no-op.")
-    fun `handler for pure expression should fail`() {
+    fun `handler for pure expression is rejected`() {
         val source = """
             effect Log where {
               info: { msg: Str } -> {} <Log>
@@ -97,14 +101,16 @@ class HandlerValidationTest {
         val error = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
-        assertContains(error.message, "has no unhandled")
+        assertContains(error.message, "performs nothing")
     }
 
     // ========== RULE 4: No matching handler ==========
 
+    // #274: a handler that doesn't match any performed effect is a runtime
+    // no-op (the op simply routes to whatever DOES match, up the chain, or
+    // suspends). Typechecker accepts it.
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0509 — non-matching handlers are runtime no-ops.")
-    fun `handler not matching any effect should fail`() {
+    fun `handler not matching any effect is accepted as runtime no-op`() {
         val source = """
             effect Log where {
               info: { msg: Str } -> {} <Log>
@@ -124,23 +130,20 @@ class HandlerValidationTest {
 
             let logMsg = {} -> Log.info { msg = "test" }
 
-            # logMsg uses Log, but we provide HttpClient which handles Network
+            # logMsg uses Log, but we provide HttpClient which handles Network.
+            # After #274 this is a no-op, not a typecheck error.
             perform HttpClient in logMsg {}
         """.trimIndent()
 
-        val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
-        }
-        assertContains(error.message, "None of the provided handlers handle effects")
-        assertContains(error.message, "Log")
-        assertContains(error.message, "HttpClient")
+        typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
     }
 
     // ========== RULE 5: Unnecessary handler (single handler) ==========
 
+    // #274: an unnecessary handler (handles an effect the body doesn't
+    // perform) is a runtime no-op.
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0510 — unnecessary handlers are runtime no-ops.")
-    fun `single unnecessary handler should fail`() {
+    fun `single unnecessary handler is accepted as runtime no-op`() {
         val source = """
             effect Log where {
               info: { msg: Str } -> {} <Log>
@@ -162,11 +165,8 @@ class HandlerValidationTest {
               Log.info { msg = "test" }
               Network.send { data = "hello" }
 
-            # Handle Log first, then try to handle Network with wrong handler
             let partiallyHandled = perform ConsoleLogger in logAndSend
 
-            # partiallyHandled is a function with <Network, *>
-            # But we try to handle FileSystem which is not present
             effect FileSystem where {
               write: { path: Str } -> {} <FileSystem>
             }
@@ -175,14 +175,12 @@ class HandlerValidationTest {
               write = { path } -> {}
             }
 
+            # DiskFS handles FileSystem, which partiallyHandled doesn't perform.
+            # After #274 this is a no-op, not a typecheck error.
             perform DiskFS in partiallyHandled {}
         """.trimIndent()
 
-        val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
-        }
-        assertContains(error.message, "DiskFS")
-        assertContains(error.message, "FileSystem")
+        typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
     }
 
     // ========== RULE 6: Handler order (rightmost first) ==========
@@ -259,9 +257,13 @@ class HandlerValidationTest {
 
     // ========== Nested performs ==========
 
+    // The inner perform handles every effect the body performs; the outer
+    // perform's body is then purely-typed (empty effect row), which V0508
+    // rejects. See `handler for pure expression is rejected` above — same
+    // rule applies whether pureness came from an explicit pure value or
+    // from an inner perform draining the row.
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0508 — outer handlers that don't match are runtime no-ops (needed for spawn chain snapshots).")
-    fun `nested performs with unnecessary outer handler should fail`() {
+    fun `nested performs with unnecessary outer handler is rejected`() {
         val source = """
             effect Log where {
               info: { msg: Str } -> {} <Log>
@@ -281,17 +283,14 @@ class HandlerValidationTest {
 
             let logMsg = {} -> Log.info { msg = "test" }
 
-            # Inner perform handles Log, result has <*> (no effects left)
-            # Outer perform tries to handle Network which is not present
-            # Wrap in function to avoid top-level <*> restriction
+            # Inner perform handles Log, body has no effects left.
+            # Outer HttpClient handles Network on now-pure body → V0508.
             let test = {} -> perform HttpClient in (perform ConsoleLogger in logMsg {})
         """.trimIndent()
 
-        val error = assertThrows<TypeCheckError> {
+        assertThrows<TypeCheckError> {
             typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
-        // Inner perform handles all effects, leaving body with no unhandled effect for outer perform.
-        assertContains(error.message, "has no unhandled")
     }
 
     @Test

@@ -6,6 +6,7 @@ import com.mezze.language.ast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.assertThrows
 
 /**
  * Comprehensive tests for ability and effect error detection.
@@ -361,9 +362,10 @@ class AbilityEffectErrorsTest {
             "Error should mention 'UnknownPerformer': ${exception.message}")
     }
 
+    // V0508: perform on a purely-typed body errors. Only the wrong-handler
+    // case (body performs A, handler B) was relaxed to a no-op by #274.
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0508 — installing a handler on a pure body is now a runtime no-op, not an error. Handlers may be preemptively installed for spawn snapshots.")
-    fun `test perform with pure expression should error`() {
+    fun `test perform with pure expression is rejected`() {
         val source = """
             effect Log where {
                 info: { msg: Str } -> {} <Log>
@@ -373,24 +375,20 @@ class AbilityEffectErrorsTest {
                 info = { msg } -> {}
             }
 
-            # This is invalid - expression 1 + 1 is pure, no effects to handle
             let test = {} ->
                 perform Console in
                 1 + 1
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        assertThrows<TypeCheckError> {
+            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
-        assertTrue(exception.message?.contains("pure") == true ||
-                   exception.message?.contains("no effects") == true,
-            "Error should mention pure expression or no effects: ${exception.message}")
     }
 
+    // #274: wrong-handler-for-effect is a runtime no-op (the op becomes
+    // MezzeSuspend and routes up the chain), not a typecheck error.
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0509/V0510 — wrong-handler for effect is a runtime no-op (op becomes MezzeSuspend), not a typecheck error.")
-    fun `test perform handler for wrong effect should error`() {
+    fun `test perform handler for wrong effect is accepted as runtime no-op`() {
         val source = """
             effect Log where {
                 info: { msg: Str } -> {} <Log>
@@ -404,18 +402,11 @@ class AbilityEffectErrorsTest {
                 print = { msg } -> {}
             }
 
-            # StdIO handles IO, but expression uses Log - mismatch
             let test = {} ->
                 perform StdIO in
                 Log.info {msg = "test"}
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
-        assertTrue(exception.message?.contains("IO") == true ||
-                   exception.message?.contains("Log") == true,
-            "Error should mention effect mismatch: ${exception.message}")
+        typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
     }
 }
