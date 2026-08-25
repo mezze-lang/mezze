@@ -127,30 +127,16 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         // (e.g. Point.sum vs Seq.sum on an anonymous `{x:Int, y:Int}`) fall
         // through to the all-candidates dispatch below, which unifies
         // against the wrong impl's it slot ("[Int] vs {x:Int, y:Int}").
+        // #448 + Gap 2: filter inherent candidates by the receiver's type-decl
+        // name(s). Nominal types match by name (Seq, Int, or a labeled Client);
+        // bare records/variants produced by transparent-alias resolution match
+        // structurally against in-scope aliases. Single unified path — same
+        // helper the chain-callee return-type lookup uses.
         if (inherentMethods.size > 1) {
             val concreteReceiver = getReceiverConcreteType(memberAccess.receiver, context)
-            // #448: when receiver's concrete type has a well-known nominal name
-            // (Seq/List/Map/Set/Bytes/Str/Int/…), filter inherent candidates
-            // to those matching. This is the STRUCTURAL fix: "value before `.`
-            // has type T; look up T.method". Without it, Seq/List/etc.
-            // literals + chain-method returns fall through to all-candidates
-            // dispatch and misroute to Option/Bytes based on load order.
-            val nominalName = concreteReceiver?.let { resolveReceiverTypeName(it) }
-            if (nominalName != null) {
-                val filtered = inherentMethods.filter { it.targetTypeName == nominalName }
-                if (filtered.isNotEmpty()) {
-                    return generateInherentMethodCall(expr, memberAccess, filtered, context)
-                }
-            }
-            val candidateAliases: Set<String> = when {
-                concreteReceiver is MezzeType.RecordType && concreteReceiver.typeName == null ->
-                    findMatchingRecordTypeAliases(concreteReceiver, context).toSet()
-                concreteReceiver is MezzeType.VariantType && concreteReceiver.typeName == null ->
-                    findMatchingVariantTypeAliases(concreteReceiver, context).toSet()
-                else -> emptySet()
-            }
-            if (candidateAliases.isNotEmpty()) {
-                val filtered = inherentMethods.filter { it.targetTypeName in candidateAliases }
+            val candidateNames = concreteReceiver?.let { candidateTypeNames(it, context) } ?: emptySet()
+            if (candidateNames.isNotEmpty()) {
+                val filtered = inherentMethods.filter { it.targetTypeName in candidateNames }
                 if (filtered.isNotEmpty()) {
                     return generateInherentMethodCall(expr, memberAccess, filtered, context)
                 }
@@ -623,9 +609,10 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
             val callee = receiver.function
             if (callee is ParsedMemberAccess) {
                 val innerType = getReceiverConcreteType(callee.receiver, context) ?: return null
-                val innerTypeName = resolveReceiverTypeName(innerType) ?: return null
+                val innerNames = candidateTypeNames(innerType, context)
+                if (innerNames.isEmpty()) return null
                 val candidates = context.typingContext.findAnonymousMethodsByName(callee.member)
-                    .filter { it.targetTypeName == innerTypeName }
+                    .filter { it.targetTypeName in innerNames }
                 val method = candidates.singleOrNull() ?: return null
                 val ret2 = (method.methodType as? MezzeType.FunctionType)?.returnType ?: return null
                 // Peel SuspendType — the effect wrapper is transparent for
@@ -1091,6 +1078,26 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
         else -> null
     } ?: return null
     return resolveReceiverTypeName(resultType)
+}
+
+/**
+ * Type-decl names a receiver type might dispatch on. A nominal type
+ * (Int, Client-with-name, TypeApplication) yields its single name; a
+ * bare record/variant produced by transparent-alias resolution falls back
+ * to structural alias matching (Gap 2 — same shape as method-dispatch's
+ * ambiguity resolver). Empty set means the receiver isn't dispatchable
+ * via inherent methods (bail out at the caller).
+ */
+internal fun ExpressionConstraintGenerator.candidateTypeNames(
+    type: MezzeType,
+    context: ConstraintContext
+): Set<String> {
+    resolveReceiverTypeName(type)?.let { return setOf(it) }
+    return when (type) {
+        is MezzeType.RecordType -> findMatchingRecordTypeAliases(type, context).toSet()
+        is MezzeType.VariantType -> findMatchingVariantTypeAliases(type, context).toSet()
+        else -> emptySet()
+    }
 }
 
 /**
