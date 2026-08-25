@@ -12,6 +12,77 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  * Contains MezzeType (sealed interface for all type representations).
  */
 
+/**
+ * The identity of a nominal type — a CLOSED, TOTAL answer to "are these the same
+ * type?" that unification can decide with one exhaustive `when` and no null
+ * ambiguity and no name-string comparison.
+ *
+ * This replaces the loose `typeName: String?` + `typeHash: Hash?` pair (4
+ * undeclared null-combinations) carried by [MezzeType.RecordType],
+ * [MezzeType.VariantType], [MezzeType.NewtypeType], and
+ * [MezzeType.TypeApplication].
+ *
+ * Identity rules (see Unification):
+ *  - two [Declared] → same iff `hash == hash` (a `displayName` is NEVER consulted)
+ *  - two [Builtin]  → same iff `kind == kind`
+ *  - two [Anonymous] → structural (fall through to field/ctor unify)
+ *  - a mixed [Declared]/[Anonymous] pair is NOT a blanket reject: for TRANSPARENT
+ *    nominal types (records, and non-walled `type X = ...` variant aliases) it
+ *    falls through to STRUCTURAL unify — that is what makes
+ *    `type Wrapper = {n:Int}; f { x = {n=5} }` type-check. Only OPAQUE walls
+ *    (newtype nodes, and `ascriptionWall` variants) reject on that mismatch.
+ *    The wall test is gated on node kind / `ascriptionWall`, never on identity
+ *    shape alone.
+ */
+@Serializable
+sealed interface TypeIdentity {
+    /**
+     * A named type from a real declaration. [hash] is the content hash of the
+     * declaration (module-distinct, rename-safe) and is the ONLY identity input.
+     * [displayName] is metadata for printing/errors — DOCUMENTED as never an
+     * identity input (so we need not thread a hash→name resolver through the
+     * type printer).
+     */
+    @Serializable
+    data class Declared(val hash: com.mezze.language.typedast.Hash, val displayName: String) : TypeIdentity
+
+    /**
+     * A name-carried builtin (Option/Result/Deque/NonEmptyList/SortedMap/SortedSet
+     * as TypeApplication or VariantType sugar). There is exactly one of each, so
+     * the [kind] tag IS its canonical identity — no content to hash. (Builtins
+     * that are dedicated MezzeType nodes — ListType, MapType, … — carry no
+     * identity field and unify structurally by node kind.)
+     */
+    @Serializable
+    data class Builtin(val kind: BuiltinKind) : TypeIdentity
+
+    /** An inline type with no declaration (`{x:Int}`, `|A,B|`). Unifies structurally. */
+    @Serializable
+    data object Anonymous : TypeIdentity
+
+    /** Name for DISPLAY/errors only — NEVER an identity input. */
+    fun displayNameOrNull(): String? = when (this) {
+        is Declared -> displayName
+        is Builtin -> kind.typeName
+        Anonymous -> null
+    }
+}
+
+/** The name-carried builtin constructors. Their reserved names are their identity. */
+enum class BuiltinKind(val typeName: String) {
+    OPTION("Option"),
+    RESULT("Result"),
+    DEQUE("Deque"),
+    NON_EMPTY_LIST("NonEmptyList"),
+    SORTED_MAP("SortedMap"),
+    SORTED_SET("SortedSet");
+
+    companion object {
+        private val byName = entries.associateBy { it.typeName }
+        fun fromName(name: String): BuiltinKind? = byName[name]
+    }
+}
+
 @Serializable
 @JsonClassDiscriminator("typeKind")
 sealed interface MezzeType {
@@ -20,6 +91,29 @@ sealed interface MezzeType {
         internal val toStringDepth = ThreadLocal.withInitial { 0 }
         internal const val MAX_DEPTH = 10
         internal const val TRUNCATE_DEPTH = 3
+
+        /**
+         * Stage A: derive a [TypeIdentity] from a nominal type's existing
+         * `typeName`/`typeHash` (or newtype name) so the four nominal types can
+         * expose `.identity` while their construction sites stay untouched.
+         *
+         * Precedence: a content hash is authoritative identity → [TypeIdentity.Declared].
+         * Otherwise, if [allowBuiltin] and the name is a known name-carried builtin
+         * → [TypeIdentity.Builtin]. Otherwise → [TypeIdentity.Anonymous].
+         *
+         * (Stage C moves `identity` into the constructors and deletes this
+         * derivation; until then it reproduces exactly today's name/hash behavior.)
+         */
+        internal fun deriveIdentity(
+            name: String?,
+            hash: com.mezze.language.typedast.Hash?,
+            allowBuiltin: Boolean
+        ): TypeIdentity = when {
+            hash != null && name != null -> TypeIdentity.Declared(hash, name)
+            allowBuiltin && name != null ->
+                BuiltinKind.fromName(name)?.let { TypeIdentity.Builtin(it) } ?: TypeIdentity.Anonymous
+            else -> TypeIdentity.Anonymous
+        }
 
         /**
          * Helper for safe toString() implementations with depth tracking.
@@ -135,6 +229,11 @@ sealed interface MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
 
+        // Stage A: identity derived from the existing name/hash so all construction
+        // sites compile untouched. Records are never name-carried builtins, so a
+        // record is Declared iff it carries a hash, else Anonymous.
+        val identity: TypeIdentity get() = deriveIdentity(typeName, typeHash, allowBuiltin = false)
+
         override fun toString(): String = safeToString(
             typeName ?: "RecordType",
             truncatedContent = { "${fields.size} fields" },
@@ -179,6 +278,13 @@ sealed interface MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
 
+        // Stage A: identity derived from the existing name/hash. A variant CAN be a
+        // name-carried builtin (Option/Result sugar), so allowBuiltin = true:
+        // a hashless variant whose name is a known builtin → Builtin(kind).
+        // `ascriptionWall` stays a SEPARATE field (author-ascription, orthogonal
+        // to declaration identity).
+        val identity: TypeIdentity get() = deriveIdentity(typeName, typeHash, allowBuiltin = true)
+
         override fun toString(): String = safeToString(
             typeName ?: "VariantType",
             truncatedContent = { "${constructors.size} constructors" },
@@ -207,6 +313,11 @@ sealed interface MezzeType {
         // construction; unification falls back to name only then.
         val typeHash: com.mezze.language.typedast.Hash? = null
     ) : MezzeType {
+        // Stage A: a newtype is an OPAQUE nominal wall — Declared iff it carries a
+        // hash (keyed on the declaration), else Anonymous (hashless legacy/builtin
+        // construction, unified by name). Never a name-carried builtin.
+        val identity: TypeIdentity get() = deriveIdentity(name, typeHash, allowBuiltin = false)
+
         override fun toString(): String = safeToString(
             name,
             truncatedContent = { "wraps ${wrappedType::class.simpleName}" },
@@ -239,6 +350,12 @@ sealed interface MezzeType {
     // This represents applying type arguments to a type constructor
     @Serializable
     data class TypeApplication(val constructor: String, val args: List<MezzeType>, val typeHash: com.mezze.language.typedast.Hash? = null) : MezzeType {
+        // Stage A: a TypeApplication CAN be a name-carried builtin
+        // (Option/Result/Deque/NonEmptyList/SortedMap/SortedSet), so allowBuiltin
+        // = true. Declared iff it carries a hash; else Builtin if the constructor
+        // is a known builtin name; else Anonymous.
+        val identity: TypeIdentity get() = deriveIdentity(constructor, typeHash, allowBuiltin = true)
+
         override fun toString(): String = safeToString(
             "TypeApplication",
             truncatedContent = { "$constructor, ${args.size} args" },
