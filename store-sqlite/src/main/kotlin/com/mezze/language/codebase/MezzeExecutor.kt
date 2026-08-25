@@ -216,7 +216,7 @@ class MezzeExecutor(
                 collectDirectCallTargets(node.index, ownHashes, visited, resolves, out)
             }
             is com.mezze.language.truffleir.DictMethodCallIR -> collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
-            is com.mezze.language.truffleir.IterChainIR -> {
+            is com.mezze.language.truffleir.FusedChainIR -> {
                 // #446 — canonicalizer output. Validate stage/sink lambda hashes;
                 // recurse into source expression + sink init.
                 when (val s = node.source) {
@@ -377,7 +377,7 @@ class MezzeExecutor(
             is com.mezze.language.truffleir.UnitLitIR -> {}
             is com.mezze.language.truffleir.CharLitIR -> {}
             is com.mezze.language.truffleir.FracLitIR -> {}
-            is com.mezze.language.truffleir.IterChainIR -> {
+            is com.mezze.language.truffleir.FusedChainIR -> {
                 // #446 — descend into source expression + sink init; queue
                 // stage/sink lambda hashes so their FunctionIRs stay loaded.
                 when (val s = node.source) {

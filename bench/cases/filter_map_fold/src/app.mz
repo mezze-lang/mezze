@@ -1,6 +1,6 @@
 ## Fusion showcase: (0..N).filter(x < N/2).map(x * 2).fold(+)
 ##
-## Should fire IterCanonicalizer + BDSL emit's fused loop path — the whole
+## Should fire ChainCanonicalizer + BDSL emit's fused loop path — the whole
 ## chain should compile to ONE loop over range with no intermediate seqs.
 ##
 ## Uses < (Ord) instead of % because class-param NumMod resolution is

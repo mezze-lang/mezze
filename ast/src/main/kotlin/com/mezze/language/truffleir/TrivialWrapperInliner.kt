@@ -694,7 +694,7 @@ object TrivialWrapperInliner {
                     node.copy(seq = ns, index = ni) else node
             }
 
-            is IterChainIR -> {
+            is FusedChainIR -> {
                 // #446 — descend into source expression, sink init, and
                 // each stage/sink MakeLambda placeholder. MakeLambdaIR
                 // itself is a leaf (its body lives in a separate

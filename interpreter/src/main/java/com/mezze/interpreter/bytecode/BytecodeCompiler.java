@@ -19,7 +19,7 @@ import com.mezze.language.truffleir.InlineBinaryOpIR;
 import com.mezze.language.truffleir.InterpolatedStringIR;
 import com.mezze.language.truffleir.StringPartIR;
 import com.mezze.language.truffleir.InlineOp;
-import com.mezze.language.truffleir.IterChainIR;
+import com.mezze.language.truffleir.FusedChainIR;
 import com.mezze.language.truffleir.SourceIR;
 import com.mezze.language.truffleir.StageIR;
 import com.mezze.language.truffleir.SinkIR;
@@ -509,7 +509,7 @@ public final class BytecodeCompiler {
         if (node instanceof ReadArgIR) return true;
         if (node instanceof ReadCaptureIR) return true;
         if (node instanceof EffectBindingIR) return true;
-        if (node instanceof IterChainIR) {
+        if (node instanceof FusedChainIR) {
             // Canon-emit contract (#446): canonicalizer must only produce
             // shapes emit can handle. Accept unconditionally here; if emit
             // refuses at runtime, it throws and MezzeLanguage buckets it
@@ -1572,8 +1572,8 @@ public final class BytecodeCompiler {
             }
             return;
         }
-        if (node instanceof IterChainIR chain) {
-            // #446 Phase 4b — canonicalized iter chain from IterCanonicalizer.
+        if (node instanceof FusedChainIR chain) {
+            // #446 Phase 4b — canonicalized iter chain from ChainCanonicalizer.
             // Drive emitRangeFusedLoop directly from the structural form.
             // See emitCanonicalIterChain for the full policy.
             if (emitCanonicalIterChain(chain, b, argCount, localMap)) return;
@@ -1583,14 +1583,14 @@ public final class BytecodeCompiler {
             // through would miscompile (there's no CallDirect equivalent
             // to reconstruct).
             throw new IllegalStateException(
-                "IterChainIR reached BDSL emit but emitter refused it. " +
+                "FusedChainIR reached BDSL emit but emitter refused it. " +
                 "Source=" + chain.getSource().getClass().getSimpleName() +
                 " stages=" + chain.getStages().size() +
                 " sink=" + chain.getSink().getClass().getSimpleName());
         }
         if (node instanceof CallDirectIR c) {
             // #446 Phase 5 — CallDirect to a fusable HOF (seq::fold, iter::fold,
-            // etc.) is already rewritten to IterChainIR by IterCanonicalizer,
+            // etc.) is already rewritten to FusedChainIR by ChainCanonicalizer,
             // handled above. The old pattern-matching tryEmitFusedFold path
             // was removed in this phase.
             // #514: route BOTH the missing-callee case AND the FOREIGN
@@ -2078,7 +2078,7 @@ public final class BytecodeCompiler {
         }
         if (node instanceof CallNativeIR cn) {
             // #446 Phase 5c — CallNativeIR("__native_seq_sum", …) is
-            // rewritten to IterChainIR(<xs>, [], SinkIR.Sum) by the
+            // rewritten to FusedChainIR(<xs>, [], SinkIR.Sum) by the
             // canonicalizer above and handled by emitCanonicalIterChain,
             // which routes to BuiltinSumLongSeq / BuiltinSumRangeLong.
             // The old tryEmitBuiltinSeqReducer path was removed here.
@@ -2479,7 +2479,7 @@ public final class BytecodeCompiler {
 
 
     /**
-     * #446 Phase 4b — emit a canonicalized {@link IterChainIR} directly.
+     * #446 Phase 4b — emit a canonicalized {@link FusedChainIR} directly.
      * The canonicalizer has already resolved (source × stages × sink) into
      * a structural form, so this bypasses the pattern-matching peel and
      * drives {@link #emitRangeFusedLoop} (for range sources) or the
@@ -2514,11 +2514,11 @@ public final class BytecodeCompiler {
      * </pre>
      */
     private boolean emitCanonicalIterChain(
-            IterChainIR chain,
+            FusedChainIR chain,
             MezzeBytecodeRootNodeGen.Builder b,
             int argCount,
             com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
-        boolean dbg = System.getenv("MEZZE_ITER_CANON_EMIT_DEBUG") != null;
+        boolean dbg = System.getenv("MEZZE_CHAIN_CANON_EMIT_DEBUG") != null;
 
         // Only Fold sink is emittable today. ForEach needs a bool-returning
         // step and no accSlot; wire it in Phase 4c.
@@ -2532,7 +2532,7 @@ public final class BytecodeCompiler {
             initExpr = foldSink.getInit();
             MakeLambdaIR folderLambda = foldSink.getF();
             if (!folderLambda.getCaptures().isEmpty()) {
-                if (dbg) System.err.println("[iter-canon-emit] reject: folder has captures");
+                if (dbg) System.err.println("[chain-canon-emit] reject: folder has captures");
                 return false;
             }
             var folderIR = language.lookupFunctionIR(folderLambda.getFunctionHash());
@@ -2540,12 +2540,12 @@ public final class BytecodeCompiler {
                     || !folderIR.getCaptureSlots().isEmpty()
                     || folderIR.getParamSlots().size() != 2
                     || !folderIR.getLocalSlots().isEmpty()) {
-                if (dbg) System.err.println("[iter-canon-emit] reject: folder shape mismatch");
+                if (dbg) System.err.println("[chain-canon-emit] reject: folder shape mismatch");
                 return false;
             }
             var folderShape = classifyFolderBody(folderIR.getBody());
             if (folderShape == null) {
-                if (dbg) System.err.println("[iter-canon-emit] reject: unclassifiable folder body: "
+                if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable folder body: "
                         + folderIR.getBody().getClass().getSimpleName());
                 return false;
             }
@@ -2564,7 +2564,7 @@ public final class BytecodeCompiler {
             op = InlineOp.ADD;
             initExpr = new LongLitIR(0L, chain.getSrc());
         } else {
-            if (dbg) System.err.println("[iter-canon-emit] reject: sink not Fold/Sum: " + chain.getSink().getClass().getSimpleName());
+            if (dbg) System.err.println("[chain-canon-emit] reject: sink not Fold/Sum: " + chain.getSink().getClass().getSimpleName());
             return false;
         }
 
@@ -2584,12 +2584,12 @@ public final class BytecodeCompiler {
             if (stage instanceof StageIR.Map mapStage) {
                 mapCount++;
                 if (mapCount > 1) {
-                    if (dbg) System.err.println("[iter-canon-emit] reject: multi-map stages (MVP)");
+                    if (dbg) System.err.println("[chain-canon-emit] reject: multi-map stages (MVP)");
                     return false;
                 }
                 var shape = classifyUnaryLiteralLambda(mapStage.getF(), language);
                 if (shape == null) {
-                    if (dbg) System.err.println("[iter-canon-emit] reject: unclassifiable map lambda");
+                    if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable map lambda");
                     return false;
                 }
                 if (shape.callHash != null) {
@@ -2602,7 +2602,7 @@ public final class BytecodeCompiler {
                     switch (shape.op) {
                         case ADD, SUB, MUL, DIV, MOD -> {}
                         default -> {
-                            if (dbg) System.err.println("[iter-canon-emit] reject: map op not arith: " + shape.op);
+                            if (dbg) System.err.println("[chain-canon-emit] reject: map op not arith: " + shape.op);
                             return false;
                         }
                     }
@@ -2613,12 +2613,12 @@ public final class BytecodeCompiler {
             } else if (stage instanceof StageIR.Filter filterStage) {
                 filterCount++;
                 if (filterCount > 1) {
-                    if (dbg) System.err.println("[iter-canon-emit] reject: multi-filter stages (MVP)");
+                    if (dbg) System.err.println("[chain-canon-emit] reject: multi-filter stages (MVP)");
                     return false;
                 }
                 var predShape = classifyUnaryPredicateLambda(filterStage.getP(), language);
                 if (predShape == null) {
-                    if (dbg) System.err.println("[iter-canon-emit] reject: unclassifiable filter lambda");
+                    if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable filter lambda");
                     return false;
                 }
                 filterPeel = new FilterPeel(
@@ -2646,13 +2646,13 @@ public final class BytecodeCompiler {
             b.beginBuiltinSumLongSeq();
               emitNode(opaqueSrc.getExpr(), b, argCount, localMap);
             b.endBuiltinSumLongSeq();
-            if (dbg) System.err.println("[iter-canon-emit] emitted BuiltinSumLongSeq (Opaque+Sum)");
+            if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (Opaque+Sum)");
             return true;
         } else {
             // Opaque with stages, or ForEach — we don't have a materialized
             // seq to index over. Refuse; canonicalizer emitted this in
             // error or emitter needs a new shape.
-            if (dbg) System.err.println("[iter-canon-emit] reject: unhandled source/sink combo");
+            if (dbg) System.err.println("[chain-canon-emit] reject: unhandled source/sink combo");
             return false;
         }
 
@@ -2665,7 +2665,7 @@ public final class BytecodeCompiler {
               emitNode(rangeEnd,   b, argCount, localMap);
               emitNode(initExpr,   b, argCount, localMap);
             b.endBuiltinSumRangeLong();
-            if (dbg) System.err.println("[iter-canon-emit] emitted BuiltinSumRangeLong");
+            if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumRangeLong");
             return true;
         }
 
@@ -2675,7 +2675,7 @@ public final class BytecodeCompiler {
             b.beginBuiltinSumLongSeq();
               emitNode(rawXsExpr, b, argCount, localMap);
             b.endBuiltinSumLongSeq();
-            if (dbg) System.err.println("[iter-canon-emit] emitted BuiltinSumLongSeq (RawSeq+Sum)");
+            if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (RawSeq+Sum)");
             return true;
         }
 
@@ -2692,7 +2692,7 @@ public final class BytecodeCompiler {
                     mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
                     filterPeel);
             b.endBlock();
-            if (dbg) System.err.println("[iter-canon-emit] emitted range-fused loop");
+            if (dbg) System.err.println("[chain-canon-emit] emitted range-fused loop");
             return true;
         }
 
@@ -2758,7 +2758,7 @@ public final class BytecodeCompiler {
         b.endWhile();
         b.emitLoadLocal(accSlot);
         b.endBlock();
-        if (dbg) System.err.println("[iter-canon-emit] emitted seq-fused loop");
+        if (dbg) System.err.println("[chain-canon-emit] emitted seq-fused loop");
         return true;
     }
 

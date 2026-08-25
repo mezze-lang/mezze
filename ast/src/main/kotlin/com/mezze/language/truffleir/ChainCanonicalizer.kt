@@ -3,7 +3,7 @@ package com.mezze.language.truffleir
 import com.mezze.language.typedast.Hash
 
 /**
- * #446 — canonicalize iter chains into [IterChainIR].
+ * #446 — canonicalize iter chains into [FusedChainIR].
  *
  * Runs post-`TrivialWrapperInliner`, pre-`DeadLetEliminator`. Rewrites
  * every fusable iter chain into a single canonical node so the BDSL
@@ -14,21 +14,21 @@ import com.mezze.language.typedast.Hash
  * the original node is returned reference-equal. The BDSL fallback
  * (ability-dispatch, generic seq-fold) then runs unchanged.
  *
- * Env gate: `MEZZE_ITER_CANONICALIZE=0` disables the pass entirely.
+ * Env gate: `MEZZE_CHAIN_CANONICALIZE=0` disables the pass entirely.
  * Default is off during phased landing; flipped on in Phase 5 once the
- * BDSL emit for IterChainIR is in place.
+ * BDSL emit for FusedChainIR is in place.
  *
  * See docs/iter-canonicalizer-design.md for the full design.
  */
-object IterCanonicalizer {
+object ChainCanonicalizer {
 
     /**
      * Kill switch. Default ON since Phase 5. Escape hatch:
-     * MEZZE_ITER_CANONICALIZE=0 disables the pass and forces callers to
+     * MEZZE_CHAIN_CANONICALIZE=0 disables the pass and forces callers to
      * rely on the throwing intercept in BytecodeCompiler.emitNode — no
-     * IterChainIR is produced, so the intercept is unreachable.
+     * FusedChainIR is produced, so the intercept is unreachable.
      */
-    private val ENABLED: Boolean = System.getenv("MEZZE_ITER_CANONICALIZE") != "0"
+    private val ENABLED: Boolean = System.getenv("MEZZE_CHAIN_CANONICALIZE") != "0"
 
     /**
      * Rewrite each function's body. Bodies that don't contain any
@@ -49,7 +49,7 @@ object IterCanonicalizer {
         if (!ENABLED) return functions
 
         // Build the HOF classifier once, from both maps.
-        val classifier = IterHofClassifier.build(functions, stdlibSnapshot)
+        val classifier = ChainHofClassifier.build(functions, stdlibSnapshot)
         if (classifier.isEmpty()) return functions
 
         val out = HashMap<Hash, FunctionIR>(functions.size)
@@ -63,8 +63,8 @@ object IterCanonicalizer {
                 anyChanged = true
             }
         }
-        if (System.getenv("MEZZE_ITER_CANON_DEBUG") != null) {
-            System.err.println("[iter-canon] rewrote bodies in " +
+        if (System.getenv("MEZZE_CHAIN_CANON_DEBUG") != null) {
+            System.err.println("[chain-canon] rewrote bodies in " +
                 out.count { it.value.body !== functions[it.key]?.body } +
                 "/${functions.size} functions")
         }
@@ -80,21 +80,21 @@ object IterCanonicalizer {
      * through. Today we only recognize the flat 4-layer chain; nested
      * iter-of-iter is out of scope for MVP.
      */
-    private fun rewrite(node: NodeIR, classifier: IterHofClassifier): NodeIR {
+    private fun rewrite(node: NodeIR, classifier: ChainHofClassifier): NodeIR {
         // Recurse first — child nodes may contain iter chains too.
         val descended = recurseChildren(node) { child -> rewrite(child, classifier) }
         // Try to canonicalize this node itself (only CallDirectIRs can
-        // become IterChainIRs).
+        // become FusedChainIRs).
         return tryCanonicalize(descended, classifier) ?: descended
     }
 
     /**
-     * Attempt to rewrite [node] into an [IterChainIR]. Returns null if
+     * Attempt to rewrite [node] into an [FusedChainIR]. Returns null if
      * the shape isn't recognized — caller keeps the original node.
      */
-    private fun tryCanonicalize(node: NodeIR, classifier: IterHofClassifier): IterChainIR? {
+    private fun tryCanonicalize(node: NodeIR, classifier: ChainHofClassifier): FusedChainIR? {
         // Bare __native_seq_sum { xs = ... } — desugared body of seq::sum.
-        // Rewrite to IterChainIR with a Sum sink so the BDSL emit can drive
+        // Rewrite to FusedChainIR with a Sum sink so the BDSL emit can drive
         // BuiltinSumLongSeq / BuiltinSumRangeLong through the canonical path.
         if (node is CallNativeIR
             && node.name == "__native_seq_sum"
@@ -107,7 +107,7 @@ object IterCanonicalizer {
             // Opaque with no stages: just a raw seq expression. Still worth
             // canonicalizing — emit falls through to BuiltinSumLongSeq via
             // RawSeq source. Only refuse if we can't get a usable source.
-            return IterChainIR(source, stages, SinkIR.Sum, node.src)
+            return FusedChainIR(source, stages, SinkIR.Sum, node.src)
         }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
@@ -121,7 +121,7 @@ object IterCanonicalizer {
         // stages, this is a bare fold on an unknown value — no gain from
         // canonicalizing. Bail so downstream can dispatch normally.
         if (stages.isEmpty() && source is SourceIR.Opaque) return null
-        return IterChainIR(source, stages, sink, node.src)
+        return FusedChainIR(source, stages, sink, node.src)
     }
 
     /**
@@ -133,17 +133,17 @@ object IterCanonicalizer {
      */
     private fun extractSinkAndSource(
         call: CallDirectIR,
-        callee: IterHofClassifier.Callee,
+        callee: ChainHofClassifier.Callee,
     ): Pair<SinkIR, NodeIR>? = when (callee.kind) {
-        IterHofClassifier.HofKind.FOLD -> extractFold(call)
-        IterHofClassifier.HofKind.SUM -> extractSum(call)
-        IterHofClassifier.HofKind.FOR_EACH -> extractForEach(call)
+        ChainHofClassifier.HofKind.FOLD -> extractFold(call)
+        ChainHofClassifier.HofKind.SUM -> extractSum(call)
+        ChainHofClassifier.HofKind.FOR_EACH -> extractForEach(call)
         // MAP/FILTER/FROM_SEQ aren't sinks — they're peel targets. If we
         // land here we're processing the wrong callsite kind; refuse
         // silently so the peel step handles it recursively.
-        IterHofClassifier.HofKind.MAP,
-        IterHofClassifier.HofKind.FILTER,
-        IterHofClassifier.HofKind.FROM_SEQ -> null
+        ChainHofClassifier.HofKind.MAP,
+        ChainHofClassifier.HofKind.FILTER,
+        ChainHofClassifier.HofKind.FROM_SEQ -> null
     }
 
     /** iter::fold / seq::fold — expects (src, init, f) + optional trailing dict. */
@@ -160,7 +160,7 @@ object IterCanonicalizer {
      * iter::sum { src = X } — equivalent to Fold(0, +). Since Phase 5c added
      * SinkIR.Sum, we can canonicalize the sum callsite directly without
      * synthesizing a folder lambda: return SinkIR.Sum + the raw src expr.
-     * BDSL emit routes the resulting IterChainIR to BuiltinSumRangeLong /
+     * BDSL emit routes the resulting FusedChainIR to BuiltinSumRangeLong /
      * BuiltinSumLongSeq exactly like the seq::sum path.
      *
      * Expects arity 1 (record { src }) or 2 (scalar-ABI [src, dict]).
@@ -261,7 +261,7 @@ object IterCanonicalizer {
      */
     private fun peelSource(
         sourceExpr: NodeIR,
-        classifier: IterHofClassifier,
+        classifier: ChainHofClassifier,
     ): Pair<List<StageIR>, SourceIR> {
         val stages = mutableListOf<StageIR>()
         var current = sourceExpr
@@ -341,7 +341,7 @@ object IterCanonicalizer {
      */
     private fun tryPeelIterMap(
         node: NodeIR,
-        classifier: IterHofClassifier,
+        classifier: ChainHofClassifier,
     ): Pair<MakeLambdaIR, NodeIR>? {
         if (node is CallNativeIR && node.name == "__native_seq_map" && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
@@ -358,7 +358,7 @@ object IterCanonicalizer {
         }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
-        if (callee.kind != IterHofClassifier.HofKind.MAP) return null
+        if (callee.kind != ChainHofClassifier.HofKind.MAP) return null
         val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = "f") ?: return null
         val (srcInner, fRaw) = extracted
         val fLambda = fRaw as? MakeLambdaIR ?: return null
@@ -368,7 +368,7 @@ object IterCanonicalizer {
 
     private fun tryPeelIterFilter(
         node: NodeIR,
-        classifier: IterHofClassifier,
+        classifier: ChainHofClassifier,
     ): Pair<MakeLambdaIR, NodeIR>? {
         if (node is CallNativeIR && node.name == "__native_seq_filter" && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
@@ -384,7 +384,7 @@ object IterCanonicalizer {
         }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
-        if (callee.kind != IterHofClassifier.HofKind.FILTER) return null
+        if (callee.kind != ChainHofClassifier.HofKind.FILTER) return null
         val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = "p") ?: return null
         val (srcInner, pRaw) = extracted
         val pLambda = pRaw as? MakeLambdaIR ?: return null
@@ -401,11 +401,11 @@ object IterCanonicalizer {
      */
     private fun tryPeelIterFromSeq(
         node: NodeIR,
-        classifier: IterHofClassifier,
+        classifier: ChainHofClassifier,
     ): NodeIR? {
         if (node is CallDirectIR) {
             val callee = classifier.lookup(node.targetHash)
-            if (callee != null && callee.kind == IterHofClassifier.HofKind.FROM_SEQ) {
+            if (callee != null && callee.kind == ChainHofClassifier.HofKind.FROM_SEQ) {
                 if (node.isScalarABI && node.args.size == 1) return node.args[0]
                 val rec = node.args.firstOrNull() as? MakeRecordIR
                 if (rec != null) {
@@ -545,7 +545,7 @@ object IterCanonicalizer {
                 val ns = f(node.seq); val ni = f(node.index)
                 if (ns !== node.seq || ni !== node.index) node.copy(seq = ns, index = ni) else node
             }
-            is IterChainIR -> {
+            is FusedChainIR -> {
                 // Inner canonicalization already done bottom-up; descend
                 // into source expression and sink init.
                 val newSource: SourceIR = when (val s = node.source) {
@@ -585,7 +585,7 @@ object IterCanonicalizer {
  * check (module basename + paramNames + fn name) is applied at build
  * time so the run-loop is a cheap map lookup.
  */
-internal class IterHofClassifier private constructor(
+internal class ChainHofClassifier private constructor(
     private val table: Map<Hash, Callee>,
 ) {
 
@@ -600,7 +600,7 @@ internal class IterHofClassifier private constructor(
         fun build(
             functions: Map<Hash, FunctionIR>,
             stdlibSnapshot: Map<Hash, FunctionIR>,
-        ): IterHofClassifier {
+        ): ChainHofClassifier {
             val out = HashMap<Hash, Callee>()
             fun scan(m: Map<Hash, FunctionIR>) {
                 for ((hash, fn) in m) {
@@ -610,7 +610,7 @@ internal class IterHofClassifier private constructor(
             }
             scan(functions)
             scan(stdlibSnapshot)
-            return IterHofClassifier(out)
+            return ChainHofClassifier(out)
         }
 
         /**

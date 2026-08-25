@@ -210,7 +210,7 @@ object FunctionIRReachability {
             is com.mezze.language.truffleir.UnitLitIR -> {}
             is com.mezze.language.truffleir.CharLitIR -> {}
             is com.mezze.language.truffleir.FracLitIR -> {}
-            is com.mezze.language.truffleir.IterChainIR -> {
+            is com.mezze.language.truffleir.FusedChainIR -> {
                 // #446 — descend into source expression + sink init.
                 // Stage/sink MakeLambdas are leaves and the outer
                 // reachability walk visits them via the FunctionIR map.

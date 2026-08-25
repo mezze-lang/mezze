@@ -309,7 +309,7 @@ sealed interface PatternIR {
 
 // #446 Iter fusion — canonical form
 /**
- * Canonical iter-chain node produced by [IterCanonicalizer].
+ * Canonical iter-chain node produced by [ChainCanonicalizer].
  *
  * Rewrites every fusable iter chain (module-level or ability-method
  * spelling; scalar-ABI or record-ABI; with or without let aliasing,
@@ -321,11 +321,11 @@ sealed interface PatternIR {
  * [StageIR] in order; `sink` consumes elements and produces a value.
  *
  * See docs/iter-canonicalizer-design.md. Feature-gated behind the
- * canonicalizer emit path — if the pass never produces an IterChainIR,
+ * canonicalizer emit path — if the pass never produces an FusedChainIR,
  * downstream consumers only need the exhaustive-`when` case at their
  * traversal sites (no runtime paths reached).
  */
-@Serializable data class IterChainIR(
+@Serializable data class FusedChainIR(
     val source: SourceIR,
     val stages: List<StageIR>,
     val sink: SinkIR,

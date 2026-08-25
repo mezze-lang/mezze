@@ -423,7 +423,7 @@ object DeadLetEliminator {
                     node.copy(seq = ns, index = ni) else node
             }
 
-            is IterChainIR -> {
+            is FusedChainIR -> {
                 // #446 — mirror of TrivialWrapperInliner.recurseChildren case.
                 val newSource: SourceIR = when (val s = node.source) {
                     is SourceIR.RangeSeq -> {

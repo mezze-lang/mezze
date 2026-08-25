@@ -7,7 +7,7 @@ import kotlin.test.assertEquals
  * Regression for the sum_fold bench workload (bench/cases/sum_fold).
  * Pre-fix: `mez build` produced a jar/native binary that crashed at
  * first invocation with `[BDSL] compile failed for sum_to reason=unsupported`
- * because supports() rejected IterChainIR (whitelist gap since #446
+ * because supports() rejected FusedChainIR (whitelist gap since #446
  * Phase 4b at 03b924a4a). This test locks in that the same shape
  * runs correctly through the interpreter test harness.
  */

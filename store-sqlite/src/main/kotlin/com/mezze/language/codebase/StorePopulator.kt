@@ -799,7 +799,7 @@ object StorePopulator {
             is com.mezze.language.truffleir.UnitLitIR -> {}
             is com.mezze.language.truffleir.CharLitIR -> {}
             is com.mezze.language.truffleir.FracLitIR -> {}
-            is com.mezze.language.truffleir.IterChainIR -> {
+            is com.mezze.language.truffleir.FusedChainIR -> {
                 // #446 — descend into source expression + sink init; report
                 // stage/sink lambda hashes as CALLS edges (same as MakeLambda).
                 when (val s = node.source) {
