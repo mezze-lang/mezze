@@ -444,7 +444,7 @@ class VariantStructuralAliasExtTest {
     // =====================================================================
     // Inferred row closure: function inferred to take a closed variant from
     // its match should reject foreign arms at call site, even when the alias
-    // is not in scope. (#148: nominalWall persists through Substitution.)
+    // is not in scope. (#148: ascriptionWall persists through Substitution.)
     // =====================================================================
     @Test
     fun `inferred closed variant rejects foreign arm at call site`() {

@@ -307,7 +307,7 @@ internal fun ExpressionConstraintGenerator.substituteAssociatedTypesInType(
             typeName = type.typeName,
             typeArgs = type.typeArgs.map { substituteAssociatedTypesInType(it, associatedTypeBindings) },
             typeHash = type.typeHash,
-            nominalWall = type.nominalWall
+            ascriptionWall = type.ascriptionWall
         )
         is MezzeType.SeqType -> MezzeType.SeqType(
             elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)

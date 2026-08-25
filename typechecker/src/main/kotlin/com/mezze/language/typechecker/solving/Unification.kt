@@ -143,7 +143,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         }
         type1 is MezzeType.RecordType && type2 is MezzeType.VariantType -> {
             if (type2.constructors.size == 1 && type2.rowVar == null &&
-                !type2.nominalWall && !isVariantNameInScope(type2, registry)) {
+                !type2.ascriptionWall && !isVariantNameInScope(type2, registry)) {
                 val (_, payloadType) = type2.constructors.entries.first()
                 if (payloadType != null) {
                     return unify(type1, payloadType, registry)
@@ -157,7 +157,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         }
         type1 is MezzeType.VariantType && type2 is MezzeType.RecordType -> {
             if (type1.constructors.size == 1 && type1.rowVar == null &&
-                !type1.nominalWall && !isVariantNameInScope(type1, registry)) {
+                !type1.ascriptionWall && !isVariantNameInScope(type1, registry)) {
                 val (_, payloadType) = type1.constructors.entries.first()
                 if (payloadType != null) {
                     return unify(payloadType, type2, registry)
@@ -564,12 +564,15 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
     )
 }
 
-// #148: nominal wall if nominalWall=true or typeName is in caller's in-scope set.
+// A variant acts as a hard wall (foreign ctors reject) when either the user
+// wrote an ascription-shaped construct (ascriptionWall) OR the alias name is
+// in the caller's import set. Kept as `isVariantNameInScope` for its
+// remaining callers; the returned bool is really "should this variant wall".
 private fun isVariantNameInScope(
     v: MezzeType.VariantType,
     registry: DeclarationRegistry
 ): Boolean {
-    if (v.nominalWall) return true
+    if (v.ascriptionWall) return true
     val name = v.typeName ?: return false
     val override = inScopeAliasNamesOverride.get()
     return if (override != null) override.contains(name)
@@ -623,7 +626,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         val closedCtors = closedVar.constructors.keys
         val openCtors = openVar.constructors.keys
 
-        // inline/inferred placeholder via #148's nominalWall flag), check that ALL
+        // inline/inferred placeholder via #148's ascriptionWall flag), check that ALL
         // constructors in the open variant exist in the closed variant. This is what
         // prevents `Yellow` from unifying with `Color = | Red, Green, Blue |` when
         // Color is declared/imported here.
@@ -655,10 +658,10 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     // or imported by name). When a value crosses a module boundary with an alias-typed shape
     // and the caller didn't import the alias, the name has no nominal force here.
     // A variant is "walled" if it carries a decl identity (name/hash) OR the
-    // author-written / inferred nominalWall marker. Both are hard walls under
+    // author-written / inferred ascriptionWall marker. Both are hard walls under
     // unification's disjoint-arms rule; only two walls with SAME arms unify.
-    val walled1 = var1.typeHash != null || var1.typeName != null || var1.nominalWall
-    val walled2 = var2.typeHash != null || var2.typeName != null || var2.nominalWall
+    val walled1 = var1.typeHash != null || var1.typeName != null || var1.ascriptionWall
+    val walled2 = var2.typeHash != null || var2.typeName != null || var2.ascriptionWall
     val bothWalled = walled1 && walled2
     val identityMatch = if (var1.typeHash != null && var2.typeHash != null) {
         var1.typeHash == var2.typeHash
@@ -687,7 +690,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
 
     // Wall + anonymous: the wall's arm set is authoritative; anonymous side's
     // extras that aren't in the wall's arms are rejected (only when the wall
-    // is actually enforced — via nominalWall OR its typeName being in scope).
+    // is actually enforced — via ascriptionWall OR its typeName being in scope).
     val (declaredVar, anonymousVar) = when {
         walled1 && !walled2 -> Pair(var1, var2)
         walled2 && !walled1 -> Pair(var2, var1)

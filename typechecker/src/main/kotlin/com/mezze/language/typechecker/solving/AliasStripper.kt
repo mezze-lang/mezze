@@ -148,7 +148,7 @@ object AliasStripper {
             payload?.let { stripImpl(it, inScope, registry, recursionGuard) }
         }
         val name = type.typeName
-        val keepName = type.nominalWall ||
+        val keepName = type.ascriptionWall ||
             name == null ||
             name in inScope ||
             (registry.lookupType(name)?.definition !is ParsedVariantDef &&
