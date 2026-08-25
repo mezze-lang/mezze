@@ -105,14 +105,20 @@ object NativeBuildPath {
 
     fun hasShellBinary(): Boolean = locateShellBinary() != null
 
+    private var projectShellDir: File? = null
+
+    fun setProjectDir(projectDir: File) {
+        projectShellDir = File(projectDir, ".mez/shell")
+    }
+
     private fun locateShellBinary(): File? {
         System.getenv("MEZZE_SHELL_BIN")?.let { path ->
             val f = File(path)
             if (f.isFile) return f
         }
-        System.getProperty("user.home")?.let { home ->
-            val installed = File("$home/.mezze/lib/mez-shell-native")
-            if (installed.isFile) return installed
+        projectShellDir?.let { dir ->
+            val shell = File(dir, "mez-shell-native")
+            if (shell.isFile) return shell
         }
         return null
     }
@@ -287,18 +293,16 @@ object NativeBuildPath {
             }
         }
 
-        // Cache as the shell binary for future -O1 builds. The -O2 binary
-        // can serve as the shell because MezzeAppMain checks for a CBOR
-        // tail trailer first; if absent, it falls back to the build-time
-        // embedded app (which is whatever this -O2 build compiled). When
-        // used as a shell, the tail-appended CBOR overrides the embedded
-        // app, so the shell's own baked-in app is irrelevant.
+        // Cache as the shell binary for future -O1 builds in this project.
+        // The -O2 binary can serve as the shell because MezzeAppMain checks
+        // for a CBOR tail trailer first; if absent, it falls back to the
+        // build-time embedded app. When used as a shell, the tail-appended
+        // CBOR overrides the embedded app.
         try {
-            val shellDest = System.getProperty("user.home")?.let {
-                File("$it/.mezze/lib/mez-shell-native")
-            }
-            if (shellDest != null) {
-                shellDest.parentFile?.mkdirs()
+            val shellDir = projectShellDir
+            if (shellDir != null) {
+                shellDir.mkdirs()
+                val shellDest = File(shellDir, "mez-shell-native")
                 outBinary.copyTo(shellDest, overwrite = true)
                 shellDest.setExecutable(true, false)
                 if (timing) System.err.println("[${relativeTime()}ms] native: cached as shell at ${shellDest.absolutePath}")

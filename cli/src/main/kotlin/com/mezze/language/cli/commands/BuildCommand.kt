@@ -72,6 +72,8 @@ class BuildCommand {
         // (native-image with -Ob instead of -O2 optimization).
         val quickBuild = args.contains("--quick") || args.contains("-q")
 
+        if (nativeBuild) NativeBuildPath.setProjectDir(currentDir)
+
         // Output directory precedence (highest first):
         //   1. CLI flag:    --out=<path> or --out <path>
         //   2. Mezze.toml:  [build] out = "..."
