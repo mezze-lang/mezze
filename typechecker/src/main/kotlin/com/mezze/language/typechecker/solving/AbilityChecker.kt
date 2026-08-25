@@ -333,19 +333,58 @@ internal class AbilityChecker(
         return ConstraintSolver.ConstraintResult.Success(resultSubst)
     }
 
+    /** Resolve an impl's `having 'out = <annotation>` to a concrete type, substituting
+     *  the impl's type-var bindings at EVERY named position — including nested ones under
+     *  a constructor (`having 'out = Map Str 'a` must substitute the inner `'a`). This
+     *  mirrors the body-side substitution in ImplValidator; without the recursion a nested
+     *  type param falls through to `typeAnnotationToMezzeType`, which turns `'a` into a
+     *  bogus `TypeApplication(constructor = "'a")` rather than the binding (#269). */
     private fun substituteAnnotationWithImplBindings(
         annotation: ParsedTypeAnnotation,
         implTypeVarBindings: Map<String, MezzeType>,
     ): MezzeType {
-        if (annotation is ParsedNamedType) {
-            val name = annotation.name
-            implTypeVarBindings[name]?.let { return it }
-            implTypeVarBindings["'$name"]?.let { return it }
-            if (name.startsWith("'")) {
-                implTypeVarBindings[name.removePrefix("'")]?.let { return it }
+        // Look up a bound type var by name, tolerating the leading-`'` ambiguity
+        // (assoc names are stored with `'` in decls but constraint keys are bare).
+        fun boundFor(name: String): MezzeType? =
+            implTypeVarBindings[name]
+                ?: implTypeVarBindings["'$name"]
+                ?: if (name.startsWith("'")) implTypeVarBindings[name.removePrefix("'")] else null
+
+        return when (annotation) {
+            is ParsedNamedType ->
+                boundFor(annotation.name) ?: (PrimitiveTypes.fromName(annotation.name)
+                    ?: WellKnownTypeApp.of(annotation.name, emptyList()))
+            is ParsedTypeApp -> {
+                // A constructor position can itself be a bound type var (higher-kinded
+                // binding); otherwise recurse into the args so nested `'a` is substituted.
+                val bound = boundFor(annotation.constructor)
+                if (bound != null && annotation.args.isEmpty()) bound
+                else WellKnownTypeApp.of(
+                    annotation.constructor,
+                    annotation.args.map { substituteAnnotationWithImplBindings(it, implTypeVarBindings) },
+                )
             }
+            is ParsedSeqType ->
+                MezzeType.SeqType(substituteAnnotationWithImplBindings(annotation.elementType, implTypeVarBindings))
+            is ParsedRecordType ->
+                MezzeType.RecordType(fields = annotation.entries.associate {
+                    it.name to substituteAnnotationWithImplBindings(it.type, implTypeVarBindings)
+                })
+            is ParsedFunctionType ->
+                MezzeType.FunctionType(
+                    paramType = substituteAnnotationWithImplBindings(annotation.paramType, implTypeVarBindings),
+                    returnType = substituteAnnotationWithImplBindings(annotation.returnType, implTypeVarBindings),
+                )
+            is ParsedVariantType ->
+                MezzeType.VariantType(constructors = annotation.constructors.associate {
+                    it.name to it.dataType?.let { dt -> substituteAnnotationWithImplBindings(dt, implTypeVarBindings) }
+                })
+            is ParsedQualifiedType ->
+                WellKnownTypeApp.of(
+                    (annotation.modulePath + annotation.typeName).joinToString("::"),
+                    annotation.args.map { substituteAnnotationWithImplBindings(it, implTypeVarBindings) },
+                )
         }
-        return typeAnnotationToMezzeType(annotation)
     }
 
     // B1 containment (case B): can ANY impl of [abilityName] produce a `having 'out`

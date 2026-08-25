@@ -349,4 +349,130 @@ class AbilityAssociatedTypeTest {
         assertTrue(t!!.contains("Int"),
             "chained resolution Int→Str→Int should end at Int, got: $t")
     }
+
+    // ─── #269: nested type params in `having 'out` + soundness pins ──────
+    //
+    // substituteAnnotationWithImplBindings now recurses into nested type args,
+    // so `having 'out = Map Str 'a` substitutes the inner `'a` from the impl's
+    // bindings instead of freezing it into a bogus `TypeApplication("'a")`.
+    // The soundness pins below lock the guarantees the audit relied on:
+    // the coarse head-name containment filter is NEVER the last word — full
+    // recursive unification still rejects arg-level mismatches.
+
+    @Test
+    fun `nested type param in having out resolves the inner arg (#269)`() {
+        // impl is generic in 'a; `having 'out = Map Str 'a` must thread the
+        // element type through. On Int, produce yields `Map Str Bool` here.
+        val t = typeOf("go", """
+            use std::collections::map
+
+            ability Boxer for 'a having 'out where {
+              box: { it: 'a } -> 'out
+            }
+            impl Boxer for Int having 'out = Map Str Bool where {
+              box = { it } -> map::empty {}
+            }
+            pub let go = {} -> (5).box {}
+        """.trimIndent())
+        assertNotNull(t, "go should typecheck (nested-param having resolves)")
+        assertTrue(t!!.contains("Map"),
+            "nested `having 'out = Map Str Bool` should resolve to a Map, got: $t")
+        assertFalse(t.contains("'a") || t.contains("\"'"),
+            "the inner param must be substituted, not frozen as a bogus ctor, got: $t")
+    }
+
+    @Test
+    fun `wrong nested arg in having out is rejected by unification (#269 soundness pin)`() {
+        // impl produces `Map Str Bool`; annotating `Map Str Int` shares the head
+        // `Map` (so the coarse abilityCanProduceOutput filter would pass) but the
+        // inner arg Bool≠Int — full unification must still REJECT. This is the
+        // accept-bad path the audit proved closed; locking it here.
+        val e = err("""
+            use std::collections::map
+
+            ability Boxer for 'a having 'out where {
+              box: { it: 'a } -> 'out
+            }
+            impl Boxer for Int having 'out = Map Str Bool where {
+              box = { it } -> map::empty {}
+            }
+            pub let bad: {} -> Map Str Int = {} -> (5).box {}
+        """.trimIndent())
+        assertNotNull(e,
+            "same head `Map` but Bool≠Int inner arg must be rejected by unification, not accepted")
+    }
+
+    @Test
+    fun `matching nested having out is accepted (#269)`() {
+        val e = err("""
+            use std::collections::map
+
+            ability Boxer for 'a having 'out where {
+              box: { it: 'a } -> 'out
+            }
+            impl Boxer for Int having 'out = Map Str Bool where {
+              box = { it } -> map::empty {}
+            }
+            pub let ok: {} -> Map Str Bool = {} -> (5).box {}
+        """.trimIndent())
+        assertNull(e, "exact nested `having 'out = Map Str Bool` should be accepted, got: $e")
+    }
+
+    // ─── #269: MULTIPLE associated types per ability (`having 'a, 'b`) ────
+    //
+    // An ability may declare more than one associated type. Each is resolved
+    // and checked independently from the impl's bindings; the decl, impl
+    // (`having 'fst = …, 'snd = …`), and solver all thread a *list*/*map* of
+    // associated types, so this is expected to work end-to-end.
+
+    @Test
+    fun `ability with two associated types resolves both (#269)`() {
+        // Split declares TWO outputs; on Int the impl fixes 'fst=Str, 'snd=Bool.
+        // A concrete call must resolve each op's return to its own associated type.
+        val fst = typeOf("getFst", """
+            ability Split for 'a having 'fst, 'snd where {
+              fst: { it: 'a } -> 'fst,
+              snd: { it: 'a } -> 'snd
+            }
+            impl Split for Int having 'fst = Str, 'snd = Bool where {
+              fst = { it } -> "x",
+              snd = { it } -> True
+            }
+            pub let getFst = {} -> (5).fst {}
+        """.trimIndent())
+        assertNotNull(fst, "getFst should typecheck")
+        assertTrue(fst!!.contains("Str"), "'fst resolves to Str on Int, got: $fst")
+
+        val snd = typeOf("getSnd", """
+            ability Split for 'a having 'fst, 'snd where {
+              fst: { it: 'a } -> 'fst,
+              snd: { it: 'a } -> 'snd
+            }
+            impl Split for Int having 'fst = Str, 'snd = Bool where {
+              fst = { it } -> "x",
+              snd = { it } -> True
+            }
+            pub let getSnd = {} -> (5).snd {}
+        """.trimIndent())
+        assertNotNull(snd, "getSnd should typecheck")
+        assertTrue(snd!!.contains("Bool"), "'snd resolves to Bool on Int, got: $snd")
+    }
+
+    @Test
+    fun `two associated types are checked independently — wrong one rejected (#269 soundness pin)`() {
+        // 'fst=Str, 'snd=Bool; annotating snd's result as Str (should be Bool)
+        // must be rejected — each associated type is checked on its own.
+        val e = err("""
+            ability Split for 'a having 'fst, 'snd where {
+              fst: { it: 'a } -> 'fst,
+              snd: { it: 'a } -> 'snd
+            }
+            impl Split for Int having 'fst = Str, 'snd = Bool where {
+              fst = { it } -> "x",
+              snd = { it } -> True
+            }
+            pub let bad: {} -> Str = {} -> (5).snd {}
+        """.trimIndent())
+        assertNotNull(e, "'snd resolves to Bool; annotating Str must be rejected")
+    }
 }
