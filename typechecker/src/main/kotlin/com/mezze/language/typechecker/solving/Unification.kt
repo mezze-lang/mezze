@@ -26,6 +26,18 @@ private val unificationCache = ThreadLocal.withInitial {
 // thread-safe and unification runs concurrently.
 private val expandContextBuilder = ThreadLocal.withInitial { ContextBuilder() }
 
+/**
+ * Describe a variant type for a user-facing error message. Gives both the
+ * alias name (when the variant carries one — anchors the error to the decl
+ * the user reads in their code) AND the arm set (concrete info to reason
+ * about). Anonymous variants render as their arm set alone.
+ */
+internal fun describeVariant(v: MezzeType.VariantType): String {
+    val arms = v.constructors.keys.sorted().joinToString(", ")
+    val armsStr = if (v.rowVar != null) "| $arms, ... |" else "| $arms |"
+    return if (v.typeName != null) "$armsStr (${v.typeName})" else armsStr
+}
+
 fun clearUnificationCache() {
     unificationCache.get().clear()
 }
@@ -618,16 +630,9 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         if (isVariantNameInScope(closedVar, registry)) {
             val invalidConstructors = openCtors - closedCtors
             if (invalidConstructors.isNotEmpty()) {
-                val available = closedCtors.sorted().joinToString(", ")
                 val invalid = invalidConstructors.sorted().joinToString(", ")
-                val typeDesc = when (closedVar.typeName) {
-                    "<inline>" -> "inline variant type '| $available |'"
-                    "<inferred>" -> "inferred variant type '| $available |'"
-                    else -> "type '${closedVar.typeName}'"
-                }
                 return UnificationResult.Failure(
-                    message = "Constructor(s) '$invalid' not found in $typeDesc. " +
-                              "Available constructors: $available",
+                    message = "Constructor(s) '$invalid' not found in ${describeVariant(closedVar)}.",
                     type1 = var1,
                     type2 = var2
                 )
@@ -649,14 +654,20 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     // acts as a nominal wall only when its name is reachable by the caller (declared locally
     // or imported by name). When a value crosses a module boundary with an alias-typed shape
     // and the caller didn't import the alias, the name has no nominal force here.
-    val bothNamed = (var1.typeHash != null && var2.typeHash != null) ||
-                    (var1.typeName != null && var2.typeName != null)
-    val namesMatch = if (var1.typeHash != null && var2.typeHash != null) {
+    // A variant is "walled" if it carries a decl identity (name/hash) OR the
+    // author-written / inferred nominalWall marker. Both are hard walls under
+    // unification's disjoint-arms rule; only two walls with SAME arms unify.
+    val walled1 = var1.typeHash != null || var1.typeName != null || var1.nominalWall
+    val walled2 = var2.typeHash != null || var2.typeName != null || var2.nominalWall
+    val bothWalled = walled1 && walled2
+    val identityMatch = if (var1.typeHash != null && var2.typeHash != null) {
         var1.typeHash == var2.typeHash
     } else {
-        var1.typeName == var2.typeName
+        // Anonymous walls (no name, no hash) with equal arm sets are the same
+        // wall; distinct arm sets differ.
+        var1.typeName == var2.typeName && var1.typeName != null
     }
-    if (bothNamed && !namesMatch) {
+    if (bothWalled && !identityMatch) {
         val var1NameInScope = isVariantNameInScope(var1, registry)
         val var2NameInScope = isVariantNameInScope(var2, registry)
         if (var1NameInScope || var2NameInScope) {
@@ -666,7 +677,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
             val sameArms = var1.constructors.keys == var2.constructors.keys
             if (!sameArms) {
                 return UnificationResult.Failure(
-                    message = "Cannot unify different variant types '${var1.typeName}' and '${var2.typeName}'",
+                    message = "Cannot unify ${describeVariant(var1)} with ${describeVariant(var2)}",
                     type1 = var1,
                     type2 = var2
                 )
@@ -674,28 +685,21 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         }
     }
 
-    // scope (#148). Otherwise the "declared" side acts purely as a structural arm set.
-    val isDeclared1 = var1.typeHash != null || var1.typeName != null
-    val isDeclared2 = var2.typeHash != null || var2.typeName != null
+    // Wall + anonymous: the wall's arm set is authoritative; anonymous side's
+    // extras that aren't in the wall's arms are rejected (only when the wall
+    // is actually enforced — via nominalWall OR its typeName being in scope).
     val (declaredVar, anonymousVar) = when {
-        isDeclared1 && !isDeclared2 -> Pair(var1, var2)
-        isDeclared2 && !isDeclared1 -> Pair(var2, var1)
+        walled1 && !walled2 -> Pair(var1, var2)
+        walled2 && !walled1 -> Pair(var2, var1)
         else -> Pair(null, null)
     }
 
     if (declaredVar != null && anonymousVar != null) {
         val invalidConstructors = anonymousVar.constructors.keys - declaredVar.constructors.keys
         if (invalidConstructors.isNotEmpty() && isVariantNameInScope(declaredVar, registry)) {
-            val available = declaredVar.constructors.keys.sorted().joinToString(", ")
             val invalid = invalidConstructors.sorted().joinToString(", ")
-            val typeDesc = when (declaredVar.typeName) {
-                "<inline>" -> "inline variant type '| $available |'"
-                "<inferred>" -> "inferred variant type '| $available |'"
-                else -> "type '${declaredVar.typeName}'"
-            }
             return UnificationResult.Failure(
-                message = "Constructor(s) '$invalid' not found in $typeDesc. " +
-                          "Available constructors: $available",
+                message = "Constructor(s) '$invalid' not found in ${describeVariant(declaredVar)}.",
                 type1 = var1,
                 type2 = var2
             )

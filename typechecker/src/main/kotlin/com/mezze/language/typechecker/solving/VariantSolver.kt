@@ -569,13 +569,17 @@ internal class VariantSolver(
         return when (type) {
             is MezzeType.VariantType -> {
                 val shouldClose = type.rowVar != null && type.rowVar in rowVarsToClose
+                // Pinning an inferred anonymous open variant to closed shape
+                // makes it act as a wall for downstream match/ascription
+                // constraints — set nominalWall=true. Do NOT invent a synthetic
+                // typeName: it's still anonymous, printed by its arm set.
                 val pinningInferred = shouldClose && type.typeName == null
                 MezzeType.VariantType(
                     constructors = type.constructors.mapValues { (_, payloadType) ->
                         payloadType?.let { closeRowVarsInType(it, rowVarsToClose) }
                     },
                     rowVar = if (shouldClose) null else type.rowVar,
-                    typeName = if (pinningInferred) "<inferred>" else type.typeName,
+                    typeName = type.typeName,
                     nominalWall = type.nominalWall || pinningInferred
                 )
             }
