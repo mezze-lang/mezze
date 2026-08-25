@@ -71,11 +71,20 @@ object TypeAnnotationConverter {
                 } else {
                     // Transparent alias inlining. Recursive aliases fall
                     // through to labeled TypeApp so the recursion terminates.
+                    // Stamp the alias's own nominal identity (name + hash) on
+                    // the resolved shape so unification and error messages can
+                    // key on the decl's identity — an author-written inline
+                    // `{c: |A,B|}` and an alias-decl `type X = |A,B|` used at
+                    // a call site are otherwise structurally indistinguishable
+                    // (both would carry `typeName="<inline>"` under
+                    // inlineVariantNaming). `nominalWall` is CLEARED: the wall
+                    // is an author-written ascription concern, not a decl one.
                     if (name !in recursionGuard) {
                         config.resolveTypeAlias(name)?.let { (aliased, _) ->
                             recursionGuard.add(name)
-                            try { return recurse(aliased) }
-                            finally { recursionGuard.remove(name) }
+                            try {
+                                return withAliasIdentity(recurse(aliased), name, config.resolveTypeHash(name), emptyList())
+                            } finally { recursionGuard.remove(name) }
                         }
                     }
                     WellKnownTypeApp.of(name, emptyList(), config.resolveTypeHash(name))
@@ -143,13 +152,21 @@ object TypeAnnotationConverter {
             }
 
             is ParsedVariantType -> {
+                // An author-written closed inline variant (`{c: |Red, Green|}`)
+                // is a hard wall — reject foreign ctors regardless of scope.
+                // That's what `nominalWall=true` tracks. Author-written OPEN
+                // variants (`|Red, Green, ...|`) are structural, no wall.
+                // `typeName` stays null: anonymous inline variants have no
+                // nominal identity to display; the printer renders their
+                // arm-set literally.
+                val isClosedInlineWall = config.inlineVariantNaming && !annotation.isOpen
                 MezzeType.VariantType(
                     constructors = annotation.constructors.associate { ctor ->
                         ctor.name to ctor.dataType?.let { recurse(it) }
                     },
                     rowVar = if (config.honorOpenRowVars && annotation.isOpen) RowVar.userOpen() else null,
-                    typeName = if (config.inlineVariantNaming && !annotation.isOpen) "<inline>" else null,
-                    nominalWall = config.inlineVariantNaming && !annotation.isOpen
+                    typeName = null,
+                    nominalWall = isClosedInlineWall,
                 )
             }
 
@@ -164,7 +181,11 @@ object TypeAnnotationConverter {
                         val extendedConfig = config.copy(typeParamSubst = extendedSubst)
                         recursionGuard.add(annotation.constructor)
                         try {
-                            return convertInternal(aliased, extendedConfig, typeVarCache, sharedRowVar, recursionGuard)
+                            return withAliasIdentity(
+                                convertInternal(aliased, extendedConfig, typeVarCache, sharedRowVar, recursionGuard),
+                                annotation.constructor, config.resolveTypeHash(annotation.constructor),
+                                convertedArgs,
+                            )
                         } finally { recursionGuard.remove(annotation.constructor) }
                     }
                 }
@@ -542,5 +563,35 @@ object TypeAnnotationConverter {
             is ParsedQualifiedType -> a.copy(args = a.args.map { rec(it) })
         }
         return rec(annotation)
+    }
+
+    /**
+     * When `type X = <shape>` is inlined at a use site, stamp X's own nominal
+     * identity (name + content hash + type-arg vector for parametric aliases)
+     * on the resolved variant/record. `nominalWall` is CLEARED — the wall
+     * is an author-written-ascription concern, not something a decl brings.
+     * Non-shape carriers (Int, Function, TypeApplication, Seq, …) pass
+     * through unchanged: they either don't need labeling (primitives) or
+     * already carry their own identity slot.
+     */
+    private fun withAliasIdentity(
+        resolved: MezzeType,
+        aliasName: String,
+        aliasHash: Hash?,
+        typeArgs: List<MezzeType>,
+    ): MezzeType {
+        return when (resolved) {
+            is MezzeType.VariantType -> resolved.copy(
+                typeName = aliasName,
+                typeHash = aliasHash ?: resolved.typeHash,
+                typeArgs = typeArgs,
+                nominalWall = false,
+            )
+            is MezzeType.RecordType -> resolved.copy(
+                typeName = aliasName,
+                typeHash = aliasHash ?: resolved.typeHash,
+            )
+            else -> resolved
+        }
     }
 }

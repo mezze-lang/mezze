@@ -60,7 +60,7 @@ object TypeAnnotationMatcher {
                                 isOpen = d.isOpen, loc = d.loc,
                             )
                         }
-                        is MezzeType.VariantType -> if (type.typeName == "<inline>" || type.typeName == null) {
+                        is MezzeType.VariantType -> if (type.typeName == null || type.typeName == aliasedDecl.name) {
                             (aliasedDecl.definition as? ParsedVariantDef)?.let { d ->
                                 ParsedVariantType(
                                     constructors = d.constructors.map { c -> ParsedVariantTypeCtor(c.name, c.dataType, c.loc) },

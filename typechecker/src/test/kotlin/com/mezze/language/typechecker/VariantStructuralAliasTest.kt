@@ -194,13 +194,12 @@ class VariantStructuralAliasTest {
     // ====================================================================
 
     @Test
-    fun `rule 4 — exported alias value rejects extra arm even when alias not imported`() {
-        // Behaviour change: under transparent type aliases, `Color` is a
-        // closed variant `| Red, Green, Blue |`. Whether `Color` is imported
-        // by name or not, a value returned from `calc` is that closed
-        // variant, and combining with a foreign arm (`Pink`) must reject.
-        // The OLD structural-loosening behaviour (unimported alias unifies
-        // with row-var-extras) is gone by design.
+    fun `rule 4 — exported alias value structurally unions with foreign arm at if-branch`() {
+        // At an inferred if-branch JOIN site, a `Color`-typed value unifies
+        // structurally with a bare foreign `Pink` into `| Red, Green, Blue,
+        // Pink |`. Walls fire only at match/pattern and at user-written
+        // ascription — never at inferred joins. Whether the caller `use`s
+        // `Color` by name is irrelevant to this rule.
         writeModule("colors", """
             pub type Color = | Red, Green, Blue |
 
@@ -218,8 +217,8 @@ class VariantStructuralAliasTest {
             ans { num = 0 }
         """
         val r = checkMain(main)
-        assertTrue(r.isFailure) {
-            "Pink not in Color's arms — closed variant must reject the extra arm."
+        assertTrue(r.isSuccess) {
+            "if-branch should union Pink with Color's arms; got: ${r.exceptionOrNull()?.message}"
         }
     }
 
