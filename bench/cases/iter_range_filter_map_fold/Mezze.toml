@@ -1,0 +1,12 @@
+[package]
+name = "bench_iter_range_filter_map_fold"
+version = "0.1.0"
+
+[[app]]
+name = "bench_iter_range_filter_map_fold"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

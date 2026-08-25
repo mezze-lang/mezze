@@ -1,0 +1,24 @@
+## Lazy Iter fusion showcase: (0..N).filter(x < N/2).map(x * 2).fold(+)
+##
+## Same shape as bench/cases/filter_map_fold but built on the new opaque
+## Iter — each stage allocates only descriptor nodes; the terminal fold
+## should be the only place any work happens.
+##
+## Free-function form (no dot-syntax) because `Iter` collides with the
+## ability of the same name in std::abilities::iter — see
+## stdlib/std/collections/iter.mz for context.
+use std::effects::log::{println, Console}
+use std::collections::iter
+
+let compute : { n: Int } -> Int = { n } -> do
+    let half = n / 2
+    let it0 = iter::range { start = 0, end = n }
+    let it1 = iter::filter { it = it0, p = {x: Int} -> x < half }
+    let it2 = iter::map    { it = it1, f = {x: Int} -> x * 2 }
+    iter::fold { it = it2, init = 0, f = {acc: Int, x: Int} -> acc + x }
+
+let main = {} -> perform Console in do
+    let a = compute {n = 1000000}
+    println { msg = "iter_range_filter_map_fold 0..1M = $(a.to_str{})" }
+    let b = compute {n = 10000000}
+    println { msg = "iter_range_filter_map_fold 0..10M = $(b.to_str{})" }

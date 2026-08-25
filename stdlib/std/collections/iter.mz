@@ -7,8 +7,12 @@
 ## over primitive longs — for numeric ranges the fused shape is the same
 ## as a hand-written `for` loop.
 ##
-## Ability-based iteration lives in `std::abilities::iter::Iter`; this
-## module is the concrete data-structure story that mirrors `std::seq`.
+## Dot-syntax (`it.fold {…}`) is deferred: the historical `Iter` ability
+## in `std::abilities::iter` shares this name, and an
+## `impl Iter 'a where { … }` here would resolve to the ability's method
+## table (implementing it for all types), not an inherent method table
+## on the concrete type. Use the free-function form for now:
+## `iter::fold { it = it, init = 0, f = … }`.
 use std::int
 
 ## Creates a lazy range `[start, end)` stepped by 1.
@@ -32,10 +36,3 @@ pub let filter : { it: Iter 'a, p: { x: 'a } -> Bool <...> } -> Iter 'a <...> = 
 ## descriptor tree at PE time.
 pub let fold : { it: Iter 'a, init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> 'b <...> = { it, init, f } ->
   __native_iter_fold { it = it, init = init, f = f }
-
-## Ability dot-syntax for Iter values.
-impl Iter 'a where {
-  map = { it, f } -> map { it = it, f = f },
-  filter = { it, p } -> filter { it = it, p = p },
-  fold = { it, init, f } -> fold { it = it, init = init, f = f },
-}
