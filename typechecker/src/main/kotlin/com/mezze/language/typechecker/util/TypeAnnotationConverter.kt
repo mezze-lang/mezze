@@ -220,6 +220,9 @@ object TypeAnnotationConverter {
         typeVarCache: MutableMap<String, TypeVar>? = null,
         resolveTypeAlias: (String) -> Pair<ParsedTypeAnnotation, List<String>>? = { null },
         recursionGuard: MutableSet<String> = mutableSetOf(),
+        // Resolve a declared type's content hash so faithful TypeApplications carry
+        // real nominal identity (Declared), never Named.
+        resolveTypeHash: (String) -> com.mezze.language.typedast.Hash? = { null },
     ): MezzeType {
         return when (annotation) {
             is ParsedNamedType -> {
@@ -228,7 +231,7 @@ object TypeAnnotationConverter {
                     resolveTypeAlias(annotation.name)?.let { (aliased, _) ->
                         recursionGuard.add(annotation.name)
                         try {
-                            return convert(aliased, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard)
+                            return convert(aliased, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash)
                         } finally { recursionGuard.remove(annotation.name) }
                     }
                 }
@@ -253,7 +256,7 @@ object TypeAnnotationConverter {
                     annotation.abilityConstraints.map { c ->
                         MezzeType.FunctionAbilityConstraint(
                             abilityName = c.abilityName,
-                            typeArgs = c.typeArgs.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard) },
+                            typeArgs = c.typeArgs.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash) },
                             abilityHash = WellKnownHashConstants.resolveAbilityHash(c.abilityName)
                         )
                     }
@@ -261,23 +264,23 @@ object TypeAnnotationConverter {
                     emptyList()
                 }
                 MezzeType.FunctionType(
-                    paramType = convert(annotation.paramType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard),
-                    returnType = convert(annotation.returnType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard),
+                    paramType = convert(annotation.paramType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash),
+                    returnType = convert(annotation.returnType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash),
                     effects = effectRow,
                     abilityConstraints = abilityConstraints
                 )
             }
             is ParsedRecordType -> {
                 MezzeType.RecordType(annotation.entries.associate { e ->
-                    e.name to convert(e.type, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard)
+                    e.name to convert(e.type, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash)
                 })
             }
-            is ParsedSeqType -> MezzeType.SeqType(convert(annotation.elementType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard))
+            is ParsedSeqType -> MezzeType.SeqType(convert(annotation.elementType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash))
             is ParsedVariantType -> {
                 if (faithful) {
                     MezzeType.VariantType(
                         constructors = annotation.constructors.associate {
-                            it.name to it.dataType?.let { dt -> convert(dt, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard) }
+                            it.name to it.dataType?.let { dt -> convert(dt, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash) }
                         },
                         rowVar = null
                     )
@@ -293,14 +296,15 @@ object TypeAnnotationConverter {
                         val rewritten = substituteTypeVarsInAnnotation(aliased, subst)
                         recursionGuard.add(annotation.constructor)
                         try {
-                            return convert(rewritten, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard)
+                            return convert(rewritten, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash)
                         } finally { recursionGuard.remove(annotation.constructor) }
                     }
                 }
                 if (faithful) {
                     MezzeType.TypeApplication(
                         annotation.constructor,
-                        annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard) }
+                        annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash) },
+                        typeHash = resolveTypeHash(annotation.constructor)
                     )
                 } else {
                     MezzeType.VarType(TypeVar.fresh())

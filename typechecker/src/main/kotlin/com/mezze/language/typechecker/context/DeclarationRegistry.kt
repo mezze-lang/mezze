@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.context
 
 import com.mezze.language.parsedast.ParsedAbilityDecl
+import com.mezze.language.parsedast.ParsedDeclHasher
 import com.mezze.language.parsedast.ParsedEffectDecl
 import com.mezze.language.parsedast.ParsedTypeDecl
 import com.mezze.language.typedast.Hash
@@ -72,15 +73,24 @@ class DeclarationRegistry(
             // resolvable (keeps import-scoping + avoids name collisions).
             hashOnlyTypeDecls: Collection<ParsedTypeDecl> = emptyList(),
         ): DeclarationRegistry {
+            // Stamp a content hash onto EVERY type decl entering the registry. The
+            // hash is a pure function of the decl and always computable, so no type
+            // decl is ever stored hashless — which means every MezzeType built from a
+            // registry decl (expandTypeApplicationToVariant, VariantSolver, alias
+            // resolution, …) carries a real nominal identity (Declared), never Named.
+            // Mirrors the effect/performer stamping idiom in ContextBuilder.
+            val typeDeclsStamped = typeDecls.mapValues { (_, d) ->
+                if (d.contentHash != null) d else d.copy(contentHash = ParsedDeclHasher.hashTypeDecl(d))
+            }
             val byHash = LinkedHashMap<Hash, ParsedTypeDecl>()
             val hashByName = LinkedHashMap<String, Hash>()
             for (d in hashOnlyTypeDecls) d.contentHash?.let { byHash[it] = d; hashByName[d.name] = it }
             // Locally-declared / imported types win over transitive ones on hash
             // collision (same hash = same type, so order is immaterial, but keep
             // it deterministic).
-            for (d in typeDecls.values) d.contentHash?.let { byHash[it] = d; hashByName[d.name] = it }
+            for (d in typeDeclsStamped.values) d.contentHash?.let { byHash[it] = d; hashByName[d.name] = it }
             return DeclarationRegistry(
-                typesByName = typeDecls,
+                typesByName = typeDeclsStamped,
                 typesByHash = byHash,
                 abilitiesByName = abilityDecls,
                 abilitiesByHash = abilityDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),

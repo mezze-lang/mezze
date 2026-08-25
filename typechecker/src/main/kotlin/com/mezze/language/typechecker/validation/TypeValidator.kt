@@ -135,7 +135,7 @@ class TypeValidator(
                             val definition = typeDeclarations[appliedType.constructor]?.definition
                             if (definition is ParsedVariantDef) {
                                 MezzeType.VariantType(
-                                    constructors = definition.constructors.associate { it.name to it.dataType?.let { dt -> TypeAnnotationConverter.convert(dt) } },
+                                    constructors = definition.constructors.associate { it.name to it.dataType?.let { dt -> TypeAnnotationConverter.convert(dt, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } }) } },
                                     rowVar = if (definition.isOpen) RowVar.fresh() else null
                                 )
                             } else null
@@ -270,7 +270,7 @@ class TypeValidator(
             val aliasFields = def.fields.associate { it.name to it.type }
             if (aliasFields.size != recordType.fields.size || aliasFields.keys != recordType.fields.keys) return@mapNotNull null
             val compatible = aliasFields.all { (name, parsedType) ->
-                val aliasFieldType = try { TypeAnnotationConverter.convert(parsedType) } catch (_: Exception) { null }
+                val aliasFieldType = try { TypeAnnotationConverter.convert(parsedType, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } }) } catch (_: Exception) { null }
                 val recordFieldType = recordType.fields[name]
                 aliasFieldType != null && recordFieldType != null && alphaEquivalent(aliasFieldType, recordFieldType, mutableMapOf())
             }
@@ -361,12 +361,16 @@ class TypeValidator(
         if (!decl.isSimpleBinding) return emptyList()
         val inferredType = constraintResults[decl.variableName]?.type ?: return emptyList()
         val annotatedType = try {
-            TypeAnnotationConverter.convert(parsedAnnotation, resolveTypeAlias = { name ->
-                registry.lookupType(name)?.let { d ->
-                    com.mezze.language.typechecker.context.ContextBuilder
-                        .aliasedAnnotationForTypeDecl(d)?.let { ann -> ann to d.typeParams }
+            TypeAnnotationConverter.convert(
+                parsedAnnotation,
+                resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
+                resolveTypeAlias = { name ->
+                    registry.lookupType(name)?.let { d ->
+                        com.mezze.language.typechecker.context.ContextBuilder
+                            .aliasedAnnotationForTypeDecl(d)?.let { ann -> ann to d.typeParams }
+                    }
                 }
-            })
+            )
         } catch (_: Exception) { return emptyList() }
         val finalType = substitution.apply(inferredType)
         if (!alphaEquivalent(annotatedType, finalType, mutableMapOf())) {

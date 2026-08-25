@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.phase
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
+import com.mezze.language.parsedast.ParsedDeclHasher
 import com.mezze.language.typechecker.ImportKind
 import com.mezze.language.typechecker.ResolvedImport
 import com.mezze.language.typechecker.module.ModuleImportContext
@@ -27,27 +28,36 @@ internal fun buildResolvedImports(importContext: ModuleImportContext?): List<Res
                 localName = name,
                 originalName = name,
                 modulePath = "",
-                type = WellKnownTypeApp.of(name, typeParams),
+                type = WellKnownTypeApp.of(
+                    name, typeParams,
+                    typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                ),
                 kind = ImportKind.TYPE
             ))
         }
 
-        for ((name, _) in importContext.importedAbilities) {
+        for ((name, abilityDecl) in importContext.importedAbilities) {
             add(ResolvedImport(
                 localName = name,
                 originalName = name,
                 modulePath = "",
-                type = WellKnownTypeApp.of(name, emptyList()),
+                type = WellKnownTypeApp.of(
+                    name, emptyList(),
+                    typeHash = abilityDecl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(abilityDecl)
+                ),
                 kind = ImportKind.ABILITY
             ))
         }
 
-        for ((name, _) in importContext.importedEffects) {
+        for ((name, effectDecl) in importContext.importedEffects) {
             add(ResolvedImport(
                 localName = name,
                 originalName = name,
                 modulePath = "",
-                type = WellKnownTypeApp.of(name, emptyList()),
+                type = WellKnownTypeApp.of(
+                    name, emptyList(),
+                    typeHash = effectDecl.contentHash ?: ParsedDeclHasher.hashEffectDecl(effectDecl)
+                ),
                 kind = ImportKind.EFFECT
             ))
         }

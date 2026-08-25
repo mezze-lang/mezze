@@ -9,6 +9,7 @@ import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.util.StringDistance
+import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import com.mezze.language.parsedast.*
 import com.mezze.language.typedast.*
 import com.mezze.language.typechecker.ModuleResolver
@@ -53,7 +54,7 @@ internal enum class IdentityVerdict { SAME, DISTINCT, UNDETERMINED }
  * guesses — no null ambiguity, and a name string NEVER decides here.
  *
  *  - both [TypeIdentity.Declared] → SAME iff hashes equal, else DISTINCT
- *  - both [TypeIdentity.Builtin]  → SAME iff kinds equal, else DISTINCT
+ *  - both [TypeIdentity.Builtin]  → SAME iff names equal, else DISTINCT
  *  - both [TypeIdentity.Anonymous] → SAME (two anonymous shapes are decided purely
  *    structurally by the caller; identity imposes no veto)
  *  - any mixed pair (Declared/Builtin/Anonymous in any combination) → UNDETERMINED:
@@ -68,7 +69,7 @@ internal fun identityVerdict(id1: TypeIdentity, id2: TypeIdentity): IdentityVerd
     id1 is TypeIdentity.Declared && id2 is TypeIdentity.Declared ->
         if (id1.hash == id2.hash) IdentityVerdict.SAME else IdentityVerdict.DISTINCT
     id1 is TypeIdentity.Builtin && id2 is TypeIdentity.Builtin ->
-        if (id1.kind == id2.kind) IdentityVerdict.SAME else IdentityVerdict.DISTINCT
+        if (id1.name == id2.name) IdentityVerdict.SAME else IdentityVerdict.DISTINCT
     id1 is TypeIdentity.Anonymous && id2 is TypeIdentity.Anonymous ->
         IdentityVerdict.SAME
     else -> IdentityVerdict.UNDETERMINED
@@ -76,7 +77,7 @@ internal fun identityVerdict(id1: TypeIdentity, id2: TypeIdentity): IdentityVerd
 
 /**
  * True iff two identities are the SAME *concrete declaration* — both [TypeIdentity.Declared]
- * with equal hash, or both [TypeIdentity.Builtin] with equal kind. Unlike [identityVerdict]'s
+ * with equal hash, or both [TypeIdentity.Builtin] with equal name. Unlike [identityVerdict]'s
  * SAME verdict this does NOT include two [TypeIdentity.Anonymous] (two anonymous shapes are
  * NOT the same nominal declaration — their sameness is decided structurally, not by identity).
  * Used where identity is an ADDITIVE match (e.g. a rename-safe alias whose name differs but
@@ -85,7 +86,7 @@ internal fun identityVerdict(id1: TypeIdentity, id2: TypeIdentity): IdentityVerd
  */
 internal fun sameDeclaredIdentity(id1: TypeIdentity, id2: TypeIdentity): Boolean = when {
     id1 is TypeIdentity.Declared && id2 is TypeIdentity.Declared -> id1.hash == id2.hash
-    id1 is TypeIdentity.Builtin && id2 is TypeIdentity.Builtin -> id1.kind == id2.kind
+    id1 is TypeIdentity.Builtin && id2 is TypeIdentity.Builtin -> id1.name == id2.name
     else -> false
 }
 
@@ -839,7 +840,7 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
         )
     }
     // A NAME match unifies; the SAME concrete declaration on DIFFERING names ALSO
-    // unifies (a rename-safe alias: equal Declared hash, or equal Builtin kind).
+    // unifies (a rename-safe alias: equal Declared hash, or equal Builtin name).
     // Identity only ever ADDS matches here — the DISTINCT reject above already
     // handled the distinct-declaration case. NOTE: must use sameDeclaredIdentity,
     // NOT the SAME verdict — two Anonymous applications are NOT the same declaration
@@ -1212,11 +1213,18 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
         paramName to argType
     }
 
-    val contextBuilder = expandContextBuilder.get()
-
+    // Convert the constructor payload annotations with a config that resolves
+    // declared-type hashes from the registry — so a recursive self-reference (the
+    // inner `Tree` in `Node { l: Tree 'a }`) carries real nominal identity
+    // (Declared), never Named. The shared expandContextBuilder has an empty decl
+    // map and would leave the inner reference hashless.
+    val expandConfig = TypeAnnotationConverter.ConversionConfig(
+        resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
+        resolveCollectionTypes = true,
+    )
     val constructors = variantDef.constructors.associate { constructor ->
         val dataType = constructor.dataType?.let { annotation ->
-            val convertedType = contextBuilder.convertParsedTypeAnnotation(annotation)
+            val convertedType = TypeAnnotationConverter.convertWith(annotation, expandConfig)
             substituteTypeParamsByName(convertedType, typeParamSubst)
         }
         constructor.name to dataType
@@ -1235,7 +1243,7 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
         rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
         typeName = typeDecl.name,
         typeArgs = typeApp.args,   // #194: carry the application's args so the printer can render `Tree Int`
-        typeHash = typeDecl.contentHash
+        typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
     )
 }
 

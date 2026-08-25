@@ -1441,7 +1441,16 @@ class TypedAstBuilder(
                     }
                     MezzeType.VarType(typeVar)
                 } else {
-                    WellKnownTypeApp.of(annotation.name, emptyList())
+                    // Stamp the declared type's content hash (registry has the decl,
+                    // hash is always computable) so the emitted TypeApplication carries
+                    // real nominal identity (Declared), never Named. Mirrors the
+                    // ability-hash resolution below.
+                    WellKnownTypeApp.of(
+                        annotation.name, emptyList(),
+                        typeHash = registry.lookupType(annotation.name)?.let { d ->
+                            d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d)
+                        }
+                    )
                 }
             }
             is ParsedFunctionType -> {
@@ -1481,7 +1490,10 @@ class TypedAstBuilder(
             is ParsedTypeApp -> {
                 WellKnownTypeApp.of(
                     constructor = annotation.constructor,
-                    args = annotation.args.map { convertParsedTypeAnnotation(it) }
+                    args = annotation.args.map { convertParsedTypeAnnotation(it) },
+                    typeHash = registry.lookupType(annotation.constructor)?.let { d ->
+                        d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d)
+                    }
                 )
             }
             is ParsedSeqType -> {

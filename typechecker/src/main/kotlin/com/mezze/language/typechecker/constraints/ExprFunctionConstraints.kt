@@ -227,7 +227,7 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
                             // machinery; here we only enforce the field types, which
                             // was the missing check that let `Point { x = "no" }` pass.)
                             for (entry in wrapped.entries) {
-                                val expectedFieldType = try { TypeAnnotationConverter.convert(entry.type) } catch (_: Exception) { null }
+                                val expectedFieldType = try { TypeAnnotationConverter.convert(entry.type, resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } }) } catch (_: Exception) { null }
                                 val actualFieldType = providedType?.fields?.get(entry.name)
                                 if (expectedFieldType != null && actualFieldType != null) {
                                     newtypeFieldConstraints.add(Constraint.Equality(
@@ -244,7 +244,7 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
                             // wrapped TYPE on whatever single field was provided,
                             // without pinning the field NAME — so `Meters { val =
                             // "boom" }` (Str into an Int newtype) is now rejected.
-                            val expectedFieldType = try { TypeAnnotationConverter.convert(wrapped) } catch (_: Exception) { null }
+                            val expectedFieldType = try { TypeAnnotationConverter.convert(wrapped, resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } }) } catch (_: Exception) { null }
                             val soleField = literalFields.singleOrNull()
                             val actualFieldType = soleField?.let { providedType?.fields?.get(it.name) }
                             if (expectedFieldType != null && actualFieldType != null) {

@@ -305,7 +305,10 @@ class ContextBuilder {
                 val typeArgs = typeDecl.typeParams.map { param ->
                     MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar.freshWithName(param) })
                 }
-                val newtypeResult = WellKnownTypeApp.of(typeDecl.name, typeArgs)
+                val newtypeResult = WellKnownTypeApp.of(
+                    typeDecl.name, typeArgs,
+                    typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                )
                 val constructorType = MezzeType.FunctionType(paramType = wrappedMezzeType, returnType = newtypeResult)
                 val typeVars = mutableSetOf<TypeVar>()
                 collectTypeVariables(constructorType, typeVars)
@@ -320,7 +323,10 @@ class ContextBuilder {
         typeVarCache.clear()
         val resultType = if (typeDecl.typeParams.isEmpty()) {
             when (val def = typeDecl.definition) {
-                is ParsedNewtypeDef -> WellKnownTypeApp.of(typeDecl.name, emptyList())
+                is ParsedNewtypeDef -> WellKnownTypeApp.of(
+                    typeDecl.name, emptyList(),
+                    typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                )
                 else -> {
                     val constructors = when (def) {
                         is ParsedVariantDef -> def.constructors.associate { ctor ->
@@ -341,7 +347,8 @@ class ContextBuilder {
                 constructor = typeDecl.name,
                 args = typeDecl.typeParams.map { param ->
                     MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar.freshWithName(param) })
-                }
+                },
+                typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
             )
         }
         val ctorType = when (val dataType = constructor.dataType) {
@@ -744,7 +751,7 @@ class ContextBuilder {
         AbilityImplFactory.typeNameOf(annotation)
 
     private fun buildConversionConfig() = TypeAnnotationConverter.ConversionConfig(
-        resolveTypeHash = { currentTypeDecls[it]?.contentHash },
+        resolveTypeHash = { currentTypeDecls[it]?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
         resolveAbilityHash = { currentAbilityDecls[it]?.contentHash },
         validateEffects = { effectRow ->
             TypeAnnotationConverter.validateUnknownEffects(

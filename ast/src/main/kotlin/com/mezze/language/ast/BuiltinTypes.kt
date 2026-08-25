@@ -50,8 +50,20 @@ object BuiltinTypes {
     const val VAL_FIELD = "val"      // Used in Option.Some and Result.Ok
     const val ERROR_FIELD = "error"  // Used in Result.Err
 
+    /**
+     * Reserved prefix for opaque NATIVE primitive types (`__NativeInstant`,
+     * `__NativePromise`, `__NativeMutInt`, …) — the runtime-handle payloads that
+     * stdlib newtypes wrap (`newtype Promise 'a = __NativePromise`). They have no
+     * `type` declaration and no content to hash: like `Int`/`Bytes`, each is a
+     * compiler builtin identified by its reserved name alone.
+     */
+    const val NATIVE_TYPE_PREFIX = "__Native"
+
+    fun isNativeType(typeName: String): Boolean = typeName.startsWith(NATIVE_TYPE_PREFIX)
+
+    /** True for any name-carried builtin: a core/primitive type OR an opaque native handle. */
     fun isBuiltinTypeName(typeName: String): Boolean {
-        return typeName in allBuiltinTypeNames
+        return typeName in allBuiltinTypeNames || isNativeType(typeName)
     }
 
     /**

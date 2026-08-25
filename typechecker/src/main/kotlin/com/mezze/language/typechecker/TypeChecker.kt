@@ -6,6 +6,7 @@ import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parsedast.*
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.FixHint
 import com.mezze.language.truffleir.FunctionIR
@@ -287,6 +288,15 @@ class TypeChecker(
 
         val registry = buildFullRegistry(loadedModules, buildResult, importContext)
 
+        // Install the registry-backed hash resolver for the whole module check so
+        // WellKnownTypeApp.of resolves a USER/LOCAL declared type's content hash in
+        // ONE place — no call site needs to thread it. (Stdlib hashes come from the
+        // well-known table; the registry supplies the rest; the hash is a pure fn of
+        // the decl and always computable.) See WellKnownTypeApp.withHashResolver.
+        WellKnownTypeApp.withHashResolver({ name ->
+            registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) }
+        }) {
+
         val constraintGenerator = ConstraintGenerator.create(
             registry = registry,
             performerToEffect = buildResult.performerToEffect,
@@ -492,6 +502,7 @@ class TypeChecker(
                 )
             }
         }
+        } // end withHashResolver
     }
 
     private class AggregatedConstraintResults(

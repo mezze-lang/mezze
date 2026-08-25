@@ -205,13 +205,14 @@ object AbilityValidator {
             )
         }
 
-        validateOperationSignatures(impl, abilityDeclaration, sourceLocation)
+        validateOperationSignatures(impl, abilityDeclaration, sourceLocation, registry)
     }
 
     private fun validateOperationSignatures(
         impl: ParsedImplAbilityDecl,
         abilityDeclaration: ParsedAbilityDecl,
-        implSourceLocation: Loc
+        implSourceLocation: Loc,
+        registry: DeclarationRegistry,
     ) {
         val substitution = abilityDeclaration.typeParams.zip(impl.allTypeArgs).toMap()
 
@@ -278,7 +279,7 @@ object AbilityValidator {
                 )
             }
 
-            if (!typeAnnotationsMatchPublic(actualParamType, expectedParamType)) {
+            if (!typeAnnotationsMatchPublic(actualParamType, expectedParamType, registry)) {
                 throw TypeCheckError(
                     "Wrong parameter type for '${implOp.name}' in impl ${impl.abilityName}: " +
                     "expected ${parsedTypeAnnotationToString(expectedParamType)}, " +
@@ -288,7 +289,7 @@ object AbilityValidator {
                 )
             }
 
-            if (!typeAnnotationsMatchPublic(actualReturnType, expectedReturnType)) {
+            if (!typeAnnotationsMatchPublic(actualReturnType, expectedReturnType, registry)) {
                 throw TypeCheckError(
                     "Wrong return type for '${implOp.name}' in impl ${impl.abilityName}: " +
                     "expected ${parsedTypeAnnotationToString(expectedReturnType)}, " +
@@ -390,10 +391,19 @@ object AbilityValidator {
         }
     }
 
-    fun typeAnnotationsMatchPublic(a: ParsedTypeAnnotation, b: ParsedTypeAnnotation): Boolean {
+    fun typeAnnotationsMatchPublic(
+        a: ParsedTypeAnnotation,
+        b: ParsedTypeAnnotation,
+        registry: DeclarationRegistry? = null,
+    ): Boolean {
         val cache = mutableMapOf<String, TypeVar>()
-        val typeA = try { TypeAnnotationConverter.convert(a, typeVarCache = cache) } catch (_: Exception) { return false }
-        val typeB = try { TypeAnnotationConverter.convert(b, typeVarCache = cache) } catch (_: Exception) { return false }
+        val resolveTypeHash: (String) -> com.mezze.language.typedast.Hash? = { name ->
+            registry?.lookupType(name)?.let { d ->
+                d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d)
+            }
+        }
+        val typeA = try { TypeAnnotationConverter.convert(a, typeVarCache = cache, resolveTypeHash = resolveTypeHash) } catch (_: Exception) { return false }
+        val typeB = try { TypeAnnotationConverter.convert(b, typeVarCache = cache, resolveTypeHash = resolveTypeHash) } catch (_: Exception) { return false }
         return unify(typeA, typeB) is UnificationResult.Success
     }
 

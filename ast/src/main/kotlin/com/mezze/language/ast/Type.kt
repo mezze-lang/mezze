@@ -61,14 +61,15 @@ sealed interface TypeIdentity {
     data class Named(val displayName: String) : TypeIdentity
 
     /**
-     * A name-carried builtin (Option/Result/Deque/NonEmptyList/SortedMap/SortedSet
-     * as TypeApplication or VariantType sugar). There is exactly one of each, so
-     * the [kind] tag IS its canonical identity — no content to hash. (Builtins
-     * that are dedicated MezzeType nodes — ListType, MapType, … — carry no
-     * identity field and unify structurally by node kind.)
+     * A name-carried builtin (`List`/`Map`/`Set`/`Seq`/`Option`/`Result`/`Bool`/…
+     * as a `TypeApplication` or `VariantType` — the name-carried form, distinct
+     * from the dedicated MezzeType nodes `ListType`/`MapType`/… which have no
+     * identity field). There is exactly ONE of each builtin, so its reserved
+     * [name] IS its canonical identity — no content to hash. [name] is always a
+     * member of [BuiltinTypes.allBuiltinTypeNames] (the single source of truth).
      */
     @Serializable
-    data class Builtin(val kind: BuiltinKind) : TypeIdentity
+    data class Builtin(val name: String) : TypeIdentity
 
     /** An inline type with no declaration (`{x:Int}`, `|A,B|`). Unifies structurally. */
     @Serializable
@@ -78,23 +79,8 @@ sealed interface TypeIdentity {
     fun displayNameOrNull(): String? = when (this) {
         is Declared -> displayName
         is Named -> displayName
-        is Builtin -> kind.typeName
+        is Builtin -> name
         Anonymous -> null
-    }
-}
-
-/** The name-carried builtin constructors. Their reserved names are their identity. */
-enum class BuiltinKind(val typeName: String) {
-    OPTION("Option"),
-    RESULT("Result"),
-    DEQUE("Deque"),
-    NON_EMPTY_LIST("NonEmptyList"),
-    SORTED_MAP("SortedMap"),
-    SORTED_SET("SortedSet");
-
-    companion object {
-        private val byName = entries.associateBy { it.typeName }
-        fun fromName(name: String): BuiltinKind? = byName[name]
     }
 }
 
@@ -128,9 +114,12 @@ sealed interface MezzeType {
             // name is absent — a hashless-name record still carries a real hash; the
             // old vetoes keyed on typeHash alone).
             hash != null -> TypeIdentity.Declared(hash, name ?: "<hashed>")
-            // A name-carried builtin.
-            allowBuiltin && name != null && BuiltinKind.fromName(name) != null ->
-                TypeIdentity.Builtin(BuiltinKind.fromName(name)!!)
+            // A name-carried builtin: a core/primitive type (List/Map/Bool/…) OR an
+            // opaque native handle (__Native*). Single source of truth:
+            // BuiltinTypes.isBuiltinTypeName. Native handles have no decl to hash —
+            // like Int, they are identified by their reserved name alone.
+            allowBuiltin && name != null && BuiltinTypes.isBuiltinTypeName(name) ->
+                TypeIdentity.Builtin(name)
             // A NAMED but hashless type → Named (keeps the name for the nominal wall,
             // alias stripping, and error rendering). Exactly today's `typeName != null,
             // typeHash == null` state. Not hash-identified → no hash veto.
@@ -252,7 +241,6 @@ sealed interface MezzeType {
     ) : MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
-
         // Stage A: identity derived from the existing name/hash so all construction
         // sites compile untouched. Records are never name-carried builtins, so a
         // record is Declared iff it carries a hash, else Anonymous.
@@ -304,7 +292,7 @@ sealed interface MezzeType {
 
         // Stage A: identity derived from the existing name/hash. A variant CAN be a
         // name-carried builtin (Option/Result sugar), so allowBuiltin = true:
-        // a hashless variant whose name is a known builtin → Builtin(kind).
+        // a hashless variant whose name is a known builtin → Builtin(name).
         // `ascriptionWall` stays a SEPARATE field (author-ascription, orthogonal
         // to declaration identity).
         val identity: TypeIdentity get() = deriveIdentity(typeName, typeHash, allowBuiltin = true)

@@ -585,6 +585,7 @@ internal class VariantSolver(
                     },
                     rowVar = if (shouldClose) null else type.rowVar,
                     typeName = type.typeName,
+                    typeHash = type.typeHash,   // preserve nominal identity on row-close rebuild
                     ascriptionWall = type.ascriptionWall || pinningInferred
                 )
             }
@@ -718,6 +719,9 @@ internal class VariantSolver(
         typeParamSubst: Map<String, MezzeType>
     ): MezzeType {
         val config = TypeAnnotationConverter.ConversionConfig(
+            // Resolve declared-type hashes from the registry so converted
+            // TypeApplications carry real nominal identity (Declared), never Named.
+            resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
             validateEffects = { ContextBuilder.validateHermeticEffects(it.allEffectNames) },
             honorOpenRowVars = true,
             typeParamSubst = typeParamSubst,

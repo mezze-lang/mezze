@@ -680,6 +680,9 @@ class ExpressionConstraintGenerator {
     }
 
     private val exprConversionConfig = TypeAnnotationConverter.ConversionConfig(
+        // Resolve a declared type's content hash so converted TypeApplications carry
+        // real nominal identity (Declared), never Named. Hash is always computable.
+        resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
         resolveAbilityHash = { WellKnownHashConstants.resolveAbilityHash(it) },
         validateEffects = { ContextBuilder.validateHermeticEffects(it.allEffectNames) },
         resolveCollectionTypes = true,
