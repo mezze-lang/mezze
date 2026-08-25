@@ -46,11 +46,11 @@ object TypeAnnotationMatcher {
             is ParsedTypeApp -> {
                 // Transparent-alias bridge: `impl for Wrap 'a` where the
                 // receiver was resolved through a transparent alias to a bare
-                // RecordType or nameless (`<inline>`) VariantType. Reconstruct
-                // the alias's aliased annotation with type-args substituted
-                // and re-match. Per project invariant: keyed on decl identity
-                // (looked up via the alias's canonical name in typeDecls),
-                // never on string-matching of type names in the concrete side.
+                // RecordType or a nameless VariantType. Reconstruct the alias's
+                // aliased annotation with type-args substituted and re-match.
+                // Per project invariant: keyed on decl identity (looked up via
+                // the alias's canonical name in typeDecls), never on string-
+                // matching of type names in the concrete side.
                 val aliasedDecl = typeDeclarations[annotation.constructor]
                 if (aliasedDecl != null && annotation.args.size == aliasedDecl.typeParams.size) {
                     val aliasedAnnotation: ParsedTypeAnnotation? = when (type) {

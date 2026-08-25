@@ -73,12 +73,9 @@ object TypeAnnotationConverter {
                     // through to labeled TypeApp so the recursion terminates.
                     // Stamp the alias's own nominal identity (name + hash) on
                     // the resolved shape so unification and error messages can
-                    // key on the decl's identity — an author-written inline
-                    // `{c: |A,B|}` and an alias-decl `type X = |A,B|` used at
-                    // a call site are otherwise structurally indistinguishable
-                    // (both would carry `typeName="<inline>"` under
-                    // inlineVariantNaming). `ascriptionWall` is CLEARED: the wall
-                    // is an author-written ascription concern, not a decl one.
+                    // key on the decl's identity. `ascriptionWall` is CLEARED:
+                    // the wall is an author-written ascription concern, not a
+                    // decl one.
                     if (name !in recursionGuard) {
                         config.resolveTypeAlias(name)?.let { (aliased, _) ->
                             recursionGuard.add(name)
