@@ -24,7 +24,12 @@ internal class VariantSolver(
 
     private fun buildConstructorIndex(): Map<String, List<Pair<ParsedTypeDecl, ParsedVariantDef>>> {
         val index = mutableMapOf<String, MutableList<Pair<ParsedTypeDecl, ParsedVariantDef>>>()
-        for (typeDecl in registry.allTypeDecls) {
+        // Include transitive / auto-imported type decls too: a value's type
+        // identity flows with it from the decl side, so `NoneFound` inside a
+        // pattern must find `OptErr`'s decl even if the caller never wrote
+        // `use opt_err::{OptErr}`. Import controls what the user can NAME in
+        // annotations, not what the values' types ARE.
+        for (typeDecl in registry.allTypeDeclsIncludingTransitive) {
             val definition = typeDecl.definition
             if (definition is ParsedVariantDef) {
                 for (constructor in definition.constructors) {

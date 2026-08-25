@@ -265,7 +265,6 @@ class VariantStructuralAliasTest {
     // If it passes, that's a REAL BUG in unification (two distinct closed
     // variants merging). Currently disabled while unification is being
     // hardened; TODO: re-enable once solver rejects the cross-variant merge.
-    @org.junit.jupiter.api.Disabled("re-enable after unification hardening — see comment above")
     @Test
     fun `rule 5 — ascription rejects value with foreign arm`() {
         writeModule("colors", """
@@ -301,7 +300,6 @@ class VariantStructuralAliasTest {
     // `AsyncError` are both closed variants. The if-expression forces both
     // branches to have the same type; two distinct closed variants can't
     // unify (they have disjoint arm sets). This is the correct rejection.
-    @org.junit.jupiter.api.Disabled("obsolete under transparent aliases — old structural-loosening story")
     @Test
     fun `rule 6 — two module-typed values combine when neither alias imported`() {
         writeModule("http_err", """
