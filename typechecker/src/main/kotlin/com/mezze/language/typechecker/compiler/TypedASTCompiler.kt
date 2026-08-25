@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.compiler
 import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
+import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.VariantAliases
 import com.mezze.language.parsedast.Loc
@@ -1017,7 +1018,7 @@ class TypedASTCompiler(
                 // Built-in ctors (Some/None/Ok/Err/…/LT/GT/EQ) keep old hashCode-only
                 // tagging so they collide with runtime-native MezzeVariant.some/ok/…
                 // by design.
-                val adtHashHex = (expr.type as? VariantType)?.typeHash?.hex
+                val adtHashHex = ((expr.type as? VariantType)?.identity as? TypeIdentity.Declared)?.hash?.hex
                 val tag = com.mezze.language.ast.BuiltinTypes.computeVariantTag(expr.tag, adtHashHex)
                 MakeVariantIR(tag, expr.tag, expr.payload?.let { compileExpr(it) }, src)
             }
@@ -2436,7 +2437,7 @@ class TypedASTCompiler(
                 // Test the tag AND (recursively) the payload, atomically, via a
                 // nested match whose true-arm binds the payload and returns the
                 // sub-tests, and whose wildcard-arm returns false.
-                val adtHashHex = (pattern.type as? VariantType)?.typeHash?.hex
+                val adtHashHex = ((pattern.type as? VariantType)?.identity as? TypeIdentity.Declared)?.hash?.hex
                 val tag = com.mezze.language.ast.BuiltinTypes.computeVariantTag(pattern.tag, adtHashHex)
 
                 val fieldNames = mutableListOf<String>()
@@ -2529,7 +2530,7 @@ class TypedASTCompiler(
             }
             is TypedLiteralPattern -> PatternIR.Literal(compileExpr(pattern.value))
             is TypedVariantPattern -> {
-                val adtHashHex = (pattern.type as? VariantType)?.typeHash?.hex
+                val adtHashHex = ((pattern.type as? VariantType)?.identity as? TypeIdentity.Declared)?.hash?.hex
                 val tag = com.mezze.language.ast.BuiltinTypes.computeVariantTag(pattern.tag, adtHashHex)
                 val fieldNames = mutableListOf<String>()
                 val fieldSlots = mutableListOf<Int>()
@@ -2773,7 +2774,7 @@ class TypedASTCompiler(
                 concreteType.constructors.size == 1 &&
                 concreteType.constructors.keys.first() == targetType.constructor -> true
             concreteType is VariantType && targetType is TypeApplication -> {
-                concreteType.typeName == targetType.constructor ||
+                concreteType.identity.displayNameOrNull() == targetType.constructor ||
                     VariantAliases.aliasFor(concreteType.constructors.keys) == targetType.constructor
             }
             // A structural container receiver (SeqType/MapType/…) matches an
@@ -2792,11 +2793,12 @@ class TypedASTCompiler(
             concreteType is SortedSetType && targetType is SortedSetType -> true
             concreteType is SortedMapType && targetType is SortedMapType -> true
             concreteType is RecordType && targetType is TypeApplication &&
-                concreteType.typeName == targetType.constructor -> true
+                concreteType.identity.displayNameOrNull() == targetType.constructor -> true
             // VariantType to VariantType: match if constructors overlap or type names match
             concreteType is VariantType && targetType is VariantType -> {
                 // Same type name (e.g., both are "Json")
-                if (concreteType.typeName != null && concreteType.typeName == targetType.typeName) return true
+                val concreteName = concreteType.identity.displayNameOrNull()
+                if (concreteName != null && concreteName == targetType.identity.displayNameOrNull()) return true
                 // Same constructor set
                 if (concreteType.constructors.keys == targetType.constructors.keys) return true
                 // Concrete has subset of target constructors (e.g., concrete is a single constructor variant)

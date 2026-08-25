@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.solving
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.parsedast.ParsedTypeDecl
 import com.mezze.language.parsedast.ParsedVariantDef
 import com.mezze.language.typechecker.ModuleResolver
@@ -147,7 +148,7 @@ object AliasStripper {
         val newCtors = type.constructors.mapValues { (_, payload) ->
             payload?.let { stripImpl(it, inScope, registry, recursionGuard) }
         }
-        val name = type.typeName
+        val name = type.identity.displayNameOrNull()
         val keepName = type.ascriptionWall ||
             name == null ||
             name in inScope ||

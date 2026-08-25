@@ -3782,7 +3782,7 @@ class MezzeTextDocumentService(
             is MezzeType.SortedMapType -> "SortedMap ${elem(type.keyType)} ${elem(type.valueType)}"
             // A named variant alias (`type Color = | Red, … |`) renders as its
             // name; an anonymous/inline union would be noise.
-            is MezzeType.VariantType -> type.typeName
+            is MezzeType.VariantType -> type.identity.displayNameOrNull()
             // Structural / polymorphic — a bare name would mislead, so fall back
             // to just the field name (null = no type hint appended).
             is MezzeType.VarType,

@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.mono
 
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.ast.VariantAliases
 
 /**
@@ -85,9 +86,9 @@ internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean 
     if (target is MezzeType.TypeApplication) {
         BuiltinTypes.builtinConstructorName(concrete)?.let { return it == target.constructor }
         return when (concrete) {
-            is MezzeType.RecordType -> concrete.typeName == target.constructor
+            is MezzeType.RecordType -> concrete.identity.displayNameOrNull() == target.constructor
             is MezzeType.VariantType -> {
-                if (concrete.typeName == target.constructor) return true
+                if (concrete.identity.displayNameOrNull() == target.constructor) return true
                 VariantAliases.aliasFor(concrete.constructors.keys) == target.constructor
             }
             else -> false
@@ -95,7 +96,8 @@ internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean 
     }
     // VariantType vs VariantType: typeName or constructor-set overlap
     if (concrete is MezzeType.VariantType && target is MezzeType.VariantType) {
-        if (concrete.typeName != null && concrete.typeName == target.typeName) return true
+        val concreteName = concrete.identity.displayNameOrNull()
+        if (concreteName != null && concreteName == target.identity.displayNameOrNull()) return true
         if (concrete.constructors.keys == target.constructors.keys) return true
         if (concrete.constructors.keys.all { it in target.constructors }) return true
     }

@@ -46,6 +46,11 @@ class ContextBuilder {
         val file = module.path
 
         val typeDecls = module.decls.filterIsInstance<ParsedTypeDecl>()
+            // Stamp the decl content hash up front so every downstream
+            // typeDecl.contentHash read carries a real hash (pure fn of the decl,
+            // always computable). A hashless type decl loses its nominal identity
+            // (Anonymous) under TypeIdentity, breaking the name-in-scope wall.
+            .map { if (it.contentHash != null) it else it.copy(contentHash = ParsedDeclHasher.hashTypeDecl(it)) }
             .associateBy { it.name }
             .toMutableMap()
 

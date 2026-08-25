@@ -152,8 +152,9 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     is MezzeType.RecordType -> {
         // A record carrying a type-alias name prints as that name; otherwise
         // print structurally.
-        if (type.typeName != null) {
-            type.typeName
+        val displayName = type.identity.displayNameOrNull()
+        if (displayName != null) {
+            displayName
         } else {
             val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
                 "$name: ${prettyPrintTypeWithMapping(fieldType, typeVarMapping)}"
@@ -169,7 +170,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
         // Special case: Bool variant prints as "Bool" instead of "| True, False |"
         if (BuiltinTypes.isBoolVariant(type)) {
             "Bool"
-        } else if (type.typeName != null
+        } else if (type.identity.displayNameOrNull() != null
             && !BuiltinTypes.isOptionVariant(type)
             && BuiltinTypes.getResultTypes(type) == null) {
             // The solver tagged this variant with its declared name (e.g. `Tree`) and,
@@ -177,7 +178,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
             val argsStr = if (type.typeArgs.isEmpty()) "" else " " + type.typeArgs.joinToString(" ") {
                 prettyPrintTypeWithMapping(it, typeVarMapping)
             }
-            "${type.typeName}$argsStr"
+            "${type.identity.displayNameOrNull()}$argsStr"
         } else {
             // Anonymous / inline variant (no name) — print structurally.
             val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
@@ -267,8 +268,8 @@ fun prettyPrintTypeWithAliases(
 ): String {
     val typeVarMapping = collectTypeVariables(type)
 
-    if (type is MezzeType.VariantType && type.typeName != null) {
-        val alias = typeAliases[type.typeName]
+    if (type is MezzeType.VariantType && type.identity.displayNameOrNull() != null) {
+        val alias = typeAliases[type.identity.displayNameOrNull()]
         if (alias != null) {
             // Prefer the stamped `typeArgs` vector (`Tree Int` → typeArgs=[IntType]).
             // Fall back to harvesting free tyvars from payloads only when typeArgs
@@ -284,7 +285,7 @@ fun prettyPrintTypeWithAliases(
             val argsStr = if (args.isEmpty()) "" else " " + args.joinToString(" ") {
                 prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
             }
-            val aliasName = type.typeName + argsStr
+            val aliasName = type.identity.displayNameOrNull() + argsStr
             return if (showExpansion) {
                 "$aliasName (= ${prettyPrintTypeWithMapping(type, typeVarMapping)})"
             } else {
@@ -320,8 +321,8 @@ private fun prettyPrintWithAliasCheck(
     typeVarMapping: Map<TypeVar, String>
 ): String {
     if (type is MezzeType.VariantType) {
-        if (type.typeName != null) {
-            val alias = typeAliases[type.typeName]
+        if (type.identity.displayNameOrNull() != null) {
+            val alias = typeAliases[type.identity.displayNameOrNull()]
             if (alias != null) {
                 // Prefer the stamped typeArgs (`Tree Int` → typeArgs=[Int]).
                 // Fall back to free-var harvest for the legacy case where the
@@ -336,7 +337,7 @@ private fun prettyPrintWithAliasCheck(
                 val argsStr = if (args.isEmpty()) "" else " " + args.joinToString(" ") {
                     prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
                 }
-                return type.typeName + argsStr
+                return type.identity.displayNameOrNull() + argsStr
             }
         }
         val typeCtors = type.constructors.keys.sorted()
@@ -497,14 +498,14 @@ private fun findTypeAliasForType(type: MezzeType, typeAliases: Map<String, TypeA
     // concrete shape against the alias's definition so `Container Int` doesn't
     // print bare as "Container".
     when (type) {
-        is MezzeType.RecordType -> type.typeName?.let { n ->
+        is MezzeType.RecordType -> type.identity.displayNameOrNull()?.let { n ->
             typeAliases[n]?.let { info ->
                 val args = if (info.typeParams.isEmpty()) emptyList()
                            else inferTypeArguments(type, info.definition, info.typeParams) ?: emptyList()
                 return TypeAliasMatch(n, args)
             }
         }
-        is MezzeType.VariantType -> type.typeName?.let { n ->
+        is MezzeType.VariantType -> type.identity.displayNameOrNull()?.let { n ->
             typeAliases[n]?.let { info ->
                 val args = if (type.typeArgs.isNotEmpty()) type.typeArgs
                            else if (info.typeParams.isEmpty()) emptyList()

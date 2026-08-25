@@ -60,8 +60,8 @@ class AbilityResolver(
 
     private fun getTypeNameForRecursionCheck(type: MezzeType): String? {
         return when (type) {
-            is MezzeType.RecordType -> type.typeName
-            is MezzeType.VariantType -> type.typeName
+            is MezzeType.RecordType -> type.identity.displayNameOrNull()
+            is MezzeType.VariantType -> type.identity.displayNameOrNull()
             is MezzeType.TypeApplication -> type.constructor
             else -> null
         }
@@ -133,7 +133,7 @@ class AbilityResolver(
             return checkUserDefinedAbilityImpl(MezzeType.BoolType, abilityName, typeArgs)
         }
 
-        val typeName = type.typeName
+        val typeName = type.identity.displayNameOrNull()
         val typeDecl = if (typeName != null) typeDeclarations[typeName] else null
         val isNewtype = typeDecl?.definition is ParsedNewtypeDef
 
@@ -179,7 +179,7 @@ class AbilityResolver(
         definition: ParsedNewtypeDef,
         abilityHash: Hash? = null
     ): AbilityCheckResult {
-        val typeName = type.typeName ?: return checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
+        val typeName = type.identity.displayNameOrNull() ?: return checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
 
         val wrappedType = type.constructors.values.firstOrNull()
 
@@ -311,10 +311,10 @@ class AbilityResolver(
 
         val result = when (type) {
             is MezzeType.RecordType -> {
-                type.typeName ?: ContentHashComputer.mezzeTypeToString(type)
+                type.identity.displayNameOrNull() ?: ContentHashComputer.mezzeTypeToString(type)
             }
             is MezzeType.VariantType -> {
-                type.typeName ?: if (BuiltInAbilities.isBoolVariant(type)) {
+                type.identity.displayNameOrNull() ?: if (BuiltInAbilities.isBoolVariant(type)) {
                     "Bool"
                 } else {
                     ContentHashComputer.mezzeTypeToString(type)

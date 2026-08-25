@@ -766,8 +766,8 @@ class ConstraintSolver(
         // module-distinct) so two same-named inherent-method candidates from
         // different modules pick correctly instead of by first-name-match. Name
         // only when the receiver has no hash (builtins).
-        val receiverHash = (receiver as? MezzeType.VariantType)?.typeHash
-            ?: (receiver as? MezzeType.TypeApplication)?.typeHash
+        val receiverHash = ((receiver as? MezzeType.VariantType)?.identity as? TypeIdentity.Declared)?.hash
+            ?: ((receiver as? MezzeType.TypeApplication)?.identity as? TypeIdentity.Declared)?.hash
         val typeName = receiverTypeName(receiver)
         val picked = (receiverHash?.let { h -> constraint.candidates.firstOrNull { it.targetTypeHash == h } })
             ?: typeName?.let { name -> constraint.candidates.firstOrNull { it.targetTypeName == name } }

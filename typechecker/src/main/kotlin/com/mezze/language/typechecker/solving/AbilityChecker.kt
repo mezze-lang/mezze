@@ -425,7 +425,7 @@ internal class AbilityChecker(
         is MezzeType.StringType -> "Str"
         is MezzeType.BoolType -> "Bool"
         is MezzeType.TypeApplication -> type.constructor
-        is MezzeType.VariantType -> type.typeName ?: "|variant|"
+        is MezzeType.VariantType -> type.identity.displayNameOrNull() ?: "|variant|"
         is MezzeType.RecordType -> "{record}"
         is MezzeType.FunctionType -> "{fn}"
         else -> type::class.simpleName ?: "?"
@@ -1101,8 +1101,8 @@ internal class AbilityChecker(
             // Hash is authoritative: when both carry a content hash and they DIFFER,
             // these are distinct declarations and do NOT match, even by name. Mirrors
             // the unifyTypeApplications hash-veto (Stage 0 proved recursion-stable).
-            val eh = expected.typeHash
-            val ah = actual.typeHash
+            val eh = (expected.identity as? TypeIdentity.Declared)?.hash
+            val ah = (actual.identity as? TypeIdentity.Declared)?.hash
             if (eh != null && ah != null && eh != ah) return false
             // Name match OR equal-hash match (rename-safe alias); the hash clause
             // only ADDS matches — the hash-inequality reject above handled distinctness.

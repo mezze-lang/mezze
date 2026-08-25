@@ -25,17 +25,18 @@ object TypeAnnotationMatcher {
                         val typeDecl = typeDeclarations[annotation.name]
                         if (typeDecl != null) typeMatchesDeclaration(type, typeDecl)
                         else when (type) {
-                            is MezzeType.RecordType -> type.typeHash?.let {
+                            is MezzeType.RecordType -> (type.identity as? TypeIdentity.Declared)?.hash?.let {
                                 it == typeDeclarations[annotation.name]?.contentHash
-                            } ?: (type.typeName == annotation.name)
+                            } ?: (type.identity.displayNameOrNull() == annotation.name)
                             is MezzeType.VariantType -> {
                                 val declHash = typeDeclarations[annotation.name]?.contentHash
-                                if (type.typeHash != null && declHash != null) type.typeHash == declHash
-                                else if (type.typeName == annotation.name) true
-                                else if (type.typeName == null && type.constructors.containsKey(annotation.name)) true
+                                val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
+                                if (typeHash != null && declHash != null) typeHash == declHash
+                                else if (type.identity.displayNameOrNull() == annotation.name) true
+                                else if (type.identity.displayNameOrNull() == null && type.constructors.containsKey(annotation.name)) true
                                 else false
                             }
-                            is MezzeType.TypeApplication -> type.typeHash?.let {
+                            is MezzeType.TypeApplication -> (type.identity as? TypeIdentity.Declared)?.hash?.let {
                                 it == typeDeclarations[annotation.name]?.contentHash
                             } ?: (type.constructor == annotation.name)
                             else -> false
@@ -60,7 +61,7 @@ object TypeAnnotationMatcher {
                                 isOpen = d.isOpen, loc = d.loc,
                             )
                         }
-                        is MezzeType.VariantType -> if (type.typeName == null || type.typeName == aliasedDecl.name) {
+                        is MezzeType.VariantType -> if (type.identity.displayNameOrNull() == null || type.identity.displayNameOrNull() == aliasedDecl.name) {
                             (aliasedDecl.definition as? ParsedVariantDef)?.let { d ->
                                 ParsedVariantType(
                                     constructors = d.constructors.map { c -> ParsedVariantTypeCtor(c.name, c.dataType, c.loc) },
@@ -85,7 +86,7 @@ object TypeAnnotationMatcher {
                     }
                     // #194: VariantType carries (typeName, typeArgs) for polymorphic
                     // uses, mirroring TypeApplication.
-                    type is MezzeType.VariantType && type.typeName == annotation.constructor &&
+                    type is MezzeType.VariantType && type.identity.displayNameOrNull() == annotation.constructor &&
                             type.typeArgs.size == annotation.args.size -> {
                         type.typeArgs.zip(annotation.args).all { (a, b) ->
                             typeMatchesAnnotation(a, b, typeDeclarations, typeVars, typeVarBindings)
@@ -129,15 +130,17 @@ object TypeAnnotationMatcher {
 
         fun typeMatchesDeclaration(type: MezzeType, typeDecl: ParsedTypeDecl): Boolean {
         if (type is MezzeType.TypeApplication) {
-            val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
+            val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
+            val hashMatch = typeHash != null && typeDecl.contentHash != null && typeHash == typeDecl.contentHash
             return hashMatch || (type.constructor == typeDecl.name && type.args.isEmpty())
         }
 
         return when (val definition = typeDecl.definition) {
             is ParsedRecordDef -> {
                 if (type is MezzeType.RecordType) {
-                    val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
-                    return hashMatch || type.typeName == typeDecl.name || type.fields.keys == definition.fields.map { it.name }.toSet()
+                    val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
+                    val hashMatch = typeHash != null && typeDecl.contentHash != null && typeHash == typeDecl.contentHash
+                    return hashMatch || type.identity.displayNameOrNull() == typeDecl.name || type.fields.keys == definition.fields.map { it.name }.toSet()
                 }
                 if (type is MezzeType.VariantType && type.constructors.size == 1) {
                     val (ctorName, ctorPayload) = type.constructors.entries.first()
@@ -149,8 +152,9 @@ object TypeAnnotationMatcher {
             }
             is ParsedVariantDef -> {
                 if (type !is MezzeType.VariantType) return false
-                val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
-                hashMatch || type.typeName == typeDecl.name ||
+                val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
+                val hashMatch = typeHash != null && typeDecl.contentHash != null && typeHash == typeDecl.contentHash
+                hashMatch || type.identity.displayNameOrNull() == typeDecl.name ||
                 definition.constructors.map { it.name }.toSet().containsAll(type.constructors.keys)
             }
             is ParsedNewtypeDef -> {
@@ -161,8 +165,9 @@ object TypeAnnotationMatcher {
                 // (`(Money{val=5}).method{}`, whose inferred type is the anonymous
                 // `| Money {…} |`) never matches `impl … for Money`.
                 if (type !is MezzeType.VariantType) return false
-                val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
-                hashMatch || type.typeName == typeDecl.name ||
+                val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
+                val hashMatch = typeHash != null && typeDecl.contentHash != null && typeHash == typeDecl.contentHash
+                hashMatch || type.identity.displayNameOrNull() == typeDecl.name ||
                 (type.constructors.size == 1 && type.constructors.containsKey(definition.constructor))
             }
             else -> false

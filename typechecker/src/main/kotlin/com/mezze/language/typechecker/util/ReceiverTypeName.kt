@@ -24,8 +24,8 @@ fun receiverTypeName(type: MezzeType): String? = when (type) {
     is MezzeType.SetType -> "Set"
     is MezzeType.MapType -> "Map"
     is MezzeType.TypeApplication -> type.constructor
-    is MezzeType.RecordType -> type.typeName
-    is MezzeType.VariantType -> type.typeName
+    is MezzeType.RecordType -> type.identity.displayNameOrNull()
+    is MezzeType.VariantType -> type.identity.displayNameOrNull()
         ?: if (type.constructors.size == 1) type.constructors.keys.first() else null
     else -> null
 }

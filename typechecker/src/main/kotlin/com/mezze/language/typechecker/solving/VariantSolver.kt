@@ -464,7 +464,7 @@ internal class VariantSolver(
             }
 
             val inScope = inScopeAliasNamesForSolverOrNull()
-            val name = variantType.typeName
+            val name = variantType.identity.displayNameOrNull()
             val nameInScope = variantType.ascriptionWall ||
                 (name != null && (inScope == null || name in inScope))
             if (!nameInScope) {
@@ -578,7 +578,7 @@ internal class VariantSolver(
                 // makes it act as a wall for downstream match/ascription
                 // constraints — set ascriptionWall=true. Do NOT invent a synthetic
                 // typeName: it's still anonymous, printed by its arm set.
-                val pinningInferred = shouldClose && type.typeName == null
+                val pinningInferred = shouldClose && type.identity.displayNameOrNull() == null
                 MezzeType.VariantType(
                     constructors = type.constructors.mapValues { (_, payloadType) ->
                         payloadType?.let { closeRowVarsInType(it, rowVarsToClose) }

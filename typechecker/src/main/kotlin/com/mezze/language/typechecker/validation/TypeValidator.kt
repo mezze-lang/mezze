@@ -257,8 +257,8 @@ class TypeValidator(
     ): Boolean {
         if (implTypeParts.size != 1) return false
         val aliases = when {
-            concreteType is MezzeType.RecordType && concreteType.typeName == null -> findMatchingRecordTypeAliases(concreteType)
-            concreteType is MezzeType.VariantType && concreteType.typeName == null -> findMatchingVariantTypeAliases(concreteType)
+            concreteType is MezzeType.RecordType && concreteType.identity.displayNameOrNull() == null -> findMatchingRecordTypeAliases(concreteType)
+            concreteType is MezzeType.VariantType && concreteType.identity.displayNameOrNull() == null -> findMatchingVariantTypeAliases(concreteType)
             else -> return false
         }
         return impls.any { it.targetTypes.size == 1 && it.targetTypes[0] in aliases }
@@ -339,12 +339,12 @@ class TypeValidator(
         val key = System.identityHashCode(type)
         typeNameCache[key]?.let { return it }
         val result = when (type) {
-            is MezzeType.VariantType -> type.typeName ?: when {
+            is MezzeType.VariantType -> type.identity.displayNameOrNull() ?: when {
                 type.constructors.keys == setOf("True", "False") -> "Bool"
                 type.constructors.size == 1 -> type.constructors.keys.first()
                 else -> ContentHashComputer.mezzeTypeToString(type)
             }
-            is MezzeType.RecordType -> type.typeName ?: ContentHashComputer.mezzeTypeToString(type)
+            is MezzeType.RecordType -> type.identity.displayNameOrNull() ?: ContentHashComputer.mezzeTypeToString(type)
             is MezzeType.SuspendType -> getTypeNameForAbility(type.valueType)
             else -> ContentHashComputer.mezzeTypeToString(type)
         }

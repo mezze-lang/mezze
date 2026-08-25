@@ -35,7 +35,58 @@ private val expandContextBuilder = ThreadLocal.withInitial { ContextBuilder() }
 internal fun describeVariant(v: MezzeType.VariantType): String {
     val arms = v.constructors.keys.sorted().joinToString(", ")
     val armsStr = if (v.rowVar != null) "| $arms, ... |" else "| $arms |"
-    return if (v.typeName != null) "$armsStr (${v.typeName})" else armsStr
+    val name = v.identity.displayNameOrNull()
+    return if (name != null) "$armsStr ($name)" else armsStr
+}
+
+/**
+ * The verdict of comparing two nominal [TypeIdentity]s. Identity alone can give
+ * one of three answers; what a caller does with [UNDETERMINED] depends on whether
+ * the type is a TRANSPARENT alias (fall through to structural) or an OPAQUE wall
+ * (reject the mismatch). See [identityVerdict].
+ */
+internal enum class IdentityVerdict { SAME, DISTINCT, UNDETERMINED }
+
+/**
+ * Compare two nominal identities. This is the single, exhaustive identity `when`
+ * that replaces the scattered `if (hash != null && hash != null) … else name …`
+ * guesses — no null ambiguity, and a name string NEVER decides here.
+ *
+ *  - both [TypeIdentity.Declared] → SAME iff hashes equal, else DISTINCT
+ *  - both [TypeIdentity.Builtin]  → SAME iff kinds equal, else DISTINCT
+ *  - both [TypeIdentity.Anonymous] → SAME (two anonymous shapes are decided purely
+ *    structurally by the caller; identity imposes no veto)
+ *  - any mixed pair (Declared/Builtin/Anonymous in any combination) → UNDETERMINED:
+ *    identity can't prove sameness OR distinctness. The caller decides:
+ *      · transparent types (records, non-walled variant aliases) → structural unify
+ *      · opaque walls (newtype, ascriptionWall variants) → reject
+ *
+ * (Stage B derives `.identity` from the legacy name/hash, so this reproduces
+ * exactly today's behaviour; Stage C/E make it authoritative.)
+ */
+internal fun identityVerdict(id1: TypeIdentity, id2: TypeIdentity): IdentityVerdict = when {
+    id1 is TypeIdentity.Declared && id2 is TypeIdentity.Declared ->
+        if (id1.hash == id2.hash) IdentityVerdict.SAME else IdentityVerdict.DISTINCT
+    id1 is TypeIdentity.Builtin && id2 is TypeIdentity.Builtin ->
+        if (id1.kind == id2.kind) IdentityVerdict.SAME else IdentityVerdict.DISTINCT
+    id1 is TypeIdentity.Anonymous && id2 is TypeIdentity.Anonymous ->
+        IdentityVerdict.SAME
+    else -> IdentityVerdict.UNDETERMINED
+}
+
+/**
+ * True iff two identities are the SAME *concrete declaration* — both [TypeIdentity.Declared]
+ * with equal hash, or both [TypeIdentity.Builtin] with equal kind. Unlike [identityVerdict]'s
+ * SAME verdict this does NOT include two [TypeIdentity.Anonymous] (two anonymous shapes are
+ * NOT the same nominal declaration — their sameness is decided structurally, not by identity).
+ * Used where identity is an ADDITIVE match (e.g. a rename-safe alias whose name differs but
+ * declaration is the same); it must never turn two distinct-named anonymous applications into
+ * a match.
+ */
+internal fun sameDeclaredIdentity(id1: TypeIdentity, id2: TypeIdentity): Boolean = when {
+    id1 is TypeIdentity.Declared && id2 is TypeIdentity.Declared -> id1.hash == id2.hash
+    id1 is TypeIdentity.Builtin && id2 is TypeIdentity.Builtin -> id1.kind == id2.kind
+    else -> false
 }
 
 fun clearUnificationCache() {
@@ -275,14 +326,20 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
 
         type1 is MezzeType.NewtypeType && type2 is MezzeType.NewtypeType -> {
             // #278/F0: newtypes are NOMINAL, module-opaque — same type only if same
-            // DECLARATION. Key on the declaration content hash when BOTH sides carry
-            // one; a hash mismatch means distinct declarations (two modules' same-named
-            // `Token`, or a version skew) and MUST fail, even when the names match.
-            // Fall back to the bare name only when a hash is absent (builtins /
-            // pre-hash construction). Mirrors the TypeApplication hash-first fix (F8).
-            val h1 = type1.typeHash
-            val h2 = type2.typeHash
-            val sameDeclaration = if (h1 != null && h2 != null) h1 == h2 else type1.name == type2.name
+            // DECLARATION. Identity decides: two Declared newtypes are the same iff
+            // their declaration hashes match (a mismatch means two modules' same-named
+            // `Token`, or a version skew, and MUST fail even when the names match).
+            // A newtype is an OPAQUE wall. When BOTH sides carry a real declaration
+            // identity (Declared/Builtin) the identity DECIDES; otherwise (a
+            // hashless/legacy newtype → Anonymous identity) we fall back to the bare
+            // NAME — NOT to structural, and NOT treating two Anonymous newtypes as the
+            // same (distinct-named hashless `A` and `B` must still reject). Mirrors the
+            // TypeApplication hash-first fix (F8).
+            val sameDeclaration = when {
+                type1.identity is TypeIdentity.Declared && type2.identity is TypeIdentity.Declared ->
+                    sameDeclaredIdentity(type1.identity, type2.identity)
+                else -> type1.name == type2.name
+            }
             if (sameDeclaration) {
                 unify(type1.wrappedType, type2.wrappedType, registry)
             } else {
@@ -499,14 +556,14 @@ private inline fun unifyMemberPayloads(
 }
 
 private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType, registry: DeclarationRegistry): UnificationResult {
-    // Hash is authoritative for NOMINAL records: two record types that each carry a
-    // declaration content hash and those hashes DIFFER are distinct declarations and
-    // MUST NOT unify structurally, even with identical field sets. Anonymous records
-    // (typeHash == null) have no nominal identity and keep structural unification.
-    // Mirrors the TypeApplication/variant/newtype hash-veto.
-    val rh1 = rec1.typeHash
-    val rh2 = rec2.typeHash
-    if (rh1 != null && rh2 != null && rh1 != rh2) {
+    // Records are TRANSPARENT nominal types: identity vetoes ONLY when it proves the
+    // two are distinct declarations (both Declared, hashes differ) — that must not
+    // unify structurally even with identical fields. When identity can't decide
+    // (UNDETERMINED — one side is an anonymous `{…}` literal, i.e. a transparent
+    // alias meeting a bare record), we KEEP structural unification. That is what
+    // makes `type Wrapper = {n:Int}; f { x = {n=5} }` type-check. Mirrors the
+    // TypeApplication/variant hash-veto; contrast newtype, which is an opaque wall.
+    if (identityVerdict(rec1.identity, rec2.identity) == IdentityVerdict.DISTINCT) {
         return UnificationResult.Failure(
             message = "Cannot unify record types: distinct declarations (content hash differs)",
             type1 = rec1,
@@ -686,13 +743,14 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         // wall; distinct arm sets differ.
         var1.typeName == var2.typeName && var1.typeName != null
     }
-    // Hash is authoritative: two walls with distinct non-null content hashes are
-    // distinct declarations and MUST NOT unify — regardless of whether either name
-    // is in scope. Mirrors the TypeApplication/NewtypeType hash-veto (Stage 0 proved
-    // recursive self-reference threads a stable equal hash, so this never over-rejects).
-    val vh1 = var1.typeHash
-    val vh2 = var2.typeHash
-    if (vh1 != null && vh2 != null && vh1 != vh2) {
+    // Identity is authoritative: two variants whose identities are provably DISTINCT
+    // (both Declared, content hashes differ) are distinct declarations and MUST NOT
+    // unify — regardless of whether either name is in scope. Mirrors the
+    // TypeApplication/NewtypeType veto (Stage 0 proved recursive self-reference
+    // threads a stable equal hash, so this never over-rejects). UNDETERMINED (a
+    // hashless/anonymous side) is left to the name-in-scope barrier below — variants
+    // are transparent aliases unless walled.
+    if (identityVerdict(var1.identity, var2.identity) == IdentityVerdict.DISTINCT) {
         return UnificationResult.Failure(
             message = "Cannot unify ${describeVariant(var1)} with ${describeVariant(var2)} (distinct declarations — content hash differs)",
             type1 = var1,
@@ -772,20 +830,22 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
     // threads the SAME `contentHash` to every occurrence, and a suite-wide probe
     // (Stage 0) found ZERO same-name/both-hash/unequal pairs across the recursive
     // codec types — so the instability rationale is dead and the veto is safe.
-    val h1 = app1.typeHash
-    val h2 = app2.typeHash
-    if (h1 != null && h2 != null && h1 != h2) {
+    val verdict = identityVerdict(app1.identity, app2.identity)
+    if (verdict == IdentityVerdict.DISTINCT) {
         return UnificationResult.Failure(
             message = "Type constructor mismatch: ${app1.constructor} is a different declaration than ${app2.constructor} (content hash differs)",
             type1 = app1,
             type2 = app2,
         )
     }
-    // A NAME match unifies; an equal typeHash on DIFFERING names ALSO unifies
-    // (a rename-safe alias). The hash clause only ever ADDS matches here — the
-    // hash-inequality REJECT above already handled the distinct-decl case.
+    // A NAME match unifies; the SAME concrete declaration on DIFFERING names ALSO
+    // unifies (a rename-safe alias: equal Declared hash, or equal Builtin kind).
+    // Identity only ever ADDS matches here — the DISTINCT reject above already
+    // handled the distinct-declaration case. NOTE: must use sameDeclaredIdentity,
+    // NOT the SAME verdict — two Anonymous applications are NOT the same declaration
+    // (else `Wrap Int` and `Seq Int`, both hashless→Anonymous, would wrongly unify).
     val constructorsMatch = app1.constructor == app2.constructor ||
-        (h1 != null && h2 != null && h1 == h2)
+        sameDeclaredIdentity(app1.identity, app2.identity)
     if (!constructorsMatch) {
         val expanded1 = expandTypeApplicationToVariant(app1, registry)
         val expanded2 = expandTypeApplicationToVariant(app2, registry)
