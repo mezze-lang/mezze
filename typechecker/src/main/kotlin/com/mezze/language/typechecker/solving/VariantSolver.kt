@@ -483,12 +483,15 @@ internal class VariantSolver(
         }
 
         if (expectedPayloadType != null && actualPayloadType != null) {
-            val payloadTypeToUnify = if (originalConstraint?.variantType is MezzeType.TypeApplication) {
-                actualPayloadType
-            } else {
-                instantiateWithFreshVars(actualPayloadType)
-            }
-            val result = unify(payloadTypeToUnify, expectedPayloadType, registry)
+            // The variant reaching us was resolved BEFORE the solver ran — its
+            // tyvars are the ones its enclosing scope minted (a scheme instance
+            // fresh-instantiated at its call site, or the impl's own forall 'a
+            // for an inline transparent alias like `type Wrap 'a = |Wrap{v:'a}|`
+            // used as an impl target). Do not re-mint them here: fresh vars at
+            // pattern-match time would sever the payload from the tyvars every
+            // downstream constraint refers to (breaks impl-body residual harvest,
+            // e.g. `l < rv` residual `Ord 'a` needs to land on impl's own 'a).
+            val result = unify(actualPayloadType, expectedPayloadType, registry)
             return when (result) {
                 is UnificationResult.Success -> ConstraintSolver.ConstraintResult.Success(result.substitution)
                 is UnificationResult.Failure -> ConstraintSolver.ConstraintResult.Failure(
