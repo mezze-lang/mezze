@@ -16,8 +16,9 @@ object BuiltinTypes {
     const val DEQUE = "Deque"
     const val NON_EMPTY_LIST = "NonEmptyList"
     const val BYTES = "Bytes"
+    const val ITER = "Iter"
 
-    val coreTypeNames = setOf(OPTION, RESULT, LIST, MAP, SET, SEQ, SORTED_MAP, SORTED_SET, DEQUE, NON_EMPTY_LIST)
+    val coreTypeNames = setOf(OPTION, RESULT, LIST, MAP, SET, SEQ, SORTED_MAP, SORTED_SET, DEQUE, NON_EMPTY_LIST, ITER)
     val primitiveTypeNames = PrimitiveTypes.allNames
     val allBuiltinTypeNames = coreTypeNames + primitiveTypeNames
 

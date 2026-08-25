@@ -43,6 +43,7 @@ object BuiltinTypeRegistry {
         put(BuiltinTypes.SORTED_SET, ModulePath(listOf("std", "collections", "sorted_set")))
         put(BuiltinTypes.DEQUE, ModulePath(listOf("std", "collections", "deque")))
         put(BuiltinTypes.NON_EMPTY_LIST, ModulePath(listOf("std", "collections", "nonemptylist")))
+        put(BuiltinTypes.ITER, ModulePath(listOf("std", "collections", "iter")))
     }
 
     /**
