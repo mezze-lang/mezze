@@ -1098,11 +1098,16 @@ internal class AbilityChecker(
     private fun typeMatchesMezzeType(expected: MezzeType, actual: MezzeType): Boolean {
         if (expected == actual) return true
         if (expected is MezzeType.TypeApplication && actual is MezzeType.TypeApplication) {
-            // #280/F8: name match OR equal-hash match. Do NOT reject a name match on
-            // hash inequality — typeHash isn't stable across recursive self-references
-            // (would over-reject codec types like Json, see JsonCodecInterpreterTest).
+            // Hash is authoritative: when both carry a content hash and they DIFFER,
+            // these are distinct declarations and do NOT match, even by name. Mirrors
+            // the unifyTypeApplications hash-veto (Stage 0 proved recursion-stable).
+            val eh = expected.typeHash
+            val ah = actual.typeHash
+            if (eh != null && ah != null && eh != ah) return false
+            // Name match OR equal-hash match (rename-safe alias); the hash clause
+            // only ADDS matches — the hash-inequality reject above handled distinctness.
             return expected.constructor == actual.constructor ||
-                (expected.typeHash != null && actual.typeHash != null && expected.typeHash == actual.typeHash)
+                (eh != null && ah != null && eh == ah)
         }
         return false
     }

@@ -499,6 +499,21 @@ private inline fun unifyMemberPayloads(
 }
 
 private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType, registry: DeclarationRegistry): UnificationResult {
+    // Hash is authoritative for NOMINAL records: two record types that each carry a
+    // declaration content hash and those hashes DIFFER are distinct declarations and
+    // MUST NOT unify structurally, even with identical field sets. Anonymous records
+    // (typeHash == null) have no nominal identity and keep structural unification.
+    // Mirrors the TypeApplication/variant/newtype hash-veto.
+    val rh1 = rec1.typeHash
+    val rh2 = rec2.typeHash
+    if (rh1 != null && rh2 != null && rh1 != rh2) {
+        return UnificationResult.Failure(
+            message = "Cannot unify record types: distinct declarations (content hash differs)",
+            type1 = rec1,
+            type2 = rec2
+        )
+    }
+
     val fields1 = rec1.fields.keys
     val fields2 = rec2.fields.keys
 
@@ -671,7 +686,22 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         // wall; distinct arm sets differ.
         var1.typeName == var2.typeName && var1.typeName != null
     }
+    // Hash is authoritative: two walls with distinct non-null content hashes are
+    // distinct declarations and MUST NOT unify — regardless of whether either name
+    // is in scope. Mirrors the TypeApplication/NewtypeType hash-veto (Stage 0 proved
+    // recursive self-reference threads a stable equal hash, so this never over-rejects).
+    val vh1 = var1.typeHash
+    val vh2 = var2.typeHash
+    if (vh1 != null && vh2 != null && vh1 != vh2) {
+        return UnificationResult.Failure(
+            message = "Cannot unify ${describeVariant(var1)} with ${describeVariant(var2)} (distinct declarations — content hash differs)",
+            type1 = var1,
+            type2 = var2
+        )
+    }
     if (bothWalled && !identityMatch) {
+        // Hash-null (anonymous / builtin) walls fall back to the in-scope name
+        // barrier: a name has nominal force only when in scope in the caller.
         val var1NameInScope = isWalledVariant(var1, registry)
         val var2NameInScope = isWalledVariant(var2, registry)
         if (var1NameInScope || var2NameInScope) {
@@ -731,19 +761,31 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
 }
 
 private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeType.TypeApplication, registry: DeclarationRegistry): UnificationResult {
-    // #280/F8: a NAME match unifies (as before), and an equal typeHash on
-    // differing names ALSO unifies (a rename-safe alias). Note: we do NOT reject
-    // a name match whose hashes DIFFER — `typeHash` is not stable across a
-    // RECURSIVE self-reference (e.g. `type Json = | … JArray {items:[Json]} |`,
-    // where the inner and outer `Json` can carry different hashes), so a hash
-    // mismatch is not a reliable "distinct declaration" signal. The cross-module
-    // same-name collision the audit worried about is instead caught structurally
-    // by the #148 in-scope nominal barrier below (and by NewtypeType/#278 for the
-    // opaque case). Keying rejection on hash inequality here over-rejects legal
-    // recursive types — see JsonCodecInterpreterTest.
+    // Hash is the authoritative nominal identity. When BOTH sides carry a
+    // declaration content hash and those hashes DIFFER, the two are distinct
+    // declarations and MUST NOT unify — even when their names match (two modules'
+    // `Widget`, a version skew). Mirrors the NewtypeType hash-veto (#278/F0).
+    //
+    // Formerly the veto was withheld out of a fear that `typeHash` is unstable
+    // across a recursive self-reference (inner vs outer `Json` in
+    // `type Json = | … JArray {items:[Json]} |`). The post-merge stamping chain
+    // threads the SAME `contentHash` to every occurrence, and a suite-wide probe
+    // (Stage 0) found ZERO same-name/both-hash/unequal pairs across the recursive
+    // codec types — so the instability rationale is dead and the veto is safe.
+    val h1 = app1.typeHash
+    val h2 = app2.typeHash
+    if (h1 != null && h2 != null && h1 != h2) {
+        return UnificationResult.Failure(
+            message = "Type constructor mismatch: ${app1.constructor} is a different declaration than ${app2.constructor} (content hash differs)",
+            type1 = app1,
+            type2 = app2,
+        )
+    }
+    // A NAME match unifies; an equal typeHash on DIFFERING names ALSO unifies
+    // (a rename-safe alias). The hash clause only ever ADDS matches here — the
+    // hash-inequality REJECT above already handled the distinct-decl case.
     val constructorsMatch = app1.constructor == app2.constructor ||
-        (app1.typeHash != null && app2.typeHash != null && app1.typeHash == app2.typeHash)
-
+        (h1 != null && h2 != null && h1 == h2)
     if (!constructorsMatch) {
         val expanded1 = expandTypeApplicationToVariant(app1, registry)
         val expanded2 = expandTypeApplicationToVariant(app2, registry)
