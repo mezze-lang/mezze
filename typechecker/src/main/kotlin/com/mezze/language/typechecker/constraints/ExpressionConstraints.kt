@@ -686,12 +686,9 @@ class ExpressionConstraintGenerator {
         honorOpenRowVars = true,
         inlineVariantNaming = true,
         resolveTypeAlias = { name ->
-            // Transparent-alias inlining at expression-annotation sites.
-            // Returns (aliased annotation, declared type-param names) so
-            // parametric aliases can be substituted at their use sites.
             registry?.lookupType(name)?.let { decl ->
-                (decl.definition as? ParsedTypeAliasDef)?.let { alias ->
-                    alias.aliasedType to decl.typeParams
+                ContextBuilder.aliasedAnnotationForTypeDecl(decl)?.let { ann ->
+                    ann to decl.typeParams
                 }
             }
         },

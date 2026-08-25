@@ -66,9 +66,8 @@ class ConstraintGenerator(
         convertEffectAnnotations = true,
         resolveTypeAlias = { name ->
             registry.lookupType(name)?.let { decl ->
-                (decl.definition as? ParsedTypeAliasDef)?.let { alias ->
-                    alias.aliasedType to decl.typeParams
-                }
+                com.mezze.language.typechecker.context.ContextBuilder
+                    .aliasedAnnotationForTypeDecl(decl)?.let { ann -> ann to decl.typeParams }
             }
         },
     )
