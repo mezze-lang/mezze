@@ -7,12 +7,28 @@ import com.mezze.language.typedast.Hash
 
 /**
  * Content hasher for ParsedAST — computes deterministic hashes directly from
- * parsed expressions WITHOUT converting to v1 AST.
+ * parsed expressions WITHOUT converting to v1 AST. This is the AUTHORITATIVE
+ * definition-identity hash (see TypedAstBuilder: TypedLetDecl.hash = hashLetDecl).
  *
- * Same Unison-style design as TypedASTHasher:
+ * DESIGN: hash names AS-WRITTEN — deliberately NOT alpha-normalized.
+ * Mezze is call-by-name (arguments are named record fields: `f {x = .., y = ..}`),
+ * so parameter/field/constructor names are part of a definition's INTERFACE, not
+ * internal scaffolding. Renaming a param changes the API and MUST change the hash.
+ * This is the opposite of Unison, where positional args make all bound names
+ * non-semantic and safe to alpha-normalize.
+ *
+ * We do NOT normalize ANY names (not param/field/ctor names, not type-var names,
+ * not interior `let` locals). The marginal cache reuse that alpha-normalization
+ * would buy is not worth the footgun of a normalizer drawing the semantic-vs-
+ * scaffolding line wrong and silently colliding two distinct definitions. Every
+ * name difference is honestly a hash difference. (Decision: 2026-08-25.)
+ * → Do NOT "upgrade" this to the alpha-normalized TypedASTHasher for identity.
+ *
+ * Concretely hashed:
  * - Record field/param names ARE part of the hash (they're API)
  * - Variant constructor names ARE part of the hash
- * - Source locations EXCLUDED
+ * - Bound-variable / type-variable names ARE hashed as-written (no normalization)
+ * - Source locations EXCLUDED (the one thing that is not content)
  * - Each node variant has a unique tag byte
  *
  * Replaces ParsedASTHasher which converted v2→v1→ASTHasher.
