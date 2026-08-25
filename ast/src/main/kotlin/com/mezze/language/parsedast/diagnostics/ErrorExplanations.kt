@@ -167,6 +167,12 @@ fun ErrorCode.explain(): String = when (this) {
         "`{ acc, x } -> body`. Rename the parameters to match, or (when supported) alias with " +
         "`{ acc, x: myLocal } -> ...`."
 
+    ErrorCode.T0212_NOT_A_NEWTYPE ->
+        "The `.(...)` construction/destructuring syntax is only for newtypes. " +
+        "The name on the left resolved to something else — an ability, effect, variant, record, " +
+        "primitive, or was undefined. Use the syntax appropriate to that kind, or import/declare " +
+        "a newtype with that name."
+
     ErrorCode.T0301_UNBOUND_TYPE_VAR ->
         "A type variable in an annotation is not bound by any parameter. " +
         "All type variables must appear in the function's parameter types."

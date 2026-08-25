@@ -371,7 +371,7 @@ class AuditBugRegressionTest {
     @Test fun `bug271_error_path_is_a_typecheckerror_not_a_raw_throw`() {
         val m = err(
             """
-            newtype Wrapped = Wrapped Int
+            newtype Wrapped = Int
             let cmp = { a: Wrapped, b: Wrapped } -> a == b
             """
         )

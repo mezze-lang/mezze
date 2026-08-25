@@ -64,6 +64,12 @@ class ConstraintGenerator(
         honorOpenRowVars = true,
         inlineVariantNaming = true,
         convertEffectAnnotations = true,
+        resolveTypeAlias = { name ->
+            registry.lookupType(name)?.let { decl ->
+                com.mezze.language.typechecker.context.ContextBuilder
+                    .aliasedAnnotationForTypeDecl(decl)?.let { ann -> ann to decl.typeParams }
+            }
+        },
     )
 
     private val implValidator = ImplValidator(

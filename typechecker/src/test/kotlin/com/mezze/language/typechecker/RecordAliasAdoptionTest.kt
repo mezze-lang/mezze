@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.prettyPrintType
+import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -34,7 +35,7 @@ class RecordAliasAdoptionTest {
 
     private fun typeOf(name: String, b: String): String? {
         val r = tc.typeCheck(parser.parseParsedModule(b.trimIndent(), "t.mz"), Paths.get("."), enablePrelude = true)
-        return r.getVariableType(name)?.let { prettyPrintType(it) }
+        return r.getVariableType(name)?.let { prettyPrintTypeWithAliases(it, tc.getTypeAliases()) }
     }
     private fun err(b: String): String? =
         try { tc.typeCheck(parser.parseParsedModule(b.trimIndent(), "t.mz"), Paths.get("."), enablePrelude = true); null }
@@ -121,7 +122,7 @@ class RecordAliasAdoptionTest {
             pub let x = { name = "M", released = False }
         """)
         val r = tc.typeCheck(parser.parseParsedModule(Files.readString(dir.resolve("user.mz")), "user.mz"), dir)
-        assertEquals("Lang", r.getVariableType("x")?.let { prettyPrintType(it) },
+        assertEquals("Lang", r.getVariableType("x")?.let { prettyPrintTypeWithAliases(it, tc.getTypeAliases()) },
             "an imported alias should be adopted")
     }
 

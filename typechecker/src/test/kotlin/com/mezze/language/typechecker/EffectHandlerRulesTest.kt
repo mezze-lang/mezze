@@ -248,10 +248,11 @@ class EffectHandlerRulesTest {
         }
     }
 
+    // V0508: perform on a purely-typed body errors — the handler could never
+    // fire. Only the wrong-handler case (body performs A, handler B) was
+    // relaxed to a runtime no-op by #274.
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0508 — perform on pure body is a runtime no-op, not an error.")
-    fun `test perform on pure function should fail`() {
-        // Define effect and impl inline instead of using stdlib imports
+    fun `test perform on pure function is rejected`() {
         val source = """
             effect Log where {
               info: { msg: Str } -> {} <Log>
@@ -266,16 +267,16 @@ class EffectHandlerRulesTest {
             perform Console in pureFunction { x = 5 }
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-
-        assertThrows<TypeCheckError>("Should fail: Console handles Log effect, but pureFunction doesn't use Log") {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        assertThrows<TypeCheckError> {
+            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
     }
 
+    // #274: a handler for an effect the body doesn't perform is a runtime
+    // no-op. The Log op suspends (becomes MezzeSuspend) because no matching
+    // handler is in the current chain; it doesn't fail typecheck.
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0509/V0510 — wrong-effect handler is a runtime no-op.")
-    fun `test wrong effect handler should fail`() {
+    fun `test wrong effect handler is accepted as runtime no-op`() {
         val source = """
             effect Log where {
               info: { msg: Str } -> {} <Log>
@@ -298,11 +299,7 @@ class EffectHandlerRulesTest {
             perform PostgresDB in logMessage { text = "test" }
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-
-        assertThrows<TypeCheckError>("Should fail: PostgresDB handles Database, not Log") {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
+        typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
     }
 
     @Test

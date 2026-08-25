@@ -86,13 +86,17 @@ class TypeValidator(
             }
         }
         for (decl in module.decls) {
-            val expr = when (decl) {
-                is ParsedLetDecl -> decl.value
-                is ParsedTopLevelExpr -> decl.expression
-                else -> null
-            } ?: continue
+            val (expr, currentDeclName) = when (decl) {
+                is ParsedLetDecl -> {
+                    val name = if (decl.isSimpleBinding) decl.variableName else null
+                    decl.value to name
+                }
+                is ParsedTopLevelExpr -> decl.expression to null
+                else -> null to null
+            }
+            if (expr == null) continue
             errors.addAll(performValidator.validatePerformExpressionsInExpression(expr, implDeclarations, effectDeclarations, parsedFunctionDefs))
-            errors.addAll(matchValidator.validateParsedMatchesInExpr(expr, substitution, constraintResults))
+            errors.addAll(matchValidator.validateParsedMatchesInExpr(expr, substitution, constraintResults, currentDeclName))
         }
 
         return if (errors.isEmpty()) {
@@ -356,7 +360,14 @@ class TypeValidator(
         val parsedAnnotation = decl.typeAnnotation ?: return emptyList()
         if (!decl.isSimpleBinding) return emptyList()
         val inferredType = constraintResults[decl.variableName]?.type ?: return emptyList()
-        val annotatedType = try { TypeAnnotationConverter.convert(parsedAnnotation) } catch (_: Exception) { return emptyList() }
+        val annotatedType = try {
+            TypeAnnotationConverter.convert(parsedAnnotation, resolveTypeAlias = { name ->
+                registry.lookupType(name)?.let { d ->
+                    com.mezze.language.typechecker.context.ContextBuilder
+                        .aliasedAnnotationForTypeDecl(d)?.let { ann -> ann to d.typeParams }
+                }
+            })
+        } catch (_: Exception) { return emptyList() }
         val finalType = substitution.apply(inferredType)
         if (!alphaEquivalent(annotatedType, finalType, mutableMapOf())) {
             return listOf(ValidationError.AnnotationMismatch(
@@ -454,11 +465,16 @@ class TypeValidator(
         type1 is MezzeType.RecordType && type2 is MezzeType.RecordType ->
             type1.fields.keys == type2.fields.keys &&
             type1.fields.all { (k, v) -> alphaEquivalent(v, type2.fields[k]!!, mapping) }
+        // Variant subtyping: the annotated variant (type1) may declare MORE
+        // arms than the inferred body (type2) uses — the body just happens to
+        // return a narrow subset. Every arm the body USES must exist in the
+        // annotation with an alphaEquivalent payload. This is Mezze's Bool
+        // model: `let x : Bool = True` — True (one arm) satisfies Bool (two).
         type1 is MezzeType.VariantType && type2 is MezzeType.VariantType ->
-            type1.constructors.keys == type2.constructors.keys &&
-            type1.constructors.all { (k, v) ->
-                val v2 = type2.constructors[k]
-                (v == null && v2 == null) || (v != null && v2 != null && alphaEquivalent(v, v2, mapping))
+            type2.constructors.keys.all { k -> k in type1.constructors.keys } &&
+            type2.constructors.all { (k, v) ->
+                val v1 = type1.constructors[k]
+                (v == null && v1 == null) || (v != null && v1 != null && alphaEquivalent(v1, v, mapping))
             }
         type1 is MezzeType.TypeApplication && type2 is MezzeType.TypeApplication ->
             type1.constructor == type2.constructor && type1.args.size == type2.args.size &&
@@ -514,6 +530,7 @@ class TypeValidator(
 
     private fun validateLetPattern(pattern: ParsedPattern, scrutineeType: MezzeType): List<ValidationError> = when (pattern) {
         is ParsedRecordPattern -> validateRecordPattern(pattern, scrutineeType)
+        is ParsedNewtypePattern -> validateLetPattern(pattern.inner, scrutineeType)
         else -> emptyList()
     }
 
@@ -555,6 +572,7 @@ class TypeValidator(
                 for (case in expr.cases) { recurse(case.body); case.guard?.let { recurse(it) } }
             }
             is ParsedVariantConstruct -> expr.value?.let { recurse(it) }
+            is ParsedNewtypeConstruct -> recurse(expr.value)
             is ParsedMemberAccess -> recurse(expr.receiver)
             is ParsedSeqLit -> expr.elements.forEach { when (it) {
                 is ParsedSeqElement.Regular -> recurse(it.expr)

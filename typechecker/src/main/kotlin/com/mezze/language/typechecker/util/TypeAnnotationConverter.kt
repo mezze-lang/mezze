@@ -25,6 +25,18 @@ object TypeAnnotationConverter {
         val typeParamSubst: Map<String, MezzeType>? = null,
         val convertEffectAnnotations: Boolean = false,
         val stripTickFromTypeVars: Boolean = false,
+        /**
+         * Transparent-alias resolver. Given a type name, returns the aliased
+         * `ParsedTypeAnnotation` PLUS the alias's declared type parameter
+         * names iff the name refers to a `type X 'a ... = ...` declaration
+         * (NOT a `newtype`, NOT a record/variant alias). The converter
+         * inlines the aliased annotation at every use site — with type-var
+         * substitution when the alias was declared with parameters — so
+         * `MyInt` and `Int`, or `Wrap Int` and `Seq Int`, unify without the
+         * solver ever seeing the alias label. Return `null` for anything
+         * that isn't a transparent alias.
+         */
+        val resolveTypeAlias: (String) -> Pair<ParsedTypeAnnotation, List<String>>? = { null },
     )
 
     fun convertWith(
@@ -33,16 +45,17 @@ object TypeAnnotationConverter {
         typeVarCache: MutableMap<String, TypeVar> = mutableMapOf(),
         sharedRowVar: SharedRowVar = SharedRowVar()
     ): MezzeType {
-        return convertInternal(annotation, config, typeVarCache, sharedRowVar)
+        return convertInternal(annotation, config, typeVarCache, sharedRowVar, mutableSetOf())
     }
 
     private fun convertInternal(
         annotation: ParsedTypeAnnotation,
         config: ConversionConfig,
         typeVarCache: MutableMap<String, TypeVar>,
-        sharedRowVar: SharedRowVar
+        sharedRowVar: SharedRowVar,
+        recursionGuard: MutableSet<String>,
     ): MezzeType {
-        fun recurse(ann: ParsedTypeAnnotation) = convertInternal(ann, config, typeVarCache, sharedRowVar)
+        fun recurse(ann: ParsedTypeAnnotation) = convertInternal(ann, config, typeVarCache, sharedRowVar, recursionGuard)
 
         return when (annotation) {
             is ParsedNamedType -> {
@@ -56,6 +69,21 @@ object TypeAnnotationConverter {
                     val typeVar = typeVarCache.getOrPut(varName) { TypeVar.freshWithName(varName) }
                     MezzeType.VarType(typeVar)
                 } else {
+                    // Transparent alias inlining. Recursive aliases fall
+                    // through to labeled TypeApp so the recursion terminates.
+                    // Stamp the alias's own nominal identity (name + hash) on
+                    // the resolved shape so unification and error messages can
+                    // key on the decl's identity. `ascriptionWall` is CLEARED:
+                    // the wall is an author-written ascription concern, not a
+                    // decl one.
+                    if (name !in recursionGuard) {
+                        config.resolveTypeAlias(name)?.let { (aliased, _) ->
+                            recursionGuard.add(name)
+                            try {
+                                return withAliasIdentity(recurse(aliased), name, config.resolveTypeHash(name), emptyList())
+                            } finally { recursionGuard.remove(name) }
+                        }
+                    }
                     WellKnownTypeApp.of(name, emptyList(), config.resolveTypeHash(name))
                 }
             }
@@ -121,17 +149,43 @@ object TypeAnnotationConverter {
             }
 
             is ParsedVariantType -> {
+                // An author-written closed inline variant (`{c: |Red, Green|}`)
+                // is a hard wall — reject foreign ctors regardless of scope.
+                // That's what `ascriptionWall=true` tracks. Author-written OPEN
+                // variants (`|Red, Green, ...|`) are structural, no wall.
+                // `typeName` stays null: anonymous inline variants have no
+                // nominal identity to display; the printer renders their
+                // arm-set literally.
+                val isClosedInlineWall = config.inlineVariantNaming && !annotation.isOpen
                 MezzeType.VariantType(
                     constructors = annotation.constructors.associate { ctor ->
                         ctor.name to ctor.dataType?.let { recurse(it) }
                     },
                     rowVar = if (config.honorOpenRowVars && annotation.isOpen) RowVar.userOpen() else null,
-                    typeName = if (config.inlineVariantNaming && !annotation.isOpen) "<inline>" else null,
-                    nominalWall = config.inlineVariantNaming && !annotation.isOpen
+                    typeName = null,
+                    ascriptionWall = isClosedInlineWall,
                 )
             }
 
             is ParsedTypeApp -> {
+                // Parametric transparent alias with cycle-guard.
+                if (annotation.constructor !in recursionGuard) {
+                    config.resolveTypeAlias(annotation.constructor)?.let { (aliased, paramNames) ->
+                        val convertedArgs = annotation.args.map { recurse(it) }
+                        val substituted = paramNames.zip(convertedArgs).toMap()
+                        val extendedSubst = (config.typeParamSubst ?: emptyMap()) + substituted +
+                            substituted.mapKeys { "'" + it.key.removePrefix("'") }
+                        val extendedConfig = config.copy(typeParamSubst = extendedSubst)
+                        recursionGuard.add(annotation.constructor)
+                        try {
+                            return withAliasIdentity(
+                                convertInternal(aliased, extendedConfig, typeVarCache, sharedRowVar, recursionGuard),
+                                annotation.constructor, config.resolveTypeHash(annotation.constructor),
+                                convertedArgs,
+                            )
+                        } finally { recursionGuard.remove(annotation.constructor) }
+                    }
+                }
                 val args = annotation.args.map { recurse(it) }
                 if (config.resolveCollectionTypes) {
                     resolveWellKnownTypeApp(annotation.constructor, args, config.resolveTypeHash(annotation.constructor))
@@ -163,11 +217,21 @@ object TypeAnnotationConverter {
         annotation: ParsedTypeAnnotation,
         faithful: Boolean = true,
         includeAbilityConstraints: Boolean = true,
-        typeVarCache: MutableMap<String, TypeVar>? = null
+        typeVarCache: MutableMap<String, TypeVar>? = null,
+        resolveTypeAlias: (String) -> Pair<ParsedTypeAnnotation, List<String>>? = { null },
+        recursionGuard: MutableSet<String> = mutableSetOf(),
     ): MezzeType {
         return when (annotation) {
             is ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
+                if (annotation.name !in recursionGuard) {
+                    resolveTypeAlias(annotation.name)?.let { (aliased, _) ->
+                        recursionGuard.add(annotation.name)
+                        try {
+                            return convert(aliased, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard)
+                        } finally { recursionGuard.remove(annotation.name) }
+                    }
+                }
                 if (faithful) {
                     MezzeType.VarType(
                         if (typeVarCache != null) {
@@ -189,7 +253,7 @@ object TypeAnnotationConverter {
                     annotation.abilityConstraints.map { c ->
                         MezzeType.FunctionAbilityConstraint(
                             abilityName = c.abilityName,
-                            typeArgs = c.typeArgs.map { convert(it, faithful, includeAbilityConstraints, typeVarCache) },
+                            typeArgs = c.typeArgs.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard) },
                             abilityHash = WellKnownHashConstants.resolveAbilityHash(c.abilityName)
                         )
                     }
@@ -197,23 +261,23 @@ object TypeAnnotationConverter {
                     emptyList()
                 }
                 MezzeType.FunctionType(
-                    paramType = convert(annotation.paramType, faithful, includeAbilityConstraints, typeVarCache),
-                    returnType = convert(annotation.returnType, faithful, includeAbilityConstraints, typeVarCache),
+                    paramType = convert(annotation.paramType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard),
+                    returnType = convert(annotation.returnType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard),
                     effects = effectRow,
                     abilityConstraints = abilityConstraints
                 )
             }
             is ParsedRecordType -> {
                 MezzeType.RecordType(annotation.entries.associate { e ->
-                    e.name to convert(e.type, faithful, includeAbilityConstraints, typeVarCache)
+                    e.name to convert(e.type, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard)
                 })
             }
-            is ParsedSeqType -> MezzeType.SeqType(convert(annotation.elementType, faithful, includeAbilityConstraints, typeVarCache))
+            is ParsedSeqType -> MezzeType.SeqType(convert(annotation.elementType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard))
             is ParsedVariantType -> {
                 if (faithful) {
                     MezzeType.VariantType(
                         constructors = annotation.constructors.associate {
-                            it.name to it.dataType?.let { dt -> convert(dt, faithful, includeAbilityConstraints, typeVarCache) }
+                            it.name to it.dataType?.let { dt -> convert(dt, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard) }
                         },
                         rowVar = null
                     )
@@ -222,10 +286,21 @@ object TypeAnnotationConverter {
                 }
             }
             is ParsedTypeApp -> {
+                // Parametric transparent alias with cycle-guard.
+                if (annotation.constructor !in recursionGuard) {
+                    resolveTypeAlias(annotation.constructor)?.let { (aliased, paramNames) ->
+                        val subst = paramNames.zip(annotation.args).toMap()
+                        val rewritten = substituteTypeVarsInAnnotation(aliased, subst)
+                        recursionGuard.add(annotation.constructor)
+                        try {
+                            return convert(rewritten, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard)
+                        } finally { recursionGuard.remove(annotation.constructor) }
+                    }
+                }
                 if (faithful) {
                     MezzeType.TypeApplication(
                         annotation.constructor,
-                        annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache) }
+                        annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard) }
                     )
                 } else {
                     MezzeType.VarType(TypeVar.fresh())
@@ -449,5 +524,71 @@ object TypeAnnotationConverter {
         is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
         is MezzeType.BytesType, is MezzeType.ByteBufferType,
         is MezzeType.CharType -> type
+    }
+
+    /**
+     * Substitute type variables in a ParsedTypeAnnotation. Used by the
+     * parametric-alias path in [convert]: given `type Wrap 'a = Seq 'a`
+     * used as `Wrap Int`, we rewrite the aliased annotation `Seq 'a` to
+     * `Seq Int` by substituting `'a → Int`, then recurse into the plain
+     * converter. Keeps the substitution parsed-AST-only so downstream
+     * conversion semantics are unaffected.
+     */
+    private fun substituteTypeVarsInAnnotation(
+        annotation: ParsedTypeAnnotation,
+        subst: Map<String, ParsedTypeAnnotation>
+    ): ParsedTypeAnnotation {
+        if (subst.isEmpty()) return annotation
+        fun rec(a: ParsedTypeAnnotation): ParsedTypeAnnotation = when (a) {
+            is ParsedNamedType -> {
+                // Type-var names come with or without the leading tick in
+                // different code paths — check both.
+                val stripped = a.name.removePrefix("'")
+                subst[a.name] ?: subst[stripped] ?: subst["'$stripped"] ?: a
+            }
+            is ParsedTypeApp -> a.copy(args = a.args.map { rec(it) })
+            is ParsedRecordType -> a.copy(entries = a.entries.map { it.copy(type = rec(it.type)) })
+            is ParsedVariantType -> a.copy(constructors = a.constructors.map { c ->
+                c.copy(dataType = c.dataType?.let { rec(it) })
+            })
+            is ParsedFunctionType -> a.copy(
+                paramType = rec(a.paramType),
+                returnType = rec(a.returnType),
+            )
+            is ParsedSeqType -> a.copy(elementType = rec(a.elementType))
+            is ParsedEffectRow -> a
+            is ParsedQualifiedType -> a.copy(args = a.args.map { rec(it) })
+        }
+        return rec(annotation)
+    }
+
+    /**
+     * When `type X = <shape>` is inlined at a use site, stamp X's own nominal
+     * identity (name + content hash + type-arg vector for parametric aliases)
+     * on the resolved variant/record. `ascriptionWall` is CLEARED — the wall
+     * is an author-written-ascription concern, not something a decl brings.
+     * Non-shape carriers (Int, Function, TypeApplication, Seq, …) pass
+     * through unchanged: they either don't need labeling (primitives) or
+     * already carry their own identity slot.
+     */
+    private fun withAliasIdentity(
+        resolved: MezzeType,
+        aliasName: String,
+        aliasHash: Hash?,
+        typeArgs: List<MezzeType>,
+    ): MezzeType {
+        return when (resolved) {
+            is MezzeType.VariantType -> resolved.copy(
+                typeName = aliasName,
+                typeHash = aliasHash ?: resolved.typeHash,
+                typeArgs = typeArgs,
+                ascriptionWall = false,
+            )
+            is MezzeType.RecordType -> resolved.copy(
+                typeName = aliasName,
+                typeHash = aliasHash ?: resolved.typeHash,
+            )
+            else -> resolved
+        }
     }
 }

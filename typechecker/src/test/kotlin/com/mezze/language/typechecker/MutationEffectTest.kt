@@ -803,9 +803,10 @@ class MutationEffectTest {
         }
     }
 
+    // #274: a performer that handles a different effect than the body's
+    // perform is a runtime no-op — the op suspends and routes up the chain.
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0509 — wrong-performer-for-effect is a runtime no-op.")
-    fun `test wrong performer type causes error`() {
+    fun `test wrong performer type is accepted as runtime no-op`() {
         val source = """
             effect Mut where {
                 mutate: {} -> {}
@@ -819,14 +820,10 @@ class MutationEffectTest {
                 other = {} -> {}
             }
 
-            # Using wrong performer for Mutation should fail
             let test = {} -> perform OtherPerformer in Mut.mutate {}
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-        assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
+        typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
     }
 
     @Test
@@ -1147,17 +1144,17 @@ class MutationEffectTest {
             use std::effects::mutation::{Mut, LocalMut, MutInt, int_to_mut, read_int, incr}
 
             # User-defined newtype wrapping a record with a mutable field
-            newtype Counter = Counter { count: MutInt }
+            newtype Counter = { count: MutInt }
 
             # Construct using record field names directly
-            let make_counter = {n} -> Counter {count = int_to_mut {n = n}}
+            let make_counter = {n} -> Counter.({count = int_to_mut {n = n}})
 
             # Unwrap with match
             let get = {c: Counter} -> match c is
-                Counter {count = m} -> read_int {n = m}
+                Counter.({count = m}) -> read_int {n = m}
 
             let tick = {c: Counter} -> match c is
-                Counter {count = m} -> incr {n = m, delta = 1}
+                Counter.({count = m}) -> incr {n = m, delta = 1}
 
             let test = {} -> perform LocalMut in do
                 let c = make_counter {n = 0}
@@ -1178,15 +1175,15 @@ class MutationEffectTest {
             use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_to_mut, seq_to_immut, sort}
 
             # User-defined buffer newtype wrapping a record
-            newtype Buffer 'a = Buffer { data: MutSeq 'a }
+            newtype Buffer 'a = { data: MutSeq 'a }
 
-            let make_buffer = {xs} -> Buffer {data = seq_to_mut {seq = xs}}
+            let make_buffer = {xs} -> Buffer.({ data = seq_to_mut {seq = xs} })
 
             let freeze = {buf: Buffer Int} -> match buf is
-                Buffer {data = s} -> seq_to_immut {seq = s}
+                Buffer.({ data = s }) -> seq_to_immut {seq = s}
 
             let sort_buffer = {buf: Buffer Int} -> match buf is
-                Buffer {data = s} -> sort {seq = s}
+                Buffer.({ data = s }) -> sort {seq = s}
 
             let test = {} -> perform LocalMut in do
                 let buf = make_buffer {xs = [3, 1, 2]}

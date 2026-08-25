@@ -37,13 +37,13 @@ class NewtypeProbeTest {
         // Basic: define newtype, construct, use in function signature.
         run("Q1a. basic construct + use (positional)",
             """
-            pub newtype UserId = UserId Str
+            pub newtype UserId = Str
             pub let take = { u: UserId } -> 42
-            pub let f = {} -> take { u = UserId { val = "abc" } }
+            pub let f = {} -> take { u = UserId.("abc") }
             """)
         run("Q1b. newtype-over-record construct",
             """
-            pub newtype Point = Point { x: Int, y: Int }
+            pub newtype Point = { x: Int, y: Int }
             pub let make = {} -> Point { x = 1, y = 2 }
             """)
     }
@@ -52,13 +52,13 @@ class NewtypeProbeTest {
     fun `Q2_impl_Eq_for_newtype`() {
         run("Q2. impl Eq for UserId",
             """
-            pub newtype UserId = UserId Str
+            pub newtype UserId = Str
             impl Eq for UserId where {
               eq  = { it, r } -> __native_str_eq { l = it, r = r },
               neq = { it, r } -> if __native_str_eq { l = it, r = r } then False else True,
             }
-            pub let a : UserId = UserId { val = "u1" }
-            pub let b : UserId = UserId { val = "u2" }
+            pub let a : UserId = UserId.("u1")
+            pub let b : UserId = UserId.("u2")
             pub let f = {} -> a == b
             """)
     }
@@ -67,7 +67,7 @@ class NewtypeProbeTest {
     fun `Q3_bare_str_rejected_as_UserId`() {
         run("Q3. bare Str where UserId expected — should REJECT",
             """
-            pub newtype UserId = UserId Str
+            pub newtype UserId = Str
             pub let take = { u: UserId } -> 42
             pub let f = {} -> take { u = "just a string" }
             """)
@@ -83,7 +83,7 @@ class NewtypeProbeTest {
         // Q4a: __native_str_eq with UserId directly — user code REJECTS (native access)
         run("Q4a. user code, native str op on UserId — REJECTS (native inaccessible)",
             """
-            pub newtype UserId = UserId Str
+            pub newtype UserId = Str
             pub let equal = { a: UserId, b: UserId } -> __native_str_eq { l = a, r = b }
             """)
 
@@ -91,14 +91,14 @@ class NewtypeProbeTest {
         run("Q4b. str::size on UserId — should REJECT",
             """
             use std::str
-            pub newtype UserId = UserId Str
+            pub newtype UserId = Str
             pub let f = { u: UserId } -> str::size { s = u }
             """)
 
         // Q4c: PASSING UserId where Str expected in a plain fn — should reject.
         run("Q4c. plain fn taking Str, given UserId — should REJECT",
             """
-            pub newtype UserId = UserId Str
+            pub newtype UserId = Str
             pub let take_str = { s: Str } -> 1
             pub let f = { u: UserId } -> take_str { s = u }
             """)
@@ -106,10 +106,10 @@ class NewtypeProbeTest {
         // Q4d: user code with pattern-match then native — REJECTS on native access.
         run("Q4d. user code, pattern-match unwrap then native — REJECTS (native inaccessible)",
             """
-            pub newtype UserId = UserId Str
+            pub newtype UserId = Str
             pub let equal = { a: UserId, b: UserId } ->
-              match a is UserId { val = x } ->
-                match b is UserId { val = y } ->
+              match a is UserId.(x) ->
+                match b is UserId.(y) ->
                   __native_str_eq { l = x, r = y }
             """)
 
@@ -123,7 +123,7 @@ class NewtypeProbeTest {
         //      (also would have leaked opacity but that's moot now).
         run("Q4f. user code, __native_str_eq with UserIds — REJECTS (native inaccessible)",
             """
-            pub newtype UserId = UserId Str
+            pub newtype UserId = Str
             pub let f = { a: UserId, b: UserId } -> __native_str_eq { l = a, r = b }
             """)
 
@@ -139,8 +139,8 @@ class NewtypeProbeTest {
         // Actually two decls in ONE module — but same name should collide anyway.
         run("Q5. duplicate newtype names — same shape",
             """
-            pub newtype Id = Id Str
-            pub newtype Id = Id Str
+            pub newtype Id = Str
+            pub newtype Id = Str
             """)
     }
 
@@ -160,8 +160,8 @@ class NewtypeProbeTest {
         // Does an ability method on a newtype receiver resolve?
         run("Q7. .to_dbg_str on newtype (auto-derived Inspect)",
             """
-            pub newtype UserId = UserId Str
-            pub let a : UserId = UserId { val = "u1" }
+            pub newtype UserId = Str
+            pub let a : UserId = UserId.("u1")
             pub let s = a.to_dbg_str {}
             """)
     }

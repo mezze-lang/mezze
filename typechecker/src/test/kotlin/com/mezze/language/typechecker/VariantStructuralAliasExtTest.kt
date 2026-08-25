@@ -303,8 +303,8 @@ class VariantStructuralAliasExtTest {
     @Test
     fun `newtype stays nominal across module boundary`() {
         writeModule("id_lib", """
-            pub newtype UserId = UserId Int
-            pub let make : { n: Int } -> UserId = { n } -> UserId { val = n }
+            pub newtype UserId = Int
+            pub let make : { n: Int } -> UserId = { n } -> UserId.(n)
         """)
         val main = """
             use id_lib::{ make }
@@ -444,7 +444,7 @@ class VariantStructuralAliasExtTest {
     // =====================================================================
     // Inferred row closure: function inferred to take a closed variant from
     // its match should reject foreign arms at call site, even when the alias
-    // is not in scope. (#148: nominalWall persists through Substitution.)
+    // is not in scope. (#148: ascriptionWall persists through Substitution.)
     // =====================================================================
     @Test
     fun `inferred closed variant rejects foreign arm at call site`() {
@@ -493,24 +493,11 @@ class VariantStructuralAliasExtTest {
         }
     }
 
-    // =====================================================================
-    // Documents a CURRENT LIMITATION: when a match's inner pattern walls
-    // create an `<inferred>`-tagged variant, that wall fires even against
-    // an out-of-scope alias whose extras would otherwise unify structurally.
-    //
-    // i.e., match { Some { val = X } -> ...; Some { val = ExtraArm } -> ... }
-    // pins the inner variant to `<inferred>`, blocking extras even when the
-    // scrutinee's actual type is an alias from another module.
-    //
-    // The "correct" behavior under #148: the inferred wall should defer to
-    // the structural-demotion of the call's return type. Tracking as a
-    // follow-up; marked @Disabled for now.
-    // A match arm whose constructor is NOT in the scrutinee's value type
-    // is dead code and should fail typecheck — even when the scrutinee's
-    // type came from an out-of-scope alias that demoted structurally.
-    //
-    // The alias still has a bounded arm set. The match arm extending that
-    // set beyond what the value can produce is a user bug we want to catch.
+    // A match arm whose constructor is NOT in the scrutinee's value type is
+    // dead code and must fail typecheck. The scrutinee's alias identity flows
+    // with the value from the decl side — `lookup` returns `Option OptErr`,
+    // so `Some { val = <ctor> }` must have `<ctor>` in OptErr's arm set,
+    // whether or not the caller imported OptErr by name.
     @Test
     fun `dead pattern arm beyond value's arm set is rejected`() {
         writeModule("opt_err", """

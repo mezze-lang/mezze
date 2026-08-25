@@ -129,12 +129,36 @@ data class ParsedVariantCtorDef(
 )
 
 /**
- * Newtype definition: `newtype UserId Wrap Int`
+ * Newtype definition: `newtype UserId = Int`. The constructor name always
+ * equals the type name — the parser rejects the old-syntax
+ * `newtype UserId = UserId Int` form. Runtime treats the newtype as fully
+ * erased; only the typechecker sees the nominal wall.
  */
 @Serializable
 data class ParsedNewtypeDef(
     val constructor: String,
     val wrappedType: ParsedTypeAnnotation,
+    override val loc: Loc
+) : ParsedTypeDef
+
+/**
+ * True type alias: `type MyInt = Int`, `type Ids = Seq Int`.
+ *
+ * TRANSPARENT: `MyInt` and `Int` are fully interchangeable at every use site.
+ * Ability impls of the aliased type apply automatically. Functions typed as
+ * `MyInt` accept any `Int`, and vice versa.
+ *
+ * If you want a distinct nominal type (Int and UserId are NOT interchangeable),
+ * use `newtype` instead.
+ *
+ * Record aliases (`type Point = { x: Int, y: Int }`) and variant aliases
+ * (`type Color = | Red, Green |`) are ParsedRecordDef / ParsedVariantDef —
+ * they carry their own structural info. This case is ONLY for RHS that isn't
+ * a record or variant.
+ */
+@Serializable
+data class ParsedTypeAliasDef(
+    val aliasedType: ParsedTypeAnnotation,
     override val loc: Loc
 ) : ParsedTypeDef
 

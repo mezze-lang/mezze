@@ -244,7 +244,7 @@ data class Substitution(
                     typeName = type.typeName,
                     typeArgs = type.typeArgs.map { applyWithVisited(it, visitedVars, chainCache) },
                     typeHash = type.typeHash,
-                    nominalWall = type.nominalWall
+                    ascriptionWall = type.ascriptionWall
                 )
             }
 
@@ -428,7 +428,7 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
             typeName = type.typeName,
             typeArgs = type.typeArgs.map { closeGeneratedRowVars(it, mustBeOpenRowVars) },
             typeHash = type.typeHash,
-            nominalWall = type.nominalWall
+            ascriptionWall = type.ascriptionWall
         )
     }
     is MezzeType.FunctionType -> MezzeType.FunctionType(

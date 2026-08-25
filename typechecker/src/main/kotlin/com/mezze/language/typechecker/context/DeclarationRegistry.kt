@@ -40,6 +40,20 @@ class DeclarationRegistry(
     val allAbilityDecls: Collection<ParsedAbilityDecl> get() = abilitiesByName.values
     val allEffectDecls: Collection<ParsedEffectDecl> get() = effectsByName.values
 
+    /**
+     * Every loaded type decl — import-scoped names PLUS transitive types
+     * reachable via hash (auto-imported through a returned/parameter type
+     * without an explicit `use`). Used when a constructor name in a pattern
+     * needs to resolve to its declaring type even though the alias isn't
+     * imported at this call site: the value's type identity flows with it,
+     * so `NoneFound` in `match lookup{} is Some { val = NoneFound }` should
+     * find `OptErr` even without `use opt_err::{OptErr}`.
+     */
+    val allTypeDeclsIncludingTransitive: Collection<ParsedTypeDecl> get() =
+        (typesByName.values.asSequence() + typesByHash.values.asSequence())
+            .distinctBy { it.contentHash ?: it.name }
+            .toList()
+
     // Expose string-keyed maps for callers that still need them directly
     val typeDeclarations: Map<String, ParsedTypeDecl> get() = typesByName
     val abilityDeclarations: Map<String, ParsedAbilityDecl> get() = abilitiesByName

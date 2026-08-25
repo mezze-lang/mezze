@@ -147,12 +147,15 @@ class PrettyPrinter {
         if (decl.visibility == Visibility.PUBLIC) append("pub ")
         when (val def = decl.definition) {
             is ParsedNewtypeDef -> {
+                // The parser sets constructor == decl.name, so the old
+                // formatter form `newtype X = X <wrappedType>` double-printed
+                // the name whenever wrappedType was a bare `ParsedTypeApp(X, …)`
+                // (old syntax `newtype UserId = UserId Int`). New syntax is
+                // `newtype X = <wrappedType>` — just print the wrapped type.
                 append("newtype ")
                 append(decl.name)
                 printTypeParams(decl.typeParams)
                 append(" = ")
-                append(def.constructor)
-                append(" ")
                 printTypeAnnotation(def.wrappedType)
             }
             else -> {
@@ -178,6 +181,7 @@ class PrettyPrinter {
             is ParsedRecordDef -> printRecordDef(def)
             is ParsedVariantDef -> printVariantDef(def)
             is ParsedNewtypeDef -> { /* handled in printTypeDecl */ }
+            is ParsedTypeAliasDef -> printTypeAnnotation(def.aliasedType)
         }
     }
 
@@ -502,6 +506,7 @@ class PrettyPrinter {
             is ParsedSeqLit -> printSeqLit(expr)
             is ParsedMemberAccess -> { printExpr(expr.receiver); append("."); append(expr.member) }
             is ParsedVariantConstruct -> printVariantConstruct(expr)
+            is ParsedNewtypeConstruct -> { append(expr.typeName); append(".("); printExpr(expr.value); append(")") }
             is ParsedLambda -> printLambda(expr)
             is ParsedFunctionCall -> printFunctionCall(expr)
             is ParsedBinaryOp -> printBinaryOp(expr)
@@ -918,6 +923,7 @@ class PrettyPrinter {
                 append(pattern.constructor)
                 pattern.payload?.let { append(" "); printPattern(it) }
             }
+            is ParsedNewtypePattern -> { append(pattern.typeName); append(".("); printPattern(pattern.inner); append(")") }
             is ParsedRecordPattern -> printRecordPattern(pattern)
             is ParsedLiteralPattern -> printLiteralValue(pattern.value)
             is ParsedSeqPattern -> printSeqPattern(pattern)

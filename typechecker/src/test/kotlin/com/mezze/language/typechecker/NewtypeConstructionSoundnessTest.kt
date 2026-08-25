@@ -7,7 +7,7 @@ import java.nio.file.Paths
 
 /**
  * #209: a newtype constructor must enforce its declared wrapped TYPE at the
- * CONSTRUCTION site — `Meters { val = "boom" }` on `newtype Meters = Meters Int`
+ * CONSTRUCTION site — `Meters.("boom")` on `newtype Meters = Int`
  * used to type-check (the payload validation only ran for `ParsedVariantDef`,
  * never `ParsedNewtypeDef`). Two agents converged on this. Fixed: newtype
  * construction now pins each field to its declared type. The scalar-wrapper field
@@ -24,32 +24,32 @@ class NewtypeConstructionSoundnessTest {
         catch (e: TypeCheckError) { e.message }
 
     @Test fun `scalar newtype rejects a wrong-typed wrapped value`() {
-        assertNotNull(err("newtype Meters = Meters Int\nlet a = Meters { val = \"boom\" }"),
+        assertNotNull(err("newtype Meters = Int\nlet a = Meters.(\"boom\")"),
             "Str into a `Meters Int` must be rejected")
     }
     @Test fun `scalar newtype accepts either val or value as the field name`() {
         // The codebase uses both spellings; only the wrapped TYPE is enforced.
-        assertNull(err("newtype Meters = Meters Int\nlet a = Meters { val = 5 }"))
-        assertNull(err("newtype Meters = Meters Int\nlet a = Meters { value = 5 }"))
+        assertNull(err("newtype Meters = Int\nlet a = Meters.(5)"))
+        assertNull(err("newtype Meters = Int\nlet a = Meters.(5)"))
     }
     @Test fun `scalar newtype rejects a wrong-typed value under the value spelling`() {
-        assertNotNull(err("newtype Meters = Meters Int\nlet a = Meters { value = \"boom\" }"),
+        assertNotNull(err("newtype Meters = Int\nlet a = Meters.(\"boom\")"),
             "wrong wrapped type must be rejected regardless of the field spelling")
     }
     @Test fun `record newtype rejects a wrong-typed field`() {
-        assertNotNull(err("newtype Point = Point { x: Int, y: Int }\nlet p = Point { x = \"no\", y = 2 }"))
+        assertNotNull(err("newtype Point = { x: Int, y: Int }\nlet p = Point.({ x = \"no\", y = 2 })"))
     }
     @Test fun `correct scalar newtype is accepted`() {
-        assertNull(err("newtype Meters = Meters Int\nlet a = Meters { val = 5 }"))
+        assertNull(err("newtype Meters = Int\nlet a = Meters.(5)"))
     }
     @Test fun `correct record newtype is accepted`() {
-        assertNull(err("newtype Point = Point { x: Int, y: Int }\nlet p = Point { x = 1, y = 2 }"))
+        assertNull(err("newtype Point = { x: Int, y: Int }\nlet p = Point.({ x = 1, y = 2 })"))
     }
     @Test fun `generic newtype accepts any element type`() {
-        assertNull(err("newtype Box 'a = Box 'a\nlet a = Box { val = 5 }"))
-        assertNull(err("newtype Box 'a = Box 'a\nlet a = Box { val = \"hi\" }"))
+        assertNull(err("newtype Box 'a = 'a\nlet a = Box.(5)"))
+        assertNull(err("newtype Box 'a = 'a\nlet a = Box.(\"hi\")"))
     }
     @Test fun `a constructed newtype round-trips through its own type`() {
-        assertNull(err("newtype Meters = Meters Int\nlet f = { m: Meters } -> m\nlet g = {} -> f { m = Meters { val = 5 } }"))
+        assertNull(err("newtype Meters = Int\nlet f = { m: Meters } -> m\nlet g = {} -> f { m = Meters.(5) }"))
     }
 }

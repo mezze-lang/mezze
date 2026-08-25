@@ -236,14 +236,14 @@ class AbilityAssociatedTypeTest {
         // `impl … for Money` — TypeAnnotationMatcher.typeMatchesDeclaration was
         // missing the ParsedNewtypeDef case.)
         val e = err("""
-            newtype Money = Money Int
+            newtype Money = Int
             ability ScaleMoney 'b for 'a having 'out where {
               times: { it: 'a, by: 'b } -> 'out
             }
             impl ScaleMoney Int for Money having 'out = Money where {
-              times = { it, by } -> match it is Money { val } -> Money { val = val }
+              times = { it, by } -> match it is Money.(val) -> Money.(val)
             }
-            pub let g = {} -> (Money { val = 5 }).times { by = 3 }
+            pub let g = {} -> (Money.(5)).times { by = 3 }
         """.trimIndent())
         assertNull(e, "a bare Money literal receiver must dispatch the multi-param ability, got: $e")
     }

@@ -55,7 +55,7 @@ class TypeNameUppercaseTest {
         // A newtype `money = money Int` fails on either the name or the ctor —
         // both must be uppercase.
         val e = err("""
-            newtype money = money Int
+            newtype money = Int
             let z = 5
         """)
         assertNotNull(e, "lowercase newtype must be rejected")
@@ -93,7 +93,7 @@ class TypeNameUppercaseTest {
     @Test
     fun `uppercase newtype is accepted`() {
         assertNull(err("""
-            newtype Money = Money Int
+            newtype Money = Int
             let z = 5
         """))
     }

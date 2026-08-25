@@ -10,7 +10,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test simple newtype with primitive type`() {
-        val source = "newtype Email = Email String"
+        val source = "newtype Email = String"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -30,7 +30,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test public newtype`() {
-        val source = "pub newtype UserId = UserId Int"
+        val source = "pub newtype UserId = Int"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -48,7 +48,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with record type`() {
-        val source = "newtype Point = Point { x: Float, y: Float }"
+        val source = "newtype Point = { x: Float, y: Float }"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -69,7 +69,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with type parameter`() {
-        val source = "newtype Option 'a = Option 'a"
+        val source = "newtype Option 'a = 'a"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -87,7 +87,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with multiple type parameters`() {
-        val source = "newtype Pair 'a 'b = Pair { first: 'a, second: 'b }"
+        val source = "newtype Pair 'a 'b = { first: 'a, second: 'b }"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -106,7 +106,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with function type`() {
-        val source = "newtype Handler = Handler { x: Int } -> String"
+        val source = "newtype Handler = { x: Int } -> String"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -126,7 +126,7 @@ class NewtypeParserTest {
     fun `test newtype with multiline formatting`() {
         val source = """
             newtype Email =
-                Email String
+                String
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -145,9 +145,9 @@ class NewtypeParserTest {
     @Test
     fun `test multiple newtype declarations`() {
         val source = """
-            newtype Email = Email String
-            newtype UserId = UserId Int
-            newtype Name = Name String
+            newtype Email = String
+            newtype UserId = Int
+            newtype Name = String
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -168,7 +168,7 @@ class NewtypeParserTest {
 
     @Test
     fun `test newtype with Array type`() {
-        val source = "newtype Names = Names [String]"
+        val source = "newtype Names = [String]"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
@@ -185,25 +185,45 @@ class NewtypeParserTest {
     }
 
     @Test
-    fun `test newtype constructor different from type name`() {
-        val source = "newtype EmailAddress = MkEmail String"
+    fun `test newtype rejects OLD redundant-constructor form with rename hint`() {
+        // Old-syntax `newtype UserId = UserId Int` must be rejected — modern
+        // syntax is `newtype UserId = Int`.
+        val ex = try {
+            parser.parseParsedModule("newtype UserId = UserId Int")
+            null
+        } catch (e: Exception) { e }
+        assertNotNull(ex, "old-syntax `newtype UserId = UserId Int` must be rejected")
+        val msg = ex!!.message ?: ""
+        assertTrue(msg.contains("no longer accepted"),
+            "error should say the syntax is deprecated; got: $msg")
+        assertTrue(msg.contains("UserId"),
+            "error should name the offending type; got: $msg")
+    }
+
+    @Test
+    fun `test newtype constructor always equals type name`() {
+        // Modern syntax: `newtype UserId = Int`. The constructor name is
+        // ALWAYS the type name — the old form `newtype UserId = UserId Int`
+        // with the leading repeat is rejected by the parser, and any other
+        // leading name (`newtype UserId = MkUser Int`) parses the RHS as a
+        // type application, not as a differing constructor.
+        val source = "newtype UserId = Int"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
         assertEquals(1, module.decls.size)
 
         val typeDecl = module.decls[0] as ParsedTypeDecl
-        assertEquals("EmailAddress", typeDecl.name)
+        assertEquals("UserId", typeDecl.name)
 
         val newtypeDef = typeDecl.definition as ParsedNewtypeDef
-        assertEquals("MkEmail", newtypeDef.constructor)
-
-        println("✅ Newtype with different constructor name parsed successfully!")
+        assertEquals("UserId", newtypeDef.constructor,
+            "Newtype constructor name must always equal the type declaration name")
     }
 
     @Test
     fun `test newtype with effects in wrapped type`() {
-        val source = "newtype Action = Action { } -> {} <Log>"
+        val source = "newtype Action = { } -> {} <Log>"
 
         val module = parser.parseParsedModule(source)
         assertNotNull(module)

@@ -44,6 +44,38 @@ object TypeAnnotationMatcher {
                 }
             }
             is ParsedTypeApp -> {
+                // Transparent-alias bridge: `impl for Wrap 'a` where the
+                // receiver was resolved through a transparent alias to a bare
+                // RecordType or a nameless VariantType. Reconstruct the alias's
+                // aliased annotation with type-args substituted and re-match.
+                // Per project invariant: keyed on decl identity (looked up via
+                // the alias's canonical name in typeDecls), never on string-
+                // matching of type names in the concrete side.
+                val aliasedDecl = typeDeclarations[annotation.constructor]
+                if (aliasedDecl != null && annotation.args.size == aliasedDecl.typeParams.size) {
+                    val aliasedAnnotation: ParsedTypeAnnotation? = when (type) {
+                        is MezzeType.RecordType -> (aliasedDecl.definition as? ParsedRecordDef)?.let { d ->
+                            ParsedRecordType(
+                                entries = d.fields.map { ParsedRecordTypeEntry(it.name, it.type, it.loc) },
+                                isOpen = d.isOpen, loc = d.loc,
+                            )
+                        }
+                        is MezzeType.VariantType -> if (type.typeName == null || type.typeName == aliasedDecl.name) {
+                            (aliasedDecl.definition as? ParsedVariantDef)?.let { d ->
+                                ParsedVariantType(
+                                    constructors = d.constructors.map { c -> ParsedVariantTypeCtor(c.name, c.dataType, c.loc) },
+                                    isOpen = d.isOpen, loc = d.loc,
+                                )
+                            }
+                        } else null
+                        else -> null
+                    }
+                    if (aliasedAnnotation != null) {
+                        val substitutions = aliasedDecl.typeParams.zip(annotation.args).toMap()
+                        val instantiated = substituteTypeAppArgsInAnnotation(aliasedAnnotation, substitutions)
+                        if (typeMatchesAnnotation(type, instantiated, typeDeclarations, typeVars, typeVarBindings)) return true
+                    }
+                }
                 when {
                     type is MezzeType.TypeApplication && type.constructor == annotation.constructor -> {
                         type.args.size == annotation.args.size &&
@@ -155,6 +187,21 @@ object TypeAnnotationMatcher {
             typeDecl.typeParams.map { typeArgMap[it] ?: return null }
         } else {
             null
+        }
+    }
+
+    private fun substituteTypeAppArgsInAnnotation(
+        annotation: ParsedTypeAnnotation,
+        substitutions: Map<String, ParsedTypeAnnotation>
+    ): ParsedTypeAnnotation {
+        return when (annotation) {
+            is ParsedNamedType -> substitutions[annotation.name] ?: substitutions[annotation.name.removePrefix("'")] ?: substitutions["'" + annotation.name.removePrefix("'")] ?: annotation
+            is ParsedTypeApp -> annotation.copy(args = annotation.args.map { substituteTypeAppArgsInAnnotation(it, substitutions) })
+            is ParsedRecordType -> annotation.copy(entries = annotation.entries.map { it.copy(type = substituteTypeAppArgsInAnnotation(it.type, substitutions)) })
+            is ParsedVariantType -> annotation.copy(constructors = annotation.constructors.map { c -> c.copy(dataType = c.dataType?.let { substituteTypeAppArgsInAnnotation(it, substitutions) }) })
+            is ParsedSeqType -> annotation.copy(elementType = substituteTypeAppArgsInAnnotation(annotation.elementType, substitutions))
+            is ParsedFunctionType -> annotation.copy(paramType = substituteTypeAppArgsInAnnotation(annotation.paramType, substitutions), returnType = substituteTypeAppArgsInAnnotation(annotation.returnType, substitutions))
+            is ParsedQualifiedType -> annotation
         }
     }
 

@@ -192,7 +192,7 @@ class PreludeGenericAbilitiesTest {
             """
             use std::option::{ Somable }
 
-            newtype UserId = UserId Int
+            newtype UserId = Int
 
             impl Somable for UserId where {
               some = { it } -> None,

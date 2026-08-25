@@ -67,6 +67,7 @@ class ExpressionConstraintGenerator {
         is ParsedRecordLit -> generateRecordLiteral(expr, context)
         is ParsedMemberAccess -> generateMemberAccess(expr, context)
         is ParsedVariantConstruct -> generateVariantConstruction(expr, context)
+        is ParsedNewtypeConstruct -> generateNewtypeConstruction(expr, context)
         is ParsedLambda -> generateLambda(expr, context)
         is ParsedFunctionCall -> generateFunctionCall(expr, context)
         is ParsedIf -> generateMatch(expr.toMatchExpr(), context)
@@ -373,7 +374,7 @@ class ExpressionConstraintGenerator {
                 typeName = type.typeName,
                 typeArgs = type.typeArgs.map { applyTypeVarSubstitution(it, substitution) },
                 typeHash = type.typeHash,
-                nominalWall = type.nominalWall
+                ascriptionWall = type.ascriptionWall
             )
             is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = applyTypeVarSubstitution(type.elementType, substitution)
@@ -684,6 +685,13 @@ class ExpressionConstraintGenerator {
         resolveCollectionTypes = true,
         honorOpenRowVars = true,
         inlineVariantNaming = true,
+        resolveTypeAlias = { name ->
+            registry?.lookupType(name)?.let { decl ->
+                ContextBuilder.aliasedAnnotationForTypeDecl(decl)?.let { ann ->
+                    ann to decl.typeParams
+                }
+            }
+        },
     )
 
     internal fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {

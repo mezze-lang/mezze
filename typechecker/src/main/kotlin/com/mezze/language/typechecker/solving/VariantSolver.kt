@@ -24,7 +24,12 @@ internal class VariantSolver(
 
     private fun buildConstructorIndex(): Map<String, List<Pair<ParsedTypeDecl, ParsedVariantDef>>> {
         val index = mutableMapOf<String, MutableList<Pair<ParsedTypeDecl, ParsedVariantDef>>>()
-        for (typeDecl in registry.allTypeDecls) {
+        // Include transitive / auto-imported type decls too: a value's type
+        // identity flows with it from the decl side, so `NoneFound` inside a
+        // pattern must find `OptErr`'s decl even if the caller never wrote
+        // `use opt_err::{OptErr}`. Import controls what the user can NAME in
+        // annotations, not what the values' types ARE.
+        for (typeDecl in registry.allTypeDeclsIncludingTransitive) {
             val definition = typeDecl.definition
             if (definition is ParsedVariantDef) {
                 for (constructor in definition.constructors) {
@@ -460,7 +465,7 @@ internal class VariantSolver(
 
             val inScope = inScopeAliasNamesForSolverOrNull()
             val name = variantType.typeName
-            val nameInScope = variantType.nominalWall ||
+            val nameInScope = variantType.ascriptionWall ||
                 (name != null && (inScope == null || name in inScope))
             if (!nameInScope) {
                 val extendedVariant = MezzeType.VariantType(
@@ -483,12 +488,15 @@ internal class VariantSolver(
         }
 
         if (expectedPayloadType != null && actualPayloadType != null) {
-            val payloadTypeToUnify = if (originalConstraint?.variantType is MezzeType.TypeApplication) {
-                actualPayloadType
-            } else {
-                instantiateWithFreshVars(actualPayloadType)
-            }
-            val result = unify(payloadTypeToUnify, expectedPayloadType, registry)
+            // The variant reaching us was resolved BEFORE the solver ran — its
+            // tyvars are the ones its enclosing scope minted (a scheme instance
+            // fresh-instantiated at its call site, or the impl's own forall 'a
+            // for an inline transparent alias like `type Wrap 'a = |Wrap{v:'a}|`
+            // used as an impl target). Do not re-mint them here: fresh vars at
+            // pattern-match time would sever the payload from the tyvars every
+            // downstream constraint refers to (breaks impl-body residual harvest,
+            // e.g. `l < rv` residual `Ord 'a` needs to land on impl's own 'a).
+            val result = unify(actualPayloadType, expectedPayloadType, registry)
             return when (result) {
                 is UnificationResult.Success -> ConstraintSolver.ConstraintResult.Success(result.substitution)
                 is UnificationResult.Failure -> ConstraintSolver.ConstraintResult.Failure(
@@ -566,14 +574,18 @@ internal class VariantSolver(
         return when (type) {
             is MezzeType.VariantType -> {
                 val shouldClose = type.rowVar != null && type.rowVar in rowVarsToClose
+                // Pinning an inferred anonymous open variant to closed shape
+                // makes it act as a wall for downstream match/ascription
+                // constraints — set ascriptionWall=true. Do NOT invent a synthetic
+                // typeName: it's still anonymous, printed by its arm set.
                 val pinningInferred = shouldClose && type.typeName == null
                 MezzeType.VariantType(
                     constructors = type.constructors.mapValues { (_, payloadType) ->
                         payloadType?.let { closeRowVarsInType(it, rowVarsToClose) }
                     },
                     rowVar = if (shouldClose) null else type.rowVar,
-                    typeName = if (pinningInferred) "<inferred>" else type.typeName,
-                    nominalWall = type.nominalWall || pinningInferred
+                    typeName = type.typeName,
+                    ascriptionWall = type.ascriptionWall || pinningInferred
                 )
             }
             is MezzeType.RecordType -> {

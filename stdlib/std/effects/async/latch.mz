@@ -3,7 +3,7 @@ use std::effects::async::{ Async, park }
 use std::int
 
 ## One-shot countdown barrier that releases waiting threads when count reaches zero.
-pub newtype Latch = Latch __NativeLatch
+pub newtype Latch = __NativeLatch
 
 impl Eq for Latch where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },

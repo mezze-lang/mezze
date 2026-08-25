@@ -18,10 +18,15 @@ import kotlin.test.assertNotNull
  */
 class OpenRecordTypeAliasTest {
 
+    // Keep the TypeChecker instance around so tests can query typeAliases
+    // for alias-aware printing.
+    private var lastTc: TypeChecker? = null
+
     private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val parser = MezzeParser()
         val parsedModule = parser.parseParsedModule(code, "test.mz")
         val typeChecker = TypeChecker()
+        lastTc = typeChecker
         return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
@@ -33,7 +38,10 @@ class OpenRecordTypeAliasTest {
         val result = parseAndTypeCheck(code)
         val actualType = getVariableType(result, variableName)
         assertNotNull(actualType, "Variable '$variableName' not found")
-        assertEquals(expectedType, prettyPrintType(actualType))
+        // Use alias-aware printer: the stored type after `type X = { … }`
+        // transparency is structural, but the display layer still surfaces
+        // the in-scope alias name when the shape matches.
+        assertEquals(expectedType, prettyPrintTypeWithAliases(actualType, lastTc!!.getTypeAliases()))
     }
 
     private fun assertTypeChecks(code: String) {

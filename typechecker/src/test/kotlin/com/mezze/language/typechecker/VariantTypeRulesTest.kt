@@ -158,8 +158,8 @@ class VariantTypeRulesTest {
 
     @Test
     fun `C2 - inline closed variant rejects unknown constructor`() {
-        // Inline variant annotations now have synthetic typeName "<inline>" set,
-        // so the unification code validates constructors properly.
+        // Inline closed variant annotations carry `ascriptionWall=true`, so
+        // unification rejects foreign constructors.
         val code = """
             let y: | Red, Blue | = Green
         """.trimIndent()
@@ -303,8 +303,8 @@ class VariantTypeRulesTest {
 
     @Test
     fun `E3b - function with inferred closed type rejects unknown constructor`() {
-        // Inferred closed variants now have synthetic typeName "<inferred>" set,
-        // so the unification code validates constructors properly.
+        // Inferred closed variants (row-var pin-closed by the match scrutinee)
+        // carry `ascriptionWall=true`, so unification rejects foreign ctors.
         val code = """
             let f = { c } -> match c is
                 Red -> 1

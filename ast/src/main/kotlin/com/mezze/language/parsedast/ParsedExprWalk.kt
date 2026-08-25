@@ -36,6 +36,7 @@ fun ParsedExpr.children(): List<ParsedExpr> = when (this) {
     }
     is ParsedMemberAccess -> listOf(receiver)
     is ParsedVariantConstruct -> listOfNotNull(value)
+    is ParsedNewtypeConstruct -> listOf(value)
     is ParsedLambda -> listOf(body)
     is ParsedFunctionCall -> listOf(function, arguments)
     is ParsedBinaryOp -> listOf(left, right)

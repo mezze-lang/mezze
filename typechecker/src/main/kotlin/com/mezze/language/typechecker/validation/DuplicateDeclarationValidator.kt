@@ -208,27 +208,35 @@ object DuplicateDeclarationValidator {
                         recordShapeToType[shapeKey] = typeDecl.name
                     }
                 }
+                is ParsedNewtypeDef -> { /* handled separately in validateNewtypeConstructors */ }
+                is ParsedTypeAliasDef -> { /* transparent alias — no ctors/fields to dup-check */ }
             }
         }
     }
 
         private fun validateNewtypeConstructors(module: ParsedModule) {
-        for (typeDecl in module.decls.filterIsInstance<ParsedTypeDecl>()) {
-            // Every TYPE NAME (alias/record/variant/newtype) must start with an
-            // uppercase letter — types live in the type namespace and are written
-            // capitalised everywhere they're used. Newtypes already enforced this
-            // on their CONSTRUCTOR below; this closes the gap where `type lang =
-            // …` (or a lowercase record/variant/newtype name) was silently
-            // accepted.
-            val typeName = typeDecl.name
-            if (typeName.isNotEmpty() && !typeName.first().isUpperCase()) {
+        // Uppercase-first rule for ALL type-namespace names: types, newtypes,
+        // abilities, effects, and variant constructors. Types are always
+        // written capitalised at their use sites, so a lowercase decl name
+        // means the value never resolves against a type slot and produces a
+        // confusing "Unknown type '<name>'" downstream. Reject at decl time
+        // with a rename hint.
+        fun requireUppercase(kind: String, name: String, loc: com.mezze.language.parsedast.Loc) {
+            if (name.isEmpty()) return
+            if (!name.first().isUpperCase()) {
+                val capitalised = name.replaceFirstChar { it.uppercase() }
+                // Context: what and why. Direction: exact rename to apply.
                 throw TypeCheckError(
-                    "Type name '$typeName' must start with an uppercase letter",
-                    typeDecl.loc,
+                    "$kind '$name' must start with an uppercase letter — types, abilities, effects, and variant constructors are always capitalised. Rename to '$capitalised'.",
+                    loc,
                     code = ErrorCode.V0707_CONSTRUCTOR_MUST_BE_UPPERCASE,
-                    hints = listOf("rename to `${typeName.replaceFirstChar { it.uppercase() }}`"),
+                    hints = listOf("rename `$name` to `$capitalised`"),
                 )
             }
+        }
+
+        for (typeDecl in module.decls.filterIsInstance<ParsedTypeDecl>()) {
+            requireUppercase("Type", typeDecl.name, typeDecl.loc)
 
             val definition = typeDecl.definition
             if (definition is ParsedNewtypeDef) {
@@ -252,6 +260,20 @@ object DuplicateDeclarationValidator {
                     )
                 }
             }
+
+            if (definition is ParsedVariantDef) {
+                for (ctor in definition.constructors) {
+                    requireUppercase("Variant constructor", ctor.name, ctor.loc)
+                }
+            }
+        }
+
+        for (abilityDecl in module.decls.filterIsInstance<ParsedAbilityDecl>()) {
+            requireUppercase("Ability", abilityDecl.name, abilityDecl.loc)
+        }
+
+        for (effectDecl in module.decls.filterIsInstance<ParsedEffectDecl>()) {
+            requireUppercase("Effect", effectDecl.name, effectDecl.loc)
         }
     }
 
@@ -338,6 +360,7 @@ object DuplicateDeclarationValidator {
         }
         is ParsedRecordDef -> definition.fields.flatMap { collectTypeVariablesFromParsedAnnotation(it.type) }
         is ParsedNewtypeDef -> collectTypeVariablesFromParsedAnnotation(definition.wrappedType)
+        is ParsedTypeAliasDef -> collectTypeVariablesFromParsedAnnotation(definition.aliasedType)
     }
 
     private fun collectTypeVariablesFromParsedAnnotation(annotation: ParsedTypeAnnotation): List<Pair<String, Loc?>> = when (annotation) {

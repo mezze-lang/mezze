@@ -306,6 +306,7 @@ class ContextBuilder {
                 collectTypeVariables(constructorType, typeVars)
                 result = result.extendPoly(definition.constructor, TypeScheme(typeVars.toList(), emptyList(), constructorType))
             }
+            is ParsedTypeAliasDef -> { /* transparent alias — no constructor to bind */ }
         }
         return result
     }
@@ -322,6 +323,7 @@ class ContextBuilder {
                         }
                         is ParsedRecordDef -> emptyMap()
                         is ParsedNewtypeDef -> emptyMap()
+                        is ParsedTypeAliasDef -> emptyMap()
                     }
                     MezzeType.VariantType(
                         constructors = constructors, rowVar = null,
@@ -750,8 +752,15 @@ class ContextBuilder {
             }.toMap()
         },
         resolveCollectionTypes = true,
-        honorOpenRowVars = false,
+        honorOpenRowVars = true,
         stripTickFromTypeVars = true,
+        resolveTypeAlias = { name ->
+            // Transparent alias inlining for `type X = <anything>`. Fires for
+            // every RHS shape of a `type` decl. `newtype` stays labelled.
+            currentTypeDecls[name]?.let { decl ->
+                aliasedAnnotationForTypeDecl(decl)?.let { ann -> ann to decl.typeParams }
+            }
+        },
     )
 
     fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
@@ -796,6 +805,28 @@ class ContextBuilder {
     }
 
     companion object {
+        /**
+         * `type X = <shape>` → parsed annotation for the RHS shape.
+         * Newtypes and built-ins return null.
+         */
+        fun aliasedAnnotationForTypeDecl(decl: ParsedTypeDecl): ParsedTypeAnnotation? {
+            if (decl.loc.file == "<builtin>") return null
+            return when (val def = decl.definition) {
+                is ParsedTypeAliasDef -> def.aliasedType
+                is ParsedRecordDef -> ParsedRecordType(
+                    entries = def.fields.map { f -> ParsedRecordTypeEntry(f.name, f.type, f.loc) },
+                    isOpen = def.isOpen,
+                    loc = def.loc,
+                )
+                is ParsedVariantDef -> ParsedVariantType(
+                    constructors = def.constructors.map { c -> ParsedVariantTypeCtor(c.name, c.dataType, c.loc) },
+                    isOpen = def.isOpen,
+                    loc = def.loc,
+                )
+                is ParsedNewtypeDef -> null
+            }
+        }
+
         fun validateHermeticEffects(
             effects: Set<String>,
             effectHashes: Map<String, Hash> = emptyMap(),

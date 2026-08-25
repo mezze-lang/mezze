@@ -41,13 +41,13 @@ type Color = | Red, Green, Blue |
 type Option 'a = | Some { val: 'a }, None |
 
 # === newtype wrapper
-newtype Email = Email String
+newtype Email = String
 
 # === newtype with record payload
-newtype Handler = Handler { x: Int } -> String
+newtype Handler = { x: Int } -> String
 
 # === newtype generic
-newtype Option 'a = Option 'a
+newtype MyOption 'a = 'a
 
 # === whole-module import
 use std::int

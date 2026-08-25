@@ -294,7 +294,7 @@ class CrossModuleImplFieldItMismatchTest {
         assertNotNull(reqType)
         assertNotNull(respType)
         assertNotNull(statusType)
-        val respStr = respType?.let { prettyPrintType(it) } ?: ""
+        val respStr = respType?.let { prettyPrintTypeWithAliases(it, typeChecker.getTypeAliases()) } ?: ""
         assertTrue(respStr.contains("Resp") && respStr.contains("Err"),
             "resp should be Result Resp Err, got $respStr")
     }

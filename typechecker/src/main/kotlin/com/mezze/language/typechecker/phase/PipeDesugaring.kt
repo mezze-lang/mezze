@@ -146,6 +146,7 @@ private fun replaceParsedPlaceholder(expr: ParsedExpr, replacement: ParsedExpr):
         }
     })
     is ParsedVariantConstruct -> expr.copy(value = expr.value?.let { replaceParsedPlaceholder(it, replacement) })
+    is ParsedNewtypeConstruct -> expr.copy(value = replaceParsedPlaceholder(expr.value, replacement))
     is ParsedPerform -> expr.copy(body = replaceParsedPlaceholder(expr.body, replacement))
     is ParsedEffectCall -> expr.copy(arguments = replaceParsedPlaceholder(expr.arguments, replacement))
     is ParsedStringLit -> expr.copy(parts = expr.parts.map { part ->

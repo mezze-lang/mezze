@@ -29,7 +29,7 @@ class NewtypeDerivingTest {
     @Test
     fun `test newtype without Eq cannot use equality`() {
         val source = """
-            newtype UserId = UserId Int
+            newtype UserId = Int
             let compare = {a: UserId, b: UserId} -> a == b
         """.trimIndent()
 
@@ -42,7 +42,7 @@ class NewtypeDerivingTest {
     @Test
     fun `test newtype without Ord cannot use ordering`() {
         val source = """
-            newtype UserId = UserId Int
+            newtype UserId = Int
             let order = {a: UserId, b: UserId} -> a < b
         """.trimIndent()
 
@@ -55,7 +55,7 @@ class NewtypeDerivingTest {
     @Test
     fun `test newtype Inspect always works`() {
         val source = """
-            newtype Email = Email String
+            newtype Email = Str
             let show = {e: Email} -> e.to_dbg_str {}
         """.trimIndent()
 

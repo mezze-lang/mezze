@@ -26,6 +26,18 @@ private val unificationCache = ThreadLocal.withInitial {
 // thread-safe and unification runs concurrently.
 private val expandContextBuilder = ThreadLocal.withInitial { ContextBuilder() }
 
+/**
+ * Describe a variant type for a user-facing error message. Gives both the
+ * alias name (when the variant carries one — anchors the error to the decl
+ * the user reads in their code) AND the arm set (concrete info to reason
+ * about). Anonymous variants render as their arm set alone.
+ */
+internal fun describeVariant(v: MezzeType.VariantType): String {
+    val arms = v.constructors.keys.sorted().joinToString(", ")
+    val armsStr = if (v.rowVar != null) "| $arms, ... |" else "| $arms |"
+    return if (v.typeName != null) "$armsStr (${v.typeName})" else armsStr
+}
+
 fun clearUnificationCache() {
     unificationCache.get().clear()
 }
@@ -131,7 +143,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         }
         type1 is MezzeType.RecordType && type2 is MezzeType.VariantType -> {
             if (type2.constructors.size == 1 && type2.rowVar == null &&
-                !type2.nominalWall && !isVariantNameInScope(type2, registry)) {
+                !type2.ascriptionWall && !isWalledVariant(type2, registry)) {
                 val (_, payloadType) = type2.constructors.entries.first()
                 if (payloadType != null) {
                     return unify(type1, payloadType, registry)
@@ -145,7 +157,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         }
         type1 is MezzeType.VariantType && type2 is MezzeType.RecordType -> {
             if (type1.constructors.size == 1 && type1.rowVar == null &&
-                !type1.nominalWall && !isVariantNameInScope(type1, registry)) {
+                !type1.ascriptionWall && !isWalledVariant(type1, registry)) {
                 val (_, payloadType) = type1.constructors.entries.first()
                 if (payloadType != null) {
                     return unify(payloadType, type2, registry)
@@ -552,12 +564,15 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
     )
 }
 
-// #148: nominal wall if nominalWall=true or typeName is in caller's in-scope set.
-private fun isVariantNameInScope(
+// A variant acts as a hard wall (foreign ctors reject) when either the user
+// wrote an ascription-shaped construct (ascriptionWall) OR the alias name is
+// in the caller's import set. Kept as `isWalledVariant` for its
+// remaining callers; the returned bool is really "should this variant wall".
+private fun isWalledVariant(
     v: MezzeType.VariantType,
     registry: DeclarationRegistry
 ): Boolean {
-    if (v.nominalWall) return true
+    if (v.ascriptionWall) return true
     val name = v.typeName ?: return false
     val override = inScopeAliasNamesOverride.get()
     return if (override != null) override.contains(name)
@@ -611,23 +626,17 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         val closedCtors = closedVar.constructors.keys
         val openCtors = openVar.constructors.keys
 
-        // inline/inferred placeholder via #148's nominalWall flag), check that ALL
-        // constructors in the open variant exist in the closed variant. This is what
-        // prevents `Yellow` from unifying with `Color = | Red, Green, Blue |` when
-        // Color is declared/imported here.
-        if (isVariantNameInScope(closedVar, registry)) {
+        // When the closed side is a wall (ascriptionWall OR an in-scope alias),
+        // the open side's ctors must be a subset of the closed side's arm set —
+        // otherwise the open side is trying to add a foreign ctor to a wall.
+        // Prevents `Yellow` from unifying with `Color = | Red, Green, Blue |`
+        // when Color is imported (or when the closed side is a hard ascription).
+        if (isWalledVariant(closedVar, registry)) {
             val invalidConstructors = openCtors - closedCtors
             if (invalidConstructors.isNotEmpty()) {
-                val available = closedCtors.sorted().joinToString(", ")
                 val invalid = invalidConstructors.sorted().joinToString(", ")
-                val typeDesc = when (closedVar.typeName) {
-                    "<inline>" -> "inline variant type '| $available |'"
-                    "<inferred>" -> "inferred variant type '| $available |'"
-                    else -> "type '${closedVar.typeName}'"
-                }
                 return UnificationResult.Failure(
-                    message = "Constructor(s) '$invalid' not found in $typeDesc. " +
-                              "Available constructors: $available",
+                    message = "Constructor(s) '$invalid' not found in ${describeVariant(closedVar)}.",
                     type1 = var1,
                     type2 = var2
                 )
@@ -649,16 +658,22 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     // acts as a nominal wall only when its name is reachable by the caller (declared locally
     // or imported by name). When a value crosses a module boundary with an alias-typed shape
     // and the caller didn't import the alias, the name has no nominal force here.
-    val bothNamed = (var1.typeHash != null && var2.typeHash != null) ||
-                    (var1.typeName != null && var2.typeName != null)
-    val namesMatch = if (var1.typeHash != null && var2.typeHash != null) {
+    // A variant is "walled" if it carries a decl identity (name/hash) OR the
+    // author-written / inferred ascriptionWall marker. Both are hard walls under
+    // unification's disjoint-arms rule; only two walls with SAME arms unify.
+    val walled1 = var1.typeHash != null || var1.typeName != null || var1.ascriptionWall
+    val walled2 = var2.typeHash != null || var2.typeName != null || var2.ascriptionWall
+    val bothWalled = walled1 && walled2
+    val identityMatch = if (var1.typeHash != null && var2.typeHash != null) {
         var1.typeHash == var2.typeHash
     } else {
-        var1.typeName == var2.typeName
+        // Anonymous walls (no name, no hash) with equal arm sets are the same
+        // wall; distinct arm sets differ.
+        var1.typeName == var2.typeName && var1.typeName != null
     }
-    if (bothNamed && !namesMatch) {
-        val var1NameInScope = isVariantNameInScope(var1, registry)
-        val var2NameInScope = isVariantNameInScope(var2, registry)
+    if (bothWalled && !identityMatch) {
+        val var1NameInScope = isWalledVariant(var1, registry)
+        val var2NameInScope = isWalledVariant(var2, registry)
         if (var1NameInScope || var2NameInScope) {
             // #149: when both walls happen to constrain to the SAME arm set,
             // unify successfully (their nominal identities are interchangeable
@@ -666,7 +681,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
             val sameArms = var1.constructors.keys == var2.constructors.keys
             if (!sameArms) {
                 return UnificationResult.Failure(
-                    message = "Cannot unify different variant types '${var1.typeName}' and '${var2.typeName}'",
+                    message = "Cannot unify ${describeVariant(var1)} with ${describeVariant(var2)}",
                     type1 = var1,
                     type2 = var2
                 )
@@ -674,28 +689,21 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         }
     }
 
-    // scope (#148). Otherwise the "declared" side acts purely as a structural arm set.
-    val isDeclared1 = var1.typeHash != null || var1.typeName != null
-    val isDeclared2 = var2.typeHash != null || var2.typeName != null
+    // Wall + anonymous: the wall's arm set is authoritative; anonymous side's
+    // extras that aren't in the wall's arms are rejected (only when the wall
+    // is actually enforced — via ascriptionWall OR its typeName being in scope).
     val (declaredVar, anonymousVar) = when {
-        isDeclared1 && !isDeclared2 -> Pair(var1, var2)
-        isDeclared2 && !isDeclared1 -> Pair(var2, var1)
+        walled1 && !walled2 -> Pair(var1, var2)
+        walled2 && !walled1 -> Pair(var2, var1)
         else -> Pair(null, null)
     }
 
     if (declaredVar != null && anonymousVar != null) {
         val invalidConstructors = anonymousVar.constructors.keys - declaredVar.constructors.keys
-        if (invalidConstructors.isNotEmpty() && isVariantNameInScope(declaredVar, registry)) {
-            val available = declaredVar.constructors.keys.sorted().joinToString(", ")
+        if (invalidConstructors.isNotEmpty() && isWalledVariant(declaredVar, registry)) {
             val invalid = invalidConstructors.sorted().joinToString(", ")
-            val typeDesc = when (declaredVar.typeName) {
-                "<inline>" -> "inline variant type '| $available |'"
-                "<inferred>" -> "inferred variant type '| $available |'"
-                else -> "type '${declaredVar.typeName}'"
-            }
             return UnificationResult.Failure(
-                message = "Constructor(s) '$invalid' not found in $typeDesc. " +
-                          "Available constructors: $available",
+                message = "Constructor(s) '$invalid' not found in ${describeVariant(declaredVar)}.",
                 type1 = var1,
                 type2 = var2
             )
@@ -1174,6 +1182,14 @@ internal fun expandTypeApplication(
             } else {
                 TypeExpansionResult.NotFound
             }
+        }
+        is ParsedTypeAliasDef -> {
+            // Transparent aliases are inlined at the annotation converter, so
+            // a TypeApplication of an alias name should never reach here in
+            // normal flow. If one leaks through (e.g. via a code path that
+            // hasn't been ported yet) treat it as NotFound rather than
+            // hallucinating record/variant/newtype shape.
+            TypeExpansionResult.NotFound
         }
     }
 }

@@ -141,7 +141,7 @@ private fun clearAbilityConstraints(type: MezzeType): MezzeType = when (type) {
         MezzeType.VariantType(
             constructors = type.constructors.mapValues { (_, dt) -> dt?.let { clearAbilityConstraints(it) } },
             rowVar = type.rowVar, typeName = type.typeName,
-            typeArgs = type.typeArgs, typeHash = type.typeHash, nominalWall = type.nominalWall
+            typeArgs = type.typeArgs, typeHash = type.typeHash, ascriptionWall = type.ascriptionWall
         )
     } else type
     else -> type

@@ -150,12 +150,9 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     return when (type) {
     is MezzeType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is MezzeType.RecordType -> {
-        // A record carrying a type-alias name (from an annotation or exact-match
-        // adoption) prints as that name, mirroring the variant branch below.
-        if (type.typeName != null
-            && type.typeName != "<inline>"
-            && !type.typeName.startsWith("<")
-        ) {
+        // A record carrying a type-alias name prints as that name; otherwise
+        // print structurally.
+        if (type.typeName != null) {
             type.typeName
         } else {
             val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
@@ -173,8 +170,6 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
         if (BuiltinTypes.isBoolVariant(type)) {
             "Bool"
         } else if (type.typeName != null
-            && type.typeName != "<inline>"        // #148: placeholder for inline ascriptions — render structurally
-            && !type.typeName.startsWith("<")     // any other synthetic <…> placeholder
             && !BuiltinTypes.isOptionVariant(type)
             && BuiltinTypes.getResultTypes(type) == null) {
             // The solver tagged this variant with its declared name (e.g. `Tree`) and,
@@ -256,6 +251,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
 
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
+    is MezzeType.NewtypeType -> "${type.name} (wraps ${prettyPrintTypeWithMapping(type.wrappedType, typeVarMapping)})"
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
     // #271: a type printer must NEVER throw — it is frequently called WHILE
     // formatting a TypeCheckError, so an uncaught exception here masks the real
@@ -274,11 +270,18 @@ fun prettyPrintTypeWithAliases(
     if (type is MezzeType.VariantType && type.typeName != null) {
         val alias = typeAliases[type.typeName]
         if (alias != null) {
-            val typeVars = mutableSetOf<MezzeType>()
-            for ((_, payload) in type.constructors) {
-                if (payload != null) collectFreeTypeVars(payload, typeVars)
+            // Prefer the stamped `typeArgs` vector (`Tree Int` → typeArgs=[IntType]).
+            // Fall back to harvesting free tyvars from payloads only when typeArgs
+            // is empty — the legacy pre-#194 path where the ident vector wasn't
+            // preserved on substitution.
+            val args: List<MezzeType> = if (type.typeArgs.isNotEmpty()) type.typeArgs else {
+                val vars = mutableSetOf<MezzeType>()
+                for ((_, payload) in type.constructors) {
+                    if (payload != null) collectFreeTypeVars(payload, vars)
+                }
+                vars.toList()
             }
-            val argsStr = if (typeVars.isEmpty()) "" else " " + typeVars.joinToString(" ") {
+            val argsStr = if (args.isEmpty()) "" else " " + args.joinToString(" ") {
                 prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
             }
             val aliasName = type.typeName + argsStr
@@ -320,11 +323,17 @@ private fun prettyPrintWithAliasCheck(
         if (type.typeName != null) {
             val alias = typeAliases[type.typeName]
             if (alias != null) {
-                val typeVars = mutableSetOf<MezzeType>()
-                for ((_, payload) in type.constructors) {
-                    if (payload != null) collectFreeTypeVars(payload, typeVars)
+                // Prefer the stamped typeArgs (`Tree Int` → typeArgs=[Int]).
+                // Fall back to free-var harvest for the legacy case where the
+                // ident vector wasn't preserved on substitution.
+                val args: List<MezzeType> = if (type.typeArgs.isNotEmpty()) type.typeArgs else {
+                    val vars = mutableSetOf<MezzeType>()
+                    for ((_, payload) in type.constructors) {
+                        if (payload != null) collectFreeTypeVars(payload, vars)
+                    }
+                    vars.toList()
                 }
-                val argsStr = if (typeVars.isEmpty()) "" else " " + typeVars.joinToString(" ") {
+                val argsStr = if (args.isEmpty()) "" else " " + args.joinToString(" ") {
                     prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
                 }
                 return type.typeName + argsStr
@@ -335,6 +344,16 @@ private fun prettyPrintWithAliasCheck(
             val aliasDef = aliasInfo.definition
             if (aliasDef is MezzeType.VariantType && aliasDef.constructors.keys.sorted() == typeCtors) {
                 if (aliasInfo.typeParams.isEmpty()) return aliasName
+                // Prefer alias-aware unification: this recovers the ACTUAL
+                // concrete type args by unifying `type` against `aliasDef`.
+                // A concrete `Tree Int` has no free vars in its payloads —
+                // the pattern-var walk below finds zero and falsely prints
+                // `Tree 'a`; unifyTypesForAlias sees payload `value: Int`
+                // vs alias `value: 'a`, binds `'a → Int`, returns `[Int]`.
+                inferTypeArguments(type, aliasDef, aliasInfo.typeParams)?.let { concreteArgs ->
+                    val argsStr = concreteArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
+                    return "$aliasName $argsStr"
+                }
                 val typeVars = mutableListOf<MezzeType>()
                 for ((_, payload) in type.constructors) {
                     if (payload != null) collectFreeTypeVars(payload, typeVars.toMutableSet())
@@ -458,6 +477,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
         val valueTypeStr = prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping)
         "$valueTypeStr ${prettyPrintEffectRow(type.effects, typeVarMapping)}"
     }
+    is MezzeType.NewtypeType -> "${type.name} (wraps ${prettyPrintWithAliasCheck(type.wrappedType, typeAliases, showExpansion, typeVarMapping)})"
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
     // #271: never throw while printing a type — see prettyPrintTypeWithMapping.
     else -> type::class.simpleName ?: "<type>"
@@ -471,11 +491,42 @@ data class TypeAliasInfo(
 )
 
 private fun findTypeAliasForType(type: MezzeType, typeAliases: Map<String, TypeAliasInfo>): TypeAliasMatch? {
+    // Fast path: prefer the ORIGINAL label on a labelled type when it names
+    // an in-scope alias directly. Avoids picking a same-shape "shadow" alias.
+    // For parametric aliases (`Container 'a`), infer args by unifying the
+    // concrete shape against the alias's definition so `Container Int` doesn't
+    // print bare as "Container".
+    when (type) {
+        is MezzeType.RecordType -> type.typeName?.let { n ->
+            typeAliases[n]?.let { info ->
+                val args = if (info.typeParams.isEmpty()) emptyList()
+                           else inferTypeArguments(type, info.definition, info.typeParams) ?: emptyList()
+                return TypeAliasMatch(n, args)
+            }
+        }
+        is MezzeType.VariantType -> type.typeName?.let { n ->
+            typeAliases[n]?.let { info ->
+                val args = if (type.typeArgs.isNotEmpty()) type.typeArgs
+                           else if (info.typeParams.isEmpty()) emptyList()
+                           else inferTypeArguments(type, info.definition, info.typeParams) ?: emptyList()
+                return TypeAliasMatch(n, args)
+            }
+        }
+        is MezzeType.TypeApplication -> typeAliases[type.constructor]?.let {
+            return TypeAliasMatch(type.constructor, type.args)
+        }
+        else -> {}
+    }
     for ((_, aliasInfo) in typeAliases) {
         if (aliasInfo.typeParams.isEmpty()) {
             // Simple type alias without parameters - use unification logic
             val substitutions = mutableMapOf<String, MezzeType>()
             if (unifyTypes(type, aliasInfo.definition, substitutions)) {
+                return TypeAliasMatch(aliasInfo.name, emptyList())
+            }
+            // Fallback: rendered-form equality (record aliases stripped of
+            // their label still print the same shape as the alias defn).
+            if (aliasNameShapeMatches(type, aliasInfo.definition, typeAliases)) {
                 return TypeAliasMatch(aliasInfo.name, emptyList())
             }
         } else {
@@ -487,6 +538,49 @@ private fun findTypeAliasForType(type: MezzeType, typeAliases: Map<String, TypeA
         }
     }
     return null
+}
+
+/**
+ * Rendered-form equality — compares the two types via prettyPrint (WITHOUT
+ * alias lookup) so representation differences like `IntType` vs
+ * `TypeApplication("Int")` or `BoolType` vs `VariantType(Bool arms)` don't
+ * defeat matching a bare record against an alias-defined record.
+ */
+private fun aliasNameShapeMatches(a: MezzeType, b: MezzeType, typeAliases: Map<String, TypeAliasInfo> = emptyMap()): Boolean {
+    if (a::class != b::class) return false
+    if (a is MezzeType.RecordType && b is MezzeType.RecordType) {
+        // Auto-adopt only when openness matches. Open alias needs an explicit
+        // annotation to adopt a closed literal (user rule); the annotation
+        // flows through as an open concrete, so alias→alias adoption still
+        // fires for annotated values.
+        if ((a.rowVar == null) != (b.rowVar == null)) return false
+        if (b.rowVar == null) {
+            if (a.fields.keys != b.fields.keys) return false
+        } else {
+            if (!a.fields.keys.containsAll(b.fields.keys)) return false
+        }
+        return b.fields.all { (n, bv) ->
+            val av = a.fields[n] ?: return@all false
+            prettyPrintTypeWithAliases(av, typeAliases) == prettyPrintTypeWithAliases(bv, typeAliases)
+        }
+    }
+    if (a is MezzeType.VariantType && b is MezzeType.VariantType) {
+        if ((a.rowVar == null) != (b.rowVar == null)) return false
+        if (b.rowVar == null) {
+            if (a.constructors.keys != b.constructors.keys) return false
+        } else {
+            if (!a.constructors.keys.containsAll(b.constructors.keys)) return false
+        }
+        return b.constructors.all { (n, bv) ->
+            val av = a.constructors[n]
+            when {
+                av == null && bv == null -> true
+                av != null && bv != null -> prettyPrintTypeWithAliases(av, typeAliases) == prettyPrintTypeWithAliases(bv, typeAliases)
+                else -> false
+            }
+        }
+    }
+    return false
 }
 
 private data class TypeAliasMatch(
@@ -501,15 +595,95 @@ private fun inferTypeArguments(
 ): List<MezzeType>? {
     val substitutions = mutableMapOf<String, MezzeType>()
 
-    if (unifyTypes(concreteType, parameterizedDef, substitutions)) {
+    // Normalise decl param names to match how they appear on the alias's
+    // definition types — with and without the leading `'` — so that a
+    // parameter declared as `'a` matches a VarType named `a` (stripped
+    // during conversion) or `'a` (unstripped) in the alias definition.
+    val patternNames = typeParams.flatMap { p ->
+        val bare = p.removePrefix("'"); listOf(bare, "'$bare")
+    }.toSet()
+
+    if (unifyTypesForAlias(concreteType, parameterizedDef, substitutions, patternNames)) {
         val typeArgs = typeParams.mapNotNull { param ->
-            substitutions[param]
+            val bare = param.removePrefix("'")
+            substitutions[bare] ?: substitutions["'$bare"] ?: substitutions[param]
         }
 
         return if (typeArgs.size == typeParams.size) typeArgs else null
     }
 
     return null
+}
+
+/**
+ * Alias-aware unification: any VarType whose name is in [patternNames]
+ * (the alias's declared tyvars, normalised with and without `'`) is
+ * treated as a pattern variable and bound to the concrete type. Anything
+ * else falls through to the strict [unifyTypes].
+ */
+private fun unifyTypesForAlias(
+    concrete: MezzeType,
+    pattern: MezzeType,
+    substitutions: MutableMap<String, MezzeType>,
+    patternNames: Set<String>,
+): Boolean {
+    if (pattern is MezzeType.VarType && pattern.variable.name in patternNames) {
+        val existing = substitutions[pattern.variable.name]
+        if (existing == null) { substitutions[pattern.variable.name] = concrete; return true }
+        return typesAreStructurallyEqual(concrete, existing)
+    }
+    // Self-recursive alias: `type Tree 'a = | ... Node { left: Tree 'a } |`
+    // stores Tree's own def with `left` INLINED to VariantType (the resolver
+    // unfolds the self-app). At the same time a concrete Tree Int stored on
+    // a user site has `left: TypeApplication(Tree, [Int])`. Bridge the two:
+    // when pattern is a VariantType with the same ctors as concrete's TypeApp,
+    // it's the same self-recursive tail — treat it as satisfied.
+    if (concrete is MezzeType.TypeApplication && pattern is MezzeType.VariantType &&
+        concrete.args.size == 1) {
+        // Bind pattern's tyvar (the sole one we're solving) to concrete's arg.
+        // Same alias / same ctors on both sides: the recursion is faithful.
+        val patternVarName = patternNames.firstOrNull { it in patternNames }
+        if (patternVarName != null) {
+            val existing = substitutions[patternVarName]
+            if (existing == null) { substitutions[patternVarName] = concrete.args[0]; return true }
+            return typesAreStructurallyEqual(concrete.args[0], existing)
+        }
+    }
+    return when {
+        concrete is MezzeType.RecordType && pattern is MezzeType.RecordType ->
+            concrete.fields.size == pattern.fields.size &&
+            concrete.isOpen == pattern.isOpen &&
+            concrete.fields.all { (name, cf) ->
+                val pf = pattern.fields[name]
+                pf != null && unifyTypesForAlias(cf, pf, substitutions, patternNames)
+            }
+        concrete is MezzeType.VariantType && pattern is MezzeType.VariantType ->
+            concrete.constructors.keys == pattern.constructors.keys &&
+            concrete.isOpen == pattern.isOpen &&
+            concrete.constructors.all { (name, cv) ->
+                val pv = pattern.constructors[name]
+                when {
+                    cv == null && pv == null -> true
+                    cv != null && pv != null -> unifyTypesForAlias(cv, pv, substitutions, patternNames)
+                    else -> false
+                }
+            }
+        concrete is MezzeType.SeqType && pattern is MezzeType.SeqType ->
+            unifyTypesForAlias(concrete.elementType, pattern.elementType, substitutions, patternNames)
+        concrete is MezzeType.ListType && pattern is MezzeType.ListType ->
+            unifyTypesForAlias(concrete.elementType, pattern.elementType, substitutions, patternNames)
+        concrete is MezzeType.MapType && pattern is MezzeType.MapType ->
+            unifyTypesForAlias(concrete.keyType, pattern.keyType, substitutions, patternNames) &&
+            unifyTypesForAlias(concrete.valueType, pattern.valueType, substitutions, patternNames)
+        concrete is MezzeType.TypeApplication && pattern is MezzeType.TypeApplication ->
+            concrete.constructor == pattern.constructor &&
+            concrete.args.size == pattern.args.size &&
+            concrete.args.zip(pattern.args).all { (c, p) -> unifyTypesForAlias(c, p, substitutions, patternNames) }
+        concrete is MezzeType.FunctionType && pattern is MezzeType.FunctionType ->
+            unifyTypesForAlias(concrete.paramType, pattern.paramType, substitutions, patternNames) &&
+            unifyTypesForAlias(concrete.returnType, pattern.returnType, substitutions, patternNames)
+        else -> typesAreStructurallyEqual(concrete, pattern)
+    }
 }
 
 private fun unifyTypes(

@@ -98,6 +98,10 @@ class PerformValidator(
                 }
             }
 
+            is ParsedNewtypeConstruct -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.value, implDeclarations, effectDeclarations, functionDefinitions))
+            }
+
             is ParsedMemberAccess -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.receiver, implDeclarations, effectDeclarations, functionDefinitions))
             }
@@ -291,6 +295,7 @@ class PerformValidator(
                 }
 
                 is ParsedVariantConstruct -> e.value?.let { traverse(it) }
+                is ParsedNewtypeConstruct -> traverse(e.value)
                 is ParsedMemberAccess -> traverse(e.receiver)
                 is ParsedSeqLit -> e.elements.forEach { element ->
                     when (element) {
@@ -424,6 +429,7 @@ class PerformValidator(
                         rowVar = if (def.isOpen) RowVar.fresh() else null)
                     is ParsedRecordDef -> MezzeType.RecordType(fields = def.fields.associate { it.name to TypeAnnotationConverter.convert(it.type) })
                     is ParsedNewtypeDef -> TypeAnnotationConverter.convert(def.wrappedType)
+                    is ParsedTypeAliasDef -> TypeAnnotationConverter.convert(def.aliasedType)
                 } else MezzeType.VarType(TypeVar.freshWithName(annotation.name))
             }
             is ParsedTypeApp -> {

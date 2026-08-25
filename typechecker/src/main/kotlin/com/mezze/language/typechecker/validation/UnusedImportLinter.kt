@@ -133,6 +133,7 @@ object UnusedImportLinter {
             is ParsedRecordDef -> for (f in def.fields) collectTypeRefs(f.type, into)
             is ParsedVariantDef -> for (c in def.constructors) c.dataType?.let { collectTypeRefs(it, into) }
             is ParsedNewtypeDef -> collectTypeRefs(def.wrappedType, into)
+            is ParsedTypeAliasDef -> collectTypeRefs(def.aliasedType, into)
         }
     }
 
@@ -145,6 +146,10 @@ object UnusedImportLinter {
             is ParsedVariantConstruct -> {
                 into.add(expr.constructor)
                 expr.value?.let { collectExprRefs(it, into) }
+            }
+            is ParsedNewtypeConstruct -> {
+                into.add(expr.typeName)
+                collectExprRefs(expr.value, into)
             }
             is ParsedLambda -> {
                 (expr.params as? ParsedLambdaParams.Typed)?.fields?.forEach { collectTypeRefs(it.type, into) }

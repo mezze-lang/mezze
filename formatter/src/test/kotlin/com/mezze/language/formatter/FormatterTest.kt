@@ -532,9 +532,10 @@ class FormatterTest {
 
     @Test
     fun `format newtype`() {
-        val input = "newtype UserId = UserId Int"
+        // New syntax: `newtype UserId = Int` (no redundant constructor).
+        val input = "newtype UserId = Int"
         val output = formatter.format(input)
-        assertEquals("newtype UserId = UserId Int\n", output)
+        assertEquals("newtype UserId = Int\n", output)
     }
 
     @Test

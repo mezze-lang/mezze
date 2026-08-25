@@ -54,7 +54,7 @@ class NominalHashIdentityTest {
         val result = unify(n1, n2)
         assertIs<UnificationResult.Failure>(
             result,
-            "two modules' opaque `newtype Token = Token Str` (different typeHash) must NOT unify",
+            "two modules' opaque `newtype Token = Str` (different typeHash) must NOT unify",
         )
     }
 

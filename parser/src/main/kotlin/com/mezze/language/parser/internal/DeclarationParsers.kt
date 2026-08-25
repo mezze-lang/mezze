@@ -511,37 +511,48 @@ internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility
                         when (assign) {
                             is ParseResult.Success -> {
                                 val stream4 = skipNewlines(assign.remaining)
-                                val constructor = identifierParser(stream4)
+                                val wrappedType = typeAnnotationParser(stream4)
 
-                                when (constructor) {
+                                when (wrappedType) {
                                     is ParseResult.Success -> {
-                                        val stream5 = skipNewlines(constructor.remaining)
-                                        val wrappedType = typeAnnotationParser(stream5)
-
-                                        when (wrappedType) {
-                                            is ParseResult.Success -> {
-                                                val file = currentFile ?: "<unknown>"
-                                                val loc = spanLocTo(newtypeToken.value, wrappedType.remaining, file)
-                                                val defLoc = spanLocTo(constructor.value, wrappedType.remaining, file)
-                                                ParseResult.Success(
-                                                    ParsedTypeDecl(
-                                                        name = typeName.value.text,
-                                                        visibility = visibility,
-                                                        typeParams = typeParams,
-                                                        definition = ParsedNewtypeDef(
-                                                            constructor = constructor.value.text,
-                                                            wrappedType = wrappedType.value,
-                                                            loc = defLoc
-                                                        ),
-                                                        loc = loc
+                                        // Reject the OLD redundant-constructor form
+                                        // `newtype UserId = UserId Int` — the leading
+                                        // name is the newtype's own name repeated,
+                                        // which is a legacy syntax we no longer accept.
+                                        // Modern form is `newtype UserId = Int`.
+                                        val declName = typeName.value.text
+                                        val innerName: String? = when (val w = wrappedType.value) {
+                                            is ParsedNamedType -> if (w.name == declName) declName else null
+                                            is ParsedTypeApp -> if (w.constructor == declName) declName else null
+                                            else -> null
+                                        }
+                                        if (innerName != null) {
+                                            stream4.failure(
+                                                "Old-syntax `newtype $declName = $declName …` is no longer accepted — " +
+                                                    "the constructor name is now inferred from the declaration name. " +
+                                                    "Rewrite as `newtype $declName = <wrapped-type>` (drop the leading `$declName`)."
+                                            )
+                                        } else {
+                                            val file = currentFile ?: "<unknown>"
+                                            val loc = spanLocTo(newtypeToken.value, wrappedType.remaining, file)
+                                            val defLoc = spanLocTo(assign.value, wrappedType.remaining, file)
+                                            ParseResult.Success(
+                                                ParsedTypeDecl(
+                                                    name = declName,
+                                                    visibility = visibility,
+                                                    typeParams = typeParams,
+                                                    definition = ParsedNewtypeDef(
+                                                        constructor = declName,
+                                                        wrappedType = wrappedType.value,
+                                                        loc = defLoc
                                                     ),
-                                                    wrappedType.remaining
-                                                )
-                                            }
-                                            is ParseResult.Failure -> wrappedType
+                                                    loc = loc
+                                                ),
+                                                wrappedType.remaining
+                                            )
                                         }
                                     }
-                                    is ParseResult.Failure -> constructor
+                                    is ParseResult.Failure -> wrappedType
                                 }
                             }
                             is ParseResult.Failure -> assign
@@ -564,7 +575,35 @@ internal val MezzeParser.typeDefinitionParser: Parser<ParsedTypeDef> get() = { s
                 if (variantResult.message.startsWith("Invalid variant syntax:")) {
                     variantResult
                 } else {
-                    recordTypeParser(stream)
+                    val recordResult = recordTypeParser(stream)
+                    // If record parsing succeeded but the next token is `->`,
+                    // this was really the parameter of a function-typed alias
+                    // (`type Producer 'a = {} -> 'a`). Discard the record
+                    // parse and fall through to the alias annotation parser.
+                    val recordConsumedByFuncArrow = recordResult is ParseResult.Success &&
+                        recordResult.remaining.current()?.type == TokenType.ARROW
+                    if (recordResult is ParseResult.Success && !recordConsumedByFuncArrow) {
+                        recordResult
+                    } else {
+                        // Fall through to a TRUE type alias: `type MyInt = Int`,
+                        // `type Ids = Seq Int`, `type Producer 'a = {} -> 'a`.
+                        val firstTok = stream.current()
+                        if (firstTok == null) recordResult
+                        else {
+                            val aliasResult = typeAnnotationParser(stream)
+                            when (aliasResult) {
+                                is ParseResult.Success -> {
+                                    val file = currentFile ?: "<unknown>"
+                                    val loc = spanLocTo(firstTok, aliasResult.remaining, file)
+                                    ParseResult.Success(
+                                        ParsedTypeAliasDef(aliasResult.value, loc),
+                                        aliasResult.remaining
+                                    )
+                                }
+                                is ParseResult.Failure -> recordResult
+                            }
+                        }
+                    }
                 }
             }
         }
