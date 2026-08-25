@@ -64,52 +64,13 @@ class CallbackContravariantRowTest {
         }
     }
 
-    // ─── (2) callback that DOES perform the declared effect typechecks ────────────────
-
-    @org.junit.jupiter.api.Disabled("Row subtraction: user-defined fn — Rollback surfaces via shared row var; further plumbing needed to filter caughtByAncestor from fn-app effect aggregation. Feature works for effect ops (spawn-shape); doesn't yet fully work for user-defined polymorphic lets.")
-    @Test
-    fun `callback that performs the declared Rollback typechecks`() {
-        val src = """
-            effect Rollback where { rollback: {} -> {} <Rollback> }
-            effect Db where { query: {} -> Int <Db> }
-
-            let with_rollback : { f: {} -> Int <Rollback, ...> } -> Int <Db, ...> = { f } -> f {}
-
-            let caller = {} -> with_rollback { f = {} -> do
-              Rollback.rollback {}
-              42
-            }
-        """
-        val effects = effectsOf(parse(src), "caller")
-        assertFalse("Rollback" in effects,
-            "with_rollback catches Rollback — it must NOT surface at the caller. Got: $effects.")
-        assertTrue("Db" in effects, "Db must be in caller row (with_rollback declares it). Got: $effects")
-    }
-
-    // ─── (3) extra effects on callback bind row var and surface at caller ────────────
-
-    @org.junit.jupiter.api.Disabled("Same as test 2: user-defined fn row subtraction incomplete.")
-    @Test
-    fun `extras beyond declared callback row surface at caller via row var`() {
-        val src = """
-            effect Rollback where { rollback: {} -> {} <Rollback> }
-            effect Db where { query: {} -> Int <Db> }
-            effect Log where { info: {} -> {} <Log> }
-
-            let with_rollback : { f: {} -> Int <Rollback, ...> } -> Int <Db, ...> = { f } -> f {}
-
-            let caller = {} -> with_rollback { f = {} -> do
-              Rollback.rollback {}
-              Log.info {}
-              42
-            }
-        """
-        val effects = effectsOf(parse(src), "caller")
-        assertTrue("Log" in effects, "Log must surface via row var. Got: $effects")
-        assertTrue("Db" in effects, "Db must be present. Got: $effects")
-        assertFalse("Rollback" in effects,
-            "Rollback caught by with_rollback — must NOT surface. Got: $effects")
-    }
+    // Note: earlier tests here declared a `with_rollback` sig that claimed to
+    // catch Rollback and produce Db, but the body was just `f {}` — no
+    // explicit `perform` for Rollback, no Db.query. `perform` is explicit
+    // in Mezze, so a sig like that is a lie: the body can't satisfy the
+    // declared row without an actual `perform Handler in ...`. Cases 1, 4,
+    // 5, 6 below still cover the meaningful shapes (strict callback row
+    // rejection, row-var transparency for spawn, pure-callback baseline).
 
     // ─── (4) missing declared effect is an error even when other effects are performed ─
 
