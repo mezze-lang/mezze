@@ -626,10 +626,11 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         val closedCtors = closedVar.constructors.keys
         val openCtors = openVar.constructors.keys
 
-        // inline/inferred placeholder via #148's ascriptionWall flag), check that ALL
-        // constructors in the open variant exist in the closed variant. This is what
-        // prevents `Yellow` from unifying with `Color = | Red, Green, Blue |` when
-        // Color is declared/imported here.
+        // When the closed side is a wall (ascriptionWall OR an in-scope alias),
+        // the open side's ctors must be a subset of the closed side's arm set —
+        // otherwise the open side is trying to add a foreign ctor to a wall.
+        // Prevents `Yellow` from unifying with `Color = | Red, Green, Blue |`
+        // when Color is imported (or when the closed side is a hard ascription).
         if (isVariantNameInScope(closedVar, registry)) {
             val invalidConstructors = openCtors - closedCtors
             if (invalidConstructors.isNotEmpty()) {
