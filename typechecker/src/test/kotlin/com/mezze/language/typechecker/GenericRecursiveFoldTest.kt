@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.prettyPrintType
+import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -57,8 +58,8 @@ class GenericRecursiveFoldTest {
         val foldType = typed.getVariableType("fold")
         val sumType = typed.getVariableType("sum")
 
-        val foldStr = foldType?.let { prettyPrintType(it) } ?: "null"
-        val sumStr = sumType?.let { prettyPrintType(it) } ?: "null"
+        val foldStr = foldType?.let { prettyPrintTypeWithAliases(it, typeChecker.getTypeAliases()) } ?: "null"
+        val sumStr = sumType?.let { prettyPrintTypeWithAliases(it, typeChecker.getTypeAliases()) } ?: "null"
 
         println("[Tree-fold] fold : $foldStr")
         println("[Tree-fold] sum  : $sumStr")

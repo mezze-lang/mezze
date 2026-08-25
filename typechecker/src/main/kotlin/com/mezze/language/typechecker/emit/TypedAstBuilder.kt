@@ -66,25 +66,8 @@ class TypedAstBuilder(
         }
     }
 
-    /**
-     * If [record] (a finalized record-literal type, closed) exactly matches an
-     * in-scope closed record alias by field NAMES and field TYPES, return it
-     * with that alias's `typeName`. Otherwise return it unchanged.
-     */
-    private fun labelRecordWithAlias(record: MezzeType.RecordType): MezzeType.RecordType {
-        if (record.typeName != null || record.rowVar != null) return record
-        // Compare field types by RENDERED form, not structural `==`: a `Bool`
-        // annotation and an inferred `Bool` (or a newtype's two representations)
-        // print identically but can be `==`-unequal.
-        val match = closedRecordAliases.firstOrNull { (_, aliasFields) ->
-            aliasFields.keys == record.fields.keys &&
-            aliasFields.all { (name, ty) ->
-                val actual = record.fields[name] ?: return@all false
-                prettyPrintType(ty) == prettyPrintType(actual)
-            }
-        } ?: return record
-        return record.copy(typeName = match.first)
-    }
+    /** Retired — `type X = { … }` is now transparent; adoption happens at display time. */
+    private fun labelRecordWithAlias(record: MezzeType.RecordType): MezzeType.RecordType = record
 
     private fun precomputeContentHashes(module: ParsedModule) {
         val mutableHashes = identifierContentHashes.toMutableMap()

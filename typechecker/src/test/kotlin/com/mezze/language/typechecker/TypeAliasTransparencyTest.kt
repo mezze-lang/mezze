@@ -216,30 +216,23 @@ class TypeAliasTransparencyTest {
         """)
     }
 
-    @Test fun `record alias label is currently kept — documented follow-up`() {
-        // `type Wrap = { n: MyInt }` used where bare `{ n: Int }` is expected
-        // currently REJECTS because the record alias label (`Wrap`) stays
-        // attached at same-module use sites. AliasStripper only fires for
-        // IMPORTED types (ImportContextMerger), and changing same-module
-        // record-alias behavior would break the existing RecordAliasAdoptionTest
-        // adoption story [[project_type_alias_adoption]].
-        //
-        // Workaround for users today: pass a bare record literal
-        // `take { r = { n = w.n } }` or annotate the destination as `Wrap`.
-        //
-        // Follow-up: extend AliasStripper to run at unification-point for
-        // same-module record aliases, gated to avoid regressing adoption.
-        val e = err("""
+    @Test fun `record alias with aliased field type flows structurally`() {
+        // `type X = <anything>` is fully transparent. Wrap and {n: Int} are
+        // the same type at every use site.
+        ok("interop.record-alias-wrapping-alias", """
             type MyInt = Int
             type Wrap = { n: MyInt }
             pub let take : { r: { n: Int } } -> Int = { r } -> r.n
             pub let go = { w: Wrap } -> take { r = w }
         """)
-        assertTrue(e != null, "expected the current observed rejection")
-        assertTrue(
-            e.contains("Wrap"),
-            "diagnostic should name Wrap to guide the user to the mismatch, got: $e",
-        )
+    }
+
+    @Test fun `bare inline record flows into record-alias parameter`() {
+        ok("interop.bare-into-alias", """
+            type Wrap = { n: Int }
+            pub let take : { w: Wrap } -> Int = { w } -> w.n
+            pub let go = {} -> take { w = { n = 42 } }
+        """)
     }
 
     @Test fun `alias flows through a Seq element boundary`() {

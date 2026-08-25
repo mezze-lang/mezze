@@ -163,8 +163,9 @@ class PatternConstraintGenerator {
             val constructors = scrutineeType.constructors.keys.sorted()
             val literalDesc = describeLiteral(literalValue)
             val firstConstructor = constructors.firstOrNull() ?: "ConstructorName"
+            val label = scrutineeType.typeName?.takeIf { !it.startsWith("<") } ?: findAliasForVariant(scrutineeType, context) ?: "[${constructors.joinToString(", ")}]"
             throw TypeCheckError(
-                "Cannot match variant type [${constructors.joinToString(", ")}] with $literalDesc. " +
+                "Cannot match variant type $label with $literalDesc. " +
                 "Use a constructor pattern like '$firstConstructor' instead, " +
                 "or use a variable pattern to catch all cases.",
                 patternLoc,
@@ -248,8 +249,9 @@ class PatternConstraintGenerator {
 
         if (scrutineeType is MezzeType.VariantType) {
             val constructors = scrutineeType.constructors.keys.sorted()
+            val label = scrutineeType.typeName?.takeIf { !it.startsWith("<") } ?: findAliasForVariant(scrutineeType, context) ?: "[${constructors.joinToString(", ")}]"
             throw TypeCheckError(
-                "Cannot match variant type [${constructors.joinToString(", ")}] with a string interpolation pattern. " +
+                "Cannot match variant type $label with a string interpolation pattern. " +
                 "Use a constructor pattern like '${constructors.firstOrNull() ?: "ConstructorName"}' instead.",
                 sourceLoc ?: pattern.loc,
                 errorType = ErrorType.INVALID_PATTERN,
@@ -452,5 +454,17 @@ class PatternConstraintGenerator {
             bindings = bindings,
             constraints = constraints
         )
+    }
+
+    private fun findAliasForVariant(v: MezzeType.VariantType, context: ConstraintContext): String? {
+        val ctors = v.constructors.keys
+        for ((name, decl) in context.typeDeclarations) {
+            val def = decl.definition
+            if (def is ParsedVariantDef) {
+                val declCtors = def.constructors.map { it.name }.toSet()
+                if (declCtors == ctors) return name
+            }
+        }
+        return null
     }
 }

@@ -37,10 +37,10 @@ class OpenVariantTypeAliasTest {
     }
 
     private fun assertTypeChecks(code: String, variableName: String, expectedType: String) {
-        val result = parseAndTypeCheckResult(code)
-        val actualType = getVariableType(result, variableName)
+        val results = parseAndTypeCheck(code)
+        val actualType = getVariableType(results.result, variableName)
         assertNotNull(actualType, "Variable '$variableName' not found")
-        assertEquals(expectedType, prettyPrintType(actualType))
+        assertEquals(expectedType, prettyPrintTypeWithAliases(actualType, results.typeChecker.getTypeAliases()))
     }
 
     private fun assertTypeChecks(code: String) {
