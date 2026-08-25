@@ -51,6 +51,7 @@ object NativeBuildPath {
      * on a machine incurs the -O2 cost; subsequent builds are instant.
      */
     fun buildShell(
+        jarFile: File,
         outputDir: File,
         outputName: String,
         appName: String,
@@ -60,14 +61,34 @@ object NativeBuildPath {
         timing: Boolean,
         relativeTime: () -> Long,
     ): File? {
-        val shell = locateShellBinary()
+        var shell = locateShellBinary()
         if (shell == null) {
-            System.err.println(
-                "Error: no shell binary found at ~/.mezze/lib/mez-shell-native.\n" +
-                "Run `mez build --native -O2` once to build and cache the shell,\n" +
-                "or set MEZZE_SHELL_BIN to a prebuilt shell binary path."
+            println("No cached shell binary found — building one via -O2 (this is a one-time cost)...")
+            val shellBinary = build(
+                jarFile = jarFile,
+                outputDir = outputDir,
+                outputName = ".mez-shell-tmp",
+                appName = appName,
+                entryName = entryName,
+                loweredFunctions = loweredFunctions,
+                performerRecords = performerRecords,
+                optimized = true,
+                timing = timing,
+                relativeTime = relativeTime,
             )
-            return null
+            if (shellBinary == null) {
+                System.err.println("Error: failed to build shell binary. Check that native-image is installed.")
+                return null
+            }
+            // build() already caches to ~/.mezze/lib/mez-shell-native
+            shell = locateShellBinary()
+            // Clean up the temp binary — the real output gets the CBOR append below
+            try { shellBinary.delete() } catch (_: Exception) {}
+            if (shell == null) {
+                System.err.println("Error: shell binary was built but not cached. Check ~/.mezze/lib/ permissions.")
+                return null
+            }
+            println("Shell binary cached. Future -O1 builds will be instant.")
         }
         val outBinary = File(outputDir, outputName)
         outputDir.mkdirs()
@@ -81,6 +102,8 @@ object NativeBuildPath {
         )
         return outBinary
     }
+
+    fun hasShellBinary(): Boolean = locateShellBinary() != null
 
     private fun locateShellBinary(): File? {
         System.getenv("MEZZE_SHELL_BIN")?.let { path ->

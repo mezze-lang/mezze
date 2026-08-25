@@ -96,10 +96,11 @@ class BuildCommand {
             return
         }
 
-        // Fail fast if native-image is needed but missing. -O1 (shell mode)
-        // only needs native-image when building the shell for the first time;
-        // -O2 always needs it.
-        if (nativeBuild && nativeO2) {
+        // Fail fast if native-image is needed but missing. -O2 always
+        // needs it; -O1 needs it only when no cached shell binary exists
+        // (first build triggers an automatic -O2 to create the shell).
+        val needsNativeImage = nativeBuild && (nativeO2 || !NativeBuildPath.hasShellBinary())
+        if (needsNativeImage) {
             val envReport = com.mezze.language.cli.EnvironmentCheck.probe()
             if (com.mezze.language.cli.EnvironmentCheck.isCriticalFailure(envReport)) {
                 println(com.mezze.language.cli.EnvironmentCheck.longReport(envReport))
@@ -322,6 +323,7 @@ class BuildCommand {
                 } else {
                     println("Building native binary -O1 (shell + CBOR append)...")
                     nativeBinary = NativeBuildPath.buildShell(
+                        jarFile = jarFile,
                         outputDir = targetDir,
                         outputName = "$outputJarName-native",
                         appName = appConfig.name,
