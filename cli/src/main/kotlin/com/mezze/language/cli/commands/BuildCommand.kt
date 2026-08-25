@@ -53,18 +53,24 @@ class BuildCommand {
             ?: args.indexOf("--app").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
                 ?.takeIf { !it.startsWith("-") }
 
-        // `--native` / `-n` produces an AOT-compiled standalone executable
-        // next to the JAR. Build is slow (~30s quick / ~2min optimized);
-        // runtime is fast (no JVM boot, no SQLite, FunctionIRs frozen in
-        // the image heap via --initialize-at-build-time).
+        // `--native` / `-n` produces a standalone executable next to the JAR.
+        //
+        // Optimization levels (inspired by gcc -O):
+        //   -O1 (default): shell + CBOR tail-append. Builds in seconds by
+        //       copying a prebuilt "shell" native binary and appending the
+        //       app's serialized IR as a footer. Runtime is the same Truffle
+        //       interpreter + JIT; only startup has a small CBOR-deserialize
+        //       cost (~10-50ms). Shell binary is built once and cached at
+        //       ~/.mezze/lib/mez-shell-native.
+        //   -O2: full native-image AOT compilation (~70s). Everything baked
+        //       into the image heap — fastest cold start, no deserialization.
+        //       Requires GraalVM native-image on PATH.
         val nativeBuild = args.contains("--native") || args.contains("-n")
-
-        // Native build defaults to optimized (-O2, ~2min, strips debug
-        // symbols) — we want the fastest user binary out of the box.
-        // Pass `--quick` for native-image's quick-build (-Ob, ~30-50s,
-        // ~20% slower binary, retains -g) when iterating during dev.
+        val nativeO2 = args.contains("-O2")
+        // Legacy compat: --quick mapped to the old quick-build mode; now -O2
+        // is the explicit full-rebuild flag. Treat --quick as -O2 quick-mode
+        // (native-image with -Ob instead of -O2 optimization).
         val quickBuild = args.contains("--quick") || args.contains("-q")
-        val optimizedBuild = !quickBuild
 
         // Output directory precedence (highest first):
         //   1. CLI flag:    --out=<path> or --out <path>
@@ -90,11 +96,10 @@ class BuildCommand {
             return
         }
 
-        // Fail fast if `--native` was requested but the toolchain is
-        // missing — building the JVM jar first and crashing 20 seconds
-        // in is a bad UX. The actual native-image invocation is later in
-        // the pipeline; this is just the early prereq check.
-        if (nativeBuild) {
+        // Fail fast if native-image is needed but missing. -O1 (shell mode)
+        // only needs native-image when building the shell for the first time;
+        // -O2 always needs it.
+        if (nativeBuild && nativeO2) {
             val envReport = com.mezze.language.cli.EnvironmentCheck.probe()
             if (com.mezze.language.cli.EnvironmentCheck.isCriticalFailure(envReport)) {
                 println(com.mezze.language.cli.EnvironmentCheck.longReport(envReport))
@@ -289,30 +294,44 @@ class BuildCommand {
             writeWindowsLauncher(winLauncher, jarFile.name, jsaName)
             if (timing) System.err.println("[${ms()}ms] launchers written")
 
-            // 8. Optional: AOT-compile to a native executable.
-            //    Runs native-image on the JAR we just built. Long build
-            //    (~2 min) for very fast cold start (<100ms). The native
-            //    binary lands next to the .jar as `<app>-native`.
+            // 8. Optional: produce a native executable.
+            //    -O1 (default): shell + CBOR tail-append. Seconds.
+            //    -O2: full native-image AOT compilation. ~70s.
             var nativeBinary: File? = null
             if (nativeBuild) {
                 println()
-                if (optimizedBuild) {
-                    println("Compiling native binary (optimized, ~2 min — pass --quick for ~30-50s build)...")
+                if (nativeO2) {
+                    val optimizedNI = !quickBuild
+                    if (optimizedNI) {
+                        println("Compiling native binary -O2 (full AOT, ~2 min — pass --quick for ~30-50s build)...")
+                    } else {
+                        println("Compiling native binary -O2 (quick mode, ~30-50s)...")
+                    }
+                    nativeBinary = NativeBuildPath.build(
+                        jarFile = jarFile,
+                        outputDir = targetDir,
+                        outputName = "$outputJarName-native",
+                        appName = appConfig.name,
+                        entryName = appConfig.entry,
+                        loweredFunctions = loweredFunctions,
+                        performerRecords = performerRecords,
+                        optimized = optimizedNI,
+                        timing = timing,
+                        relativeTime = { (System.nanoTime() - startTime) / 1_000_000 },
+                    )
                 } else {
-                    println("Compiling native binary (quick mode, ~30-50s)...")
+                    println("Building native binary -O1 (shell + CBOR append)...")
+                    nativeBinary = NativeBuildPath.buildShell(
+                        outputDir = targetDir,
+                        outputName = "$outputJarName-native",
+                        appName = appConfig.name,
+                        entryName = appConfig.entry,
+                        loweredFunctions = loweredFunctions,
+                        performerRecords = performerRecords,
+                        timing = timing,
+                        relativeTime = { (System.nanoTime() - startTime) / 1_000_000 },
+                    )
                 }
-                nativeBinary = NativeBuildPath.build(
-                    jarFile = jarFile,
-                    outputDir = targetDir,
-                    outputName = "$outputJarName-native",
-                    appName = appConfig.name,
-                    entryName = appConfig.entry,
-                    loweredFunctions = loweredFunctions,
-                    performerRecords = performerRecords,
-                    optimized = optimizedBuild,
-                    timing = timing,
-                    relativeTime = { (System.nanoTime() - startTime) / 1_000_000 },
-                )
             }
 
             val buildTime = (System.nanoTime() - startTime) / 1_000_000

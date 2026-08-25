@@ -37,6 +37,81 @@ import java.util.jar.Manifest
  */
 object NativeBuildPath {
 
+    /**
+     * -O1 native build: copy a prebuilt "shell" native binary and append
+     * this app's CBOR payload as a footer. The shell binary reads the
+     * footer at startup via [MezzeAppMain.readTailFromBinary].
+     *
+     * Shell binary resolution order:
+     *   1. MEZZE_SHELL_BIN env var (absolute path)
+     *   2. ~/.mezze/lib/mez-shell-native (installed by `mez` or first -O2 build)
+     *
+     * If the shell doesn't exist, falls back to building it via -O2 and
+     * caching it for future -O1 builds. This means the FIRST -O1 build
+     * on a machine incurs the -O2 cost; subsequent builds are instant.
+     */
+    fun buildShell(
+        outputDir: File,
+        outputName: String,
+        appName: String,
+        entryName: String,
+        loweredFunctions: List<FunctionIR>,
+        performerRecords: List<Array<String>>,
+        timing: Boolean,
+        relativeTime: () -> Long,
+    ): File? {
+        val shell = locateShellBinary()
+        if (shell == null) {
+            System.err.println(
+                "Error: no shell binary found at ~/.mezze/lib/mez-shell-native.\n" +
+                "Run `mez build --native -O2` once to build and cache the shell,\n" +
+                "or set MEZZE_SHELL_BIN to a prebuilt shell binary path."
+            )
+            return null
+        }
+        val outBinary = File(outputDir, outputName)
+        outputDir.mkdirs()
+        val closure = computeReachableClosure(loweredFunctions)
+        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryName, performerRecords)
+        shell.copyTo(outBinary, overwrite = true)
+        outBinary.setExecutable(true, false)
+        appendCborTrailer(outBinary, fnBytes, metaBytes)
+        if (timing) System.err.println(
+            "[${relativeTime()}ms] -O1: appended ${fnBytes.size + metaBytes.size + 24} bytes to $outBinary"
+        )
+        return outBinary
+    }
+
+    private fun locateShellBinary(): File? {
+        System.getenv("MEZZE_SHELL_BIN")?.let { path ->
+            val f = File(path)
+            if (f.isFile) return f
+        }
+        System.getProperty("user.home")?.let { home ->
+            val installed = File("$home/.mezze/lib/mez-shell-native")
+            if (installed.isFile) return installed
+        }
+        return null
+    }
+
+    private fun appendCborTrailer(binary: File, fnBytes: ByteArray, metaBytes: ByteArray) {
+        java.io.RandomAccessFile(binary, "rw").use { raf ->
+            raf.seek(raf.length())
+            raf.write(fnBytes)
+            raf.write(metaBytes)
+            fun writeU64Le(v: Long) {
+                raf.writeLong(java.lang.Long.reverseBytes(v))
+            }
+            writeU64Le(fnBytes.size.toLong())
+            writeU64Le(metaBytes.size.toLong())
+            raf.write("MEZZBIN ".toByteArray(Charsets.US_ASCII))
+        }
+    }
+
+    /**
+     * -O2 native build: full native-image AOT compilation. Produces a
+     * self-contained binary with everything baked into the image heap.
+     */
     fun build(
         jarFile: File,
         outputDir: File,
@@ -185,10 +260,30 @@ object NativeBuildPath {
                 outBinary.copyTo(cacheFile, overwrite = true)
                 if (timing) System.err.println("[${relativeTime()}ms] native: cached binary at ${cacheFile.absolutePath}")
             } catch (e: Exception) {
-                // Cache write failure is non-fatal — the binary is still produced.
                 if (timing) System.err.println("[${relativeTime()}ms] native: cache write failed: ${e.message}")
             }
         }
+
+        // Cache as the shell binary for future -O1 builds. The -O2 binary
+        // can serve as the shell because MezzeAppMain checks for a CBOR
+        // tail trailer first; if absent, it falls back to the build-time
+        // embedded app (which is whatever this -O2 build compiled). When
+        // used as a shell, the tail-appended CBOR overrides the embedded
+        // app, so the shell's own baked-in app is irrelevant.
+        try {
+            val shellDest = System.getProperty("user.home")?.let {
+                File("$it/.mezze/lib/mez-shell-native")
+            }
+            if (shellDest != null) {
+                shellDest.parentFile?.mkdirs()
+                outBinary.copyTo(shellDest, overwrite = true)
+                shellDest.setExecutable(true, false)
+                if (timing) System.err.println("[${relativeTime()}ms] native: cached as shell at ${shellDest.absolutePath}")
+            }
+        } catch (e: Exception) {
+            if (timing) System.err.println("[${relativeTime()}ms] native: shell cache write failed: ${e.message}")
+        }
+
         return outBinary
     }
 
