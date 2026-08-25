@@ -214,6 +214,8 @@ public final class NativeDispatch extends MezzeNode {
         registerBoolHandlers();
         // Seq operations (new, MezzeSeq-backed)
         registerSeqHandlers();
+        // Iter operations (new, lazy MezzeIter-backed)
+        registerIterHandlers();
         // List operations
         registerListHandlers();
         // Set operations
@@ -942,6 +944,28 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.subsequencesNonEmpty(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_contiguous_subsequences", (r, c) ->
             SeqNatives.contiguousSubsequences(getSeq(r, "xs")));
+    }
+
+    // ==================== Iter (lazy, MezzeIter-backed) ====================
+
+    private static com.mezze.datastructures.iter.MezzeIter getIter(MezzeRecord r, String name) {
+        Object val = getField(r, name);
+        if (val instanceof com.mezze.datastructures.iter.MezzeIter it) return it;
+        throw new RuntimeException("Expected MezzeIter for field '" + name + "', got: " +
+            (val == null ? "null" : val.getClass().getSimpleName()));
+    }
+
+    private static void registerIterHandlers() {
+        HANDLERS.put("__native_iter_range", (r, c) ->
+            IterNatives.range(getLong(r, "start"), getLong(r, "end")));
+        HANDLERS.put("__native_iter_range_step", (r, c) ->
+            IterNatives.rangeStep(getLong(r, "start"), getLong(r, "end"), getLong(r, "step")));
+        HANDLERS.put("__native_iter_map", (r, c) ->
+            IterNatives.map(getIter(r, "it"), getFunction(r, "f")));
+        HANDLERS.put("__native_iter_filter", (r, c) ->
+            IterNatives.filter(getIter(r, "it"), getFunction(r, "p")));
+        HANDLERS.put("__native_iter_fold", (r, c) ->
+            IterNatives.fold(getIter(r, "it"), getField(r, "init"), getFunction(r, "f"), c));
     }
 
     // ==================== List ====================
