@@ -803,9 +803,10 @@ class MutationEffectTest {
         }
     }
 
+    // #274: a performer that handles a different effect than the body's
+    // perform is a runtime no-op — the op suspends and routes up the chain.
     @Test
-    @org.junit.jupiter.api.Disabled("#274 relaxed V0509 — wrong-performer-for-effect is a runtime no-op.")
-    fun `test wrong performer type causes error`() {
+    fun `test wrong performer type is accepted as runtime no-op`() {
         val source = """
             effect Mut where {
                 mutate: {} -> {}
@@ -819,14 +820,10 @@ class MutationEffectTest {
                 other = {} -> {}
             }
 
-            # Using wrong performer for Mutation should fail
             let test = {} -> perform OtherPerformer in Mut.mutate {}
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-        assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
+        typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
     }
 
     @Test

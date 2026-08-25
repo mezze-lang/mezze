@@ -143,7 +143,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         }
         type1 is MezzeType.RecordType && type2 is MezzeType.VariantType -> {
             if (type2.constructors.size == 1 && type2.rowVar == null &&
-                !type2.ascriptionWall && !isVariantNameInScope(type2, registry)) {
+                !type2.ascriptionWall && !isWalledVariant(type2, registry)) {
                 val (_, payloadType) = type2.constructors.entries.first()
                 if (payloadType != null) {
                     return unify(type1, payloadType, registry)
@@ -157,7 +157,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         }
         type1 is MezzeType.VariantType && type2 is MezzeType.RecordType -> {
             if (type1.constructors.size == 1 && type1.rowVar == null &&
-                !type1.ascriptionWall && !isVariantNameInScope(type1, registry)) {
+                !type1.ascriptionWall && !isWalledVariant(type1, registry)) {
                 val (_, payloadType) = type1.constructors.entries.first()
                 if (payloadType != null) {
                     return unify(payloadType, type2, registry)
@@ -566,9 +566,9 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
 
 // A variant acts as a hard wall (foreign ctors reject) when either the user
 // wrote an ascription-shaped construct (ascriptionWall) OR the alias name is
-// in the caller's import set. Kept as `isVariantNameInScope` for its
+// in the caller's import set. Kept as `isWalledVariant` for its
 // remaining callers; the returned bool is really "should this variant wall".
-private fun isVariantNameInScope(
+private fun isWalledVariant(
     v: MezzeType.VariantType,
     registry: DeclarationRegistry
 ): Boolean {
@@ -631,7 +631,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         // otherwise the open side is trying to add a foreign ctor to a wall.
         // Prevents `Yellow` from unifying with `Color = | Red, Green, Blue |`
         // when Color is imported (or when the closed side is a hard ascription).
-        if (isVariantNameInScope(closedVar, registry)) {
+        if (isWalledVariant(closedVar, registry)) {
             val invalidConstructors = openCtors - closedCtors
             if (invalidConstructors.isNotEmpty()) {
                 val invalid = invalidConstructors.sorted().joinToString(", ")
@@ -672,8 +672,8 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         var1.typeName == var2.typeName && var1.typeName != null
     }
     if (bothWalled && !identityMatch) {
-        val var1NameInScope = isVariantNameInScope(var1, registry)
-        val var2NameInScope = isVariantNameInScope(var2, registry)
+        val var1NameInScope = isWalledVariant(var1, registry)
+        val var2NameInScope = isWalledVariant(var2, registry)
         if (var1NameInScope || var2NameInScope) {
             // #149: when both walls happen to constrain to the SAME arm set,
             // unify successfully (their nominal identities are interchangeable
@@ -700,7 +700,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
 
     if (declaredVar != null && anonymousVar != null) {
         val invalidConstructors = anonymousVar.constructors.keys - declaredVar.constructors.keys
-        if (invalidConstructors.isNotEmpty() && isVariantNameInScope(declaredVar, registry)) {
+        if (invalidConstructors.isNotEmpty() && isWalledVariant(declaredVar, registry)) {
             val invalid = invalidConstructors.sorted().joinToString(", ")
             return UnificationResult.Failure(
                 message = "Constructor(s) '$invalid' not found in ${describeVariant(declaredVar)}.",
