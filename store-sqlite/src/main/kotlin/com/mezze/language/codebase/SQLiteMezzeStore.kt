@@ -91,7 +91,11 @@ class SQLiteMezzeStore private constructor(
          * and regenerated from source. See
          * `docs/architecture/17-three-file-cache.md`.
          */
-        const val SCHEMA_VERSION = 4
+        // v5: hash-driven TypeIdentity (Stage D) — MezzeTypeHasher now encodes a
+        // nominal type's identity via a discriminant-tagged appendIdentity(), which
+        // shifts the content-hash bytes for every nominal type. Old caches are
+        // dropped and regenerated.
+        const val SCHEMA_VERSION = 5
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of

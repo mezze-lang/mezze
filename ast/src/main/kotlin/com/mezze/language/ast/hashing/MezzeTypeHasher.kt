@@ -69,18 +69,18 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.NewtypeType -> {
             b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x10))
             b.append(type.name); b.append(type.constructor)
-            // #278/F0: fold the declaration hash into the structural hash when
-            // present, so two same-named newtypes from different declarations hash
-            // DISTINCTLY here too (mirrors the TypeApplication case below). Without
-            // this, `MezzeTypeHasher` collapses them and any hash-based identity
-            // downstream re-opens the collision F0 closes in unification.
-            type.typeHash?.let { b.appendBoolean(true); b.append(it.hex) } ?: b.appendBoolean(false)
+            // #278/F0: fold the declaration IDENTITY into the structural hash so two
+            // same-named newtypes from different declarations hash DISTINCTLY here
+            // too (mirrors TypeApplication). Without this, `MezzeTypeHasher` collapses
+            // them and any hash-based identity downstream re-opens the collision F0
+            // closes in unification.
+            appendIdentity(b, type.identity)
             appendTypeInScope(b, type.wrappedType)
         }
         is MezzeType.TypeApplication -> {
             b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR))
             b.append(type.constructor)
-            type.typeHash?.let { b.appendBoolean(true); b.append(it.hex) } ?: b.appendBoolean(false)
+            appendIdentity(b, type.identity)
             b.appendInt(type.args.size)
             for (arg in type.args) appendTypeInScope(b, arg)
         }
@@ -90,7 +90,7 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         }
         is MezzeType.RecordType -> {
             b.append(byteArrayOf(HashTags.RECORD_TYPE))
-            type.typeHash?.let { b.appendBoolean(true); b.append(it.hex) } ?: b.appendBoolean(false)
+            appendIdentity(b, type.identity)
             // #264: openness marker — an open `{x, ...}` and a closed `{x}` are
             // distinct types (different runtime shapes) and must not collide.
             b.appendBoolean(type.rowVar != null)
@@ -101,7 +101,7 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         }
         is MezzeType.VariantType -> {
             b.append(byteArrayOf(HashTags.VARIANT_TYPE))
-            type.typeHash?.let { b.appendBoolean(true); b.append(it.hex) } ?: b.appendBoolean(false)
+            appendIdentity(b, type.identity)
             // #264: openness + nominal-wall markers — same-constructor variants that
             // differ only in these flags are distinct types.
             b.appendBoolean(type.rowVar != null)
@@ -126,6 +126,45 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
             b.append(byteArrayOf(HashTags.PERFORM, 0x02))
             b.appendInt(type.effects.size)
             for (e in type.effects.toSortedSet()) b.append(e)
+        }
+    }
+}
+
+/**
+ * Encode a nominal type's [TypeIdentity] into the content hash. This is the
+ * single, exhaustive expression of "what distinguishes this nominal type from
+ * another of the same structural shape" — one discriminant tag per identity kind
+ * followed by the kind's distinguishing content:
+ *
+ *  - [TypeIdentity.Declared] → tag + the declaration content hash. The
+ *    `displayName` is DELIBERATELY NOT hashed: the hash is the sole identity, so
+ *    two declared types with the same content hash but different display names are
+ *    the same type (rename-safe), exactly as unification treats them.
+ *  - [TypeIdentity.Builtin]  → tag + the reserved builtin name (its canonical
+ *    identity — there is exactly one `Option`/`List`/… so the name IS the hash).
+ *  - [TypeIdentity.Named]    → tag + the display name. A hashless-but-named type
+ *    (transitional; see [TypeIdentity.Named]) keys on its name here, matching how
+ *    unification falls back to the name when no hash is present.
+ *  - [TypeIdentity.Anonymous] → tag only. An inline structural type has no identity
+ *    beyond its fields/constructors, which the surrounding branch already hashes.
+ *
+ * The discriminant tag makes the four kinds hash distinctly even when their
+ * distinguishing content coincides (e.g. an [Anonymous] type never collides with
+ * a [Named] one that happens to share the enclosing constructor name).
+ */
+private fun appendIdentity(b: MezzeHashBuilder, identity: com.mezze.language.ast.TypeIdentity) {
+    when (identity) {
+        is com.mezze.language.ast.TypeIdentity.Declared -> {
+            b.append(byteArrayOf(0x01)); b.append(identity.hash.hex)
+        }
+        is com.mezze.language.ast.TypeIdentity.Builtin -> {
+            b.append(byteArrayOf(0x02)); b.append(identity.name)
+        }
+        is com.mezze.language.ast.TypeIdentity.Named -> {
+            b.append(byteArrayOf(0x03)); b.append(identity.displayName)
+        }
+        com.mezze.language.ast.TypeIdentity.Anonymous -> {
+            b.append(byteArrayOf(0x04))
         }
     }
 }
