@@ -105,7 +105,7 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
             // #264: openness + nominal-wall markers — same-constructor variants that
             // differ only in these flags are distinct types.
             b.appendBoolean(type.rowVar != null)
-            b.appendBoolean(type.nominalWall)
+            b.appendBoolean(type.ascriptionWall)
             b.appendInt(type.constructors.size)
             for (name in type.constructors.keys.sorted()) {
                 b.append(name)

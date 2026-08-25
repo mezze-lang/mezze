@@ -465,7 +465,7 @@ internal class VariantSolver(
 
             val inScope = inScopeAliasNamesForSolverOrNull()
             val name = variantType.typeName
-            val nameInScope = variantType.nominalWall ||
+            val nameInScope = variantType.ascriptionWall ||
                 (name != null && (inScope == null || name in inScope))
             if (!nameInScope) {
                 val extendedVariant = MezzeType.VariantType(
@@ -576,7 +576,7 @@ internal class VariantSolver(
                 val shouldClose = type.rowVar != null && type.rowVar in rowVarsToClose
                 // Pinning an inferred anonymous open variant to closed shape
                 // makes it act as a wall for downstream match/ascription
-                // constraints — set nominalWall=true. Do NOT invent a synthetic
+                // constraints — set ascriptionWall=true. Do NOT invent a synthetic
                 // typeName: it's still anonymous, printed by its arm set.
                 val pinningInferred = shouldClose && type.typeName == null
                 MezzeType.VariantType(
@@ -585,7 +585,7 @@ internal class VariantSolver(
                     },
                     rowVar = if (shouldClose) null else type.rowVar,
                     typeName = type.typeName,
-                    nominalWall = type.nominalWall || pinningInferred
+                    ascriptionWall = type.ascriptionWall || pinningInferred
                 )
             }
             is MezzeType.RecordType -> {

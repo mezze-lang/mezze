@@ -374,7 +374,7 @@ class ExpressionConstraintGenerator {
                 typeName = type.typeName,
                 typeArgs = type.typeArgs.map { applyTypeVarSubstitution(it, substitution) },
                 typeHash = type.typeHash,
-                nominalWall = type.nominalWall
+                ascriptionWall = type.ascriptionWall
             )
             is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = applyTypeVarSubstitution(type.elementType, substitution)

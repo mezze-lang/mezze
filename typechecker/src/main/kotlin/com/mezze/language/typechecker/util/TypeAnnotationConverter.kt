@@ -77,7 +77,7 @@ object TypeAnnotationConverter {
                     // `{c: |A,B|}` and an alias-decl `type X = |A,B|` used at
                     // a call site are otherwise structurally indistinguishable
                     // (both would carry `typeName="<inline>"` under
-                    // inlineVariantNaming). `nominalWall` is CLEARED: the wall
+                    // inlineVariantNaming). `ascriptionWall` is CLEARED: the wall
                     // is an author-written ascription concern, not a decl one.
                     if (name !in recursionGuard) {
                         config.resolveTypeAlias(name)?.let { (aliased, _) ->
@@ -154,7 +154,7 @@ object TypeAnnotationConverter {
             is ParsedVariantType -> {
                 // An author-written closed inline variant (`{c: |Red, Green|}`)
                 // is a hard wall — reject foreign ctors regardless of scope.
-                // That's what `nominalWall=true` tracks. Author-written OPEN
+                // That's what `ascriptionWall=true` tracks. Author-written OPEN
                 // variants (`|Red, Green, ...|`) are structural, no wall.
                 // `typeName` stays null: anonymous inline variants have no
                 // nominal identity to display; the printer renders their
@@ -166,7 +166,7 @@ object TypeAnnotationConverter {
                     },
                     rowVar = if (config.honorOpenRowVars && annotation.isOpen) RowVar.userOpen() else null,
                     typeName = null,
-                    nominalWall = isClosedInlineWall,
+                    ascriptionWall = isClosedInlineWall,
                 )
             }
 
@@ -568,7 +568,7 @@ object TypeAnnotationConverter {
     /**
      * When `type X = <shape>` is inlined at a use site, stamp X's own nominal
      * identity (name + content hash + type-arg vector for parametric aliases)
-     * on the resolved variant/record. `nominalWall` is CLEARED — the wall
+     * on the resolved variant/record. `ascriptionWall` is CLEARED — the wall
      * is an author-written-ascription concern, not something a decl brings.
      * Non-shape carriers (Int, Function, TypeApplication, Seq, …) pass
      * through unchanged: they either don't need labeling (primitives) or
@@ -585,7 +585,7 @@ object TypeAnnotationConverter {
                 typeName = aliasName,
                 typeHash = aliasHash ?: resolved.typeHash,
                 typeArgs = typeArgs,
-                nominalWall = false,
+                ascriptionWall = false,
             )
             is MezzeType.RecordType -> resolved.copy(
                 typeName = aliasName,

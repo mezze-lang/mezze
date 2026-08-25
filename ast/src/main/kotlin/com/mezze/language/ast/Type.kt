@@ -165,17 +165,16 @@ sealed interface MezzeType {
         // their inlined variant bodies at outer positions (e.g. `match` scrutinees).
         val typeArgs: List<MezzeType> = emptyList(),
         val typeHash: com.mezze.language.typedast.Hash? = null,  // Content hash of the type declaration (for rename-safe identity)
-        // #148: marks the variant as a nominal wall that ALWAYS rejects foreign
-        // constructors, regardless of whether `typeName` is in scope at the use
-        // site. Set true for:
-        //   - Inline ascriptions   (`let x: | A, B | = ...`)
-        //   - Inferred match-scrutinee closure (the typechecker pinned the
-        //     scrutinee to the union of its match arms).
-        // Variant aliases declared with `type Foo = | ... |` use typeName +
-        // in-scope membership instead, NOT this flag. That's how a `pub type`
-        // alias becomes structural across module boundaries while ascriptions
-        // stay nominal everywhere.
-        val nominalWall: Boolean = false
+        // A hard wall: foreign constructors reject regardless of scope.
+        // Set true for constructs that behave like an author-written ascription:
+        //   - An inline closed ascription (`let x: | A, B | = ...`)
+        //   - An inferred match-scrutinee whose row var got pin-closed to the
+        //     union of its match arms (a match implicitly ascribes the
+        //     scrutinee to its covered arm set)
+        // Alias-resolved shapes (`type Foo = | A, B |` used at a call site)
+        // do NOT set this flag — their nominal identity lives on typeName +
+        // typeHash, and unification's "walled" test consults those directly.
+        val ascriptionWall: Boolean = false
     ) : MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
