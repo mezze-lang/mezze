@@ -926,15 +926,19 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
     val allEffects2 = eff2.allEffectNames
     val combinedEffects = allEffects1 + allEffects2
 
+    // Hermetic-Mut check reads each effect's carried content hash directly.
+    // The row carries effectHashes (effectName → declHash); prefer that. The
+    // registry lookup is only the parse-boundary seed for any effect that has
+    // not yet had its hash stamped onto the row — never a name→identity compare.
     val combinedHashes = eff1.effectHashes + eff2.effectHashes
-    fun resolveEffectHash(name: String): Hash? = combinedHashes[name] ?: registry.resolveEffectHash(name)
+    fun effectHash(name: String): Hash? = combinedHashes[name] ?: registry.resolveEffectHash(name)
 
     val mutEffect = combinedEffects.firstOrNull { name ->
-        WellKnownHashConstants.isMut(resolveEffectHash(name))
+        WellKnownHashConstants.isMut(effectHash(name))
     }
     if (mutEffect != null && combinedEffects.size > 1) {
         val otherEffects = combinedEffects.filter { name ->
-            !WellKnownHashConstants.isMut(resolveEffectHash(name))
+            !WellKnownHashConstants.isMut(effectHash(name))
         }.joinToString(", ")
         return UnificationResult.Failure(
             message = "$mutEffect effect is hermetic: cannot coexist with other effects ($otherEffects). " +

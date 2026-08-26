@@ -786,8 +786,7 @@ internal class AbilityChecker(
 
             resolvedHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
             resolvedHash == WellKnownHashConstants.ABILITY_LOGICALOR -> {
-                unwrappedType is MezzeType.BoolType || BuiltInAbilities.isBoolVariant(unwrappedType) ||
-                isBoolLikeVariant(unwrappedType)
+                unwrappedType is MezzeType.BoolType || BuiltInAbilities.isBoolVariant(unwrappedType)
             }
 
             else -> false
@@ -930,14 +929,6 @@ internal class AbilityChecker(
             "${renderAnnotation(a.paramType)} -> ${renderAnnotation(a.returnType)}"
         is ParsedSeqType -> "[${renderAnnotation(a.elementType)}]"
         else -> a::class.simpleName?.removePrefix("Parsed")?.removeSuffix("Type") ?: "?"
-    }
-
-    private fun isBoolLikeVariant(type: MezzeType): Boolean {
-        if (type !is MezzeType.VariantType) return false
-        val keys = type.constructors.keys
-        return keys.all { it == "True" || it == "False" } &&
-               keys.isNotEmpty() &&
-               type.constructors.values.all { it == null }
     }
 
     internal fun isConcrete(type: MezzeType): Boolean {
