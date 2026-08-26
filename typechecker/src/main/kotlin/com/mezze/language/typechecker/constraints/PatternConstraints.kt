@@ -163,7 +163,7 @@ class PatternConstraintGenerator {
             val constructors = scrutineeType.constructors.keys.sorted()
             val literalDesc = describeLiteral(literalValue)
             val firstConstructor = constructors.firstOrNull() ?: "ConstructorName"
-            val label = scrutineeType.typeName?.takeIf { !it.startsWith("<") } ?: findAliasForVariant(scrutineeType, context) ?: "[${constructors.joinToString(", ")}]"
+            val label = scrutineeType.identity.displayNameOrNull()?.takeIf { !it.startsWith("<") } ?: findAliasForVariant(scrutineeType, context) ?: "[${constructors.joinToString(", ")}]"
             throw TypeCheckError(
                 "Cannot match variant type $label with $literalDesc. " +
                 "Use a constructor pattern like '$firstConstructor' instead, " +
@@ -249,7 +249,7 @@ class PatternConstraintGenerator {
 
         if (scrutineeType is MezzeType.VariantType) {
             val constructors = scrutineeType.constructors.keys.sorted()
-            val label = scrutineeType.typeName?.takeIf { !it.startsWith("<") } ?: findAliasForVariant(scrutineeType, context) ?: "[${constructors.joinToString(", ")}]"
+            val label = scrutineeType.identity.displayNameOrNull()?.takeIf { !it.startsWith("<") } ?: findAliasForVariant(scrutineeType, context) ?: "[${constructors.joinToString(", ")}]"
             throw TypeCheckError(
                 "Cannot match variant type $label with a string interpolation pattern. " +
                 "Use a constructor pattern like '${constructors.firstOrNull() ?: "ConstructorName"}' instead.",

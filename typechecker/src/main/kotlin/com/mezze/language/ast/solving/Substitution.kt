@@ -230,8 +230,7 @@ data class Substitution(
             is MezzeType.RecordType -> MezzeType.RecordType(
                 fields = type.fields.mapValues { (_, fieldType) -> applyWithVisited(fieldType, visitedVars, chainCache) },
                 rowVar = type.rowVar,
-                typeName = type.typeName,
-                typeHash = type.typeHash
+                identity = type.identity
             )
 
             is MezzeType.VariantType -> {
@@ -241,9 +240,8 @@ data class Substitution(
                 MezzeType.VariantType(
                     constructors = appliedConstructors,
                     rowVar = type.rowVar,
-                    typeName = type.typeName,
                     typeArgs = type.typeArgs.map { applyWithVisited(it, visitedVars, chainCache) },
-                    typeHash = type.typeHash,
+                    identity = type.identity,
                     ascriptionWall = type.ascriptionWall
                 )
             }
@@ -251,7 +249,7 @@ data class Substitution(
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,
                 args = type.args.map { applyWithVisited(it, visitedVars, chainCache) },
-                typeHash = type.typeHash
+                identity = type.identity
             )
 
             is MezzeType.SeqType -> MezzeType.SeqType(
@@ -406,8 +404,7 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         MezzeType.RecordType(
             fields = type.fields.mapValues { (_, fieldType) -> closeGeneratedRowVars(fieldType, mustBeOpenRowVars) },
             rowVar = closedRowVar,
-            typeName = type.typeName,
-            typeHash = type.typeHash
+            identity = type.identity
         )
     }
     is MezzeType.VariantType -> {
@@ -425,9 +422,8 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
                 payloadType?.let { closeGeneratedRowVars(it, mustBeOpenRowVars) }
             },
             rowVar = closedRowVar,
-            typeName = type.typeName,
             typeArgs = type.typeArgs.map { closeGeneratedRowVars(it, mustBeOpenRowVars) },
-            typeHash = type.typeHash,
+            identity = type.identity,
             ascriptionWall = type.ascriptionWall
         )
     }
@@ -452,7 +448,7 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
     is MezzeType.TypeApplication -> MezzeType.TypeApplication(
         constructor = type.constructor,
         args = type.args.map { closeGeneratedRowVars(it, mustBeOpenRowVars) },
-        typeHash = type.typeHash
+        identity = type.identity
     )
     is MezzeType.SuspendType -> MezzeType.SuspendType(
         valueType = closeGeneratedRowVars(type.valueType, mustBeOpenRowVars),

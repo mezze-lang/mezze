@@ -404,8 +404,7 @@ class ConstraintSolver(
         val mergedVariant = MezzeType.VariantType(
             constructors = mergedConstructors,
             rowVar = leftType.rowVar ?: rightType.rowVar,
-            typeName = leftType.typeName ?: rightType.typeName,
-            typeHash = leftType.typeHash ?: rightType.typeHash
+            identity = if (leftType.identity != TypeIdentity.Anonymous) leftType.identity else rightType.identity
         )
 
         val updatedMappings = mutableMapOf<TypeVar, MezzeType>()

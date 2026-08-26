@@ -2,6 +2,7 @@ package com.mezze.language.typechecker
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
+import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.typechecker.solving.AliasStripper
 import com.mezze.language.typechecker.context.DeclarationRegistry
@@ -43,8 +44,7 @@ class AliasStripperSoundnessTest {
     fun `effect associated types inside FunctionType are stripped`() {
         val colorType = VariantType(
             constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),
-            typeName = "Color",
-            typeHash = null
+            identity = TypeIdentity.Named("Color")
         )
         val effectInstance = EffectInstance(
             name = "State",
@@ -68,7 +68,7 @@ class AliasStripperSoundnessTest {
         val strippedInstance = strippedFn.effects!!.effectInstances.first()
         val strippedState = strippedInstance.associatedTypes["'state"]
         assertTrue(strippedState is VariantType)
-        assertEquals(null, (strippedState as VariantType).typeName,
+        assertEquals(null, (strippedState as VariantType).identity.displayNameOrNull(),
             "Color alias should be stripped from effect associated type when not in scope")
     }
 
@@ -76,8 +76,7 @@ class AliasStripperSoundnessTest {
     fun `effect associated types inside SuspendType are stripped`() {
         val colorType = VariantType(
             constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),
-            typeName = "Color",
-            typeHash = null
+            identity = TypeIdentity.Named("Color")
         )
         val effectInstance = EffectInstance(
             name = "State",
@@ -99,7 +98,7 @@ class AliasStripperSoundnessTest {
         val strippedInstance = strippedSusp.effects.effectInstances.first()
         val strippedState = strippedInstance.associatedTypes["'state"]
         assertTrue(strippedState is VariantType)
-        assertEquals(null, (strippedState as VariantType).typeName,
+        assertEquals(null, (strippedState as VariantType).identity.displayNameOrNull(),
             "Color alias should be stripped from suspended effect associated type when not in scope")
     }
 
@@ -107,8 +106,7 @@ class AliasStripperSoundnessTest {
     fun `ability constraint typeArgs inside FunctionType are stripped`() {
         val colorType = VariantType(
             constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),
-            typeName = "Color",
-            typeHash = null
+            identity = TypeIdentity.Named("Color")
         )
         val constraint = FunctionAbilityConstraint(
             abilityName = "Eq",
@@ -127,7 +125,7 @@ class AliasStripperSoundnessTest {
         assertEquals(1, strippedFn.abilityConstraints.size)
         val strippedArg = strippedFn.abilityConstraints[0].typeArgs[0]
         assertTrue(strippedArg is VariantType)
-        assertEquals(null, (strippedArg as VariantType).typeName,
+        assertEquals(null, (strippedArg as VariantType).identity.displayNameOrNull(),
             "Color alias should be stripped from ability constraint typeArgs when not in scope")
     }
 
@@ -136,8 +134,7 @@ class AliasStripperSoundnessTest {
         val inScopeSet = setOf("Color")
         val colorType = VariantType(
             constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),
-            typeName = "Color",
-            typeHash = null
+            identity = TypeIdentity.Named("Color")
         )
         val effectInstance = EffectInstance(
             name = "State",
@@ -163,12 +160,12 @@ class AliasStripperSoundnessTest {
         val strippedInstance = strippedFn.effects!!.effectInstances.first()
         val strippedState = strippedInstance.associatedTypes["'state"]
         assertTrue(strippedState is VariantType)
-        assertEquals("Color", (strippedState as VariantType).typeName,
+        assertEquals("Color", (strippedState as VariantType).identity.displayNameOrNull(),
             "Color alias should be preserved when in scope")
 
         val strippedConstraintArg = strippedFn.abilityConstraints[0].typeArgs[0]
         assertTrue(strippedConstraintArg is VariantType)
-        assertEquals("Color", (strippedConstraintArg as VariantType).typeName,
+        assertEquals("Color", (strippedConstraintArg as VariantType).identity.displayNameOrNull(),
             "Color alias should be preserved in ability constraints when in scope")
     }
 }

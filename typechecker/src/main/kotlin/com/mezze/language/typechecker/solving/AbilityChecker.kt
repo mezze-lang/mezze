@@ -644,14 +644,14 @@ internal class AbilityChecker(
                 val closedFields = type.fields.mapValues { (_, fieldType) ->
                     closeOpenRecords(fieldType)
                 }
-                MezzeType.RecordType(fields = closedFields, rowVar = null, typeName = type.typeName, typeHash = type.typeHash)
+                MezzeType.RecordType(fields = closedFields, rowVar = null, identity = type.identity)
             }
             is MezzeType.TypeApplication -> {
                 if (type.args.none { needsRowClosing(it) }) {
                     return type
                 }
                 val closedArgs = type.args.map { closeOpenRecords(it) }
-                WellKnownTypeApp.of(type.constructor, closedArgs, type.typeHash)
+                WellKnownTypeApp.of(type.constructor, closedArgs, (type.identity as? TypeIdentity.Declared)?.hash)
             }
             is MezzeType.VariantType -> {
                 val needsClosing = type.rowVar != null || type.constructors.values.any { it != null && needsRowClosing(it) }
@@ -661,7 +661,7 @@ internal class AbilityChecker(
                 val closedConstructors = type.constructors.mapValues { (_, payload) ->
                     payload?.let { closeOpenRecords(it) }
                 }
-                MezzeType.VariantType(closedConstructors, rowVar = null, typeName = type.typeName, typeHash = type.typeHash)
+                MezzeType.VariantType(closedConstructors, rowVar = null, identity = type.identity)
             }
             is MezzeType.ListType -> {
                 if (!needsRowClosing(type.elementType)) return type

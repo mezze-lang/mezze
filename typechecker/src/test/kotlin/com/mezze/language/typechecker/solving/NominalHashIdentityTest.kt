@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.solving
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.typedast.Hash
 import org.junit.jupiter.api.Test
 import kotlin.test.assertIs
@@ -30,8 +31,8 @@ class NominalHashIdentityTest {
     // codec types, so the veto is safe. See hash-driven-typechecker Stage 0/1.)
 
     @Test fun `same-named type applications with DIFFERENT hashes do not unify`() {
-        val app1 = MezzeType.TypeApplication("Widget", emptyList(), typeHash = hashA)
-        val app2 = MezzeType.TypeApplication("Widget", emptyList(), typeHash = hashB)
+        val app1 = MezzeType.TypeApplication("Widget", emptyList(), identity = TypeIdentity.Declared(hashA, "Widget"))
+        val app2 = MezzeType.TypeApplication("Widget", emptyList(), identity = TypeIdentity.Declared(hashB, "Widget"))
         val result = unify(app1, app2)
         assertIs<UnificationResult.Failure>(
             result,
@@ -40,21 +41,21 @@ class NominalHashIdentityTest {
     }
 
     @Test fun `same-named type applications with the SAME hash unify`() {
-        val app1 = MezzeType.TypeApplication("Widget", emptyList(), typeHash = hashA)
-        val app2 = MezzeType.TypeApplication("Widget", emptyList(), typeHash = hashA)
+        val app1 = MezzeType.TypeApplication("Widget", emptyList(), identity = TypeIdentity.Declared(hashA, "Widget"))
+        val app2 = MezzeType.TypeApplication("Widget", emptyList(), identity = TypeIdentity.Declared(hashA, "Widget"))
         assertIs<UnificationResult.Success>(unify(app1, app2), "same declaration unifies with itself")
     }
 
     @Test fun `hashless type applications unify by name (builtins and pre-hash)`() {
-        val app1 = MezzeType.TypeApplication("List", emptyList())
-        val app2 = MezzeType.TypeApplication("List", emptyList())
+        val app1 = MezzeType.TypeApplication("List", emptyList(), identity = TypeIdentity.Builtin("List"))
+        val app2 = MezzeType.TypeApplication("List", emptyList(), identity = TypeIdentity.Builtin("List"))
         assertIs<UnificationResult.Success>(unify(app1, app2), "hashless TypeApps unify by name")
     }
 
     @Test fun `differently-named type applications with the SAME hash unify (rename-safe alias)`() {
         // The hash clause ADDS matches: a rename-safe alias (name differs, hash same).
-        val app1 = MezzeType.TypeApplication("Widget", emptyList(), typeHash = hashA)
-        val app2 = MezzeType.TypeApplication("Gadget", emptyList(), typeHash = hashA)
+        val app1 = MezzeType.TypeApplication("Widget", emptyList(), identity = TypeIdentity.Declared(hashA, "Widget"))
+        val app2 = MezzeType.TypeApplication("Gadget", emptyList(), identity = TypeIdentity.Declared(hashA, "Gadget"))
         val result = unify(app1, app2)
         assertIs<UnificationResult.Success>(result, "equal typeHash on differing names is a rename-safe alias")
     }
@@ -62,8 +63,8 @@ class NominalHashIdentityTest {
     // ---- F0: NewtypeType (defensive — currently near-unreachable, but hardened) ----
 
     @Test fun `same-named newtypes with DIFFERENT hashes do not unify`() {
-        val n1 = MezzeType.NewtypeType("Token", "Token", MezzeType.StringType, typeHash = hashA)
-        val n2 = MezzeType.NewtypeType("Token", "Token", MezzeType.StringType, typeHash = hashB)
+        val n1 = MezzeType.NewtypeType("Token", "Token", MezzeType.StringType, identity = TypeIdentity.Declared(hashA, "Token"))
+        val n2 = MezzeType.NewtypeType("Token", "Token", MezzeType.StringType, identity = TypeIdentity.Declared(hashB, "Token"))
         val result = unify(n1, n2)
         assertIs<UnificationResult.Failure>(
             result,
@@ -72,15 +73,15 @@ class NominalHashIdentityTest {
     }
 
     @Test fun `same-named newtypes with the SAME hash unify`() {
-        val n1 = MezzeType.NewtypeType("Token", "Token", MezzeType.StringType, typeHash = hashA)
-        val n2 = MezzeType.NewtypeType("Token", "Token", MezzeType.StringType, typeHash = hashA)
+        val n1 = MezzeType.NewtypeType("Token", "Token", MezzeType.StringType, identity = TypeIdentity.Declared(hashA, "Token"))
+        val n2 = MezzeType.NewtypeType("Token", "Token", MezzeType.StringType, identity = TypeIdentity.Declared(hashA, "Token"))
         val result = unify(n1, n2)
         assertIs<UnificationResult.Success>(result, "the same newtype declaration unifies with itself")
     }
 
     @Test fun `newtypes with NO hash fall back to name`() {
-        val n1 = MezzeType.NewtypeType("Meters", "Meters", MezzeType.IntType)
-        val n2 = MezzeType.NewtypeType("Meters", "Meters", MezzeType.IntType)
+        val n1 = MezzeType.NewtypeType("Meters", "Meters", MezzeType.IntType, identity = TypeIdentity.Named("Meters"))
+        val n2 = MezzeType.NewtypeType("Meters", "Meters", MezzeType.IntType, identity = TypeIdentity.Named("Meters"))
         val result = unify(n1, n2)
         assertIs<UnificationResult.Success>(result, "hashless newtypes unify by name (legacy behavior)")
     }
@@ -88,8 +89,8 @@ class NominalHashIdentityTest {
     // ---- Variants: hash-veto (distinct declarations don't unify) ----
 
     @Test fun `same-named variants with DIFFERENT hashes do not unify`() {
-        val v1 = MezzeType.VariantType(mapOf("A" to null, "B" to null), typeName = "E", typeHash = hashA)
-        val v2 = MezzeType.VariantType(mapOf("A" to null, "B" to null), typeName = "E", typeHash = hashB)
+        val v1 = MezzeType.VariantType(mapOf("A" to null, "B" to null), identity = TypeIdentity.Declared(hashA, "E"))
+        val v2 = MezzeType.VariantType(mapOf("A" to null, "B" to null), identity = TypeIdentity.Declared(hashB, "E"))
         assertIs<UnificationResult.Failure>(
             unify(v1, v2),
             "two modules' `E` variant (different typeHash, identical arms) must NOT unify",
@@ -97,16 +98,16 @@ class NominalHashIdentityTest {
     }
 
     @Test fun `same-named variants with the SAME hash unify`() {
-        val v1 = MezzeType.VariantType(mapOf("A" to null, "B" to null), typeName = "E", typeHash = hashA)
-        val v2 = MezzeType.VariantType(mapOf("A" to null, "B" to null), typeName = "E", typeHash = hashA)
+        val v1 = MezzeType.VariantType(mapOf("A" to null, "B" to null), identity = TypeIdentity.Declared(hashA, "E"))
+        val v2 = MezzeType.VariantType(mapOf("A" to null, "B" to null), identity = TypeIdentity.Declared(hashA, "E"))
         assertIs<UnificationResult.Success>(unify(v1, v2), "same variant declaration unifies with itself")
     }
 
     // ---- Records: nominal hash-veto; anonymous records stay structural ----
 
     @Test fun `record types with DIFFERENT hashes do not unify even with identical fields`() {
-        val r1 = MezzeType.RecordType(mapOf("x" to MezzeType.IntType), typeHash = hashA)
-        val r2 = MezzeType.RecordType(mapOf("x" to MezzeType.IntType), typeHash = hashB)
+        val r1 = MezzeType.RecordType(mapOf("x" to MezzeType.IntType), identity = TypeIdentity.Declared(hashA, "R"))
+        val r2 = MezzeType.RecordType(mapOf("x" to MezzeType.IntType), identity = TypeIdentity.Declared(hashB, "R"))
         assertIs<UnificationResult.Failure>(
             unify(r1, r2),
             "two distinct nominal records (different typeHash) must NOT unify structurally",
@@ -114,8 +115,8 @@ class NominalHashIdentityTest {
     }
 
     @Test fun `record types with the SAME hash unify`() {
-        val r1 = MezzeType.RecordType(mapOf("x" to MezzeType.IntType), typeHash = hashA)
-        val r2 = MezzeType.RecordType(mapOf("x" to MezzeType.IntType), typeHash = hashA)
+        val r1 = MezzeType.RecordType(mapOf("x" to MezzeType.IntType), identity = TypeIdentity.Declared(hashA, "R"))
+        val r2 = MezzeType.RecordType(mapOf("x" to MezzeType.IntType), identity = TypeIdentity.Declared(hashA, "R"))
         assertIs<UnificationResult.Success>(unify(r1, r2), "same record declaration unifies with itself")
     }
 

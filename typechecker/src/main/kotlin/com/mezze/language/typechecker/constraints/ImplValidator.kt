@@ -771,8 +771,10 @@ internal class ImplValidator(
      * type variable / not a known type, is left untouched.
      */
     private fun stampTypeHashes(type: MezzeType): MezzeType {
-        val stamped = if (type is MezzeType.TypeApplication && type.typeHash == null) {
-            registry.typeHashFor(type.constructor)?.let { type.copy(typeHash = it) } ?: type
+        val stamped = if (type is MezzeType.TypeApplication && type.identity !is TypeIdentity.Declared) {
+            registry.typeHashFor(type.constructor)?.let {
+                type.copy(identity = TypeIdentity.Declared(it, type.constructor))
+            } ?: type
         } else type
         return stamped.transformChildren { stampTypeHashes(it) }
     }
@@ -786,7 +788,8 @@ internal class ImplValidator(
             // WellKnownTypeApp.of still fills in a well-known hash when absent.
             is MezzeType.VarType -> substitution[type.variable.name] ?: type
             is MezzeType.TypeApplication -> WellKnownTypeApp.of(
-                type.constructor, type.args.map { substituteTypeParams(it, substitution) }, type.typeHash)
+                type.constructor, type.args.map { substituteTypeParams(it, substitution) },
+                (type.identity as? TypeIdentity.Declared)?.hash)
             else -> type.transformChildren { substituteTypeParams(it, substitution) }
         }
 

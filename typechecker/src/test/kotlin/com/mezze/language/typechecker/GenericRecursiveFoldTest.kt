@@ -73,10 +73,10 @@ class GenericRecursiveFoldTest {
                 is com.mezze.language.ast.MezzeType.FunctionType ->
                     "FunctionType\n${indent}param=${describe(t.paramType, "$indent  ")}\n${indent}return=${describe(t.returnType, "$indent  ")}"
                 is com.mezze.language.ast.MezzeType.RecordType ->
-                    "RecordType(typeName=${t.typeName})\n" +
+                    "RecordType(typeName=${t.identity.displayNameOrNull()})\n" +
                     t.fields.entries.joinToString("\n") { "$indent${it.key}=${describe(it.value, "$indent  ")}" }
                 is com.mezze.language.ast.MezzeType.VariantType ->
-                    "VariantType(typeName=${t.typeName}, ctors=${t.constructors.keys})"
+                    "VariantType(typeName=${t.identity.displayNameOrNull()}, ctors=${t.constructors.keys})"
                 is com.mezze.language.ast.MezzeType.TypeApplication ->
                     "TypeApplication(${t.constructor}, args=${t.args.size})"
                 else -> "${t.javaClass.simpleName}: $t"

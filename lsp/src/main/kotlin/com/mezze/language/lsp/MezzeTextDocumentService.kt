@@ -3122,7 +3122,7 @@ class MezzeTextDocumentService(
                 else -> generateForNamedType(state, expected.constructor, out)
             }
             is MezzeType.VariantType -> {
-                expected.typeName?.let { generateForNamedType(state, it, out) }
+                expected.identity.displayNameOrNull()?.let { generateForNamedType(state, it, out) }
             }
             is MezzeType.RecordType -> {
                 if (expected.fields.isNotEmpty()) {

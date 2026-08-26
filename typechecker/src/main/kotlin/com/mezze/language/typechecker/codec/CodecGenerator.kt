@@ -1708,8 +1708,8 @@ class CodecGenerator {
         // Use shallow type annotation to avoid infinite recursion for recursive types like Json
         // (JArray contains [Json], JObject contains [{key: Str, value: Json}]).
         val shallowFormatAnnotation = when {
-            formatType is MezzeType.VariantType && formatType.typeName != null ->
-                ParsedNamedType(formatType.typeName!!, GEN_LOC)
+            formatType is MezzeType.VariantType && formatType.identity.displayNameOrNull() != null ->
+                ParsedNamedType(formatType.identity.displayNameOrNull()!!, GEN_LOC)
             formatType is MezzeType.VariantType ->
                 mezzeTypeToAnnotation(formatType)  // fallback for unnamed variants
             else -> mezzeTypeToAnnotation(formatType)

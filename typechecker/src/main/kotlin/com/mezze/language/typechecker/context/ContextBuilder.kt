@@ -338,7 +338,8 @@ class ContextBuilder {
                     }
                     MezzeType.VariantType(
                         constructors = constructors, rowVar = null,
-                        typeName = typeDecl.name, typeHash = typeDecl.contentHash
+                        identity = typeDecl.contentHash?.let { TypeIdentity.Declared(it, typeDecl.name) }
+                            ?: TypeIdentity.Named(typeDecl.name)
                     )
                 }
             }

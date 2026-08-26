@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.phase
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.TypeAliasInfo
 import com.mezze.language.parsedast.*
@@ -24,8 +25,10 @@ internal fun buildTypeAliasesFromParsedModule(
                 MezzeType.VariantType(
                     constructors = constructors,
                     rowVar = if (def.isOpen) RowVar.fresh() else null,
-                    typeName = typeDecl.name,
-                    typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                    identity = TypeIdentity.Declared(
+                        typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl),
+                        typeDecl.name
+                    )
                 )
             }
             is ParsedRecordDef -> {
@@ -41,8 +44,10 @@ internal fun buildTypeAliasesFromParsedModule(
                     // treated it as solver-inferred and let `f.zzz` invent an unlisted
                     // field; userOpen() makes reading an absent field an error.
                     rowVar = if (def.isOpen) RowVar.userOpen() else null,
-                    typeName = typeDecl.name,
-                    typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                    identity = TypeIdentity.Declared(
+                        typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl),
+                        typeDecl.name
+                    )
                 )
             }
             is ParsedTypeAliasDef -> {

@@ -206,7 +206,7 @@ class ConstraintGenerator(
                                         WellKnownTypeApp.of(
                                             constructor = preConvertedAnnotationType.constructor,
                                             args = preConvertedAnnotationType.args.map { substitution.apply(it) },
-                                            typeHash = preConvertedAnnotationType.typeHash
+                                            typeHash = (preConvertedAnnotationType.identity as? TypeIdentity.Declared)?.hash
                                         )
                                     } else {
                                         substitution.apply(preConvertedAnnotationType)

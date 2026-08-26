@@ -162,7 +162,6 @@ object TypeAnnotationConverter {
                         ctor.name to ctor.dataType?.let { recurse(it) }
                     },
                     rowVar = if (config.honorOpenRowVars && annotation.isOpen) RowVar.userOpen() else null,
-                    typeName = null,
                     ascriptionWall = isClosedInlineWall,
                 )
             }
@@ -301,10 +300,16 @@ object TypeAnnotationConverter {
                     }
                 }
                 if (faithful) {
+                    val ctorHash = resolveTypeHash(annotation.constructor)
+                    val ctorIdentity = when {
+                        ctorHash != null -> TypeIdentity.Declared(ctorHash, annotation.constructor)
+                        BuiltinTypes.isBuiltinTypeName(annotation.constructor) -> TypeIdentity.Builtin(annotation.constructor)
+                        else -> TypeIdentity.Named(annotation.constructor)
+                    }
                     MezzeType.TypeApplication(
                         annotation.constructor,
                         annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash) },
-                        typeHash = resolveTypeHash(annotation.constructor)
+                        identity = ctorIdentity
                     )
                 } else {
                     MezzeType.VarType(TypeVar.fresh())
@@ -581,16 +586,20 @@ object TypeAnnotationConverter {
         aliasHash: Hash?,
         typeArgs: List<MezzeType>,
     ): MezzeType {
+        val aliasIdentity = run {
+            val hash = aliasHash ?: (resolved as? MezzeType.VariantType)?.identity
+                ?.let { it as? TypeIdentity.Declared }?.hash
+                ?: ((resolved as? MezzeType.RecordType)?.identity as? TypeIdentity.Declared)?.hash
+            if (hash != null) TypeIdentity.Declared(hash, aliasName) else TypeIdentity.Named(aliasName)
+        }
         return when (resolved) {
             is MezzeType.VariantType -> resolved.copy(
-                typeName = aliasName,
-                typeHash = aliasHash ?: resolved.typeHash,
+                identity = aliasIdentity,
                 typeArgs = typeArgs,
                 ascriptionWall = false,
             )
             is MezzeType.RecordType -> resolved.copy(
-                typeName = aliasName,
-                typeHash = aliasHash ?: resolved.typeHash,
+                identity = aliasIdentity,
             )
             else -> resolved
         }

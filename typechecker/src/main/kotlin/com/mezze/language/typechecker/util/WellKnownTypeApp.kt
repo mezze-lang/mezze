@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.util
 
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typedast.Hash
 
@@ -53,10 +55,16 @@ internal object WellKnownTypeApp {
         args: List<MezzeType> = emptyList(),
         typeHash: Hash? = null
     ): MezzeType.TypeApplication {
+        val hash = typeHash ?: resolveHash(constructor)
+        val identity = when {
+            hash != null -> TypeIdentity.Declared(hash, constructor)
+            BuiltinTypes.isBuiltinTypeName(constructor) -> TypeIdentity.Builtin(constructor)
+            else -> TypeIdentity.Named(constructor)
+        }
         return MezzeType.TypeApplication(
             constructor = constructor,
             args = args,
-            typeHash = typeHash ?: resolveHash(constructor)
+            identity = identity
         )
     }
 

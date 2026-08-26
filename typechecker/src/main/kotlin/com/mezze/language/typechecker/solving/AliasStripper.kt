@@ -131,8 +131,7 @@ object AliasStripper {
                     payload?.let { stripImpl(it, inScope, registry, recursionGuard) }
                 },
                 rowVar = expanded.rowVar,
-                typeName = null,
-                typeHash = null
+                identity = TypeIdentity.Anonymous
             )
         } finally {
             recursionGuard.remove(type.constructor)
@@ -157,7 +156,7 @@ object AliasStripper {
         return if (keepName) {
             type.copy(constructors = newCtors)
         } else {
-            type.copy(constructors = newCtors, typeName = null, typeHash = null)
+            type.copy(constructors = newCtors, identity = TypeIdentity.Anonymous)
         }
     }
 

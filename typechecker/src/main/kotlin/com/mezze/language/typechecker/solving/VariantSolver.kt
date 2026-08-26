@@ -279,7 +279,7 @@ internal class VariantSolver(
         }
         val boolType = MezzeType.VariantType(
             constructors = mapOf(BuiltinTypes.TRUE to null, BuiltinTypes.FALSE to null),
-            rowVar = null, typeName = "Bool"
+            rowVar = null, identity = TypeIdentity.Builtin("Bool")
         )
         return ConstraintSolver.ConstraintResult.Success(
             Substitution.single(typeVar, boolType)
@@ -453,7 +453,7 @@ internal class VariantSolver(
             if (variantType.rowVar != null) {
                 val extendedVariant = MezzeType.VariantType(
                     constructors = variantType.constructors + (constructorName to expectedPayloadType),
-                    rowVar = variantType.rowVar, typeName = variantType.typeName
+                    rowVar = variantType.rowVar, identity = variantType.identity
                 )
                 val targetTypeVar = findTypeVarForVariant(variantType, currentSubst)
                 return if (targetTypeVar != null) {
@@ -470,7 +470,7 @@ internal class VariantSolver(
             if (!nameInScope) {
                 val extendedVariant = MezzeType.VariantType(
                     constructors = variantType.constructors + (constructorName to expectedPayloadType),
-                    rowVar = null, typeName = null, typeHash = null
+                    rowVar = null, identity = TypeIdentity.Anonymous
                 )
                 val targetTypeVar = findTypeVarForVariant(variantType, currentSubst)
                 return if (targetTypeVar != null) {
@@ -584,8 +584,7 @@ internal class VariantSolver(
                         payloadType?.let { closeRowVarsInType(it, rowVarsToClose) }
                     },
                     rowVar = if (shouldClose) null else type.rowVar,
-                    typeName = type.typeName,
-                    typeHash = type.typeHash,   // preserve nominal identity on row-close rebuild
+                    identity = type.identity,   // preserve nominal identity on row-close rebuild
                     ascriptionWall = type.ascriptionWall || pinningInferred
                 )
             }
@@ -633,7 +632,7 @@ internal class VariantSolver(
                 WellKnownTypeApp.of(
                     constructor = type.constructor,
                     args = type.args.map { closeRowVarsInType(it, rowVarsToClose) },
-                    typeHash = type.typeHash
+                    typeHash = (type.identity as? TypeIdentity.Declared)?.hash
                 )
             }
             is MezzeType.SuspendType -> {
@@ -683,9 +682,9 @@ internal class VariantSolver(
         val declaredVariant = MezzeType.VariantType(
             constructors = constructors,
             rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-            typeName = typeDecl.name,
             typeArgs = typeParamMapping.values.toList(),
-            typeHash = typeDecl.contentHash
+            identity = typeDecl.contentHash?.let { TypeIdentity.Declared(it, typeDecl.name) }
+                ?: TypeIdentity.Named(typeDecl.name)
         )
 
         var resultSubst = if (bindTo != null) Substitution.single(bindTo, declaredVariant) else Substitution.empty

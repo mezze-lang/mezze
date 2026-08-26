@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.context
 
 import com.mezze.language.ast.AbilityConstraint
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.solving.Substitution
@@ -134,14 +135,14 @@ private fun clearAbilityConstraints(type: MezzeType): MezzeType = when (type) {
     is MezzeType.RecordType -> if (type.fields.values.any { it is MezzeType.FunctionType }) {
         MezzeType.RecordType(
             fields = type.fields.mapValues { (_, ft) -> clearAbilityConstraints(ft) },
-            rowVar = type.rowVar, typeName = type.typeName, typeHash = type.typeHash
+            rowVar = type.rowVar, identity = type.identity
         )
     } else type
     is MezzeType.VariantType -> if (type.constructors.values.any { it is MezzeType.FunctionType }) {
         MezzeType.VariantType(
             constructors = type.constructors.mapValues { (_, dt) -> dt?.let { clearAbilityConstraints(it) } },
-            rowVar = type.rowVar, typeName = type.typeName,
-            typeArgs = type.typeArgs, typeHash = type.typeHash, ascriptionWall = type.ascriptionWall
+            rowVar = type.rowVar,
+            typeArgs = type.typeArgs, identity = type.identity, ascriptionWall = type.ascriptionWall
         )
     } else type
     else -> type

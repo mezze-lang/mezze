@@ -281,7 +281,7 @@ internal fun ExpressionConstraintGenerator.substituteAssociatedTypesInType(
                 WellKnownTypeApp.of(
                     constructor = type.constructor,
                     args = type.args.map { substituteAssociatedTypesInType(it, associatedTypeBindings) },
-                    typeHash = type.typeHash
+                    typeHash = (type.identity as? TypeIdentity.Declared)?.hash
                 )
             }
         }
@@ -296,17 +296,15 @@ internal fun ExpressionConstraintGenerator.substituteAssociatedTypesInType(
                 substituteAssociatedTypesInType(fieldType, associatedTypeBindings)
             },
             rowVar = type.rowVar,
-            typeName = type.typeName,
-            typeHash = type.typeHash
+            identity = type.identity
         )
         is MezzeType.VariantType -> MezzeType.VariantType(
             constructors = type.constructors.mapValues { (_, dataType) ->
                 dataType?.let { substituteAssociatedTypesInType(it, associatedTypeBindings) }
             },
             rowVar = type.rowVar,
-            typeName = type.typeName,
             typeArgs = type.typeArgs.map { substituteAssociatedTypesInType(it, associatedTypeBindings) },
-            typeHash = type.typeHash,
+            identity = type.identity,
             ascriptionWall = type.ascriptionWall
         )
         is MezzeType.SeqType -> MezzeType.SeqType(

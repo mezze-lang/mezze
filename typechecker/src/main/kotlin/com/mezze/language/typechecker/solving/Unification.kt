@@ -646,7 +646,7 @@ private fun isWalledVariant(
     registry: DeclarationRegistry
 ): Boolean {
     if (v.ascriptionWall) return true
-    val name = v.typeName ?: return false
+    val name = v.identity.displayNameOrNull() ?: return false
     val override = inScopeAliasNamesOverride.get()
     return if (override != null) override.contains(name)
            else registry.typeNames.contains(name)
@@ -734,15 +734,18 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     // A variant is "walled" if it carries a decl identity (name/hash) OR the
     // author-written / inferred ascriptionWall marker. Both are hard walls under
     // unification's disjoint-arms rule; only two walls with SAME arms unify.
-    val walled1 = var1.typeHash != null || var1.typeName != null || var1.ascriptionWall
-    val walled2 = var2.typeHash != null || var2.typeName != null || var2.ascriptionWall
+    val walled1 = var1.identity != TypeIdentity.Anonymous || var1.ascriptionWall
+    val walled2 = var2.identity != TypeIdentity.Anonymous || var2.ascriptionWall
     val bothWalled = walled1 && walled2
-    val identityMatch = if (var1.typeHash != null && var2.typeHash != null) {
-        var1.typeHash == var2.typeHash
+    val id1 = var1.identity
+    val id2 = var2.identity
+    val identityMatch = if (id1 is TypeIdentity.Declared && id2 is TypeIdentity.Declared) {
+        id1.hash == id2.hash
     } else {
         // Anonymous walls (no name, no hash) with equal arm sets are the same
         // wall; distinct arm sets differ.
-        var1.typeName == var2.typeName && var1.typeName != null
+        val n1 = id1.displayNameOrNull()
+        n1 != null && n1 == id2.displayNameOrNull()
     }
     // Identity is authoritative: two variants whose identities are provably DISTINCT
     // (both Declared, content hashes differ) are distinct declarations and MUST NOT
@@ -1153,7 +1156,7 @@ private fun substituteTypeParamsByName(type: MezzeType, subst: Map<String, Mezze
 }
 
 internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, registry: DeclarationRegistry): MezzeType.RecordType? {
-    val typeDecl = registry.lookupType(typeApp.constructor, typeApp.typeHash) ?: return null
+    val typeDecl = registry.lookupType(typeApp.constructor, (typeApp.identity as? TypeIdentity.Declared)?.hash) ?: return null
 
     val recordDef = typeDecl.definition as? ParsedRecordDef ?: return null
 
@@ -1180,7 +1183,7 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, r
 }
 
 internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, registry: DeclarationRegistry): MezzeType.VariantType? {
-    val typeDecl = registry.lookupType(typeApp.constructor, typeApp.typeHash)
+    val typeDecl = registry.lookupType(typeApp.constructor, (typeApp.identity as? TypeIdentity.Declared)?.hash)
         ?: ModuleResolver.lookupTypeDeclaration(typeApp.constructor)
         ?: return null
 
@@ -1241,9 +1244,11 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     return MezzeType.VariantType(
         constructors = constructors,
         rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-        typeName = typeDecl.name,
         typeArgs = typeApp.args,   // #194: carry the application's args so the printer can render `Tree Int`
-        typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+        identity = TypeIdentity.Declared(
+            typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl),
+            typeDecl.name
+        )
     )
 }
 
@@ -1265,7 +1270,7 @@ internal fun expandTypeApplication(
     typeApp: MezzeType.TypeApplication,
     registry: DeclarationRegistry
 ): TypeExpansionResult {
-    val typeDecl = registry.lookupType(typeApp.constructor, typeApp.typeHash) ?: return TypeExpansionResult.NotFound
+    val typeDecl = registry.lookupType(typeApp.constructor, (typeApp.identity as? TypeIdentity.Declared)?.hash) ?: return TypeExpansionResult.NotFound
 
     return when (val definition = typeDecl.definition) {
         is ParsedRecordDef -> {

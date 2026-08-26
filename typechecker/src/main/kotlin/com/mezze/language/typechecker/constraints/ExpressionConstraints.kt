@@ -363,17 +363,15 @@ class ExpressionConstraintGenerator {
                     applyTypeVarSubstitution(fieldType, substitution)
                 },
                 rowVar = type.rowVar,
-                typeName = type.typeName,
-                typeHash = type.typeHash
+                identity = type.identity
             )
             is MezzeType.VariantType -> MezzeType.VariantType(
                 constructors = type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { applyTypeVarSubstitution(it, substitution) }
                 },
                 rowVar = type.rowVar,
-                typeName = type.typeName,
                 typeArgs = type.typeArgs.map { applyTypeVarSubstitution(it, substitution) },
-                typeHash = type.typeHash,
+                identity = type.identity,
                 ascriptionWall = type.ascriptionWall
             )
             is MezzeType.SeqType -> MezzeType.SeqType(
@@ -403,7 +401,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.TypeApplication -> WellKnownTypeApp.of(
                 constructor = type.constructor,
                 args = type.args.map { applyTypeVarSubstitution(it, substitution) },
-                typeHash = type.typeHash
+                typeHash = (type.identity as? TypeIdentity.Declared)?.hash
             )
             is MezzeType.NewtypeType -> type.copy(
                 wrappedType = applyTypeVarSubstitution(type.wrappedType, substitution)
