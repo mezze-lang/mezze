@@ -720,12 +720,24 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         inherentMethods.first()
     } else if (inherentMethods.size == 1) {
         inherentMethods.first()
-    } else if (receiverTypeHash != null && inherentMethods.any { it.targetTypeHash == receiverTypeHash }) {
-        inherentMethods.first { it.targetTypeHash == receiverTypeHash }
+    } else if (receiverTypeHash != null) {
+        // The receiver carries a declaration hash: identity is AUTHORITATIVE.
+        // Match strictly by hash. Do NOT fall through to a name match — a
+        // differently-hashed impl that happens to share the receiver's NAME is a
+        // DIFFERENT declaration (two modules' `Widget`), and rescuing it by name
+        // is exactly the silent mis-dispatch the hash veto exists to prevent.
+        // No hash-match ⇒ unresolved (null), never a name-based guess.
+        inherentMethods.firstOrNull { it.targetTypeHash == receiverTypeHash }
     } else if (receiverTypeName != null) {
+        // Hashless receiver (builtins / pre-hash): name is the only identity we
+        // have, so a name match is the correct fallback here.
         inherentMethods.firstOrNull { it.targetTypeName == receiverTypeName }
     } else {
-        inherentMethods.firstOrNull()
+        // No receiver identity at all — neither a hash nor a name. Picking the
+        // first candidate would be a blind by-load-order guess (the comment above
+        // flags exactly this), so resolve to UNRESOLVED and let the fresh result
+        // VarType stay open rather than silently mis-dispatch.
+        null
     }
 
     // (after issue #213 pinned non-generic returns to e.g. `Int`) survive.
