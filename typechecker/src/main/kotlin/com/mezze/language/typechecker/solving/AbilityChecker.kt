@@ -353,12 +353,20 @@ internal class AbilityChecker(
         return when (annotation) {
             is ParsedNamedType ->
                 boundFor(annotation.name) ?: (PrimitiveTypes.fromName(annotation.name)
-                    ?: WellKnownTypeApp.of(annotation.name, emptyList()))
+                    // #312: an UNBOUND type-var name (`'a`) is a free type variable —
+                    // model it as VarType, NOT a bogus TypeApplication(constructor="'a")
+                    // whose name lives only in `constructor`. (Closes producer #1: the
+                    // #269 doc above describes exactly this leak.)
+                    ?: if (annotation.name.isTypeVarName()) MezzeType.VarType(TypeVar.freshWithName(annotation.name))
+                       else WellKnownTypeApp.of(annotation.name, emptyList()))
             is ParsedTypeApp -> {
                 // A constructor position can itself be a bound type var (higher-kinded
                 // binding); otherwise recurse into the args so nested `'a` is substituted.
                 val bound = boundFor(annotation.constructor)
                 if (bound != null && annotation.args.isEmpty()) bound
+                // #312: an unbound nullary type-var constructor is a free type variable.
+                else if (annotation.args.isEmpty() && annotation.constructor.isTypeVarName())
+                    MezzeType.VarType(TypeVar.freshWithName(annotation.constructor))
                 else WellKnownTypeApp.of(
                     annotation.constructor,
                     annotation.args.map { substituteAnnotationWithImplBindings(it, implTypeVarBindings) },
