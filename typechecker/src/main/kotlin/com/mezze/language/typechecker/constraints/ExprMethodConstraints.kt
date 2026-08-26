@@ -611,8 +611,19 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
                 val innerType = getReceiverConcreteType(callee.receiver, context) ?: return null
                 val innerNames = candidateTypeNames(innerType, context)
                 if (innerNames.isEmpty()) return null
-                val candidates = context.typingContext.findAnonymousMethodsByName(callee.member)
-                    .filter { it.targetTypeName in innerNames }
+                val allCandidates = context.typingContext.findAnonymousMethodsByName(callee.member)
+                // Prefer the receiver's CONTENT HASH when it has one: two same-named
+                // methods from different modules differ only by targetTypeHash, and
+                // unlike the primary dispatch path this site picks via singleOrNull()
+                // with no later hash veto — so a name-only filter could select the
+                // wrong module's method. Fall back to the name-set for hashless
+                // receivers (builtins / transparent aliases), exactly as the primary
+                // path does.
+                val innerHash = ((innerType as? MezzeType.VariantType)?.identity as? TypeIdentity.Declared)?.hash
+                    ?: ((innerType as? MezzeType.TypeApplication)?.identity as? TypeIdentity.Declared)?.hash
+                val byHash = if (innerHash != null) allCandidates.filter { it.targetTypeHash == innerHash } else emptyList()
+                val candidates = if (byHash.isNotEmpty()) byHash
+                    else allCandidates.filter { it.targetTypeName in innerNames }
                 val method = candidates.singleOrNull() ?: return null
                 val ret2 = (method.methodType as? MezzeType.FunctionType)?.returnType ?: return null
                 // Peel SuspendType — the effect wrapper is transparent for
