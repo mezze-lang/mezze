@@ -71,6 +71,14 @@ public final class MezzeVariant implements TruffleObject {
         com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(com.mezze.language.ast.BuiltinTypes.SOME, null);
     private static final int NONE_TAG =
         com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
+    // Canonical tags for the cons-list ADT's builtin constructors, cached once
+    // (same rule as SOME/NONE above). Consumed where a native MezzeList is
+    // pattern-matched AS the Nil/Cons variants — the match key is the tag int,
+    // never the constructor-name spelling.
+    public static final int NIL_TAG =
+        com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(com.mezze.language.ast.BuiltinTypes.NIL, null);
+    public static final int CONS_TAG =
+        com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(com.mezze.language.ast.BuiltinTypes.CONS, null);
 
     /**
      * TagRegistry defines the mapping from constructor names to integer tags.

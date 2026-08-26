@@ -1587,8 +1587,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static boolean doList(int expectedTag, String tagName,
                                      com.mezze.datastructures.list.MezzeList<?> list) {
-            if ("Nil".equals(tagName)) return list.isEmpty();
-            if ("Cons".equals(tagName)) return !list.isEmpty();
+            // Match on the expected TAG int (which the pattern already carries),
+            // not the constructor-name spelling — consistent with doVariant above
+            // and the SOME_TAG/NONE_TAG tag-based path. Tags are name-deterministic,
+            // so expectedTag for a `Nil`/`Cons` pattern equals NIL_TAG/CONS_TAG.
+            if (expectedTag == MezzeVariant.NIL_TAG) return list.isEmpty();
+            if (expectedTag == MezzeVariant.CONS_TAG) return !list.isEmpty();
             return false;
         }
 
