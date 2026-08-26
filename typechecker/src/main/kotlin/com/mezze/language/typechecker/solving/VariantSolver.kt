@@ -683,8 +683,11 @@ internal class VariantSolver(
             constructors = constructors,
             rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
             typeArgs = typeParamMapping.values.toList(),
-            identity = typeDecl.contentHash?.let { TypeIdentity.Declared(it, typeDecl.name) }
-                ?: TypeIdentity.Named(typeDecl.name)
+            // A declared variant always has a content hash (pure fn of the decl).
+            identity = TypeIdentity.Declared(
+                typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl),
+                typeDecl.name
+            )
         )
 
         var resultSubst = if (bindTo != null) Substitution.single(bindTo, declaredVariant) else Substitution.empty

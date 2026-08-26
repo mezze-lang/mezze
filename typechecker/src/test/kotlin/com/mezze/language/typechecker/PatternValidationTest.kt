@@ -501,7 +501,7 @@ class PatternValidationTest {
     @Test
     fun `newtype with declared type variable should pass`() {
         val code = """
-            newtype Wrapper 'a = Wrap 'a
+            newtype Wrapper 'a = 'a
         """.trimIndent()
 
         // Should pass - 'a is declared

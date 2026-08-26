@@ -304,7 +304,11 @@ object TypeAnnotationConverter {
                     val ctorIdentity = when {
                         ctorHash != null -> TypeIdentity.Declared(ctorHash, annotation.constructor)
                         BuiltinTypes.isBuiltinTypeName(annotation.constructor) -> TypeIdentity.Builtin(annotation.constructor)
-                        else -> TypeIdentity.Named(annotation.constructor)
+                        // Name resolved to no declaration/builtin — undeclared type.
+                        // Valid code never reaches here (the unknown-type validation
+                        // pass rejects it from the parsed annotation). Anonymous =
+                        // structural, no identity.
+                        else -> TypeIdentity.Anonymous
                     }
                     MezzeType.TypeApplication(
                         annotation.constructor,
@@ -590,7 +594,7 @@ object TypeAnnotationConverter {
             val hash = aliasHash ?: (resolved as? MezzeType.VariantType)?.identity
                 ?.let { it as? TypeIdentity.Declared }?.hash
                 ?: ((resolved as? MezzeType.RecordType)?.identity as? TypeIdentity.Declared)?.hash
-            if (hash != null) TypeIdentity.Declared(hash, aliasName) else TypeIdentity.Named(aliasName)
+            if (hash != null) TypeIdentity.Declared(hash, aliasName) else TypeIdentity.Anonymous
         }
         return when (resolved) {
             is MezzeType.VariantType -> resolved.copy(

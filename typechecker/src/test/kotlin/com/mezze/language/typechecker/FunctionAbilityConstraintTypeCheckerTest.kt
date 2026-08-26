@@ -91,7 +91,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
     fun testMultipleAbilityConstraints() {
         val source = """
             ability Eq for 'a where {
-                equals : {right: 'a} -> Boolean
+                equals : {right: 'a} -> Bool
             }
 
             ability Show for 'a where {

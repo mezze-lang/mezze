@@ -79,11 +79,11 @@ class NominalHashIdentityTest {
         assertIs<UnificationResult.Success>(result, "the same newtype declaration unifies with itself")
     }
 
-    @Test fun `newtypes with NO hash fall back to name`() {
-        val n1 = MezzeType.NewtypeType("Meters", "Meters", MezzeType.IntType, identity = TypeIdentity.Named("Meters"))
-        val n2 = MezzeType.NewtypeType("Meters", "Meters", MezzeType.IntType, identity = TypeIdentity.Named("Meters"))
+    @Test fun `newtypes with the SAME hash unify`() {
+        val n1 = MezzeType.NewtypeType("Meters", "Meters", MezzeType.IntType, identity = TypeIdentity.Declared(hashA, "Meters"))
+        val n2 = MezzeType.NewtypeType("Meters", "Meters", MezzeType.IntType, identity = TypeIdentity.Declared(hashA, "Meters"))
         val result = unify(n1, n2)
-        assertIs<UnificationResult.Success>(result, "hashless newtypes unify by name (legacy behavior)")
+        assertIs<UnificationResult.Success>(result, "same newtype declaration unifies with itself")
     }
 
     // ---- Variants: hash-veto (distinct declarations don't unify) ----

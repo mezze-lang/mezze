@@ -101,7 +101,7 @@ class TypeApplicationExpansionTest {
                   Ok { val } -> True
                   Err { error } -> False
 
-            let example: Result Int String = Ok { val = 42 }
+            let example: Result Int Str = Ok { val = 42 }
             let result = is_ok { result = example }
         """.trimIndent()
 
@@ -461,7 +461,7 @@ class TypeApplicationExpansionTest {
               Left { val } -> True
               Right { val } -> False
 
-            let example: Either Int String = Left { val = 42 }
+            let example: Either Int Str = Left { val = 42 }
             let result = is_left {either = example}
         """.trimIndent()
 
@@ -479,7 +479,7 @@ class TypeApplicationExpansionTest {
               Right { val } -> Right { val }
 
             let double = {x} -> x * 2
-            let example: Either Int String = Left { val = 21 }
+            let example: Either Int Str = Left { val = 21 }
             let result = map_left {either = example, f = double}
         """.trimIndent()
 
@@ -496,7 +496,7 @@ class TypeApplicationExpansionTest {
               Left { val } -> Right { val }
               Right { val } -> Left { val }
 
-            let example: Either Int String = Left { val = 42 }
+            let example: Either Int Str = Left { val = 42 }
             let result = swap {either = example}
         """.trimIndent()
 

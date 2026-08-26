@@ -142,15 +142,11 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
  *    the same type (rename-safe), exactly as unification treats them.
  *  - [TypeIdentity.Builtin]  → tag + the reserved builtin name (its canonical
  *    identity — there is exactly one `Option`/`List`/… so the name IS the hash).
- *  - [TypeIdentity.Named]    → tag + the display name. A hashless-but-named type
- *    (transitional; see [TypeIdentity.Named]) keys on its name here, matching how
- *    unification falls back to the name when no hash is present.
  *  - [TypeIdentity.Anonymous] → tag only. An inline structural type has no identity
  *    beyond its fields/constructors, which the surrounding branch already hashes.
  *
- * The discriminant tag makes the four kinds hash distinctly even when their
- * distinguishing content coincides (e.g. an [Anonymous] type never collides with
- * a [Named] one that happens to share the enclosing constructor name).
+ * The discriminant tag makes the three kinds hash distinctly even when their
+ * distinguishing content coincides.
  */
 private fun appendIdentity(b: MezzeHashBuilder, identity: com.mezze.language.ast.TypeIdentity) {
     when (identity) {
@@ -159,9 +155,6 @@ private fun appendIdentity(b: MezzeHashBuilder, identity: com.mezze.language.ast
         }
         is com.mezze.language.ast.TypeIdentity.Builtin -> {
             b.append(byteArrayOf(0x02)); b.append(identity.name)
-        }
-        is com.mezze.language.ast.TypeIdentity.Named -> {
-            b.append(byteArrayOf(0x03)); b.append(identity.displayName)
         }
         com.mezze.language.ast.TypeIdentity.Anonymous -> {
             b.append(byteArrayOf(0x04))

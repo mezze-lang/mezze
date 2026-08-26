@@ -178,6 +178,10 @@ fun ErrorCode.explain(): String = when (this) {
         "primitive, or was undefined. Use the syntax appropriate to that kind, or import/declare " +
         "a newtype with that name."
 
+    ErrorCode.T0213_UNKNOWN_TYPE ->
+        "An uppercase name in a type position resolves to no declaration, import, or builtin. " +
+        "Declare it (`type X = ...` / `newtype X = ...`), import it (`use mod::{X}`), or fix the spelling."
+
     ErrorCode.T0301_UNBOUND_TYPE_VAR ->
         "A type variable in an annotation is not bound by any parameter. " +
         "All type variables must appear in the function's parameter types."

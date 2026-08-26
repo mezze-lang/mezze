@@ -187,18 +187,20 @@ class NewtypeTypeCheckerTest {
     }
 
     @Test
-    fun `test newtype allows different names for type and constructor`() {
+    fun `test newtype constructor equals type name and constructs via dot-paren`() {
+        // Old syntax `newtype T = MkT Str` (a distinct constructor name) is gone:
+        // the constructor name always equals the type name, and construction uses
+        // `T.(...)`. This is the current, valid form.
         val source = """
-            newtype EmailAddress = MkEmail Str
+            newtype EmailAddress = Str
 
-            let mkEmail = {s} -> MkEmail {value = s}
+            let mkEmail = {s} -> EmailAddress.(s)
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
-        println("✅ Different names for type and constructor allowed")
     }
 
     // ========== Usage Tests ==========

@@ -735,7 +735,7 @@ class OpenVariantUnificationTest {
     @Test
     fun `Result Ok in function argument requires payload`() {
         assertTypeCheckFails("""
-            let processResult: { r: Result Int String } -> Int = { r } ->
+            let processResult: { r: Result Int Str } -> Int = { r } ->
                 match r is
                     Ok { val } -> val
                     Err { error } -> 0
@@ -747,7 +747,7 @@ class OpenVariantUnificationTest {
     @Test
     fun `Result Ok in function argument with payload succeeds`() {
         assertTypeChecks("""
-            let processResult: { r: Result Int String } -> Int = { r } ->
+            let processResult: { r: Result Int Str } -> Int = { r } ->
                 match r is
                     Ok { val } -> val
                     Err { error } -> 0

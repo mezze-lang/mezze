@@ -59,7 +59,7 @@ internal object WellKnownTypeApp {
         val identity = when {
             hash != null -> TypeIdentity.Declared(hash, constructor)
             BuiltinTypes.isBuiltinTypeName(constructor) -> TypeIdentity.Builtin(constructor)
-            else -> TypeIdentity.Named(constructor)
+            else -> TypeIdentity.Anonymous
         }
         return MezzeType.TypeApplication(
             constructor = constructor,

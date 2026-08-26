@@ -30,6 +30,7 @@ class TypeValidator(
     private val effectValidator = EffectValidator(context)
     private val matchValidator = MatchValidator(typeDeclarations, registry)
     private val performValidator = PerformValidator(typeDeclarations, implDeclarations)
+    private val unknownTypeValidator = UnknownTypeValidator(registry)
     private val codecGenerator = CodecGenerator()
 
     private val typeNameCache = mutableMapOf<Int, String>()
@@ -40,6 +41,8 @@ class TypeValidator(
     ): ValidationResult {
         val errors = mutableListOf<ValidationError>()
         val warnings = mutableListOf<String>()
+
+        errors.addAll(unknownTypeValidator.validate(module))
 
         for ((bindingName, result) in constraintResults) {
             val finalType = substitution.apply(result.type)

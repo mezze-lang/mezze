@@ -206,6 +206,39 @@ sealed interface ValidationError {
             }
     }
 
+    /**
+     * An uppercase name in a genuine TYPE position (a let annotation, a type-decl
+     * body, an ability/effect op signature) that resolves to no declaration and is
+     * not a builtin or a type variable — i.e. a dangling type reference such as
+     * `type Box = | Wrap { val: Gadget } |` with no `type Gadget` in scope. The
+     * registry is complete before this check runs, so a name that fails to resolve
+     * is genuinely undeclared, not transiently-unresolved.
+     */
+    data class UnknownType(
+        val typeName: String,
+        val availableTypes: List<String> = emptyList(),
+        val loc: Loc? = null
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.T0213_UNKNOWN_TYPE
+
+        override fun message(): String = buildString {
+            append("unknown type: '$typeName' — no declaration, import, or builtin defines it")
+            if (availableTypes.isNotEmpty()) {
+                append(". ")
+                append(StringDistance.suggestOrList(typeName, availableTypes, "types"))
+            }
+        }
+
+        override fun location() = loc
+
+        override val fixHints: List<FixHint>
+            get() {
+                if (loc == null || availableTypes.isEmpty()) return emptyList()
+                val close = LevenshteinSuggest.closestN(typeName, availableTypes, 3)
+                return if (close.isNotEmpty()) listOf(FixHint.Rename(loc, close)) else emptyList()
+            }
+    }
+
         data class AbilityUsedAsValue(
         val abilityName: String,
         val context: String? = null,

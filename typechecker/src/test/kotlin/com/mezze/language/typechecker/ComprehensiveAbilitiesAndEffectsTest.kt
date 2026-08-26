@@ -214,7 +214,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             effect Auth where {
-              authenticate : {token: Str} -> Boolean <Auth>
+              authenticate : {token: Str} -> Bool <Auth>
             }
 
             effect Database where {

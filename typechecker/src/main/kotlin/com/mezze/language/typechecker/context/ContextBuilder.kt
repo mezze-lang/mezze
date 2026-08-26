@@ -338,8 +338,13 @@ class ContextBuilder {
                     }
                     MezzeType.VariantType(
                         constructors = constructors, rowVar = null,
-                        identity = typeDecl.contentHash?.let { TypeIdentity.Declared(it, typeDecl.name) }
-                            ?: TypeIdentity.Named(typeDecl.name)
+                        // A declared variant always has a content hash — it is a pure
+                        // function of the decl (ParsedDeclHasher), so compute it rather
+                        // than falling back to a hashless identity.
+                        identity = TypeIdentity.Declared(
+                            typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl),
+                            typeDecl.name
+                        )
                     )
                 }
             }

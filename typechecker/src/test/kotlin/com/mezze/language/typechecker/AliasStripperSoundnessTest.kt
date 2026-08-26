@@ -21,6 +21,7 @@ import kotlin.test.assertEquals
 class AliasStripperSoundnessTest {
 
     private val testLoc = Loc("test.mz", 1, 1, 1, 1)
+    private val colorHash = com.mezze.language.typedast.Hash("cccc000000000000000000000000000000000000000000000000000000000000")
 
     private val colorVariantDef = ParsedVariantDef(
         constructors = listOf(
@@ -44,7 +45,7 @@ class AliasStripperSoundnessTest {
     fun `effect associated types inside FunctionType are stripped`() {
         val colorType = VariantType(
             constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),
-            identity = TypeIdentity.Named("Color")
+            identity = TypeIdentity.Declared(colorHash, "Color")
         )
         val effectInstance = EffectInstance(
             name = "State",
@@ -76,7 +77,7 @@ class AliasStripperSoundnessTest {
     fun `effect associated types inside SuspendType are stripped`() {
         val colorType = VariantType(
             constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),
-            identity = TypeIdentity.Named("Color")
+            identity = TypeIdentity.Declared(colorHash, "Color")
         )
         val effectInstance = EffectInstance(
             name = "State",
@@ -106,7 +107,7 @@ class AliasStripperSoundnessTest {
     fun `ability constraint typeArgs inside FunctionType are stripped`() {
         val colorType = VariantType(
             constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),
-            identity = TypeIdentity.Named("Color")
+            identity = TypeIdentity.Declared(colorHash, "Color")
         )
         val constraint = FunctionAbilityConstraint(
             abilityName = "Eq",
@@ -134,7 +135,7 @@ class AliasStripperSoundnessTest {
         val inScopeSet = setOf("Color")
         val colorType = VariantType(
             constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),
-            identity = TypeIdentity.Named("Color")
+            identity = TypeIdentity.Declared(colorHash, "Color")
         )
         val effectInstance = EffectInstance(
             name = "State",

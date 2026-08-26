@@ -74,6 +74,7 @@ enum class ErrorCode {
     T0210_ANNOTATION_VS_BODY_MISMATCH,
     T0211_CALLBACK_PARAM_NAMES_MISMATCH, // `f = { acc, i } -> ...` where sig wants `{ acc, x }` — lambda param names ARE record destructuring, must match the caller's field names
     T0212_NOT_A_NEWTYPE, // `Foo.(x)` where Foo isn't a newtype (ability, effect, variant, record, primitive, or unknown)
+    T0213_UNKNOWN_TYPE, // an uppercase type name in a type position resolves to no declaration/builtin (e.g. `{ val: Gadget }` with no `type Gadget`)
 
     // ─── Typechecker: inference & binding (T03xx) ────────────────────────
     T0301_UNBOUND_TYPE_VAR,

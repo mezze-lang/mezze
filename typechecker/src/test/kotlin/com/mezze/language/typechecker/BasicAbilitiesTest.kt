@@ -90,7 +90,7 @@ class BasicAbilitiesTest {
     fun testAbilityWithMethodLevelConstraints() {
         val source = """
             ability Eq for 'a where {
-              equals : {left: 'a, right: 'a} -> Boolean
+              equals : {left: 'a, right: 'a} -> Bool
             }
 
             ability Ord for 'a where {

@@ -47,20 +47,6 @@ sealed interface TypeIdentity {
     data class Declared(val hash: com.mezze.language.typedast.Hash, val displayName: String) : TypeIdentity
 
     /**
-     * A named type from a declaration whose content hash is NOT (yet) available at
-     * this construction point. Carries the [displayName] so name-based concerns
-     * (the in-scope nominal wall, alias stripping, error rendering) keep working —
-     * but it is NOT hash-identified, so it never participates in a hash veto and is
-     * treated like a transitional/UNDETERMINED identity in unification (same as
-     * today's `typeName != null, typeHash == null`). The hash is a pure function of
-     * the decl and usually IS stamped upstream; this case covers the residual sites
-     * (and tests) that build a named type without threading the hash through.
-     * Prefer [Declared] wherever the hash is reachable.
-     */
-    @Serializable
-    data class Named(val displayName: String) : TypeIdentity
-
-    /**
      * A name-carried builtin (`List`/`Map`/`Set`/`Seq`/`Option`/`Result`/`Bool`/…
      * as a `TypeApplication` or `VariantType` — the name-carried form, distinct
      * from the dedicated MezzeType nodes `ListType`/`MapType`/… which have no
@@ -78,7 +64,6 @@ sealed interface TypeIdentity {
     /** Name for DISPLAY/errors only — NEVER an identity input. */
     fun displayNameOrNull(): String? = when (this) {
         is Declared -> displayName
-        is Named -> displayName
         is Builtin -> name
         Anonymous -> null
     }
