@@ -155,10 +155,10 @@ class AbilityOperationEffectsTest {
         assertNotNull(typedProgram, "Ability with mixed pure and effectful operations should pass")
     }
 
-    // ========== INVALID CASES - POLYMORPHIC EFFECTS ==========
+    // ========== POLYMORPHIC EFFECTS ON ABILITY OPS (VALID) ==========
 
     @Test
-    fun `test ability operation with polymorphic effects should fail`() {
+    fun `test ability operation with polymorphic effects should pass`() {
         val source = """
             ability Processor for 'a where {
                 process: {it: 'a} -> Str <...>
@@ -166,18 +166,13 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val error = assertThrows<TypeCheckError>("Should fail: polymorphic effects not allowed") {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
-
-        assert(error.message?.contains("polymorphic") == true || error.message?.contains("<...>") == true) {
-            "Error message should mention polymorphic effects: ${error.message}"
-        }
+        assertNotNull(typedProgram, "Ability operation with polymorphic effects should pass")
     }
 
     @Test
-    fun `test ability operation with effect and polymorphic tail should fail`() {
+    fun `test ability operation with effect and polymorphic tail should pass`() {
         val source = """
             effect Mut where {
                 mutate: {} -> {}
@@ -189,14 +184,9 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val error = assertThrows<TypeCheckError>("Should fail: polymorphic tail not allowed") {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
-
-        assert(error.message?.contains("polymorphic") == true) {
-            "Error message should mention polymorphic effects: ${error.message}"
-        }
+        assertNotNull(typedProgram, "Ability operation with effect and polymorphic tail should pass")
     }
 
     // ========== INVALID CASES - PERFORMED MARKER ==========
@@ -246,7 +236,7 @@ class AbilityOperationEffectsTest {
     // ========== MORE INVALID CASES ==========
 
     @Test
-    fun `test ability operation with just polymorphic marker alone should fail`() {
+    fun `test ability operation with just polymorphic marker alone should pass`() {
         val source = """
             ability Flexible for 'a where {
                 flex: {it: 'a} -> 'a <...>
@@ -254,17 +244,16 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertThrows<TypeCheckError>("Should fail: <...> alone not allowed") {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
+        assertNotNull(typedProgram, "Ability operation with <...> should pass")
     }
 
     // Note: <..., *> is not valid parser syntax, so we can't test it.
     // The parser will reject it before the typechecker sees it.
 
     @Test
-    fun `test multiple operations some with invalid effects should fail`() {
+    fun `test multiple operations with mixed effects including polymorphic should pass`() {
         val source = """
             effect Log where {
                 log: {msg: Str} -> {}
@@ -273,19 +262,14 @@ class AbilityOperationEffectsTest {
             ability Mixed for 'a where {
                 pure_op: {it: 'a} -> Str,
                 effectful_op: {it: 'a} -> Str <Log>,
-                bad_op: {it: 'a} -> Str <...>
+                poly_op: {it: 'a} -> Str <...>
             }
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val error = assertThrows<TypeCheckError>("Should fail: one operation has invalid effects") {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
-
-        assert(error.message?.contains("bad_op") == true || error.message?.contains("polymorphic") == true) {
-            "Error should mention the bad operation or polymorphic: ${error.message}"
-        }
+        assertNotNull(typedProgram, "Ability with mixed pure, concrete, and polymorphic effects should pass")
     }
 
     // ========== EFFECT TRACKING AT CALL SITES ==========

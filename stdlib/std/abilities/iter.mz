@@ -10,13 +10,14 @@
 ## specialize to the direct-storage path — the ability is the generic
 ## interface, specialization recovers the fast path.
 ##
-## Effectful producers (file handles, DB cursors) will implement
-## `ToIter` once effect rows on ability methods are supported.
-## For now `next` is pure — effectful iteration uses the descriptor
-## tree's `CallbackProducerNode` directly.
+## Effectful producers (file handles, DB cursors) implement `ToIter`
+## with effects on `next`. Pure producers (range) use `<>`. The effect
+## row propagates through the combinator chain — pure producers get
+## full fusion with zero overhead, effectful producers get combinator
+## fusion with one `next()` call per element.
 
 use std::option
 
 ability ToIter for 'c having 'elem where {
-  next: { it: 'c } -> Option 'elem
+  next: { it: 'c } -> Option 'elem <...>
 }

@@ -62,15 +62,6 @@ object AbilityValidator {
         // Ability-level constraints caught at parse time (P0119) since #212
         for (operation in ability.operations) {
             val effects = operation.effects ?: continue
-            if (effects.isPolymorphic) {
-                throw TypeCheckError(
-                    "Ability operation '${operation.name}' in '${ability.name}' cannot have polymorphic effects (<...>). " +
-                    "Ability operations must declare concrete effects to define a clear contract. " +
-                    "Use specific effects like <Mut> or no effects for pure operations.",
-                    sourceLocation,
-                    code = ErrorCode.V0411_POLYMORPHIC_EFFECT_IN_ABILITY_OP,
-                )
-            }
             if (effects.isPerformed) {
                 throw TypeCheckError(
                     "Ability operation '${operation.name}' in '${ability.name}' cannot have performed marker (<*>). " +

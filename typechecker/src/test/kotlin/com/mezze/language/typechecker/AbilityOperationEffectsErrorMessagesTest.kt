@@ -24,29 +24,17 @@ class AbilityOperationEffectsErrorMessagesTest {
     }
 
     @Test
-    fun `error message for polymorphic effects mentions the operation name and ability`() {
+    fun `ability operation with polymorphic effects should pass`() {
         val source = """
-            ability BadAbility for 'a where {
-                bad_operation: {} -> Str <...>
+            ability FlexAbility for 'a where {
+                process: {} -> Str <...>
             }
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        println("Polymorphic effects error: ${error.message}")
-
-        assertTrue(error.message?.contains("bad_operation") == true) {
-            "Error should mention operation name 'bad_operation': ${error.message}"
-        }
-        assertTrue(error.message?.contains("BadAbility") == true) {
-            "Error should mention ability name 'BadAbility': ${error.message}"
-        }
-        assertTrue(error.message?.contains("polymorphic") == true) {
-            "Error should mention 'polymorphic': ${error.message}"
-        }
+        assertNotNull(typedProgram, "Ability operation with polymorphic effects should pass")
     }
 
     @Test
@@ -76,30 +64,21 @@ class AbilityOperationEffectsErrorMessagesTest {
     }
 
     @Test
-    fun `error message for effect with polymorphic tail is clear`() {
+    fun `ability operation with effect and polymorphic tail should pass`() {
         val source = """
             effect Mut where {
                 mutate: {} -> {}
             }
 
-            ability BadAbility for 'a where {
-                bad_op: {} -> Str <Mut, ...>
+            ability MutAbility for 'a where {
+                mut_op: {} -> Str <Mut, ...>
             }
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        println("Polymorphic tail error: ${error.message}")
-
-        assertTrue(error.message?.contains("bad_op") == true) {
-            "Error should mention operation name: ${error.message}"
-        }
-        assertTrue(error.message?.contains("polymorphic") == true) {
-            "Error should explain polymorphic effects not allowed: ${error.message}"
-        }
+        assertNotNull(typedProgram, "Ability operation with effect and polymorphic tail should pass")
     }
 
     @Test
@@ -130,34 +109,24 @@ class AbilityOperationEffectsErrorMessagesTest {
     }
 
     @Test
-    fun `error identifies which operation has invalid effects in multi-op ability`() {
+    fun `multi-op ability with mixed effects including polymorphic should pass`() {
         val source = """
             effect Log where {
                 log: {msg: Str} -> {}
             }
 
             ability MixedAbility for 'a where {
-                good_op1: {} -> Str,
-                good_op2: {} -> Int <Log>,
-                the_bad_one: {} -> Bool <...>,
-                good_op3: {} -> Float
+                pure_op: {} -> Str,
+                log_op: {} -> Int <Log>,
+                flex_op: {} -> Bool <...>,
+                another_pure: {} -> Float
             }
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        println("Multi-op error: ${error.message}")
-
-        assertTrue(error.message?.contains("the_bad_one") == true) {
-            "Error should specifically identify 'the_bad_one' as the problematic operation: ${error.message}"
-        }
-        // Should NOT mention good operations
-        assertFalse(error.message?.contains("good_op1") == true) {
-            "Error should NOT mention 'good_op1': ${error.message}"
-        }
+        assertNotNull(typedProgram, "Multi-op ability with polymorphic effect should pass")
     }
 
     // ========== IMPL EFFECT MATCHING TESTS ==========
