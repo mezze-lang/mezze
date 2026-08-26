@@ -484,7 +484,7 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
                         convertParsedTypeAnnotation(typeAnn)
                     },
                     abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash
-                        ?: WellKnownHashConstants.resolveAbilityHash(constraint.abilityName)
+                        ?: registry?.resolveAbilityHash(constraint.abilityName)
                 )
             }
         }

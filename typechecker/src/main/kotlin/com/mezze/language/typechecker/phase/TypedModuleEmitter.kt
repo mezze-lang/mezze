@@ -94,7 +94,7 @@ internal fun emitTypedModuleAndLower(
                 } else {
                     continue
                 }
-                val abilityHash = WellKnownHashConstants.resolveHash(ci.abilityName)
+                val abilityHash = registry.resolveAbilityHash(ci.abilityName)
                 val parsedImpl = when {
                     WellKnownHashConstants.isEncodeFlavoredCodec(abilityHash) ->
                         codecGen.generateEncodeImpl(formatType, dataType)

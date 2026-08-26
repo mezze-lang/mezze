@@ -33,6 +33,17 @@ class DeclarationRegistry(
     fun lookupEffect(name: String, hash: Hash? = null): ParsedEffectDecl? =
         (hash?.let { effectsByHash[it] }) ?: effectsByName[name]
 
+    /** Content hash for an ability by name (check-time replacement for the
+     *  generated WellKnownHashConstants.resolveAbilityHash). Same pure value:
+     *  `decl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(decl)`. */
+    fun resolveAbilityHash(name: String): Hash? =
+        lookupAbility(name)?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+
+    /** Content hash for an effect by name (check-time replacement for the
+     *  generated WellKnownHashConstants.resolveEffectHash). */
+    fun resolveEffectHash(name: String): Hash? =
+        lookupEffect(name)?.let { it.contentHash ?: ParsedDeclHasher.hashEffectDecl(it) }
+
     val typeNames: Set<String> get() = typesByName.keys
     val abilityNames: Set<String> get() = abilitiesByName.keys
     val effectNames: Set<String> get() = effectsByName.keys

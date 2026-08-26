@@ -186,7 +186,7 @@ class TypeValidator(
             if (typeName.startsWith("'") || typeName == "Unknown") continue
 
             val abilityName = constraint.abilityName
-            val effectiveHash = constraint.abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
+            val effectiveHash = constraint.abilityHash ?: registry.resolveAbilityHash(abilityName)
 
             if (BuiltInAbilities.isBuiltInAbility(abilityName)) continue
             if (canDeriveAbility(abilityName, concreteType, effectiveHash)) continue
@@ -447,7 +447,7 @@ class TypeValidator(
             else -> null
         } ?: return emptyList()
 
-        fun resolveHash(name: String) = row.effectHashes[name] ?: WellKnownHashConstants.resolveHash(name)
+        fun resolveHash(name: String) = row.effectHashes[name] ?: registry.resolveEffectHash(name)
         val names = row.allEffectNames
         val hermetic = names.firstOrNull { WellKnownHashConstants.isMut(resolveHash(it)) } ?: return emptyList()
         if (names.size <= 1) return emptyList()

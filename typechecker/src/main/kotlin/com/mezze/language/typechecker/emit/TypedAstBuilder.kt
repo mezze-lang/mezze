@@ -1462,7 +1462,7 @@ class TypedAstBuilder(
                             convertParsedTypeAnnotation(ta)
                         },
                         abilityHash = registry.lookupAbility(constraint.abilityName)?.contentHash
-                            ?: WellKnownHashConstants.resolveAbilityHash(constraint.abilityName)
+                            ?: registry.resolveAbilityHash(constraint.abilityName)
                     )
                 }
                 MezzeType.FunctionType(

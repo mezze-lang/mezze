@@ -398,7 +398,7 @@ class AbilityResolver(
             return AbilityCheckResult.Satisfied("User-defined impl: $implRef")
         }
 
-        val resolvedHash = WellKnownHashConstants.resolveAbilityHash(abilityName)
+        val resolvedHash = registry.resolveAbilityHash(abilityName)
         if (WellKnownHashConstants.isCodecAbility(resolvedHash) && codecGenerator.isSerializable(type)) {
             return AbilityCheckResult.Satisfied("Auto-derived codec impl")
         }

@@ -977,7 +977,7 @@ class ConstraintGenerator(
             if (solvedTypeVar is MezzeType.VarType) {
                 val matchingTypeVar = typeVars.find { it.name == solvedTypeVar.variable.name }
 
-                val constraintResolvedHash = constraint.abilityHash ?: WellKnownHashConstants.resolveHash(constraint.abilityName)
+                val constraintResolvedHash = constraint.abilityHash ?: registry.resolveAbilityHash(constraint.abilityName)
                 if (matchingTypeVar != null && !WellKnownHashConstants.isInspect(constraintResolvedHash)) {
                     // Carry the FULL type-arg tuple: primary (the matched var) plus
                     // the constraint's extra ability args, substituted. Hardcoding a

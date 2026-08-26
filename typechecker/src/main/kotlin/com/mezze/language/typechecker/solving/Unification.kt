@@ -316,7 +316,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
             unifySuspended(type1, type2, registry)
 
         type1 is MezzeType.EffectRow && type2 is MezzeType.EffectRow ->
-            unifyEffectRows(type1, type2)
+            unifyEffectRows(type1, type2, registry)
 
         type1 is MezzeType.IntType && type2 is MezzeType.IntType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.FloatType && type2 is MezzeType.FloatType -> UnificationResult.Success(Substitution.empty)
@@ -432,9 +432,9 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
         //       apply_pure's callback param is pure) — the module then
         //       type-checked as pure while performing Log at runtime.
         isPure1 && hasConcrete2 ->
-            unifyEffectRows(effects1 ?: MezzeType.EffectRow(emptySet()), effects2!!).getOrElse { return it }
+            unifyEffectRows(effects1 ?: MezzeType.EffectRow(emptySet()), effects2!!, registry).getOrElse { return it }
         isPure2 && hasConcrete1 ->
-            unifyEffectRows(effects1!!, effects2 ?: MezzeType.EffectRow(emptySet())).getOrElse { return it }
+            unifyEffectRows(effects1!!, effects2 ?: MezzeType.EffectRow(emptySet()), registry).getOrElse { return it }
 
         // Both polymorphic-only or polymorphic-vs-concrete: keep the row
         // var open. Eagerly binding here (via unifyEffectRows) would
@@ -446,7 +446,7 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
 
         // #274-B: both sides have concrete effects — propagate through
         // row vars so `<Foo, ...>` can absorb the body's extra effects.
-        else -> unifyEffectRows(effects1!!, effects2!!).getOrElse { return it }
+        else -> unifyEffectRows(effects1!!, effects2!!, registry).getOrElse { return it }
     }
 
     // Unify ability-constraint ASSOCIATED TYPES, mirroring the effect-row path
@@ -917,17 +917,17 @@ private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.Sorte
 
 private fun unifySuspended(susp1: MezzeType.SuspendType, susp2: MezzeType.SuspendType, registry: DeclarationRegistry): UnificationResult {
     val valueSubst = unify(susp1.valueType, susp2.valueType, registry).getOrElse { return it }
-    val effectSubst = unifyEffectRows(susp1.effects, susp2.effects).getOrElse { return it }
+    val effectSubst = unifyEffectRows(susp1.effects, susp2.effects, registry).getOrElse { return it }
     return UnificationResult.Success(valueSubst.compose(effectSubst))
 }
 
-private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow): UnificationResult {
+private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow, registry: DeclarationRegistry): UnificationResult {
     val allEffects1 = eff1.allEffectNames
     val allEffects2 = eff2.allEffectNames
     val combinedEffects = allEffects1 + allEffects2
 
     val combinedHashes = eff1.effectHashes + eff2.effectHashes
-    fun resolveEffectHash(name: String): Hash? = combinedHashes[name] ?: WellKnownHashConstants.resolveHash(name)
+    fun resolveEffectHash(name: String): Hash? = combinedHashes[name] ?: registry.resolveEffectHash(name)
 
     val mutEffect = combinedEffects.firstOrNull { name ->
         WellKnownHashConstants.isMut(resolveEffectHash(name))

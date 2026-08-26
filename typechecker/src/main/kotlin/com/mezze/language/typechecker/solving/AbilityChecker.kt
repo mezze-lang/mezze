@@ -66,7 +66,7 @@ internal class AbilityChecker(
                     val abilityName = tracked.abilityName
                     val typeArgs = tracked.typeArgs
                     val errorLoc = tracked.loc
-                    val trackedResolvedHash = tracked.abilityHash ?: WellKnownHashConstants.resolveHash(abilityName)
+                    val trackedResolvedHash = tracked.abilityHash ?: registry.resolveAbilityHash(abilityName)
                     if (WellKnownHashConstants.isInspect(trackedResolvedHash)) continue
                     val concreteTypeArgs: List<MezzeType> = typeArgs.map { typeArg ->
                         if (typeArg is MezzeType.VarType &&
@@ -128,7 +128,7 @@ internal class AbilityChecker(
         val abilityName = constraint.abilityName
         val typeArgs = constraint.typeArgs
 
-        val resolvedHash = constraint.abilityHash ?: WellKnownHashConstants.resolveHash(abilityName)
+        val resolvedHash = constraint.abilityHash ?: registry.resolveAbilityHash(abilityName)
         if (WellKnownHashConstants.isInspect(resolvedHash)) {
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
         }
@@ -510,7 +510,7 @@ internal class AbilityChecker(
     }
 
     internal fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): Boolean {
-        val effectiveHash = abilityHash ?: WellKnownHashConstants.resolveHash(abilityName)
+        val effectiveHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
         if (typeArgs.size == 1) {
             if (canDeriveAbility(abilityName, typeArgs.first(), effectiveHash)) {
                 return true
@@ -579,7 +579,7 @@ internal class AbilityChecker(
                             else -> typeAnnotationToMezzeType(typeArg)
                         }
                     }
-                    checkAbilityImplementation(constraint.abilityName, resolvedTypeArgs, WellKnownHashConstants.resolveHash(constraint.abilityName))
+                    checkAbilityImplementation(constraint.abilityName, resolvedTypeArgs, registry.resolveAbilityHash(constraint.abilityName))
                 }
             } else {
                 true
@@ -590,7 +590,7 @@ internal class AbilityChecker(
     }
 
     private fun isCodecAbility(abilityName: String, abilityHash: Hash? = null): Boolean =
-        WellKnownHashConstants.isCodecAbility(abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName))
+        WellKnownHashConstants.isCodecAbility(abilityHash ?: registry.resolveAbilityHash(abilityName))
 
     private fun checkCodecAbilityImplementation(
         abilityName: String,
@@ -733,7 +733,7 @@ internal class AbilityChecker(
     }
 
     private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
-        val resolvedHash = abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
+        val resolvedHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
         var unwrappedType = unwrapSuspended(type)
 
         var isNewtype = unwrappedType is MezzeType.NewtypeType
@@ -950,13 +950,13 @@ internal class AbilityChecker(
     }
 
     internal fun tryBidirectionalInference(abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): Substitution? {
-        val resolvedHash = abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
+        val resolvedHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
         if (resolvedHash == WellKnownHashConstants.ABILITY_DECODEREPR && typeArgs.size == 1) {
             val dataType = typeArgs[0]
 
             if (dataType is MezzeType.VarType) {
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
-                    WellKnownHashConstants.resolveAbilityHash(impl.abilityName) == WellKnownHashConstants.ABILITY_DECODEREPR &&
+                    registry.resolveAbilityHash(impl.abilityName) == WellKnownHashConstants.ABILITY_DECODEREPR &&
                     impl.targetTypes.isNotEmpty()
                 }
 
@@ -973,7 +973,7 @@ internal class AbilityChecker(
 
             if (formatType !is MezzeType.VarType && dataType is MezzeType.VarType) {
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
-                    WellKnownHashConstants.resolveAbilityHash(impl.abilityName) == WellKnownHashConstants.ABILITY_DECODE &&
+                    registry.resolveAbilityHash(impl.abilityName) == WellKnownHashConstants.ABILITY_DECODE &&
                     impl.targetTypes.size >= 2 &&
                     typeMatchesMezzeType(formatType, impl.targetTypes[0])
                 }
