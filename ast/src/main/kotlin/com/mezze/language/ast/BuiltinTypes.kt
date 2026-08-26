@@ -62,6 +62,10 @@ object BuiltinTypes {
         CONS to LIST, NIL to LIST,
     )
 
+    /** True iff [name] is a reserved builtin constructor (Some/None/Ok/Err/True/
+     *  False/Cons/Nil). Single authority — prefer this over raw `name == "True"`. */
+    fun isReservedConstructor(name: String): Boolean = name in coreVariantConstructors
+
     // Standard record field names for built-in types
     const val VAL_FIELD = "val"      // Used in Option.Some and Result.Ok
     const val ERROR_FIELD = "error"  // Used in Result.Err

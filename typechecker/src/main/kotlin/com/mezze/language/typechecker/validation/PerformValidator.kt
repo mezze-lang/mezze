@@ -397,7 +397,7 @@ class PerformValidator(
                 MezzeType.RecordType(fields, null)
             }
             is ParsedVariantConstruct -> {
-                if (expr.constructor == "True" || expr.constructor == "False") {
+                if (expr.constructor == BuiltinTypes.TRUE || expr.constructor == BuiltinTypes.FALSE) {
                     MezzeType.BoolType
                 } else {
                     val payloadType = expr.value?.let { constructTypeFromParsedExpression(it) }

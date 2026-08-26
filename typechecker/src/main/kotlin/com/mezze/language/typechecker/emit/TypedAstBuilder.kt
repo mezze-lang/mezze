@@ -490,9 +490,9 @@ class TypedAstBuilder(
                 buildExpr(expr.value, file, contextType)
             }
             is ParsedVariantConstruct -> {
-                if (expr.constructor == "True" && expr.value == null) {
+                if (expr.constructor == BuiltinTypes.TRUE && expr.value == null) {
                     TypedBoolLit(true, MezzeType.BoolType, loc)
-                } else if (expr.constructor == "False" && expr.value == null) {
+                } else if (expr.constructor == BuiltinTypes.FALSE && expr.value == null) {
                     TypedBoolLit(false, MezzeType.BoolType, loc)
                 } else {
                     val payload = expr.value?.let { buildExpr(it, file) }
@@ -635,15 +635,15 @@ class TypedAstBuilder(
                 val scrutinee = buildExpr(expr.scrutinee, file)
 
                 val isBoolMatch = expr.cases.size == 2 &&
-                    expr.cases.any { c -> c.patterns.any { it is ParsedConstructorPattern && it.constructor == "True" } } &&
-                    expr.cases.any { c -> c.patterns.any { it is ParsedConstructorPattern && it.constructor == "False" } }
+                    expr.cases.any { c -> c.patterns.any { it is ParsedConstructorPattern && it.constructor == BuiltinTypes.TRUE } } &&
+                    expr.cases.any { c -> c.patterns.any { it is ParsedConstructorPattern && it.constructor == BuiltinTypes.FALSE } }
 
                 if (isBoolMatch) {
                     val trueCase = expr.cases.find { c ->
-                        c.patterns.any { it is ParsedConstructorPattern && it.constructor == "True" }
+                        c.patterns.any { it is ParsedConstructorPattern && it.constructor == BuiltinTypes.TRUE }
                     }
                     val falseCase = expr.cases.find { c ->
-                        c.patterns.any { it is ParsedConstructorPattern && it.constructor == "False" }
+                        c.patterns.any { it is ParsedConstructorPattern && it.constructor == BuiltinTypes.FALSE }
                     }
                     val thenBranch = buildExpr(trueCase!!.body, file, contextType)
                     val elseBranch = buildExpr(falseCase!!.body, file, thenBranch.type)
@@ -1099,9 +1099,9 @@ class TypedAstBuilder(
             is ParsedVariablePattern -> TypedVarPattern(pattern.name, unknownType, loc)
             is ParsedWildcardPattern -> TypedWildcardPattern(unknownType, loc)
             is ParsedConstructorPattern -> {
-                if (pattern.constructor == "True" && pattern.payload == null) {
+                if (pattern.constructor == BuiltinTypes.TRUE && pattern.payload == null) {
                     TypedLiteralPattern(TypedBoolLit(true, MezzeType.BoolType, loc), MezzeType.BoolType, loc)
-                } else if (pattern.constructor == "False" && pattern.payload == null) {
+                } else if (pattern.constructor == BuiltinTypes.FALSE && pattern.payload == null) {
                     TypedLiteralPattern(TypedBoolLit(false, MezzeType.BoolType, loc), MezzeType.BoolType, loc)
                 } else {
                     val payload = pattern.payload?.let { buildPattern(it, file) }
