@@ -4,6 +4,9 @@ import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.ast.VariantAliases
+import com.mezze.language.typechecker.solving.IdentityVerdict
+import com.mezze.language.typechecker.solving.identityVerdict
+import com.mezze.language.typechecker.solving.sameDeclaredIdentity
 
 /**
  * Type-level helpers used by the mono pipeline. These are intentionally
@@ -76,9 +79,20 @@ internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean 
     if (concrete is MezzeType.NatType && target is MezzeType.NatType) return true
     if (concrete is MezzeType.CharType && target is MezzeType.CharType) return true
     if (concrete is MezzeType.FracType && target is MezzeType.FracType) return true
-    // TypeApp constructor match
+    // TypeApp constructor match. Hash is the authoritative nominal identity:
+    // when BOTH sides carry a declaration content hash and those hashes DIFFER,
+    // they are distinct declarations (two modules' `Widget`, a version skew) and
+    // MUST NOT match — even when their names coincide. Mirrors the solver's
+    // unifyTypeApplications veto (#278/F0). Without this the mono layer would
+    // dispatch by NAME ALONE, matching where unify would reject.
     if (concrete is MezzeType.TypeApplication && target is MezzeType.TypeApplication) {
-        return concrete.constructor == target.constructor
+        if (identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT) return false
+        // A name match, or the SAME concrete declaration under differing names
+        // (a rename-safe alias: equal Declared hash / equal Builtin name), matches.
+        // Identity only ever ADDS a match — the DISTINCT reject above handled the
+        // distinct-declaration case.
+        return concrete.constructor == target.constructor ||
+            sameDeclaredIdentity(concrete.identity, target.identity)
     }
     // Container-to-TypeApp aliases. The structural-container name mapping is the
     // single source in BuiltinTypes.builtinConstructorName (must agree with the

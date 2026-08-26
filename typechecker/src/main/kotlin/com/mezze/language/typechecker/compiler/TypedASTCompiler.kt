@@ -5,6 +5,9 @@ import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
 import com.mezze.language.ast.TypeIdentity
+import com.mezze.language.typechecker.solving.IdentityVerdict
+import com.mezze.language.typechecker.solving.identityVerdict
+import com.mezze.language.typechecker.solving.sameDeclaredIdentity
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.VariantAliases
 import com.mezze.language.parsedast.Loc
@@ -2766,8 +2769,16 @@ class TypedASTCompiler(
             concreteType is NatType && targetType is NatType -> true
             concreteType is CharType && targetType is CharType -> true
             concreteType is FracType && targetType is FracType -> true
+            // Hash is authoritative nominal identity: two same-named TypeApplications
+            // from DIFFERENT declarations (differing content hash) must NOT match —
+            // mirrors the solver's unifyTypeApplications veto (#278/F0). Name match,
+            // or the same concrete decl under a rename-safe alias, still matches;
+            // identity only ADDS a match after the DISTINCT reject.
+            concreteType is TypeApplication && targetType is TypeApplication &&
+                identityVerdict(concreteType.identity, targetType.identity) == IdentityVerdict.DISTINCT -> false
             concreteType is TypeApplication && targetType is TypeApplication ->
-                concreteType.constructor == targetType.constructor
+                concreteType.constructor == targetType.constructor ||
+                    sameDeclaredIdentity(concreteType.identity, targetType.identity)
             concreteType is VariantType && targetType is TypeApplication &&
                 concreteType.constructors.size == 1 &&
                 concreteType.constructors.keys.first() == targetType.constructor -> true
