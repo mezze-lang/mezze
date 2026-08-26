@@ -184,15 +184,40 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                     }
 
                     val associatedTypeBindings = mutableMapOf<String, ParsedTypeAnnotation>()
+                    var havingError: ParseResult.Failure? = null
                     if (abilityStream.current()?.type == TokenType.HAVING) {
+                        val havingToken = abilityStream.current()!!
                         abilityStream = skipNewlines(abilityStream.advance())
                         while (true) {
                             val typeVarResult = identifierParser(abilityStream)
                             if (typeVarResult !is ParseResult.Success) break
                             val typeVarName = typeVarResult.value.text
-                            if (!typeVarName.startsWith("'")) break
+                            if (!typeVarName.startsWith("'")) {
+                                val tok = typeVarResult.value
+                                havingError = ParseResult.Failure(
+                                    message = "'having' expects a type variable binding, not a concrete type.\n" +
+                                        "Write: having 'elem = $typeVarName",
+                                    position = tok.position,
+                                    line = tok.line,
+                                    column = tok.column,
+                                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0127_HAVING_NEEDS_BINDING,
+                                    isFatal = true,
+                                )
+                                break
+                            }
                             abilityStream = skipNewlines(typeVarResult.remaining)
-                            if (abilityStream.current()?.type != TokenType.ASSIGN) break
+                            if (abilityStream.current()?.type != TokenType.ASSIGN) {
+                                val nextTok = abilityStream.current() ?: havingToken
+                                havingError = ParseResult.Failure(
+                                    message = "'having' requires a type binding: having $typeVarName = Type",
+                                    position = nextTok.position,
+                                    line = nextTok.line,
+                                    column = nextTok.column,
+                                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0127_HAVING_NEEDS_BINDING,
+                                    isFatal = true,
+                                )
+                                break
+                            }
                             abilityStream = skipNewlines(abilityStream.advance())
                             val typeResult = atomicTypeAnnotation(abilityStream)
                             if (typeResult !is ParseResult.Success) break
@@ -212,6 +237,10 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                             }
                         }
                     }
+                    if (havingError != null) {
+                        result = havingError as ParseResult<ParsedTypeAnnotation>
+                        break
+                    }
 
                     val constraintLoc = spanLocTo(constraintStart, abilityStream, file)
                     abilityConstraints.add(ParsedFnAbilityConstraint(abilityName, typeArgs, associatedTypeBindings, constraintLoc))
@@ -226,6 +255,8 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                 currentStream = abilityStream
             }
 
+            if (result is ParseResult.Failure) break
+
             // Allow the return-arrow to sit on a following line: a wrapped
             // signature (`… : { … }\n  -> Ret`, #78) is newline-insensitive
             // between the parameter type, `->`, effect row, and return type.
@@ -239,6 +270,7 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                 val arrowStream = streamBeforeArrow.advance()
                 val returnType = functionTypeAnnotation(arrowStream)
 
+                val paramType = (result as ParseResult.Success).value
                 result = when (returnType) {
                     is ParseResult.Success -> {
                         val streamAfterReturn = skipNewlines(returnType.remaining)
@@ -272,6 +304,7 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                     var current = skipNewlines(afterLt)
                                     var foundEllipsis = false
                                     var foundPerformed = false
+                                    var effectHavingError: ParseResult.Failure? = null
 
                                     while (true) {
                                         val effectNameResult = parseQualifiedName(current)
@@ -281,6 +314,7 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                         current = skipNewlines(effectNameResult.remaining)
 
                                         if (current.current()?.type == TokenType.HAVING) {
+                                            val havingTok = current.current()!!
                                             current = skipNewlines(current.advance())
                                             val associatedTypes = mutableMapOf<String, ParsedTypeAnnotation>()
 
@@ -288,9 +322,32 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                                 val typeVarResult = identifierParser(current)
                                                 if (typeVarResult !is ParseResult.Success) break
                                                 val typeVarName = typeVarResult.value.text
-                                                if (!typeVarName.startsWith("'")) break
+                                                if (!typeVarName.startsWith("'")) {
+                                                    val tok = typeVarResult.value
+                                                    effectHavingError = ParseResult.Failure(
+                                                        message = "'having' expects a type variable binding, not a concrete type.\n" +
+                                                            "Write: having 'elem = $typeVarName",
+                                                        position = tok.position,
+                                                        line = tok.line,
+                                                        column = tok.column,
+                                                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0127_HAVING_NEEDS_BINDING,
+                                                        isFatal = true,
+                                                    )
+                                                    break
+                                                }
                                                 current = skipNewlines(typeVarResult.remaining)
-                                                if (current.current()?.type != TokenType.ASSIGN) break
+                                                if (current.current()?.type != TokenType.ASSIGN) {
+                                                    val nextTok = current.current() ?: havingTok
+                                                    effectHavingError = ParseResult.Failure(
+                                                        message = "'having' requires a type binding: having $typeVarName = Type",
+                                                        position = nextTok.position,
+                                                        line = nextTok.line,
+                                                        column = nextTok.column,
+                                                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0127_HAVING_NEEDS_BINDING,
+                                                        isFatal = true,
+                                                    )
+                                                    break
+                                                }
                                                 current = skipNewlines(current.advance())
                                                 val typeResult = atomicTypeAnnotation(current)
                                                 if (typeResult !is ParseResult.Success) break
@@ -310,12 +367,14 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                                 }
                                             }
 
+                                            if (effectHavingError != null) break
                                             val annLoc = if (effectStart != null) spanLocTo(effectStart, current, file) else streamLoc(current, file)
                                             effectAnnotations.add(ParsedEffectAnnotation(effectName, associatedTypes, annLoc))
                                         } else {
                                             simpleEffectNames.add(effectName)
                                         }
 
+                                        if (effectHavingError != null) break
                                         if (current.current()?.type == TokenType.COMMA) {
                                             current = skipNewlines(current.advance())
                                             if (current.current()?.type == TokenType.ELLIPSIS) {
@@ -333,6 +392,9 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                         }
                                     }
 
+                                    if (effectHavingError != null) {
+                                        result = effectHavingError as ParseResult<ParsedTypeAnnotation>
+                                    }
                                     if (current.current()?.type == TokenType.GT) {
                                         EffectRowParseResult(simpleEffectNames, effectAnnotations, foundEllipsis, foundPerformed, current.advance())
                                     } else {
@@ -343,6 +405,10 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                         } else {
                             EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)
                         }
+
+                        if (result is ParseResult.Failure) {
+                            result
+                        } else {
 
                         // `with` after the return type is rejected — constraints must
                         // come BEFORE the arrow. Catching this here gives a precise
@@ -386,10 +452,11 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
 
                             val fnLoc = spanLocTo(startToken, streamAfterWith, file)
                             ParseResult.Success(
-                                ParsedFunctionType(result.value, returnType.value, effectRow, abilityConstraints, fnLoc),
+                                ParsedFunctionType(paramType, returnType.value, effectRow, abilityConstraints, fnLoc),
                                 streamAfterWith
                             )
                         }
+                    } // else (result is not Failure)
                     }
                     is ParseResult.Failure -> break
                 }

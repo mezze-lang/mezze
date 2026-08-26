@@ -2,6 +2,7 @@ package com.mezze.language.typechecker
 
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.parser.ParseException
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -348,5 +349,50 @@ class AbilityAssociatedTypeTest {
         assertNotNull(t, "chain should typecheck")
         assertTrue(t!!.contains("Int"),
             "chained resolution Int→Str→Int should end at Int, got: $t")
+    }
+
+    @Test
+    fun `having without type variable binding gives clear error`() {
+        val source = """
+            use std::option
+
+            ability ToIter for 'c having 'elem where {
+                next: {it: 'c} -> Option 'elem
+            }
+
+            type MyRange = { n: Int }
+
+            impl ToIter for MyRange having 'elem = Int where {
+                next = {it} -> Some {val = it.n}
+            }
+
+            let first : { items: 'c } with ToIter 'c having Int -> Option Int =
+                { items } -> items.next {}
+        """.trimIndent()
+
+        val ex = assertThrows(ParseException::class.java) {
+            parser.parseParsedModule(source, "test.mz")
+        }
+        assertTrue(ex.message!!.contains("type variable binding"), "Error should mention type variable binding, got: ${ex.message}")
+        assertTrue(ex.message!!.contains("having 'elem = Int"), "Error should suggest the fix, got: ${ex.message}")
+    }
+
+    @Test
+    fun `having with type var but missing equals gives clear error`() {
+        val source = """
+            use std::option
+
+            ability ToIter for 'c having 'elem where {
+                next: {it: 'c} -> Option 'elem
+            }
+
+            let first : { items: 'c } with ToIter 'c having 'elem -> Option Int =
+                { items } -> items.next {}
+        """.trimIndent()
+
+        val ex = assertThrows(ParseException::class.java) {
+            parser.parseParsedModule(source, "test.mz")
+        }
+        assertTrue(ex.message!!.contains("having 'elem = Type"), "Error should show binding syntax, got: ${ex.message}")
     }
 }

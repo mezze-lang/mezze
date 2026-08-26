@@ -534,20 +534,20 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test polymorphic effect propagates through generic function`() {
         val source = """
-            ability Peekable for 'c where {
-                peek: {it: 'c} -> Int <...>
+            ability ToIter for 'c having 'elem where {
+                next: {it: 'c} -> Option 'elem <...>
             }
 
-            type MyBox = { n: Int }
+            type MyRange = { n: Int }
 
-            impl Peekable for MyBox where {
-                peek = {it} -> it.n
+            impl ToIter for MyRange having 'elem = Int where {
+                next = {it} -> Some {val = it.n}
             }
 
-            let peek_it : {item: 'c} with Peekable 'c -> Int =
-                {item} -> item.peek {}
+            let first : { items: 'c } with ToIter 'c having 'elem = Int -> Option Int =
+                { items } -> items.next {}
 
-            peek_it {item = {n = 10}}
+            first { items = { n = 10 } }
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

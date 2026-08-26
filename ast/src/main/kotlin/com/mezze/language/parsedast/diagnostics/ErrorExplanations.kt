@@ -118,6 +118,11 @@ fun ErrorCode.explain(): String = when (this) {
         "Return type annotations go on the binding, not inline in the lambda. " +
         "Use `let f: {Int} -> Int = {x} -> x` not `{x} -> Int do x`."
 
+    ErrorCode.P0127_HAVING_NEEDS_BINDING ->
+        "The `having` keyword in a `with` constraint requires a type variable binding: " +
+        "`having 'elem = Int`, not `having Int`. The type variable must match " +
+        "the one declared in the ability's `having` clause."
+
     ErrorCode.T0201_TYPE_MISMATCH ->
         "Two types that should be the same are different. This is the most common type error. " +
         "Check that the argument types match the function's parameter types, " +
