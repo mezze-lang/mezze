@@ -19,6 +19,17 @@ import java.nio.file.Path
  * Parse → Typecheck → Wrap top-level → Monomorphize → Resolve → Lower → TruffleCompiler
  */
 object PipelineRunner {
+    // Entry-point / synthetic function-name conventions, single-sourced here
+    // (the only place they are recognized). ENTRY_FN is the compiled entry
+    // wrapper; MAIN_FN the user entry; LAMBDA_FN the anonymous-fn placeholder.
+    // The `__toplevel*` prefix is the shared MagicParams.TOPLEVEL_EXPR_PREFIX
+    // stem — matched by prefix since toplevel decls are numbered.
+    private const val ENTRY_FN = "__entry__"
+    private const val MAIN_FN = "main"
+    private const val LAMBDA_FN = "lambda"
+    // Stem of MagicParams.TOPLEVEL_EXPR_PREFIX ("__toplevel_expr_"); matched by
+    // prefix because synthetic toplevel decls are numbered.
+    private const val TOPLEVEL_PREFIX = "__toplevel"
 
     // tryCompile deleted — TypedASTCompiler replaces the old Mono→Resolve→Lower pipeline
 
@@ -185,7 +196,7 @@ object PipelineRunner {
             // catches everything they reach.
             val roots = mutableSetOf<com.mezze.language.typedast.Hash>()
             for (fn in functions) {
-                if (fn.name == "__entry__" || fn.name == "main" || fn.name.startsWith("__toplevel")) {
+                if (fn.name == ENTRY_FN || fn.name == MAIN_FN || fn.name.startsWith(TOPLEVEL_PREFIX)) {
                     roots.add(fn.hash)
                 }
                 if (entryName != null && fn.name == entryName) roots.add(fn.hash)
@@ -267,7 +278,7 @@ object PipelineRunner {
             // __entry__'s body purely for its global-binding side effect, then
             // read the NAMED entry function by its content hash and invoke it
             // with {}.
-            val wrapperFn = functions.find { it.name == "__entry__" }
+            val wrapperFn = functions.find { it.name == ENTRY_FN }
             mainFn = wrapperFn ?: namedEntry
             source = sourceHelper.getOrCreateSource(mainFn.sourceFile)
 
@@ -296,7 +307,7 @@ object PipelineRunner {
             )
         } else {
             // No named entry — fall back to __entry__ (tests/REPL) or last function
-            mainFn = functions.find { it.name == "__entry__" } ?: functions.last()
+            mainFn = functions.find { it.name == ENTRY_FN } ?: functions.last()
             source = sourceHelper.getOrCreateSource(mainFn.sourceFile)
             bodyNode = bodyOf(mainFn)
         }
@@ -304,7 +315,7 @@ object PipelineRunner {
         // Build hash→name map for performer/handler lookup by name
         val hashToName = mutableMapOf<com.mezze.language.typedast.Hash, String>()
         for (fn in functions) {
-            if (fn.name != "lambda" && fn.name != "__entry__" && !fn.name.startsWith("__toplevel")) {
+            if (fn.name != LAMBDA_FN && fn.name != ENTRY_FN && !fn.name.startsWith(TOPLEVEL_PREFIX)) {
                 hashToName[fn.hash] = fn.name
             }
         }

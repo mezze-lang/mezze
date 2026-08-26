@@ -79,6 +79,10 @@ public final class MezzeVariant implements TruffleObject {
         com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(com.mezze.language.ast.BuiltinTypes.NIL, null);
     public static final int CONS_TAG =
         com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(com.mezze.language.ast.BuiltinTypes.CONS, null);
+    private static final int OK_TAG =
+        com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(com.mezze.language.ast.BuiltinTypes.OK, null);
+    private static final int ERR_TAG =
+        com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(com.mezze.language.ast.BuiltinTypes.ERR, null);
 
     /**
      * TagRegistry defines the mapping from constructor names to integer tags.
@@ -404,6 +408,20 @@ public final class MezzeVariant implements TruffleObject {
      */
     public boolean isNone() {
         return tag == NONE_TAG;
+    }
+
+    /**
+     * Check if this is an Ok variant (tag-based, like isSome/isNone).
+     */
+    public boolean isOk() {
+        return tag == OK_TAG;
+    }
+
+    /**
+     * Check if this is an Err variant (tag-based, like isSome/isNone).
+     */
+    public boolean isErr() {
+        return tag == ERR_TAG;
     }
 
     /**

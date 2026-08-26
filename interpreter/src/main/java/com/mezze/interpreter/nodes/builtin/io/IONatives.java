@@ -503,7 +503,7 @@ public final class IONatives {
      */
     private static Object injectUrlIntoMockResponse(Object response, String url) {
         if (!(response instanceof MezzeVariant variant)) return response;
-        if (!"Ok".equals(variant.getConstructorName())) return response;
+        if (!variant.isOk()) return response;
         if (!variant.hasPayload()) return response;
         Object payload = variant.getPayloadValue();
         if (!(payload instanceof MezzeRecord wrapped)) return response;
@@ -850,7 +850,7 @@ public final class IONatives {
         Object reqTimeoutObj = getField(req, "timeout_ms");
         if (reqTimeoutObj instanceof Long l) {
             timeoutMs = l.intValue();
-        } else if (reqTimeoutObj instanceof MezzeVariant v && "Some".equals(v.getConstructorName())) {
+        } else if (reqTimeoutObj instanceof MezzeVariant v && v.isSome()) {
             Object payload = v.getPayloadValue();
             if (payload instanceof MezzeRecord pr) {
                 Object val = getField(pr, "val");
