@@ -394,7 +394,7 @@ internal class AbilityChecker(
     // head. If no impl can produce [required], the result was forced to a type this
     // ability never yields (e.g. a numeric op forced to `Result`), which is an error.
     private fun abilityCanProduceOutput(abilityName: String, required: MezzeType): Boolean {
-        val impls = context.getAbilityImpls(abilityName)
+        val impls = abilityImpls(abilityName)
         if (impls.isEmpty()) return true  // unknown ability surface — don't over-reject
         val requiredHead = typeHeadName(required)
         for (impl in impls) {
@@ -435,7 +435,7 @@ internal class AbilityChecker(
         abilityName: String,
         primaryType: MezzeType
     ): Pair<TypingContext.AbilityImplInfo, Map<String, MezzeType>>? {
-        val allImpls = context.getAbilityImpls(abilityName)
+        val allImpls = abilityImpls(abilityName)
 
         // Which annotation is the RECEIVER? For a single-param ability it's the
         // only one; for a multi-param ability (`Scale 'by for 'a`) the impl's
@@ -483,7 +483,7 @@ internal class AbilityChecker(
         abilityName: String,
         classArgs: List<MezzeType>
     ): Pair<TypingContext.AbilityImplInfo, Map<String, MezzeType>>? {
-        for (impl in context.getAbilityImpls(abilityName)) {
+        for (impl in abilityImpls(abilityName)) {
             val annotations = impl.targetTypeAnnotations ?: continue
             if (annotations.size != classArgs.size) continue
             val typeVarBindings = mutableMapOf<String, MezzeType>()
@@ -507,6 +507,32 @@ internal class AbilityChecker(
             is ParsedVariantType -> MezzeType.VariantType(constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> typeAnnotationToMezzeType(dt) } })
             is ParsedQualifiedType -> WellKnownTypeApp.of((annotation.modulePath + annotation.typeName).joinToString("::"), annotation.args.map { typeAnnotationToMezzeType(it) })
         }
+    }
+
+    /**
+     * Ability-impl lookup, hash-aware. Returns the UNION of the ability's
+     * hash-keyed impls (resolved from [abilityName] via the registry — the same
+     * pure fn the well-known table's generator uses) and its name-keyed impls,
+     * deduped by content hash.
+     *
+     * The two populations are NOT interchangeable: USER impls carry the ability's
+     * decl content hash and land in the by-hash index, while BUILT-IN impls
+     * (`Ord for Int`, `Eq for Int`, …) are hashless and live only in the name
+     * index. Returning just one silently drops the other — e.g. a user `Ord for
+     * Str` would hide the builtin `Ord for Int`. Merging keeps the hash channel
+     * (which disambiguates two same-named abilities from different modules) while
+     * still surfacing the hashless builtins the name index holds.
+     */
+    private fun abilityImpls(abilityName: String, abilityHash: Hash? = null): List<TypingContext.AbilityImplInfo> {
+        val hash = abilityHash ?: registry.resolveAbilityHash(abilityName)
+        val byName = context.getAbilityImpls(abilityName)
+        if (hash == null) return byName
+        val byHash = context.getAbilityImplsByDeclHash(hash)
+        if (byHash.isEmpty()) return byName
+        // Union, deduped by impl content hash (an impl reachable by BOTH channels
+        // must appear once).
+        val seen = HashSet<Hash>()
+        return (byHash + byName).filter { seen.add(it.contentHash) }
     }
 
     internal fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): Boolean {
@@ -856,7 +882,7 @@ internal class AbilityChecker(
     private fun abilityImplExistsForType(abilityName: String, typeArgs: List<MezzeType>): Boolean {
         val primaryType = typeArgs.firstOrNull() ?: return false
         val primaryName = prettyPrintType(primaryType)
-        val impls = context.getAbilityImpls(abilityName)
+        val impls = abilityImpls(abilityName)
         return impls.any { info ->
             val targets = info.targetTypeAnnotations
             val rendered = when {
@@ -887,7 +913,7 @@ internal class AbilityChecker(
     }
 
     private fun formatAbilityCandidates(abilityName: String): String {
-        val impls = context.getAbilityImpls(abilityName)
+        val impls = abilityImpls(abilityName)
         if (impls.isEmpty()) return ""
         val rendered = impls.mapNotNull { info ->
             val targets = info.targetTypeAnnotations
@@ -977,7 +1003,7 @@ internal class AbilityChecker(
             }
         }
 
-        val allImpls = context.getAbilityImpls(abilityName)
+        val allImpls = abilityImpls(abilityName)
 
         if (allImpls.isEmpty()) {
             return null
