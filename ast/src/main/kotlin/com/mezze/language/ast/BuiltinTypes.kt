@@ -148,17 +148,17 @@ object BuiltinTypes {
     fun isOptionVariant(type: MezzeType): Boolean {
         return type is MezzeType.VariantType &&
                type.constructors.size == 2 &&
-               type.constructors.containsKey("Some") &&
-               type.constructors.containsKey("None") &&
-               type.constructors["None"] == null &&
+               type.constructors.containsKey(SOME) &&
+               type.constructors.containsKey(NONE) &&
+               type.constructors[NONE] == null &&
                !type.isOpen
     }
 
     fun getOptionValueType(type: MezzeType.VariantType): MezzeType? {
         if (!isOptionVariant(type)) return null
-        val someType = type.constructors["Some"] ?: return null
+        val someType = type.constructors[SOME] ?: return null
         return when (someType) {
-            is MezzeType.RecordType -> someType.fields["val"]
+            is MezzeType.RecordType -> someType.fields[VAL_FIELD]
             else -> someType
         }
     }
@@ -166,16 +166,16 @@ object BuiltinTypes {
     fun getResultTypes(type: MezzeType.VariantType): Pair<MezzeType, MezzeType>? {
         if (type.constructors.size != 2 || type.isOpen) return null
 
-        val okType = type.constructors["Ok"] ?: return null
-        val errType = type.constructors["Err"] ?: return null
+        val okType = type.constructors[OK] ?: return null
+        val errType = type.constructors[ERR] ?: return null
 
         val valueType = when (okType) {
-            is MezzeType.RecordType -> okType.fields["val"]
+            is MezzeType.RecordType -> okType.fields[VAL_FIELD]
             else -> null
         } ?: return null
 
         val errorType = when (errType) {
-            is MezzeType.RecordType -> errType.fields["error"]
+            is MezzeType.RecordType -> errType.fields[ERROR_FIELD]
             else -> null
         } ?: return null
 

@@ -1045,9 +1045,8 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
         else -> null
     }
     if (ctorName != null) {
-        when (ctorName) {
-            "Ok", "Err" -> return "Result"
-            "Some", "None" -> return "Option"
+        BuiltinTypes.reservedConstructorOwner[ctorName]?.let {
+            if (it == BuiltinTypes.RESULT || it == BuiltinTypes.OPTION) return it
         }
         for ((typeName, typeDecl) in context.typeDeclarations) {
             val def = typeDecl.definition

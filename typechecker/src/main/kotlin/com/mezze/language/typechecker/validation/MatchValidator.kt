@@ -261,7 +261,7 @@ class MatchValidator(
                     is ParsedLiteralPattern -> {
                         if (case.guard == null && case.ifLetBindings.isEmpty()) {
                             val lit = pattern.value
-                            if (lit is ParsedLiteralValue.BoolValue) coveredConstructors.add(if (lit.value) "True" else "False")
+                            if (lit is ParsedLiteralValue.BoolValue) coveredConstructors.add(if (lit.value) BuiltinTypes.TRUE else BuiltinTypes.FALSE)
                         }
                     }
                     else -> {}

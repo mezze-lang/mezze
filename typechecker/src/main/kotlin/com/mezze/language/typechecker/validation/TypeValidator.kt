@@ -343,7 +343,7 @@ class TypeValidator(
         typeNameCache[key]?.let { return it }
         val result = when (type) {
             is MezzeType.VariantType -> type.identity.displayNameOrNull() ?: when {
-                type.constructors.keys == setOf("True", "False") -> "Bool"
+                type.constructors.keys == setOf(BuiltinTypes.TRUE, BuiltinTypes.FALSE) -> BuiltinTypes.BOOL
                 type.constructors.size == 1 -> type.constructors.keys.first()
                 else -> ContentHashComputer.mezzeTypeToString(type)
             }

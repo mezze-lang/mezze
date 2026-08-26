@@ -51,8 +51,8 @@ object PrimitiveTypes {
         if (type !is MezzeType.VariantType) return false
         val constructors = type.constructors
         return constructors.size == 2 &&
-               constructors.containsKey("True") && constructors["True"] == null &&
-               constructors.containsKey("False") && constructors["False"] == null &&
+               constructors.containsKey(BuiltinTypes.TRUE) && constructors[BuiltinTypes.TRUE] == null &&
+               constructors.containsKey(BuiltinTypes.FALSE) && constructors[BuiltinTypes.FALSE] == null &&
                type.rowVar == null
     }
 

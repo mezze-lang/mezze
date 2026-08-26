@@ -253,7 +253,7 @@ internal class VariantSolver(
         constructorName: String,
         expectedPayloadType: MezzeType?
     ): ConstraintSolver.ConstraintResult {
-        if (constructorName != "True" && constructorName != "False") {
+        if (constructorName != BuiltinTypes.TRUE && constructorName != BuiltinTypes.FALSE) {
             return ConstraintSolver.ConstraintResult.Failure(
                 "Bool type only has constructors 'True' and 'False', not '$constructorName'"
             )

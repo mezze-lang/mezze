@@ -258,16 +258,26 @@ object Keywords {
     const val TO_DBG_STR = "to_dbg_str"
 }
 
-// Reverse-lookup constructor-set → typeName for ability-impl matching (e.g. `impl Sized for Option`).
+// Reverse-lookup constructor-set → builtin type name for ability-impl matching
+// (e.g. an anonymous `| Some, None |` value matching `impl Sized for Option`).
 // Used by TypedASTCompiler and MonoTypeOps — keeping the table here ensures both agree.
+//
+// DERIVED from [BuiltinTypes.reservedConstructorOwner] (the single source for
+// "which builtin owns this reserved constructor"), so the ctor→owner mapping is
+// never re-spelled here as raw literals. An anonymous variant whose FULL
+// constructor set is exactly a builtin's reserved constructors IS that builtin
+// structurally — that is the only case this maps. (Formerly a hand-written table
+// that duplicated the ownership map and even carried a `Just,Nothing → Maybe`
+// entry for a type that is not a builtin at all.)
 object VariantAliases {
-    val byConstructorSet: Map<String, String> = mapOf(
-        "None,Some" to "Option",
-        "Err,Ok" to "Result",
-        "Cons,Nil" to "List",
-        "False,True" to "Bool",
-        "Just,Nothing" to "Maybe",
-    )
+    // constructor-set key ("None,Some") → builtin type name ("Option"),
+    // built by grouping reservedConstructorOwner by owner and requiring the
+    // full reserved-constructor set of that owner.
+    val byConstructorSet: Map<String, String> =
+        BuiltinTypes.reservedConstructorOwner.entries
+            .groupBy({ it.value }, { it.key })
+            .entries
+            .associate { (owner, ctors) -> ctors.sorted().joinToString(",") to owner }
 
     fun aliasFor(constructors: Set<String>): String? =
         byConstructorSet[constructors.sorted().joinToString(",")]

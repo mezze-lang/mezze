@@ -290,7 +290,7 @@ object ErrorMessageBuilder {
     // pointing at the explicit conversion.
     private fun seqListMismatchHint(expected: MezzeType, actual: MezzeType): String {
         fun isSeq(t: MezzeType) = t is MezzeType.SeqType
-        fun isList(t: MezzeType) = t is MezzeType.TypeApplication && t.constructor == "List"
+        fun isList(t: MezzeType) = t is MezzeType.TypeApplication && t.constructor == BuiltinTypes.LIST
         return when {
             // wrote a `[...]` sequence where a List was expected
             isList(expected) && isSeq(actual) ->
