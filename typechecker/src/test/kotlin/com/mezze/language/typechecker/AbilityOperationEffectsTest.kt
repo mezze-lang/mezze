@@ -478,4 +478,81 @@ class AbilityOperationEffectsTest {
 
         assertNotNull(typedProgram, "Multiple abilities with different effects should work")
     }
+
+    // ========== POLYMORPHIC EFFECTS ON ABILITY OPS ==========
+
+    @Test
+    fun `test ability with polymorphic effect op - pure impl`() {
+        val source = """
+            ability ToIter for 'c having 'elem where {
+                next: {it: 'c} -> Option 'elem <...>
+            }
+
+            type MyRange = { n: Int }
+
+            impl ToIter for MyRange having 'elem = Int where {
+                next = {it} -> Some {val = it.n}
+            }
+
+            let r = {n = 5}
+            r.next {}
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
+
+        assertNotNull(typedProgram, "Pure impl of ability with polymorphic effect op should pass")
+    }
+
+    @Test
+    fun `test ability with polymorphic effect op - effectful impl`() {
+        val source = """
+            effect Mut where {
+                get_val: {} -> Int
+            }
+
+            ability ToIter for 'c having 'elem where {
+                next: {it: 'c} -> Option 'elem <...>
+            }
+
+            type MutReader = { id: Int }
+
+            impl ToIter for MutReader having 'elem = Int where {
+                next = {it} -> Some {val = Mut.get_val {}}
+            }
+
+            let reader = {id = 1}
+            reader.next {}
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
+
+        assertNotNull(typedProgram, "Effectful impl of ability with polymorphic effect op should pass")
+    }
+
+    @Test
+    fun `test polymorphic effect propagates through generic function`() {
+        val source = """
+            ability Peekable for 'c where {
+                peek: {it: 'c} -> Int <...>
+            }
+
+            type MyBox = { n: Int }
+
+            impl Peekable for MyBox where {
+                peek = {it} -> it.n
+            }
+
+            let peek_it : {item: 'c} with Peekable 'c -> Int =
+                {item} -> item.peek {}
+
+            peek_it {item = {n = 10}}
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
+
+        assertNotNull(typedProgram, "Polymorphic effect should propagate through generic function")
+    }
 }
