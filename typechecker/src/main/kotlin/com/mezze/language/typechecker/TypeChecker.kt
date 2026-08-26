@@ -294,7 +294,15 @@ class TypeChecker(
         // well-known table; the registry supplies the rest; the hash is a pure fn of
         // the decl and always computable.) See WellKnownTypeApp.withHashResolver.
         WellKnownTypeApp.withHashResolver({ name ->
+            // Resolve as broadly as ImplValidator.stampTypeHashes does (#312): a
+            // cross-module ability-op type like `Config` isn't a DIRECT decl in
+            // this module (lookupType misses it), but typeHashFor consults local +
+            // imported + transitive types. Using it here means such a type is born
+            // Declared(hash) at construction instead of Anonymous-with-a-name that
+            // stampTypeHashes has to repair by reading `.constructor` — the deferred
+            // case that blocked constructor from deriving purely from identity.
             registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) }
+                ?: registry.typeHashFor(name)
         }) {
 
         val constraintGenerator = ConstraintGenerator.create(
