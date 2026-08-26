@@ -26,6 +26,13 @@ fun receiverTypeName(type: MezzeType): String? = when (type) {
     is MezzeType.TypeApplication -> type.constructor
     is MezzeType.RecordType -> type.identity.displayNameOrNull()
     is MezzeType.VariantType -> type.identity.displayNameOrNull()
+        // Fallback for a hashless single-constructor variant: this is how a
+        // record type (`type Pair = {..}`) reaches dispatch — a one-constructor
+        // variant `| Pair {..} |` whose sole CONSTRUCTOR name IS the type name.
+        // So the fallback is not a wrong "type-from-constructor" guess; for a
+        // one-constructor type the two names coincide by construction. Same
+        // accepted "hashless receiver → name is the only identity" rule as the
+        // primitive/builtin arms above (name is a fallback, never a hash veto).
         ?: if (type.constructors.size == 1) type.constructors.keys.first() else null
     else -> null
 }
