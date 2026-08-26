@@ -201,21 +201,21 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
             // returns `SeqType`, but `impl Seq 'a` methods declare their
             // receiver as `TypeApplication("Seq", 'a)`).
             pattern.args.size == 1 -> when {
-                pattern.constructor == "Seq" && v is MezzeType.SeqType ->
+                pattern.constructor == BuiltinTypes.SEQ && v is MezzeType.SeqType ->
                     unify(pattern.args[0], v.elementType, bindings)
-                pattern.constructor == "List" && v is MezzeType.ListType ->
+                pattern.constructor == BuiltinTypes.LIST && v is MezzeType.ListType ->
                     unify(pattern.args[0], v.elementType, bindings)
-                pattern.constructor == "Set" && v is MezzeType.SetType ->
+                pattern.constructor == BuiltinTypes.SET && v is MezzeType.SetType ->
                     unify(pattern.args[0], v.elementType, bindings)
-                pattern.constructor == "SortedSet" && v is MezzeType.SortedSetType ->
+                pattern.constructor == BuiltinTypes.SORTED_SET && v is MezzeType.SortedSetType ->
                     unify(pattern.args[0], v.elementType, bindings)
                 else -> false
             }
             pattern.args.size == 2 -> when {
-                pattern.constructor == "Map" && v is MezzeType.MapType ->
+                pattern.constructor == BuiltinTypes.MAP && v is MezzeType.MapType ->
                     unify(pattern.args[0], v.keyType, bindings) &&
                     unify(pattern.args[1], v.valueType, bindings)
-                pattern.constructor == "SortedMap" && v is MezzeType.SortedMapType ->
+                pattern.constructor == BuiltinTypes.SORTED_MAP && v is MezzeType.SortedMapType ->
                     unify(pattern.args[0], v.keyType, bindings) &&
                     unify(pattern.args[1], v.valueType, bindings)
                 else -> false
@@ -239,42 +239,42 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
  *  must bind `'a → Int` for stdlib mono seeding to work. */
 private fun unifySeq(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
     v is MezzeType.SeqType -> unify(patternElem, v.elementType, bindings)
-    v is MezzeType.TypeApplication && v.constructor == "Seq" && v.args.size == 1 ->
+    v is MezzeType.TypeApplication && v.constructor == BuiltinTypes.SEQ && v.args.size == 1 ->
         unify(patternElem, v.args[0], bindings)
     else -> false
 }
 
 private fun unifyList(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
     v is MezzeType.ListType -> unify(patternElem, v.elementType, bindings)
-    v is MezzeType.TypeApplication && v.constructor == "List" && v.args.size == 1 ->
+    v is MezzeType.TypeApplication && v.constructor == BuiltinTypes.LIST && v.args.size == 1 ->
         unify(patternElem, v.args[0], bindings)
     else -> false
 }
 
 private fun unifySet(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
     v is MezzeType.SetType -> unify(patternElem, v.elementType, bindings)
-    v is MezzeType.TypeApplication && v.constructor == "Set" && v.args.size == 1 ->
+    v is MezzeType.TypeApplication && v.constructor == BuiltinTypes.SET && v.args.size == 1 ->
         unify(patternElem, v.args[0], bindings)
     else -> false
 }
 
 private fun unifySortedSet(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
     v is MezzeType.SortedSetType -> unify(patternElem, v.elementType, bindings)
-    v is MezzeType.TypeApplication && v.constructor == "SortedSet" && v.args.size == 1 ->
+    v is MezzeType.TypeApplication && v.constructor == BuiltinTypes.SORTED_SET && v.args.size == 1 ->
         unify(patternElem, v.args[0], bindings)
     else -> false
 }
 
 private fun unifyMap(patternKey: MezzeType, patternVal: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
     v is MezzeType.MapType -> unify(patternKey, v.keyType, bindings) && unify(patternVal, v.valueType, bindings)
-    v is MezzeType.TypeApplication && v.constructor == "Map" && v.args.size == 2 ->
+    v is MezzeType.TypeApplication && v.constructor == BuiltinTypes.MAP && v.args.size == 2 ->
         unify(patternKey, v.args[0], bindings) && unify(patternVal, v.args[1], bindings)
     else -> false
 }
 
 private fun unifySortedMap(patternKey: MezzeType, patternVal: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
     v is MezzeType.SortedMapType -> unify(patternKey, v.keyType, bindings) && unify(patternVal, v.valueType, bindings)
-    v is MezzeType.TypeApplication && v.constructor == "SortedMap" && v.args.size == 2 ->
+    v is MezzeType.TypeApplication && v.constructor == BuiltinTypes.SORTED_MAP && v.args.size == 2 ->
         unify(patternKey, v.args[0], bindings) && unify(patternVal, v.args[1], bindings)
     else -> false
 }
