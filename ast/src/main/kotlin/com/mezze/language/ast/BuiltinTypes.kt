@@ -30,7 +30,8 @@ object BuiltinTypes {
     const val OK = "Ok"
     const val ERR = "Err"
 
-    // Bool constructors
+    // Bool type + constructors
+    const val BOOL = "Bool"
     const val TRUE = "True"
     const val FALSE = "False"
 
@@ -45,6 +46,21 @@ object BuiltinTypes {
      * constructor rules.
      */
     val coreVariantConstructors = setOf(SOME, NONE, OK, ERR, TRUE, FALSE, CONS, NIL)
+
+    /**
+     * Each reserved builtin constructor mapped to the builtin type it belongs to.
+     * These constructor names are RESERVED — a user variant may not declare them
+     * (they are the built-in constructors of Bool/Option/Result/List). Single
+     * source for "which builtin owns this constructor name", used by the
+     * duplicate/reserved-constructor validator. Keys are exactly
+     * [coreVariantConstructors].
+     */
+    val reservedConstructorOwner: Map<String, String> = mapOf(
+        SOME to OPTION, NONE to OPTION,
+        OK to RESULT, ERR to RESULT,
+        TRUE to BOOL, FALSE to BOOL,
+        CONS to LIST, NIL to LIST,
+    )
 
     // Standard record field names for built-in types
     const val VAL_FIELD = "val"      // Used in Option.Some and Result.Ok

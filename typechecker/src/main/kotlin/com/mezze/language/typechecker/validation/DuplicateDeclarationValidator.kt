@@ -112,12 +112,11 @@ object DuplicateDeclarationValidator {
         }
     }
 
-        private val BUILTIN_CONSTRUCTORS = mapOf(
-        BuiltinTypes.SOME to BuiltinTypes.OPTION,
-        BuiltinTypes.NONE to BuiltinTypes.OPTION,
-        BuiltinTypes.OK to BuiltinTypes.RESULT,
-        BuiltinTypes.ERR to BuiltinTypes.RESULT
-    )
+        // Reserved builtin constructors → their owning builtin type. Single-
+        // sourced from BuiltinTypes so ALL reserved constructors (incl. Bool's
+        // True/False and List's Cons/Nil, previously missing here) are rejected
+        // when a user variant tries to redeclare them.
+        private val BUILTIN_CONSTRUCTORS = BuiltinTypes.reservedConstructorOwner
 
         private fun validateDuplicateConstructors(module: ParsedModule) {
         val constructorToTypeMap = mutableMapOf<String, String>()
