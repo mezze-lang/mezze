@@ -1,4 +1,4 @@
-## Lazy Iter — descriptor-tree stream. Companion to `Seq` (materialized).
+## Lazy Iter — descriptor-tree sequence.
 ##
 ## `Iter` is opaque: its stages allocate only immutable descriptor nodes
 ## (no arrays, no boxed cells) and no user code runs until a sink like
@@ -7,12 +7,10 @@
 ## over primitive longs — for numeric ranges the fused shape is the same
 ## as a hand-written `for` loop.
 ##
-## Dot-syntax (`it.fold {…}`) is deferred: the historical `Iter` ability
-## in `std::abilities::iter` shares this name, and an
-## `impl Iter 'a where { … }` here would resolve to the ability's method
-## table (implementing it for all types), not an inherent method table
-## on the concrete type. Use the free-function form for now:
-## `iter::fold { it = it, init = 0, f = … }`.
+## Any type implementing the `ToIter` ability can enter the Iter pipeline
+## via its `next` method. Known producers (range) get full producer +
+## combinator fusion. Unknown producers (file handles, user types) get
+## combinator fusion with one `next()` call per element.
 use std::int
 
 ## Creates a lazy range `[start, end)` stepped by 1.

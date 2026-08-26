@@ -1,12 +1,8 @@
 ## Lazy Iter fusion showcase: (0..N).filter(x < N/2).map(x * 2).fold(+)
 ##
-## Same shape as bench/cases/filter_map_fold but built on the new opaque
-## Iter — each stage allocates only descriptor nodes; the terminal fold
-## should be the only place any work happens.
-##
-## Free-function form (no dot-syntax) because `Iter` collides with the
-## ability of the same name in std::abilities::iter — see
-## stdlib/std/collections/iter.mz for context.
+## Same shape as bench/cases/filter_map_fold but built on the opaque Iter
+## descriptor tree — each stage allocates only descriptor nodes; the
+## terminal fold should be the only place any work happens.
 use std::effects::log::{println, Console}
 use std::collections::iter
 

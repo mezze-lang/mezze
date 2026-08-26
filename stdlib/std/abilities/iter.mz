@@ -1,35 +1,22 @@
-## Descriptor-shaped iteration.
+## Conversion to Iter — the universal iteration entry point.
 ##
-## A value of an `Iter`-implementing type `'c` is an immutable *descriptor*
-## for a stream of elements of the associated type `'elem`. `next` advances
-## the descriptor by one step, returning `Step { elem, next_it }` when an
-## element is available, or `Done` at end-of-stream.
+## Any type that implements `ToIter` can be iterated: its elements are
+## available to all Iter combinators (filter, map, fold, etc.) via a
+## single `next` method that returns `Option 'elem`.
 ##
-## The receiver `'c` is not mutated — `next` returns the *next descriptor*
-## rather than modifying the current one. This lets iterators compose
-## purely (no shared state, no ordering hazards) and lets the compile-time
-## fusion pass recognize `xs.iter{}.filter(p).map(f).fold(init, g)` as the
-## same shape as the range/seq-fused loop.
+## Collections like Seq and List implement `ToIter` for generic code,
+## but keep their own optimized inherent HOFs for direct use. When the
+## fusion pass sees a concrete type at monomorphization time it can
+## specialize to the direct-storage path — the ability is the generic
+## interface, specialization recovers the fast path.
 ##
-## For stateful / effectful iteration (generators, cursors, IO streams),
-## see the parked `StatefulIter` (#445) — that ability sits on top of an
-## effect row and drives via `perform`.
-##
-## Concrete impls forward to native fold/get loops; the ability method is
-## rarely called directly. See `std::collections::iter` for the standard
-## free-function chain: `iter::filter`, `iter::map`, `iter::fold`,
-## `iter::sum`, `iter::for_each`.
+## Effectful producers (file handles, DB cursors) will implement
+## `ToIter` once effect rows on ability methods are supported.
+## For now `next` is pure — effectful iteration uses the descriptor
+## tree's `CallbackProducerNode` directly.
 
-## Step result: end-of-stream sentinel or (element, next-descriptor) pair.
-##
-## Kept as a distinct variant rather than `Option ({elem, next_it})` so the
-## fusion peel can pattern-match on the ctor name directly and so future
-## specializations (unboxed `elem`, tail-call resume) can extend the
-## variant without churning `Option` at every user callsite.
-pub type IterStep 'c 'elem = | IterDone, IterStep { elem: 'elem, next_it: 'c } |
+use std::option
 
-ability Iter for 'c having 'elem where {
-  ## Advance the descriptor. `IterDone` marks end-of-stream. `IterStep`
-  ## exposes the current element and the successor descriptor.
-  next: { it: 'c } -> IterStep 'c 'elem
+ability ToIter for 'c having 'elem where {
+  next: { it: 'c } -> Option 'elem
 }
