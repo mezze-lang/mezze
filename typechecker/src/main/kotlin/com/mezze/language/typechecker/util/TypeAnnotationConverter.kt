@@ -327,12 +327,12 @@ object TypeAnnotationConverter {
 
     private fun resolveWellKnownTypeApp(constructor: String, args: List<MezzeType>, typeHash: Hash? = null): MezzeType {
         return when {
-            constructor == "Seq" && args.size == 1 -> MezzeType.SeqType(args[0])
-            constructor == "List" && args.size == 1 -> MezzeType.ListType(args[0])
-            constructor == "Set" && args.size == 1 -> MezzeType.SetType(args[0])
-            constructor == "SortedSet" && args.size == 1 -> MezzeType.SortedSetType(args[0])
-            constructor == "Map" && args.size == 2 -> MezzeType.MapType(args[0], args[1])
-            constructor == "SortedMap" && args.size == 2 -> MezzeType.SortedMapType(args[0], args[1])
+            constructor == BuiltinTypes.SEQ && args.size == 1 -> MezzeType.SeqType(args[0])
+            constructor == BuiltinTypes.LIST && args.size == 1 -> MezzeType.ListType(args[0])
+            constructor == BuiltinTypes.SET && args.size == 1 -> MezzeType.SetType(args[0])
+            constructor == BuiltinTypes.SORTED_SET && args.size == 1 -> MezzeType.SortedSetType(args[0])
+            constructor == BuiltinTypes.MAP && args.size == 2 -> MezzeType.MapType(args[0], args[1])
+            constructor == BuiltinTypes.SORTED_MAP && args.size == 2 -> MezzeType.SortedMapType(args[0], args[1])
             else -> WellKnownTypeApp.of(constructor, args, typeHash)
         }
     }

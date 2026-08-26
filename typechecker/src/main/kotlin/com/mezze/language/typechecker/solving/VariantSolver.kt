@@ -318,7 +318,7 @@ internal class VariantSolver(
         isPatternContext: Boolean,
         currentSubst: Substitution
     ): ConstraintSolver.ConstraintResult {
-        if (constructorName == "True" || constructorName == "False") {
+        if (constructorName == BuiltinTypes.TRUE || constructorName == BuiltinTypes.FALSE) {
             return solveBoolConstructorOnVar(constructorName, expectedPayloadType, variantType.variable)
         }
 

@@ -127,8 +127,8 @@ class AbilityResolver(
 
     private fun checkVariantAbility(type: MezzeType.VariantType, abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): AbilityCheckResult {
         val isBool = type.constructors.size == 2 &&
-            type.constructors.containsKey("True") && type.constructors.containsKey("False") &&
-            type.constructors["True"] == null && type.constructors["False"] == null
+            type.constructors.containsKey(BuiltinTypes.TRUE) && type.constructors.containsKey(BuiltinTypes.FALSE) &&
+            type.constructors[BuiltinTypes.TRUE] == null && type.constructors[BuiltinTypes.FALSE] == null
         if (isBool) {
             return checkUserDefinedAbilityImpl(MezzeType.BoolType, abilityName, typeArgs)
         }
