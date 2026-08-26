@@ -275,6 +275,13 @@ fun ErrorCode.explain(): String = when (this) {
         "which a call compiles to directly, bypassing the impl — or the type already has an " +
         "inherent method of that name (e.g. neg/not on Int/Bool). Rename the ability method."
 
+    ErrorCode.V0421_IMPL_EFFECT_MISMATCH ->
+        "An ability impl operation's effects don't match the ability's declared effect contract. " +
+        "If the ability op declares a concrete effect like `<Storage>`, every impl must carry exactly that effect. " +
+        "If the ability op is pure (no effect annotation), every impl must also be pure. " +
+        "If the ability op uses `<E, ...>`, the impl must include E but may add others. " +
+        "Only `<...>` (fully polymorphic) allows the impl to choose freely."
+
     ErrorCode.V0501_EFFECT_NOT_HANDLED ->
         "A performed effect is not handled. " +
         "Wrap the expression in a `handle` block that provides a handler for this effect."

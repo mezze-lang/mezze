@@ -103,6 +103,7 @@ enum class ErrorCode {
     V0418_INHERENT_IMPL_ON_UNDEFINED_TYPE,
     V0419_IMPL_METHOD_FIELD_CONFLICT,
     V0420_ABILITY_METHOD_SHADOWS_BUILTIN_OPERATOR,
+    V0421_IMPL_EFFECT_MISMATCH, // impl op effects don't satisfy the ability op's effect contract
 
     // ─── Validator: effects (V05xx) ──────────────────────────────────────
     V0501_EFFECT_NOT_HANDLED,

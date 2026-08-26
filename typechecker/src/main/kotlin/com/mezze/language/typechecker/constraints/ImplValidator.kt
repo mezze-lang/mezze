@@ -118,6 +118,15 @@ internal class ImplValidator(
                     validationReason = "Ability body validation",
                     implForallVars = implForallVars,
                     inferredSink = inferredSink,
+                    onBodyResult = { bodyResult, _ ->
+                        validateImplOpEffectContract(
+                            declOp = declOp,
+                            bodyEffects = bodyResult.effects,
+                            abilityName = abilityName,
+                            opName = implOp.name,
+                            loc = implOp.loc,
+                        )
+                    },
                     onSolveFailure = { solveResult ->
                         val allFieldAccessErrors = solveResult.errors.all {
                             it.message.contains("Cannot access field") && it.message.contains("non-record type")
@@ -131,6 +140,77 @@ internal class ImplValidator(
                         }
                         false
                     },
+                )
+            }
+        }
+    }
+
+    /**
+     * Enforce the ability operation's effect contract on an impl body.
+     *
+     * - Pure (no effect row): body must produce no effects.
+     * - Closed concrete `<E1, E2>` (not polymorphic): body effects must be a
+     *   subset of the declared set.
+     * - Concrete + open tail `<E, ...>` (polymorphic with named effects): body
+     *   must include every declared effect, but may add others.
+     * - Fully polymorphic `<...>` (polymorphic, no named effects): anything goes.
+     */
+    private fun validateImplOpEffectContract(
+        declOp: ParsedAbilityOp,
+        bodyEffects: Set<String>,
+        abilityName: String,
+        opName: String,
+        loc: Loc,
+    ) {
+        val declEffects = declOp.effects
+
+        if (declEffects == null) {
+            // Pure: body must not introduce effects.
+            if (bodyEffects.isNotEmpty()) {
+                throw TypeCheckError(
+                    "Operation '$opName' in ability '$abilityName' is declared pure (no effect annotation), " +
+                        "but the impl body uses effects: ${bodyEffects.sorted().joinToString(", ")}. " +
+                        "Either remove the effectful calls from the impl body, or add an effect annotation " +
+                        "to the ability operation.",
+                    loc,
+                    code = ErrorCode.V0421_IMPL_EFFECT_MISMATCH,
+                )
+            }
+            return
+        }
+
+        if (declEffects.isPolymorphic && declEffects.allEffectNames.isEmpty()) {
+            // Fully polymorphic `<...>`: any effects allowed.
+            return
+        }
+
+        val declaredNames = declEffects.allEffectNames
+
+        if (declEffects.isPolymorphic) {
+            // Concrete + open tail `<E, ...>`: body must include the declared effects.
+            val missing = declaredNames - bodyEffects
+            if (missing.isNotEmpty()) {
+                throw TypeCheckError(
+                    "Operation '$opName' in ability '$abilityName' declares effects " +
+                        "<${declaredNames.sorted().joinToString(", ")}, ...>, " +
+                        "but the impl body is missing: ${missing.sorted().joinToString(", ")}. " +
+                        "The impl must at least use the declared effects.",
+                    loc,
+                    code = ErrorCode.V0421_IMPL_EFFECT_MISMATCH,
+                )
+            }
+        } else {
+            // Closed concrete `<E1, E2>`: body effects must be a subset.
+            val extra = bodyEffects - declaredNames
+            if (extra.isNotEmpty()) {
+                throw TypeCheckError(
+                    "Operation '$opName' in ability '$abilityName' declares effects " +
+                        "<${declaredNames.sorted().joinToString(", ")}>, " +
+                        "but the impl body also uses: ${extra.sorted().joinToString(", ")}. " +
+                        "Either add the extra effects to the ability operation's annotation, " +
+                        "or handle them within the impl body.",
+                    loc,
+                    code = ErrorCode.V0421_IMPL_EFFECT_MISMATCH,
                 )
             }
         }
