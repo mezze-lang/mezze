@@ -465,7 +465,7 @@ class ContextBuilder {
             is ParsedFunctionCall -> {
                 val callee = expr.function
                 if (callee is ParsedIdentifier
-                    && callee.localName == ScopedEffectConstants.ABORT
+                    && EffectBindingKind.fromName(callee.localName) == EffectBindingKind.ABORT
                 ) {
                     val v = extractRecordField(expr.arguments, ScopedEffectConstants.VAL_FIELD)
                     if (v != null) return v

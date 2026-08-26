@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.compiler
 
+import com.mezze.language.ast.EffectBindingKind
 import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
@@ -1104,10 +1105,7 @@ class TypedASTCompiler(
                 // Names contributed by the effect-handler runtime inside op
                 // handler bodies (`scope`, `resume`, `abort`). See
                 // EffectBindingIR / EffectBindingNode for the lookup rules.
-                if (expr.name == ScopedEffectConstants.SCOPE
-                    || expr.name == ScopedEffectConstants.RESUME
-                    || expr.name == ScopedEffectConstants.ABORT
-                ) {
+                if (EffectBindingKind.fromName(expr.name) != null) {
                     return EffectBindingIR(expr.name, src)
                 }
 
