@@ -1,11 +1,115 @@
 ---
 import Base from '../layouts/Base.astro'
+import Mascot from '../components/Mascot.astro'
+import Tag from '../components/Tag.astro'
+import Prose from '../components/Prose.astro'
+import { site, hero, topics, playground, features } from '../data/content'
+import { highlight } from '../lib/highlight'
 ---
 <Base title="Mezze">
-  <h1>Mezze</h1>
-  <p class="lede">
-    A statically typed functional language with algebraic effects — where what a
-    function <em>does</em> is part of its type, not a comment.
-  </p>
-  <p><a href="/tour">Take the tour →</a> <p><a href="/playground">Try it in your browser →</a></p>nbsp; <a href="/playground">Open the playground</a></p>
+  <div class="shell">
+    <div class="page">
+
+      <section class="hero">
+        <div>
+          <Prose as="h1" text={hero.headline} />
+          <p class="lede">{hero.lede}</p>
+          <div class="cta">
+            <a class="btn btn-primary" href={hero.primaryCta.href}>{hero.primaryCta.label}</a>
+          </div>
+          <p class="micro">{hero.footnote}</p>
+        </div>
+        <div class="hero-mascot"><Mascot size={168} /></div>
+      </section>
+
+      <section class="tags">
+        {topics.map((t) => <Tag colour={t.colour}>{t.label}</Tag>)}
+      </section>
+
+      <section class="play">
+        <div class="playbar">
+          <span class="tabs">
+            {playground.tabs.map((t, i) => (
+              <button class:list={['tab', { on: i === 0 }]} data-idx={i}>{t.label}</button>
+            ))}
+          </span>
+          <button class="run" disabled>▶ Run</button>
+        </div>
+        <pre class="code"><code id="panel-code" set:html={highlight(playground.tabs[0].code)} /></pre>
+        <div class="out"><span class="dot"></span><span id="panel-msg">Press Run.</span></div>
+      </section>
+
+      <section class="feats">
+        {features.map((f) => (
+          <article>
+            <Prose as="h3" text={f.title} />
+            <p>{f.body}</p>
+          </article>
+        ))}
+      </section>
+
+      <section class="states">
+        <span class="st ok">✓ 3 tests passed</span>
+        <span class="st warn">! LoomAsync not available in the browser</span>
+        <span class="st note">◆ 2 effects handled</span>
+        <span class="st err">✕ Cannot use '+' with Str, Int</span>
+        <span class="st info">ⓘ typechecked in 34ms</span>
+        <span class="st dbg">⟐ inferred Str -> Int</span>
+      </section>
+
+
+    </div>
+  </div>
+
+  <script>
+    import { playground } from '../data/content'
+    import { highlight } from '../lib/highlight'
+    import { loadMezze } from '../scripts/mezze-runtime'
+
+    let currentSource = playground.tabs[0].code
+
+    // One shared loader: the 56MB bundle is fetched once per visit, however
+    // many pages or editors ask for it.
+    loadMezze()
+      .then(() => document.dispatchEvent(new CustomEvent('mezze-ready')))
+      .catch(() => document.dispatchEvent(new CustomEvent('mezze-failed')))
+
+    const codeEl = document.getElementById('panel-code')
+    const msgEl = document.getElementById('panel-msg')
+    const runBtn = document.querySelector('.run')
+    let ready = false
+    const tabs = Array.from(document.querySelectorAll('.tab'))
+
+    tabs.forEach((tab) =>
+      tab.addEventListener('click', () => {
+        tabs.forEach((t) => t.classList.remove('on'))
+        tab.classList.add('on')
+        currentSource = playground.tabs[Number(tab.dataset.idx)].code
+        codeEl.innerHTML = highlight(currentSource)
+        msgEl.textContent = ready ? 'Ready. Press Run.' : 'Loading the compiler…'
+      }),
+    )
+
+    runBtn.disabled = true
+    msgEl.textContent = 'loading the compiler…'
+    document.addEventListener('mezze-ready', () => {
+      ready = true
+      runBtn.disabled = false
+      msgEl.textContent = 'Ready. Press Run.'
+    })
+    document.addEventListener('mezze-failed', () => {
+      ready = false
+      runBtn.disabled = true
+      msgEl.textContent = 'The Mezze runtime did not load.'
+    })
+
+    runBtn.addEventListener('click', () => {
+      if (typeof window.runMezze !== 'function') return
+      msgEl.textContent = 'running…'
+      setTimeout(() => {
+        try { msgEl.textContent = String(window.runMezze(currentSource)).trim() }
+        catch (e) { msgEl.textContent = 'Internal error: ' + e }
+      }, 0)
+    })
+  </script>
 </Base>

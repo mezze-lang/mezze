@@ -2,7 +2,7 @@
 import Base from '../layouts/Base.astro'
 import { lessons } from '../data/lessons'
 ---
-<Base title="Tour — Mezze" description="Learn Mezze feature by feature, running every example in your browser.">
+<Base title="Tour — Mezze" width="full" description="Learn Mezze feature by feature, running every example in your browser.">
   <div class="tour">
     <!-- LEFT: narrow vertical exercise rail + prose -->
     <div class="tour-left">
@@ -40,14 +40,15 @@ import { lessons } from '../data/lessons'
           <textarea class="ed-src" spellcheck="false" autocomplete="off"
                     autocorrect="off" autocapitalize="off"></textarea>
         </div>
+        <pre class="ed-out">Waiting for the Mezze runtime…</pre>
       </div>
-      <pre class="ed-out">Waiting for the Mezze runtime…</pre>
     </div>
   </div>
 </Base>
 
 <script>
   import { lessons } from '../data/lessons'
+  import { loadMezze } from '../scripts/mezze-runtime'
 
   // Mirrors tooling/vscode-extension/.../mezze.tmLanguage.json (token-only).
   const KEYWORDS = ['let','type','newtype','effect','ability','impl','use','as','if','then',
@@ -131,6 +132,7 @@ import { lessons } from '../data/lessons'
   const srcEl = $('.ed-src'), codeEl = $('#ed-code'), preEl = $('.ed-hl')
   const outEl = $('.ed-out'), statusEl = $('.ed-status')
   const btns = Array.from(document.querySelectorAll('.ed-bar button'))
+  let ready = false
 
   const paint = (html) => { codeEl.innerHTML = html !== undefined ? html : highlight(srcEl.value) }
   const show = (t, k) => { outEl.textContent = t; outEl.className = 'ed-out ' + (k || '') }
@@ -255,7 +257,7 @@ import { lessons } from '../data/lessons'
     show('working…')
     setTimeout(() => {
       try { fn() } catch (e) { show('Internal error: ' + e, 'err') }
-      btns.forEach((b) => (b.disabled = false))
+      btns.forEach((b) => (b.disabled = !ready))
     }, 0)
   }
 
@@ -289,9 +291,12 @@ import { lessons } from '../data/lessons'
     $('#t-body').innerHTML = l.body.map((p) => `<p>${inline(p)}</p>`).join('')
     $('#t-pos').textContent = `${n + 1} / ${lessons.length}`
     railItems.forEach((el, k) => el.classList.toggle('is-active', k === n))
+    // The ends are dead ends: show that rather than letting a click do nothing.
+    $('#t-prev').disabled = n === 0
+    $('#t-next').disabled = n === lessons.length - 1
     srcEl.value = l.code
     paint()
-    show('Ready. Press Run.')
+    show(ready ? 'Ready. Press Run.' : 'Loading the compiler…')
     history.replaceState(null, '', '#' + l.slug)
   }
   railItems.forEach((el) => (el.onclick = () => go(Number(el.dataset.idx))))
@@ -302,81 +307,90 @@ import { lessons } from '../data/lessons'
   go(hashIdx >= 0 ? hashIdx : 0)
 
   // ---- runtime ----
-  // The wasm wrapper self-executes and installs globals, then main() returns,
-  // so poll for the globals rather than awaiting a module export.
-  const t0 = performance.now()
-  const tag = document.createElement('script')
-  tag.src = '/wasm/mezze.js'
-  document.head.appendChild(tag)
-  ;(async () => {
-    for (let i = 0; i < 900; i++) {
-      if (typeof window.runMezze === 'function') {
-        statusEl.textContent = `runtime ready (${((performance.now() - t0) / 1000).toFixed(1)}s)`
-        btns.forEach((b) => (b.disabled = false))
-        show('Ready. Press Run.')
-        return
-      }
-      await new Promise((r) => setTimeout(r, 100))
-    }
-    statusEl.textContent = 'runtime failed to load'
-    show('The Mezze runtime did not load.\n\nThis build needs a browser with WebAssembly 3.0 (GC + exception handling).', 'err')
-  })()
+  // Shared loader: fetched once per visit, shared with the landing page.
+  loadMezze()
+    .then((rt) => {
+      ready = true
+      statusEl.textContent = `runtime ready (${rt.loadSeconds.toFixed(1)}s)`
+      btns.forEach((b) => (b.disabled = false))
+      show('Ready. Press Run.')
+    })
+    .catch(() => {
+      ready = false
+      btns.forEach((b) => (b.disabled = true))
+      statusEl.textContent = 'runtime failed to load'
+      show('The Mezze runtime did not load.\n\nThis build needs a browser with WebAssembly 3.0 (GC + exception handling).', 'err')
+    })
 </script>
 
 <style is:global>
-  /* The tour is a full-width app view, not an article. */
-  body:has(.tour) main { max-width: none; padding: 0 1.5rem 1.5rem; }
-
   .tour {
     display: grid;
-    grid-template-columns: 1fr 1fr;      /* left half / right half */
-    gap: 1.75rem;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1.4rem;
     align-items: stretch;
-    height: calc(100vh - 8.5rem);
-    min-height: 520px;
+    /* Fill what is left below the sticky header. The header is ~3.6rem;
+       the padding below is part of the same budget so nothing is clipped. */
+    height: calc(100dvh - 3.6rem);
+    min-height: 32rem;
+    padding-block: 0;
   }
   @media (max-width: 1000px) {
-    .tour { grid-template-columns: 1fr; height: auto; }
+    .tour {
+      grid-template-columns: 1fr;
+      height: auto;
+      padding-block: var(--tour-pad);
+    }
   }
 
   /* ---- LEFT: far-left vertical rail + prose ---- */
-  .tour-left { display: grid; grid-template-columns: 3.25rem 1fr; gap: 1.25rem; min-height: 0; }
+  .tour-left {
+    display: grid;
+    grid-template-columns: 3.4rem minmax(0, 1fr);
+    grid-template-rows: 100%;   /* so the rail stretches and its border reaches the bottom */
+    gap: 1rem; min-height: 0; min-width: 0;
+  }
 
   .rail {
     display: flex; flex-direction: column; gap: .3rem;
-    overflow-y: auto; padding: .15rem;
-    border-right: 1px solid var(--line);
+    overflow-y: auto;
+    overflow-x: hidden;      /* items are sized to fit; never scroll sideways */
+    padding: var(--tour-pad) .55rem var(--tour-pad) .15rem;
+    border-right: 1px solid var(--rule);
   }
   .rail-item {
-    flex: none; width: 2.5rem; height: 2.5rem;
+    flex: none; width: 2.4rem; height: 2.4rem;
     display: grid; place-items: center;
     font: inherit; border: 1px solid transparent; border-radius: 6px;
-    background: transparent; color: var(--muted); cursor: pointer;
+    background: transparent; color: var(--soft); cursor: pointer;
   }
-  .rail-item:hover { background: var(--panel); color: var(--fg); }
-  .rail-item.is-active { background: var(--panel); border-color: var(--accent); color: var(--accent); }
+  .rail-item:hover { background: var(--panel); color: var(--ink); }
+  .rail-item.is-active { background: var(--panel); border-color: var(--primary); color: var(--primary); }
   .rail-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; }
 
-  .prose { overflow-y: auto; padding-right: .5rem; min-height: 0; }
+  .prose { overflow-y: auto; padding: var(--tour-pad) .75rem var(--tour-pad) 0; min-height: 0; }
   .prose h1 { margin: 0 0 .25rem; font-size: 1.6rem; }
-  .t-blurb { margin: 0 0 1.25rem; color: var(--muted); font-size: .92rem; }
+  .t-blurb { margin: 0 0 1.25rem; color: var(--soft); font-size: .92rem; }
   .prose p { margin: 0 0 1rem; max-width: 62ch; }
   .prose code { background: var(--panel); padding: .1em .35em; border-radius: 3px; font-size: .9em; }
   .steps { display: flex; align-items: center; gap: 1rem; margin-top: 1.5rem; }
-  .steps button { font: inherit; font-size: .88rem; padding: .3rem .9rem; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); cursor: pointer; }
-  .steps button:hover { border-color: var(--accent); color: var(--accent); }
-  #t-pos { color: var(--muted); font-size: .82rem; }
+  .steps button { font: inherit; font-size: .88rem; padding: .3rem .9rem; border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--rule)); border-radius: 5px; background: var(--ground); color: var(--primary); cursor: pointer; transition: background .15s, border-color .15s; }
+  .steps button:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 10%, var(--ground)); border-color: var(--primary); }
+  .steps button:disabled { opacity: .4; cursor: default; }
+  #t-pos { color: var(--soft); font-size: .82rem; }
 
   /* ---- RIGHT: editor on top, bigger output below ---- */
-  .tour-right { display: grid; grid-template-rows: 3fr 1fr; gap: 1rem; min-height: 0; }
-  @media (max-width: 1000px) { .tour-right { grid-template-rows: 460px 180px; } }
+  .tour-right { display: flex; flex-direction: column; min-height: 0; padding-block: var(--tour-pad); }
+  @media (max-width: 1000px) { .tour-right { height: 40rem; } }
 
-  .ed { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
-  .ed-bar { display: flex; align-items: center; gap: .5rem; padding: .55rem .75rem; border-bottom: 1px solid var(--line); flex: none; }
-  .ed-bar button { font: inherit; font-size: .88rem; padding: .25rem .85rem; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); cursor: pointer; }
-  .ed-bar button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .ed { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--panel); }
+  .ed-bar { display: flex; align-items: center; gap: .5rem; padding: .55rem .75rem; border-bottom: 1px solid var(--rule); flex: none; }
+  .ed-bar button { font: inherit; font-size: .88rem; padding: .25rem .85rem; border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--rule)); border-radius: 5px; background: var(--ground); color: var(--primary); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+  .ed-bar button:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 10%, var(--ground)); border-color: var(--primary); }
+  .ed-bar button[data-act="run"] { background: var(--primary); border-color: var(--primary); color: var(--on-primary); font-weight: 600; }
+  .ed-bar button[data-act="run"]:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 86%, #000); }
   .ed-bar button:disabled { opacity: .45; cursor: default; }
-  .ed-status { margin-left: auto; font-size: .8rem; color: var(--muted); }
+  .ed-status { margin-left: auto; font-size: .8rem; color: var(--soft); }
 
   .ed-editor { position: relative; flex: 1 1 auto; min-height: 0; }
 
@@ -395,15 +409,15 @@ import { lessons } from '../data/lessons'
     overflow-wrap: normal;
     letter-spacing: 0;
   }
-  .ed-hl { position: absolute; inset: 0; overflow: auto; pointer-events: none; color: var(--fg); }
+  .ed-hl { position: absolute; inset: 0; overflow: auto; pointer-events: none; color: var(--ink); }
   .ed-hl code { font: inherit; background: none; padding: 0; }
   .ed-src {
     position: absolute; inset: 0; width: 100%; height: 100%;
     resize: none; background: transparent; color: transparent;
-    caret-color: var(--fg); overflow: auto;
+    caret-color: var(--ink); overflow: auto;
   }
   .ed-src:focus { outline: none; }
-  .ed-src::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .ed-src::selection { background: color-mix(in srgb, var(--primary) 30%, transparent); }
 
   .t-kw   { color: var(--syn-kw); }
   .t-str  { color: var(--syn-str); }
@@ -420,8 +434,8 @@ import { lessons } from '../data/lessons'
 
   .hover-tip {
     position: fixed; z-index: 50; pointer-events: none;
-    background: var(--panel); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--rule); border-radius: 6px;
     padding: .35rem .6rem; font-size: .8rem;
     box-shadow: 0 4px 14px rgb(0 0 0 / .18);
     max-width: 40rem; white-space: pre-wrap;
@@ -431,12 +445,14 @@ import { lessons } from '../data/lessons'
   .t-err  { text-decoration: underline wavy var(--err); text-underline-offset: 3px; }
 
   .ed-out {
-    margin: 0; padding: .9rem 1rem;
-    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    margin: 0; padding: .85rem 1rem;
+    border-top: 1px solid var(--rule);
+    background: var(--surface);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: .82rem; line-height: 1.55;
-    white-space: pre-wrap; color: var(--muted);
-    overflow: auto; min-height: 0;
+    white-space: pre-wrap; color: var(--soft);
+    overflow: auto;
+    flex: none; height: 9.5rem;
   }
   .ed-out.ok { color: var(--ok); }
   .ed-out.err { color: var(--err); }

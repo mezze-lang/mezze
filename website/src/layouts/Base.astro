@@ -1,9 +1,25 @@
 ---
+/**
+ * The one layout. Every page gets the same header and footer from here —
+ * pages never render their own chrome, so it cannot drift between them.
+ *
+ *   width="page"  (default) centred column, for normal content
+ *   width="full"  edge-to-edge, for app-like pages such as the tour
+ */
+import '../styles/tokens.css'
+import SiteHeader from '../components/SiteHeader.astro'
+
 interface Props {
   title: string
   description?: string
+  width?: 'page' | 'full'
 }
-const { title, description = 'Mezze — a statically typed functional language with algebraic effects.' } = Astro.props
+
+const {
+  title,
+  description = 'Mezze — a functional language where effects are part of the type.',
+  width = 'page',
+} = Astro.props
 ---
 <!doctype html>
 <html lang="en">
@@ -13,133 +29,83 @@ const { title, description = 'Mezze — a statically typed functional language w
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
+    <link rel="icon" type="image/png" href="/icons/olive.png" data-favicon />
+    <script is:inline>
+      // Apply the stored theme before first paint so there is no flash.
+      const t = localStorage.getItem('mezze-theme')
+      if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t
+    </script>
   </head>
   <body>
-    <header>
-      <a href="/" class="brand">Mezze</a>
-      <nav>
-        <a href="/tour">Tour</a>
-        <a href="/docs">Docs</a>
-        <a href="/blog">Blog</a>
-      </nav>
-    </header>
-    <main><slot /></main>
-    <footer>Mezze</footer>
+    <SiteHeader />
+    <main class:list={['site-main', `is-${width}`]}><slot /></main>
 
     <style is:global>
-      /* Catppuccin Latte (light) / Macchiato (dark).
-         Values taken verbatim from catppuccin/palette. */
-      :root {
-        --bg:      #eff1f5;  /* base */
-        --panel:   #e6e9ef;  /* mantle */
-        --fg:      #4c4f69;  /* text */
-        --muted:   #6c6f85;  /* subtext0 */
-        --line:    #ccd0da;  /* surface0 */
-        --accent:  #8839ef;  /* mauve */
-        --ok:      #40a02b;  /* green */
-        --err:     #d20f39;  /* red */
-        --warn:    #df8e1d;  /* yellow */
+      *, *::before, *::after { box-sizing: border-box; }
 
-        /* syntax */
-        --syn-kw:   #8839ef;  /* mauve   — keywords */
-        --syn-str:  #40a02b;  /* green   — strings */
-        --syn-num:  #fe640b;  /* peach   — numbers */
-        --syn-bool: #fe640b;  /* peach   — True/False */
-        --syn-com:  #9ca0b0;  /* overlay0 — comments */
-        --syn-ctor: #df8e1d;  /* yellow  — types & constructors */
-        --syn-tv:   #179299;  /* teal    — 'typevars */
-        --syn-eff:  #ea76cb;  /* pink    — effect rows */
-        --syn-fn:   #1e66f5;  /* blue    — bindings */
-        --syn-mth:    #1e66f5;  /* blue     — .dot_methods */
-        --syn-fld:    #7287fd;  /* lavender — record fields */
-        --syn-interp: #ea76cb;  /* pink     — $( ) delimiters */
-      }
-
-      :root:not([data-theme='light']) {
-        @media (prefers-color-scheme: dark) {
-          --bg:      #24273a;  /* base */
-          --panel:   #1e2030;  /* mantle */
-          --fg:      #cad3f5;  /* text */
-          --muted:   #a5adcb;  /* subtext0 */
-          --line:    #363a4f;  /* surface0 */
-          --accent:  #c6a0f6;  /* mauve */
-          --ok:      #a6da95;  /* green */
-          --err:     #ed8796;  /* red */
-          --warn:    #eed49f;  /* yellow */
-
-          --syn-kw:   #c6a0f6;
-          --syn-str:  #a6da95;
-          --syn-num:  #f5a97f;
-          --syn-bool: #f5a97f;
-          --syn-com:  #6e738d;
-          --syn-ctor: #eed49f;
-          --syn-tv:   #8bd5ca;
-          --syn-eff:  #f5bde6;
-          --syn-fn:   #8aadf4;
-          --syn-mth:    #8aadf4;
-          --syn-fld:    #b7bdf8;
-          --syn-interp: #f5bde6;
-        }
-      }
-
-      :root[data-theme='dark'] {
-        --bg:      #24273a;
-        --panel:   #1e2030;
-        --fg:      #cad3f5;
-        --muted:   #a5adcb;
-        --line:    #363a4f;
-        --accent:  #c6a0f6;
-        --ok:      #a6da95;
-        --err:     #ed8796;
-        --warn:    #eed49f;
-
-        --syn-kw:   #c6a0f6;
-        --syn-str:  #a6da95;
-        --syn-num:  #f5a97f;
-        --syn-bool: #f5a97f;
-        --syn-com:  #6e738d;
-        --syn-ctor: #eed49f;
-        --syn-tv:   #8bd5ca;
-        --syn-eff:  #f5bde6;
-        --syn-fn:   #8aadf4;
-        --syn-mth:    #8aadf4;
-        --syn-fld:    #b7bdf8;
-        --syn-interp: #f5bde6;
-      }
-
-      * { box-sizing: border-box; }
       body {
         margin: 0;
-        background: var(--bg);
-        color: var(--fg);
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
-        line-height: 1.6;
-      }
-      header {
+        min-height: 100dvh;
         display: flex;
-        align-items: baseline;
-        gap: 1.5rem;
-        max-width: 1100px;
-        margin: 0 auto;
-        padding: 1.5rem 1.25rem;
+        flex-direction: column;
+        background: var(--ground);
+        color: var(--ink);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 16px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
       }
-      .brand { font-weight: 600; font-size: 1.15rem; text-decoration: none; color: var(--fg); }
-      header nav { margin-left: auto; display: flex; gap: 1.25rem; }
-      header nav a { color: var(--muted); text-decoration: none; font-size: 0.92rem; }
-      header nav a:hover { color: var(--accent); }
-      main { max-width: 1100px; margin: 0 auto; padding: 0 1.25rem 4rem; }
-      footer {
-        max-width: 1100px;
+
+      .site-main { flex: 1 1 auto; min-height: 0; }
+      .site-main.is-page {
+        max-width: var(--page-w);
         margin: 0 auto;
-        padding: 2rem 1.25rem;
-        border-top: 1px solid var(--line);
-        color: var(--muted);
-        font-size: 0.85rem;
+        padding: 0 var(--page-pad);
+        width: 100%;
       }
-      h1 { font-size: 2.1rem; line-height: 1.2; margin: 1rem 0 0.5rem; }
-      h2 { font-size: 1.25rem; margin: 2.5rem 0 0.75rem; }
-      p.lede { font-size: 1.1rem; color: var(--muted); margin: 0 0 2rem; max-width: 46rem; }
-      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+      .site-main.is-full { padding-inline: var(--page-pad); max-width: 100%; overflow-x: hidden; }
+
+      h1, h2, h3 { letter-spacing: -.02em; text-wrap: balance; }
+      a { color: var(--primary); }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { transition: none !important; animation: none !important; }
+      }
     </style>
+
+    <script>
+      import { dishes } from '../data/dishes'
+
+      const KEY = 'mezze-dish'
+      const root = document.documentElement
+
+      /** Paint one dish: primary colour everywhere, matching icon shown. */
+      function show(i) {
+        const d = dishes[i]
+        root.style.setProperty('--primary', d.primary)
+        root.style.setProperty('--on-primary', d.onPrimary)
+        document.querySelectorAll('[data-mascot] img').forEach((img) => {
+          img.classList.toggle('on', img.dataset.dish === d.key)
+        })
+        const fav = document.querySelector('[data-favicon]')
+        if (fav) fav.href = d.icon
+        sessionStorage.setItem(KEY, String(i))
+      }
+
+      // Fixed order: a fresh visit starts at the first dish and clicking
+      // advances through the list. The position survives navigation within
+      // a visit, so the site does not flip colour on every page change.
+      const saved = sessionStorage.getItem(KEY)
+      let current = saved === null ? 0 : Number(saved) % dishes.length
+      show(current)
+
+      document.querySelectorAll('[data-mascot]:not(.is-static)').forEach((el) =>
+        el.addEventListener('click', () => {
+          current = (current + 1) % dishes.length
+          show(current)
+        }),
+      )
+    </script>
   </body>
 </html>
