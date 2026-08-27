@@ -1,0 +1,35 @@
+---
+/**
+ * The Mezze mascot.
+ *
+ * All six dishes are rendered; one is shown at a time. A dish is chosen at
+ * random on load, and clicking advances to the next — the primary colour
+ * changes with it, so the character and the interface always match.
+ *
+ *   <Mascot />            inline, 22px
+ *   <Mascot size={120} /> hero
+ *   <Mascot static />     no click handler (decorative use)
+ */
+import { dishes } from '../data/dishes'
+
+interface Props {
+  size?: number
+  static?: boolean
+  class?: string
+}
+const { size = 22, static: isStatic = false, class: cls = '' } = Astro.props
+---
+<button
+  class:list={['mascot', cls, { 'is-static': isStatic }]}
+  style={`--s:${size}px`}
+  type="button"
+  data-mascot
+  aria-label={isStatic ? 'Mezze' : 'Change the dish'}
+  title={isStatic ? undefined : 'Click for a different dish'}
+  disabled={isStatic}
+>
+  {dishes.map((d, i) => (
+    <img src={d.icon} alt={d.label} data-dish={d.key} class:list={{ on: i === 0 }} loading="eager" />
+  ))}
+</button>
+

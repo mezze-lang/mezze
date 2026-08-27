@@ -1,0 +1,72 @@
+---
+/**
+ * Light/dark toggle.
+ *
+ * One icon, swapped in JS rather than with CSS. An earlier version stacked two
+ * SVGs and hid one via a nested `:root:not([data-theme]) { @media … }` rule —
+ * Astro's scoped-style compiler dropped it, so both icons rendered at once.
+ */
+---
+<button class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">
+  <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+    <path class="glyph" d="M12 7.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z" />
+    <g class="rays" stroke-width="1.7" stroke-linecap="round">
+      <path d="M12 2.6v2.1M12 19.3v2.1M2.6 12h2.1M19.3 12h2.1M5.2 5.2l1.5 1.5M17.3 17.3l1.5 1.5M18.8 5.2l-1.5 1.5M6.7 17.3l-1.5 1.5" />
+    </g>
+  </svg>
+</button>
+
+<script>
+  const KEY = 'mezze-theme'
+  const root = document.documentElement
+  const btn = document.querySelector('.theme-toggle')
+  const glyph = btn && btn.querySelector('.glyph')
+  const rays = btn && btn.querySelector('.rays')
+
+  const SUN = 'M12 7.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z'
+  const MOON = 'M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z'
+
+  const isDark = () =>
+    root.dataset.theme
+      ? root.dataset.theme === 'dark'
+      : matchMedia('(prefers-color-scheme: dark)').matches
+
+  function paint() {
+    if (!glyph || !rays) return
+    const dark = isDark()
+    // Show the state you would switch TO.
+    glyph.setAttribute('d', dark ? SUN : MOON)
+    rays.style.display = dark ? '' : 'none'
+  }
+
+  const stored = localStorage.getItem(KEY)
+  if (stored === 'dark' || stored === 'light') root.dataset.theme = stored
+  paint()
+
+  btn && btn.addEventListener('click', () => {
+    const next = isDark() ? 'light' : 'dark'
+    root.dataset.theme = next
+    localStorage.setItem(KEY, next)
+    paint()
+  })
+</script>
+
+<style>
+  .theme-toggle {
+    display: inline-grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    flex: none;
+    border: 1px solid var(--rule);
+    border-radius: var(--r-sm);
+    background: var(--panel);
+    color: var(--soft);
+    cursor: pointer;
+  }
+  .theme-toggle:hover { color: var(--primary); border-color: var(--primary); }
+  .theme-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .theme-toggle svg { display: block; fill: currentColor; stroke: currentColor; }
+  .theme-toggle .rays { fill: none; }
+</style>
