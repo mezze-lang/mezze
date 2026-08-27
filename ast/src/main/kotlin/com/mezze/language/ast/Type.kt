@@ -293,6 +293,22 @@ sealed interface MezzeType {
     // This represents applying type arguments to a type constructor
     @Serializable
     data class TypeApplication(val constructor: String, val args: List<MezzeType>, val identity: TypeIdentity = TypeIdentity.Anonymous) : MezzeType {
+        init {
+            // #312 (reference-everywhere): a name-carrying identity IS the type's
+            // reference, so `constructor` must never disagree with it — the name is
+            // one fact, held in `identity`, and `constructor` merely mirrors it.
+            // This makes a name-compare on a Declared/Builtin type unable to diverge
+            // from identity BY CONSTRUCTION (any producer that set a diverging name
+            // fails loudly here instead of leaking a name the identity system can't
+            // see). Anonymous is exempt: its transient undeclared-name case is never
+            // read for identity (UnknownTypeValidator reports off the parse tree),
+            // and its name is display-only.
+            val idName = identity.displayNameOrNull()
+            require(identity is TypeIdentity.Anonymous || idName == constructor) {
+                "TypeApplication.constructor ('$constructor') disagrees with its identity name ('$idName'): " +
+                    "the name is carried by identity; constructor must mirror it (#312)."
+            }
+        }
         override fun toString(): String = safeToString(
             "TypeApplication",
             truncatedContent = { "$constructor, ${args.size} args" },
