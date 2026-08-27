@@ -76,3 +76,45 @@ export function highlight(src: string): string {
   }
   return out + esc(src.slice(last))
 }
+
+/** 1-based source location, as reported by checkMezze. */
+export interface Diagnostic {
+  location?: {
+    startLine?: number
+    startCol?: number
+    endLine?: number
+    endCol?: number
+  }
+}
+
+/**
+ * The source with one diagnostic span underlined.
+ *
+ * The marked line is escaped rather than highlighted: the underline wraps a
+ * character range that does not respect token boundaries, so highlighting it
+ * would mean splitting spans mid-token. Falls back to plain highlighting when
+ * the location is missing or degenerate.
+ */
+export function withError(src: string, d: Diagnostic | null | undefined): string {
+  const loc = d?.location
+  if (!loc?.startLine) return highlight(src)
+
+  const lines = src.split('\n')
+  const li = loc.startLine - 1
+  if (li < 0 || li >= lines.length) return highlight(src)
+
+  const line = lines[li]
+  const start = Math.max(0, (loc.startCol ?? 1) - 1)
+  const end = loc.endLine === loc.startLine
+    ? Math.min(line.length, loc.endCol ?? line.length)
+    : line.length
+  if (end <= start) return highlight(src)
+
+  const head = lines.slice(0, li).join('\n')
+  const tail = lines.slice(li + 1).join('\n')
+  return (head ? esc(head) + '\n' : '')
+    + esc(line.slice(0, start))
+    + `<span class="tk-err">${esc(line.slice(start, end))}</span>`
+    + esc(line.slice(end))
+    + (tail ? '\n' + esc(tail) : '') + '\n'
+}

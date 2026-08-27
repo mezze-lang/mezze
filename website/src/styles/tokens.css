@@ -66,6 +66,12 @@
   --syn-com:  var(--faint);
   --syn-num:  var(--tomato);
   --syn-mark: var(--onion);
+  --syn-tv:     var(--mint);
+  --syn-eff:    var(--onion);
+  --syn-mth:    var(--mint);
+  --syn-fld:    var(--aubergine);
+  --syn-interp: var(--onion);
+  --syn-err:    var(--err);
 
   /* --- shape & motion -------------------------------------------------- */
   --r-sm: 7px;
@@ -358,16 +364,17 @@ mark {
 /* Mezze syntax tokens — see src/lib/highlight.ts */
 .tk-com    { color: var(--syn-com); font-style: italic; }
 .tk-str    { color: var(--syn-str); }
-.tk-tv     { color: var(--mint); font-style: italic; }
-.tk-eff    { color: var(--onion); }
+.tk-tv     { color: var(--syn-tv); font-style: italic; }
+.tk-eff    { color: var(--syn-eff); }
 .tk-bool   { color: var(--syn-num); }
 .tk-num    { color: var(--syn-num); }
 .tk-kw     { color: var(--syn-kw); }
-.tk-fn     { color: var(--mint); }
-.tk-mth    { color: var(--mint); }
-.tk-fld    { color: var(--aubergine); }
+.tk-fn     { color: var(--syn-fn); }
+.tk-mth    { color: var(--syn-mth); }
+.tk-fld    { color: var(--syn-fld); }
 .tk-ctor   { color: var(--syn-type); }
-.tk-interp { color: var(--onion); }
+.tk-interp { color: var(--syn-interp); }
+.tk-err    { text-decoration: underline wavy var(--syn-err); text-underline-offset: 3px; }
 
 /* ===========================================================================
    Mascot — all six dishes are in the DOM; exactly one is visible.

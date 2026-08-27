@@ -49,84 +49,7 @@ import { lessons } from '../data/lessons'
 <script>
   import { lessons } from '../data/lessons'
   import { loadMezze } from '../scripts/mezze-runtime'
-
-  // Mirrors tooling/vscode-extension/.../mezze.tmLanguage.json (token-only).
-  const KEYWORDS = ['let','type','newtype','effect','ability','impl','use','as','if','then',
-                    'else','match','is','do','perform','in','with','having','where','for','pub']
-
-  const esc = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-
-  const RE = new RegExp([
-    '(##?(?:[ \\t][^\\n]*)?$)',                        // comments
-    '("(?:[^"\\\\\\n]|\\\\.)*")',                      // strings (interp handled inside)
-    "('[a-zA-Z_][a-zA-Z0-9_]*)",                       // 'typevars
-    '(<[A-Z][A-Za-z0-9_]*(?:\\s*,\\s*[A-Za-z0-9_.]+)*>)', // <Effect> rows
-    '\\b(True|False)\\b',                              // booleans
-    '\\b([0-9][0-9_]*(?:\\.[0-9][0-9_]*)?n?)\\b',      // numbers
-    `\\b(${KEYWORDS.join('|')})\\b`,                   // keywords
-    '(?<=\\blet\\s)([a-z_][A-Za-z0-9_]*)',             // binding being defined
-    '(\\.[a-z_][A-Za-z0-9_]*)',                        // .dot_methods
-    '([a-z_][A-Za-z0-9_]*)(?=\\s*=[^=])',              // record field names
-    '\\b([A-Z][A-Za-z0-9_]*)\\b',                      // constructors / types
-  ].join('|'), 'gm')
-  const CLS = ['t-com','t-str','t-tv','t-eff','t-bool','t-num','t-kw','t-fn','t-mth','t-fld','t-ctor']
-
-  /** A string literal, with $(...) interpolations highlighted as code. */
-  function highlightString(str) {
-    let out = '', last = 0
-    for (const m of str.matchAll(/\$\(/g)) {
-      // Scan to the matching close paren so nested calls survive.
-      let depth = 1, j = m.index + 2
-      while (j < str.length && depth > 0) {
-        if (str[j] === '(') depth++
-        else if (str[j] === ')') depth--
-        j++
-      }
-      if (depth !== 0) break
-      out += `<span class="t-str">${esc(str.slice(last, m.index))}</span>`
-      out += `<span class="t-interp">${esc('$(')}</span>`
-      out += highlight(str.slice(m.index + 2, j - 1))
-      out += `<span class="t-interp">${esc(')')}</span>`
-      last = j
-    }
-    return out + `<span class="t-str">${esc(str.slice(last))}</span>`
-  }
-
-  function highlight(src) {
-    let out = '', last = 0
-    for (const m of src.matchAll(RE)) {
-      out += esc(src.slice(last, m.index))
-      const gi = m.slice(1).findIndex((g) => g !== undefined)
-      // Strings recurse so $(...) inside them is highlighted as code.
-      out += CLS[gi] === 't-str'
-        ? highlightString(m[0])
-        : `<span class="${CLS[gi]}">${esc(m[0])}</span>`
-      last = m.index + m[0].length
-    }
-    return out + esc(src.slice(last))
-  }
-
-  /** Underline one span using 1-based line/col from checkMezze. */
-  function withError(src, d) {
-    const loc = d && d.location
-    if (!loc || !loc.startLine) return highlight(src)
-    const lines = src.split('\n')
-    const li = loc.startLine - 1
-    if (li < 0 || li >= lines.length) return highlight(src)
-    const line = lines[li]
-    const s = Math.max(0, (loc.startCol || 1) - 1)
-    const e = loc.endLine === loc.startLine
-      ? Math.min(line.length, loc.endCol || line.length)
-      : line.length
-    if (e <= s) return highlight(src)
-    const head = lines.slice(0, li).join('\n')
-    const tail = lines.slice(li + 1).join('\n')
-    return (head ? esc(head) + '\n' : '')
-      + esc(line.slice(0, s))
-      + `<span class="t-err">${esc(line.slice(s, e))}</span>`
-      + esc(line.slice(e))
-      + (tail ? '\n' + esc(tail) : '') + '\n'
-  }
+  import { highlight, withError } from '../lib/highlight'
 
   const $ = (s) => document.querySelector(s)
   const srcEl = $('.ed-src'), codeEl = $('#ed-code'), preEl = $('.ed-hl')
@@ -419,18 +342,6 @@ import { lessons } from '../data/lessons'
   .ed-src:focus { outline: none; }
   .ed-src::selection { background: color-mix(in srgb, var(--primary) 30%, transparent); }
 
-  .t-kw   { color: var(--syn-kw); }
-  .t-str  { color: var(--syn-str); }
-  .t-num  { color: var(--syn-num); }
-  .t-bool { color: var(--syn-bool); }
-  .t-com  { color: var(--syn-com); font-style: italic; }
-  .t-ctor { color: var(--syn-ctor); }
-  .t-tv   { color: var(--syn-tv); font-style: italic; }
-  .t-eff  { color: var(--syn-eff); }
-  .t-fn   { color: var(--syn-fn); }
-  .t-mth  { color: var(--syn-mth); }
-  .t-fld  { color: var(--syn-fld); }
-  .t-interp { color: var(--syn-interp); }
 
   .hover-tip {
     position: fixed; z-index: 50; pointer-events: none;
@@ -442,7 +353,6 @@ import { lessons } from '../data/lessons'
   }
   .hover-tip code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: none; padding: 0; }
   .hover-tip .ht-type { color: var(--syn-ctor); }
-  .t-err  { text-decoration: underline wavy var(--err); text-underline-offset: 3px; }
 
   .ed-out {
     margin: 0; padding: .85rem 1rem;
