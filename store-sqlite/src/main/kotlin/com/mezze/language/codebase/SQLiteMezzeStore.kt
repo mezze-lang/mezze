@@ -95,7 +95,13 @@ class SQLiteMezzeStore private constructor(
         // nominal type's identity via a discriminant-tagged appendIdentity(), which
         // shifts the content-hash bytes for every nominal type. Old caches are
         // dropped and regenerated.
-        const val SCHEMA_VERSION = 5
+        //
+        // #312 (5→6): TypeApplication no longer hashes its `constructor` string for
+        // Declared/Builtin identities — the name is already in appendIdentity, and
+        // constructor is enforced to mirror it (Type.kt init{}). Only Anonymous
+        // still hashes constructor (its sole name signal). Content-hash bytes shift
+        // for every named TypeApplication; old caches dropped and regenerated.
+        const val SCHEMA_VERSION = 6
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of

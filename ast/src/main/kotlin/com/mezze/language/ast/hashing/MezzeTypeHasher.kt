@@ -79,7 +79,15 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         }
         is MezzeType.TypeApplication -> {
             b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR))
-            b.append(type.constructor)
+            // #312: the name lives in `identity` (Declared→hash, Builtin→name).
+            // Since `constructor` is enforced to mirror it (Type.kt init{}), hashing
+            // the string again for Declared/Builtin is pure redundancy — appendIdentity
+            // already captures it. Only Anonymous carries no name in identity, so its
+            // constructor string is the sole distinguisher there (undeclared-name
+            // transient) and must still be hashed.
+            if (type.identity is com.mezze.language.ast.TypeIdentity.Anonymous) {
+                b.append(type.constructor)
+            }
             appendIdentity(b, type.identity)
             b.appendInt(type.args.size)
             for (arg in type.args) appendTypeInScope(b, arg)
