@@ -96,6 +96,15 @@ should stay that way.
 `npm run build` runs `astro check` first, then builds. Both should pass
 cleanly; a type error is a real one.
 
+`npm run build:all` builds the WASM compiler first, then the site — one
+command from a clean checkout. The WASM step is skipped when `public/wasm`
+is newer than the compiler sources, so it is only slow the first time or
+after a compiler change; `npm run build:wasm -- --force` rebuilds it anyway.
+
+The WASM build needs Docker (GraalVM Web Image is Oracle-only, so it runs in
+Oracle's published container) and takes 20-40 minutes. See
+`wasm-build/build.sh`.
+
 ## Icons
 
 `public/icons/` holds the six dish icons. They are committed, so an edit that

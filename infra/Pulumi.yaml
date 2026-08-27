@@ -1,0 +1,6 @@
+name: mezze-website
+runtime:
+  name: nodejs
+  options:
+    packagemanager: npm
+description: Cloudflare Pages hosting for mezze-lang.org

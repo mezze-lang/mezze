@@ -682,3 +682,14 @@ fun parseNativeImageFlags(file: File): Map<String, List<String>> {
     }
     return sections
 }
+
+/**
+ * Prints the runtime classpath, one absolute path per line joined by ':'.
+ *
+ * Used by website/wasm-build/build.sh, which needs the same classpath the CLI
+ * runs with in order to hand it to native-image.
+ */
+tasks.register("printRuntimeClasspath") {
+    val cp = sourceSets.main.get().runtimeClasspath
+    doLast { println(cp.asPath) }
+}
