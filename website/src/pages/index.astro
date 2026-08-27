@@ -3,7 +3,7 @@ import Base from '../layouts/Base.astro'
 import Mascot from '../components/Mascot.astro'
 import Tag from '../components/Tag.astro'
 import Prose from '../components/Prose.astro'
-import { site, hero, topics, playground, features } from '../data/content'
+import { hero, topics, playground, features } from '../data/content'
 import { highlight } from '../lib/highlight'
 ---
 <Base title="Mezze">
@@ -74,11 +74,17 @@ import { highlight } from '../lib/highlight'
       .then(() => document.dispatchEvent(new CustomEvent('mezze-ready')))
       .catch(() => document.dispatchEvent(new CustomEvent('mezze-failed')))
 
-    const codeEl = document.getElementById('panel-code')
-    const msgEl = document.getElementById('panel-msg')
-    const runBtn = document.querySelector('.run')
+    // Typed up front: every one of these is required markup on this page, so a
+    // miss is a bug worth throwing on rather than silently no-op-ing.
+    const codeEl = document.getElementById('panel-code') as HTMLElement
+    const msgEl = document.getElementById('panel-msg') as HTMLElement
+    const runBtn = document.querySelector('.run') as HTMLButtonElement
+    const tabs = Array.from(document.querySelectorAll('.tab')) as HTMLElement[]
     let ready = false
-    const tabs = Array.from(document.querySelectorAll('.tab'))
+
+    const setStatus = () => {
+      msgEl.textContent = ready ? 'Ready. Press Run.' : 'Loading the compiler…'
+    }
 
     tabs.forEach((tab) =>
       tab.addEventListener('click', () => {
@@ -86,16 +92,17 @@ import { highlight } from '../lib/highlight'
         tab.classList.add('on')
         currentSource = playground.tabs[Number(tab.dataset.idx)].code
         codeEl.innerHTML = highlight(currentSource)
-        msgEl.textContent = ready ? 'Ready. Press Run.' : 'Loading the compiler…'
+        setStatus()
       }),
     )
 
     runBtn.disabled = true
-    msgEl.textContent = 'loading the compiler…'
+    setStatus()
+
     document.addEventListener('mezze-ready', () => {
       ready = true
       runBtn.disabled = false
-      msgEl.textContent = 'Ready. Press Run.'
+      setStatus()
     })
     document.addEventListener('mezze-failed', () => {
       ready = false
@@ -106,10 +113,19 @@ import { highlight } from '../lib/highlight'
     runBtn.addEventListener('click', () => {
       if (typeof window.runMezze !== 'function') return
       msgEl.textContent = 'running…'
+      // Yield so the DOM repaints before the synchronous wasm call blocks.
       setTimeout(() => {
-        try { msgEl.textContent = String(window.runMezze(currentSource)).trim() }
-        catch (e) { msgEl.textContent = 'Internal error: ' + e }
+        try {
+          msgEl.textContent = String(window.runMezze!(currentSource)).trim()
+        } catch (e) {
+          msgEl.textContent = 'Internal error: ' + e
+        }
       }, 0)
+    })
+    document.addEventListener('mezze-failed', () => {
+      ready = false
+      runBtn.disabled = true
+      msgEl.textContent = 'The Mezze runtime did not load.'
     })
   </script>
 </Base>

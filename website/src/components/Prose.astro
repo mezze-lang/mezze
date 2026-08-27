@@ -2,11 +2,6 @@
 /** Renders content-file copy, applying the ~mark~ / _squiggle_ / `code` syntax. */
 import { format } from '../lib/text'
 
-interface Props {
-  text: string
-  as?: string
-  class?: string
-}
 const { text, as: Tag = 'span', class: cls = '' } = Astro.props
 ---
 <Tag class={cls} set:html={format(text)} />

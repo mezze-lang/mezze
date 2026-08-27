@@ -19,9 +19,10 @@
 <script>
   const KEY = 'mezze-theme'
   const root = document.documentElement
-  const btn = document.querySelector('.theme-toggle')
-  const glyph = btn && btn.querySelector('.glyph')
-  const rays = btn && btn.querySelector('.rays')
+  // Required markup on every page — Base renders the toggle in the header.
+  const btn = document.querySelector('.theme-toggle') as HTMLButtonElement
+  const glyph = btn.querySelector('.glyph') as SVGPathElement
+  const rays = btn.querySelector('.rays') as SVGGElement
 
   const SUN = 'M12 7.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z'
   const MOON = 'M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z'

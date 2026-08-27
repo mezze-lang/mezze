@@ -39,18 +39,20 @@ import Editor from '../components/Editor.astro'
   import { esc } from '../lib/highlight'
   import { mountEditor } from '../scripts/editor'
 
-  const $ = (s) => document.querySelector(s)
+  const $ = <T extends Element>(sel: string) => document.querySelector(sel) as T
   const editor = mountEditor($('[data-editor]'))
 
-  const railItems = Array.from(document.querySelectorAll('.rail-item'))
+  const railItems = Array.from(document.querySelectorAll<HTMLElement>('.rail-item'))
+  const prevBtn = $<HTMLButtonElement>('#t-prev')
+  const nextBtn = $<HTMLButtonElement>('#t-next')
 
   /** The lesson prose supports `code` and **bold** only. */
-  const inline = (s) => esc(s)
+  const inline = (s: string) => esc(s)
     .replace(/\`([^\`]+)\`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
 
   let current = -1
-  const go = (i) => {
+  const go = (i: number) => {
     const n = Math.max(0, Math.min(lessons.length - 1, i))
     if (n === current) return
     current = n
@@ -61,15 +63,15 @@ import Editor from '../components/Editor.astro'
     $('#t-pos').textContent = `${n + 1} / ${lessons.length}`
     railItems.forEach((el, k) => el.classList.toggle('is-active', k === n))
     // The ends are dead ends: show that rather than letting a click do nothing.
-    $('#t-prev').disabled = n === 0
-    $('#t-next').disabled = n === lessons.length - 1
+    prevBtn.disabled = n === 0
+    nextBtn.disabled = n === lessons.length - 1
     editor.setSource(l.code)
     history.replaceState(null, '', '#' + l.slug)
   }
 
   railItems.forEach((el) => (el.onclick = () => go(Number(el.dataset.idx))))
-  $('#t-prev').onclick = () => go(current - 1)
-  $('#t-next').onclick = () => go(current + 1)
+  prevBtn.onclick = () => go(current - 1)
+  nextBtn.onclick = () => go(current + 1)
 
   const hashIdx = lessons.findIndex((l) => l.slug === location.hash.slice(1))
   go(hashIdx >= 0 ? hashIdx : 0)

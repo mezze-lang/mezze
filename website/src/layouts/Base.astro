@@ -81,14 +81,15 @@ const {
       const root = document.documentElement
 
       /** Paint one dish: primary colour everywhere, matching icon shown. */
-      function show(i) {
+      function show(i: number) {
         const d = dishes[i]
         root.style.setProperty('--primary', d.primary)
         root.style.setProperty('--on-primary', d.onPrimary)
-        document.querySelectorAll('[data-mascot] img').forEach((img) => {
+        const imgs = document.querySelectorAll<HTMLImageElement>('[data-mascot] img')
+        imgs.forEach((img) => {
           img.classList.toggle('on', img.dataset.dish === d.key)
         })
-        const fav = document.querySelector('[data-favicon]')
+        const fav = document.querySelector<HTMLLinkElement>('[data-favicon]')
         if (fav) fav.href = d.icon
         sessionStorage.setItem(KEY, String(i))
       }
