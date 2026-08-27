@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro'
 import { lessons } from '../data/lessons'
+import Editor from '../components/Editor.astro'
 ---
 <Base title="Tour — Mezze" width="full" description="Learn Mezze feature by feature, running every example in your browser.">
   <div class="tour">
@@ -28,179 +29,24 @@ import { lessons } from '../data/lessons'
 
     <!-- RIGHT: editor on top, larger output below -->
     <div class="tour-right">
-      <div class="ed">
-        <div class="ed-bar">
-          <button data-act="run" disabled>Run</button>
-          <button data-act="check" disabled>Check</button>
-          <button data-act="fmt" disabled>Format</button>
-          <span class="ed-status">loading runtime…</span>
-        </div>
-        <div class="ed-editor">
-          <pre class="ed-hl" aria-hidden="true"><code id="ed-code"></code></pre>
-          <textarea class="ed-src" spellcheck="false" autocomplete="off"
-                    autocorrect="off" autocapitalize="off"></textarea>
-        </div>
-        <pre class="ed-out">Waiting for the Mezze runtime…</pre>
-      </div>
+      <Editor />
     </div>
   </div>
 </Base>
 
 <script>
   import { lessons } from '../data/lessons'
-  import { loadMezze } from '../scripts/mezze-runtime'
-  import { esc, highlight, withError } from '../lib/highlight'
+  import { esc } from '../lib/highlight'
+  import { mountEditor } from '../scripts/editor'
 
   const $ = (s) => document.querySelector(s)
-  const srcEl = $('.ed-src'), codeEl = $('#ed-code'), preEl = $('.ed-hl')
-  const outEl = $('.ed-out'), statusEl = $('.ed-status')
-  const btns = Array.from(document.querySelectorAll('.ed-bar button'))
-  let ready = false
+  const editor = mountEditor($('[data-editor]'))
 
-  const paint = (html) => { codeEl.innerHTML = html !== undefined ? html : highlight(srcEl.value) }
-  const show = (t, k) => { outEl.textContent = t; outEl.className = 'ed-out ' + (k || '') }
-  const syncScroll = () => { preEl.scrollTop = srcEl.scrollTop; preEl.scrollLeft = srcEl.scrollLeft }
-
-  // Live diagnostics: re-check ~600ms after typing stops, so squiggles appear
-  // without pressing Check. Typecheck-only, so no user code executes.
-  let liveTimer
-  const liveCheck = () => {
-    if (typeof window.checkMezze !== 'function') return
-    try {
-      const res = window.checkMezze(srcEl.value)
-      const ds = (res && res.diagnostics) || []
-      paint(ds.length ? withError(srcEl.value, ds[0]) : undefined)
-    } catch { /* keep the last good paint */ }
-  }
-
-  srcEl.addEventListener('input', () => {
-    paint()
-    clearTimeout(liveTimer)
-    liveTimer = setTimeout(liveCheck, 600)
-  })
-  srcEl.addEventListener('scroll', syncScroll)
-  srcEl.addEventListener('keydown', (e) => {
-    if (e.key !== 'Tab') return
-    e.preventDefault()
-    const a = srcEl.selectionStart, b = srcEl.selectionEnd
-    srcEl.value = srcEl.value.slice(0, a) + '  ' + srcEl.value.slice(b)
-    srcEl.selectionStart = srcEl.selectionEnd = a + 2
-    paint()
-  })
-
-  // ---- hover types ----
-  // typeAt(src, line, col) walks the TypedAST (same utility the LSP hover uses),
-  // so this resolves locals, parameters and subexpressions — not just top-level
-  // bindings. Positions are 1-based, matching Loc.
-  const tip = document.createElement('div')
-  tip.className = 'hover-tip'
-  tip.hidden = true
-  document.body.appendChild(tip)
-
-  let charW = 0
-  const measureChar = () => {
-    const cs = getComputedStyle(srcEl)
-    const probe = document.createElement('span')
-    probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${cs.font}`
-    probe.textContent = '0'.repeat(100)
-    document.body.appendChild(probe)
-    charW = probe.getBoundingClientRect().width / 100
-    probe.remove()
-  }
-
-  /** 1-based (line, col) under the pointer, or null if outside the text. */
-  const posAt = (x, y) => {
-    const r = srcEl.getBoundingClientRect()
-    if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null
-    if (!charW) measureChar()
-    const cs = getComputedStyle(srcEl)
-    const padL = parseFloat(cs.paddingLeft)
-    const padT = parseFloat(cs.paddingTop)
-    const lineH = parseFloat(cs.lineHeight)
-    const row = Math.floor((y - r.top + srcEl.scrollTop - padT) / lineH)
-    const col = Math.floor((x - r.left + srcEl.scrollLeft - padL) / charW)
-    const lines = srcEl.value.split('\n')
-    if (row < 0 || row >= lines.length) return null
-    if (col < 0 || col > lines[row].length) return null
-    // Only over word characters — avoids popups on whitespace and punctuation.
-    if (!/[A-Za-z0-9_]/.test(lines[row][col] || '')) return null
-    return [row + 1, col + 1]
-  }
-
-  let hoverTimer, lastKey = ''
-  const hideTip = () => { tip.hidden = true; lastKey = '' }
-
-  srcEl.addEventListener('mousemove', (e) => {
-    const p = posAt(e.clientX, e.clientY)
-    if (!p) return hideTip()
-    const key = p[0] + ':' + p[1]
-    if (key === lastKey) {
-      tip.style.left = e.clientX + 12 + 'px'
-      tip.style.top = e.clientY + 18 + 'px'
-      return
-    }
-    clearTimeout(hoverTimer)
-    const [line, col] = p
-    const x = e.clientX, y = e.clientY
-    // typeAt re-typechecks, so debounce it rather than run on every pixel.
-    hoverTimer = setTimeout(() => {
-      if (typeof window.typeAt !== 'function') return
-      let t = ''
-      try { t = String(window.typeAt(srcEl.value, line, col)) } catch { /* ignore */ }
-      if (!t) return hideTip()
-      lastKey = key
-      const i = t.indexOf(' : ')
-      tip.innerHTML = i > 0
-        ? `<code>${esc(t.slice(0, i))}</code> : <code class="ht-type">${esc(t.slice(i + 3))}</code>`
-        : `<code class="ht-type">${esc(t)}</code>`
-      tip.style.left = x + 12 + 'px'
-      tip.style.top = y + 18 + 'px'
-      tip.hidden = false
-    }, 120)
-  })
-  srcEl.addEventListener('mouseleave', hideTip)
-  srcEl.addEventListener('scroll', hideTip)
-  srcEl.addEventListener('input', hideTip)
-
-  const diagnostics = (res) => {
-    const ds = (res && res.diagnostics) || []
-    if (!ds.length) { paint(); show('No errors.', 'ok'); return true }
-    paint(withError(srcEl.value, ds[0]))
-    show(ds.map((d) => {
-      const l = d.location
-      const at = l && l.startLine ? `${l.startLine}:${l.startCol}` : '?'
-      const hints = (d.hints || []).map((h) => `\n    hint: ${h}`).join('')
-      return `${d.severity} at ${at}\n  ${d.message}${hints}`
-    }).join('\n\n'), 'err')
-    return false
-  }
-
-  const act = (fn) => () => {
-    btns.forEach((b) => (b.disabled = true))
-    show('working…')
-    setTimeout(() => {
-      try { fn() } catch (e) { show('Internal error: ' + e, 'err') }
-      btns.forEach((b) => (b.disabled = !ready))
-    }, 0)
-  }
-
-  const ACTIONS = {
-    run: () => {
-      if (!diagnostics(window.checkMezze(srcEl.value))) return
-      const out = String(window.runMezze(srcEl.value))
-      const denied = out.indexOf('Not supported in the browser') >= 0
-      show(out, denied ? 'warn' : /^(TYPE ERROR|ERROR)/.test(out) ? 'err' : '')
-    },
-    check: () => diagnostics(window.checkMezze(srcEl.value)),
-    fmt: () => { srcEl.value = String(window.formatMezze(srcEl.value)); paint(); show('Formatted.', 'ok') },
-  }
-  btns.forEach((b) => (b.onclick = act(ACTIONS[b.dataset.act])))
-
-
-  // ---- lessons ----
   const railItems = Array.from(document.querySelectorAll('.rail-item'))
+
+  /** The lesson prose supports `code` and **bold** only. */
   const inline = (s) => esc(s)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\`([^\`]+)\`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
 
   let current = -1
@@ -211,39 +57,22 @@ import { lessons } from '../data/lessons'
     const l = lessons[n]
     $('#t-title').textContent = l.title
     $('#t-blurb').textContent = l.blurb
-    $('#t-body').innerHTML = l.body.map((p) => `<p>${inline(p)}</p>`).join('')
+    $('#t-body').innerHTML = l.body.map((para) => `<p>${inline(para)}</p>`).join('')
     $('#t-pos').textContent = `${n + 1} / ${lessons.length}`
     railItems.forEach((el, k) => el.classList.toggle('is-active', k === n))
     // The ends are dead ends: show that rather than letting a click do nothing.
     $('#t-prev').disabled = n === 0
     $('#t-next').disabled = n === lessons.length - 1
-    srcEl.value = l.code
-    paint()
-    show(ready ? 'Ready. Press Run.' : 'Loading the compiler…')
+    editor.setSource(l.code)
     history.replaceState(null, '', '#' + l.slug)
   }
+
   railItems.forEach((el) => (el.onclick = () => go(Number(el.dataset.idx))))
   $('#t-prev').onclick = () => go(current - 1)
   $('#t-next').onclick = () => go(current + 1)
 
   const hashIdx = lessons.findIndex((l) => l.slug === location.hash.slice(1))
   go(hashIdx >= 0 ? hashIdx : 0)
-
-  // ---- runtime ----
-  // Shared loader: fetched once per visit, shared with the landing page.
-  loadMezze()
-    .then((rt) => {
-      ready = true
-      statusEl.textContent = `runtime ready (${rt.loadSeconds.toFixed(1)}s)`
-      btns.forEach((b) => (b.disabled = false))
-      show('Ready. Press Run.')
-    })
-    .catch(() => {
-      ready = false
-      btns.forEach((b) => (b.disabled = true))
-      statusEl.textContent = 'runtime failed to load'
-      show('The Mezze runtime did not load.\n\nThis build needs a browser with WebAssembly 3.0 (GC + exception handling).', 'err')
-    })
 </script>
 
 <style is:global>
@@ -306,65 +135,4 @@ import { lessons } from '../data/lessons'
   .tour-right { display: flex; flex-direction: column; min-height: 0; padding-block: var(--tour-pad); }
   @media (max-width: 1000px) { .tour-right { height: 40rem; } }
 
-  .ed { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--panel); }
-  .ed-bar { display: flex; align-items: center; gap: .5rem; padding: .55rem .75rem; border-bottom: 1px solid var(--rule); flex: none; }
-  .ed-bar button { font: inherit; font-size: .88rem; padding: .25rem .85rem; border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--rule)); border-radius: 5px; background: var(--ground); color: var(--primary); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
-  .ed-bar button:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 10%, var(--ground)); border-color: var(--primary); }
-  .ed-bar button[data-act="run"] { background: var(--primary); border-color: var(--primary); color: var(--on-primary); font-weight: 600; }
-  .ed-bar button[data-act="run"]:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 86%, #000); }
-  .ed-bar button:disabled { opacity: .45; cursor: default; }
-  .ed-status { margin-left: auto; font-size: .8rem; color: var(--soft); }
-
-  .ed-editor { position: relative; flex: 1 1 auto; min-height: 0; }
-
-  /* CRITICAL: both layers must agree on every metric that affects glyph
-     position, or the highlight drifts from the text. No word-break — that
-     wraps the two layers differently. */
-  .ed-hl, .ed-src {
-    margin: 0;
-    padding: .9rem 1rem;
-    border: 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: .84rem;
-    line-height: 1.6;
-    tab-size: 2;
-    white-space: pre;
-    overflow-wrap: normal;
-    letter-spacing: 0;
-  }
-  .ed-hl { position: absolute; inset: 0; overflow: auto; pointer-events: none; color: var(--ink); }
-  .ed-hl code { font: inherit; background: none; padding: 0; }
-  .ed-src {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    resize: none; background: transparent; color: transparent;
-    caret-color: var(--ink); overflow: auto;
-  }
-  .ed-src:focus { outline: none; }
-  .ed-src::selection { background: color-mix(in srgb, var(--primary) 30%, transparent); }
-
-
-  .hover-tip {
-    position: fixed; z-index: 50; pointer-events: none;
-    background: var(--panel); color: var(--ink);
-    border: 1px solid var(--rule); border-radius: 6px;
-    padding: .35rem .6rem; font-size: .8rem;
-    box-shadow: 0 4px 14px rgb(0 0 0 / .18);
-    max-width: 40rem; white-space: pre-wrap;
-  }
-  .hover-tip code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: none; padding: 0; }
-  .hover-tip .ht-type { color: var(--syn-ctor); }
-
-  .ed-out {
-    margin: 0; padding: .85rem 1rem;
-    border-top: 1px solid var(--rule);
-    background: var(--surface);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: .82rem; line-height: 1.55;
-    white-space: pre-wrap; color: var(--soft);
-    overflow: auto;
-    flex: none; height: 9.5rem;
-  }
-  .ed-out.ok { color: var(--ok); }
-  .ed-out.err { color: var(--err); }
-  .ed-out.warn { color: var(--warn); }
 </style>

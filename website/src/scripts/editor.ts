@@ -1,0 +1,247 @@
+/**
+ * Wiring for the Editor component.
+ *
+ * Scoped to one root element rather than the document, so a page may hold
+ * several editors. Returns a handle the host can drive — the tour uses it to
+ * swap the source when the lesson changes.
+ */
+import { esc, highlight, withError } from '../lib/highlight'
+import { loadMezze } from './mezze-runtime'
+
+/** How long typing must pause before diagnostics re-run. */
+const LIVE_CHECK_MS = 600
+/** typeAt re-typechecks, so the hover is debounced rather than per-pixel. */
+const HOVER_MS = 120
+
+export interface EditorHandle {
+  /** Replace the source and repaint. */
+  setSource(code: string): void
+  /** Write a line into the output pane. `kind` maps to a status colour. */
+  show(text: string, kind?: 'ok' | 'err' | 'warn'): void
+  /** True once the runtime has loaded and the controls are live. */
+  isReady(): boolean
+}
+
+export function mountEditor(root: HTMLElement): EditorHandle {
+  const q = <T extends Element>(sel: string) => root.querySelector(sel) as T
+  const srcEl = q<HTMLTextAreaElement>('.ed-src')
+  const codeEl = q<HTMLElement>('.ed-code')
+  const preEl = q<HTMLElement>('.ed-hl')
+  const outEl = q<HTMLElement>('.ed-out')
+  const statusEl = q<HTMLElement>('.ed-status')
+  const btns = Array.from(root.querySelectorAll('.ed-bar button')) as HTMLButtonElement[]
+
+  let ready = false
+
+  const paint = (html?: string) => {
+    codeEl.innerHTML = html !== undefined ? html : highlight(srcEl.value)
+  }
+  const show = (text: string, kind?: string) => {
+    outEl.textContent = text
+    outEl.className = 'ed-out ' + (kind || '')
+  }
+  const syncScroll = () => {
+    preEl.scrollTop = srcEl.scrollTop
+    preEl.scrollLeft = srcEl.scrollLeft
+  }
+
+  // ---- live diagnostics -----------------------------------------------
+  // Typecheck-only, so no user code runs while typing.
+  let liveTimer: number | undefined
+  const liveCheck = () => {
+    if (typeof window.checkMezze !== 'function') return
+    try {
+      const res = window.checkMezze(srcEl.value) as any
+      const ds = res?.diagnostics ?? []
+      paint(ds.length ? withError(srcEl.value, ds[0]) : undefined)
+    } catch {
+      // Keep the last good paint rather than clearing the editor.
+    }
+  }
+
+  srcEl.addEventListener('input', () => {
+    paint()
+    clearTimeout(liveTimer)
+    liveTimer = window.setTimeout(liveCheck, LIVE_CHECK_MS)
+  })
+  srcEl.addEventListener('scroll', syncScroll)
+  srcEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return
+    e.preventDefault()
+    const a = srcEl.selectionStart
+    const b = srcEl.selectionEnd
+    srcEl.value = srcEl.value.slice(0, a) + '  ' + srcEl.value.slice(b)
+    srcEl.selectionStart = srcEl.selectionEnd = a + 2
+    paint()
+  })
+
+  // ---- hover types ------------------------------------------------------
+  // typeAt walks the TypedAST — the same utility the LSP hover uses — so this
+  // resolves locals, parameters and subexpressions, not just top-level
+  // bindings. Positions are 1-based, matching Loc.
+  const tip = document.createElement('div')
+  tip.className = 'hover-tip'
+  tip.hidden = true
+  document.body.appendChild(tip)
+
+  let charW = 0
+  const measureChar = () => {
+    const cs = getComputedStyle(srcEl)
+    const probe = document.createElement('span')
+    probe.style.cssText =
+      `position:absolute;visibility:hidden;white-space:pre;font:${cs.font}`
+    probe.textContent = '0'.repeat(100)
+    document.body.appendChild(probe)
+    charW = probe.getBoundingClientRect().width / 100
+    probe.remove()
+  }
+
+  /** 1-based (line, col) under the pointer, or null if outside the text. */
+  const posAt = (x: number, y: number): [number, number] | null => {
+    const r = srcEl.getBoundingClientRect()
+    if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null
+    if (!charW) measureChar()
+    const cs = getComputedStyle(srcEl)
+    const row = Math.floor(
+      (y - r.top + srcEl.scrollTop - parseFloat(cs.paddingTop)) / parseFloat(cs.lineHeight),
+    )
+    const col = Math.floor(
+      (x - r.left + srcEl.scrollLeft - parseFloat(cs.paddingLeft)) / charW,
+    )
+    const lines = srcEl.value.split('\n')
+    if (row < 0 || row >= lines.length) return null
+    if (col < 0 || col > lines[row].length) return null
+    // Word characters only — avoids popups over whitespace and punctuation.
+    if (!/[A-Za-z0-9_]/.test(lines[row][col] || '')) return null
+    return [row + 1, col + 1]
+  }
+
+  let hoverTimer: number | undefined
+  let lastKey = ''
+  const hideTip = () => {
+    tip.hidden = true
+    lastKey = ''
+  }
+
+  srcEl.addEventListener('mousemove', (e) => {
+    const p = posAt(e.clientX, e.clientY)
+    if (!p) return hideTip()
+
+    const key = p[0] + ':' + p[1]
+    if (key === lastKey) {
+      tip.style.left = e.clientX + 12 + 'px'
+      tip.style.top = e.clientY + 18 + 'px'
+      return
+    }
+
+    clearTimeout(hoverTimer)
+    const [line, col] = p
+    const x = e.clientX
+    const y = e.clientY
+    hoverTimer = window.setTimeout(() => {
+      if (typeof window.typeAt !== 'function') return
+      let t = ''
+      try {
+        t = String(window.typeAt(srcEl.value, line, col))
+      } catch {
+        // No type at this position; fall through to hide.
+      }
+      if (!t) return hideTip()
+
+      lastKey = key
+      const i = t.indexOf(' : ')
+      tip.innerHTML = i > 0
+        ? `<code>${esc(t.slice(0, i))}</code> : <code class="ht-type">${esc(t.slice(i + 3))}</code>`
+        : `<code class="ht-type">${esc(t)}</code>`
+      tip.style.left = x + 12 + 'px'
+      tip.style.top = y + 18 + 'px'
+      tip.hidden = false
+    }, HOVER_MS)
+  })
+  srcEl.addEventListener('mouseleave', hideTip)
+  srcEl.addEventListener('scroll', hideTip)
+  srcEl.addEventListener('input', hideTip)
+
+  // ---- actions ----------------------------------------------------------
+  /** Renders diagnostics; returns true when the source is clean. */
+  const report = (res: any): boolean => {
+    const ds = res?.diagnostics ?? []
+    if (!ds.length) {
+      paint()
+      show('No errors.', 'ok')
+      return true
+    }
+    paint(withError(srcEl.value, ds[0]))
+    show(
+      ds.map((d: any) => {
+        const l = d.location
+        const at = l?.startLine ? `${l.startLine}:${l.startCol}` : '?'
+        const hints = (d.hints ?? []).map((h: string) => `\n    hint: ${h}`).join('')
+        return `${d.severity} at ${at}\n  ${d.message}${hints}`
+      }).join('\n\n'),
+      'err',
+    )
+    return false
+  }
+
+  /** Disables the controls for the duration, since the call is synchronous. */
+  const act = (fn: () => void) => () => {
+    btns.forEach((b) => (b.disabled = true))
+    show('working…')
+    // Yield first so the DOM repaints before the wasm call blocks.
+    setTimeout(() => {
+      try {
+        fn()
+      } catch (e) {
+        show('Internal error: ' + e, 'err')
+      }
+      btns.forEach((b) => (b.disabled = !ready))
+    }, 0)
+  }
+
+  const ACTIONS: Record<string, () => void> = {
+    run: () => {
+      if (!report(window.checkMezze!(srcEl.value))) return
+      const out = String(window.runMezze!(srcEl.value))
+      const denied = out.includes('Not supported in the browser')
+      show(out, denied ? 'warn' : /^(TYPE ERROR|ERROR)/.test(out) ? 'err' : '')
+    },
+    check: () => void report(window.checkMezze!(srcEl.value)),
+    fmt: () => {
+      srcEl.value = String(window.formatMezze!(srcEl.value))
+      paint()
+      show('Formatted.', 'ok')
+    },
+  }
+  btns.forEach((b) => (b.onclick = act(ACTIONS[b.dataset.act!])))
+
+  // ---- runtime ----------------------------------------------------------
+  paint()
+  loadMezze()
+    .then((rt) => {
+      ready = true
+      statusEl.textContent = `runtime ready (${rt.loadSeconds.toFixed(1)}s)`
+      btns.forEach((b) => (b.disabled = false))
+      show('Ready. Press Run.')
+    })
+    .catch(() => {
+      ready = false
+      btns.forEach((b) => (b.disabled = true))
+      statusEl.textContent = 'runtime failed to load'
+      show(
+        'The Mezze runtime did not load.\n\n' +
+          'This build needs a browser with WebAssembly 3.0 (GC + exception handling).',
+        'err',
+      )
+    })
+
+  return {
+    setSource(code) {
+      srcEl.value = code
+      paint()
+      show(ready ? 'Ready. Press Run.' : 'Loading the compiler…')
+    },
+    show,
+    isReady: () => ready,
+  }
+}
