@@ -101,16 +101,21 @@ private object InternedTokens {
     const val USE = "use"
     const val HAVING = "having"
 
-    // Common identifiers
-    const val TRUE = "True"
-    const val FALSE = "False"
-    const val SOME = "Some"
-    const val NONE = "None"
-    const val OK = "Ok"
-    const val ERR = "Err"
+    // Common identifiers — the builtin constructor names, single-sourced from
+    // BuiltinTypes (these are the same constant String instances, so interning a
+    // lexed occurrence to one of them reuses BuiltinTypes' canonical instance).
+    const val TRUE = com.mezze.language.ast.BuiltinTypes.TRUE
+    const val FALSE = com.mezze.language.ast.BuiltinTypes.FALSE
+    const val SOME = com.mezze.language.ast.BuiltinTypes.SOME
+    const val NONE = com.mezze.language.ast.BuiltinTypes.NONE
+    const val OK = com.mezze.language.ast.BuiltinTypes.OK
+    const val ERR = com.mezze.language.ast.BuiltinTypes.ERR
 
     // Map for quick lookup of interned identifiers
     val commonIdentifiers = setOf(TRUE, FALSE, SOME, NONE, OK, ERR)
+
+    /** name → its canonical interned instance (O(1) reuse on the lexer hot path). */
+    val canonicalById: Map<String, String> = commonIdentifiers.associateWith { it }
 }
 
 /**
@@ -491,19 +496,9 @@ class Lexer(
             return Token(keywordType, internedText, start, startLine, startColumn)
         }
 
-        val internedText = if (text in InternedTokens.commonIdentifiers) {
-            when (text) {
-                "True" -> InternedTokens.TRUE
-                "False" -> InternedTokens.FALSE
-                "Some" -> InternedTokens.SOME
-                "None" -> InternedTokens.NONE
-                "Ok" -> InternedTokens.OK
-                "Err" -> InternedTokens.ERR
-                else -> text
-            }
-        } else {
-            text
-        }
+        // Reuse the canonical interned instance for a common builtin-ctor identifier
+        // (single-sourced from BuiltinTypes via InternedTokens), else keep the lexed text.
+        val internedText = InternedTokens.canonicalById[text] ?: text
 
         return Token(TokenType.IDENTIFIER, internedText, start, startLine, startColumn)
     }
