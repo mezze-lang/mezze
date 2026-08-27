@@ -1,0 +1,15 @@
+# Cloudflare Pages reads this file.
+#
+# The wasm runtime is ~55MB (about 16MB gzipped). It is the single largest cost
+# on the site, so it must be cached hard and revalidated never — a new build
+# ships a new filename if the contents change.
+
+/wasm/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Astro fingerprints these, so they are safe to cache forever too.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/icons/*
+  Cache-Control: public, max-age=604800
