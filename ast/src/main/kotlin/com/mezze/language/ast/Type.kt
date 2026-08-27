@@ -122,7 +122,7 @@ sealed interface MezzeType {
         is SuspendType -> predicate(valueType)
         is NewtypeType -> predicate(wrappedType)
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
-        is NatType, is FracType, is BytesType, is ByteBufferType,
+        is NatType, is FracType, is BytesType,
         is CharType, is EffectRow -> false
     }
 
@@ -141,7 +141,7 @@ sealed interface MezzeType {
         is SuspendType -> copy(valueType = f(valueType))
         is NewtypeType -> copy(wrappedType = f(wrappedType))
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
-        is NatType, is FracType, is BytesType, is ByteBufferType,
+        is NatType, is FracType, is BytesType,
         is CharType, is EffectRow -> this
     }
 
@@ -172,10 +172,6 @@ sealed interface MezzeType {
     // Binary data type
     @Serializable
     object BytesType : MezzeType
-
-    // Mutable byte buffer for streaming/building (internal mutation, functional API)
-    @Serializable
-    object ByteBufferType : MezzeType
 
     // Type variables (for inference)
     @Serializable

@@ -24,7 +24,6 @@ object BuiltinTypeRegistry {
             val modulePath = when (PrimitiveTypes.fromName(name)) {
                 MezzeType.StringType -> ModulePath(listOf("std", "str"))
                 MezzeType.BytesType -> ModulePath(listOf("std", "collections", "bytes"))
-                MezzeType.ByteBufferType -> ModulePath(listOf("std", "collections", "buffer"))
                 else -> ModulePath(listOf("std", name.lowercase()))
             }
             put(name, modulePath)

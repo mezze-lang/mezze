@@ -12,7 +12,6 @@ object PrimitiveTypes {
     const val FRAC = "Frac"
     const val CHAR = "Char"
     const val BYTES = "Bytes"
-    const val BYTE_BUFFER = "ByteBuffer"
 
     private val nameToType: Map<String, MezzeType> = mapOf(
         INT to MezzeType.IntType,
@@ -23,7 +22,6 @@ object PrimitiveTypes {
         FRAC to MezzeType.FracType,
         CHAR to MezzeType.CharType,
         BYTES to MezzeType.BytesType,
-        BYTE_BUFFER to MezzeType.ByteBufferType,
     )
 
     private val typeToName: Map<MezzeType, String> =

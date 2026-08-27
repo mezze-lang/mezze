@@ -3144,7 +3144,7 @@ class MezzeTextDocumentService(
             // Not usefully constructible from a bare expected type.
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
             is MezzeType.StringType, is MezzeType.CharType, is MezzeType.NatType,
-            is MezzeType.FracType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+            is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.NewtypeType, is MezzeType.ListType,
             is MezzeType.SeqType, is MezzeType.MapType, is MezzeType.SetType,
             is MezzeType.SortedMapType, is MezzeType.SortedSetType,
@@ -3765,7 +3765,6 @@ class MezzeTextDocumentService(
             is MezzeType.NatType -> "Nat"
             is MezzeType.FracType -> "Frac"
             is MezzeType.BytesType -> "Bytes"
-            is MezzeType.ByteBufferType -> "ByteBuffer"
             is MezzeType.TypeApplication ->
                 // e.g. `Option Str`, `Result Int Str`. Render the arg vector too
                 // so the user sees the full shape; drop it once it gets deep.

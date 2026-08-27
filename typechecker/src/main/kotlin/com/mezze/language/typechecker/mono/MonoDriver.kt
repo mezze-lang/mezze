@@ -624,7 +624,6 @@ object MonoDriver {
             is MezzeType.FracType -> "Frac"
             is MezzeType.CharType -> "Char"
             is MezzeType.BytesType -> "Bytes"
-            is MezzeType.ByteBufferType -> "ByteBuffer"
             is MezzeType.EffectRow -> "<eff>"
         }
     }
@@ -652,7 +651,7 @@ object MonoDriver {
                 is MezzeType.TypeApplication -> t.args.forEach(::go)
                 is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
                 is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-                is MezzeType.BytesType, is MezzeType.ByteBufferType,
+                is MezzeType.BytesType,
                 is MezzeType.CharType, is MezzeType.EffectRow -> Unit
             }
         }
@@ -685,7 +684,7 @@ object MonoDriver {
             is MezzeType.TypeApplication -> type.args.any { typeParamAppearsIn(typeParamName, it) }
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
             is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-            is MezzeType.BytesType, is MezzeType.ByteBufferType,
+            is MezzeType.BytesType,
             is MezzeType.CharType, is MezzeType.EffectRow -> false
         }
     }

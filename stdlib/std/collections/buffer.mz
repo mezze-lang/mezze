@@ -1,5 +1,8 @@
 use std::abilities::sized::{ Sized }
 
+## A mutable, growable byte buffer for streaming and building binary data.
+pub newtype ByteBuffer = __NativeByteBuffer
+
 ## Creates a new buffer with the specified initial capacity.
 pub let new: { capacity: Int } -> ByteBuffer = { capacity } -> __native_buffer_new { capacity = capacity }
 

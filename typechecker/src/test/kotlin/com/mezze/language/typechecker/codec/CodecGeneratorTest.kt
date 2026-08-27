@@ -38,9 +38,9 @@ class CodecGeneratorTest {
         // #195 PR-A: Bytes now has a real `impl EncodeRepr` / `impl DecodeRepr` via
         // Format.encode_bytes / decode_bytes — needed so polymorphic stdlib helpers
         // (`'a with EncodeRepr 'a`) dispatch when `'a` instantiates to Bytes.
-        // ByteBuffer stays unserializable; it's a mutable I/O cursor, not a value.
+        // (ByteBuffer is now a stdlib newtype over a native handle — an unserializable
+        // mutable I/O cursor — so it is no longer a MezzeType node to assert on here.)
         assertTrue(generator.isSerializable(MezzeType.BytesType))
-        assertFalse(generator.isSerializable(MezzeType.ByteBufferType))
     }
 
     @Test

@@ -753,7 +753,6 @@ internal class AbilityChecker(
             is MezzeType.FracType,
             is MezzeType.CharType,
             is MezzeType.BytesType,
-            is MezzeType.ByteBufferType -> type
             is MezzeType.NewtypeType -> type
         }
     }

@@ -352,7 +352,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
             }
         }
         type1 is MezzeType.BytesType && type2 is MezzeType.BytesType -> UnificationResult.Success(Substitution.empty)
-        type1 is MezzeType.ByteBufferType && type2 is MezzeType.ByteBufferType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.CharType && type2 is MezzeType.CharType -> UnificationResult.Success(Substitution.empty)
 
         else -> {

@@ -101,7 +101,7 @@ class SQLiteMezzeStore private constructor(
         // constructor is enforced to mirror it (Type.kt init{}). Only Anonymous
         // still hashes constructor (its sole name signal). Content-hash bytes shift
         // for every named TypeApplication; old caches dropped and regenerated.
-        const val SCHEMA_VERSION = 6
+        const val SCHEMA_VERSION = 7
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of

@@ -652,7 +652,6 @@ internal class VariantSolver(
             is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.BytesType,
-            is MezzeType.ByteBufferType,
             is MezzeType.CharType,
             is MezzeType.EffectRow -> type
         }
