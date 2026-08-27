@@ -1,5 +1,6 @@
 node_modules/
-bin/
+dist/
 
-# Stack config (Pulumi.<stack>.yaml) IS committed — secrets in it are
-# encrypted by the Pulumi backend, and the stack is not reproducible without it.
+# Pulumi.<stack>.yaml IS committed — it holds the stack's encryptionsalt, and
+# the stack is not reproducible without it. No plaintext secrets go in it;
+# those come from sops-decrypted env vars at run time.

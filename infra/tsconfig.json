@@ -1,13 +1,21 @@
 {
   "compilerOptions": {
     "strict": true,
-    "target": "es2022",
-    "module": "commonjs",
-    "moduleResolution": "node",
-    "outDir": "bin",
+    "outDir": "dist",
+    "target": "es2020",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "sourceMap": true,
     "experimentalDecorators": true,
-    "forceConsistentCasingInFileNames": true
+    "pretty": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true
   },
-  "include": ["index.ts"]
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
 }

@@ -1,6 +1,6 @@
-name: mezze-website
-runtime:
-  name: nodejs
-  options:
-    packagemanager: npm
-description: Cloudflare Pages hosting for mezze-lang.org
+name: mezze-lang
+runtime: nodejs
+description: Cloudflare Pages + apex/www custom domains + DNS for mezze-lang.org
+# All configuration comes from environment variables, populated by sops:
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_ZONE_ID
+# See the top-level Justfile — everything runs through `sops exec-env`.

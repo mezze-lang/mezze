@@ -24,9 +24,25 @@ in
     # tree-sitter CLI for the tooling/tree-sitter-mezze grammar
     # (generate parser.c, build native lib, run corpus tests).
     pkgs.tree-sitter
+    # website deployment — see the Justfile
+    pkgs.pulumi-bin
+    pkgs.pulumiPackages.pulumi-nodejs
+    pkgs.just                     # command runner
+    pkgs.sops                     # secret file encryption
+    pkgs.age                      # asymmetric backend for sops
   ] ++ lib.optionals pkgs.stdenv.isLinux [
     pkgs.gcc
   ];
+
+  # --- website deployment (Pulumi + Cloudflare) -----------------------------
+  env.PULUMI_SKIP_UPDATE_CHECK = "true";
+  # State lives in ~/.pulumi/ rather than Pulumi Cloud — back it up, it holds
+  # the resource-ID map and losing it means Pulumi cannot reconcile what is
+  # already provisioned against the code.
+  env.PULUMI_BACKEND_URL = "file://~";
+  # Nothing to prompt for: real secrets never enter Pulumi state, they arrive
+  # as sops-decrypted env vars on each run.
+  env.PULUMI_CONFIG_PASSPHRASE = "";
 
   languages = {
     java = {

@@ -1,69 +1,87 @@
-# Infrastructure
+# infra — Cloudflare Pages for mezze-lang.org
 
-Pulumi program for the Cloudflare Pages project behind mezze-lang.org.
+Provisions the Cloudflare Pages project, the apex + www custom domains, and the
+DNS records that point at them. Pulumi with `@pulumi/cloudflare`.
 
-It owns the **project and its DNS**, not the uploads. `wrangler pages deploy`
-pushes the built site; keeping those separate means a routine deploy has no
-permission to destroy infrastructure.
+The site itself (`website/dist/`) is uploaded separately with `wrangler pages
+deploy` — see `just deploy` in the root `Justfile`. This stack owns the
+plumbing, so a routine deploy holds no permission to destroy infrastructure.
 
-## First run
+All commands go through the root `Justfile`. Don't run `pulumi` directly — it
+needs env vars populated by `sops exec-env secrets.yaml`.
 
-```sh
-npm install
-pulumi stack init prod
-```
+## What you need from Cloudflare
 
-Then the config. The API token needs **Pages:Edit**, plus **Zone:Read** and
-**DNS:Edit** on the zone if you want the custom domain:
+**1. An API token** — dashboard → *My Profile* → *API Tokens* → *Create Token*
+→ *Create Custom Token*:
 
-```sh
-pulumi config set --secret cloudflare:apiToken   <token>
-pulumi config set mezze:accountId <account-id>
-```
+| Category | Permission | Scope |
+|---|---|---|
+| Account | Cloudflare Pages | Edit | your account |
+| Zone | DNS | Edit | zone: `mezze-lang.org` |
+| Zone | Page Rules | Edit | zone: `mezze-lang.org` |
+| Zone | Zone Settings | Edit | zone: `mezze-lang.org` |
 
-Both are on the Cloudflare dashboard — the account id is in the right-hand
-sidebar of any zone's overview page.
+Page Rules is for the www → apex redirect; Zone Settings for Always Use HTTPS.
+Cloudflare shows the token once.
 
-Bring it up:
+**2. Your Account ID** — dashboard sidebar (32-hex).
 
-```sh
-pulumi up
-```
+**3. The Zone ID for `mezze-lang.org`** — the domain's overview page, right
+column (32-hex).
 
-That gives you a `*.pages.dev` URL, which is enough to deploy against.
-
-## Adding the domain
-
-The domain is optional so the stack works before DNS is ready. When it is:
+## Populate the secrets
 
 ```sh
-pulumi config set mezze:domain mezze-lang.org
-pulumi config set mezze:zoneId <zone-id>
-pulumi up
+just secrets-edit
 ```
 
-This adds the Pages custom domain and two proxied CNAMEs — apex and `www`.
-The apex is a CNAME rather than an A record because Cloudflare flattens it at
-the zone root.
+```yaml
+CLOUDFLARE_API_TOKEN:  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+CLOUDFLARE_ACCOUNT_ID: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+CLOUDFLARE_ZONE_ID:    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
 
-## Deploying the site
+Save and close; sops encrypts in place. `secrets.yaml` stays committed — the
+encryption travels with it. `.sops.yaml` uses the same age recipient as
+shriyans.im, so the private key already at `~/.config/sops/age/keys.txt`
+works here.
 
-From `website/`:
+## Provision
 
 ```sh
-npm run build:all      # wasm, then the site
-npx wrangler pages deploy dist --project-name mezze-lang
+just infra-install    # once
+just infra-preview    # dry-run
+just infra-up
 ```
 
-`build:all` skips the wasm step when `public/wasm` is newer than the compiler
-sources, so it is only slow the first time or after a compiler change.
+**No Pulumi Cloud account needed.** devenv sets `PULUMI_BACKEND_URL=file://~`
+so state lives in `~/.pulumi/`, and `PULUMI_CONFIG_PASSPHRASE=""` so nothing
+prompts. Real secrets never enter Pulumi state — they arrive from sops on each
+run. The stack is created on first use.
 
-## Notes
+> ⚠️ Back up `~/.pulumi/`. It holds the resource-ID map; losing it means Pulumi
+> can't reconcile what's provisioned against the code.
 
-- `Pulumi.<stack>.yaml` is committed. Secrets in it are encrypted by the
-  Pulumi backend, and the stack cannot be reproduced without it.
-- **The wasm bundle is 55MB.** Cloudflare Pages caps a single file at 25MB,
-  so this will be rejected on upload. It has not been deployed yet, so that
-  limit is untested here — expect to need one of: splitting the module,
-  serving it from R2 and fetching cross-origin, or asking Cloudflare to lift
-  the cap. Worth resolving before the first deploy rather than during it.
+## Deploy the site
+
+```sh
+just build-all    # wasm (if stale) then the site
+just deploy       # build + wrangler upload
+```
+
+wrangler reads `CLOUDFLARE_API_TOKEN` from the sops-decrypted env.
+
+## Tear down
+
+```sh
+just infra-destroy
+```
+
+## Known blocker
+
+**The wasm runtime is 55MB and Cloudflare Pages caps a single file at 25MB.**
+Untested here — nothing has been deployed yet — but the upload is likely to be
+rejected. Options are splitting the module, serving it from R2 and fetching
+cross-origin, or asking Cloudflare to lift the cap. Worth settling before the
+first deploy rather than during it.

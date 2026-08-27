@@ -1,75 +1,101 @@
+// Provision the Cloudflare Pages project, the apex + www custom domains, and
+// the DNS that points at them, for mezze-lang.org.
+//
+// The built site (website/dist/) is uploaded separately by wrangler — see
+// `just deploy`. This stack owns the plumbing, not the deploy artifacts, so a
+// routine deploy holds no permission to destroy infrastructure.
+//
+// Config comes from environment variables, populated by `sops exec-env`:
+//   CLOUDFLARE_API_TOKEN    — auto-detected by the cloudflare provider
+//   CLOUDFLARE_ACCOUNT_ID   — the account owning the Pages project and zone
+//   CLOUDFLARE_ZONE_ID      — the zone id for mezze-lang.org
+
 import * as pulumi from '@pulumi/pulumi'
 import * as cloudflare from '@pulumi/cloudflare'
 
-/**
- * Cloudflare Pages hosting for mezze-lang.org.
- *
- * Config (set with `pulumi config set`, `--secret` where noted):
- *   cloudflare:apiToken   secret — needs Pages:Edit and, for a custom domain,
- *                         Zone:Read + DNS:Edit on the zone
- *   mezze:accountId       Cloudflare account id
- *   mezze:domain          apex domain, e.g. mezze-lang.org  (optional)
- *   mezze:zoneId          zone id for that domain           (optional)
- *
- * Uploading the built site is deliberately not modelled here: `wrangler pages
- * deploy` does that, and having Pulumi own the project while CI owns the
- * uploads keeps a deploy from being able to destroy infrastructure.
- */
-const cfg = new pulumi.Config('mezze')
-const accountId = cfg.require('accountId')
-const domain = cfg.get('domain')
-const zoneId = cfg.get('zoneId')
+function required(name: string): string {
+  const v = process.env[name]
+  if (!v) throw new Error(`${name} is not set (run 'just infra-up' — it loads secrets via sops)`)
+  return v
+}
 
-const PROJECT = 'mezze-lang'
-const PRODUCTION_BRANCH = 'main'
+const accountId = required('CLOUDFLARE_ACCOUNT_ID')
+const zoneId = required('CLOUDFLARE_ZONE_ID')
+const domain = 'mezze-lang.org'
+const project = 'mezze-lang' // must match `wrangler pages deploy --project-name`
+const managed = 'managed by pulumi · mezze-lang.org' // tag on every DNS record
 
-const site = new cloudflare.PagesProject('site', {
+// 1. Pages project, direct-upload mode (no git integration).
+const pages = new cloudflare.PagesProject('site', {
   accountId,
-  name: PROJECT,
-  productionBranch: PRODUCTION_BRANCH,
+  name: project,
+  productionBranch: 'main',
   deploymentConfigs: {
-    production: {
-      // The wasm runtime is ~55MB; nothing here should try to transform it.
-      compatibilityDate: '2026-08-01',
-    },
-    preview: {
-      compatibilityDate: '2026-08-01',
+    production: { compatibilityDate: '2026-08-01' },
+    preview: { compatibilityDate: '2026-08-01' },
+  },
+})
+
+// 2. Attach the apex and www custom domains.
+const apex = new cloudflare.PagesDomain('apex', {
+  accountId,
+  projectName: pages.name,
+  name: domain,
+})
+const www = new cloudflare.PagesDomain('www', {
+  accountId,
+  projectName: pages.name,
+  name: `www.${domain}`,
+})
+
+// 3. DNS for each hostname, tagged so anyone in the dashboard can see these
+// are managed here rather than by hand.
+new cloudflare.DnsRecord('apex-cname', {
+  zoneId,
+  name: '@',
+  type: 'CNAME',
+  content: pages.subdomain,
+  proxied: true,
+  ttl: 1,
+  comment: managed,
+}, { dependsOn: [apex] })
+
+new cloudflare.DnsRecord('www-cname', {
+  zoneId,
+  name: 'www',
+  type: 'CNAME',
+  content: pages.subdomain,
+  proxied: true,
+  ttl: 1,
+  comment: managed,
+}, { dependsOn: [www] })
+
+// 4. Zone-level "Always Use HTTPS" — raw http:// requests 301 at the edge,
+// covering anything that arrives before Pages sees it.
+new cloudflare.ZoneSetting('always-https', {
+  zoneId,
+  settingId: 'always_use_https',
+  value: 'on',
+})
+
+// 5. Canonical redirect www → apex, applied at the edge. A _redirects file in
+// dist/ is unreliable when both hostnames are attached as Pages custom
+// domains. Uses one of the three free Page Rules.
+//
+// Token needs: Zone → Page Rules → Edit.
+new cloudflare.PageRule('www-to-apex', {
+  zoneId,
+  target: `www.${domain}/*`,
+  priority: 1,
+  status: 'active',
+  actions: {
+    forwardingUrl: {
+      url: `https://${domain}/$1`,
+      statusCode: 301,
     },
   },
 })
 
-/**
- * Custom domain, apex and www.
- *
- * Only created when both `domain` and `zoneId` are configured, so the stack
- * stands up against the *.pages.dev URL before DNS is ready.
- */
-if (domain && zoneId) {
-  const apex = new cloudflare.PagesDomain('apex', {
-    accountId,
-    projectName: site.name,
-    domain,
-  })
-
-  // Pages resolves the apex through a CNAME at the zone root; Cloudflare
-  // flattens it, which is why this is a CNAME rather than an A record.
-  new cloudflare.Record('apex-cname', {
-    zoneId,
-    name: '@',
-    type: 'CNAME',
-    content: pulumi.interpolate`${site.subdomain}`,
-    proxied: true,
-  }, { dependsOn: [apex] })
-
-  new cloudflare.Record('www-cname', {
-    zoneId,
-    name: 'www',
-    type: 'CNAME',
-    content: domain,
-    proxied: true,
-  })
-}
-
-export const projectName = site.name
-export const pagesUrl = pulumi.interpolate`https://${site.subdomain}`
-export const siteUrl = domain ? `https://${domain}` : pagesUrl
+export const pagesSubdomain = pages.subdomain // e.g. mezze-lang.pages.dev
+export const primaryUrl = pulumi.interpolate`https://${domain}`
+export const wwwUrl = pulumi.interpolate`https://www.${domain}`
