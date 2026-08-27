@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.astro/
+.wrangler/
+.DS_Store
+*.log
+.env
+.env.production
+
+# WASM build artifacts (58MB) — rebuild via wasm-build/README.md
+public/wasm/*.wasm

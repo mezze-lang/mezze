@@ -17,7 +17,10 @@ in
     pkgs-unstable.kotlin
     graalvm
     pkgs.zlib
-    pkgs.nodejs
+    # Pinned major: the website (Astro) and the VSCode extension build against
+    # this. Bare `pkgs.nodejs` is an alias that drifts with nixpkgs, which would
+    # silently change the major version under the website's lockfile.
+    pkgs.nodejs_24
     # tree-sitter CLI for the tooling/tree-sitter-mezze grammar
     # (generate parser.c, build native lib, run corpus tests).
     pkgs.tree-sitter
@@ -123,6 +126,20 @@ in
       fi
     '';
 
+    web-dev.exec = ''
+      echo "🌐 Starting website dev server..."
+      cd website
+      [ -d node_modules ] || npm install
+      npm run dev -- "$@"
+    '';
+
+    web-build.exec = ''
+      echo "🌐 Building website..."
+      cd website
+      [ -d node_modules ] || npm install
+      npm run build
+    '';
+
     smoke-tests.exec = ''
       echo "🧪 Running CLI smoke tests..."
       ./docker-test-project/run-tests.sh "$@"
@@ -147,6 +164,10 @@ in
     echo "  smoke-tests    - Run comprehensive CLI smoke tests"
     echo "  ts-build       - Generate + build tree-sitter-mezze grammar"
     echo "  ts-test        - Run tree-sitter corpus tests"
+    echo ""
+    echo "🌐 Website:"
+    echo "  web-dev        - Website dev server (website/)"
+    echo "  web-build      - Build website to website/dist"
     echo ""
     echo "📝 Examples:"
     echo "  mezze-dev parse examples/basic/hello_world.mezze"
