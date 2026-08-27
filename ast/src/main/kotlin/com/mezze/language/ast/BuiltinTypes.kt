@@ -70,6 +70,10 @@ object BuiltinTypes {
     const val VAL_FIELD = "val"      // Used in Option.Some and Result.Ok
     const val ERROR_FIELD = "error"  // Used in Result.Err
 
+    /** The Bool ability method for logical negation: `b.not {}`. Single source so
+     *  callers recognize the negation method here, not via raw `member == "not"`. */
+    const val NOT_METHOD = "not"
+
     /**
      * Reserved prefix for opaque NATIVE primitive types (`__NativeInstant`,
      * `__NativePromise`, `__NativeMutInt`, …) — the runtime-handle payloads that

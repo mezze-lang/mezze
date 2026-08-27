@@ -3108,16 +3108,16 @@ class MezzeTextDocumentService(
 
         when (expected) {
             is MezzeType.TypeApplication -> when (expected.constructor) {
-                "Result" -> {
+                BuiltinTypes.RESULT -> {
                     val okT = expected.args.getOrNull(0)
                     val errT = expected.args.getOrNull(1)
-                    out += snippetItem("Ok", "Ok { ${if (okT != null) tab(1, okT) else "\$1"} }", "construct Result", 0)
-                    out += snippetItem("Err", "Err { error = ${if (errT != null) tab(1, errT) else "\$1"} }", "construct Result", 1)
+                    out += snippetItem(BuiltinTypes.OK, "${BuiltinTypes.OK} { ${if (okT != null) tab(1, okT) else "\$1"} }", "construct Result", 0)
+                    out += snippetItem(BuiltinTypes.ERR, "${BuiltinTypes.ERR} { ${BuiltinTypes.ERROR_FIELD} = ${if (errT != null) tab(1, errT) else "\$1"} }", "construct Result", 1)
                 }
-                "Option" -> {
+                BuiltinTypes.OPTION -> {
                     val someT = expected.args.getOrNull(0)
-                    out += snippetItem("Some", "Some { ${if (someT != null) tab(1, someT) else "\$1"} }", "construct Option", 0)
-                    out += snippetItem("None", "None", "construct Option", 1)
+                    out += snippetItem(BuiltinTypes.SOME, "${BuiltinTypes.SOME} { ${if (someT != null) tab(1, someT) else "\$1"} }", "construct Option", 0)
+                    out += snippetItem(BuiltinTypes.NONE, BuiltinTypes.NONE, "construct Option", 1)
                 }
                 else -> generateForNamedType(state, expected.constructor, out)
             }
@@ -3138,8 +3138,8 @@ class MezzeTextDocumentService(
                 out += snippetItem("{ … } -> …", "{${params.joinToString(", ")}} -> \$1", "fill lambda", 0)
             }
             is MezzeType.BoolType -> {
-                out += snippetItem("True", "True", "Bool", 0)
-                out += snippetItem("False", "False", "Bool", 1)
+                out += snippetItem(BuiltinTypes.TRUE, BuiltinTypes.TRUE, "Bool", 0)
+                out += snippetItem(BuiltinTypes.FALSE, BuiltinTypes.FALSE, "Bool", 1)
             }
             // Not usefully constructible from a bare expected type.
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
@@ -4811,7 +4811,8 @@ class MezzeTextDocumentService(
             first.isDigit() || (first == '-' && receiverText.length > 1 && receiverText[1].isDigit()) -> {
                 if (receiverText.contains('.')) MezzeType.FloatType else MezzeType.IntType
             }
-            receiverText == "true" || receiverText == "false" || receiverText == "True" || receiverText == "False" -> MezzeType.BoolType
+            receiverText == BuiltinTypes.TRUE || receiverText == BuiltinTypes.FALSE ||
+                receiverText == BuiltinTypes.TRUE.lowercase() || receiverText == BuiltinTypes.FALSE.lowercase() -> MezzeType.BoolType
             else -> null
         }
     }
@@ -5445,38 +5446,38 @@ class MezzeTextDocumentService(
         }
 
         // Add Bool constructors (built-in)
-        items.add(CompletionItem("True").apply {
+        items.add(CompletionItem(BuiltinTypes.TRUE).apply {
             kind = CompletionItemKind.EnumMember
-            detail = "Bool"
+            detail = BuiltinTypes.BOOL
         })
-        items.add(CompletionItem("False").apply {
+        items.add(CompletionItem(BuiltinTypes.FALSE).apply {
             kind = CompletionItemKind.EnumMember
-            detail = "Bool"
+            detail = BuiltinTypes.BOOL
         })
 
         // Add Option constructors (commonly used)
-        items.add(CompletionItem("Some").apply {
+        items.add(CompletionItem(BuiltinTypes.SOME).apply {
             kind = CompletionItemKind.EnumMember
-            detail = "Option"
-            insertText = "Some { value = \${1:} }"
+            detail = BuiltinTypes.OPTION
+            insertText = "${BuiltinTypes.SOME} { ${BuiltinTypes.VAL_FIELD} = \${1:} }"
             insertTextFormat = InsertTextFormat.Snippet
         })
-        items.add(CompletionItem("None").apply {
+        items.add(CompletionItem(BuiltinTypes.NONE).apply {
             kind = CompletionItemKind.EnumMember
-            detail = "Option"
+            detail = BuiltinTypes.OPTION
         })
 
         // Add Result constructors (commonly used)
-        items.add(CompletionItem("Ok").apply {
+        items.add(CompletionItem(BuiltinTypes.OK).apply {
             kind = CompletionItemKind.EnumMember
-            detail = "Result"
-            insertText = "Ok { value = \${1:} }"
+            detail = BuiltinTypes.RESULT
+            insertText = "${BuiltinTypes.OK} { ${BuiltinTypes.VAL_FIELD} = \${1:} }"
             insertTextFormat = InsertTextFormat.Snippet
         })
-        items.add(CompletionItem("Err").apply {
+        items.add(CompletionItem(BuiltinTypes.ERR).apply {
             kind = CompletionItemKind.EnumMember
-            detail = "Result"
-            insertText = "Err { error = \${1:} }"
+            detail = BuiltinTypes.RESULT
+            insertText = "${BuiltinTypes.ERR} { ${BuiltinTypes.ERROR_FIELD} = \${1:} }"
             insertTextFormat = InsertTextFormat.Snippet
         })
 
@@ -6901,7 +6902,7 @@ class MezzeTextDocumentService(
         fun boolNotReceiver(e: ParsedExpr): ParsedExpr? {
             val call = unwrapParens(e) as? ParsedFunctionCall ?: return null
             val member = call.function as? ParsedMemberAccess ?: return null
-            return if (member.member == "not") member.receiver else null
+            return if (member.member == BuiltinTypes.NOT_METHOD) member.receiver else null
         }
 
         val replacement: String? = when (node) {
@@ -6914,16 +6915,16 @@ class MezzeTextDocumentService(
             // x == True -> x ; x == False -> x.not {}  (either side)
             is ParsedBinaryOp -> if (node.op.isEquality) {
                 when {
-                    isBoolLit(node.right, "True") -> srcOf(node.left.loc)
-                    isBoolLit(node.left, "True") -> srcOf(node.right.loc)
-                    isBoolLit(node.right, "False") -> "(${srcOf(node.left.loc)}).not {}"
-                    isBoolLit(node.left, "False") -> "(${srcOf(node.right.loc)}).not {}"
+                    isBoolLit(node.right, BuiltinTypes.TRUE) -> srcOf(node.left.loc)
+                    isBoolLit(node.left, BuiltinTypes.TRUE) -> srcOf(node.right.loc)
+                    isBoolLit(node.right, BuiltinTypes.FALSE) -> "(${srcOf(node.left.loc)}).${BuiltinTypes.NOT_METHOD} {}"
+                    isBoolLit(node.left, BuiltinTypes.FALSE) -> "(${srcOf(node.right.loc)}).${BuiltinTypes.NOT_METHOD} {}"
                     else -> null
                 }
             } else null
 
             // if b then True else False -> b
-            is ParsedIf -> if (isBoolLit(node.thenBranch, "True") && isBoolLit(node.elseBranch, "False"))
+            is ParsedIf -> if (isBoolLit(node.thenBranch, BuiltinTypes.TRUE) && isBoolLit(node.elseBranch, BuiltinTypes.FALSE))
                 srcOf(node.condition.loc) else null
 
             else -> null
