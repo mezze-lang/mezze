@@ -49,7 +49,7 @@ import { lessons } from '../data/lessons'
 <script>
   import { lessons } from '../data/lessons'
   import { loadMezze } from '../scripts/mezze-runtime'
-  import { highlight, withError } from '../lib/highlight'
+  import { esc, highlight, withError } from '../lib/highlight'
 
   const $ = (s) => document.querySelector(s)
   const srcEl = $('.ed-src'), codeEl = $('#ed-code'), preEl = $('.ed-hl')

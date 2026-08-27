@@ -15,7 +15,8 @@ const KEYWORDS = [
   'with', 'having', 'where', 'for', 'pub',
 ]
 
-const esc = (s: string) =>
+/** HTML-escape. Exported because callers building their own markup need it. */
+export const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 const RE = new RegExp(
