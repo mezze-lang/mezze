@@ -674,7 +674,7 @@ class TypedAstBuilder(
                 TypedSeq(elements, MezzeType.SeqType(elemType), loc)
             }
             is ParsedBinaryOp -> {
-                val op = OperatorMapping.getBinaryOp(expr.op)
+                val op = expr.op.resolved
                 if (op != null) {
                     val desugared = ParsedFunctionCall(
                         function = ParsedMemberAccess(expr.left, op.method, expr.loc),

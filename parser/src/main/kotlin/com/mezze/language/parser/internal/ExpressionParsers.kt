@@ -3,6 +3,7 @@ package com.mezze.language.parser.internal
 import com.mezze.language.parsedast.*
 import com.mezze.language.parser.*
 import com.mezze.language.ast.SyntaxMetadata
+import com.mezze.language.ast.OperatorMapping
 
 import com.mezze.language.parser.internal.lib.*
 
@@ -2760,7 +2761,7 @@ internal fun MezzeParser.desugarBinaryOperatorParsed(
     right: ParsedExpr,
     loc: Loc
 ): ParsedExpr {
-    return ParsedBinaryOp(operator, left, right, loc)
+    return ParsedBinaryOp(OperatorMapping.parse(operator), left, right, loc)
 }
 
 internal fun MezzeParser.parseParsedInterpolatedString(

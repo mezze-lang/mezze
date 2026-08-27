@@ -10,11 +10,11 @@ import com.mezze.language.ast.SyntaxMetadata
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 
 internal fun ExpressionConstraintGenerator.generateBinaryOp(expr: ParsedBinaryOp, context: ConstraintContext): ConstraintResult {
-    val op = OperatorMapping.getBinaryOp(expr.op)
+    val op = expr.op.resolved
         ?: throw TypeCheckError(
-            "Unknown operator: ${expr.op}", expr.loc,
+            "Unknown operator: ${expr.op.symbol}", expr.loc,
             code = ErrorCode.T0401_UNKNOWN_OPERATOR,
-            hints = listOf("binary operators desugar to method calls; check that `${expr.op}` is a known operator"),
+            hints = listOf("binary operators desugar to method calls; check that `${expr.op.symbol}` is a known operator"),
         )
 
     val desugared = ParsedFunctionCall(
@@ -23,7 +23,7 @@ internal fun ExpressionConstraintGenerator.generateBinaryOp(expr: ParsedBinaryOp
         loc = expr.loc
     )
 
-    SyntaxMetadata.markAsOperator(expr.loc, expr.op)
+    SyntaxMetadata.markAsOperator(expr.loc, expr.op.symbol)
 
     return generate(desugared, context)
 }

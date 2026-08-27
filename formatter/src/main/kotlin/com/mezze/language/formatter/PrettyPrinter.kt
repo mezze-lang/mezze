@@ -705,14 +705,14 @@ class PrettyPrinter {
     }
 
     private fun printBinaryOp(expr: ParsedBinaryOp) {
-        val needsParensLeft = needsParens(expr.left, expr.op, isLeft = true)
-        val needsParensRight = needsParens(expr.right, expr.op, isLeft = false)
+        val needsParensLeft = needsParens(expr.left, expr.op.symbol, isLeft = true)
+        val needsParensRight = needsParens(expr.right, expr.op.symbol, isLeft = false)
 
         if (needsParensLeft) append("(")
         printExpr(expr.left)
         if (needsParensLeft) append(")")
 
-        append(" ${expr.op} ")
+        append(" ${expr.op.symbol} ")
 
         if (needsParensRight) append("(")
         printExpr(expr.right)
@@ -1230,7 +1230,7 @@ class PrettyPrinter {
     private fun needsParens(expr: ParsedExpr, op: String, isLeft: Boolean): Boolean {
         if (expr !is ParsedBinaryOp) return false
         val outerPrec = operatorPrecedence(op)
-        val innerPrec = operatorPrecedence(expr.op)
+        val innerPrec = operatorPrecedence(expr.op.symbol)
         return if (isLeft) innerPrec < outerPrec else innerPrec <= outerPrec
     }
 
@@ -1260,7 +1260,7 @@ class PrettyPrinter {
         is ParsedVariantConstruct -> expr.constructor.length + (expr.value?.let { estimateExprWidth(it) + 1 } ?: 0)
         is ParsedMemberAccess -> estimateExprWidth(expr.receiver) + expr.member.length + 1
         is ParsedFunctionCall -> estimateExprWidth(expr.function) + estimateExprWidth(expr.arguments) + 1
-        is ParsedBinaryOp -> estimateExprWidth(expr.left) + expr.op.length + 2 + estimateExprWidth(expr.right)
+        is ParsedBinaryOp -> estimateExprWidth(expr.left) + expr.op.symbol.length + 2 + estimateExprWidth(expr.right)
         is ParsedRecordLit -> estimateRecordLitWidth(expr)
         is ParsedParens -> estimateExprWidth(expr.expr) + 2
         is ParsedPipe -> estimateExprWidth(expr.left) + estimateExprWidth(expr.right) + 4

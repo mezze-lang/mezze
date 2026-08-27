@@ -156,7 +156,7 @@ class NumericLiteralUnderscoreTest {
         // Operators are now preserved as ParsedBinaryOp in the AST
         assert(letBinding.value is ParsedBinaryOp)
         val binOp = letBinding.value as ParsedBinaryOp
-        assertEquals("+", binOp.op)
+        assertEquals("+", binOp.op.symbol)
         assertEquals(1000L, (binOp.left as ParsedIntLit).value)
         assertEquals(2000L, (binOp.right as ParsedIntLit).value)
     }
@@ -168,6 +168,6 @@ class NumericLiteralUnderscoreTest {
         val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
         assert(letBinding.value is ParsedBinaryOp)
         val binOp = letBinding.value as ParsedBinaryOp
-        assertEquals("+", binOp.op)
+        assertEquals("+", binOp.op.symbol)
     }
 }

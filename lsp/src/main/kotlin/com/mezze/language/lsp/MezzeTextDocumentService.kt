@@ -6912,7 +6912,7 @@ class MezzeTextDocumentService(
             }
 
             // x == True -> x ; x == False -> x.not {}  (either side)
-            is ParsedBinaryOp -> if (node.op == "==") {
+            is ParsedBinaryOp -> if (node.op.isEquality) {
                 when {
                     isBoolLit(node.right, "True") -> srcOf(node.left.loc)
                     isBoolLit(node.left, "True") -> srcOf(node.right.loc)

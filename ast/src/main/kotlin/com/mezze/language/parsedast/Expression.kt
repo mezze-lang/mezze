@@ -1,5 +1,6 @@
 package com.mezze.language.parsedast
 
+import com.mezze.language.ast.BinaryOperator
 import kotlinx.serialization.Serializable
 
 /**
@@ -117,7 +118,7 @@ data class ParsedFunctionCall(
  */
 @Serializable
 data class ParsedBinaryOp(
-    val op: String,
+    val op: BinaryOperator,
     val left: ParsedExpr,
     val right: ParsedExpr,
     override val loc: Loc

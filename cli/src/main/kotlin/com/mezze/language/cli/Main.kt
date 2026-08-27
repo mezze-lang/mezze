@@ -548,7 +548,7 @@ private fun prettyPrintParsedExpr(expr: ParsedExpr): String {
         is ParsedPipe -> "${prettyPrintParsedExpr(expr.left)} |> ${prettyPrintParsedExpr(expr.right)}"
         is ParsedPipePlaceholder -> "@"
         is ParsedParens -> "(${prettyPrintParsedExpr(expr.expr)})"
-        is ParsedBinaryOp -> "${prettyPrintParsedExpr(expr.left)} ${expr.op} ${prettyPrintParsedExpr(expr.right)}"
+        is ParsedBinaryOp -> "${prettyPrintParsedExpr(expr.left)} ${expr.op.symbol} ${prettyPrintParsedExpr(expr.right)}"
     }
 }
 

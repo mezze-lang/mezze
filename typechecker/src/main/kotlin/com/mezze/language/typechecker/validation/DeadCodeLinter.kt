@@ -119,7 +119,7 @@ object DeadCodeLinter {
                 "condition itself (or its negation)."
 
             // x == True / True == x / x == False / False == x
-            expr is ParsedBinaryOp && expr.op == "==" &&
+            expr is ParsedBinaryOp && expr.op.isEquality &&
                 (isBoolLiteral(expr.left) || isBoolLiteral(expr.right)) ->
                 "Comparing a boolean to a boolean literal is redundant — `x == True` is `x`, " +
                 "`x == False` is `x.not {}`."
