@@ -8,31 +8,31 @@ class OperatorMappingTest {
 
     @Test
     fun `test arithmetic binary operators`() {
-        assertEquals(OperatorMapping.BinaryOp("NumAdd", "add"), OperatorMapping.getBinaryOp("+"))
-        assertEquals(OperatorMapping.BinaryOp("NumSub", "sub"), OperatorMapping.getBinaryOp("-"))
-        assertEquals(OperatorMapping.BinaryOp("NumMul", "mul"), OperatorMapping.getBinaryOp("*"))
-        assertEquals(OperatorMapping.BinaryOp("NumDiv", "div"), OperatorMapping.getBinaryOp("/"))
-        assertEquals(OperatorMapping.BinaryOp("NumMod", "mod"), OperatorMapping.getBinaryOp("%"))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.NumAdd, "add"), OperatorMapping.getBinaryOp("+"))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.NumSub, "sub"), OperatorMapping.getBinaryOp("-"))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.NumMul, "mul"), OperatorMapping.getBinaryOp("*"))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.NumDiv, "div"), OperatorMapping.getBinaryOp("/"))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.NumMod, "mod"), OperatorMapping.getBinaryOp("%"))
     }
 
     @Test
     fun `test equality binary operators`() {
-        assertEquals(OperatorMapping.BinaryOp("Eq", "eq"), OperatorMapping.getBinaryOp("=="))
-        assertEquals(OperatorMapping.BinaryOp("Eq", "neq"), OperatorMapping.getBinaryOp("!="))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.Eq, "eq"), OperatorMapping.getBinaryOp("=="))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.Eq, "neq"), OperatorMapping.getBinaryOp("!="))
     }
 
     @Test
     fun `test ordering binary operators`() {
-        assertEquals(OperatorMapping.BinaryOp("Ord", "lt"), OperatorMapping.getBinaryOp("<"))
-        assertEquals(OperatorMapping.BinaryOp("Ord", "gt"), OperatorMapping.getBinaryOp(">"))
-        assertEquals(OperatorMapping.BinaryOp("Ord", "le"), OperatorMapping.getBinaryOp("<="))
-        assertEquals(OperatorMapping.BinaryOp("Ord", "ge"), OperatorMapping.getBinaryOp(">="))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.Ord, "lt"), OperatorMapping.getBinaryOp("<"))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.Ord, "gt"), OperatorMapping.getBinaryOp(">"))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.Ord, "le"), OperatorMapping.getBinaryOp("<="))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.Ord, "ge"), OperatorMapping.getBinaryOp(">="))
     }
 
     @Test
     fun `test logical binary operators`() {
-        assertEquals(OperatorMapping.BinaryOp("LogicalAnd", "and"), OperatorMapping.getBinaryOp("&&"))
-        assertEquals(OperatorMapping.BinaryOp("LogicalOr", "or"), OperatorMapping.getBinaryOp("||"))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.LogicalAnd, "and"), OperatorMapping.getBinaryOp("&&"))
+        assertEquals(OperatorMapping.BinaryOp(OperatorMapping.OpAbility.LogicalOr, "or"), OperatorMapping.getBinaryOp("||"))
     }
 
     @Test

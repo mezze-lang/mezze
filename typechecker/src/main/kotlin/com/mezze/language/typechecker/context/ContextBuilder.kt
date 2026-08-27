@@ -84,27 +84,13 @@ class ContextBuilder {
 
         for (perfDecl in module.decls.filterIsInstance<ParsedPerformerDecl>()) {
             val refName = perfDecl.effect.localName
-            val isAbility = refName in allAbilityNames
-            val isEffect = refName in allEffectNames
 
-            if (isAbility && !isEffect) {
-                val converted = ParsedImplAbilityDecl(
-                    target = ParsedImplTarget.Named(perfDecl.effect),
-                    targetTypes = listOf(ParsedNamedType(perfDecl.performerName, perfDecl.loc)),
+            if (ImplClassifier.isAbilityImpl(refName, allAbilityNames, allEffectNames)) {
+                val converted = ImplClassifier.performerToAbilityImpl(
+                    perfDecl = perfDecl,
                     forallVars = emptyList(),
-                    associatedTypeBindings = perfDecl.associatedTypeBindings,
-                    operations = perfDecl.operations.map { op ->
-                        ParsedImplOp(
-                            name = op.name,
-                            paramType = op.paramType?.takeUnless { it is ParsedRecordType && it.entries.isEmpty() },
-                            returnType = op.returnType?.takeUnless { it is ParsedRecordType && it.entries.isEmpty() },
-                            implementation = op.implementation,
-                            abilityConstraints = emptyList(),
-                            loc = op.loc
-                        )
-                    },
-                    loc = perfDecl.loc,
-                    contentHash = null
+                    stripEmptyRecordParams = true,
+                    targetLoc = perfDecl.loc,
                 )
                 val withHash = ensureContentHash(converted, file)
                 resolvedAbilityImplDecls.add(withHash)

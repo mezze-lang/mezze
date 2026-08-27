@@ -112,28 +112,16 @@ internal fun resolveParsedImplDeclarations(module: ParsedModule): ParsedModule {
 
     val resolvedDecls = module.decls.map { decl ->
         if (decl is ParsedPerformerDecl &&
-            decl.effect.localName in abilityNames &&
-            decl.effect.localName !in effectNames) {
-            val targetType = ParsedNamedType(decl.performerName, decl.effect.loc)
-            val targetTypes = listOf(targetType)
-
-            ParsedImplAbilityDecl(
-                target = ParsedImplTarget.Named(decl.effect),
-                targetTypes = targetTypes,
-                abilityTypeArgs = emptyList(),
-                forallVars = collectTypeVarNames(targetTypes),
-                associatedTypeBindings = decl.associatedTypeBindings,
-                operations = decl.operations.map { op ->
-                    ParsedImplOp(
-                        name = op.name,
-                        paramType = op.paramType,
-                        returnType = op.returnType,
-                        implementation = op.implementation,
-                        abilityConstraints = emptyList(),
-                        loc = op.loc
-                    )
-                },
-                loc = decl.loc
+            ImplClassifier.isAbilityImpl(decl.effect.localName, abilityNames, effectNames)) {
+            ImplClassifier.performerToAbilityImpl(
+                perfDecl = decl,
+                // A generic impl's performer name IS a type var (`impl Somable for 'a`),
+                // which is a forall introduction; preserve it exactly as the historic
+                // collectTypeVarNames(targetTypes) did. (ContextBuilder passes
+                // emptyList() because it re-derives forallVars downstream.) #303
+                forallVars = collectTypeVarNames(listOf(ParsedNamedType(decl.performerName, decl.effect.loc))),
+                stripEmptyRecordParams = false,
+                targetLoc = decl.effect.loc,
             )
         } else {
             decl
