@@ -7,6 +7,7 @@ import com.mezze.language.codebase.StorePopulator
 import com.mezze.language.parsedast.diagnostics.display
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
+import com.mezze.language.typechecker.diagnostics.*
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.ast.prettyPrintType

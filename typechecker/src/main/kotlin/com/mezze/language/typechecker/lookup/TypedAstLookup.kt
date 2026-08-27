@@ -1,4 +1,4 @@
-package com.mezze.language.lsp
+package com.mezze.language.typechecker.lookup
 
 import com.mezze.language.typedast.*
 import com.mezze.language.parsedast.Loc

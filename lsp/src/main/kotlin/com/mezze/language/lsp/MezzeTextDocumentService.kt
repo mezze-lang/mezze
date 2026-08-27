@@ -1,5 +1,7 @@
 package com.mezze.language.lsp
 
+import com.mezze.language.typechecker.lookup.TypedAstLookup
+
 import com.mezze.language.ast.*
 import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.typechecker.TypeCheckResult

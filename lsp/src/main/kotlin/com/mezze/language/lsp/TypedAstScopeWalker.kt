@@ -1,5 +1,7 @@
 package com.mezze.language.lsp
 
+import com.mezze.language.typechecker.lookup.TypedAstLookup
+
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.typedast.*

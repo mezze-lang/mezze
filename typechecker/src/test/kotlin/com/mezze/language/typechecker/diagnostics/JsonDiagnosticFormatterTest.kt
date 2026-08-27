@@ -1,11 +1,5 @@
-package com.mezze.language.cli
+package com.mezze.language.typechecker.diagnostics
 
-import com.mezze.language.cli.commands.CheckResultJson
-import com.mezze.language.cli.commands.DiagnosticJson
-import com.mezze.language.cli.commands.FixHintJson
-import com.mezze.language.cli.commands.JsonDiagnosticFormatter
-import com.mezze.language.cli.commands.Severity
-import com.mezze.language.cli.commands.Status
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.FixHint
