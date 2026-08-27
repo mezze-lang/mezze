@@ -1,0 +1,86 @@
+/* ===========================================================================
+   Site header — rendered once by Base, identical on every page.
+   =========================================================================== */
+
+.site-bar {
+  position: sticky; top: 0; z-index: 20;
+  border-bottom: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--ground) 90%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+}
+.site-bar-inner {
+  padding: .85rem var(--page-pad);
+  display: flex; align-items: center; gap: 1.4rem;
+  font-size: .82rem; color: var(--soft);
+}
+.site-bar nav { display: flex; gap: 1.2rem; }
+.site-bar nav a { color: inherit; text-decoration: none; }
+.site-bar nav a:hover { color: var(--primary); }
+.site-bar nav a.on { color: var(--primary); font-weight: 600; }
+.site-bar-actions { margin-left: auto; display: flex; align-items: center; gap: .55rem; }
+
+.brand {
+  display: inline-flex; align-items: center; gap: .45rem;
+  font-weight: 800; font-size: 1rem; color: var(--primary); text-decoration: none;
+}
+.brand.sm { font-size: .88rem; font-weight: 700; }
+
+.pill {
+  padding: .34rem .9rem; border-radius: var(--r-pill); font-size: .78rem;
+  background: var(--primary); color: var(--on-primary); text-decoration: none;
+}
+.pill:hover { background: color-mix(in srgb, var(--primary) 86%, #000); }
+
+
+@media (max-width: 760px) { .site-bar nav { display: none; } }
+
+/* Mezze syntax tokens — see src/lib/highlight.ts */
+.tk-com    { color: var(--syn-com); font-style: italic; }
+.tk-str    { color: var(--syn-str); }
+.tk-tv     { color: var(--syn-tv); font-style: italic; }
+.tk-eff    { color: var(--syn-eff); }
+.tk-bool   { color: var(--syn-num); }
+.tk-num    { color: var(--syn-num); }
+.tk-kw     { color: var(--syn-kw); }
+.tk-fn     { color: var(--syn-fn); }
+.tk-mth    { color: var(--syn-mth); }
+.tk-fld    { color: var(--syn-fld); }
+.tk-ctor   { color: var(--syn-type); }
+.tk-interp { color: var(--syn-interp); }
+.tk-err    { text-decoration: underline wavy var(--syn-err); text-underline-offset: 3px; }
+
+/* ===========================================================================
+   Mascot — all six dishes are in the DOM; exactly one is visible.
+   These rules live here, not in a scoped <style>, because Astro's scoped-style
+   compiler was dropping them and every icon rendered stacked and visible.
+   =========================================================================== */
+
+.mascot {
+  position: relative;
+  display: inline-block;
+  width: var(--s, 22px);
+  height: var(--s, 22px);
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  line-height: 0;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: transform .18s cubic-bezier(.34, 1.56, .64, 1);
+}
+.mascot.is-static { cursor: default; }
+.mascot:not(.is-static):hover { transform: rotate(-6deg) scale(1.06); }
+.mascot:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 8px; }
+
+.mascot img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity .18s;
+  pointer-events: none;
+}
+.mascot img.on { opacity: 1; }

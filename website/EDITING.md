@@ -13,7 +13,11 @@ ordinary edits.
 | Homepage feature blurbs | `src/data/content.ts` → `features` |
 | Taste of Mezze lessons — prose *and* code | `src/data/lessons.ts` |
 | Blog posts | `src/content/blog/*.md` |
-| Colours, spacing, every style | `src/styles/tokens.css` |
+| Colours and spacing | `src/styles/tokens.css` |
+| Landing-page styles | `src/styles/page.css` |
+| Header, mascot, syntax colours | `src/styles/chrome.css` |
+| Blog styles | `src/styles/blog.css` |
+| Editor styles | `src/components/Editor.astro` |
 | The dish cycle and its order | `src/data/dishes.ts` |
 
 ## Inline syntax
@@ -89,9 +93,8 @@ should stay that way.
 
 ## Building
 
-Use `npx astro build`. `npm run build` also runs `astro check`, which currently
-reports pre-existing type errors on the inline DOM scripts and blocks the
-build.
+`npm run build` runs `astro check` first, then builds. Both should pass
+cleanly; a type error is a real one.
 
 ## Icons
 

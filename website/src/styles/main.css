@@ -1,0 +1,14 @@
+/**
+ * The one stylesheet Base imports. Order matters: tokens define the custom
+ * properties everything else reads.
+ *
+ * These are plain stylesheets rather than scoped <style> blocks because
+ * Astro's scoped-style compiler drops rules whose selectors it cannot match
+ * to markup in the same file — which is most of these, since the classes are
+ * produced at runtime by lib/text.ts and lib/highlight.ts.
+ */
+@import './tokens.css';   /* palette, surfaces, semantic and syntax colours */
+@import './marks.css';    /* highlighter marks and squiggles */
+@import './chrome.css';   /* header, mascot, theme toggle, syntax classes */
+@import './page.css';     /* landing page */
+@import './blog.css';     /* blog index and posts */

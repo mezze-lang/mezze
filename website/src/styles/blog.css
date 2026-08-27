@@ -1,0 +1,50 @@
+/* --- blog ------------------------------------------------------------- */
+/* Cards and posts default to the current dish; frontmatter `colour` overrides. */
+.blog-index, .post { --c: var(--primary); }
+
+.blog-head { padding: 1rem 0 1.8rem; }
+.blog-head h1, .post-head h1 { margin: 0 0 .5rem; font-size: 2.1rem; letter-spacing: -.02em; }
+.blog-head .lede, .post-head .lede { margin: 0; color: var(--soft); font-size: 1.02rem; }
+
+.post-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
+.post-card {
+  border: 1px solid var(--rule); border-radius: var(--r-md);
+  border-left: 3px solid var(--c); background: var(--surface);
+  transition: border-color .15s, transform .15s;
+}
+.post-card:hover { border-color: color-mix(in srgb, var(--c) 45%, var(--rule)); }
+.post-card a { display: block; padding: 1.1rem 1.3rem; text-decoration: none; color: inherit; }
+.post-card time, .post-head time {
+  font-family: ui-monospace, Menlo, monospace; font-size: .7rem;
+  color: var(--faint); letter-spacing: .04em; text-transform: uppercase;
+}
+.post-card h2 { margin: .35rem 0 .4rem; font-size: 1.12rem; font-weight: 700; }
+.post-card p { margin: 0; color: var(--soft); font-size: .92rem; line-height: 1.6; }
+
+.post .back {
+  display: inline-block; margin-bottom: 1.4rem; font-size: .82rem;
+  color: var(--soft); text-decoration: none;
+}
+.post .back:hover { color: var(--c); }
+.post-head { padding: 0 0 1.6rem; border-bottom: 1px solid var(--rule); margin-bottom: 1.8rem; }
+.post-body { max-width: 40rem; padding-bottom: 3rem; line-height: 1.75; }
+.post-body h2 { margin: 2.2rem 0 .7rem; font-size: 1.22rem; font-weight: 700; }
+.post-body h3 { margin: 1.8rem 0 .6rem; font-size: 1.02rem; font-weight: 700; }
+.post-body p { margin: 0 0 1.05rem; }
+.post-body ul, .post-body ol { margin: 0 0 1.05rem; padding-left: 1.3rem; }
+.post-body li { margin: .3rem 0; }
+.post-body a { color: var(--c); text-underline-offset: 2px; }
+.post-body code {
+  font-family: ui-monospace, Menlo, monospace; font-size: .86em;
+  background: var(--raised); padding: .12em .38em; border-radius: var(--r-sm);
+}
+.post-body pre {
+  background: var(--surface); border: 1px solid var(--rule);
+  border-radius: var(--r-md); padding: 1rem 1.15rem; overflow-x: auto;
+  font-size: .8rem; line-height: 1.7; margin: 0 0 1.2rem;
+}
+.post-body pre code { background: none; padding: 0; }
+.post-body blockquote {
+  margin: 0 0 1.2rem; padding: .2rem 0 .2rem 1.1rem;
+  border-left: 3px solid var(--c); color: var(--soft);
+}
