@@ -43,7 +43,7 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
                 "'${expr.typeName}' is a record type, not a newtype. Construct with '${expr.typeName} { <fields> = <values> }'."
             aliasDecl != null ->
                 "'${expr.typeName}' is a transparent type alias, not a newtype. Just construct the aliased type directly — the value is interchangeable. If you want a distinct nominal type, declare `newtype ${expr.typeName} = ...` instead of `type`."
-            expr.typeName in setOf("Int", "Nat", "Float", "Str", "Bool", "Char", "Bytes", "Frac", "ByteBuffer") ->
+            expr.typeName in PrimitiveTypes.allNames ->
                 "'${expr.typeName}' is a primitive type, not a newtype. Only newtypes can be constructed with '.(...)'. If you meant a module function, use '${expr.typeName.lowercase()}::<function> { ... }'."
             expr.typeName.firstOrNull()?.isLowerCase() == true ->
                 "'${expr.typeName}' starts with a lowercase letter, so it's a value or module — not a type. " +

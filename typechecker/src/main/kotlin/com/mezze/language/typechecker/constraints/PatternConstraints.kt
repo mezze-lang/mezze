@@ -48,7 +48,7 @@ class PatternConstraintGenerator {
                     "'${pattern.typeName}' is an effect, not a newtype; cannot destructure with '.(...)'."
                 variantDecl != null ->
                     "'${pattern.typeName}' is a variant type, not a newtype. Destructure with '${pattern.typeName} { <field> = <pat> }'."
-                pattern.typeName in setOf("Int", "Nat", "Float", "Str", "Bool", "Char") ->
+                pattern.typeName in PrimitiveTypes.allNames ->
                     "'${pattern.typeName}' is a primitive type, not a newtype; cannot destructure with '.(...)'."
                 else -> "Unknown type '${pattern.typeName}'. Did you forget to import it?"
             }
