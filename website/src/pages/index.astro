@@ -57,20 +57,24 @@ import { highlight } from '../lib/highlight'
   <script>
     import { playground } from '../data/content'
     import { highlight } from '../lib/highlight'
-    import { prewarmMezzeOnIntent } from '../scripts/mezze-runtime'
+    import { prewarmMezze } from '../scripts/mezze-runtime'
     import hovers from '../data/hovers.json'
     import { renderHover } from '../lib/hover'
     import { hideHoverTip, showHoverTip } from '../scripts/hover-tip'
 
     // Nothing here needs the runtime — the samples are highlighted at build
-    // time and their output recorded. So do not fetch 16MB on arrival; arm it
-    // to start only when the reader aims at a page that does need it.
-    prewarmMezzeOnIntent()
+    // time and their output recorded. Fetch it during the first idle moment
+    // anyway, so the tour starts instantly for anyone who goes there next.
+    prewarmMezze()
 
     // The panel replays each sample's recorded output rather than compiling.
     // Every one of these was run through the real compiler; the tour is where
     // code is actually editable and executed.
     const codeEl = document.getElementById('panel-code') as HTMLElement
+    // The <pre> is the visible box; <code> is only as tall as its text, so a
+    // pointer moving into the panel's padding leaves <code> without firing
+    // mouseleave and the tooltip stayed up over nothing.
+    const paneEl = codeEl.parentElement as HTMLElement
     const blurbEl = document.getElementById('panel-blurb') as HTMLElement
     const msgEl = document.getElementById('panel-msg') as HTMLElement
     const runBtn = document.querySelector('.run') as HTMLButtonElement
@@ -141,7 +145,7 @@ import { highlight } from '../lib/highlight'
       return [line, col]
     }
 
-    codeEl.addEventListener('mousemove', (e) => {
+    paneEl.addEventListener('mousemove', (e) => {
       const p = posAt(e.clientX, e.clientY)
       if (!p) return hideTip()
       const map = (hovers as Record<string, Record<string, string>>)[TAB_KEYS[current]]
@@ -151,11 +155,17 @@ import { highlight } from '../lib/highlight'
       // editor shows — so it goes through the same renderer as the tour.
       showHoverTip(renderHover(t), e.clientX, e.clientY)
     })
-    codeEl.addEventListener('mouseleave', hideTip)
-    // mouseleave alone strands the tooltip when the window loses focus or the
-    // pointer exits through the window edge without crossing the code block.
+    paneEl.addEventListener('mouseleave', hideTip)
+    // mouseleave alone strands the tooltip when the window loses focus, the
+    // pointer exits through the window edge, or the reader clicks elsewhere.
     window.addEventListener('blur', hideTip)
     document.addEventListener('mouseleave', hideTip)
+    document.addEventListener('pointerdown', (e) => {
+      if (!paneEl.contains(e.target as Node)) hideTip()
+    })
+    // Switching dish replaces the code under the pointer, so whatever the
+    // tooltip is describing no longer exists.
+    window.addEventListener('scroll', hideTip, { passive: true })
 
     runBtn.disabled = false
     runBtn.addEventListener('click', () => {

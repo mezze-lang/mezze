@@ -85,9 +85,13 @@
   --shadow: 0 1px 2px rgb(36 31 25 / .05), 0 4px 16px rgb(36 31 25 / .04);
 }
 
-/* --- system dark, unless the reader explicitly chose light ------------- */
-:root:not([data-theme="light"]) {
-  @media (prefers-color-scheme: dark) {
+/* --- system dark, unless the reader explicitly chose light -------------
+   Media query outside, selector inside — NOT the nested form. Written as
+   `:root:not(…) { @media … { } }`, the minifier dropped the selector and left
+   the declarations bare inside the media query, so they applied to nothing and
+   every reader on a light OS still got dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
     --olive:     #8FB56A;
     --aubergine: #B98FD6;
     --tomato:    #F0736A;

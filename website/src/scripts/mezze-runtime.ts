@@ -89,43 +89,43 @@ export function loadMezze(): Promise<MezzeRuntime> {
 }
 
 /**
- * Warm the HTTP cache when the reader looks likely to need the runtime.
+ * Start fetching the runtime once the page has settled.
  *
- * The bundle is ~16MB gzipped, so fetching it on every page load spends a
- * phone-sized download on visitors who never open an editor. Instead this
- * arms a one-shot prefetch that fires on the first real signal of intent:
- * pointing at or focusing a link to a page that has an editor.
+ * Fetching on load competes with the page's own assets and spends ~16MB
+ * gzipped on a reader who may never open an editor; waiting for a hover means
+ * the download only begins as they click, so they wait the whole thing. This
+ * splits the difference: begin during the first idle moment after load, so the
+ * bytes are usually in cache before anyone asks, and prefetch (not preload)
+ * keeps it at the lowest priority so nothing visible is delayed.
  *
- * A full page navigation tears down the JS context, so the in-memory promise
- * cannot survive it — the browser cache is what carries the runtime from one
- * page to the next, via the long-lived Cache-Control in public/_headers.
+ * Skipped under Save-Data and on 2g/3g, where a speculative 16MB is a real
+ * cost — those readers pay it only when they actually open an editor, via the
+ * hover trigger below.
  *
- * Respects Save-Data and 2g/3g connections: there, the reader waits for the
- * editor page rather than paying for a download they may not use.
- *
- * @param selector links whose hover/focus should trigger the prefetch.
+ * @param selector links whose hover/focus should trigger the fetch immediately,
+ *                 for the case where the idle fetch was skipped or is still
+ *                 pending.
  */
-export function prewarmMezzeOnIntent(selector = 'a[href^="/taste"]'): void {
+export function prewarmMezze(selector = 'a[href^="/taste"]'): void {
   if (window.__mezzePromise || window.__mezzePrefetched) return
 
   const conn = (navigator as any).connection
-  if (conn?.saveData) return
-  if (/2g|3g/.test(conn?.effectiveType ?? '')) return
+  const frugal = conn?.saveData || /2g|3g/.test(conn?.effectiveType ?? '')
 
-  const links = Array.from(document.querySelectorAll(selector))
-  if (!links.length) return
+  const fire = () => prefetchMezze()
 
-  const fire = () => {
-    prefetchMezze()
-    for (const el of links) {
-      el.removeEventListener('pointerenter', fire)
-      el.removeEventListener('focus', fire)
-    }
-  }
-  for (const el of links) {
+  // Hover/focus is the strong signal — honour it even when frugal.
+  for (const el of Array.from(document.querySelectorAll(selector))) {
     el.addEventListener('pointerenter', fire, { once: true })
     el.addEventListener('focus', fire, { once: true })
   }
+
+  if (frugal) return
+
+  // Idle, not load: let the page finish its own work first.
+  const idle = (window as any).requestIdleCallback
+  if (typeof idle === 'function') idle(fire, { timeout: 3000 })
+  else setTimeout(fire, 1500)
 }
 
 /** Queue the bytes into the HTTP cache without instantiating anything. */
