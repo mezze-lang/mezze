@@ -17,15 +17,16 @@ export const lessons: Lesson[] = [
   {
     slug: "primitives",
     title: "Values and types",
-    blurb: "let, inference, and why interpolation asks for a Str.",
+    blurb: "Bindings, inference, and a live editor.",
     body: [
-      "Everything starts with **let**. Types are inferred, so none of these bindings say what they are — but they all have exact types, and the compiler knows them.",
-      "String interpolation with `$(...)` accepts a `Str` and nothing else. That looks strict at first; it means a stray value can never quietly become text in a log line.",
-      "Hover any name to see what it was inferred as.",
+      "This editor is **live**. Change anything and press Run, or hover a name to see the type the compiler inferred for it — no annotations required.",
+      "Everything starts with `let`. None of these bindings say what they are, but all of them have exact types.",
+      "Interpolation with `$(...)` takes a `Str` and nothing else. Strict at first glance; it means a stray value never quietly becomes text in a log line.",
     ],
     code: `use std::effects::log::{ Console, println }
 
-# let binds a value. Types are inferred — none are written here.
+# This editor is live. Change anything and press Run — or hover a name to
+# see the type the compiler inferred for it.
 let name = "Mezze"
 let year = 2026
 let ready = True
@@ -38,17 +39,38 @@ let main = {} -> perform Console in do
   println { msg = "7 / 2 = \$((7 / 2).to_str {})" }`,
   },
   {
-    slug: "records",
-    title: "Records",
-    blurb: "Fields, copy-with, and destructuring.",
+    slug: "functions",
+    title: "Functions",
+    blurb: "Named parameters, always.",
     body: [
-      "A **record** is just named fields. There is no class to declare and no constructor to call — `{ x = 3, y = 4 }` is the value.",
-      "`{ ...point, x = 10 }` copies with one field changed. The original is untouched; nothing mutates.",
-      "`let { x, y } = point` destructures. The same shape works as a function parameter, which is why every Mezze function takes exactly one record.",
+      "A function is `{ params } -> body`. Every parameter is **named** — Mezze has no positional arguments at all.",
+      "So a call reads the way it is written, and the order is yours: both calls below do the same thing.",
+      "Add a parameter later and existing calls keep compiling. That is the trade positional arguments cannot make.",
     ],
     code: `use std::effects::log::{ Console, println }
 
-# A record is just fields. No class, no constructor.
+# Every parameter is named — there are no positional arguments in Mezze.
+let clamp = { val, low, high } ->
+  if val < low then low else if val > high then high else val
+
+# So a call reads the way it is written, in any order.
+let main = {} -> perform Console in do
+  println { msg = clamp { val = 42, low = 0, high = 10 }.to_str {} }
+  println { msg = clamp { low = 0, high = 10, val = 5 }.to_str {} }`,
+  },
+  {
+    slug: "records",
+    title: "Records",
+    blurb: "The parameter list was a record all along.",
+    body: [
+      "That parameter list — `{ val, low, high }` — is a **record**: one value with named fields. Records are that same shape standing on their own.",
+      "`{ ...point, x = 10 }` copies with one field changed. The original is untouched; nothing mutates.",
+      "And `let { x, y } = point` destructures using the syntax a parameter list already uses. One idea, three places.",
+    ],
+    code: `use std::effects::log::{ Console, println }
+
+# That parameter list was a record all along: { val, low, high } is one
+# value with named fields, and records are that same shape on their own.
 let point = { x = 3, y = 4 }
 
 let main = {} -> perform Console in do
@@ -56,10 +78,9 @@ let main = {} -> perform Console in do
 
   # Copy with a change. The original is untouched.
   let moved = { ...point, x = 10 }
-  println { msg = "moved x = \$(moved.x.to_str {})" }
-  println { msg = "original x = \$(point.x.to_str {})" }
+  println { msg = "moved: \$(moved.x.to_str {}), original: \$(point.x.to_str {})" }
 
-  # Destructure in a let.
+  # Destructure — the same syntax a parameter list uses.
   let { x, y } = point
   println { msg = "\$(x.to_str {}), \$(y.to_str {})" }`,
   },
@@ -147,31 +168,6 @@ let main = {} -> perform Console in do
   println { msg = "open:   \$(open { r = big }.to_str {})" }`,
   },
   {
-    slug: "functions",
-    title: "Functions",
-    blurb: "One record in, and functions as values.",
-    body: [
-      "A function takes **one record**, which is why every argument is named at the call site. `clamp { val = 42, low = 0, high = 10 }` reads the way it is written.",
-      "Reorder the fields and existing calls keep compiling. Positional arguments cannot offer that.",
-      "Functions are values too: `twice` takes one as a field and calls it.",
-    ],
-    code: `use std::effects::log::{ Console, println }
-
-# A function takes one record, so every argument is named at the call site.
-let clamp: { val: Int, low: Int, high: Int } -> Int = { val, low, high } ->
-  if val < low then low else if val > high then high else val
-
-# Functions are values: pass one in, return one out.
-let twice: { f: { n: Int } -> Int, n: Int } -> Int = { f, n } ->
-  f { n = f { n = n } }
-
-let inc = { n } -> n + 1
-
-let main = {} -> perform Console in do
-  println { msg = "\$(clamp { val = 42, low = 0, high = 10 }.to_str {})" }
-  println { msg = "\$(twice { f = inc, n = 5 }.to_str {})" }`,
-  },
-  {
     slug: "effects",
     title: "Effects",
     blurb: "What a function does to the world, in its type.",
@@ -225,7 +221,7 @@ let main = {} -> perform Console in do
     title: "Your own abilities",
     blurb: "Interfaces you can implement for any type.",
     body: [
-      "An **ability** declares an interface. The receiver is called `it`, and every method takes a record like any other function.",
+      "An **ability** declares an interface. The receiver is named `it`, and every method takes a record like any other function.",
       "`impl Priced for Book` supplies it for one type — including types you did not write.",
       "`with Priced 'a` on a signature means *any type that implements this*. Write the function once, and it works for every implementation.",
     ],
@@ -282,11 +278,10 @@ let main = {} -> perform Console in perform Defaults in
     blurb: "A record type, an ability, an effect, and a fold.",
     body: [
       "All of it at once: a record type for the data, an ability for behaviour, a `<Log>` row the compiler infers rather than you writing, and a fold over a sequence.",
-      "`x.total {}` is the ability method. `seq::fold` is a plain stdlib function — nothing here is special-cased.",
+      "`x.total {}` is the ability method, and `.fold {}` is a plain stdlib function called as a method. Nothing here is special-cased.",
       "Edit the cart and press Run.",
     ],
-    code: `use std::effects::log::{ Log, Console, println }
-use std::collections::seq
+    code: `use std::effects::log::{ Console, println }
 
 type Item = { name: Str, price: Int, qty: Int }
 
@@ -304,10 +299,9 @@ let main = {} -> perform Console in do
     { name = "pita", price = 199, qty = 3 },
   ]
 
-  seq::map { xs = cart, f = { x } ->
-    println { msg = "\$(x.name): \$(x.total {}.to_str {})" } }
+  cart.map { f = { x } -> println { msg = "\$(x.name): \$(x.total {}.to_str {})" } }
 
-  let sum = seq::fold { xs = cart, init = 0, f = { acc, x } -> acc + x.total {} }
+  let sum = cart.fold { init = 0, f = { acc, x } -> acc + x.total {} }
   println { msg = "total: \$(sum.to_str {}) cents" }`,
   },
 ]

@@ -21,7 +21,10 @@ say "Resolving classpath"
 CP="$(cat "$HERE/.classpath")"
 
 say "Compiling the extractor"
-mkdir -p "$WORK/classes" "$WORK/samples"
+mkdir -p "$WORK/classes"
+# Wipe first: a renamed tab would otherwise leave its old sample behind and
+# ship hovers for code that is no longer on the page.
+rm -rf "$WORK/samples" && mkdir -p "$WORK/samples"
 javac -nowarn -cp "$CP" -d "$WORK/classes" "$HERE/src/HoverExtractor.java"
 
 # The samples live in content.ts; write each tab out as a .mz file first.
