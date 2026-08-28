@@ -37,7 +37,9 @@
 @media (max-width: 760px) {
   .site-bar-inner { gap: .8rem; font-size: .78rem; }
   .site-bar nav { display: flex; gap: .7rem; }
-  .brand span { display: none; }   /* mascot alone is enough at this size */
+  /* Hide the wordmark only. Must not be a bare `.brand span`: the static
+     mascot is itself a span, so that selector hid the whole brand. */
+  .brand > .brand-name { display: none; }   /* mascot alone is enough here */
 }
 
 /* Mezze syntax tokens — see src/lib/highlight.ts */
@@ -75,7 +77,10 @@
   cursor: pointer;
   transition: transform .18s cubic-bezier(.34, 1.56, .64, 1);
 }
-.mascot.is-static { cursor: default; }
+/* Inherit, not default: the static mascot sits inside the brand link, so it
+   should show the same pointer as the text beside it. Standing alone it is
+   decorative and inherits whatever the parent has. */
+.mascot.is-static { cursor: inherit; }
 .mascot:not(.is-static):hover { transform: rotate(-6deg) scale(1.06); }
 .mascot:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 8px; }
 
@@ -99,14 +104,28 @@
   position: fixed; z-index: 50; pointer-events: none;
   background: var(--panel); color: var(--ink);
   border: 1px solid var(--rule); border-radius: 6px;
-  padding: .35rem .6rem; font-size: .8rem;
+  padding: .4rem .6rem; font-size: .8rem;
   box-shadow: 0 4px 14px rgb(0 0 0 / .18);
-  max-width: 40rem; white-space: pre-wrap;
+  /* Narrower than the old 40rem: hover now carries a doc paragraph as well as
+     a signature, and an over-wide tooltip is hard to read and easy to run off
+     the viewport. Long signatures wrap inside the code block instead. */
+  max-width: 34rem; max-height: 20rem; overflow: hidden;
+  display: flex; flex-direction: column; gap: .35rem;
 }
+/* No pre-wrap on the container — its children are blocks now, and the
+   whitespace would be counted twice. The code block keeps its own. */
+.hover-tip .ht-code {
+  margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; overflow-wrap: break-word; line-height: 1.5;
+}
+.hover-tip .ht-doc {
+  margin: 0; color: var(--soft); line-height: 1.5;
+  padding-top: .3rem; border-top: 1px solid var(--rule);
+}
+/* The first paragraph needs no divider when no code precedes it. */
+.hover-tip .ht-doc:first-child { padding-top: 0; border-top: none; }
 .hover-tip code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: none; padding: 0; }
-.hover-tip .ht-name { color: var(--ink); font-weight: 700; }
-.hover-tip .ht-sep  { color: var(--faint); }
-.hover-tip .ht-type { color: var(--syn-type); font-weight: 600; }
+.hover-tip .ht-err { color: var(--err); }
 
 /* A claim that is designed but not yet shipped. Small, muted, and hoverable —
    visible enough to be honest, quiet enough not to undercut the line. */
@@ -119,3 +138,4 @@ sup.tbd {
   vertical-align: super;
   cursor: help;
 }
+.hover-tip .ht-err { color: var(--err); font-weight: 600; white-space: pre-wrap; }

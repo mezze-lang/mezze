@@ -6,6 +6,8 @@
  * swap the source when the lesson changes.
  */
 import { esc, highlight, withError } from '../lib/highlight'
+import { renderHover } from '../lib/hover'
+import { hideHoverTip, moveHoverTip, showHoverTip } from './hover-tip'
 import { loadMezze } from './mezze-runtime'
 
 /** How long typing must pause before diagnostics re-run. */
@@ -23,6 +25,12 @@ export interface EditorHandle {
 }
 
 export function mountEditor(root: HTMLElement): EditorHandle {
+  // Guard against double-mounting: a page that drives its own editor (the
+  // tour) calls this directly, and autoMountEditors() also sweeps the document.
+  if (root.dataset.mounted === '1') {
+    return (root as any).__mezzeHandle as EditorHandle
+  }
+  root.dataset.mounted = '1'
   const q = <T extends Element>(sel: string) => root.querySelector(sel) as T
   const srcEl = q<HTMLTextAreaElement>('.ed-src')
   const codeEl = q<HTMLElement>('.ed-code')
@@ -32,6 +40,8 @@ export function mountEditor(root: HTMLElement): EditorHandle {
   const btns = Array.from(root.querySelectorAll('.ed-bar button')) as HTMLButtonElement[]
 
   let ready = false
+  /** Diagnostics from the last check, for hover to report on. */
+  let diags: any[] = []
 
   const paint = (html?: string) => {
     codeEl.innerHTML = html !== undefined ? html : highlight(srcEl.value)
@@ -52,8 +62,8 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     if (typeof window.checkMezze !== 'function') return
     try {
       const res = window.checkMezze(srcEl.value) as any
-      const ds = res?.diagnostics ?? []
-      paint(ds.length ? withError(srcEl.value, ds[0]) : undefined)
+      diags = res?.diagnostics ?? []
+      paint(diags.length ? withError(srcEl.value, diags[0], diags[0].message) : undefined)
     } catch {
       // Keep the last good paint rather than clearing the editor.
     }
@@ -65,6 +75,9 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     liveTimer = window.setTimeout(liveCheck, LIVE_CHECK_MS)
   })
   srcEl.addEventListener('scroll', syncScroll)
+  // Leaving the editor is a natural point to validate: the reader has stopped
+  // typing, and it costs a typecheck rather than a run.
+  srcEl.addEventListener('blur', liveCheck)
   srcEl.addEventListener('keydown', (e) => {
     if (e.key !== 'Tab') return
     e.preventDefault()
@@ -79,10 +92,6 @@ export function mountEditor(root: HTMLElement): EditorHandle {
   // typeAt walks the TypedAST — the same utility the LSP hover uses — so this
   // resolves locals, parameters and subexpressions, not just top-level
   // bindings. Positions are 1-based, matching Loc.
-  const tip = document.createElement('div')
-  tip.className = 'hover-tip'
-  tip.hidden = true
-  document.body.appendChild(tip)
 
   /**
    * Width of one character in the editor, in px.
@@ -142,7 +151,9 @@ export function mountEditor(root: HTMLElement): EditorHandle {
    * Asks the browser which character is under the cursor rather than dividing
    * by a character width: lines wrap, so a visual row is not a source line and
    * the arithmetic version resolved the wrong token after the first wrap.
-   * Reads from the highlight layer, whose text matches the textarea exactly.
+   *
+   * The caret comes from the textarea, which sits on top — the highlight layer
+   * below it is pointer-events:none, so a hit test never reaches it.
    */
   const posAt = (x: number, y: number): [number, number] | null => {
     const r = srcEl.getBoundingClientRect()
@@ -152,22 +163,14 @@ export function mountEditor(root: HTMLElement): EditorHandle {
       caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
     }
     const caret = doc.caretPositionFromPoint?.(x, y)
-    if (!caret || !codeEl.contains(caret.offsetNode)) return null
+    if (!caret) return null
 
-    const walker = document.createTreeWalker(codeEl, NodeFilter.SHOW_TEXT)
-    let offset = 0
-    let node: Node | null
-    while ((node = walker.nextNode())) {
-      if (node === caret.offsetNode) {
-        offset += caret.offset
-        break
-      }
-      offset += node.textContent?.length ?? 0
-    }
-    if (!node) return null
-
-    const text = codeEl.textContent ?? ''
-    if (!/[A-Za-z0-9_]/.test(text[offset] ?? '')) return null
+    // Inside a textarea the browser reports an offset into its value directly,
+    // so there is no node walk to do.
+    const text = srcEl.value
+    const offset = caret.offset
+    if (offset < 0 || offset >= text.length) return null
+    if (!/[A-Za-z0-9_]/.test(text[offset])) return null
 
     const before = text.slice(0, offset)
     return [before.split('\n').length, offset - before.lastIndexOf('\n')]
@@ -175,19 +178,26 @@ export function mountEditor(root: HTMLElement): EditorHandle {
 
   let hoverTimer: number | undefined
   let lastKey = ''
+  /** True while the pointer is genuinely over the editor's text layer. */
+  let pointerInside = false
   const hideTip = () => {
-    tip.hidden = true
+    // Cancel the pending lookup too: a hover queued moments before the pointer
+    // left would otherwise resolve after this and re-show the tooltip over a
+    // position nobody is pointing at any more.
+    clearTimeout(hoverTimer)
+    hideHoverTip()
     lastKey = ''
   }
 
   srcEl.addEventListener('mousemove', (e) => {
+    pointerInside = true
     const p = posAt(e.clientX, e.clientY)
     if (!p) return hideTip()
 
     const key = p[0] + ':' + p[1]
     if (key === lastKey) {
-      tip.style.left = e.clientX + 12 + 'px'
-      tip.style.top = e.clientY + 18 + 'px'
+      // Same token: just follow the pointer, no re-render and no lookup.
+      moveHoverTip(e.clientX, e.clientY)
       return
     }
 
@@ -196,6 +206,20 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     const x = e.clientX
     const y = e.clientY
     hoverTimer = window.setTimeout(() => {
+      // Re-check on arrival: 120ms is long enough for the pointer to have left
+      // the editor entirely, and a stale async result must not resurrect it.
+      if (!pointerInside) return
+      const err = diags.find((d) => {
+        const l = d?.location
+        if (!l?.startLine) return false
+        if (line !== l.startLine) return false
+        return col >= (l.startCol ?? 1) && col <= (l.endCol ?? 1e9)
+      })
+      if (err) {
+        lastKey = key
+        showHoverTip(`<code class="ht-err">${esc(err.message)}</code>`, x, y)
+        return
+      }
       if (typeof window.typeAt !== 'function') return
       let t = ''
       try {
@@ -206,21 +230,27 @@ export function mountEditor(root: HTMLElement): EditorHandle {
       if (!t) return hideTip()
 
       lastKey = key
-      const i = t.indexOf(' : ')
-      // The type is Mezze, so run it through the same highlighter as the code.
-      tip.innerHTML = i > 0
-        ? `<code class="ht-name">${esc(t.slice(0, i))}</code>` +
-          `<code class="ht-sep"> : </code>` +
-          `<code>${highlight(t.slice(i + 3))}</code>`
-        : `<code>${highlight(t)}</code>`
-      tip.style.left = x + 12 + 'px'
-      tip.style.top = y + 18 + 'px'
-      tip.hidden = false
+      // The compiler returns the same markdown the LSP shows in an editor —
+      // fenced Mezze plus doc prose — so render it rather than splitting on
+      // " : ", which only held while this was a bare "name : Type" string.
+      showHoverTip(renderHover(t), x, y)
     }, HOVER_MS)
   })
-  srcEl.addEventListener('mouseleave', hideTip)
+  srcEl.addEventListener('pointerenter', () => { pointerInside = true })
+  srcEl.addEventListener('mouseleave', () => { pointerInside = false; hideTip() })
   srcEl.addEventListener('scroll', hideTip)
   srcEl.addEventListener('input', hideTip)
+  // Leaving the textarea by keyboard, or the page losing focus entirely, both
+  // strand the tooltip — mouseleave never fires for either.
+  srcEl.addEventListener('blur', hideTip)
+  window.addEventListener('blur', () => { pointerInside = false; hideTip() })
+  // The pointer can exit through the window edge without crossing the editor's
+  // boundary, which skips mouseleave.
+  document.addEventListener('mouseleave', () => { pointerInside = false; hideTip() })
+  // A click anywhere else means attention has moved on.
+  document.addEventListener('pointerdown', (e) => {
+    if (e.target !== srcEl) { pointerInside = false; hideTip() }
+  })
 
   // ---- actions ----------------------------------------------------------
   /** Renders diagnostics; returns true when the source is clean. */
@@ -231,14 +261,20 @@ export function mountEditor(root: HTMLElement): EditorHandle {
       show('No errors.', 'ok')
       return true
     }
-    paint(withError(srcEl.value, ds[0]))
+    paint(withError(srcEl.value, ds[0], ds[0].message))
+    // `pretty` is rendered by the compiler-s own ErrorFormatter, so the pane
+    // reads exactly like `mez check`: error code, --> location, source snippet
+    // with a caret, hints and notes. Reused rather than reimplemented here —
+    // a second renderer in TypeScript would drift from the CLI silently.
+    const pretty: string[] = res?.pretty ?? []
     show(
-      ds.map((d: any) => {
-        const l = d.location
-        const at = l?.startLine ? `${l.startLine}:${l.startCol}` : '?'
-        const hints = (d.hints ?? []).map((h: string) => `\n    hint: ${h}`).join('')
-        return `${d.severity} at ${at}\n  ${d.message}${hints}`
-      }).join('\n\n'),
+      pretty.length
+        ? pretty.join('\n\n')
+        : ds.map((d: any) => {
+            const l = d.location
+            const at = l?.startLine ? `${l.startLine}:${l.startCol}` : '?'
+            return `error at ${at}\n  ${d.message}`
+          }).join('\n\n'),
       'err',
     )
     return false
@@ -295,7 +331,7 @@ export function mountEditor(root: HTMLElement): EditorHandle {
       )
     })
 
-  return {
+  const handle: EditorHandle = {
     setSource(code) {
       srcEl.value = code
       paint()
@@ -303,5 +339,21 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     },
     show,
     isReady: () => ready,
+  }
+  ;(root as any).__mezzeHandle = handle
+  return handle
+}
+
+/**
+ * Mount every editor on the page that nobody has claimed.
+ *
+ * The component is markup only, so a page that merely includes it — a blog post
+ * with an embedded sample — would otherwise render dead controls and never load
+ * the runtime. Pages that need a handle (the tour) call mountEditor themselves;
+ * the dataset guard keeps this from mounting those a second time.
+ */
+export function autoMountEditors(): void {
+  for (const el of document.querySelectorAll<HTMLElement>('[data-editor]')) {
+    if (el.dataset.mounted !== '1') mountEditor(el)
   }
 }

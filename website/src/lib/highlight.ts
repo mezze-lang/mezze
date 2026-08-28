@@ -96,7 +96,11 @@ export interface Diagnostic {
  * would mean splitting spans mid-token. Falls back to plain highlighting when
  * the location is missing or degenerate.
  */
-export function withError(src: string, d: Diagnostic | null | undefined): string {
+export function withError(
+  src: string,
+  d: Diagnostic | null | undefined,
+  message?: string,
+): string {
   const loc = d?.location
   if (!loc?.startLine) return highlight(src)
 
@@ -111,11 +115,16 @@ export function withError(src: string, d: Diagnostic | null | undefined): string
     : line.length
   if (end <= start) return highlight(src)
 
-  const head = lines.slice(0, li).join('\n')
-  const tail = lines.slice(li + 1).join('\n')
-  return (head ? esc(head) + '\n' : '')
-    + esc(line.slice(0, start))
-    + `<span class="tk-err">${esc(line.slice(start, end))}</span>`
-    + esc(line.slice(end))
-    + (tail ? '\n' + esc(tail) : '') + '\n'
+  // Highlight the whole file first, then wrap the offending span. Escaping
+  // everything instead — as this used to — dropped syntax colouring the moment
+  // a diagnostic appeared, so the editor went plain black on any error.
+  const before = lines.slice(0, li).join('\n')
+  const title = message ? ` title="${esc(message)}"` : ''
+
+  return (before ? highlight(before) + '\n' : '')
+    + highlight(line.slice(0, start))
+    + `<span class="tk-err"${title}>${highlight(line.slice(start, end))}</span>`
+    + highlight(line.slice(end))
+    + (li + 1 < lines.length ? '\n' + highlight(lines.slice(li + 1).join('\n')) : '')
+    + '\n'
 }

@@ -7,6 +7,8 @@ import com.mezze.language.typedast.TypedAbilityImpl;
 import com.mezze.language.typedast.TypedExpr;
 import com.mezze.language.parsedast.Loc;
 import com.mezze.language.typechecker.lookup.TypedAstLookup;
+import com.mezze.language.typechecker.hover.HoverInfo;
+import com.mezze.language.typechecker.TypeCheckOutputKt;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,8 +51,9 @@ public final class HoverExtractor {
     /** Every position that resolves to a type, keyed "line:col". */
     private static Map<String, String> extract(String source) {
         Map<String, String> hovers = new LinkedHashMap<>();
-        TypedModule tm = typecheck(source);
-        if (tm == null) return hovers;
+        Checked ck = typecheck(source);
+        if (ck == null) return hovers;
+        TypedModule tm = ck.typedModule;
 
         String[] lines = source.split("\n", -1);
         for (int line = 1; line <= lines.length; line++) {
@@ -59,7 +62,7 @@ public final class HoverExtractor {
                 // Probe the middle of the token: findAtPosition wants a
                 // position inside the span, and edges are ambiguous.
                 int col = span.start + 1 + (span.length() / 2);
-                String type = typeAt(tm, line, col);
+                String type = typeAt(ck, line, col);
                 if (type.isEmpty()) continue;
                 // Record the whole span so hovering anywhere in the word works.
                 for (int c = span.start + 1; c <= span.end; c++) {
@@ -70,32 +73,50 @@ public final class HoverExtractor {
         return hovers;
     }
 
-    private static TypedModule typecheck(String source) {
+    /** Everything HoverInfo needs about a checked sample. */
+    private record Checked(
+        String source,
+        ParsedModule parsed,
+        TypedModule typedModule,
+        HoverInfo.Context ctx) {}
+
+    private static Checked typecheck(String source) {
         try {
             ParsedModule m = new MezzeParser().parseParsedModule(source, "/tmp/sample.mz");
-            TypeChecker.TypeCheckResult r =
-                new TypeChecker().checkParsedModule(m, Path.of("/tmp"), null, true);
+            TypeChecker tc = new TypeChecker();
+            TypeChecker.TypeCheckResult r = tc.checkParsedModule(m, Path.of("/tmp"), null, true);
             if (!(r instanceof TypeChecker.TypeCheckResult.Success s)) return null;
-            return s.getTypedModule();
+            com.mezze.language.typechecker.TypeCheckResult hr =
+                TypeCheckOutputKt.toHoverResult(r);
+            HoverInfo.Context ctx = new HoverInfo.Context(
+                source, hr, tc.getTypeAliases(), m, hr,
+                null, null, null, null);
+            return new Checked(source, m, s.getTypedModule(), ctx);
         } catch (Throwable t) {
             return null;
         }
     }
 
-    private static String typeAt(TypedModule tm, int line, int col) {
+    /**
+     * Hover markdown for a position, from the shared HoverInfo.
+     *
+     * The same renderer the LSP and the playground use, so a static sample on
+     * the landing page and the same code in the tour agree — this used to be a
+     * third, weaker copy that printed a bare type with no alias resolution
+     * (a declared `Money` showed up as `'a`).
+     *
+     * HoverInfo is 0-based, matching the LSP's Position; callers here use the
+     * 1-based Loc convention.
+     */
+    private static String typeAt(Checked ck, int line, int col) {
         try {
-            TypedAstLookup.LookupResult hit =
-                TypedAstLookup.INSTANCE.findAtPosition(tm, line, col);
-            if (hit instanceof TypedAstLookup.LookupResult.Binding b) {
-                return b.getName() + " : " + TypePrinterKt.prettyPrintType(b.getType());
-            }
-            if (hit instanceof TypedAstLookup.LookupResult.Expr e) {
-                return TypePrinterKt.prettyPrintType(e.getExpr().getType());
-            }
-            // TypedAstLookup only walks let-declarations, so an `impl` body
-            // resolves to nothing. The bodies are typed — TypedAbilityImpl
-            // holds them in `operations` — so search those directly.
-            return typeInImpls(tm, line, col);
+            String md = HoverInfo.INSTANCE.at(ck.ctx, line - 1, col - 1);
+            if (md != null && !md.isBlank()) return md;
+            // HoverInfo walks let-declarations, so an `impl` body resolves to
+            // nothing. Those bodies are typed — TypedAbilityImpl holds them in
+            // `operations` — so search them directly as a fallback.
+            String t = typeInImpls(ck.typedModule, line, col);
+            return t.isEmpty() ? "" : "```mezze\n" + t + "\n```";
         } catch (Throwable t) {
             return "";
         }

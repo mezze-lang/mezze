@@ -10,6 +10,12 @@ import com.mezze.language.typedast.TypedModule;
 import com.mezze.language.ast.TypePrinterKt;
 import com.mezze.language.typechecker.diagnostics.DiagnosticJson;
 import com.mezze.language.typechecker.diagnostics.JsonDiagnosticFormatter;
+import com.mezze.language.typechecker.printing.ErrorFormatter;
+import com.mezze.language.typechecker.printing.ParseErrorFormatter;
+import com.mezze.language.typechecker.hover.HoverInfo;
+import com.mezze.language.typechecker.TypeCheckOutputKt;
+import com.mezze.language.typechecker.SourceContext;
+import com.mezze.language.parsedast.Loc;
 import com.mezze.language.parser.ParseException;
 import org.graalvm.polyglot.*;
 import org.graalvm.webimage.api.JS;
@@ -114,22 +120,80 @@ public final class MezzeWeb {
                         "playground.mz", null, s.getTypedModule(), s.getWarnings()));
             }
             java.util.List<DiagnosticJson> diags = new java.util.ArrayList<>();
+            java.util.List<String> pretty = new java.util.ArrayList<>();
             if (r instanceof TypeChecker.TypeCheckResult.Failure f) {
                 for (TypeChecker.TypeCheckError e : f.getErrors()) {
                     diags.add(JsonDiagnosticFormatter.INSTANCE.fromTypeCheckError(e));
+                    // The CLI-s own rendering, reused rather than reimplemented:
+                    // error code, --> location, source snippet with a caret,
+                    // hints and notes. colorize=false: the pane is plain text
+                    // and colours itself by severity.
+                    // The parser is handed /tmp/playground.mz so module
+                    // resolution has a real path; strip it back to the bare
+                    // name the reader typed into.
+                    pretty.add(ErrorFormatter.INSTANCE.format(e, source, false)
+                        .replace("/tmp/playground.mz", "playground.mz"));
                 }
             }
-            return JsonDiagnosticFormatter.INSTANCE.render(
-                JsonDiagnosticFormatter.INSTANCE.errors("playground.mz", null, diags));
+            return withPretty(
+                JsonDiagnosticFormatter.INSTANCE.render(
+                    JsonDiagnosticFormatter.INSTANCE.errors("playground.mz", null, diags)),
+                pretty);
         } catch (Throwable t) {
             if (t instanceof ParseException pe) {
-                return JsonDiagnosticFormatter.INSTANCE.render(
-                    JsonDiagnosticFormatter.INSTANCE.errors("playground.mz", null,
-                        java.util.List.of(JsonDiagnosticFormatter.INSTANCE.fromParseException(pe))));
+                DiagnosticJson dj = JsonDiagnosticFormatter.INSTANCE.fromParseException(pe);
+                return withPretty(
+                    JsonDiagnosticFormatter.INSTANCE.render(
+                        JsonDiagnosticFormatter.INSTANCE.errors("playground.mz", null,
+                            java.util.List.of(dj))),
+                    java.util.List.of(
+                        ParseErrorFormatter.INSTANCE.format(pe)
+                            .replace("/tmp/playground.mz", "playground.mz")));
             }
             return "{\"status\":\"ERRORS\",\"diagnostics\":[{\"severity\":\"ERROR\",\"message\":"
                  + jsonStr(String.valueOf(t.getMessage())) + "}]}";
         }
+    }
+
+    /**
+     * Splice a "pretty" array of CLI-rendered errors into the check envelope.
+     *
+     * Appended as a sibling of "diagnostics" rather than a field inside each
+     * one, so the structured JSON stays byte-identical to `mez check --json`.
+     * Index i of "pretty" corresponds to index i of "diagnostics".
+     */
+    private static String withPretty(String jsonEnvelope, java.util.List<String> pretty) {
+        if (pretty.isEmpty()) return jsonEnvelope;
+        int close = jsonEnvelope.lastIndexOf('}');
+        if (close < 0) return jsonEnvelope;
+        StringBuilder sb = new StringBuilder(jsonEnvelope.substring(0, close));
+        sb.append(",\"pretty\":[");
+        for (int i = 0; i < pretty.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(jsonText(pretty.get(i)));
+        }
+        return sb.append("]}").toString();
+    }
+
+
+    /** JSON string escaper that preserves newlines — snippets are multi-line. */
+    private static String jsonText(String s) {
+        StringBuilder sb = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"'  -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 32) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+                }
+            }
+        }
+        return sb.append("\"").toString();
     }
 
     private static String jsonStr(String s) {
@@ -148,19 +212,30 @@ public final class MezzeWeb {
         if (source == null || source.isBlank()) return "";
         try {
             ParsedModule m = new MezzeParser().parseParsedModule(source, "/tmp/playground.mz");
-            TypeChecker.TypeCheckResult r =
-                new TypeChecker().checkParsedModule(m, Path.of("/tmp"), null, true);
-            if (!(r instanceof TypeChecker.TypeCheckResult.Success s)) return "";
-            TypedModule tm = s.getTypedModule();
-            if (tm == null) return "";
-            TypedAstLookup.LookupResult hit = TypedAstLookup.INSTANCE.findAtPosition(tm, line, col);
-            if (hit instanceof TypedAstLookup.LookupResult.Binding b) {
-                return b.getName() + " : " + TypePrinterKt.prettyPrintType(b.getType());
-            }
-            if (hit instanceof TypedAstLookup.LookupResult.Expr e) {
-                return TypePrinterKt.prettyPrintType(e.getExpr().getType());
-            }
-            return "";
+            TypeChecker tc = new TypeChecker();
+            TypeChecker.TypeCheckResult r = tc.checkParsedModule(m, Path.of("/tmp"), null, true);
+
+            // Both outcomes carry a typed module, so hover keeps working on
+            // code that does not currently typecheck — which is exactly when a
+            // reader is most likely to be hovering.
+            com.mezze.language.typechecker.TypeCheckResult hoverResult =
+                TypeCheckOutputKt.toHoverResult(r);
+
+            HoverInfo.Context ctx = new HoverInfo.Context(
+                source,
+                hoverResult,
+                tc.getTypeAliases(),
+                m,
+                hoverResult,   // lastSuccessful: single-shot, so the same result
+                null,          // selfUri: no document to link back to
+                null,          // resolveFileUri: nothing on disk in a browser
+                null,          // docFromStore: no project store
+                null);         // storeAbilityDecls: likewise
+
+            // HoverInfo is 0-based (LSP Position); typeAt is called with the
+            // 1-based Loc convention the editor uses.
+            String md = HoverInfo.INSTANCE.at(ctx, line - 1, col - 1);
+            return md == null ? "" : md;
         } catch (Throwable t) {
             return "";
         }

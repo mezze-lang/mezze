@@ -35,6 +35,20 @@ const { code = '', placeholder = 'Waiting for the Mezze runtime…' } = Astro.pr
 <style is:global>
   /* Global rather than scoped: the hover tooltip is appended to <body>,
      outside this component's DOM, so a scoped rule would not reach it. */
+  /* Overlay scrollbars: the track sits over the content and fades in while
+     scrolling rather than reserving a permanent gutter. Matters on macOS with
+     "always show scrollbars", where a classic bar is visible even at rest and
+     the two stacked layers reserve different widths, shifting them apart. */
+  .ed ::-webkit-scrollbar { width: 8px; height: 8px; }
+  .ed ::-webkit-scrollbar-track { background: transparent; }
+  .ed ::-webkit-scrollbar-thumb { background: transparent; border-radius: 4px; }
+  .ed:hover ::-webkit-scrollbar-thumb,
+  .ed :focus-within::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--soft) 45%, transparent); }
+  .ed ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--soft) 70%, transparent); }
+  /* Firefox has no overlay mode; thin + transparent track is the closest. */
+  .ed .ed-src, .ed .ed-hl, .ed .ed-out { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+  .ed:hover .ed-src, .ed:hover .ed-hl, .ed:hover .ed-out { scrollbar-color: color-mix(in srgb, var(--soft) 45%, transparent) transparent; }
+
   .ed { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--panel); }
   .ed-bar { display: flex; align-items: center; gap: .5rem; padding: .55rem .75rem; border-bottom: 1px solid var(--rule); flex: none; }
   .ed-bar button { font: inherit; font-size: .88rem; padding: .25rem .85rem; border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--rule)); border-radius: 5px; background: var(--ground); color: var(--primary); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
@@ -88,3 +102,11 @@ const { code = '', placeholder = 'Waiting for the Mezze runtime…' } = Astro.pr
   .ed-out.ok { color: var(--ok); }
   .ed-out.err { color: var(--err); }
   .ed-out.warn { color: var(--warn); }</style>
+
+<script>
+  // Ships with the component so an editor works wherever it is embedded — a
+  // blog post does not have to know to wire it up. Pages that drive the editor
+  // (the tour) call mountEditor themselves; this skips anything already mounted.
+  import { autoMountEditors } from '../scripts/editor'
+  autoMountEditors()
+</script>

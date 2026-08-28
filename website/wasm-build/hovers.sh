@@ -17,8 +17,11 @@ say() { printf '\033[1m▸ %s\033[0m\n' "$*"; }
 
 say "Resolving classpath"
 (cd "$REPO" && ./gradlew --quiet :cli:jar :typechecker:jar :parser:jar :ast:jar)
-(cd "$REPO" && ./gradlew --quiet :cli:printRuntimeClasspath) > "$HERE/.classpath"
-CP="$(cat "$HERE/.classpath")"
+# A DIFFERENT file from build.sh-s .classpath: that one lists the staged,
+# version-matched jars in .jars/, this one the raw Gradle runtime classpath.
+# Sharing the name meant whichever script ran second clobbered the other.
+(cd "$REPO" && ./gradlew --quiet :cli:printRuntimeClasspath) > "$HERE/.classpath-hovers"
+CP="$(cat "$HERE/.classpath-hovers")"
 
 say "Compiling the extractor"
 mkdir -p "$WORK/classes"
