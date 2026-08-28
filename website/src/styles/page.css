@@ -149,11 +149,39 @@
 }
 
 @media (max-width: 900px) {
-  /* Stacked, copy first — the sample is the thing to scroll to. */
-  /* A wider gap than the desktop 2rem column gap translates to, because
-     stacked the aside's text runs straight into the editor's top edge with
-     nothing beside it to read as a boundary. */
-  .page .play-wrap { grid-template-columns: 1fr; gap: 1.6rem; }
-  .page .play-aside { order: -1; padding-top: 0; }
-  .page .play-aside h2 { font-size: 1.3rem; }
+  /* Stacked, the three parts want a different order than the two-column
+     layout gives them. Side by side the aside reads as one block beside the
+     sample; stacked, its last paragraph describes the sample specifically, so
+     it belongs under it:
+
+       Mezze + summary
+       code sample
+       what this sample shows
+
+     Done with grid placement rather than by moving anything in the markup, so
+     the desktop layout and the DOM order stay exactly as they are — the note
+     still follows the copy it belongs with for a screen reader.
+     A wider gap than the desktop 2rem column gap translates to, because
+     stacked there is nothing beside the text to read as a boundary. */
+  .page .play-wrap {
+    grid-template-columns: 1fr;
+    grid-template-areas: "head" "lede" "sample" "note";
+    /* Row gap only between the blocks; the heading and its summary belong
+       together, so that pair closes up below. */
+    gap: 1.6rem;
+  }
+  /* display: contents so the aside's children place themselves into the grid
+     individually; the aside itself lays out nothing. */
+  .page .play-aside { display: contents; }
+  .page .play-aside h2 { grid-area: head; font-size: 1.3rem; margin: 0; }
+  /* Pulled up against the heading: the 1.6rem row gap is meant to separate the
+     three blocks, not to split a heading from the sentence under it. */
+  .page .play-lede { grid-area: lede; margin: -1.1rem 0 0; }
+  .page .play-note {
+    grid-area: note;
+    /* The rule read as a divider inside the aside; standing alone under the
+       sample it is redundant with the gap above it. */
+    padding-top: 0; border-top: none;
+  }
+  .page .play { grid-area: sample; }
 }
