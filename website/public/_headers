@@ -11,5 +11,10 @@
 /_astro/*
   Cache-Control: public, max-age=31536000, immutable
 
+# Short, with revalidation: these live in public/ so Astro never fingerprints
+# them, which means a redesigned icon keeps its old URL and cannot displace a
+# cached copy. A week of immutability meant new artwork simply did not appear.
+# must-revalidate keeps the bytes cached but forces a conditional request, so a
+# changed file is picked up on the next visit at the cost of one 304.
 /icons/*
-  Cache-Control: public, max-age=604800
+  Cache-Control: public, max-age=3600, must-revalidate
