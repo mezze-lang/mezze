@@ -19,17 +19,15 @@ import java.nio.file.Path
  * Parse → Typecheck → Wrap top-level → Monomorphize → Resolve → Lower → TruffleCompiler
  */
 object PipelineRunner {
-    // Entry-point / synthetic function-name conventions, single-sourced here
-    // (the only place they are recognized). ENTRY_FN is the compiled entry
-    // wrapper; MAIN_FN the user entry; LAMBDA_FN the anonymous-fn placeholder.
-    // The `__toplevel*` prefix is the shared MagicParams.TOPLEVEL_EXPR_PREFIX
-    // stem — matched by prefix since toplevel decls are numbered.
-    private const val ENTRY_FN = "__entry__"
-    private const val MAIN_FN = "main"
-    private const val LAMBDA_FN = "lambda"
-    // Stem of MagicParams.TOPLEVEL_EXPR_PREFIX ("__toplevel_expr_"); matched by
-    // prefix because synthetic toplevel decls are numbered.
-    private const val TOPLEVEL_PREFIX = "__toplevel"
+    // Entry-point / synthetic function-name conventions — single-sourced in the
+    // shared MagicParams (F7), NOT redefined locally, so producer (EntryFunctionBuilder)
+    // and consumer (here) can never drift. ENTRY_FN is the compiled entry wrapper;
+    // MAIN_FN the user entry; LAMBDA_FN the anonymous-fn placeholder; TOPLEVEL_PREFIX
+    // matches numbered synthetic toplevel-expr decls (__toplevel_expr_0, …).
+    private val ENTRY_FN = com.mezze.language.ast.MagicParams.ENTRY_FN
+    private val MAIN_FN = com.mezze.language.ast.MagicParams.MAIN_FN
+    private val LAMBDA_FN = com.mezze.language.ast.MagicParams.LAMBDA_FN
+    private val TOPLEVEL_PREFIX = com.mezze.language.ast.MagicParams.TOPLEVEL_EXPR_PREFIX
 
     // tryCompile deleted — TypedASTCompiler replaces the old Mono→Resolve→Lower pipeline
 

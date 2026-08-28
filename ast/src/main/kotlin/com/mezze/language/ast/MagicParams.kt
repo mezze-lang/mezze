@@ -55,6 +55,17 @@ object MagicParams {
     /** Synthetic top-level bare-expression decl, e.g. `__toplevel_expr_0`. */
     const val TOPLEVEL_EXPR_PREFIX = "__toplevel_expr_"
 
+    /** The compiled entry wrapper: a synthetic fn that binds every top-level
+     *  `let` as a global (via RegisterGlobal). Minted by EntryFunctionBuilder,
+     *  recognized at run in PipelineRunner. */
+    const val ENTRY_FN = "__entry__"
+
+    /** The conventional user entry-point name (an app's `main`). */
+    const val MAIN_FN = "main"
+
+    /** Anonymous-lambda placeholder function name. */
+    const val LAMBDA_FN = "lambda"
+
     /** Internal solver-injected type-var name prefix (invariant checks skip these). */
     const val INTERNAL_PREFIX = "__internal_"
 

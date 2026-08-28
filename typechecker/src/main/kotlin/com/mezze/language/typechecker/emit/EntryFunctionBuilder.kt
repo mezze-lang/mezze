@@ -64,7 +64,7 @@ object EntryFunctionBuilder {
         val entryHash = computeHash("__entry__:" + module.hash.hex)
         val entryDecl = TypedLetDecl(
             hash = entryHash,
-            name = "__entry__",
+            name = com.mezze.language.ast.MagicParams.ENTRY_FN,
             typeParams = emptyList(),
             value = blockBody,
             scheme = TypeScheme(emptyList(), emptyList(), lastType),
@@ -117,7 +117,7 @@ object EntryFunctionBuilder {
         val entryHash = computeHash("__entry__:" + module.hash.hex)
         val entryDecl = TypedLetDecl(
             hash = entryHash,
-            name = "__entry__",
+            name = com.mezze.language.ast.MagicParams.ENTRY_FN,
             typeParams = emptyList(),
             value = blockBody,
             scheme = TypeScheme(emptyList(), emptyList(), lastType),
