@@ -7,6 +7,7 @@
  *
  * Underscore is NOT a delimiter: snake_case identifiers appear throughout the copy.
  *   ^TBD^          -> superscript marker, for a claim not yet shipped
+ *   **word**       -> <strong>word</strong>
  *   `code`         -> <code>code</code>
  *   \n             -> <br>
  *
@@ -47,6 +48,7 @@ export function format(input: string): string {
   )
 
   out = out.replace(/\^([^^\n]+)\^/g, '<sup class="tbd" title="Designed, not yet shipped">$1</sup>')
+  out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
   out = out.replace(/`([^`]+)`/g, '<code>$1</code>')
   out = out.replace(/\n/g, '<br>')
 

@@ -36,7 +36,7 @@ import Editor from '../components/Editor.astro'
 
 <script>
   import { lessons } from '../data/lessons'
-  import { esc } from '../lib/highlight'
+  import { format } from '../lib/text'
   import { mountEditor } from '../scripts/editor'
 
   const $ = <T extends Element>(sel: string) => document.querySelector(sel) as T
@@ -47,10 +47,6 @@ import Editor from '../components/Editor.astro'
   const nextBtn = $<HTMLButtonElement>('#t-next')
 
   /** The lesson prose supports `code` and **bold** only. */
-  const inline = (s: string) => esc(s)
-    .replace(/\`([^\`]+)\`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-
   let current = -1
   const go = (i: number) => {
     const n = Math.max(0, Math.min(lessons.length - 1, i))
@@ -59,7 +55,7 @@ import Editor from '../components/Editor.astro'
     const l = lessons[n]
     $('#t-title').textContent = l.title
     $('#t-blurb').textContent = l.blurb
-    $('#t-body').innerHTML = l.body.map((para) => `<p>${inline(para)}</p>`).join('')
+    $('#t-body').innerHTML = l.body.map((para) => `<p>${format(para)}</p>`).join('')
     $('#t-pos').textContent = `${n + 1} / ${lessons.length}`
     railItems.forEach((el, k) => el.classList.toggle('is-active', k === n))
     // The ends are dead ends: show that rather than letting a click do nothing.

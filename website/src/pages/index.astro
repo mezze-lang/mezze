@@ -43,7 +43,7 @@ import { highlight } from '../lib/highlight'
         {features.map((f) => (
           <article>
             <Prose as="h3" text={f.title} />
-            <p>{f.body}</p>
+            <Prose as="p" text={f.body} />
           </article>
         ))}
       </section>
