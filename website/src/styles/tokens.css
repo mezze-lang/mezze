@@ -4,10 +4,12 @@
    Every colour is named for a dish. Change a value here and the whole site
    follows — nothing else in the codebase should hard-code a hex.
 
-   Light is the default. Dark is defined three times on purpose:
-     :root                           -> light
-     prefers-color-scheme + :not()   -> system dark, unless light is forced
-     [data-theme="dark"]             -> explicit toggle
+   Light is the default, for everyone, including a fresh private window.
+     :root                 -> light
+     [data-theme="dark"]   -> dark, and only when the reader asks for it
+
+   prefers-color-scheme is deliberately NOT consulted: following the OS meant
+   a first visit on a dark-mode machine never saw the light design at all.
    =========================================================================== */
 
 :root {
@@ -85,88 +87,6 @@
   --shadow: 0 1px 2px rgb(36 31 25 / .05), 0 4px 16px rgb(36 31 25 / .04);
 }
 
-/* --- system dark, unless the reader explicitly chose light -------------
-   Media query outside, selector inside — NOT the nested form. Written as
-   `:root:not(…) { @media … { } }`, the minifier dropped the selector and left
-   the declarations bare inside the media query, so they applied to nothing and
-   every reader on a light OS still got dark. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --olive:     #8FB56A;
-    --aubergine: #B98FD6;
-    --tomato:    #F0736A;
-    --lemon:     #E8CC5E;
-    --onion:     #F58AAF;
-    --mint:      #7FC9C0;
-    --on-primary: #16130F;
-
-    --ground:  #17140F;
-    --surface: #1E1A14;
-    --raised:  #262119;
-    --panel:   #1B1712;
-
-    --ink:   #F0EBE0;
-    --soft:  #A9A192;
-    --faint: #6E675B;
-    --rule:  #322C22;
-
-    /* dark marks: low-alpha washes, since a pastel would blow out */
-    --mark-onion: color-mix(in srgb, var(--onion) 34%, transparent);
-    --mark-lemon: color-mix(in srgb, var(--lemon) 32%, transparent);
-    --mark-auber: color-mix(in srgb, var(--aubergine) 44%, transparent);
-    --mark-tomato: color-mix(in srgb, var(--tomato) 34%, transparent);
-    --mark-mint:  color-mix(in srgb, var(--mint) 34%, transparent);
-    --mark-olive:  color-mix(in srgb, var(--olive) 30%, transparent);
-
-    --ok:   color-mix(in srgb, var(--olive) 70%, #FFF);
-    --err:  color-mix(in srgb, var(--tomato) 74%, #FFF);
-    --warn: color-mix(in srgb, var(--lemon) 84%, #FFF);
-    --info: color-mix(in srgb, var(--mint) 76%, #FFF);
-
-    --note: color-mix(in srgb, var(--onion) 78%, #FFF);
-
-    --dbg:  color-mix(in srgb, var(--aubergine) 72%, #FFF);
-
-    --ok-bg:   color-mix(in srgb, var(--olive) 26%, transparent);
-
-    --err-bg:  color-mix(in srgb, var(--tomato) 24%, transparent);
-
-    --warn-bg: color-mix(in srgb, var(--lemon) 24%, transparent);
-
-    --info-bg: color-mix(in srgb, var(--mint) 24%, transparent);
-
-    --note-bg: color-mix(in srgb, var(--onion) 24%, transparent);
-
-    --dbg-bg:  color-mix(in srgb, var(--aubergine) 28%, transparent);
-
-    --syn-kw:     color-mix(in srgb, var(--aubergine) 82%, #FFF);
-
-    --syn-fn:     color-mix(in srgb, var(--mint) 86%, #FFF);
-
-    --syn-type:   #E0A070;
-
-    --syn-str:    color-mix(in srgb, var(--olive) 72%, #FFF);
-
-    --syn-com:    var(--faint);
-
-    --syn-num:    color-mix(in srgb, var(--tomato) 84%, #FFF);
-
-    --syn-mark:   var(--onion);
-
-    --syn-tv:     color-mix(in srgb, var(--mint) 70%, #FFF);
-
-    --syn-eff:    color-mix(in srgb, var(--onion) 86%, #FFF);
-
-    --syn-mth:    color-mix(in srgb, var(--aubergine) 66%, #FFF);
-
-    --syn-fld:    var(--ink);
-
-    --syn-interp: color-mix(in srgb, var(--onion) 86%, #FFF);
-
-    --syn-err:    var(--err);
-    --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 4px 16px rgb(0 0 0 / .2);
-  }
-}
 
 /* --- explicit dark toggle (wins over a light OS) ---------------------- */
 :root[data-theme="dark"] {

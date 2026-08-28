@@ -63,6 +63,17 @@ const iconList = dishes.map((d) => d.icon)
     <style is:global>
       *, *::before, *::after { box-sizing: border-box; }
 
+      /* Overlay scrollbars for the page itself. Firefox reserves a permanent
+         gutter otherwise, so a bar sits at the right edge whether or not
+         anyone is scrolling. `scrollbar-gutter: stable` would keep the space
+         reserved, which is the opposite of what is wanted here; thin +
+         transparent track lets the content run to the edge and the thumb
+         appear only over it. Chrome and Safari already overlay by default. */
+      html {
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--soft) 40%, transparent) transparent;
+      }
+
       body {
         margin: 0;
         min-height: 100dvh;
