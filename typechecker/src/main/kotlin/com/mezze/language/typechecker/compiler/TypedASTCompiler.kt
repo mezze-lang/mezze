@@ -1819,9 +1819,13 @@ class TypedASTCompiler(
         for ((name, _) in resolvedDicts) {
             hashBuilder.append(name)
         }
-        // Include context types to make hash unique per instantiation
+        // Include context types to make hash unique per instantiation. Use the
+        // structural type hasher (appendTypeInScope), NOT t.toString() — toString is a
+        // compiler-internal, depth-truncated rendering (unstable across compiler
+        // versions, and lossy → collisions). This wrapperHash is persisted as a
+        // FunctionIR key, so it must be a stable function of the type's identity. (#316)
         for (t in allConcreteTypes) {
-            hashBuilder.append(t.toString())
+            com.mezze.language.ast.hashing.appendTypeInScope(hashBuilder, t)
         }
         val wrapperHash = Hash(hashBuilder.build().toFullHexString())
 
