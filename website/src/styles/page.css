@@ -87,7 +87,11 @@
   .page .hero {
     grid-template-columns: 1fr auto;
     grid-template-areas: "head head" "lede mascot" "cta cta" "micro micro";
-    align-items: center; gap: .5rem .9rem; padding: 1.6rem 0 1.2rem;
+    align-items: center; gap: .5rem .9rem;
+    /* Deeper bottom padding than the desktop 1.8rem looks like it needs: on a
+       phone the sections stack, so this is the only thing separating the hero
+       footnote from the section below it. */
+    padding: 1.6rem 0 2.4rem;
   }
   .page .hero > div:first-child { display: contents; }
   .page .hero h1 { grid-area: head; }
@@ -146,7 +150,10 @@
 
 @media (max-width: 900px) {
   /* Stacked, copy first — the sample is the thing to scroll to. */
-  .page .play-wrap { grid-template-columns: 1fr; gap: 1rem; }
+  /* A wider gap than the desktop 2rem column gap translates to, because
+     stacked the aside's text runs straight into the editor's top edge with
+     nothing beside it to read as a boundary. */
+  .page .play-wrap { grid-template-columns: 1fr; gap: 1.6rem; }
   .page .play-aside { order: -1; padding-top: 0; }
   .page .play-aside h2 { font-size: 1.3rem; }
 }
