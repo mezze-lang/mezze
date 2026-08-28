@@ -8,8 +8,15 @@
 
 
 .page .hero {
-  display: grid; grid-template-columns: 1fr auto; align-items: center;
-  gap: 2.2rem; padding: 2.6rem 0 1.8rem;
+  display: grid;
+  /* Same 2fr 1fr / 2rem as .play-wrap below, so the mascot centres over the
+     aside column rather than hugging the right edge above a narrower one. */
+  grid-template-columns: 2fr 1fr; align-items: center;
+  gap: 2rem; padding: 2.6rem 0 1.8rem;
+}
+/* Desktop only: the mobile grid re-places this with justify-self: end. */
+@media (min-width: 761px) {
+  .page .hero-mascot { justify-self: center; }
 }
 .page .hero h1 {
   margin: 0 0 1rem; font-size: clamp(1.9rem, 3.8vw, 2.6rem);
@@ -17,7 +24,7 @@
 }
 .page .lede { margin: 0 0 1.3rem; font-size: 1.02rem; color: var(--soft); max-width: 38rem; }
 .page .cta { display: flex; flex-wrap: wrap; gap: .55rem; }
-.page .micro { margin: 1rem 0 0; font-size: .8rem; color: var(--soft); }
+.page .micro { margin: .5rem 0 0; font-size: .8rem; color: var(--soft); }
 .page .micro a { color: var(--primary); }
 
 .page .tags { display: flex; flex-wrap: wrap; gap: .35rem; padding: 0 0 1.4rem; }
@@ -85,8 +92,8 @@
   .page .hero > div:first-child { display: contents; }
   .page .hero h1 { grid-area: head; }
   .page .hero .lede { grid-area: lede; margin: 0; max-width: none; }
-  .page .hero .cta { grid-area: cta; margin-top: .5rem; }
-  .page .hero .micro { grid-area: micro; }
+  .page .hero .cta { grid-area: cta; margin-top: .3rem; }
+  .page .hero .micro { grid-area: micro; margin-top: -.1rem; }
   .page .hero-mascot { grid-area: mascot; justify-self: end; }
   .page .hero-mascot .mascot { width: 84px; height: 84px; }
   .page .feats { grid-template-columns: 1fr; gap: 1.4rem; }
@@ -110,3 +117,36 @@
 .btn-primary:hover { background: color-mix(in srgb, var(--primary) 86%, #000); }
 .btn-ghost { border-color: var(--rule); color: var(--ink); }
 .btn-ghost:hover { border-color: var(--primary); color: var(--primary); }
+
+/* --- playground + side copy --------------------------------------------- */
+.page .play-wrap {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 2rem;
+  align-items: start;
+  /* min-width:0 or a long code line widens the whole grid. */
+  min-width: 0;
+}
+.page .play-wrap > * { min-width: 0; }
+.page .play-aside { padding-top: 0; }
+.page .play-aside h2 {
+  margin: 0 0 .5rem; font-size: 1.6rem; font-weight: 800;
+  letter-spacing: -.02em; color: var(--primary);
+  /* Tight leading, then pull up by the half-leading that remains. Inheriting
+     the body line-height put ~6px of space above the cap, which read as the
+     heading sitting lower than the toolbar it should align with. */
+  line-height: 1.1;
+  margin-top: -.18rem;
+}
+.page .play-lede { margin: 0 0 .9rem; font-size: .95rem; color: var(--soft); }
+.page .play-note {
+  margin: 0; padding-top: .8rem; font-size: .88rem; color: var(--soft);
+  border-top: 1px solid var(--rule);
+}
+
+@media (max-width: 900px) {
+  /* Stacked, copy first — the sample is the thing to scroll to. */
+  .page .play-wrap { grid-template-columns: 1fr; gap: 1rem; }
+  .page .play-aside { order: -1; padding-top: 0; }
+  .page .play-aside h2 { font-size: 1.3rem; }
+}

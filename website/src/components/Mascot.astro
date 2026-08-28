@@ -18,21 +18,24 @@ interface Props {
   class?: string
 }
 const { size = 22, static: isStatic = false, class: cls = '' } = Astro.props
+const Tag = isStatic ? 'span' : 'button'
 ---
-<button
+<!-- A span when static: nesting a <button> inside the header <a> is invalid
+     HTML, and the button swallowed the click so the brand never navigated. -->
+<Tag
   class:list={['mascot', cls, { 'is-static': isStatic }]}
   style={`--s:${size}px`}
-  type="button"
+  type={isStatic ? undefined : 'button'}
   data-mascot
-  aria-label={isStatic ? 'Mezze' : 'Change the dish'}
+  aria-label={isStatic ? undefined : 'Change the dish'}
   title={isStatic ? undefined : 'Click for a different dish'}
-  disabled={isStatic}
+  aria-hidden={isStatic ? 'true' : undefined}
 >
   {dishes.map((d, i) => (
-    <img src={d.icon} alt={d.label} data-dish={d.key} data-idx={i}
+    <img src={d.icon} alt={isStatic ? '' : d.label} data-dish={d.key} data-idx={i}
          class:list={{ on: i === 0 }} loading="eager" />
   ))}
-</button>
+</Tag>
 
 {/* Generated from the dish list so the pre-paint state and the palette cannot
     drift apart. The inline script in Base sets data-dish before first paint;

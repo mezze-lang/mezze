@@ -25,17 +25,18 @@ export const lessons: Lesson[] = [
     ],
     code: `use std::effects::log::{ Console, println }
 
-# This editor is live. Change anything and press Run — or hover a name to
-# see the type the compiler inferred for it.
+# This editor is live. Change anything and
+# press Run, or hover a name for its type.
 let name = "Mezze"
-
 let year = 2026
-
 let ready = True
 
 let main = {} -> perform Console in do
   println { msg = "\$(name) — \$(year.to_str {})" }
   println { msg = "ready: \$(ready.to_str {})" }
+
+  # Interpolation never guesses: a value has
+  # to become a Str first.
   println { msg = "7 / 2 = \$((7 / 2).to_str {})" }`,
   },
   {
@@ -49,17 +50,17 @@ let main = {} -> perform Console in do
     ],
     code: `use std::effects::log::{ Console, println }
 
-# Every parameter is named — Mezze has no positional arguments at all.
-let clamp = { val, low, high } -> if val < low then low else if val > high then high else val
+# Every parameter is named. Mezze has no
+# positional arguments at all.
+let rect = { width, height } -> width * height
 
-# So a call reads the way it is written, in any order.
 let main = {} -> perform Console in do
-  println {
-    msg = clamp { val = 42, low = 0, high = 10 }.to_str {},
-  }
-  println {
-    msg = clamp { low = 0, high = 10, val = 5 }.to_str {},
-  }`,
+  let a = rect { width = 3, height = 4 }
+  println { msg = a.to_str {} }
+
+  # Same call, fields the other way round.
+  let b = rect { height = 4, width = 3 }
+  println { msg = b.to_str {} }`,
   },
   {
     slug: "records",
@@ -72,49 +73,51 @@ let main = {} -> perform Console in do
     ],
     code: `use std::effects::log::{ Console, println }
 
-# That parameter list was a record all along: { val, low, high } is one
-# value with named fields, and records are that same shape on their own.
+# That parameter list was a record all along:
+# one value with named fields.
 let point = { x = 3, y = 4 }
 
 let main = {} -> perform Console in do
   println { msg = "x = \$(point.x.to_str {})" }
-  # Copy with a change. The original is untouched.
+
+  # Copy with a change; the original is untouched.
   let moved = { ...point, x = 10 }
-  println { msg = "moved: \$(moved.x.to_str {}), original: \$(point.x.to_str {})" }
-  # Destructure — the same syntax a parameter list uses.
+  println { msg = "moved x = \$(moved.x.to_str {})" }
+
+  # Destructuring uses the same shape again.
   let { x, y } = point
   println { msg = "\$(x.to_str {}), \$(y.to_str {})" }`,
   },
   {
     slug: "variants",
     title: "Variants",
-    blurb: "Closed sets of cases, and exhaustive match.",
+    blurb: "Open and closed sets of cases.",
     body: [
-      "A **variant** is a fixed set of alternatives, separated by pipes. Some carry payloads, some do not.",
-      "`match` must cover every case. Delete the `Point` arm and press Check: the compiler names the case you forgot, before the program runs.",
-      "That is the bargain — add a case later and every incomplete match becomes an error rather than a bug.",
+      "A **variant** lists its cases between pipes, separated by commas. Some carry a payload, some do not.",
+      "A trailing `...` leaves the variant **open** — a value may be a case listed here or one added elsewhere. Without it the type is closed.",
+      "Closed means `match` must cover every case: delete the `Point` arm and press Check. An open variant needs a catch-all instead, since the compiler cannot know every case.",
     ],
     code: `use std::effects::log::{ Console, println }
 
-# A variant is a closed set of cases. Pipes separate them.
+# Cases sit between pipes, separated by commas.
 type Shape = |
   Circle { radius: Int },
   Rect { w: Int, h: Int },
-  Point,
+  Point
 |
 
-# match must cover every case — delete an arm and this stops compiling.
-let area: { shape: Shape } -> Int = { shape } -> match shape is
+# A trailing \`...\` leaves a variant open.
+type Level = | Low, High, ... |
+
+let area = { shape } -> match shape is
   Circle { radius } -> radius * radius * 3
   Rect { w, h } -> w * h
   Point -> 0
 
-
 let main = {} -> perform Console in do
-  let circle = area { shape = Circle { radius = 5 } }
-  let rect = area { shape = Rect { w = 3, h = 4 } }
-  println { msg = "circle: \$(circle.to_str {})" }
-  println { msg = "rect:   \$(rect.to_str {})" }`,
+  # Closed, so match must cover every case.
+  let c = area { shape = Circle { radius = 5 } }
+  println { msg = "circle: \$(c.to_str {})" }`,
   },
   {
     slug: "aliases",
@@ -127,18 +130,18 @@ let main = {} -> perform Console in do
     ],
     code: `use std::effects::log::{ Console, println }
 
-# A type alias names a shape so you can say it once and reuse it.
+# An alias names a shape so you say it once.
 type Reading = { city: Str, temp: Int }
 
-# The name is documentation: a Reading IS that record, not a wrapper
-# around it, so anything with the right fields fits.
-let describe: { r: Reading } -> Str = { r } -> "\$(r.city): \$(r.temp.to_str {})°C"
+# A Reading IS that record, not a wrapper —
+# anything with the right fields fits.
+let describe: { r: Reading } -> Str = { r } ->
+  "\$(r.city): \$(r.temp.to_str {})°C"
 
 let main = {} -> perform Console in do
-  println {
-    msg = describe { r = { city = "Lisbon", temp = 21 } },
-  }
-  # Built the plain way, still a Reading.
+  let lisbon = { city = "Lisbon", temp = 21 }
+  println { msg = describe { r = lisbon } }
+
   let cairo = { city = "Cairo", temp = 35 }
   println { msg = describe { r = cairo } }`,
   },
@@ -153,17 +156,19 @@ let main = {} -> perform Console in do
     ],
     code: `use std::effects::log::{ Console, println }
 
-# A closed record says exactly which fields it takes.
+# Closed: exactly these fields, nothing more.
 let closed: { r: { id: Int } } -> Int = { r } -> r.id
 
-# \`...\` opens it: the caller may pass more fields than this needs.
+# \`...\` opens it — the caller may pass extras.
 let open: { r: { id: Int, ... } } -> Int = { r } -> r.id
 
 let main = {} -> perform Console in do
   let small = { id = 1 }
   let big = { id = 2, name = "ada", active = True }
-  println { msg = "closed: \$(closed { r = small }.to_str {})" }
-  println { msg = "open:   \$(open { r = big }.to_str {})" }`,
+
+  # Only the open one accepts the wider record.
+  println { msg = closed { r = small }.to_str {} }
+  println { msg = open { r = big }.to_str {} }`,
   },
   {
     slug: "effects",
@@ -174,39 +179,57 @@ let main = {} -> perform Console in do
       "A **handler** decides what the effect means. `Console` prints; `QuietConsole` discards. The function itself does not change.",
       "Run it: only one line appears. The second call was handled into silence.",
     ],
-    code: `use std::effects::log::{ Log, Console, QuietConsole, println }
+    code: `use std::effects::http::{ Http, MockHttpClient, MockRule,
+                          UrlPattern, Response, request }
+use std::effects::log::{ Console, println }
+use std::collections::map
+use std::collections::bytes
 
-# <Log> is an effect row. It says this function talks to the outside world,
-# and the type carries that up to whoever calls it.
-let audit: { id: Int } -> {} <Log> = { id } -> println { msg = "order \$(id.to_str {}) seen" }
+# A canned reply, so the test never leaves the machine.
+let canned: Response = {
+  status = 200,
+  headers = map::empty {},
+  body = bytes::from_string { s = "ok" },
+  url = "",
+}
 
-let main = {} -> do
-  # A handler decides what the effect means. Console prints it...
-  perform Console in audit { id = 1 }
-  # ...QuietConsole throws it away. Same function, unchanged.
-  perform QuietConsole in audit { id = 2 }
-  perform Console in println { msg = "done" }`,
+let rules: [MockRule] = [
+  { methods = [], url = Glob { pattern = "**" },
+    response = Ok { val = canned } },
+]
+
+# <Http> in the type says this reaches the network.
+let fetch = { url } -> request { url = url }.send {}
+
+let main = {} -> perform Console in
+  perform MockHttpClient { rules = rules } in do
+    let r = fetch { url = "https://mezze-lang.org" }
+    println { msg = "handled by the mock" }`,
   },
   {
     slug: "abilities",
     title: "Abilities",
-    blurb: "Dot-calling methods on any type.",
+    blurb: "Inspect is derived; to_str is not.",
     body: [
-      "`Inspect` is derived for every type, so `.to_dbg_str {}` works on anything — records, numbers, variants you just declared.",
-      "A dot call resolves against the receiver's type. `Int` has its own inherent methods too, like `.abs {}`.",
-      "This is how Mezze does ad-hoc polymorphism. The next lesson adds your own.",
+      "`Inspect` is special: it is the one ability the compiler **derives for every type**, so `.to_dbg_str {}` works on anything, including a type you declared a line ago.",
+      "`to_str` is **not** an ability. Each type defines its own as an inherent method, which is why `Int` has one and `User` does not.",
+      "A dot call resolves against the receiver's type either way. The next lesson defines an ability of your own.",
     ],
     code: `use std::effects::log::{ Console, println }
 
-# Inspect is built in and derived for every type, so to_dbg_str always works.
 type User = { name: Str, age: Int }
 
 let main = {} -> perform Console in do
   let u = { name = "ada", age = 36 }
-  # A dot call finds the method for this value's type.
+
+  # Inspect is the one ability the compiler
+  # derives for every type, so this always works.
   println { msg = u.to_dbg_str {} }
-  println { msg = (42).to_dbg_str {} }
-  println { msg = "abs: \$((0 - 7).abs {}.to_str {})" }`,
+
+  # to_str is not an ability. Each type defines
+  # its own, which is why Int has one and User
+  # does not.
+  println { msg = (36).to_str {} }`,
   },
   {
     slug: "custom-abilities",
@@ -219,7 +242,7 @@ let main = {} -> perform Console in do
     ],
     code: `use std::effects::log::{ Console, println }
 
-# An ability is an interface. The receiver is named it.
+# An ability is an interface. The receiver is it.
 ability Priced for 'a where {
   cents: { it: 'a } -> Int
 }
@@ -230,12 +253,13 @@ impl Priced for Book where {
   cents = { it } -> it.price
 }
 
-# with Priced 'a means: any type that implements Priced.
-let show: { it: 'a } with Priced 'a -> Str = { it } -> "\$(it.cents {}.to_str {}) cents"
+# \`with Priced 'a\` means any type implementing it.
+let show: { it: 'a } with Priced 'a -> Str = { it } ->
+  "\$(it.cents {}.to_str {}) cents"
 
-let main = {} -> perform Console in println {
-  msg = show { it = { title = "Dune", price = 1299 } },
-}`,
+let main = {} -> perform Console in do
+  let dune = { title = "Dune", price = 1299 }
+  println { msg = show { it = dune } }`,
   },
   {
     slug: "custom-effects",
@@ -253,14 +277,18 @@ effect Config where {
   get: { key: Str } -> Str <Config>
 }
 
-# A handler gives the operation meaning. This one answers from a record.
+# A handler gives the operation its meaning.
 impl Config for Defaults where {
   get = { key } -> if key == "host" then "localhost" else "?"
 }
 
-let greet: {} -> Str <Config> = {} -> "connecting to \$(Config.get { key = "host" })"
+let greet = {} -> do
+  let host = Config.get { key = "host" }
+  "connecting to \$(host)"
 
-let main = {} -> perform Console in perform Defaults in println { msg = greet {} }`,
+let main = {} ->
+  perform Console in perform Defaults in
+    println { msg = greet {} }`,
   },
   {
     slug: "full-program",
@@ -288,8 +316,14 @@ let main = {} -> perform Console in do
     { name = "olive oil", price = 899, qty = 2 },
     { name = "pita", price = 199, qty = 3 },
   ]
-  cart.map { f = { x } -> println { msg = "\$(x.name): \$(x.total {}.to_str {})" } }
-  let sum = cart.fold { init = 0, f = { acc, x } -> acc + x.total {} }
+
+  cart.map { f = { x } ->
+    println { msg = "\$(x.name): \$(x.total {}.to_str {})" } }
+
+  let sum = cart.fold {
+    init = 0,
+    f = { acc, x } -> acc + x.total {},
+  }
   println { msg = "total: \$(sum.to_str {}) cents" }`,
   },
 ]

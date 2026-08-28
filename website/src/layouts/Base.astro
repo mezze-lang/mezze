@@ -8,6 +8,7 @@
  */
 import '../styles/main.css'
 import SiteHeader from '../components/SiteHeader.astro'
+import { subscribe } from '../data/content'
 import { dishes } from '../data/dishes'
 
 interface Props {
@@ -148,5 +149,13 @@ const iconList = dishes.map((d) => d.icon)
         }),
       )
     </script>
+    {subscribe.formId && (
+      <script
+        async
+        is:inline
+        src={`https://eocampaign1.com/form/${subscribe.formId}.js`}
+        data-form={subscribe.formId}
+      ></script>
+    )}
   </body>
 </html>

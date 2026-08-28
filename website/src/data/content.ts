@@ -22,8 +22,8 @@ export const site = {
   name: 'mezze',
   tagline: 'A functional language with effects in the type.',
   nav: [
-    { label: 'Taste of Mezze', href: '/taste' },
-    { label: 'Blog', href: '/blog' },
+    { label: 'Taste', href: '/taste' },
+    { label: 'Dev Blog', href: '/dev-blog' },
   ],
 }
 
@@ -36,6 +36,25 @@ export const hero = {
   footnote: 'Runs in your browser. Nothing to install to try it.',
 }
 
+/**
+ * Mailing list.
+ *
+ * `action` is the EmailOctopus *embedded form* URL — Lists → your list →
+ * Forms → Embedded. It is safe to publish: that endpoint can only add an
+ * address. Never put an API key here. A key is readable by anyone who views
+ * source and can read and delete lists, not just append to them.
+ */
+export const subscribe = {
+  /**
+   * EmailOctopus form id — Forms -> your form -> Embed. Safe to publish: it
+   * only opens their hosted form, and the copy inside it is theirs to edit.
+   * Never put an API key here; a key is readable by anyone viewing source and
+   * can read and delete lists.
+   */
+  formId: '2f717668-a2f9-11f1-ac5a-0f5779896a9a',
+  cta: 'Install',
+}
+
 export const topics = [
   { label: 'effects', colour: 'onion' },
   { label: 'handlers', colour: 'tomato' },
@@ -46,6 +65,10 @@ export const topics = [
 ] as const
 
 export const playground = {
+  /** Sits beside the samples, above the per-tab blurb. */
+  aside:
+    'A functional language where what a function does to the world is part ' +
+    'of its type — and you never write that type down.',
   caption: "Every sample here was run through the compiler — the output is what it printed.",
   tabs: [
     {
