@@ -1,0 +1,54 @@
+---
+/**
+ * Not found.
+ *
+ * The page is one Mezze expression, set as display type rather than run
+ * through the syntax highlighter — nothing here is a code sample, so the
+ * parts are coloured by hand to read as a headline.
+ */
+import Base from '../layouts/Base.astro'
+
+const open = '{'
+const close = '}'
+---
+<Base title="Not found — Mezze" description="No page at this address.">
+  <section class="nf">
+    <!-- Braces come from a variable: bare { } in markup are read as JSX. -->
+    <p class="nf-expr"><span class="c">Err</span> <span class="p">{open}</span> <span
+      class="f">error</span> <span class="p">=</span> <span
+      class="c">NotFound</span> <span class="p">{close}</span></p>
+    <p class="nf-say">There is no page at this address.</p>
+    <p class="nf-go"><a href="/">Back to the start</a></p>
+  </section>
+</Base>
+
+<style>
+  .nf {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 1.15rem; text-align: center;
+    /* Centred in what is left below the header, without the page scrolling.
+       dvh, so mobile browser chrome collapsing does not leave a gap. */
+    min-height: calc(100dvh - var(--bar-h, 3.6rem) - 9rem);
+    justify-content: center;
+    padding: 2rem 0 4rem;
+  }
+
+  .nf-expr {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 600; line-height: 1.25; letter-spacing: -.01em;
+    /* Scales with the viewport so the expression never wraps — split across
+       two lines it stops reading as one expression. */
+    font-size: clamp(1.15rem, 6vw, 2.6rem);
+    white-space: nowrap;
+  }
+  /* Constructors carry the weight; braces and `=` recede so the eye lands on
+     Err and NotFound. */
+  .nf-expr .c { color: var(--syn-type); }
+  .nf-expr .f { color: var(--ink); font-weight: 500; }
+  .nf-expr .p { color: var(--faint); font-weight: 400; }
+
+  .nf-say { margin: 0; color: var(--soft); font-size: 1rem; }
+  .nf-go { margin: 0; }
+  .nf-go a { color: var(--primary); font-weight: 600; }
+</style>
