@@ -8,6 +8,7 @@
  */
 import '../styles/main.css'
 import SiteHeader from '../components/SiteHeader.astro'
+import { dishes } from '../data/dishes'
 
 interface Props {
   title: string
@@ -20,6 +21,10 @@ const {
   description = 'Mezze — a functional language where effects are part of the type.',
   width = 'page',
 } = Astro.props
+
+// The pre-paint script cannot use imports, so the icon paths are baked in
+// here rather than duplicated by hand.
+const iconList = dishes.map((d) => d.icon)
 ---
 <!doctype html>
 <html lang="en">
@@ -30,10 +35,24 @@ const {
     <meta name="description" content={description} />
     <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
     <link rel="icon" type="image/png" href="/icons/olive.png" data-favicon />
-    <script is:inline>
-      // Apply the stored theme before first paint so there is no flash.
+    <script is:inline define:vars={{ iconList }}>
+      // Both of these run before first paint, so the page never shows one
+      // state and then corrects itself.
+      const root = document.documentElement
+
       const t = localStorage.getItem('mezze-theme')
-      if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t
+      if (t === 'dark' || t === 'light') root.dataset.theme = t
+
+      // The markup ships dish 0; without this the saved dish only takes effect
+      // after hydration, so the first frame is always olive.
+      const saved = Number(sessionStorage.getItem('mezze-dish'))
+      if (saved > 0) {
+        root.dataset.dish = String(saved)
+        // The tab icon ships as dish 0 too; correct it in the same breath.
+        const icons = iconList
+        const fav = document.querySelector('[data-favicon]')
+        if (fav && icons[saved]) fav.href = icons[saved]
+      }
     </script>
   </head>
   <body>
@@ -100,6 +119,14 @@ const {
       const saved = sessionStorage.getItem(KEY)
       let current = saved === null ? 0 : Number(saved) % dishes.length
       show(current)
+
+      // Hand off from the pre-paint CSS to the inline styles show() just set,
+      // then allow the cross-fade — so the first frame is correct and only
+      // later clicks animate.
+      root.removeAttribute('data-dish')
+      requestAnimationFrame(() => {
+        document.querySelectorAll('[data-mascot]').forEach((el) => el.classList.add('is-live'))
+      })
 
       document.querySelectorAll('[data-mascot]:not(.is-static)').forEach((el) =>
         el.addEventListener('click', () => {
