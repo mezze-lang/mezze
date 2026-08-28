@@ -2,6 +2,13 @@
 #
 # Rebuild public/icons/*.png from a contact sheet holding all six dishes.
 #
+# NOTE: the icons currently committed were NOT produced by this script. Five of
+# them are the earlier hand-corrected set (02eadbe84) and only the aubergine
+# comes from a generated sheet, all normalised afterwards by tools/size-icons.sh
+# so each subject fills the same fraction of its canvas. Re-running this would
+# replace all six with generated art. Kept because the crop, tint and alpha
+# handling below took several passes to get right and are worth not relearning.
+#
 #   ./tools/icons.sh ~/Downloads/sheet.png
 #
 # Expects them left to right, top to bottom:
