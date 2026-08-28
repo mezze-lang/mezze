@@ -179,9 +179,16 @@
   .page .play-lede { grid-area: lede; margin: -1.1rem 0 0; }
   .page .play-note {
     grid-area: note;
-    /* The rule read as a divider inside the aside; standing alone under the
-       sample it is redundant with the gap above it. */
-    padding-top: 0; border-top: none;
+    /* The rule moves below: above the description it separated the sample from
+       its own caption, which are the two things that belong together here. Under
+       it, it closes the section off. */
+    padding: 0 0 1.4rem;
+    border-top: none;
+    border-bottom: 1px solid var(--rule);
+    /* Pulled up against the sample it describes. The row gap has to stay wide
+       enough for the copy blocks above, and .play adds 1.5rem of its own bottom
+       padding, so without this the caption floats ~3rem clear of the code. */
+    margin-top: -1.9rem;
   }
   .page .play { grid-area: sample; }
 }
