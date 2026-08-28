@@ -48,3 +48,17 @@
   margin: 0 0 1.2rem; padding: .2rem 0 .2rem 1.1rem;
   border-left: 3px solid var(--c); color: var(--soft);
 }
+
+/* A live editor embedded in a post. Fixed height: it sits in prose, so it
+   should not grow with the code the reader types into it. */
+/* Sized like the Taste page rather than a thumbnail: the output pane is a
+   fixed 9.5rem, so a 22rem box left only ~10rem for code and every sample
+   scrolled from the first line. Break out of the prose column too — a full
+   editor needs more width than a measure tuned for reading. */
+.post-editor {
+  height: 34rem; margin: 0 0 1.8rem; display: flex;
+  width: min(100%, 62rem);
+}
+@media (max-width: 760px) {
+  .post-editor { height: 30rem; }
+}

@@ -3,6 +3,7 @@ title: Marking up a post
 blurb: Every highlighter and squiggle the site knows, shown in context.
 date: 2026-08-27
 colour: lemon
+draft: true
 ---
 
 This post exists to show what the inline syntax looks like once it renders.

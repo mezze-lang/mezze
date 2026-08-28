@@ -1,27 +1,26 @@
 ---
-/** Blog index. Lists every non-draft post, newest first. */
-import { getCollection } from 'astro:content'
+/** Blog index. Drafts show in dev only — see lib/posts. */
+import { posts } from '../../lib/posts'
 import Base from '../../layouts/Base.astro'
 
-const posts = (await getCollection('blog', ({ data }) => !data.draft))
-  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf())
+const entries = await posts()
 
 const fmt = (d: Date) =>
   d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 ---
-<Base title="Blog — Mezze" description="Notes on building Mezze.">
+<Base title="Dev Blog — Mezze" description="Notes on building Mezze.">
   <div class="page blog-index">
     <header class="blog-head">
-      <h1>Blog</h1>
+      <h1>Dev Blog</h1>
       <p class="lede">Notes on building the language.</p>
     </header>
 
-    {posts.length === 0 && <p class="micro">Nothing published yet.</p>}
+    {entries.length === 0 && <p class="micro">Nothing published yet.</p>}
 
     <ul class="post-list">
-      {posts.map((p) => (
+      {entries.map((p) => (
         <li class="post-card" style={p.data.colour ? `--c: var(--${p.data.colour})` : undefined}>
-          <a href={`/blog/${p.id}`}>
+          <a href={`/dev-blog/${p.id}`}>
             <time datetime={p.data.date.toISOString()}>{fmt(p.data.date)}</time>
             <h2>{p.data.title}</h2>
             <p>{p.data.blurb}</p>
@@ -35,6 +34,8 @@ const fmt = (d: Date) =>
 <script>
   // The tour is one click away and needs a 55MB runtime. Start filling the
   // HTTP cache now so it is warm on arrival.
-  import { prewarmMezze } from '../../scripts/mezze-runtime'
-  prewarmMezze()
+  import { prewarmMezzeOnIntent } from '../../scripts/mezze-runtime'
+  // A post may embed an editor, so aiming at one is a signal of intent — as is
+  // aiming at the tour from the nav.
+  prewarmMezzeOnIntent('a[href^="/taste"], a[href^="/dev-blog/"]')
 </script>

@@ -3,6 +3,7 @@ title: Running a compiler in the browser
 blurb: Mezze parses, typechecks and runs inside WebAssembly — including real HTTPS.
 date: 2026-08-20
 colour: olive
+draft: true
 ---
 
 The playground on this site is ==onion:not a simulation==. It is the actual Mezze
