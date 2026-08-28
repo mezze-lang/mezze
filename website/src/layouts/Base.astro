@@ -35,7 +35,7 @@ const iconList = dishes.map((d) => d.icon)
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
-    <link rel="icon" type="image/png" href="/icons/olive.png" data-favicon />
+    <link rel="icon" type="image/png" href={dishes[0].icon} data-favicon />
     <script is:inline define:vars={{ iconList }}>
       // Both of these run before first paint, so the page never shows one
       // state and then corrects itself.

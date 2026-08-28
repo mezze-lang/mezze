@@ -19,11 +19,23 @@ export interface Dish {
   onPrimary: string
 }
 
+/**
+ * Cache-busting stamp on the icon URLs.
+ *
+ * These live in public/, so Astro never fingerprints them: a redesigned icon
+ * keeps its old URL, and a CDN goes on serving the cached copy until the entry
+ * expires — a week, in our case, during which new artwork simply does not
+ * appear. The stamp is a hash of the icon bytes, refreshed by tools/icons.sh,
+ * so the URL changes exactly when the artwork does and never otherwise.
+ */
+const ICON_V = '65327f25'
+const icon = (name: string) => `/icons/${name}.png?v=${ICON_V}`
+
 export const dishes: Dish[] = [
-  { key: 'olive',     label: 'Olive',         icon: '/icons/olive.png',     primary: 'var(--olive)', onPrimary: '#FFFEFA' },
-  { key: 'lemon',     label: 'Lemon',         icon: '/icons/lemon.png',     primary: 'var(--lemon)', onPrimary: '#FFFEFA' },
-  { key: 'onion',     label: 'Pickled onion', icon: '/icons/onion.png',     primary: 'var(--onion)', onPrimary: '#FFFEFA' },
-  { key: 'tomato',    label: 'Tomato',        icon: '/icons/tomato.png',    primary: 'var(--tomato)', onPrimary: '#FFFEFA' },
-  { key: 'mint',      label: 'Mint',          icon: '/icons/mint.png',      primary: 'var(--mint)', onPrimary: '#FFFEFA' },
-  { key: 'aubergine', label: 'Aubergine',     icon: '/icons/aubergine.png', primary: 'var(--aubergine)', onPrimary: '#FFFEFA' },
+  { key: 'olive',     label: 'Olive',         icon: icon('olive'),     primary: 'var(--olive)', onPrimary: '#FFFEFA' },
+  { key: 'lemon',     label: 'Lemon',         icon: icon('lemon'),     primary: 'var(--lemon)', onPrimary: '#FFFEFA' },
+  { key: 'onion',     label: 'Pickled onion', icon: icon('onion'),     primary: 'var(--onion)', onPrimary: '#FFFEFA' },
+  { key: 'tomato',    label: 'Tomato',        icon: icon('tomato'),    primary: 'var(--tomato)', onPrimary: '#FFFEFA' },
+  { key: 'mint',      label: 'Mint',          icon: icon('mint'),      primary: 'var(--mint)', onPrimary: '#FFFEFA' },
+  { key: 'aubergine', label: 'Aubergine',     icon: icon('aubergine'), primary: 'var(--aubergine)', onPrimary: '#FFFEFA' },
 ]

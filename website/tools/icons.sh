@@ -45,6 +45,9 @@ for i in 0 1 2 3 4 5; do
   printf '  %-10s %s\n' "$n" "$(du -h "$OUT/$n.png" | cut -f1)"
 done
 
+# The URL must change when the artwork does — see tools/stamp-icons.mjs.
+node "$HERE/stamp-icons.mjs"
+
 # 128 colours costs ~0.6% RMSE — invisible on these flat-shaded icons — and
 # takes the set from ~390K to ~70K.
 echo "▸ Done — $(du -sh "$OUT" | cut -f1) in public/icons/"

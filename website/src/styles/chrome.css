@@ -35,8 +35,25 @@
 /* Keep the nav on phones — hiding it stranded Taste of Mezze and Blog with
    no other way to reach them. Tighten instead. */
 @media (max-width: 760px) {
-  .site-bar-inner { gap: .8rem; font-size: .78rem; }
-  .site-bar nav { display: flex; gap: .7rem; }
+  /* Every item keeps its full text — brand, two nav links, Install and the
+     toggle. On a 360px phone that is more than fits, and a flex row with
+     nothing allowed to shrink squeezes the labels instead of the gaps. So:
+     tighten the gaps and padding first, and let nav scroll if it still does
+     not fit rather than compress the words. */
+  .site-bar-inner { gap: .7rem; font-size: .78rem; padding-inline: .85rem; }
+  .site-bar nav {
+    display: flex; gap: .85rem;
+    min-width: 0; overflow-x: auto;
+    /* Hide the scrollbar: it is a two-item row, and a visible bar under the
+       header reads as breakage rather than affordance. */
+    scrollbar-width: none;
+  }
+  .site-bar nav::-webkit-scrollbar { display: none; }
+  .site-bar nav a { white-space: nowrap; }
+  .site-bar-actions { gap: .45rem; }
+  /* The pill is the widest optional item; trim its padding before anything
+     starts losing letters. */
+  .site-bar-actions .pill { padding-inline: .6rem; }
   /* Hide the wordmark only. Must not be a bare `.brand span`: the static
      mascot is itself a span, so that selector hid the whole brand. */
   .brand > .brand-name { display: none; }   /* mascot alone is enough here */
