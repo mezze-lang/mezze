@@ -28,7 +28,7 @@ export interface Dish {
  * appear. The stamp is a hash of the icon bytes, refreshed by tools/icons.sh,
  * so the URL changes exactly when the artwork does and never otherwise.
  */
-const ICON_V = '7135eac8'
+const ICON_V = '1d7d8dec'
 const icon = (name: string) => `/icons/${name}.png?v=${ICON_V}`
 
 export const dishes: Dish[] = [

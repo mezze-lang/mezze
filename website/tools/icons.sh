@@ -20,14 +20,20 @@ trap 'rm -rf "$WORK"' EXIT
 
 names=(tomato onion aubergine lemon mint olive)
 
-# Palette token each dish is nudged toward (light theme, src/styles/tokens.css).
-tokens=(D6453C E8608F 7A4E9E F2C230 5FA8A0 5E7A2E)
-
-# How far to pull, in percent. Deliberately small: the art already sits near the
-# palette, and a heavy pull flattens the shading that makes these read as
-# objects rather than swatches. Mint and olive need more — the generator drifts
-# them green/yellow, losing mint's teal entirely.
-pulls=(6 6 6 6 26 22)
+# Colour is left alone.
+#
+# Two corrections were tried and both made it worse. A -colorize pull toward
+# each palette token blends EVERY pixel, so the black eyes and outlines were
+# dragged toward the token too — at a high pull olive's eyes came out olive-grey
+# and the face all but vanished. Matching the old icons' mean saturation and
+# lightness instead went muddy, because those means are pulled down by the large
+# black outlines: matching the average over-darkens the body.
+#
+# Side by side with the set it replaces, the untouched art is already close, and
+# it is the only version that is clean. Left at 100/100 rather than deleted, so
+# the knob is here if a future sheet does drift.
+lights=(100 100 100 100 100 100)
+sats=(100 100 100 100 100 100)
 
 # Ranges of actual content along one axis, from the alpha channel.
 #
@@ -70,8 +76,7 @@ for i in 0 1 2 3 4 5; do
   magick "$WORK/tile_$i.png" \
     -background none -alpha on \
     -gravity center -extent "%[fx:max(w,h)]x%[fx:max(w,h)]" \
-    -fill "#${tokens[$i]}" -colorize "${pulls[$i]}%" \
-    -modulate 100,104,100 \
+    -modulate "${lights[$i]},${sats[$i]},100" \
     -resize 256x256 \
     -colors 128 \
     -channel A -level 0%,92% +channel \
