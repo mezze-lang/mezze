@@ -4,6 +4,7 @@ import com.mezze.language.typechecker.TypeChecker;
 import com.mezze.language.truffleir.FunctionIR;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.language.formatter.Formatter;
+import com.mezze.language.formatter.WidthOverride;
 import com.mezze.language.typechecker.lookup.TypedAstLookup;
 import com.mezze.language.typedast.TypedModule;
 import com.mezze.language.ast.TypePrinterKt;

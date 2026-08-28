@@ -1382,7 +1382,7 @@ wasmImports.jsbody = {
 			conversion.handleJSError(e);}}).call(...args),
 	'_LMezzeWeb.installFmt___Function_V' : (...args) => (function(fn){
 		try{
-			globalThis.formatMezze = (src) => fn(src);
+			globalThis.formatMezze = (src, cols) => fn(src + '\u0000' + (cols || 0));
 		}catch( e ) {
 			conversion.handleJSError(e);}}).call(...args),
 	'_LMezzeWeb.installRun___Function_V' : (...args) => (function(fn){

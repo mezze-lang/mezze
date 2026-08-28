@@ -13,12 +13,31 @@ import com.oracle.truffle.api.instrumentation.EventContext;
  * playground does not use, so no-op it to sidestep the backend codegen bug.
  *
  * SandboxContext is package-private, so it is reached via @TargetClass alias.
+ *
+ * Guarded by onlyWith: the sandbox instrument ships in some GraalVM builds and
+ * not others, and an unconditional substitution fails the build outright when
+ * its target is absent.
  */
-@TargetClass(className = "com.oracle.truffle.sandbox.SandboxContext")
+final class SandboxPresent implements java.util.function.BooleanSupplier {
+    @Override
+    public boolean getAsBoolean() {
+        try {
+            Class.forName("com.oracle.truffle.sandbox.SandboxInstrument", false,
+                          SandboxPresent.class.getClassLoader());
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+}
+
+@TargetClass(className = "com.oracle.truffle.sandbox.SandboxContext",
+             onlyWith = SandboxPresent.class)
 final class Target_com_oracle_truffle_sandbox_SandboxContext {
 }
 
-@TargetClass(className = "com.oracle.truffle.sandbox.SandboxInstrument")
+@TargetClass(className = "com.oracle.truffle.sandbox.SandboxInstrument",
+             onlyWith = SandboxPresent.class)
 final class Target_com_oracle_truffle_sandbox_SandboxInstrument {
     @Substitute
     private static void checkAstDepth(EventContext eventContext,
