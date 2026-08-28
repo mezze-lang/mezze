@@ -133,9 +133,12 @@ import { highlight } from '../lib/highlight'
       const t = map?.[p[0] + ':' + p[1]]
       if (!t) return hideTip()
       const i = t.indexOf(' : ')
+      // The type is Mezze, so run it through the same highlighter as the code.
       tip.innerHTML = i > 0
-        ? `<code>${t.slice(0, i)}</code> : <code class="ht-type">${t.slice(i + 3)}</code>`
-        : `<code class="ht-type">${t}</code>`
+        ? `<code class="ht-name">${t.slice(0, i)}</code>` +
+          `<code class="ht-sep"> : </code>` +
+          `<code>${highlight(t.slice(i + 3))}</code>`
+        : `<code>${highlight(t)}</code>`
       tip.style.left = e.clientX + 12 + 'px'
       tip.style.top = e.clientY + 18 + 'px'
       tip.hidden = false

@@ -99,24 +99,60 @@ public final class HoverExtractor {
         int length() { return end - start; }
     }
 
-    /** Word spans, skipping comments and string bodies. */
+    /**
+     * Word spans in the code, skipping comments and literal string text.
+     *
+     * Interpolations are code, not text: everything inside $(...) is scanned,
+     * because those expressions are typechecked like any other and deserve a
+     * hover. Only the literal characters around them are skipped.
+     */
     private static List<Span> identifiers(String text) {
         List<Span> spans = new ArrayList<>();
-        int hash = text.indexOf('#');
+        int hash = commentStart(text);
         String scan = hash >= 0 ? text.substring(0, hash) : text;
 
         int i = 0;
         boolean inString = false;
+        int interpDepth = 0;
         while (i < scan.length()) {
             char c = scan.charAt(i);
-            if (c == '"') { inString = !inString; i++; continue; }
-            if (inString || !(Character.isLetter(c) || c == '_')) { i++; continue; }
+
+            if (c == '"' && interpDepth == 0) {
+                inString = !inString;
+                i++;
+                continue;
+            }
+            if (inString && interpDepth == 0
+                && c == '$' && i + 1 < scan.length() && scan.charAt(i + 1) == '(') {
+                interpDepth = 1;
+                i += 2;
+                continue;
+            }
+            if (interpDepth > 0) {
+                if (c == '(') interpDepth++;
+                else if (c == ')') { interpDepth--; i++; continue; }
+            }
+            // Inside a string but outside an interpolation: literal text.
+            if (inString && interpDepth == 0) { i++; continue; }
+
+            if (!(Character.isLetter(c) || c == '_')) { i++; continue; }
             int start = i;
             while (i < scan.length()
                    && (Character.isLetterOrDigit(scan.charAt(i)) || scan.charAt(i) == '_')) i++;
             spans.add(new Span(start, i));
         }
         return spans;
+    }
+
+    /** Index of a line comment, ignoring any # that sits inside a string. */
+    private static int commentStart(String text) {
+        boolean inString = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '"') inString = !inString;
+            else if (c == '#' && !inString) return i;
+        }
+        return -1;
     }
 
     private static String quote(String s) {

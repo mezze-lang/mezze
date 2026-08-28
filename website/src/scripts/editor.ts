@@ -150,9 +150,12 @@ export function mountEditor(root: HTMLElement): EditorHandle {
 
       lastKey = key
       const i = t.indexOf(' : ')
+      // The type is Mezze, so run it through the same highlighter as the code.
       tip.innerHTML = i > 0
-        ? `<code>${esc(t.slice(0, i))}</code> : <code class="ht-type">${esc(t.slice(i + 3))}</code>`
-        : `<code class="ht-type">${esc(t)}</code>`
+        ? `<code class="ht-name">${esc(t.slice(0, i))}</code>` +
+          `<code class="ht-sep"> : </code>` +
+          `<code>${highlight(t.slice(i + 3))}</code>`
+        : `<code>${highlight(t)}</code>`
       tip.style.left = x + 12 + 'px'
       tip.style.top = y + 18 + 'px'
       tip.hidden = false

@@ -41,11 +41,11 @@
 .tk-eff    { color: var(--syn-eff); }
 .tk-bool   { color: var(--syn-num); }
 .tk-num    { color: var(--syn-num); }
-.tk-kw     { color: var(--syn-kw); }
+.tk-kw     { color: var(--syn-kw); font-weight: 700; }
 .tk-fn     { color: var(--syn-fn); }
 .tk-mth    { color: var(--syn-mth); }
 .tk-fld    { color: var(--syn-fld); }
-.tk-ctor   { color: var(--syn-type); }
+.tk-ctor   { color: var(--syn-type); font-weight: 600; }
 .tk-interp { color: var(--syn-interp); }
 .tk-err    { text-decoration: underline wavy var(--syn-err); text-underline-offset: 3px; }
 
@@ -98,4 +98,18 @@
   max-width: 40rem; white-space: pre-wrap;
 }
 .hover-tip code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: none; padding: 0; }
-.hover-tip .ht-type { color: var(--syn-type); }
+.hover-tip .ht-name { color: var(--ink); font-weight: 700; }
+.hover-tip .ht-sep  { color: var(--faint); }
+.hover-tip .ht-type { color: var(--syn-type); font-weight: 600; }
+
+/* A claim that is designed but not yet shipped. Small, muted, and hoverable —
+   visible enough to be honest, quiet enough not to undercut the line. */
+sup.tbd {
+  font-size: .58em;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: var(--faint);
+  margin-left: .18em;
+  vertical-align: super;
+  cursor: help;
+}

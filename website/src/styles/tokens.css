@@ -59,18 +59,18 @@
   --dbg-bg:  color-mix(in srgb, var(--aubergine) 18%, transparent);
 
   /* --- code syntax ---------------------------------------------------- */
-  --syn-kw:   var(--tomato);
-  --syn-fn:   var(--mint);
-  --syn-type: color-mix(in srgb, var(--lemon) 72%, #000);
-  --syn-str:  var(--olive);
+  --syn-kw:   color-mix(in srgb, var(--aubergine) 88%, #000);
+  --syn-fn:   color-mix(in srgb, var(--mint) 62%, #000);
+  --syn-type: #A85A2B;   /* a warm brown: distinct from tomato and lemon */
+  --syn-str:  color-mix(in srgb, var(--olive) 90%, #000);
   --syn-com:  var(--faint);
-  --syn-num:  var(--tomato);
+  --syn-num:  color-mix(in srgb, var(--tomato) 82%, #000);
   --syn-mark: var(--onion);
-  --syn-tv:     var(--mint);
-  --syn-eff:    var(--onion);
-  --syn-mth:    var(--mint);
-  --syn-fld:    var(--aubergine);
-  --syn-interp: var(--onion);
+  --syn-tv:     color-mix(in srgb, var(--mint) 55%, #000);
+  --syn-eff:    color-mix(in srgb, var(--onion) 68%, #000);
+  --syn-mth:    color-mix(in srgb, var(--aubergine) 62%, #000);
+  --syn-fld:    var(--ink);
+  --syn-interp: color-mix(in srgb, var(--onion) 68%, #000);
   --syn-err:    var(--err);
 
   /* --- shape & motion -------------------------------------------------- */
@@ -134,8 +134,31 @@
 
     --dbg-bg:  color-mix(in srgb, var(--aubergine) 28%, transparent);
 
-    --syn-type: color-mix(in srgb, var(--lemon) 88%, #FFF);
-    --syn-str:  color-mix(in srgb, var(--olive) 72%, #FFF);
+    --syn-kw:     color-mix(in srgb, var(--aubergine) 82%, #FFF);
+
+    --syn-fn:     color-mix(in srgb, var(--mint) 86%, #FFF);
+
+    --syn-type:   #E0A070;
+
+    --syn-str:    color-mix(in srgb, var(--olive) 72%, #FFF);
+
+    --syn-com:    var(--faint);
+
+    --syn-num:    color-mix(in srgb, var(--tomato) 84%, #FFF);
+
+    --syn-mark:   var(--onion);
+
+    --syn-tv:     color-mix(in srgb, var(--mint) 70%, #FFF);
+
+    --syn-eff:    color-mix(in srgb, var(--onion) 86%, #FFF);
+
+    --syn-mth:    color-mix(in srgb, var(--aubergine) 66%, #FFF);
+
+    --syn-fld:    var(--ink);
+
+    --syn-interp: color-mix(in srgb, var(--onion) 86%, #FFF);
+
+    --syn-err:    var(--err);
     --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 4px 16px rgb(0 0 0 / .2);
   }
 }
@@ -188,8 +211,31 @@
 
   --dbg-bg:  color-mix(in srgb, var(--aubergine) 28%, transparent);
 
-  --syn-type: color-mix(in srgb, var(--lemon) 88%, #FFF);
-  --syn-str:  color-mix(in srgb, var(--olive) 72%, #FFF);
+  --syn-kw:     color-mix(in srgb, var(--aubergine) 82%, #FFF);
+
+  --syn-fn:     color-mix(in srgb, var(--mint) 86%, #FFF);
+
+  --syn-type:   #E0A070;
+
+  --syn-str:    color-mix(in srgb, var(--olive) 72%, #FFF);
+
+  --syn-com:    var(--faint);
+
+  --syn-num:    color-mix(in srgb, var(--tomato) 84%, #FFF);
+
+  --syn-mark:   var(--onion);
+
+  --syn-tv:     color-mix(in srgb, var(--mint) 70%, #FFF);
+
+  --syn-eff:    color-mix(in srgb, var(--onion) 86%, #FFF);
+
+  --syn-mth:    color-mix(in srgb, var(--aubergine) 66%, #FFF);
+
+  --syn-fld:    var(--ink);
+
+  --syn-interp: color-mix(in srgb, var(--onion) 86%, #FFF);
+
+  --syn-err:    var(--err);
   --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 4px 16px rgb(0 0 0 / .2);
 }
 

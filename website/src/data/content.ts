@@ -28,20 +28,20 @@ export const site = {
 }
 
 export const hero = {
-  headline: 'Write what it ~onion~does~.\nLet the types ~~follow~~.',
+  headline: 'Write what it ~onion~does~.\nThe types ~~keep up~~.',
   lede:
-    'Effects are part of the signature — files, logging, tasks, failure. ' +
-    'You never annotate one. Structural types, full inference, running on the JVM.',
+    'Every function tells you what it touches — files, network, tasks, failure — and ' +
+    'you never annotate one. Full inference, structural types, running on the JVM.',
   primaryCta: { label: 'Taste of Mezze', href: '/taste' },
   footnote: 'Runs in your browser. Nothing to install to try it.',
 }
 
 export const topics = [
-  { label: 'abilities', colour: 'olive' },
-  { label: 'records', colour: 'lemon' },
   { label: 'effects', colour: 'onion' },
-  { label: 'types', colour: 'tomato' },
-  { label: 'async', colour: 'mint' },
+  { label: 'handlers', colour: 'tomato' },
+  { label: 'records', colour: 'lemon' },
+  { label: 'abilities', colour: 'olive' },
+  { label: 'concurrency', colour: 'mint' },
   { label: 'mutation', colour: 'auber' },
 ] as const
 
@@ -141,40 +141,52 @@ let main = {} -> perform Console in do
 /** One per dish, in cycle order — the mark colour follows the palette. */
 export const features = [
   {
-    title: 'Stop guessing what a value ~olive~can do~',
+    title: 'Write like a ~lemon~dynamic language~, get a strict one',
     body:
-      'Type a dot and the editor lists every operation that applies — including ' +
-      'ones you defined yourself, on types you did not write.',
+      'Full inference across the whole program. Annotate a signature where it helps ' +
+      'someone reading it, never to satisfy the compiler.',
   },
   {
-    title: 'Never break a caller by ~lemon~adding a field~',
+    title: 'A few small pieces, ~onion~reused everywhere~',
     body:
-      'Arguments are named, always. Add one, reorder them, and every existing ' +
-      'call site keeps compiling. No positional arguments to get wrong.',
+      'Records are the whole story: arguments are records, so every call names its ' +
+      'fields. Learn one shape and it holds from a two-field literal to a module API.',
   },
   {
-    title: 'Know what a function ~onion~touches~ before you call it',
+    title: 'Swap out the ~tomato~side effects~ when you need to',
     body:
-      'If it writes files or hits the network, that is in its type. Nothing ' +
-      'reaches the outside world without saying so first.',
+      'The same function runs against the real filesystem or an in-memory one, a live ' +
+      'clock or a frozen one. Tests get a different handler, not different code.',
   },
   {
-    title: 'Tests that cannot reach ~tomato~production~',
+    title: 'Fearless concurrency, ~mint~built on Loom~',
     body:
-      'Swap the handler, not the code. The same function logs to a console, a ' +
-      'buffer, or nowhere — decided by the caller, checked by the compiler.',
+      'Millions of virtual threads, and cancellation that actually interrupts a parked ' +
+      'task. STM, atoms, channels, agents and latches ship with it.',
   },
   {
-    title: 'Keep the libraries you ~mint~already have~',
+    title: 'Mutation where it ~auber~earns its place~',
     body:
-      'Runs on GraalVM, so your Java and Kotlin come with you. No rewrite, no ' +
-      'bindings to maintain.',
+      'Mutate in place inside a scope, hand back an immutable value at the edge. Fused ' +
+      'loops, and AOT native binaries when you want them.',
   },
   {
-    title: 'Fast loops without ~auber~losing track~',
+    title: 'Control flow you can ~olive~define yourself~',
     body:
-      'Mutate in place where it counts. The type system makes sure none of it ' +
-      'escapes the scope you allowed it in.',
+      'Effects are first-class, so early return, retries and resource scopes are ordinary ' +
+      'library code. No syntax to wait for.',
+  },
+  {
+    title: 'Distributed computing^TBD^',
+    body:
+      'Durable workflows and distributed execution, built on the same effect system. ' +
+      'Designed, not yet shipped.',
+  },
+  {
+    title: 'Keep the libraries you already have^TBD^',
+    body:
+      'Mezze runs on GraalVM, so calling the Java, Kotlin and Python you already have ' +
+      'is the plan. Designed, not yet shipped.',
   },
 ]
 
