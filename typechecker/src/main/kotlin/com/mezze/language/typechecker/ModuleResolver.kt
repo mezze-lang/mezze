@@ -4,7 +4,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.ast.debug.ContentHashRegistry
 import com.mezze.language.ast.debug.ContentHashRegistry.DeclarationKind
 import com.mezze.language.ast.hashing.MezzeHash
-import com.mezze.language.ast.hashing.MezzeHashBuilder
+import java.security.MessageDigest
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.ParsedModuleCacheHolder
 import com.mezze.language.parser.ParseException
@@ -286,6 +286,21 @@ class ModuleResolver(
             this.store = store
         }
 
+        /**
+         * SHA-256 hex of source text — MUST match the scheme StorePopulator /
+         * StoreParsedModuleCache.sha256Hex use to WRITE the parsed_modules /
+         * typed_modules `source_hash` column. Previously this side computed a
+         * '#'-prefixed, 16-byte-truncated SHA3-512 (MezzeHash.toString()), so the
+         * persisted parse cache could NEVER be read back (every getParsedModule
+         * lookup missed → cold starts always re-parsed). #317 sweep. Kept a private
+         * mirror rather than importing store-sqlite's copy — typechecker depends on
+         * the :store interface, not the :store-sqlite impl.
+         */
+        private fun sha256Hex(source: String): String {
+            val md = MessageDigest.getInstance("SHA-256")
+            return md.digest(source.toByteArray()).joinToString("") { "%02x".format(it) }
+        }
+
                 private fun tryLoadParsedFromStore(modulePath: String, sourceHash: Hash): ParsedModule? {
             val s = store ?: return null
             return try {
@@ -388,9 +403,7 @@ class ModuleResolver(
         fun isModuleStale(modulePath: String, sourceContent: String): Boolean {
             val cachedModule = getFromCache(modulePath) ?: return true  // Not cached = stale
             val cachedHash = cachedModule.sourceHash ?: return true     // No hash = stale
-            val currentHash = Hash(
-                MezzeHashBuilder().append(sourceContent).build().toString()
-            )
+            val currentHash = Hash(sha256Hex(sourceContent))
             return cachedHash != currentHash
         }
 
@@ -487,9 +500,7 @@ class ModuleResolver(
                 )
 
             val source = Files.readString(filePath)
-            val sourceHash = Hash(
-                MezzeHashBuilder().append(source).build().toString()
-            )
+            val sourceHash = Hash(sha256Hex(source))
 
             getFromCacheByContentHash(sourceHash)?.let { cachedModule ->
                 DebugLogger.debug(Category.ModuleResolver) {
