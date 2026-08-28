@@ -115,20 +115,24 @@ export function mountEditor(root: HTMLElement): EditorHandle {
    * The formatter is fixed at 100 columns for the CLI, which overflows this
    * pane. Measuring here lets Format wrap to what the reader actually has.
    *
-   * Measured from `.ed`, not the textarea: the textarea scrolls horizontally,
-   * so once a long line is present its own width reflects the content rather
-   * than what is visible — which is how this ended up asking for 87 columns in
-   * a pane that fits about 60.
+   * This overshot twice before: once when the textarea still scrolled
+   * horizontally and reported its content width, and again when the width came
+   * from the container while the padding came from the textarea.
    */
   const editorCols = (): number => {
     const w = measureCharWidth()
     const cs = getComputedStyle(srcEl)
-    const usable = root.clientWidth
+
+    // Measure the textarea's own content box. Taking the container's width and
+    // the textarea's padding mixes two boxes and overshoots by the container's
+    // border. Now that the layers wrap rather than scroll, the textarea's width
+    // tracks the pane and cannot be inflated by a long line.
+    const usable = srcEl.clientWidth
       - parseFloat(cs.paddingLeft)
       - parseFloat(cs.paddingRight)
 
     if (!w || !usable) return 80
-    // A couple of columns of slack so a trailing character never wraps.
+    // Two columns of slack so a trailing character never tips onto a new line.
     return Math.max(40, Math.min(100, Math.floor(usable / w) - 2))
   }
 
