@@ -36,8 +36,13 @@ names=(tomato onion aubergine lemon mint olive)
 # brown and the lemon-s leaf turned yellow. The body barely moves between 45%
 # and 90% anyway — 197,67,29 vs 198,64,31 on tomato — so the extra pull bought
 # nothing and cost the foliage.
+#
+# Mint and olive are the exception and go to 100: they are the two the generator
+# drifts furthest (mint arrived as a plain green with almost no blue, where its
+# token is teal), and neither has green foliage to protect, so there is nothing
+# for a strong pull to spoil.
 tokens=(D6453C E8608F 7A4E9E F2C230 5FA8A0 5E7A2E)
-pulls=(45 45 15 45 60 60)
+pulls=(45 45 15 45 100 100)
 
 # Ranges of actual content along one axis, from the alpha channel.
 #
@@ -64,8 +69,20 @@ while read -r y0 y1; do
   h=$(( y1 - y0 + 1 ))
   while read -r x0 x1; do
     w=$(( x1 - x0 + 1 ))
+    # Re-measure the vertical extent WITHIN this column. The row band is the
+    # union of three subjects, so the tallest one sets it — using that height
+    # for all three reached past the shorter ones into the row below, which is
+    # how a green shard of mint ended up under the onion.
+    # A column spans the whole sheet, so it reports one band per row. Pick the
+    # one that overlaps the row being processed — taking the first would be
+    # right for the top row and wrong for every row under it.
+    cy0=$y0; cy1=$y1
+    while read -r b0 b1; do
+      if [ "$b0" -le "$y1" ] && [ "$b1" -ge "$y0" ]; then cy0=$b0; cy1=$b1; break; fi
+    done < <(bounds row "${w}x1024+${x0}+0")
+    ch=$(( cy1 - cy0 + 1 ))
     magick "$SHEET" \
-      -crop "$(( w + PAD*2 ))x$(( h + PAD*2 ))+$(( x0 - PAD ))+$(( y0 - PAD ))" +repage \
+      -crop "$(( w + PAD*2 ))x$(( ch + PAD*2 ))+$(( x0 - PAD ))+$(( cy0 - PAD ))" +repage \
       "$WORK/tile_$i.png"
     i=$(( i + 1 ))
   done < <(bounds col "1536x${h}+0+${y0}")
