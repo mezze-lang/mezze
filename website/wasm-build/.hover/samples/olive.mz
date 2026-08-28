@@ -1,0 +1,8 @@
+use std::effects::log::{ Console, QuietConsole, println }
+
+# Swap where output goes without touching the function.
+let audit = { order } -> println { msg = "saw \$(order)" }
+
+let main = {} -> do
+  perform Console in audit { order = "A-1" }
+  perform QuietConsole in audit { order = "A-2" }

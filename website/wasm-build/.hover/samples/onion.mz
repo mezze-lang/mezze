@@ -1,0 +1,9 @@
+use std::effects::log::{ Console, println }
+
+# Change one field; the original is untouched.
+let base = { host = "localhost", port = 8080, tls = False }
+let prod = { ...base, host = "mezze-lang.org", tls = True }
+
+let main = {} -> perform Console in do
+  println { msg = base.host }
+  println { msg = prod.host }

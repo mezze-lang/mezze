@@ -1,9 +1,8 @@
 ---
 import Base from '../layouts/Base.astro'
 import Mascot from '../components/Mascot.astro'
-import Tag from '../components/Tag.astro'
 import Prose from '../components/Prose.astro'
-import { hero, topics, playground, features } from '../data/content'
+import { hero, playground, features } from '../data/content'
 import { highlight } from '../lib/highlight'
 ---
 <Base title="Mezze">
@@ -20,10 +19,6 @@ import { highlight } from '../lib/highlight'
           <p class="micro">{hero.footnote}</p>
         </div>
         <div class="hero-mascot"><Mascot size={168} /></div>
-      </section>
-
-      <section class="tags">
-        {topics.map((t) => <Tag colour={t.colour}>{t.label}</Tag>)}
       </section>
 
       <section class="play">
@@ -47,16 +42,6 @@ import { highlight } from '../lib/highlight'
           </article>
         ))}
       </section>
-
-      <section class="states">
-        <span class="st ok">✓ 3 tests passed</span>
-        <span class="st warn">! LoomAsync not available in the browser</span>
-        <span class="st note">◆ 2 effects handled</span>
-        <span class="st err">✕ Cannot use '+' with Str, Int</span>
-        <span class="st info">ⓘ typechecked in 34ms</span>
-        <span class="st dbg">⟐ inferred Str -> Int</span>
-      </section>
-
 
     </div>
   </div>
@@ -83,17 +68,22 @@ import { highlight } from '../lib/highlight'
 
     const select = (i: number) => {
       current = i
+      tabs.forEach((t, k) => t.classList.toggle('on', k === i))
       codeEl.innerHTML = highlight(playground.tabs[i].code)
       msgEl.textContent = IDLE
     }
 
     tabs.forEach((tab) =>
-      tab.addEventListener('click', () => {
-        tabs.forEach((t) => t.classList.remove('on'))
-        tab.classList.add('on')
-        select(Number(tab.dataset.idx))
-      }),
+      tab.addEventListener('click', () => select(Number(tab.dataset.idx))),
     )
+
+    // Each dish owns a sample, so clicking the mascot walks the examples with
+    // the colour. Tabs still work on their own — this only follows the mascot.
+    document.addEventListener('mezze-dish', (e) => {
+      const key = (e as CustomEvent).detail?.key
+      const i = playground.tabs.findIndex((t) => t.dish === key)
+      if (i >= 0) select(i)
+    })
 
     // ---- hover types ------------------------------------------------------
     // Types were extracted at build time by wasm-build/hovers.sh, using the
@@ -104,9 +94,9 @@ import { highlight } from '../lib/highlight'
     tip.hidden = true
     document.body.appendChild(tip)
 
-    // Must match the sample filenames hovers.sh writes, which come from the
-    // tab labels lowercased.
-    const TAB_KEYS = playground.tabs.map((t) => t.label.toLowerCase())
+    // hovers.json is keyed by dish — the same key hovers.sh writes its
+    // extracted samples under.
+    const TAB_KEYS = playground.tabs.map((t) => t.dish)
     const hideTip = () => { tip.hidden = true }
 
     /**

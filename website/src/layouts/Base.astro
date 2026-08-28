@@ -111,6 +111,9 @@ const iconList = dishes.map((d) => d.icon)
         const fav = document.querySelector<HTMLLinkElement>('[data-favicon]')
         if (fav) fav.href = d.icon
         sessionStorage.setItem(KEY, String(i))
+        // Let a page follow the dish — the landing page pairs each one with
+        // its own code sample.
+        document.dispatchEvent(new CustomEvent('mezze-dish', { detail: { index: i, key: d.key } }))
       }
 
       // Fixed order: a fresh visit starts at the first dish and clicking

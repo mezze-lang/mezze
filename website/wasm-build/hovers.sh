@@ -32,7 +32,7 @@ say "Extracting samples"
 node -e '
   const fs = require("fs")
   const src = fs.readFileSync(process.argv[1], "utf8")
-  const re = /label: '"'"'([^'"'"']+)'"'"',\s*\n\s*code: `([\s\S]*?)`,/g
+  const re = /dish: "([^"]+)",[\s\S]*?code: `([\s\S]*?)`,/g
   let m, n = 0
   while ((m = re.exec(src))) {
     fs.writeFileSync(`${process.argv[2]}/${m[1].toLowerCase()}.mz`, m[2])

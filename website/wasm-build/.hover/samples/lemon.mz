@@ -1,0 +1,8 @@
+use std::effects::log::{ Console, println }
+
+# Arguments are named, so order never matters.
+let label = { name, unit } -> "\$(name) sold by the \$(unit)"
+
+let main = {} -> perform Console in do
+  println { msg = label { name = "olive oil", unit = "litre" } }
+  println { msg = label { unit = "gram", name = "za'atar" } }

@@ -46,67 +46,112 @@ export const topics = [
 ] as const
 
 export const playground = {
-  caption: 'Every sample here was run through the compiler — the output is what it printed.',
+  caption: "Every sample here was run through the compiler — the output is what it printed.",
   tabs: [
     {
-      label: 'Effects',
-      code: `use std::effects::log::{ Log, Console, QuietConsole, println }
+      dish: "olive",
+      label: "Handlers",
+      blurb: "Swap where output goes",
+      code: `use std::effects::log::{ Console, QuietConsole, println }
 
-# <Log> says this touches the outside world. The caller cannot miss it.
-let audit: { order: Str } -> {} <Log> = { order } -> println { msg = "saw \\$(order)" }
+# Swap where output goes without touching the function.
+let audit = { order } -> println { msg = "saw \$(order)" }
 
 let main = {} -> do
   perform Console in audit { order = "A-1" }
   perform QuietConsole in audit { order = "A-2" }`,
-      output: 'saw A-1',
+      output: "saw A-1",
     },
     {
-      label: 'Records',
+      dish: "lemon",
+      label: "Named arguments",
+      blurb: "Order never matters",
       code: `use std::effects::log::{ Console, println }
 
-type Item = { name: Str, price: Int }
+# Arguments are named, so order never matters.
+let label = { name, unit } -> "\$(name) sold by the \$(unit)"
 
 let main = {} -> perform Console in do
-  let item = { name = "olive oil", price = 899 }
-  let sale = { ...item, price = 499 }
-  println { msg = "\\$(sale.name): \\$(sale.price.to_str {})" }`,
-      output: 'olive oil: 499',
+  println { msg = label { name = "olive oil", unit = "litre" } }
+  println { msg = label { unit = "gram", name = "za'atar" } }`,
+      output: "olive oil sold by the litre\nza’atar sold by the gram",
     },
     {
-      label: 'Concurrency',
+      dish: "onion",
+      label: "Records",
+      blurb: "Copy with a change",
+      code: `use std::effects::log::{ Console, println }
+
+# Change one field; the original is untouched.
+let base = { host = "localhost", port = 8080, tls = False }
+let prod = { ...base, host = "mezze-lang.org", tls = True }
+
+let main = {} -> perform Console in do
+  println { msg = base.host }
+  println { msg = prod.host }`,
+      output: "localhost\nmezze-lang.org",
+    },
+    {
+      dish: "tomato",
+      label: "Exhaustive match",
+      blurb: "Miss a case, it will not compile",
+      code: `use std::effects::log::{ Console, println }
+
+# Miss a case and it will not compile.
+type Status = | Queued, Running, Done { ms: Int } |
+
+let describe = { s } -> match s is
+  Queued -> "waiting"
+  Running -> "in progress"
+  Done { ms } -> "finished in \$(ms.to_str {})"
+
+let main = {} -> perform Console in do
+  println { msg = describe { s = Queued } }
+  println { msg = describe { s = Done { ms = 42 } } }`,
+      output: "waiting\nfinished in 42",
+    },
+    {
+      dish: "mint",
+      label: "Concurrency",
+      blurb: "Two requests at once",
       code: `use std::effects::async::{ Async, LoomAsync }
-use std::effects::log::{ Log, Console, println }
+use std::effects::log::{ Console, println }
 use std::result::{ get_or_else }
 
-let fetch: { url: Str } -> Str <Log> = { url } -> do
-  println { msg = "GET \\$(url)" }
+# Two requests at once, not one after the other.
+let fetch = { url } -> do
+  println { msg = "GET \$(url)" }
   url
 
 let main = {} -> perform Console in perform LoomAsync in do
-  # Both start now; neither waits for the other.
   let a = Async.spawn { f = {} -> fetch { url = "/users" } }
   let b = Async.spawn { f = {} -> fetch { url = "/orders" } }
-  # await hands back a Result, so a failure cannot be dropped.
+
   println { msg = get_or_else { result = a.await {}, def = "?" } }
   println { msg = get_or_else { result = b.await {}, def = "?" } }`,
-      output: 'GET /users\nGET /orders\n/users\n/orders\n\n(the two GET lines race — order varies run to run)',
+      output: "GET /users\nGET /orders\n/users\n/orders\n\n(the GET lines race — order varies run to run)",
     },
     {
-      label: 'Abilities',
+      dish: "aubergine",
+      label: "Abilities",
+      blurb: "Dot-methods on your own types",
       code: `use std::effects::log::{ Console, println }
 
-ability Priced for 'a where {
+# Give your own type the same dot-methods as a built-in one.
+ability Money for 'a where {
   cents: { it: 'a } -> Int
 }
 
-type Book = { price: Int }
+type Eur = { amount: Int }
 
-impl Priced for Book where {
-  cents = { it } -> it.price
+impl Money for Eur where {
+  cents = { it } -> it.amount
 }
 
-let main = {} -> perform Console in println { msg = ({ price = 1299 }.cents {}).to_str {} }`,
-      output: '1299',
+let main = {} -> perform Console in do
+  let price = { amount = 1299 }
+  println { msg = price.cents {}.to_str {} }`,
+      output: "1299",
     },
   ],
 }
