@@ -19,8 +19,21 @@ class DeclarationRegistry(
     // unchanged, but a cross-module ability-op type can later resolve by hash.
     private val allTypeHashesByName: Map<String, Hash> = emptyMap(),
 ) {
+    /**
+     * The single declaration-resolution rule: HASH-FIRST, name-only-as-fallback.
+     *
+     * A hash — when the caller has one — is authoritative identity and decides
+     * outright. A NAME is consulted ONLY when no hash is supplied, i.e. at the
+     * source-resolution boundary (a `use`d name being resolved to its decl for
+     * the first time). This is the one legitimate place a name maps to a decl;
+     * it is NOT a dispatch fallback. Every lookup* below delegates here so the
+     * rule lives in exactly one spot and cannot drift per decl-kind.
+     */
+    private fun <D> resolve(name: String, hash: Hash?, byHash: Map<Hash, D>, byName: Map<String, D>): D? =
+        (hash?.let { byHash[it] }) ?: byName[name]
+
     fun lookupType(name: String, hash: Hash? = null): ParsedTypeDecl? =
-        (hash?.let { typesByHash[it] }) ?: typesByName[name]
+        resolve(name, hash, typesByHash, typesByName)
 
     /** The content hash for a type by name, consulting local + imported +
      *  transitive types. For hash-stamping only (see [allTypeHashesByName]). */
@@ -28,10 +41,10 @@ class DeclarationRegistry(
         typesByName[name]?.contentHash ?: allTypeHashesByName[name]
 
     fun lookupAbility(name: String, hash: Hash? = null): ParsedAbilityDecl? =
-        (hash?.let { abilitiesByHash[it] }) ?: abilitiesByName[name]
+        resolve(name, hash, abilitiesByHash, abilitiesByName)
 
     fun lookupEffect(name: String, hash: Hash? = null): ParsedEffectDecl? =
-        (hash?.let { effectsByHash[it] }) ?: effectsByName[name]
+        resolve(name, hash, effectsByHash, effectsByName)
 
     /** Content hash for an ability by name (check-time replacement for the
      *  generated WellKnownHashConstants.resolveAbilityHash). Same pure value:
