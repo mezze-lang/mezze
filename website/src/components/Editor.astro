@@ -35,7 +35,7 @@ const { code = '', placeholder = 'Waiting for the Mezze runtime…' } = Astro.pr
 <style is:global>
   /* Global rather than scoped: the hover tooltip is appended to <body>,
      outside this component's DOM, so a scoped rule would not reach it. */
-  .ed { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--panel); }
+  .ed { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--panel); }
   .ed-bar { display: flex; align-items: center; gap: .5rem; padding: .55rem .75rem; border-bottom: 1px solid var(--rule); flex: none; }
   .ed-bar button { font: inherit; font-size: .88rem; padding: .25rem .85rem; border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--rule)); border-radius: 5px; background: var(--ground); color: var(--primary); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
   .ed-bar button:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 10%, var(--ground)); border-color: var(--primary); }
@@ -44,7 +44,7 @@ const { code = '', placeholder = 'Waiting for the Mezze runtime…' } = Astro.pr
   .ed-bar button:disabled { opacity: .45; cursor: default; }
   .ed-status { margin-left: auto; font-size: .8rem; color: var(--soft); }
 
-  .ed-editor { position: relative; flex: 1 1 auto; min-height: 0; }
+  .ed-editor { position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; }
 
   /* CRITICAL: both layers must agree on every metric that affects glyph
      position, or the highlight drifts from the text. No word-break — that

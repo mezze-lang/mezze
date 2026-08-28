@@ -130,7 +130,10 @@ import Editor from '../components/Editor.astro'
   #t-pos { color: var(--soft); font-size: .82rem; }
 
   /* ---- RIGHT: editor on top, bigger output below ---- */
-  .tour-right { display: flex; flex-direction: column; min-height: 0; padding-block: var(--tour-pad); }
+  /* min-width:0 matters: a flex item defaults to min-width:auto and refuses to
+     shrink below its content, so one long line in the editor widens the whole
+     column and scrolls the page sideways. */
+  .tour-right { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding-block: var(--tour-pad); }
   @media (max-width: 1000px) { .tour-right { height: 40rem; } }
 
 </style>

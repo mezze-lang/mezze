@@ -119,11 +119,16 @@ export function mountEditor(root: HTMLElement): EditorHandle {
    *
    * The formatter is fixed at 100 columns for the CLI, which overflows this
    * pane. Measuring here lets Format wrap to what the reader actually has.
+   *
+   * Measured from `.ed`, not the textarea: the textarea scrolls horizontally,
+   * so once a long line is present its own width reflects the content rather
+   * than what is visible — which is how this ended up asking for 87 columns in
+   * a pane that fits about 60.
    */
   const editorCols = (): number => {
     const w = measureCharWidth()
     const cs = getComputedStyle(srcEl)
-    const usable = srcEl.clientWidth
+    const usable = root.clientWidth
       - parseFloat(cs.paddingLeft)
       - parseFloat(cs.paddingRight)
 
