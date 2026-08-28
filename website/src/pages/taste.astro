@@ -85,7 +85,7 @@ import Editor from '../components/Editor.astro'
     align-items: stretch;
     /* Fill what is left below the sticky header. The header is ~3.6rem;
        the padding below is part of the same budget so nothing is clipped. */
-    height: calc(100dvh - 3.6rem);
+    height: calc(100dvh - var(--bar-h, 3.6rem));
     min-height: 32rem;
     padding-block: 0;
   }

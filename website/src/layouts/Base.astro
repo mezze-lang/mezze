@@ -128,6 +128,16 @@ const iconList = dishes.map((d) => d.icon)
         document.querySelectorAll('[data-mascot]').forEach((el) => el.classList.add('is-live'))
       })
 
+      // The tour sizes itself to the viewport minus the header. The header is
+      // content-driven, so measure it rather than hardcoding a guess.
+      const bar = document.querySelector('.site-bar')
+      if (bar) {
+        const publish = () =>
+          root.style.setProperty('--bar-h', bar.getBoundingClientRect().height + 'px')
+        publish()
+        new ResizeObserver(publish).observe(bar)
+      }
+
       document.querySelectorAll('[data-mascot]:not(.is-static)').forEach((el) =>
         el.addEventListener('click', () => {
           current = (current + 1) % dishes.length

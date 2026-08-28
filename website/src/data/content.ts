@@ -46,66 +46,94 @@ export const topics = [
 ] as const
 
 export const playground = {
-  caption: 'Live — the real compiler, compiled to WebAssembly.',
+  caption: 'Every sample here was run through the compiler — the output is what it printed.',
   tabs: [
     {
       label: 'Effects',
-      code: `use std::effects::log::{ Console, QuietConsole, println, info }
+      code: `use std::effects::log::{ Log, Console, QuietConsole, println }
+use std::int
 
-let process = { id, total } -> do
-  info { msg = "handling order #$(id.to_dbg_str {})" }
-  total
+# The <Log> in this type is the point: this function reaches the outside
+# world, and the signature has to say so.
+let charge: { order: Int, amount: Int } -> {} <Log> = { order, amount } ->
+  println { msg = "charging #$(int::to_str {n = order}): $(int::to_str {n = amount})" }
 
-# the same function under two handlers
-let main = {} -> perform Console in do
-  let a = perform Console in process { id = 1, total = 40 }
-  let b = perform QuietConsole in process { id = 2, total = 2 }
-  println { msg = "total = $((a + b).to_dbg_str {})" }`,
+let main = {} -> do
+  # Same function, two handlers. The caller decides what logging means.
+  perform Console in charge { order = 1001, amount = 4200 }
+  perform QuietConsole in charge { order = 1002, amount = 900 }
+  perform Console in println { msg = "done" }`,
+      output: 'charging #1001: 4200\ndone',
     },
     {
       label: 'Records',
       code: `use std::effects::log::{ Console, println }
+use std::int
 
-# structural — anything with a name field fits
-let greet = { who } -> "hello, $(who.name)!"
+type Order = { id: Int, total: Int, currency: Str }
 
-let main = {} -> perform Console in
-  println { msg = greet { who = { name = "friend", age = 30 } } }`,
+# Arguments are named, so the call site says what each number means.
+let summarise: { order: Order } -> Str = { order } ->
+  "#$(int::to_str {n = order.id}) — $(int::to_str {n = order.total}) $(order.currency)"
+
+let main = {} -> perform Console in do
+  let o = { id = 1001, total = 4200, currency = "EUR" }
+  println { msg = summarise { order = o } }
+
+  # Copy with one field changed; the rest come along untouched.
+  println { msg = summarise { order = { ...o, total = 0 } } }`,
+      output: '#1001 — 4200 EUR\n#1001 — 0 EUR',
+    },
+    {
+      label: 'Async',
+      code: `use std::effects::async::{ Async, LoomAsync }
+use std::effects::log::{ Log, Console, println }
+use std::result::{ get_or_else }
+use std::int
+
+let fetch_user: { id: Int } -> Str <Log> = { id } -> do
+  println { msg = "fetching user $(int::to_str {n = id})" }
+  "ada"
+
+let fetch_orders: { id: Int } -> Int <Log> = { id } -> do
+  println { msg = "fetching orders for $(int::to_str {n = id})" }
+  3
+
+let main = {} -> perform Console in perform LoomAsync in do
+  # Both start now; neither waits for the other.
+  let user = Async.spawn { f = {} -> fetch_user { id = 7 } }
+  let orders = Async.spawn { f = {} -> fetch_orders { id = 7 } }
+
+  # await returns a Result, so a failed task cannot be dropped by accident.
+  let name = get_or_else { result = user.await {}, def = "unknown" }
+  let count = get_or_else { result = orders.await {}, def = 0 }
+  println { msg = "$(name) has $(int::to_str {n = count}) orders" }`,
+      output: 'fetching user 7\nfetching orders for 7\nada has 3 orders',
     },
     {
       label: 'Abilities',
       code: `use std::effects::log::{ Console, println }
+use std::int
 
-type Vec2 = | Vec2 { x: Int, y: Int } |
-
-impl Vec2 where {
-  len_sq = { it } -> match it is
-    Vec2 { x, y } -> x * x + y * y,
+# One ability, one method. The receiver is named it.
+ability Money for 'a where {
+  cents: { it: 'a } -> Int
 }
 
-let main = {} -> perform Console in
-  println { msg = "len_sq = $(Vec2 { x = 3, y = 4 }.len_sq {}.to_dbg_str {})" }`,
-    },
-    {
-      label: 'Signatures',
-      code: `use std::effects::log::{ Log, Console, println }
+# A plain record — no wrapper needed to give it behaviour.
+type Eur = { amount: Int }
 
-# 'a is a type variable: describe works for any type that can print itself.
-let describe: { it: 'a, loud: Bool } -> Str =
-  { it, loud } -> do
-    let name = it.to_dbg_str {}
-    match loud is
-      True -> name.to_upper {}
-      False -> name
+impl Money for Eur where {
+  cents = { it } -> it.amount
+}
 
-# <Log> is the effect row: this function logs, and the type says so.
-let shout: { msg: Str } -> {} <Log> =
-  { msg } -> println { msg = msg }
+# Works for any type with a Money impl, including ones added later.
+let describe: { it: 'a } with Money 'a -> Str = { it } ->
+  "$(int::to_str {n = it.cents {}}) cents"
 
 let main = {} -> perform Console in do
-  shout { msg = describe { it = "mezze", loud = True } }
-  shout { msg = describe { it = "mezze", loud = False } }
-  shout { msg = describe { it = 42, loud = False } }`,
+  println { msg = describe { it = { amount = 4200 } } }`,
+      output: '4200 cents',
     },
   ],
 }
@@ -113,40 +141,40 @@ let main = {} -> perform Console in do
 /** One per dish, in cycle order — the mark colour follows the palette. */
 export const features = [
   {
-    title: 'Dot-chaining on ~olive~any~ type',
+    title: 'Stop guessing what a value ~olive~can do~',
     body:
-      'Abilities give ad-hoc polymorphism with associated types. Type a dot, ' +
-      'see what a value can do.',
+      'Type a dot and the editor lists every operation that applies — including ' +
+      'ones you defined yourself, on types you did not write.',
   },
   {
-    title: 'Every argument has a ~lemon~name~',
+    title: 'Never break a caller by ~lemon~adding a field~',
     body:
-      'Functions take records, so nothing depends on argument order and adding ' +
-      'a field never breaks a call site.',
+      'Arguments are named, always. Add one, reorder them, and every existing ' +
+      'call site keeps compiling. No positional arguments to get wrong.',
   },
   {
-    title: 'Effects are ~onion~in the type~',
+    title: 'Know what a function ~onion~touches~ before you call it',
     body:
-      'What a function does to the world is part of its signature, not a ' +
-      'convention. Handlers decide what those effects mean.',
+      'If it writes files or hits the network, that is in its type. Nothing ' +
+      'reaches the outside world without saying so first.',
   },
   {
-    title: 'Types you never ~tomato~write down~',
+    title: 'Tests that cannot reach ~tomato~production~',
     body:
-      'Full inference across the program. Annotate where it helps a reader, ' +
-      'not to satisfy the compiler.',
+      'Swap the handler, not the code. The same function logs to a console, a ' +
+      'buffer, or nowhere — decided by the caller, checked by the compiler.',
   },
   {
-    title: 'Sits beside your ~mint~Java~',
+    title: 'Keep the libraries you ~mint~already have~',
     body:
-      'GraalVM underneath. Call the Java, Kotlin, Python and JavaScript you ' +
-      'already have.',
+      'Runs on GraalVM, so your Java and Kotlin come with you. No rewrite, no ' +
+      'bindings to maintain.',
   },
   {
-    title: 'Mutation that ~auber~stays put~',
+    title: 'Fast loops without ~auber~losing track~',
     body:
-      'In-place updates behind a hermetic effect. Fast loops, with the type ' +
-      'system keeping them from escaping.',
+      'Mutate in place where it counts. The type system makes sure none of it ' +
+      'escapes the scope you allowed it in.',
   },
 ]
 

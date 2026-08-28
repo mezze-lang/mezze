@@ -86,3 +86,16 @@
    animates in from olive on every load, which reads as a flash. */
 .mascot.is-live img { transition: opacity .18s; }
 .mascot img.on { opacity: 1; }
+
+/* Hover type tooltip — used by the tour editor and the landing page panel.
+   Appended to <body>, so it cannot live in a component scope. */
+.hover-tip {
+  position: fixed; z-index: 50; pointer-events: none;
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 6px;
+  padding: .35rem .6rem; font-size: .8rem;
+  box-shadow: 0 4px 14px rgb(0 0 0 / .18);
+  max-width: 40rem; white-space: pre-wrap;
+}
+.hover-tip code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: none; padding: 0; }
+.hover-tip .ht-type { color: var(--syn-type); }

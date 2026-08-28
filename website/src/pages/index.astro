@@ -33,7 +33,7 @@ import { highlight } from '../lib/highlight'
               <button class:list={['tab', { on: i === 0 }]} data-idx={i}>{t.label}</button>
             ))}
           </span>
-          <button class="run" disabled>▶ Run</button>
+          <button class="run">▶ Run</button>
         </div>
         <pre class="code"><code id="panel-code" set:html={highlight(playground.tabs[0].code)} /></pre>
         <div class="out"><span class="dot"></span><span id="panel-msg">Press Run.</span></div>
@@ -64,68 +64,91 @@ import { highlight } from '../lib/highlight'
   <script>
     import { playground } from '../data/content'
     import { highlight } from '../lib/highlight'
-    import { loadMezze } from '../scripts/mezze-runtime'
+    import { prewarmMezze } from '../scripts/mezze-runtime'
+    import hovers from '../data/hovers.json'
 
-    let currentSource = playground.tabs[0].code
+    // Nothing here needs the runtime, but the tour is one click away.
+    prewarmMezze()
 
-    // One shared loader: the 56MB bundle is fetched once per visit, however
-    // many pages or editors ask for it.
-    loadMezze()
-      .then(() => document.dispatchEvent(new CustomEvent('mezze-ready')))
-      .catch(() => document.dispatchEvent(new CustomEvent('mezze-failed')))
-
-    // Typed up front: every one of these is required markup on this page, so a
-    // miss is a bug worth throwing on rather than silently no-op-ing.
+    // The panel replays each sample's recorded output rather than compiling.
+    // Every one of these was run through the real compiler; the tour is where
+    // code is actually editable and executed.
     const codeEl = document.getElementById('panel-code') as HTMLElement
     const msgEl = document.getElementById('panel-msg') as HTMLElement
     const runBtn = document.querySelector('.run') as HTMLButtonElement
     const tabs = Array.from(document.querySelectorAll('.tab')) as HTMLElement[]
-    let ready = false
 
-    const setStatus = () => {
-      msgEl.textContent = ready ? 'Ready. Press Run.' : 'Loading the compiler…'
+    let current = 0
+    const IDLE = 'Press Run.'
+
+    const select = (i: number) => {
+      current = i
+      codeEl.innerHTML = highlight(playground.tabs[i].code)
+      msgEl.textContent = IDLE
     }
 
     tabs.forEach((tab) =>
       tab.addEventListener('click', () => {
         tabs.forEach((t) => t.classList.remove('on'))
         tab.classList.add('on')
-        currentSource = playground.tabs[Number(tab.dataset.idx)].code
-        codeEl.innerHTML = highlight(currentSource)
-        setStatus()
+        select(Number(tab.dataset.idx))
       }),
     )
 
-    runBtn.disabled = true
-    setStatus()
+    // ---- hover types ------------------------------------------------------
+    // Types were extracted at build time by wasm-build/hovers.sh, using the
+    // same lookup the tour does — so the landing page gets real inferred types
+    // without downloading the runtime.
+    const tip = document.createElement('div')
+    tip.className = 'hover-tip'
+    tip.hidden = true
+    document.body.appendChild(tip)
 
-    document.addEventListener('mezze-ready', () => {
-      ready = true
-      runBtn.disabled = false
-      setStatus()
-    })
-    document.addEventListener('mezze-failed', () => {
-      ready = false
-      runBtn.disabled = true
-      msgEl.textContent = 'The Mezze runtime did not load.'
-    })
+    const TAB_KEYS = ['effects', 'records', 'async', 'abilities']
+    const hideTip = () => { tip.hidden = true }
 
+    /** 1-based (line, col) under the pointer, or null. */
+    const posAt = (x: number, y: number): [number, number] | null => {
+      const r = codeEl.getBoundingClientRect()
+      if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null
+      const cs = getComputedStyle(codeEl)
+      const lineH = parseFloat(cs.lineHeight)
+      // The <pre> is monospace, so one character is one fixed width.
+      const probe = document.createElement('span')
+      probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${cs.font}`
+      probe.textContent = '0'.repeat(100)
+      document.body.appendChild(probe)
+      const charW = probe.getBoundingClientRect().width / 100
+      probe.remove()
+
+      const line = Math.floor((y - r.top) / lineH) + 1
+      const col = Math.floor((x - r.left) / charW) + 1
+      return [line, col]
+    }
+
+    codeEl.addEventListener('mousemove', (e) => {
+      const p = posAt(e.clientX, e.clientY)
+      if (!p) return hideTip()
+      const map = (hovers as Record<string, Record<string, string>>)[TAB_KEYS[current]]
+      const t = map?.[p[0] + ':' + p[1]]
+      if (!t) return hideTip()
+      const i = t.indexOf(' : ')
+      tip.innerHTML = i > 0
+        ? `<code>${t.slice(0, i)}</code> : <code class="ht-type">${t.slice(i + 3)}</code>`
+        : `<code class="ht-type">${t}</code>`
+      tip.style.left = e.clientX + 12 + 'px'
+      tip.style.top = e.clientY + 18 + 'px'
+      tip.hidden = false
+    })
+    codeEl.addEventListener('mouseleave', hideTip)
+
+    runBtn.disabled = false
     runBtn.addEventListener('click', () => {
-      if (typeof window.runMezze !== 'function') return
       msgEl.textContent = 'running…'
-      // Yield so the DOM repaints before the synchronous wasm call blocks.
+      // A beat of delay so pressing Run feels like it did something.
       setTimeout(() => {
-        try {
-          msgEl.textContent = String(window.runMezze!(currentSource)).trim()
-        } catch (e) {
-          msgEl.textContent = 'Internal error: ' + e
-        }
-      }, 0)
-    })
-    document.addEventListener('mezze-failed', () => {
-      ready = false
-      runBtn.disabled = true
-      msgEl.textContent = 'The Mezze runtime did not load.'
+        msgEl.textContent = playground.tabs[current].output
+      }, 180)
     })
   </script>
 </Base>
