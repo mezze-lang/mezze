@@ -20,20 +20,24 @@ trap 'rm -rf "$WORK"' EXIT
 
 names=(tomato onion aubergine lemon mint olive)
 
-# Colour is left alone.
+# Palette token each dish is pulled toward, and how far.
 #
-# Two corrections were tried and both made it worse. A -colorize pull toward
-# each palette token blends EVERY pixel, so the black eyes and outlines were
-# dragged toward the token too — at a high pull olive's eyes came out olive-grey
-# and the face all but vanished. Matching the old icons' mean saturation and
-# lightness instead went muddy, because those means are pulled down by the large
-# black outlines: matching the average over-darkens the body.
+# The pull is MASKED BY LUMINANCE so it lands on the coloured body only. A bare
+# -colorize blends every pixel, so the black eyes and outlines get dragged
+# toward the token too — at the pull olive needs, its eyes came out olive-grey
+# and the face all but vanished.
 #
-# Side by side with the set it replaces, the untouched art is already close, and
-# it is the only version that is clean. Left at 100/100 rather than deleted, so
-# the knob is here if a future sheet does drift.
-lights=(100 100 100 100 100 100)
-sats=(100 100 100 100 100 100)
+# Values solved per dish against the set this replaces (02eadbe84), through the
+# whole pipeline including quantisation: measuring an intermediate step was off
+# by enough to leave everything over-saturated.
+#
+# Capped well below what a pure body match wants, because luminance masking
+# protects black but not other hues: at 90% the tomato-s green stem turned
+# brown and the lemon-s leaf turned yellow. The body barely moves between 45%
+# and 90% anyway — 197,67,29 vs 198,64,31 on tomato — so the extra pull bought
+# nothing and cost the foliage.
+tokens=(D6453C E8608F 7A4E9E F2C230 5FA8A0 5E7A2E)
+pulls=(45 45 15 45 60 60)
 
 # Ranges of actual content along one axis, from the alpha channel.
 #
@@ -73,10 +77,17 @@ for i in 0 1 2 3 4 5; do
   n="${names[$i]}"
   # -extent squares the (unequal) crops on a transparent ground before the
   # resize, so every icon lands on the same canvas and none is stretched.
-  magick "$WORK/tile_$i.png" \
+  SZ=$(magick "$WORK/tile_$i.png" -format '%[fx:max(w,h)]' info:)
+  # Split in two: an mpr: register does not survive the whole chain — folded
+  # into one command every icon came out solid black.
+  magick "$WORK/tile_$i.png" -write mpr:s +delete \
+    mpr:s \( mpr:s -fill "#${tokens[$i]}" -colorize "${pulls[$i]}%" \) \
+    \( mpr:s -alpha off -colorspace Gray -auto-level \) -compose over -composite \
+    \( mpr:s -alpha extract \) -alpha off -compose CopyOpacity -composite \
+    "$WORK/tinted_$i.png"
+  magick "$WORK/tinted_$i.png" \
     -background none -alpha on \
-    -gravity center -extent "%[fx:max(w,h)]x%[fx:max(w,h)]" \
-    -modulate "${lights[$i]},${sats[$i]},100" \
+    -gravity center -extent "${SZ}x${SZ}" \
     -resize 256x256 \
     -colors 128 \
     -channel A -level 0%,92% +channel \
