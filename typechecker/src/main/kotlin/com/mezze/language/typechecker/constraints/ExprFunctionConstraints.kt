@@ -504,9 +504,28 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
                     .filter { it.abilityName == ab.abilityName && it.primaryTypeVar.id == ab.typeVar.id }
                     .flatMap { res -> res.associatedTypeVars.entries }
                     .associate { (name, assocVar) -> name to (MezzeType.VarType(assocVar) as MezzeType) }
+                // In a FunctionAbilityConstraint the receiver IS typeArgs[0] —
+                // ImportContextMerger and ConstraintGenerator both derive
+                // `typeParam` from it and keep it in the list. Internally
+                // Constraint.AbilityRequired stores it separately in `typeVar`,
+                // so it has to be put back — but only when the source did not
+                // already carry it. A constraint that came from instantiating a
+                // declared `with Priced 'a` arrives with the receiver still in
+                // typeArgs, and prepending unconditionally printed the receiver
+                // twice: `with Priced 'a 'a` for a one-parameter ability.
+                // Arity is the reliable test, not variable identity: an
+                // instantiated constraint has a FRESHENED receiver var, so
+                // comparing it against typeArgs[0] only works when the two have
+                // since been unified. The ability declaration says how many
+                // arguments it takes, and typeArgs already being that long means
+                // the receiver is in there.
+                val declaredArity = context.abilityDeclarations[ab.abilityName]
+                    ?.typeParams?.size
+                val alreadyLed = declaredArity != null && ab.typeArgs.size >= declaredArity
+                val receiver: MezzeType = MezzeType.VarType(ab.typeVar)
                 MezzeType.FunctionAbilityConstraint(
                     abilityName = ab.abilityName,
-                    typeArgs = listOf<MezzeType>(MezzeType.VarType(ab.typeVar)) + ab.typeArgs,
+                    typeArgs = if (alreadyLed) ab.typeArgs else listOf(receiver) + ab.typeArgs,
                     associatedTypeBindings = bindings,
                     abilityHash = ab.abilityHash
                 )
