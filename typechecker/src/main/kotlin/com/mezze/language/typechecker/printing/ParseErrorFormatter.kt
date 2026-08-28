@@ -1,4 +1,4 @@
-package com.mezze.language.cli.commands
+package com.mezze.language.typechecker.printing
 
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.display
@@ -7,7 +7,7 @@ import com.mezze.language.parser.ParseException
 /**
  * Rust-style formatter for parse errors.
  *
- * Mirrors the layout of `ErrorFormatter` (typechecker) so parse + type
+ * Mirrors the layout of [ErrorFormatter], its neighbour here, so parse + type
  * errors look the same in `mez check` / `mez build` / `mez dev`:
  *
  *   error: <one-line message>

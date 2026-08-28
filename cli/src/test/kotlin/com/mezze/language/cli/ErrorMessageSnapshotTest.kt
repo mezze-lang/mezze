@@ -1,6 +1,6 @@
 package com.mezze.language.cli
 
-import com.mezze.language.cli.commands.ParseErrorFormatter
+import com.mezze.language.typechecker.printing.ParseErrorFormatter
 import com.mezze.language.cli.commands.TypeCheckRunner
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.ModuleResolver
