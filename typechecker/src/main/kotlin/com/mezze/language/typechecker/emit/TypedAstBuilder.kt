@@ -964,12 +964,18 @@ class TypedAstBuilder(
             pushScope(mutableListOf(), isLambdaBoundary = false)
         }
         val stmts = mutableListOf<TypedStatement>()
-        for (stmt in expr.statements) {
+        for ((srcIdx, stmt) in expr.statements.withIndex()) {
             when (stmt) {
                 is ParsedStatement.Let -> {
                     val pattern = stmt.pattern
                     if (pattern is ParsedRecordPattern) {
-                        val destrName = "__destr_${stmts.size}"
+                        // #316 (Leak A): disambiguate the synthetic destructure temp name by
+                        // the SOURCE statement index, not stmts.size. A running count of
+                        // already-LOWERED statements is a lowering artifact — it would shift
+                        // the block's content hash if the lowerer's expansion changed, on
+                        // byte-identical source. srcIdx is source-pure AND unique per statement.
+                        val destrName = "__destr_${srcIdx}"
+                        val destrHash = ParsedDeclHasher.hashExpr(stmt.value)
                         val valueType = stmt.typeAnnotation
                             ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
                             ?: MezzeType.VarType(TypeVar.freshWithName("let_destr"))
@@ -979,7 +985,6 @@ class TypedAstBuilder(
                         if (lambdaParamScopes.isNotEmpty() && destrName !in lambdaParamScopes.last()) {
                             lambdaParamScopes.last().add(destrName)
                         }
-                        val destrHash = ParsedDeclHasher.hashExpr(stmt.value)
                         stmts.add(TypedStatement.Let(destrName, destrHash, resolvedType, value, stmt.loc))
 
                         emitRecordDestructureFields(pattern.entries, destrName, resolvedType, stmt.loc, stmts)
@@ -1535,7 +1540,11 @@ class TypedAstBuilder(
                 stmts.add(TypedStatement.Let(name, hash, type, access, loc))
             },
             emitNested = { nestedEntries, fieldName, fieldType, fieldAccess ->
-                val nestedVarName = "__destr_${fieldName}_${stmts.size}"
+                // #316 (Leak A): name the nested temp by its SOURCE field path
+                // (parent + field), not stmts.size. The path uniquely identifies this
+                // sub-record within the destructure and is stable across lowering changes;
+                // it also feeds fieldHash below, so the content hash stays source-pure.
+                val nestedVarName = "__destr_${parentVarName}_${fieldName}"
                 identifierContext[nestedVarName] = fieldType
                 val nestedHash = fieldHash(parentVarName, nestedVarName)
                 stmts.add(TypedStatement.Let(nestedVarName, nestedHash, fieldType, fieldAccess, loc))
@@ -1562,7 +1571,8 @@ class TypedAstBuilder(
                 }
             },
             emitNested = { nestedEntries, fieldName, fieldType, fieldAccess ->
-                val nestedVarName = "__destructured_${fieldName}_${decls.size}"
+                // #316 (Leak A): source field path, not decls.size (see emitRecordDestructureFields).
+                val nestedVarName = "__destructured_${parentVarName}_${fieldName}"
                 val nestedHash = fieldHash(parentVarName, nestedVarName)
                 val nestedScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
                 decls.add(TypedLetDecl(nestedHash, nestedVarName, emptyList(), fieldAccess, nestedScheme, false, loc))
