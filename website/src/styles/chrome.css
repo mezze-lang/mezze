@@ -129,6 +129,11 @@
   max-width: 34rem; max-height: 20rem; overflow: hidden;
   display: flex; flex-direction: column; gap: .35rem;
 }
+/* The hidden attribute hides via a UA rule, [hidden] { display: none }, which
+   a CLASS selector outranks — so .hover-tip{display:flex} above silently beat
+   el.hidden = true and the tooltip never went away. Every hide path was firing
+   and having no visible effect. Restate it at higher specificity. */
+.hover-tip[hidden] { display: none; }
 /* No pre-wrap on the container — its children are blocks now, and the
    whitespace would be counted twice. The code block keeps its own. */
 .hover-tip .ht-code {
