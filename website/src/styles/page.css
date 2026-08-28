@@ -182,7 +182,12 @@
     /* The rule moves below: above the description it separated the sample from
        its own caption, which are the two things that belong together here. Under
        it, it closes the section off. */
-    padding: 0 0 1.4rem;
+    /* The rule belongs to the caption above it, so it sits close — and the air
+       goes below, where the next section starts. It was the other way round:
+       1.4rem above and only the .feats 0.2rem below, so the rule floated clear
+       of the text it closes and nearly touched what follows. */
+    padding: 0 0 .7rem;
+    margin-bottom: 1rem;
     border-top: none;
     border-bottom: 1px solid var(--rule);
     /* Pulled up against the sample it describes. The row gap has to stay wide
