@@ -40,9 +40,9 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     outEl.textContent = text
     outEl.className = 'ed-out ' + (kind || '')
   }
+  // Only vertical: the layers wrap rather than scroll sideways.
   const syncScroll = () => {
     preEl.scrollTop = srcEl.scrollTop
-    preEl.scrollLeft = srcEl.scrollLeft
   }
 
   // ---- live diagnostics -----------------------------------------------
@@ -109,11 +109,6 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     return w
   }
 
-  let charW = 0
-  const measureChar = () => {
-    charW = measureCharWidth()
-  }
-
   /**
    * How many characters fit across the editor right now.
    *
@@ -137,24 +132,41 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     return Math.max(40, Math.min(100, Math.floor(usable / w) - 2))
   }
 
-  /** 1-based (line, col) under the pointer, or null if outside the text. */
+  /**
+   * 1-based (line, col) under the pointer, or null if not over a word.
+   *
+   * Asks the browser which character is under the cursor rather than dividing
+   * by a character width: lines wrap, so a visual row is not a source line and
+   * the arithmetic version resolved the wrong token after the first wrap.
+   * Reads from the highlight layer, whose text matches the textarea exactly.
+   */
   const posAt = (x: number, y: number): [number, number] | null => {
     const r = srcEl.getBoundingClientRect()
     if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null
-    if (!charW) measureChar()
-    const cs = getComputedStyle(srcEl)
-    const row = Math.floor(
-      (y - r.top + srcEl.scrollTop - parseFloat(cs.paddingTop)) / parseFloat(cs.lineHeight),
-    )
-    const col = Math.floor(
-      (x - r.left + srcEl.scrollLeft - parseFloat(cs.paddingLeft)) / charW,
-    )
-    const lines = srcEl.value.split('\n')
-    if (row < 0 || row >= lines.length) return null
-    if (col < 0 || col > lines[row].length) return null
-    // Word characters only — avoids popups over whitespace and punctuation.
-    if (!/[A-Za-z0-9_]/.test(lines[row][col] || '')) return null
-    return [row + 1, col + 1]
+
+    const doc = document as Document & {
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+    }
+    const caret = doc.caretPositionFromPoint?.(x, y)
+    if (!caret || !codeEl.contains(caret.offsetNode)) return null
+
+    const walker = document.createTreeWalker(codeEl, NodeFilter.SHOW_TEXT)
+    let offset = 0
+    let node: Node | null
+    while ((node = walker.nextNode())) {
+      if (node === caret.offsetNode) {
+        offset += caret.offset
+        break
+      }
+      offset += node.textContent?.length ?? 0
+    }
+    if (!node) return null
+
+    const text = codeEl.textContent ?? ''
+    if (!/[A-Za-z0-9_]/.test(text[offset] ?? '')) return null
+
+    const before = text.slice(0, offset)
+    return [before.split('\n').length, offset - before.lastIndexOf('\n')]
   }
 
   let hoverTimer: number | undefined
