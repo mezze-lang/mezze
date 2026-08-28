@@ -13,7 +13,6 @@ import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
-import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.mono.unwrapSuspended
 import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 import com.mezze.language.typechecker.util.WellKnownTypeApp
@@ -565,7 +564,11 @@ internal class AbilityChecker(
                     hashBuilder.append("codec_impl")
                     hashBuilder.append(abilityName)
                     hashBuilder.append("_single_param_")
-                    hashBuilder.append(ContentHashComputer.mezzeTypeToString(dataType))
+                    // #317: hash the type via the canonical MezzeTypeHasher, not the lossy
+                    // ContentHashComputer.mezzeTypeToString (which collapses records/variants
+                    // to field-NAMES only, dropping field types → distinct types collide on
+                    // one implKey and the second codec impl is silently dropped).
+                    com.mezze.language.ast.hashing.appendType(hashBuilder, dataType)
                     val implKey = Hash(hashBuilder.build().toFullHexString())
                     if (!generatedCodecImpls.containsKey(implKey)) {
                         generatedCodecImpls[implKey] = GeneratedCodecImpl(
@@ -642,8 +645,10 @@ internal class AbilityChecker(
         val hashBuilder = MezzeHashBuilder()
         hashBuilder.append("codec_impl")
         hashBuilder.append(abilityName)
-        hashBuilder.append(ContentHashComputer.mezzeTypeToString(formatType))
-        hashBuilder.append(ContentHashComputer.mezzeTypeToString(dataType))
+        // #317: canonical MezzeTypeHasher, not lossy mezzeTypeToString (see the
+        // single-param codec site above for why the field-name-only string collides).
+        com.mezze.language.ast.hashing.appendType(hashBuilder, formatType)
+        com.mezze.language.ast.hashing.appendType(hashBuilder, dataType)
         val implKey = Hash(hashBuilder.build().toFullHexString())
 
         if (generatedCodecImpls.containsKey(implKey)) {
