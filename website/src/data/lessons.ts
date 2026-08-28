@@ -24,8 +24,6 @@ export const lessons: Lesson[] = [
       "Hover any name to see what it was inferred as.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::int
-use std::bool
 
 # let binds a value. Types are inferred — none are written here.
 let name = "Mezze"
@@ -33,11 +31,11 @@ let year = 2026
 let ready = True
 
 let main = {} -> perform Console in do
-  println { msg = "\$(name) — \$(int::to_str {n = year})" }
-  println { msg = "ready: \$(bool::to_str {b = ready})" }
+  println { msg = "\$(name) — \$(year.to_str {})" }
+  println { msg = "ready: \$(ready.to_str {})" }
 
   # Interpolation never guesses: a value has to become a Str first.
-  println { msg = "7 / 2 = \$(int::to_str {n = 7 / 2})" }`,
+  println { msg = "7 / 2 = \$((7 / 2).to_str {})" }`,
   },
   {
     slug: "records",
@@ -49,22 +47,21 @@ let main = {} -> perform Console in do
       "`let { x, y } = point` destructures. The same shape works as a function parameter, which is why every Mezze function takes exactly one record.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::int
 
 # A record is just fields. No class, no constructor.
 let point = { x = 3, y = 4 }
 
 let main = {} -> perform Console in do
-  println { msg = "x = \$(int::to_str {n = point.x})" }
+  println { msg = "x = \$(point.x.to_str {})" }
 
   # Copy with a change. The original is untouched.
   let moved = { ...point, x = 10 }
-  println { msg = "moved x = \$(int::to_str {n = moved.x})" }
-  println { msg = "original x = \$(int::to_str {n = point.x})" }
+  println { msg = "moved x = \$(moved.x.to_str {})" }
+  println { msg = "original x = \$(point.x.to_str {})" }
 
   # Destructure in a let.
   let { x, y } = point
-  println { msg = "\$(int::to_str {n = x}), \$(int::to_str {n = y})" }`,
+  println { msg = "\$(x.to_str {}), \$(y.to_str {})" }`,
   },
   {
     slug: "variants",
@@ -76,7 +73,6 @@ let main = {} -> perform Console in do
       "That is the bargain — add a case later and every incomplete match becomes an error rather than a bug.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::int
 
 # A variant is a closed set of cases. Pipes separate them.
 type Shape = |
@@ -92,9 +88,12 @@ let area: { shape: Shape } -> Int = { shape } -> match shape is
   Point -> 0
 
 let main = {} -> perform Console in do
-  println { msg = "circle: \$(int::to_str {n = area { shape = Circle { radius = 2 } }})" }
-  println { msg = "rect:   \$(int::to_str {n = area { shape = Rect { w = 3, h = 4 } }})" }
-  println { msg = "point:  \$(int::to_str {n = area { shape = Point }})" }`,
+  let circle = area { shape = Circle { radius = 2 } }
+  let rect = area { shape = Rect { w = 3, h = 4 } }
+
+  println { msg = "circle: \$(circle.to_str {})" }
+  println { msg = "rect:   \$(rect.to_str {})" }
+  println { msg = "point:  \$(area { shape = Point }.to_str {})" }`,
   },
   {
     slug: "aliases",
@@ -106,7 +105,6 @@ let main = {} -> perform Console in do
       "So an alias is documentation the compiler checks, not a new type to convert in and out of.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::int
 
 # A type alias names a shape so you can say it once and reuse it.
 type Reading = { city: Str, temp: Int }
@@ -114,7 +112,7 @@ type Reading = { city: Str, temp: Int }
 # The name is documentation: a Reading IS that record, not a wrapper
 # around it, so anything with the right fields fits.
 let describe: { r: Reading } -> Str = { r } ->
-  "\$(r.city): \$(int::to_str {n = r.temp})°C"
+  "\$(r.city): \$(r.temp.to_str {})°C"
 
 let main = {} -> perform Console in do
   println { msg = describe { r = { city = "Lisbon", temp = 21 } } }
@@ -133,7 +131,6 @@ let main = {} -> perform Console in do
       "Open where you want callers to grow their data without breaking you; closed where the exact shape is the point.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::int
 
 # A closed record says exactly which fields it takes.
 let closed: { r: { id: Int } } -> Int = { r } -> r.id
@@ -145,10 +142,10 @@ let main = {} -> perform Console in do
   let small = { id = 1 }
   let big = { id = 2, name = "ada", active = True }
 
-  println { msg = "closed: \$(int::to_str {n = closed { r = small }})" }
+  println { msg = "closed: \$((closed { r = small }).to_str {})" }
 
   # Only the open one accepts the wider record.
-  println { msg = "open:   \$(int::to_str {n = open { r = big }})" }`,
+  println { msg = "open:   \$((open { r = big }).to_str {})" }`,
   },
   {
     slug: "functions",
@@ -160,7 +157,6 @@ let main = {} -> perform Console in do
       "Functions are values too: `twice` takes one as a field and calls it.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::int
 
 # A function takes one record, so every argument is named at the call site.
 let clamp: { val: Int, low: Int, high: Int } -> Int = { val, low, high } ->
@@ -173,8 +169,8 @@ let twice: { f: { n: Int } -> Int, n: Int } -> Int = { f, n } ->
 let inc = { n } -> n + 1
 
 let main = {} -> perform Console in do
-  println { msg = "\$(int::to_str {n = clamp { val = 42, low = 0, high = 10 }})" }
-  println { msg = "\$(int::to_str {n = twice { f = inc, n = 5 }})" }`,
+  println { msg = "\$((clamp { val = 42, low = 0, high = 10 }).to_str {})" }
+  println { msg = "\$((twice { f = inc, n = 5 }).to_str {})" }`,
   },
   {
     slug: "effects",
@@ -186,12 +182,11 @@ let main = {} -> perform Console in do
       "Run it: only one line appears. The second call was handled into silence.",
     ],
     code: `use std::effects::log::{ Log, Console, QuietConsole, println }
-use std::int
 
 # <Log> is an effect row. It says this function talks to the outside world,
 # and the type carries that all the way up to whoever calls it.
 let audit: { order: Int } -> {} <Log> = { order } ->
-  println { msg = "order \$(int::to_str {n = order}) seen" }
+  println { msg = "order \$(order.to_str {}) seen" }
 
 let main = {} -> do
   # A handler decides what the effect means. Console prints it...
@@ -212,7 +207,6 @@ let main = {} -> do
       "This is how Mezze does ad-hoc polymorphism. The next lesson adds your own.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::int
 
 # Inspect is built in and derived for every type, so to_dbg_str always works.
 type User = { name: Str, age: Int }
@@ -225,7 +219,7 @@ let main = {} -> perform Console in do
   println { msg = (42).to_dbg_str {} }
 
   # Int has its own inherent methods too.
-  println { msg = "abs: \$(int::to_str {n = (0 - 7).abs {}})" }`,
+  println { msg = "abs: \$(((0 - 7).abs {}).to_str {})" }`,
   },
   {
     slug: "custom-abilities",
@@ -237,7 +231,6 @@ let main = {} -> perform Console in do
       "`with Priced 'a` on a signature means *any type that implements this*. Write the function once, and it works for every implementation.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::int
 
 # An ability is an interface. \`it\` is the receiver.
 ability Priced for 'a where {
@@ -252,7 +245,7 @@ impl Priced for Book where {
 
 # \`with Priced 'a\` means: any type that implements Priced.
 let show_total: { it: 'a } with Priced 'a -> Str = { it } ->
-  "\$(int::to_str {n = it.cents {}}) cents"
+  "\$((it.cents {}).to_str {}) cents"
 
 let main = {} -> perform Console in do
   println { msg = show_total { it = { title = "Dune", price = 1299 } } }`,
@@ -267,7 +260,6 @@ let main = {} -> perform Console in do
       "Exceptions, early return and retries are all ordinary code here. There is no syntax to wait for.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::int
 
 # Effects are not built in — you declare your own.
 effect Error having 'e where {
@@ -283,7 +275,7 @@ let safe_div = { a, b } ->
   if b == 0 then Error.raise { err = "divide by zero" } else Ok { val = a / b }
 
 let report = { r } -> match r is
-  Ok { val } -> "ok: \$(int::to_str {n = val})"
+  Ok { val } -> "ok: \$(val.to_str {})"
   Err { error } -> "failed: \$(error)"
 
 let main = {} -> perform Console in do
@@ -301,7 +293,6 @@ let main = {} -> perform Console in do
     ],
     code: `use std::effects::log::{ Log, Console, println }
 use std::collections::seq
-use std::int
 
 type Item = { name: Str, price: Int, qty: Int }
 
@@ -314,7 +305,7 @@ impl Priced for Item where {
 }
 
 let line: { it: Item } -> Str = { it } ->
-  "  \$(it.name) x\$(int::to_str {n = it.qty}) = \$(int::to_str {n = it.total {}})"
+  "  \$(it.name) x\$(it.qty.to_str {}) = \$((it.total {}).to_str {})"
 
 let main = {} -> perform Console in do
   let cart = [
@@ -328,6 +319,6 @@ let main = {} -> perform Console in do
   println { msg = seq::fold { xs = lines, init = "", f = { acc, x } -> "\$(acc)\$(x)\\n" } }
 
   let sum = seq::fold { xs = cart, init = 0, f = { acc, x } -> acc + x.total {} }
-  println { msg = "total: \$(int::to_str {n = sum}) cents" }`,
+  println { msg = "total: \$(sum.to_str {}) cents" }`,
   },
 ]

@@ -1,5 +1,4 @@
 use std::effects::log::{ Console, println }
-use std::int
 
 ability Priced for 'a where {
   cents: { it: 'a } -> Int
@@ -12,4 +11,4 @@ impl Priced for Book where {
 }
 
 let main = {} -> perform Console in
-  println { msg = int::to_str {n = { price = 1299 }.cents {}} }
+  println { msg = ({ price = 1299 }.cents {}).to_str {} }

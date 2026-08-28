@@ -28,7 +28,7 @@ export const site = {
 }
 
 export const hero = {
-  headline: 'Write what it ~onion~does~.\nThe types ~~keep up~~.',
+  headline: 'Write what it ~onion~does~.\nThe types ~~olive:keep up~~.',
   lede:
     'Every function tells you what it touches — files, network, tasks, failure — and ' +
     'you never annotate one. Full inference, structural types, running on the JVM.',
@@ -54,7 +54,7 @@ export const playground = {
 
 # <Log> says this touches the outside world. The caller cannot miss it.
 let audit: { order: Str } -> {} <Log> = { order } ->
-  println { msg = "saw $(order)" }
+  println { msg = "saw \\$(order)" }
 
 let main = {} -> do
   perform Console in audit { order = "A-1" }
@@ -64,7 +64,6 @@ let main = {} -> do
     {
       label: 'Records',
       code: `use std::effects::log::{ Console, println }
-use std::int
 
 type Item = { name: Str, price: Int }
 
@@ -72,7 +71,7 @@ let main = {} -> perform Console in do
   let item = { name = "olive oil", price = 899 }
   let sale = { ...item, price = 499 }
 
-  println { msg = "$(sale.name): $(int::to_str {n = sale.price})" }`,
+  println { msg = "\\$(sale.name): \\$(sale.price.to_str {})" }`,
       output: 'olive oil: 499',
     },
     {
@@ -82,7 +81,7 @@ use std::effects::log::{ Log, Console, println }
 use std::result::{ get_or_else }
 
 let fetch: { url: Str } -> Str <Log> = { url } -> do
-  println { msg = "GET $(url)" }
+  println { msg = "GET \\$(url)" }
   url
 
 let main = {} -> perform Console in perform LoomAsync in do
@@ -98,7 +97,6 @@ let main = {} -> perform Console in perform LoomAsync in do
     {
       label: 'Abilities',
       code: `use std::effects::log::{ Console, println }
-use std::int
 
 ability Priced for 'a where {
   cents: { it: 'a } -> Int
@@ -111,7 +109,7 @@ impl Priced for Book where {
 }
 
 let main = {} -> perform Console in
-  println { msg = int::to_str {n = { price = 1299 }.cents {}} }`,
+  println { msg = ({ price = 1299 }.cents {}).to_str {} }`,
       output: '1299',
     },
   ],
@@ -123,7 +121,7 @@ export const features = [
     title: 'Write like a ~lemon~dynamic language~, get a strict one',
     body:
       'Full inference across the whole program. Annotate a signature where it helps ' +
-      'someone reading it, ~~never~~ to satisfy the compiler.',
+      'someone reading it, ~~lemon:never~~ to satisfy the compiler.',
   },
   {
     title: 'A few small pieces, ~onion~reused everywhere~',
@@ -135,7 +133,7 @@ export const features = [
     title: 'Swap out the ~tomato~side effects~ when you need to',
     body:
       'The same function runs against the real filesystem or an in-memory one, a live ' +
-      'clock or a frozen one. Tests get a different ~~handler~~, not different code.',
+      'clock or a frozen one. Tests get a different ~~tomato:handler~~, not different code.',
   },
   {
     title: 'First-class ~olive~continuations~',
@@ -152,7 +150,7 @@ export const features = [
   {
     title: 'Competitively fast on ~auber~GraalVM~',
     body:
-      'Optimised data structures, loop fusion, and mutation that is ~~safe~~ because the ' +
+      'Optimised data structures, loop fusion, and mutation that is ~~aubergine:safe~~ because the ' +
       'type system keeps it in scope. AOT native binaries when you want them.',
   },
   {

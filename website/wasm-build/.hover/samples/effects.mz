@@ -2,7 +2,7 @@ use std::effects::log::{ Log, Console, QuietConsole, println }
 
 # <Log> says this touches the outside world. The caller cannot miss it.
 let audit: { order: Str } -> {} <Log> = { order } ->
-  println { msg = "saw $(order)" }
+  println { msg = "saw \\$(order)" }
 
 let main = {} -> do
   perform Console in audit { order = "A-1" }
