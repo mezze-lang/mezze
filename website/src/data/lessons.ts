@@ -2,171 +2,332 @@ export interface Lesson {
   slug: string
   title: string
   blurb: string
-  /** Paragraphs of explanation. */
+  /** Paragraphs of explanation. Supports backtick code and **bold**. */
   body: string[]
   code: string
 }
 
 /**
- * Lessons are derived from examples/*.mz in the Mezze repo — every snippet
- * has been run through the WASM runtime, so what the tour claims and what
- * the Run button produces agree.
+ * The tour, in order: primitives first, then one idea at a time.
+ *
+ * Every snippet has been typechecked and run by the real compiler, so what a
+ * lesson claims and what the Run button prints agree.
  */
 export const lessons: Lesson[] = [
   {
-    slug: 'hello',
-    title: 'Hello, Mezze',
-    blurb: 'Bindings, functions, string interpolation.',
+    slug: "primitives",
+    title: "Values and types",
+    blurb: "let, inference, and why interpolation asks for a Str.",
     body: [
-      'Every Mezze program starts from `main`. Values bind with `let`, and there is no separate statement form — a program is a set of declarations.',
-      'Functions always take a **record** argument. `{ who } -> ...` destructures a field named `who`, so calls are `greet { who = "world" }` — arguments are named at the call site, never positional.',
-      'Strings interpolate with `$(...)`. Non-string values need `.to_dbg_str {}` first; Mezze will not silently stringify.',
+      "Everything starts with **let**. Types are inferred, so none of these bindings say what they are — but they all have exact types, and the compiler knows them.",
+      "String interpolation with `$(...)` accepts a `Str` and nothing else. That looks strict at first; it means a stray value can never quietly become text in a log line.",
+      "Hover any name to see what it was inferred as.",
     ],
     code: `use std::effects::log::{ Console, println }
+use std::int
+use std::bool
 
+# let binds a value. Types are inferred — none are written here.
 let name = "Mezze"
 let year = 2026
-let flag = True
-
-let greet = { who } -> "Hello, $(who)!"
+let ready = True
 
 let main = {} -> perform Console in do
-  println { msg = greet { who = name } }
-  println { msg = "year = $(year.to_dbg_str {})" }
-  println { msg = "flag = $(flag.to_dbg_str {})" }
-`,
+  println { msg = "\$(name) — \$(int::to_str {n = year})" }
+  println { msg = "ready: \$(bool::to_str {b = ready})" }
+
+  # Interpolation never guesses: a value has to become a Str first.
+  println { msg = "7 / 2 = \$(int::to_str {n = 7 / 2})" }`,
   },
   {
-    slug: 'types',
-    title: 'Types and matching',
-    blurb: 'Variants, exhaustive pattern matching.',
+    slug: "records",
+    title: "Records",
+    blurb: "Fields, copy-with, and destructuring.",
     body: [
-      'A `type` declares a closed variant — a value is exactly one of its cases, each carrying its own named fields.',
-      '`match ... is` must be **exhaustive** for a closed variant. Delete the `Triangle` arm below and press Check: the typechecker names the case you forgot, before the program ever runs.',
-      'That is the whole bargain — the compiler tracks which shapes are possible, so adding a variant later turns every incomplete match into an error rather than a bug.',
+      "A **record** is just named fields. There is no class to declare and no constructor to call — `{ x = 3, y = 4 }` is the value.",
+      "`{ ...point, x = 10 }` copies with one field changed. The original is untouched; nothing mutates.",
+      "`let { x, y } = point` destructures. The same shape works as a function parameter, which is why every Mezze function takes exactly one record.",
     ],
     code: `use std::effects::log::{ Console, println }
+use std::int
 
+# A record is just fields. No class, no constructor.
+let point = { x = 3, y = 4 }
+
+let main = {} -> perform Console in do
+  println { msg = "x = \$(int::to_str {n = point.x})" }
+
+  # Copy with a change. The original is untouched.
+  let moved = { ...point, x = 10 }
+  println { msg = "moved x = \$(int::to_str {n = moved.x})" }
+  println { msg = "original x = \$(int::to_str {n = point.x})" }
+
+  # Destructure in a let.
+  let { x, y } = point
+  println { msg = "\$(int::to_str {n = x}), \$(int::to_str {n = y})" }`,
+  },
+  {
+    slug: "variants",
+    title: "Variants",
+    blurb: "Closed sets of cases, and exhaustive match.",
+    body: [
+      "A **variant** is a fixed set of alternatives, separated by pipes. Some carry payloads, some do not.",
+      "`match` must cover every case. Delete the `Point` arm and press Check: the compiler names the case you forgot, before the program runs.",
+      "That is the bargain — add a case later and every incomplete match becomes an error rather than a bug.",
+    ],
+    code: `use std::effects::log::{ Console, println }
+use std::int
+
+# A variant is a closed set of cases. Pipes separate them.
 type Shape = |
   Circle { radius: Int },
   Rect { w: Int, h: Int },
-  Triangle { base: Int, height: Int },
+  Point
 |
 
-let area = { shape } -> match shape is
+# match must cover every case — delete an arm and this stops compiling.
+let area: { shape: Shape } -> Int = { shape } -> match shape is
   Circle { radius } -> radius * radius * 3
   Rect { w, h } -> w * h
-  Triangle { base, height } -> base * height / 2
+  Point -> 0
 
 let main = {} -> perform Console in do
-  println { msg = "circle = $(area { shape = Circle { radius = 2 } }.to_dbg_str {})" }
-  println { msg = "rect   = $(area { shape = Rect { w = 3, h = 4 } }.to_dbg_str {})" }
-`,
+  println { msg = "circle: \$(int::to_str {n = area { shape = Circle { radius = 2 } }})" }
+  println { msg = "rect:   \$(int::to_str {n = area { shape = Rect { w = 3, h = 4 } }})" }
+  println { msg = "point:  \$(int::to_str {n = area { shape = Point }})" }`,
   },
   {
-    slug: 'abilities',
-    title: 'Abilities',
-    blurb: 'Shared behaviour across types, plus dot-methods.',
+    slug: "aliases",
+    title: "Type aliases",
+    blurb: "Naming a shape you use more than once.",
     body: [
-      'An `ability` names behaviour a type can provide — close to a typeclass or trait. `impl Printable for Vec2` supplies it for one type.',
-      'An **inherent** `impl Vec2 where { ... }` is different: it attaches methods directly to the type, which is what makes `v.mag_sq {}` dot-syntax work.',
-      'Both are resolved statically. There is no dynamic dispatch by name — the compiler knows exactly which implementation each call reaches.',
+      "`type Reading = { city: Str, temp: Int }` gives a name to a shape.",
+      "The alias is **transparent**: a `Reading` *is* that record, not a wrapper around it. Any value with the right fields fits, whether or not it was built with the name in mind.",
+      "So an alias is documentation the compiler checks, not a new type to convert in and out of.",
     ],
     code: `use std::effects::log::{ Console, println }
+use std::int
 
-ability Printable for 'a where {
-  display: { it: 'a } -> Str
-}
+# A type alias names a shape so you can say it once and reuse it.
+type Reading = { city: Str, temp: Int }
 
-type Vec2 = | Vec2 { x: Int, y: Int } |
-
-impl Printable for Vec2 where {
-  display = { it } -> match it is
-    Vec2 { x, y } -> "($(x.to_dbg_str {}), $(y.to_dbg_str {}))"
-}
-
-impl Vec2 where {
-  mag_sq = { it } -> match it is
-    Vec2 { x, y } -> x * x + y * y,
-}
+# The name is documentation: a Reading IS that record, not a wrapper
+# around it, so anything with the right fields fits.
+let describe: { r: Reading } -> Str = { r } ->
+  "\$(r.city): \$(int::to_str {n = r.temp})°C"
 
 let main = {} -> perform Console in do
-  let v = Vec2 { x = 3, y = 4 }
-  println { msg = "v       = $(Printable.display { it = v })" }
-  println { msg = "mag_sq  = $(v.mag_sq {}.to_dbg_str {})" }
-`,
+  println { msg = describe { r = { city = "Lisbon", temp = 21 } } }
+
+  # Built the plain way, still a Reading.
+  let cairo = { city = "Cairo", temp = 35 }
+  println { msg = describe { r = cairo } }`,
   },
   {
-    slug: 'effects',
-    title: 'Effects',
-    blurb: 'What a function does is part of its type.',
+    slug: "open-records",
+    title: "Open and closed records",
+    blurb: "Deciding what a function will accept.",
     body: [
-      'This is the idea Mezze is built around. `process_order` calls `info` and `warn`, so it carries the `<Log>` effect in its type. A caller cannot ignore that — it must supply a handler with `perform`.',
-      'The same function then runs twice below with **different handlers**: `Console` prints, `QuietConsole` stays silent. The function did not change; the interpretation of its effects did.',
-      'That is what separates effects from ordinary side effects. Logging, filesystem, HTTP and randomness are all values you pass in, so a test swaps `MemoryFS` for `LocalDisk` and nothing else moves.',
+      "A closed parameter says exactly which fields it takes, and **rejects** anything wider. Try passing `big` to `closed`.",
+      "Adding `...` opens it: `{ id: Int, ... }` means *at least* this field. Now a caller can hand over a record with more in it.",
+      "Open where you want callers to grow their data without breaking you; closed where the exact shape is the point.",
     ],
-    code: `use std::effects::log::{ Log, Console, QuietConsole, println, info, warn }
+    code: `use std::effects::log::{ Console, println }
+use std::int
 
-let process_order = { id, amount } -> do
-  info { msg = "Processing order #$(id.to_dbg_str {})" }
-  if amount > 1000
-    then warn { msg = "Large order: $(amount.to_dbg_str {})" }
-    else info { msg = "Normal order: $(amount.to_dbg_str {})" }
-  amount
+# A closed record says exactly which fields it takes.
+let closed: { r: { id: Int } } -> Int = { r } -> r.id
+
+# \`...\` opens it: the caller may pass more fields than this needs.
+let open: { r: { id: Int, ... } } -> Int = { r } -> r.id
 
 let main = {} -> perform Console in do
-  println { msg = "--- Console handler ---" }
-  perform Console in do
-    process_order { id = 1, amount = 500 }
-    process_order { id = 2, amount = 1500 }
-  println { msg = "--- QuietConsole handler (silent) ---" }
-  perform QuietConsole in do
-    process_order { id = 3, amount = 9999 }
-  println { msg = "done" }
-`,
+  let small = { id = 1 }
+  let big = { id = 2, name = "ada", active = True }
+
+  println { msg = "closed: \$(int::to_str {n = closed { r = small }})" }
+
+  # Only the open one accepts the wider record.
+  println { msg = "open:   \$(int::to_str {n = open { r = big }})" }`,
   },
   {
-    slug: 'handlers',
-    title: 'Swapping the world',
-    blurb: 'Filesystem and randomness as values.',
+    slug: "functions",
+    title: "Functions",
+    blurb: "One record in, and functions as values.",
     body: [
-      'Because effects are handled rather than performed directly, the surrounding world is a parameter. `MemoryFS` is a complete filesystem that exists only in memory.',
-      '`SeededRandom { seed = 42 }` is deterministic — this page and the `mez` CLI produce the identical number. That is what makes a shareable playground link mean something.',
-      'Swap `MemoryFS` for `LocalDisk` and press Run: the browser refuses, naming the performer, because there is no real disk here. It does not quietly pretend to succeed.',
+      "A function takes **one record**, which is why every argument is named at the call site. `clamp { val = 42, low = 0, high = 10 }` reads the way it is written.",
+      "Reorder the fields and existing calls keep compiling. Positional arguments cannot offer that.",
+      "Functions are values too: `twice` takes one as a field and calls it.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::effects::filesystem::{ FileSystem, MemoryFS, write_text, read_text_or }
-use std::effects::random::{ Random, SeededRandom, random_int }
+use std::int
 
-let main = {} -> perform Console in perform MemoryFS in
-  perform SeededRandom { seed = 42 } in do
-    write_text { path = "/notes.txt", text = "written in memory" }
-    println { msg = "file  = $(read_text_or { path = "/notes.txt", default = "missing" })" }
-    println { msg = "roll  = $(random_int { min = 1, max = 100 }.to_dbg_str {})" }
-`,
+# A function takes one record, so every argument is named at the call site.
+let clamp: { val: Int, low: Int, high: Int } -> Int = { val, low, high } ->
+  if val < low then low else if val > high then high else val
+
+# Functions are values: pass one in, return one out.
+let twice: { f: { n: Int } -> Int, n: Int } -> Int = { f, n } ->
+  f { n = f { n = n } }
+
+let inc = { n } -> n + 1
+
+let main = {} -> perform Console in do
+  println { msg = "\$(int::to_str {n = clamp { val = 42, low = 0, high = 10 }})" }
+  println { msg = "\$(int::to_str {n = twice { f = inc, n = 5 }})" }`,
   },
   {
-    slug: 'http',
-    title: 'Talking to the network',
-    blurb: 'A real HTTPS request, from this tab.',
+    slug: "effects",
+    title: "Effects",
+    blurb: "What a function does to the world, in its type.",
     body: [
-      'The `Http` effect works the same way. `HttpClient` is the real performer; in this page it is bridged to the browser, so the request below genuinely leaves your machine.',
-      '`Http.request` returns a `Result`, so failure is a value you match on rather than an exception you forget to catch.',
-      'Browser rules still apply: only sites that send permissive CORS headers will answer. For examples that must always work, `MockHttpClient` scripts responses instead.',
+      "`<Log>` on the return type is an **effect row**. It says this function talks to the outside world, and that travels up to everyone who calls it.",
+      "A **handler** decides what the effect means. `Console` prints; `QuietConsole` discards. The function itself does not change.",
+      "Run it: only one line appears. The second call was handled into silence.",
+    ],
+    code: `use std::effects::log::{ Log, Console, QuietConsole, println }
+use std::int
+
+# <Log> is an effect row. It says this function talks to the outside world,
+# and the type carries that all the way up to whoever calls it.
+let audit: { order: Int } -> {} <Log> = { order } ->
+  println { msg = "order \$(int::to_str {n = order}) seen" }
+
+let main = {} -> do
+  # A handler decides what the effect means. Console prints it...
+  perform Console in audit { order = 1 }
+
+  # ...QuietConsole throws it away. Same function, no change to its code.
+  perform QuietConsole in audit { order = 2 }
+
+  perform Console in println { msg = "done" }`,
+  },
+  {
+    slug: "abilities",
+    title: "Abilities",
+    blurb: "Dot-calling methods on any type.",
+    body: [
+      "`Inspect` is derived for every type, so `.to_dbg_str {}` works on anything — records, numbers, variants you just declared.",
+      "A dot call resolves against the receiver's type. `Int` has its own inherent methods too, like `.abs {}`.",
+      "This is how Mezze does ad-hoc polymorphism. The next lesson adds your own.",
     ],
     code: `use std::effects::log::{ Console, println }
-use std::effects::http::{ Http, HttpClient, request, default_http_config, body_string }
+use std::int
 
-let main = {} -> perform Console in perform HttpClient in do
-  let resp = Http.request {
-    req = request { url = "https://api.github.com/zen" },
-    config = default_http_config,
-  }
-  match resp is
-    Ok { val } -> match body_string { resp = val } is
-      Ok { val = text } -> println { msg = "$(val.status.to_dbg_str {}): $(text)" }
-      Err { error = _ } -> println { msg = "status $(val.status.to_dbg_str {}), no body" }
-    Err { error = _ } -> println { msg = "request failed" }
-`,
+# Inspect is built in and derived for every type, so to_dbg_str always works.
+type User = { name: Str, age: Int }
+
+let main = {} -> perform Console in do
+  let u = { name = "ada", age = 36 }
+
+  # A dot call finds the method for this value's type.
+  println { msg = u.to_dbg_str {} }
+  println { msg = (42).to_dbg_str {} }
+
+  # Int has its own inherent methods too.
+  println { msg = "abs: \$(int::to_str {n = (0 - 7).abs {}})" }`,
+  },
+  {
+    slug: "custom-abilities",
+    title: "Your own abilities",
+    blurb: "Interfaces you can implement for any type.",
+    body: [
+      "An **ability** declares an interface. The receiver is called `it`, and every method takes a record like any other function.",
+      "`impl Priced for Book` supplies it for one type — including types you did not write.",
+      "`with Priced 'a` on a signature means *any type that implements this*. Write the function once, and it works for every implementation.",
+    ],
+    code: `use std::effects::log::{ Console, println }
+use std::int
+
+# An ability is an interface. \`it\` is the receiver.
+ability Priced for 'a where {
+  cents: { it: 'a } -> Int
+}
+
+type Book = { title: Str, price: Int }
+
+impl Priced for Book where {
+  cents = { it } -> it.price
+}
+
+# \`with Priced 'a\` means: any type that implements Priced.
+let show_total: { it: 'a } with Priced 'a -> Str = { it } ->
+  "\$(int::to_str {n = it.cents {}}) cents"
+
+let main = {} -> perform Console in do
+  println { msg = show_total { it = { title = "Dune", price = 1299 } } }`,
+  },
+  {
+    slug: "custom-effects",
+    title: "Your own effects",
+    blurb: "Effects are library code, not syntax.",
+    body: [
+      "Effects are not built in. `effect Error having 'e` declares one, and `having` gives it an associated type so each handler picks its own error type.",
+      "The handler decides the meaning. `abort` stops the computation and returns a value instead — that is how this one turns a raise into an `Err`.",
+      "Exceptions, early return and retries are all ordinary code here. There is no syntax to wait for.",
+    ],
+    code: `use std::effects::log::{ Console, println }
+use std::int
+
+# Effects are not built in — you declare your own.
+effect Error having 'e where {
+  raise: { err: 'e } -> 'a <Error>
+}
+
+# A handler decides what raising means. This one stops and returns an Err.
+impl Error for ErrorToResult having 'e = 'err where {
+  raise = { err } -> abort { val = Err { error = err } }
+}
+
+let safe_div = { a, b } ->
+  if b == 0 then Error.raise { err = "divide by zero" } else Ok { val = a / b }
+
+let report = { r } -> match r is
+  Ok { val } -> "ok: \$(int::to_str {n = val})"
+  Err { error } -> "failed: \$(error)"
+
+let main = {} -> perform Console in do
+  println { msg = report { r = perform ErrorToResult in safe_div { a = 10, b = 2 } } }
+  println { msg = report { r = perform ErrorToResult in safe_div { a = 10, b = 0 } } }`,
+  },
+  {
+    slug: "full-program",
+    title: "Putting it together",
+    blurb: "A record type, an ability, an effect, and a fold.",
+    body: [
+      "All of it at once: a record type for the data, an ability for behaviour, a `<Log>` row the compiler infers rather than you writing, and a fold over a sequence.",
+      "`x.total {}` is the ability method. `seq::fold` is a plain stdlib function — nothing here is special-cased.",
+      "Edit the cart and press Run.",
+    ],
+    code: `use std::effects::log::{ Log, Console, println }
+use std::collections::seq
+use std::int
+
+type Item = { name: Str, price: Int, qty: Int }
+
+ability Priced for 'a where {
+  total: { it: 'a } -> Int
+}
+
+impl Priced for Item where {
+  total = { it } -> it.price * it.qty
+}
+
+let line: { it: Item } -> Str = { it } ->
+  "  \$(it.name) x\$(int::to_str {n = it.qty}) = \$(int::to_str {n = it.total {}})"
+
+let main = {} -> perform Console in do
+  let cart = [
+    { name = "olive oil", price = 899, qty = 2 },
+    { name = "za'atar", price = 450, qty = 1 },
+    { name = "pita", price = 199, qty = 3 },
+  ]
+
+  println { msg = "cart:" }
+  let lines = seq::map { xs = cart, f = { x } -> line { it = x } }
+  println { msg = seq::fold { xs = lines, init = "", f = { acc, x } -> "\$(acc)\$(x)\\n" } }
+
+  let sum = seq::fold { xs = cart, init = 0, f = { acc, x } -> acc + x.total {} }
+  println { msg = "total: \$(int::to_str {n = sum}) cents" }`,
   },
 ]

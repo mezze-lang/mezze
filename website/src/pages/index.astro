@@ -104,25 +104,41 @@ import { highlight } from '../lib/highlight'
     tip.hidden = true
     document.body.appendChild(tip)
 
-    const TAB_KEYS = ['effects', 'records', 'async', 'abilities']
+    // Must match the sample filenames hovers.sh writes, which come from the
+    // tab labels lowercased.
+    const TAB_KEYS = playground.tabs.map((t) => t.label.toLowerCase())
     const hideTip = () => { tip.hidden = true }
 
-    /** 1-based (line, col) under the pointer, or null. */
+    /**
+     * 1-based (line, col) under the pointer, or null.
+     *
+     * Asks the browser which character is under the cursor rather than doing
+     * the arithmetic: the highlighter wraps tokens in spans and the <pre> has
+     * padding, so measuring from the element box lands on the wrong column.
+     */
     const posAt = (x: number, y: number): [number, number] | null => {
-      const r = codeEl.getBoundingClientRect()
-      if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null
-      const cs = getComputedStyle(codeEl)
-      const lineH = parseFloat(cs.lineHeight)
-      // The <pre> is monospace, so one character is one fixed width.
-      const probe = document.createElement('span')
-      probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${cs.font}`
-      probe.textContent = '0'.repeat(100)
-      document.body.appendChild(probe)
-      const charW = probe.getBoundingClientRect().width / 100
-      probe.remove()
+      const doc = document as Document & {
+        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+      }
+      const caret = doc.caretPositionFromPoint?.(x, y)
+      if (!caret || !codeEl.contains(caret.offsetNode)) return null
 
-      const line = Math.floor((y - r.top) / lineH) + 1
-      const col = Math.floor((x - r.left) / charW) + 1
+      // Count text before this node to recover the offset into the whole sample.
+      const walker = document.createTreeWalker(codeEl, NodeFilter.SHOW_TEXT)
+      let offset = 0
+      let node: Node | null
+      while ((node = walker.nextNode())) {
+        if (node === caret.offsetNode) {
+          offset += caret.offset
+          break
+        }
+        offset += node.textContent?.length ?? 0
+      }
+      if (!node) return null
+
+      const before = (codeEl.textContent ?? '').slice(0, offset)
+      const line = before.split('\n').length
+      const col = offset - before.lastIndexOf('\n')
       return [line, col]
     }
 

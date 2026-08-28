@@ -1,15 +1,10 @@
 use std::effects::log::{ Console, println }
 use std::int
 
-type Order = { id: Int, total: Int, currency: Str }
-
-# Arguments are named, so the call site says what each number means.
-let summarise: { order: Order } -> Str = { order } ->
-  "#$(int::to_str {n = order.id}) — $(int::to_str {n = order.total}) $(order.currency)"
+type Item = { name: Str, price: Int }
 
 let main = {} -> perform Console in do
-  let o = { id = 1001, total = 4200, currency = "EUR" }
-  println { msg = summarise { order = o } }
+  let item = { name = "olive oil", price = 899 }
+  let sale = { ...item, price = 499 }
 
-  # Copy with one field changed; the rest come along untouched.
-  println { msg = summarise { order = { ...o, total = 0 } } }
+  println { msg = "$(sale.name): $(int::to_str {n = sale.price})" }

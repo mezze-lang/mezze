@@ -51,89 +51,68 @@ export const playground = {
     {
       label: 'Effects',
       code: `use std::effects::log::{ Log, Console, QuietConsole, println }
-use std::int
 
-# The <Log> in this type is the point: this function reaches the outside
-# world, and the signature has to say so.
-let charge: { order: Int, amount: Int } -> {} <Log> = { order, amount } ->
-  println { msg = "charging #$(int::to_str {n = order}): $(int::to_str {n = amount})" }
+# <Log> says this touches the outside world. The caller cannot miss it.
+let audit: { order: Str } -> {} <Log> = { order } ->
+  println { msg = "saw $(order)" }
 
 let main = {} -> do
-  # Same function, two handlers. The caller decides what logging means.
-  perform Console in charge { order = 1001, amount = 4200 }
-  perform QuietConsole in charge { order = 1002, amount = 900 }
-  perform Console in println { msg = "done" }`,
-      output: 'charging #1001: 4200\ndone',
+  perform Console in audit { order = "A-1" }
+  perform QuietConsole in audit { order = "A-2" }`,
+      output: 'saw A-1',
     },
     {
       label: 'Records',
       code: `use std::effects::log::{ Console, println }
 use std::int
 
-type Order = { id: Int, total: Int, currency: Str }
-
-# Arguments are named, so the call site says what each number means.
-let summarise: { order: Order } -> Str = { order } ->
-  "#$(int::to_str {n = order.id}) — $(int::to_str {n = order.total}) $(order.currency)"
+type Item = { name: Str, price: Int }
 
 let main = {} -> perform Console in do
-  let o = { id = 1001, total = 4200, currency = "EUR" }
-  println { msg = summarise { order = o } }
+  let item = { name = "olive oil", price = 899 }
+  let sale = { ...item, price = 499 }
 
-  # Copy with one field changed; the rest come along untouched.
-  println { msg = summarise { order = { ...o, total = 0 } } }`,
-      output: '#1001 — 4200 EUR\n#1001 — 0 EUR',
+  println { msg = "$(sale.name): $(int::to_str {n = sale.price})" }`,
+      output: 'olive oil: 499',
     },
     {
-      label: 'Async',
+      label: 'Concurrency',
       code: `use std::effects::async::{ Async, LoomAsync }
 use std::effects::log::{ Log, Console, println }
 use std::result::{ get_or_else }
-use std::int
 
-let fetch_user: { id: Int } -> Str <Log> = { id } -> do
-  println { msg = "fetching user $(int::to_str {n = id})" }
-  "ada"
-
-let fetch_orders: { id: Int } -> Int <Log> = { id } -> do
-  println { msg = "fetching orders for $(int::to_str {n = id})" }
-  3
+let fetch: { url: Str } -> Str <Log> = { url } -> do
+  println { msg = "GET $(url)" }
+  url
 
 let main = {} -> perform Console in perform LoomAsync in do
   # Both start now; neither waits for the other.
-  let user = Async.spawn { f = {} -> fetch_user { id = 7 } }
-  let orders = Async.spawn { f = {} -> fetch_orders { id = 7 } }
+  let a = Async.spawn { f = {} -> fetch { url = "/users" } }
+  let b = Async.spawn { f = {} -> fetch { url = "/orders" } }
 
-  # await returns a Result, so a failed task cannot be dropped by accident.
-  let name = get_or_else { result = user.await {}, def = "unknown" }
-  let count = get_or_else { result = orders.await {}, def = 0 }
-  println { msg = "$(name) has $(int::to_str {n = count}) orders" }`,
-      output: 'fetching user 7\nfetching orders for 7\nada has 3 orders',
+  # await hands back a Result, so a failure cannot be dropped.
+  println { msg = get_or_else { result = a.await {}, def = "?" } }
+  println { msg = get_or_else { result = b.await {}, def = "?" } }`,
+      output: 'GET /users\nGET /orders\n/users\n/orders',
     },
     {
       label: 'Abilities',
       code: `use std::effects::log::{ Console, println }
 use std::int
 
-# One ability, one method. The receiver is named it.
-ability Money for 'a where {
+ability Priced for 'a where {
   cents: { it: 'a } -> Int
 }
 
-# A plain record — no wrapper needed to give it behaviour.
-type Eur = { amount: Int }
+type Book = { price: Int }
 
-impl Money for Eur where {
-  cents = { it } -> it.amount
+impl Priced for Book where {
+  cents = { it } -> it.price
 }
 
-# Works for any type with a Money impl, including ones added later.
-let describe: { it: 'a } with Money 'a -> Str = { it } ->
-  "$(int::to_str {n = it.cents {}}) cents"
-
-let main = {} -> perform Console in do
-  println { msg = describe { it = { amount = 4200 } } }`,
-      output: '4200 cents',
+let main = {} -> perform Console in
+  println { msg = int::to_str {n = { price = 1299 }.cents {}} }`,
+      output: '1299',
     },
   ],
 }
@@ -144,7 +123,7 @@ export const features = [
     title: 'Write like a ~lemon~dynamic language~, get a strict one',
     body:
       'Full inference across the whole program. Annotate a signature where it helps ' +
-      'someone reading it, never to satisfy the compiler.',
+      'someone reading it, ~~never~~ to satisfy the compiler.',
   },
   {
     title: 'A few small pieces, ~onion~reused everywhere~',
@@ -156,7 +135,13 @@ export const features = [
     title: 'Swap out the ~tomato~side effects~ when you need to',
     body:
       'The same function runs against the real filesystem or an in-memory one, a live ' +
-      'clock or a frozen one. Tests get a different handler, not different code.',
+      'clock or a frozen one. Tests get a different ~~handler~~, not different code.',
+  },
+  {
+    title: 'First-class ~olive~continuations~',
+    body:
+      'Exceptions and early return are ordinary functions here, not syntax the language ' +
+      'had to grow. Write your own control flow and it looks like everyone else\'s.',
   },
   {
     title: 'Fearless concurrency, ~mint~built on Loom~',
@@ -165,16 +150,10 @@ export const features = [
       'task. STM, atoms, channels, agents and latches ship with it.',
   },
   {
-    title: 'Mutation where it ~auber~earns its place~',
+    title: 'Competitively fast on ~auber~GraalVM~',
     body:
-      'Mutate in place inside a scope, hand back an immutable value at the edge. Fused ' +
-      'loops, and AOT native binaries when you want them.',
-  },
-  {
-    title: 'Control flow you can ~olive~define yourself~',
-    body:
-      'Effects are first-class, so early return, retries and resource scopes are ordinary ' +
-      'library code. No syntax to wait for.',
+      'Optimised data structures, loop fusion, and mutation that is ~~safe~~ because the ' +
+      'type system keeps it in scope. AOT native binaries when you want them.',
   },
   {
     title: 'Distributed computing^TBD^',

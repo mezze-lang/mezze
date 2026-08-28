@@ -1,21 +1,15 @@
 use std::effects::log::{ Console, println }
 use std::int
 
-# One ability, one method. The receiver is named it.
-ability Money for 'a where {
+ability Priced for 'a where {
   cents: { it: 'a } -> Int
 }
 
-# A plain record — no wrapper needed to give it behaviour.
-type Eur = { amount: Int }
+type Book = { price: Int }
 
-impl Money for Eur where {
-  cents = { it } -> it.amount
+impl Priced for Book where {
+  cents = { it } -> it.price
 }
 
-# Works for any type with a Money impl, including ones added later.
-let describe: { it: 'a } with Money 'a -> Str = { it } ->
-  "$(int::to_str {n = it.cents {}}) cents"
-
-let main = {} -> perform Console in do
-  println { msg = describe { it = { amount = 4200 } } }
+let main = {} -> perform Console in
+  println { msg = int::to_str {n = { price = 1299 }.cents {}} }

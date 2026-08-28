@@ -1,13 +1,9 @@
 use std::effects::log::{ Log, Console, QuietConsole, println }
-use std::int
 
-# The <Log> in this type is the point: this function reaches the outside
-# world, and the signature has to say so.
-let charge: { order: Int, amount: Int } -> {} <Log> = { order, amount } ->
-  println { msg = "charging #$(int::to_str {n = order}): $(int::to_str {n = amount})" }
+# <Log> says this touches the outside world. The caller cannot miss it.
+let audit: { order: Str } -> {} <Log> = { order } ->
+  println { msg = "saw $(order)" }
 
 let main = {} -> do
-  # Same function, two handlers. The caller decides what logging means.
-  perform Console in charge { order = 1001, amount = 4200 }
-  perform QuietConsole in charge { order = 1002, amount = 900 }
-  perform Console in println { msg = "done" }
+  perform Console in audit { order = "A-1" }
+  perform QuietConsole in audit { order = "A-2" }
