@@ -84,33 +84,52 @@ export function mountEditor(root: HTMLElement): EditorHandle {
   tip.hidden = true
   document.body.appendChild(tip)
 
-  let charW = 0
-  const measureChar = () => {
+  /**
+   * Width of one character in the editor, in px.
+   *
+   * Measured with a probe inside the editor's own box, copying the font
+   * metrics individually: the `font` shorthand drops letter-spacing, and a
+   * probe appended to <body> can inherit a different font stack. Either
+   * mistake under-measures, which shows up as hover landing on the wrong
+   * column and Format wrapping too wide.
+   */
+  const measureCharWidth = (): number => {
     const cs = getComputedStyle(srcEl)
     const probe = document.createElement('span')
-    probe.style.cssText =
-      `position:absolute;visibility:hidden;white-space:pre;font:${cs.font}`
-    probe.textContent = '0'.repeat(100)
-    document.body.appendChild(probe)
-    charW = probe.getBoundingClientRect().width / 100
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre'
+    probe.style.fontFamily = cs.fontFamily
+    probe.style.fontSize = cs.fontSize
+    probe.style.fontWeight = cs.fontWeight
+    probe.style.letterSpacing = cs.letterSpacing
+    probe.style.fontFeatureSettings = cs.fontFeatureSettings
+    probe.textContent = 'x'.repeat(100)
+    srcEl.parentElement!.appendChild(probe)
+    const w = probe.getBoundingClientRect().width / 100
     probe.remove()
+    return w
+  }
+
+  let charW = 0
+  const measureChar = () => {
+    charW = measureCharWidth()
   }
 
   /**
    * How many characters fit across the editor right now.
    *
-   * The formatter is fixed at 100 columns for the CLI, which either overflows
-   * a narrow pane or wastes a wide one. Measuring here lets Format wrap to
-   * what the reader actually has.
+   * The formatter is fixed at 100 columns for the CLI, which overflows this
+   * pane. Measuring here lets Format wrap to what the reader actually has.
    */
   const editorCols = (): number => {
-    if (!charW) measureChar()
+    const w = measureCharWidth()
     const cs = getComputedStyle(srcEl)
     const usable = srcEl.clientWidth
       - parseFloat(cs.paddingLeft)
       - parseFloat(cs.paddingRight)
-    // Clamp: below ~40 the output is unreadable, above 120 it stops helping.
-    return Math.max(40, Math.min(120, Math.floor(usable / charW)))
+
+    if (!w || !usable) return 80
+    // A couple of columns of slack so a trailing character never wraps.
+    return Math.max(40, Math.min(100, Math.floor(usable / w) - 2))
   }
 
   /** 1-based (line, col) under the pointer, or null if outside the text. */
