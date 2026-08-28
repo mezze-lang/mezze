@@ -54,13 +54,17 @@ export const playground = {
       blurb: "Swap where output goes",
       code: `use std::effects::log::{ Console, QuietConsole, println }
 
-# Swap where output goes without touching the function.
+# The same function, two destinations.
 let audit = { order } -> println { msg = "saw \$(order)" }
 
 let main = {} -> do
+  # Console prints it...
   perform Console in audit { order = "A-1" }
-  perform QuietConsole in audit { order = "A-2" }`,
-      output: "saw A-1",
+
+  # ...QuietConsole drops it. Nothing in audit changed.
+  perform QuietConsole in audit { order = "A-2" }
+  perform Console in println { msg = "done" }`,
+      output: "saw A-1\ndone",
     },
     {
       dish: "lemon",
@@ -68,13 +72,18 @@ let main = {} -> do
       blurb: "Order never matters",
       code: `use std::effects::log::{ Console, println }
 
-# Arguments are named, so order never matters.
+# Every argument is named, so the order is yours.
 let label = { name, unit } -> "\$(name) sold by the \$(unit)"
 
 let main = {} -> perform Console in do
   println { msg = label { name = "olive oil", unit = "litre" } }
-  println { msg = label { unit = "gram", name = "za'atar" } }`,
-      output: "olive oil sold by the litre\nza’atar sold by the gram",
+
+  # Same call, fields the other way round.
+  println { msg = label { unit = "gram", name = "za'atar" } }
+
+  let honey = label { name = "honey", unit = "jar" }
+  println { msg = honey }`,
+      output: "olive oil sold by the litre\nza’atar sold by the gram\nhoney sold by the jar",
     },
     {
       dish: "onion",
@@ -82,14 +91,20 @@ let main = {} -> perform Console in do
       blurb: "Copy with a change",
       code: `use std::effects::log::{ Console, println }
 
-# Change one field; the original is untouched.
+# A record is just named fields — no class, no constructor.
 let base = { host = "localhost", port = 8080, tls = False }
+
+# Copy with one field changed; the original is untouched.
 let prod = { ...base, host = "mezze-lang.org", tls = True }
 
 let main = {} -> perform Console in do
   println { msg = base.host }
-  println { msg = prod.host }`,
-      output: "localhost\nmezze-lang.org",
+  println { msg = prod.host }
+
+  # Destructuring is exhaustive — \`...\` opts out of the rest.
+  let { host, port, ... } = prod
+  println { msg = "\$(host):\$(port.to_str {})" }`,
+      output: "localhost\nmezze-lang.org\nmezze-lang.org:8080",
     },
     {
       dish: "tomato",

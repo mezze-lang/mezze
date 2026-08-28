@@ -3,6 +3,9 @@ import com.mezze.language.parser.MezzeParser;
 import com.mezze.language.parsedast.ParsedModule;
 import com.mezze.language.typechecker.TypeChecker;
 import com.mezze.language.typedast.TypedModule;
+import com.mezze.language.typedast.TypedAbilityImpl;
+import com.mezze.language.typedast.TypedExpr;
+import com.mezze.language.parsedast.Loc;
 import com.mezze.language.typechecker.lookup.TypedAstLookup;
 
 import java.nio.file.Files;
@@ -89,10 +92,78 @@ public final class HoverExtractor {
             if (hit instanceof TypedAstLookup.LookupResult.Expr e) {
                 return TypePrinterKt.prettyPrintType(e.getExpr().getType());
             }
-            return "";
+            // TypedAstLookup only walks let-declarations, so an `impl` body
+            // resolves to nothing. The bodies are typed — TypedAbilityImpl
+            // holds them in `operations` — so search those directly.
+            return typeInImpls(tm, line, col);
         } catch (Throwable t) {
             return "";
         }
+    }
+
+    /** Innermost typed expression inside any impl body covering (line, col). */
+    private static String typeInImpls(TypedModule tm, int line, int col) {
+        TypedExpr best = null;
+        for (TypedAbilityImpl impl : tm.getAbilityImpls()) {
+            for (TypedExpr body : impl.getOperations().values()) {
+                TypedExpr hit = smallestCovering(body, line, col, null);
+                if (hit != null && (best == null || narrower(hit, best))) best = hit;
+            }
+        }
+        return best == null ? "" : TypePrinterKt.prettyPrintType(best.getType());
+    }
+
+    /**
+     * Walks an expression tree by reflection, since the concrete TypedExpr
+     * subclasses each name their children differently and the shared walker in
+     * TypedAstLookup is private.
+     */
+    private static TypedExpr smallestCovering(Object node, int line, int col, TypedExpr best) {
+        if (node instanceof TypedExpr e) {
+            if (covers(e.getLoc(), line, col) && (best == null || narrower(e, best))) best = e;
+        }
+        if (node instanceof Iterable<?> it) {
+            for (Object child : it) best = smallestCovering(child, line, col, best);
+            return best;
+        }
+        if (node instanceof java.util.Map<?, ?> m) {
+            for (Object child : m.values()) best = smallestCovering(child, line, col, best);
+            return best;
+        }
+        if (node instanceof TypedExpr) {
+            for (java.lang.reflect.Method getter : node.getClass().getMethods()) {
+                if (!getter.getName().startsWith("get") || getter.getParameterCount() != 0) continue;
+                if (getter.getName().equals("getLoc") || getter.getName().equals("getType")) continue;
+                try {
+                    Object child = getter.invoke(node);
+                    if (child instanceof TypedExpr || child instanceof Iterable
+                        || child instanceof java.util.Map) {
+                        best = smallestCovering(child, line, col, best);
+                    }
+                } catch (Throwable ignored) {
+                    // A getter that throws is not a child worth chasing.
+                }
+            }
+        }
+        return best;
+    }
+
+    private static boolean covers(Loc loc, int line, int col) {
+        if (loc == null) return false;
+        if (line < loc.getStartLine() || line > loc.getEndLine()) return false;
+        if (line == loc.getStartLine() && col < loc.getStartCol()) return false;
+        if (line == loc.getEndLine() && col > loc.getEndCol()) return false;
+        return true;
+    }
+
+    /** True when a spans fewer characters than b — the more specific hit. */
+    private static boolean narrower(TypedExpr a, TypedExpr b) {
+        return span(a.getLoc()) < span(b.getLoc());
+    }
+
+    private static long span(Loc l) {
+        return (long) (l.getEndLine() - l.getStartLine()) * 10_000
+             + (l.getEndCol() - l.getStartCol());
     }
 
     private record Span(int start, int end) {
