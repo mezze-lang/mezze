@@ -36,8 +36,8 @@ check:
 build:
     cd {{site}} && npm run build
 
-# Compile the Mezze compiler to WebAssembly (Docker; 20-40 min).
 # Skipped automatically when public/wasm is newer than the compiler sources.
+# Compile the Mezze compiler to WebAssembly (Docker; slow)
 wasm:
     cd {{site}} && npm run build:wasm
 
@@ -45,9 +45,22 @@ wasm:
 wasm-force:
     cd {{site}} && ./wasm-build/build.sh --force
 
-# WASM (if stale) then the site — a full build from a clean checkout
-build-all:
-    cd {{site}} && npm run build:all
+# The samples are fixed, so their types are extracted once on the JVM rather
+# than shipping the 58MB runtime to a page that never runs code (~28KB output).
+# Precompute hover types for the landing-page samples
+hovers:
+    cd {{site}} && ./wasm-build/hovers.sh
+
+#   wasm    compiler -> WebAssembly (Docker, slow; skipped when current)
+#   hovers  type hints for the static samples (needs the jars wasm just built)
+#   build   astro check + astro build, which embeds both
+#
+# Use `just build` alone only when the runtime and hover data are current.
+# Everything: wasm -> hovers -> site. A full build from a clean checkout
+release: wasm hovers build
+
+# Alias kept for muscle memory — same thing as `release`.
+build-all: release
 
 # Serve the built site locally
 preview: build
@@ -97,11 +110,24 @@ infra-destroy: _stack
 # deploy
 # ============================================================
 
-# Build the site and upload website/dist/ to Cloudflare Pages
-deploy: build
-    sops exec-env secrets.yaml \
-      'npx --yes wrangler@latest pages deploy {{site}}/dist --project-name {{project}} --branch main'
+# Upload the WebAssembly runtime to R2.
+#
+# Pages rejects files over 25 MiB and the runtime is ~56, so it is served from
+# the bucket instead. Both files go together: mezze.js finds its .wasm through
+# document.currentScript.src, so they must share an origin.
+# Push the runtime to the R2 bucket
+push-wasm:
+    @cd infra && pulumi stack select {{stack}} >/dev/null 2>&1
+    sops exec-env secrets.yaml 'set -euo pipefail; B=$(cd infra && pulumi stack output runtimeBucket); for f in mezze.js mezze.js.wasm; do echo "  uploading $f"; npx --yes wrangler@latest r2 object put "$B/wasm/$f" --file "{{site}}/public/wasm/$f" --remote --cache-control "public, max-age=31536000, immutable"; done'
 
+# Depends on `release`, not `build`: deploying after a bare `build` would ship
+# whatever wasm and hover data happened to be lying around, which may predate
+# the compiler changes in this checkout. The wasm is stripped from dist/ — it
+# is served from R2, and Pages would reject it for size anyway.
+# Full pipeline, then upload website/dist/ to Cloudflare Pages
+deploy: release push-wasm
+    @cd infra && pulumi stack select {{stack}} >/dev/null 2>&1
+    sops exec-env secrets.yaml 'set -euo pipefail; URL=$(cd infra && pulumi stack output runtimeUrl); echo "  runtime: $URL"; PUBLIC_WASM_BASE="$URL" npm --prefix {{site}} run build; rm -rf {{site}}/dist/wasm; npx --yes wrangler@latest pages deploy {{site}}/dist --project-name {{project}} --branch main'
 # Deploy without a fresh build (uses whatever is in website/dist/)
 deploy-only:
     sops exec-env secrets.yaml \

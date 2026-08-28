@@ -36,6 +36,12 @@ in
 
   # --- website deployment (Pulumi + Cloudflare) -----------------------------
   env.PULUMI_SKIP_UPDATE_CHECK = "true";
+
+  # pulumiPackages.pulumi-nodejs puts an OLD cloudflare provider (6.13) on PATH,
+  # and an ambient plugin wins over ~/.pulumi/plugins. infra/package.json pins
+  # 6.19, and PageRule/ZoneSetting differ between the two — so ignore ambient
+  # plugins and use the version the project actually asked for.
+  env.PULUMI_IGNORE_AMBIENT_PLUGINS = "true";
   # State lives in ~/.pulumi/ rather than Pulumi Cloud — back it up, it holds
   # the resource-ID map and losing it means Pulumi cannot reconcile what is
   # already provisioned against the code.

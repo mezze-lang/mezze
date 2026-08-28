@@ -96,6 +96,55 @@ new cloudflare.PageRule('www-to-apex', {
   },
 })
 
+
+// ---------------------------------------------------------------------------
+// 6. R2 bucket for the WebAssembly runtime.
+//
+// Cloudflare Pages rejects any file over 25 MiB and the runtime is ~56 MiB, so
+// it cannot ship inside dist/ — it lives here and the site fetches it at run
+// time. R2 charges no egress, so serving a large binary costs storage only
+// (~56 MB, comfortably inside the 10 GB free tier).
+//
+// No custom domain: the managed `pub-<hash>.r2.dev` URL is enough for a public
+// asset, and one less DNS record to own.
+const runtime = new cloudflare.R2Bucket('runtime', {
+  accountId,
+  name: `${project}-runtime`,
+  location: 'WEUR',
+});
+
+// Public read access over the r2.dev domain. Without this the bucket is
+// private and the browser gets a 401.
+const runtimePublic = new cloudflare.R2ManagedDomain('runtime-public', {
+  accountId,
+  bucketName: runtime.name,
+  enabled: true,
+});
+
+// CORS: the fetch is cross-origin now (site on mezze-lang.org, runtime on
+// r2.dev), so the bucket must name who may read it. Restricted to this site's
+// own origins — a bucket that allowed `*` would let any page on the web embed
+// the runtime and bill the storage to this account.
+new cloudflare.R2BucketCors('runtime-cors', {
+  accountId,
+  bucketName: runtime.name,
+  rules: [{
+    allowed: {
+      origins: [`https://${domain}`, `https://www.${domain}`],
+      methods: ['GET', 'HEAD'],
+      // Range requests need this so a browser can resume a partial fetch.
+      headers: ['range'],
+    },
+    exposeHeaders: ['content-length', 'content-range'],
+    maxAgeSeconds: 86400,
+  }],
+});
+
 export const pagesSubdomain = pages.subdomain // e.g. mezze-lang.pages.dev
 export const primaryUrl = pulumi.interpolate`https://${domain}`
 export const wwwUrl = pulumi.interpolate`https://www.${domain}`
+
+// The base the site fetches the runtime from. `just deploy` reads this and
+// writes it into the build, so the URL is never hardcoded in two places.
+export const runtimeBucket = runtime.name
+export const runtimeUrl = pulumi.interpolate`https://${runtimePublic.domain}`
