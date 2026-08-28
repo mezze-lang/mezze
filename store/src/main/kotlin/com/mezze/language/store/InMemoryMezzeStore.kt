@@ -158,8 +158,8 @@ class InMemoryMezzeStore : MezzeStore {
 
     // ── APPS ──
 
-    override fun putApp(name: String, entryName: String, entryModule: String, sourceFile: String?) {
-        apps[name] = AppRow(name, entryName, entryModule, sourceFile)
+    override fun putApp(name: String, entryHash: Hash, entryName: String?, entryModule: String, sourceFile: String?) {
+        apps[name] = AppRow(name, entryHash, entryName, entryModule, sourceFile)
     }
 
     override fun getApp(name: String): AppRow? = apps[name]

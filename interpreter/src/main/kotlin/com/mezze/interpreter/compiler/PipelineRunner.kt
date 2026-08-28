@@ -45,7 +45,11 @@ object PipelineRunner {
         importedModulePaths: List<String> = emptyList(),
         projectRoot: Path = Path.of("."),
         performerRecords: List<Array<String>> = emptyList(),
-        entryName: String? = null,
+        // Entry-point identity: the entry function's content hash (== entry
+        // FunctionIR.hash). Selected by `find { it.hash == entryHash }`, NEVER
+        // by name. Null = no configured user entry (tests/REPL) → fall back to
+        // the synthetic __entry__ wrapper / last function. (D1/D2.)
+        entryHash: Hash? = null,
         // Caller-provided source text keyed by file path. When present, the
         // compiler builds Truffle Sources from THIS content (not disk) so the
         // debugger's breakpoints resolve against the exact source the client
@@ -199,7 +203,7 @@ object PipelineRunner {
                 if (fn.name == ENTRY_FN || fn.name == MAIN_FN || fn.name.startsWith(TOPLEVEL_PREFIX)) {
                     roots.add(fn.hash)
                 }
-                if (entryName != null && fn.name == entryName) roots.add(fn.hash)
+                if (entryHash != null && fn.hash == entryHash) roots.add(fn.hash)
             }
             // Include performer factories/ops as reachable roots — they're
             // installed dynamically by handler chain lookup, not called
@@ -213,12 +217,13 @@ object PipelineRunner {
 
         // Find the entry point and compile it.
         //
-        // If a named entry function exists (from Mezze.toml entryName), compile a call
-        // to it: `entryName {}`. This is the mez dev path.
+        // If a user entry function exists (the Mezze.toml entry, resolved to a
+        // content hash at pack time), compile a call to it. This is the mez
+        // dev / exec / build path. Selection is by hash, never by name.
         //
-        // If no named entry, use __entry__ (tests/REPL wrapping of top-level expressions)
-        // or fall back to the last function.
-        val namedEntry = if (entryName != null) functions.find { it.name == entryName } else null
+        // If no user entry, use __entry__ (tests/REPL wrapping of top-level
+        // expressions) or fall back to the last function.
+        val namedEntry = if (entryHash != null) functions.find { it.hash == entryHash } else null
 
         val mainFn: com.mezze.language.truffleir.FunctionIR
         val source: com.oracle.truffle.api.source.Source

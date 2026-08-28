@@ -40,11 +40,13 @@ object EmbeddedAppLoader {
 
             // Descriptor format (CBOR map): {
             //   "appName": String,
-            //   "entryName": String?,
+            //   "entryHash": String,   // entry-point identity (content hash)
+            //   "entryName": String?,  // display-only
             //   "performers": List<List<String>>
             // }
             val desc = StoreSerialization.deserializeEmbeddedAppMeta(descBytes)
             EmbeddedApp.appName = desc.appName
+            EmbeddedApp.entryHash = desc.entryHash
             EmbeddedApp.entryName = desc.entryName
             EmbeddedApp.performerRecords = desc.performerRecords
 

@@ -54,7 +54,7 @@ object EmbeddedExec {
         executeWithTruffle(
             functions = embedded.functions,
             performers = embedded.performerRecords,
-            entryName = embedded.entryName,
+            entryHash = embedded.entryHash,
             args = args,
             timing = timing,
             t0 = t0,
@@ -73,7 +73,8 @@ object EmbeddedExec {
     private fun executeWithTruffle(
         functions: List<FunctionIR>,
         performers: List<Array<String>> = emptyList(),
-        entryName: String? = null,
+        // Entry-point identity: entry function content-hash hex (never a name).
+        entryHash: String? = null,
         args: List<String> = emptyList(),
         timing: Boolean = false,
         t0: Long = System.nanoTime(),
@@ -310,8 +311,8 @@ object EmbeddedExec {
             com.mezze.interpreter.nodes.builtin.effects.EnvironmentNatives
                 .setWireArgv(userArgv)
 
-            if (entryName != null) {
-                MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot, entryName)
+            if (entryHash != null) {
+                MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot, entryHash)
             } else {
                 MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot)
             }

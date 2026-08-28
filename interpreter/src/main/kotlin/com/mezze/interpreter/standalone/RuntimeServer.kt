@@ -569,10 +569,12 @@ object RuntimeServer {
             return
         }
 
-        val entryName = meta.entryName
+        // Entry-point identity = content hash (never a name). meta.entryHash is
+        // the entry function's content-hash hex, packed at build/pack time.
+        val entryHash = meta.entryHash
         try {
-            if (entryName != null) {
-                MezzeLanguage.setFunctionsForDirectExecution(functions, meta.performerRecords, state.projectRoot(), entryName)
+            if (entryHash.isNotEmpty()) {
+                MezzeLanguage.setFunctionsForDirectExecution(functions, meta.performerRecords, state.projectRoot(), entryHash)
             } else {
                 MezzeLanguage.setFunctionsForDirectExecution(functions, meta.performerRecords, state.projectRoot())
             }

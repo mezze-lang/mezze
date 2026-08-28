@@ -453,10 +453,15 @@ object WireRunner {
             return null
         }
 
+        // Entry identity = content hash (== entry FunctionIR.hash). Resolved
+        // once here at the front door from the user-named entry; carried as a
+        // hash through packing / runtime selection. entryName kept as display.
+        val entryHash = entry.hash
         val closure: List<FunctionIR> = NativeBuildPath.computeReachableClosure(result.loweredFunctions)
         val (fnBytes, metaBytes) = NativeBuildPath.packEmbeddedAppCbor(
             closure = closure,
             appName = appName,
+            entryHash = entryHash.hex,
             entryName = entryName,
             performerRecords = result.performerRecords,
         )

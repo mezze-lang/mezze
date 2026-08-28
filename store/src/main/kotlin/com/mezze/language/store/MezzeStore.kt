@@ -144,7 +144,17 @@ interface MezzeStore : AutoCloseable {
     // APPS — per-app entry metadata + function/performer manifests
     // ====================================================================
 
-    fun putApp(name: String, entryName: String, entryModule: String, sourceFile: String?)
+    /**
+     * Record an app's entry-point metadata.
+     *
+     * [entryHash] is the entry function's content hash — the SOLE identity of
+     * the entry point (== the entry `TypedLetDecl.hash` == the entry
+     * `FunctionIR.hash`). Selection at runtime keys on this hash, never on a
+     * name. [entryName] is retained as optional display metadata only and must
+     * NOT be read for selection anywhere. [entryModule]/[sourceFile] are
+     * addressing/provenance.
+     */
+    fun putApp(name: String, entryHash: Hash, entryName: String?, entryModule: String, sourceFile: String?)
     fun getApp(name: String): AppRow?
 
     /**
@@ -302,7 +312,10 @@ data class BlobRow(
 
 data class AppRow(
     val name: String,
-    val entryName: String,
+    /** Entry-point identity: content hash of the entry function. */
+    val entryHash: Hash,
+    /** Display-only entry name; NEVER a selection key. Nullable for forward-compat. */
+    val entryName: String?,
     val entryModule: String,
     val sourceFile: String?
 )

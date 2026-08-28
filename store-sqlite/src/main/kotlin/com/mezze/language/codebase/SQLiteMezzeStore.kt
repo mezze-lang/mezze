@@ -101,7 +101,12 @@ class SQLiteMezzeStore private constructor(
         // constructor is enforced to mirror it (Type.kt init{}). Only Anonymous
         // still hashes constructor (its sole name signal). Content-hash bytes shift
         // for every named TypeApplication; old caches dropped and regenerated.
-        const val SCHEMA_VERSION = 7
+        // v8 (D1/D2): apps table gains `entry_hash TEXT NOT NULL` — the app
+        // entry-point identity is now the entry function's content hash, not a
+        // name. `entry_name` demoted to nullable display metadata. A version
+        // mismatch drops/rebuilds the cache (harmless; embedded apps are
+        // rebuilt by `mez build`).
+        const val SCHEMA_VERSION = 8
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of
@@ -797,9 +802,13 @@ class SQLiteMezzeStore private constructor(
             s.executeUpdate("""
                 -- apps: declared entry points from Mezze.toml.
                 -- entry_module not FK'd; the module may be registered later.
+                -- entry_hash is the entry function's content hash — the SOLE
+                -- entry-point identity (== entry FunctionIR.hash). entry_name
+                -- is display-only and NEVER a selection key.
                 CREATE TABLE apps (
                     name         TEXT PRIMARY KEY,
-                    entry_name   TEXT NOT NULL,
+                    entry_hash   TEXT NOT NULL,
+                    entry_name   TEXT,
                     entry_module TEXT NOT NULL,
                     source_file  TEXT
                 ) WITHOUT ROWID
@@ -1387,24 +1396,25 @@ class SQLiteMezzeStore private constructor(
 
     private val putAppStmt: PreparedStatement by lazy {
         conn.prepareStatement("""
-            INSERT OR REPLACE INTO apps (name, entry_name, entry_module, source_file)
-            VALUES (?, ?, ?, ?)
+            INSERT OR REPLACE INTO apps (name, entry_hash, entry_name, entry_module, source_file)
+            VALUES (?, ?, ?, ?, ?)
         """.trimIndent())
     }
 
     @Synchronized
-    override fun putApp(name: String, entryName: String, entryModule: String, sourceFile: String?) {
+    override fun putApp(name: String, entryHash: Hash, entryName: String?, entryModule: String, sourceFile: String?) {
         putAppStmt.apply {
             setString(1, name)
-            setString(2, entryName)
-            setString(3, entryModule)
-            if (sourceFile != null) setString(4, sourceFile) else setNull(4, java.sql.Types.VARCHAR)
+            setString(2, entryHash.hex)
+            if (entryName != null) setString(3, entryName) else setNull(3, java.sql.Types.VARCHAR)
+            setString(4, entryModule)
+            if (sourceFile != null) setString(5, sourceFile) else setNull(5, java.sql.Types.VARCHAR)
             executeUpdate()
         }
     }
 
     private val getAppStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT name, entry_name, entry_module, source_file FROM apps WHERE name = ?")
+        conn.prepareStatement("SELECT name, entry_hash, entry_name, entry_module, source_file FROM apps WHERE name = ?")
     }
 
     @Synchronized
@@ -1413,9 +1423,10 @@ class SQLiteMezzeStore private constructor(
         return getAppStmt.executeQuery().use { rs ->
             if (rs.next()) AppRow(
                 name = rs.getString(1),
-                entryName = rs.getString(2),
-                entryModule = rs.getString(3),
-                sourceFile = rs.getString(4)
+                entryHash = Hash(rs.getString(2)),
+                entryName = rs.getString(3),
+                entryModule = rs.getString(4),
+                sourceFile = rs.getString(5)
             ) else null
         }
     }

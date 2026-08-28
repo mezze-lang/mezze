@@ -88,7 +88,7 @@ class IncrementalSkipTest {
         )
         // App bookkeeping that the gate's loadFunctions step needs.
         store.transaction {
-            store.putApp("myapp", "main", modulePath, tmpFile.absolutePath)
+            store.putApp("myapp", mainHash, "main", modulePath, tmpFile.absolutePath)
             store.setAppFunctionHashes("myapp", listOf(mainHash))
         }
         // Stash a dummy IR so loadFunctions returns a complete list.

@@ -55,7 +55,10 @@ object NativeBuildPath {
         outputDir: File,
         outputName: String,
         appName: String,
-        entryName: String,
+        /** Entry-point identity: entry function content-hash hex. */
+        entryHash: String,
+        /** Display-only entry name. */
+        entryName: String?,
         loweredFunctions: List<FunctionIR>,
         performerRecords: List<Array<String>>,
         timing: Boolean,
@@ -69,6 +72,7 @@ object NativeBuildPath {
                 outputDir = outputDir,
                 outputName = ".mez-shell-tmp",
                 appName = appName,
+                entryHash = entryHash,
                 entryName = entryName,
                 loweredFunctions = loweredFunctions,
                 performerRecords = performerRecords,
@@ -93,7 +97,7 @@ object NativeBuildPath {
         val outBinary = File(outputDir, outputName)
         outputDir.mkdirs()
         val closure = computeReachableClosure(loweredFunctions)
-        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryName, performerRecords)
+        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
         shell.copyTo(outBinary, overwrite = true)
         outBinary.setExecutable(true, false)
         appendCborTrailer(outBinary, fnBytes, metaBytes)
@@ -146,7 +150,10 @@ object NativeBuildPath {
         outputDir: File,
         outputName: String,
         appName: String,
-        entryName: String,
+        /** Entry-point identity: entry function content-hash hex. */
+        entryHash: String,
+        /** Display-only entry name. */
+        entryName: String?,
         loweredFunctions: List<FunctionIR>,
         performerRecords: List<Array<String>>,
         optimized: Boolean,
@@ -165,7 +172,7 @@ object NativeBuildPath {
         // because JarEntry stamps with current time.
         val closure = computeReachableClosure(loweredFunctions)
         if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
-        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryName, performerRecords)
+        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
 
         // Native-image cache: hash everything that determines the produced
         // binary; on cache hit, copy the prior binary and skip the 70s
@@ -441,14 +448,15 @@ object NativeBuildPath {
         loweredFunctions: List<FunctionIR>,
         performerRecords: List<Array<String>>,
         appName: String,
-        entryName: String,
+        entryHash: String,
+        entryName: String?,
         timing: Boolean,
         relativeTime: () -> Long,
     ): File {
         val closure = computeReachableClosure(loweredFunctions)
         if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
 
-        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryName, performerRecords)
+        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
 
         val embeddedJar = File(stagingDir, "embedded-app.jar")
         writeJar(embeddedJar, mapOf(
@@ -471,13 +479,17 @@ object NativeBuildPath {
     fun packEmbeddedAppCbor(
         closure: List<FunctionIR>,
         appName: String,
-        entryName: String,
+        /** Entry-point identity: entry function content-hash hex. */
+        entryHash: String,
+        /** Display-only entry name; NEVER a selection key. */
+        entryName: String?,
         performerRecords: List<Array<String>>,
     ): Pair<ByteArray, ByteArray> {
         val fnBytes = StoreSerialization.serializeFunctionIRList(closure)
         val metaBytes = StoreSerialization.serializeEmbeddedAppMeta(
             StoreSerialization.EmbeddedAppMeta(
                 appName = appName,
+                entryHash = entryHash,
                 entryName = entryName,
                 performerRecords = performerRecords.map { it.toList() },
             )

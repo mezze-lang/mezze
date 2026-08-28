@@ -166,8 +166,8 @@ class ChainedMezzeStore(
 
     // ── Apps (write to primary only) ──────────────────────────────────────
 
-    override fun putApp(name: String, entryName: String, entryModule: String, sourceFile: String?) {
-        primary.putApp(name, entryName, entryModule, sourceFile)
+    override fun putApp(name: String, entryHash: Hash, entryName: String?, entryModule: String, sourceFile: String?) {
+        primary.putApp(name, entryHash, entryName, entryModule, sourceFile)
     }
     override fun getApp(name: String): AppRow? = firstNonNull { it.getApp(name) }
     override fun setAppFunctionHashes(name: String, hashes: List<Hash>) {

@@ -251,8 +251,13 @@ class InitCommand {
                 parsedModule = ast,
                 loadedParsedModules = depParsed
             )
+            // Front-door name→hash: templates always use `main` as the entry.
+            // Persist the entry's content hash as identity; keep the name for
+            // display. If the template lacks `main`, skip app registration
+            // (the pre-typecheck is best-effort; see the catch below).
+            val entryHash = result.loweredFunctions.find { it.name == "main" }?.hash ?: return
             store.transaction {
-                store.putApp(appName, "main", modulePath, appFile.absolutePath)
+                store.putApp(appName, entryHash, "main", modulePath, appFile.absolutePath)
                 store.setAppFunctionHashes(appName, result.loweredFunctions.map { it.hash })
                 store.setAppPerformerRecords(appName, result.performerRecords)
             }

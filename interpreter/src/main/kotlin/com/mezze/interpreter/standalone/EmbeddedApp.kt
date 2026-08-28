@@ -28,6 +28,11 @@ object EmbeddedApp {
     @JvmStatic
     var performerRecords: List<Array<String>> = emptyList()
 
+    /** Entry-point identity: entry function content-hash hex. Selection keys on this, never on a name. */
+    @JvmStatic
+    var entryHash: String? = null
+
+    /** Display-only entry name; NEVER a selection key. */
     @JvmStatic
     var entryName: String? = null
 

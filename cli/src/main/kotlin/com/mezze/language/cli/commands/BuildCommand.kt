@@ -182,6 +182,16 @@ class BuildCommand {
                 warningCount = compiled.warningCount
             }
 
+            // Front-door name→hash resolution: the user names their entry in
+            // Mezze.toml; we resolve it to a content hash ONCE here and carry
+            // the hash (never the name) through persistence / packing /
+            // runtime selection. FunctionIR.hash == the entry decl's hash.
+            val entryHash = loweredFunctions.find { it.name == appConfig.entry }?.hash
+            if (entryHash == null) {
+                println("Error: App must define a '${appConfig.entry}' function with type {} -> {} <*>")
+                kotlin.system.exitProcess(4)
+            }
+
             // 2b. Stdlib FunctionIRs are NOT seeded into cache.sqlite.
             //     The old seed loop wrote ~1164 stdlib functions (~4.8 MB)
             //     into every project's cache. Two of the three things that
@@ -252,6 +262,7 @@ class BuildCommand {
             createStandaloneJar(
                 outputJar = jarFile,
                 appName = appConfig.name,
+                entryHash = entryHash.hex,
                 entryName = appConfig.entry,
                 closure = closure,
                 performerRecords = performerRecords,
@@ -315,6 +326,7 @@ class BuildCommand {
                         outputDir = targetDir,
                         outputName = "$outputJarName-native",
                         appName = appConfig.name,
+                        entryHash = entryHash.hex,
                         entryName = appConfig.entry,
                         loweredFunctions = loweredFunctions,
                         performerRecords = performerRecords,
@@ -329,6 +341,7 @@ class BuildCommand {
                         outputDir = targetDir,
                         outputName = "$outputJarName-native",
                         appName = appConfig.name,
+                        entryHash = entryHash.hex,
                         entryName = appConfig.entry,
                         loweredFunctions = loweredFunctions,
                         performerRecords = performerRecords,
@@ -442,8 +455,15 @@ class BuildCommand {
             parsedModule = ast,
             loadedParsedModules = depParsedModules
         )
+        // Front-door name→hash: resolve the entry decl's content hash; persist
+        // the HASH as the entry identity (entryName kept as display metadata).
+        val entryHash = typeCheckResult.loweredFunctions.find { it.name == entryName }?.hash
+            ?: run {
+                println("Error: App must define a '$entryName' function with type {} -> {} <*>")
+                kotlin.system.exitProcess(4)
+            }
         store.transaction {
-            store.putApp(appName, entryName, modulePath, appFile.absolutePath)
+            store.putApp(appName, entryHash, entryName, modulePath, appFile.absolutePath)
             store.setAppFunctionHashes(appName, typeCheckResult.loweredFunctions.map { it.hash })
             store.setAppPerformerRecords(appName, typeCheckResult.performerRecords)
         }
@@ -618,6 +638,7 @@ class BuildCommand {
     private fun createStandaloneJar(
         outputJar: File,
         appName: String,
+        entryHash: String,
         entryName: String,
         closure: List<com.mezze.language.truffleir.FunctionIR>,
         performerRecords: List<Array<String>>,
@@ -633,6 +654,7 @@ class BuildCommand {
         val (fnBytes, metaBytes) = NativeBuildPath.packEmbeddedAppCbor(
             closure = closure,
             appName = appName,
+            entryHash = entryHash,
             entryName = entryName,
             performerRecords = performerRecords,
         )

@@ -77,6 +77,12 @@ object StoreSerialization {
     @kotlinx.serialization.Serializable
     data class EmbeddedAppMeta(
         val appName: String,
+        // Entry-point identity: the entry function's content hash (hex). The
+        // runtime selects the entry by `find { it.hash == entryHash }`, never
+        // by name. Wire type is String to match the DB's hash-TEXT storage and
+        // avoid Java/CBOR interop friction with the Hash value type.
+        val entryHash: String,
+        // Display-only entry name; NEVER a selection key.
         val entryName: String?,
         // List<List<String>> instead of List<Array<String>> because kotlinx
         // serializes arrays awkwardly; the standalone code converts back
@@ -97,6 +103,7 @@ object StoreSerialization {
         val raw = cbor.decodeFromByteArray(EmbeddedAppMeta.serializer(), bytes)
         return DeserializedEmbeddedAppMeta(
             appName = raw.appName,
+            entryHash = raw.entryHash,
             entryName = raw.entryName,
             performerRecords = raw.performerRecords.map { it.toTypedArray() }
         )
@@ -104,6 +111,9 @@ object StoreSerialization {
 
     data class DeserializedEmbeddedAppMeta(
         val appName: String,
+        /** Entry-point identity: entry function content-hash hex. */
+        val entryHash: String,
+        /** Display-only entry name; NEVER a selection key. */
         val entryName: String?,
         val performerRecords: List<Array<String>>
     )
