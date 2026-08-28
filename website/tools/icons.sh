@@ -74,6 +74,7 @@ for i in 0 1 2 3 4 5; do
     -modulate 100,104,100 \
     -resize 256x256 \
     -colors 128 \
+    -channel A -level 0%,92% +channel \
     -strip -define png:compression-level=9 \
     "$OUT/$n.png"
   printf '  %-10s %s\n' "$n" "$(du -h "$OUT/$n.png" | cut -f1)"
@@ -83,5 +84,9 @@ done
 node "$HERE/stamp-icons.mjs"
 
 # 128 colours costs ~0.6% RMSE — invisible on flat-shaded art — and takes the
-# set from ~390K to ~70K.
+# set from ~390K to ~70K. It quantises the ALPHA channel too, though, which left
+# the interior at 200-253 instead of 255: no fully opaque pixel anywhere, so the
+# whole icon was faintly see-through and read as soft against a dark ground.
+# Levelling alpha snaps that interior back to solid while leaving the genuine
+# one-pixel anti-aliased rim intact.
 echo "▸ Done — $(du -sh "$OUT" | cut -f1) in public/icons/"
