@@ -25,11 +25,12 @@
 .page .play { padding: 0 0 1.5rem; }
 .page .play > * { border-inline: 1px solid var(--rule); }
 .page .playbar {
-  display: flex; align-items: center; gap: .6rem;
+  /* wraps: four tabs plus Run do not fit on a phone in one row */
+  display: flex; flex-wrap: wrap; align-items: center; gap: .6rem;
   padding: .5rem .6rem; border-radius: var(--r-md) var(--r-md) 0 0;
   background: transparent; border-top: 1px solid var(--rule);
 }
-.page .tabs { display: flex; gap: .25rem; }
+.page .tabs { display: flex; flex-wrap: wrap; gap: .25rem; }
 .page .tab {
   font: inherit; font-family: ui-monospace, Menlo, monospace; font-size: .71rem;
   padding: .28rem .7rem; border: 0; border-radius: var(--r-sm);
@@ -73,10 +74,19 @@
 
 
 @media (max-width: 820px) {
-  .page .hero { grid-template-columns: 1fr; }
-  .page .hero-mascot { display: none; }
-  .page .feats { grid-template-columns: 1fr; }
-  .page .bar nav { display: none; }
+  /* Mascot above the headline rather than beside it. Not hidden: it is the
+     only way to change the dish, and the header one is decorative. */
+  .page .hero { grid-template-columns: 1fr; gap: 1.2rem; padding: 1.6rem 0 1.2rem; }
+  .page .hero-mascot { order: -1; }
+  .page .hero-mascot .mascot { width: 92px; height: 92px; }
+  .page .feats { grid-template-columns: 1fr; gap: 1.4rem; }
+}
+
+@media (max-width: 480px) {
+  .page .hero-mascot .mascot { width: 76px; height: 76px; }
+  .page .code { font-size: .72rem; padding: .9rem 1rem; }
+  .page .playbar { padding: .5rem .5rem; }
+  .page .tab { padding: .28rem .55rem; }
 }
 
 /* buttons */

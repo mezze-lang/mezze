@@ -32,7 +32,13 @@
 .pill:hover { background: color-mix(in srgb, var(--primary) 86%, #000); }
 
 
-@media (max-width: 760px) { .site-bar nav { display: none; } }
+/* Keep the nav on phones — hiding it stranded Taste of Mezze and Blog with
+   no other way to reach them. Tighten instead. */
+@media (max-width: 760px) {
+  .site-bar-inner { gap: .8rem; font-size: .78rem; }
+  .site-bar nav { display: flex; gap: .7rem; }
+  .brand span { display: none; }   /* mascot alone is enough at this size */
+}
 
 /* Mezze syntax tokens — see src/lib/highlight.ts */
 .tk-com    { color: var(--syn-com); font-style: italic; }
