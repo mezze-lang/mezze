@@ -1210,6 +1210,61 @@ class LspFeaturesTest {
         )
     }
 
+    @Test
+    fun `documentHighlight on a shadowed inner binding excludes the outer binding`() {
+        // `x` is bound at top level AND as a lambda param. Highlighting the
+        // inner (param) `x` must NOT light up the top-level `let x` — they are
+        // distinct binders. The old bare-name collector merged all same-named
+        // occurrences; the BindingRef-driven collector separates them. (L1)
+        val (uri, source) = openSingleFile("""
+            let x = 100
+            let main = {} -> {x} -> x
+        """.trimIndent())
+
+        val lines = source.lines()
+        val bodyLine = lines.indexOfFirst { it.contains("{x} -> x") }
+        // Click the body use of `x` (the last `x` on that line).
+        val useCol = lines[bodyLine].lastIndexOf('x')
+        val highlights = server.textDocumentService.documentHighlight(DocumentHighlightParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(bodyLine, useCol)
+        }).get(5, TimeUnit.SECONDS)
+
+        assertNotNull(highlights)
+        // Every highlight must be on the lambda-param line, never on the
+        // top-level `let x` (line 0).
+        assertTrue(
+            highlights.all { it.range.start.line == bodyLine },
+            "inner `x` highlights must not include the outer `let x` on line 0; got ${highlights.map { it.range.start.line }}"
+        )
+        assertTrue(highlights.isNotEmpty(), "expected at least the inner `x` use highlighted")
+    }
+
+    @Test
+    fun `documentHighlight on a non-shadowed binding still finds all its uses`() {
+        // Regression guard: with no shadowing, every same-named occurrence is
+        // the same binder, so the structural collector must still return them
+        // all (proves the BindingRef filter didn't over-restrict). (L1)
+        val (uri, source) = openSingleFile("""
+            let main = {x: Int, y: Int} -> x + x + y
+        """.trimIndent())
+
+        val lines = source.lines()
+        val line = lines.indexOfFirst { it.contains("x + x + y") }
+        val col = lines[line].indexOf("x +")  // first body `x`
+        val highlights = server.textDocumentService.documentHighlight(DocumentHighlightParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(line, col)
+        }).get(5, TimeUnit.SECONDS)
+
+        assertNotNull(highlights)
+        // Two `x` uses in the body (plus possibly the param decl).
+        assertTrue(
+            highlights.count { it.range.start.line == line } >= 2,
+            "expected both body `x` uses highlighted, got ${highlights.size}: $highlights"
+        )
+    }
+
     // ===== Document symbol (outline) ===================================
 
     @Test

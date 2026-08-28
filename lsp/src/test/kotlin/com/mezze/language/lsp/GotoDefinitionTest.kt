@@ -153,6 +153,45 @@ class GotoDefinitionTest {
         )
     }
 
+    @Test
+    fun `cmd-click on a shadowing lambda param lands on the param, not the outer let`() {
+        // `x` is bound at top level AND as a lambda param that shadows it.
+        // The lambda body's `x` refers to the PARAM. The old bare-name walker
+        // returned the first same-named binder in module order (the top-level
+        // `let x`); the BindingRef-driven resolver must land on the param. (L2)
+        val ws = mkWorkspace(
+            "app.mz" to """
+                let x = 100
+                let main = {} -> {x} -> x
+            """.trimIndent()
+        )
+        openProject(ws)
+        val uri = ws.resolve("src/app.mz").toUri().toString()
+        val text = ws.resolve("src/app.mz").toFile().readText()
+        openFile(uri, text)
+
+        // Line 1: `let main = {} -> {x} -> x`
+        // 0         1         2
+        // 0123456789012345678901234567
+        // let main = {} -> {x} -> x
+        //                        ^ char 24 (the body use of `x`)
+        val lines = text.lines()
+        val bodyLine = lines.indexOfFirst { it.contains("{x} -> x") }
+        val useCol = lines[bodyLine].lastIndexOf('x')
+        val locs = definitionAt(uri, line = bodyLine, character = useCol)
+        assertTrue(locs.isNotEmpty(), "expected a definition for the lambda-param `x`")
+        val loc = locs.first()
+        // Must land on the PARAM `x` (inside `{x}`), NOT the top-level `let x`
+        // on line 0.
+        assertEquals(bodyLine, loc.range.start.line,
+            "should land on the lambda-param line, not the top-level `let x` (line 0); got ${locs.map { it.range.start.line }}")
+        val paramCol = lines[bodyLine].indexOf("{x}") + 1
+        assertTrue(
+            loc.range.start.character in (paramCol - 1)..(paramCol + 1),
+            "should land on the param `x` at col ~$paramCol, got col=${loc.range.start.character}"
+        )
+    }
+
     // Cross-module test disabled: the LSP smoke harness lacks
     // stdlib.sqlite on the test classpath, so any test workspace that
     // triggers ImportResolver paths through stdlib (which sibling-file

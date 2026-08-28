@@ -2296,9 +2296,20 @@ class MezzeTextDocumentService(
                     if (expr is com.mezze.language.typedast.TypedVar) {
                         // Variable reference — find where it was defined.
                         when (val binding = expr.binding) {
-                            // Local let bindings in the current file: walk
-                            // the typed module looking for `let <name> = …`.
+                            // Local let bindings / lambda params / match pattern
+                            // bindings in the current file. Resolve the binder
+                            // STRUCTURALLY from the cursor var's de Bruijn
+                            // coordinate (BindingRef.Local), not by first name
+                            // match — otherwise a shadowed local jumps to the
+                            // wrong (outer) binder. (L2)
                             is com.mezze.language.typedast.BindingRef.Local -> {
+                                val key = resolveBinderKeyAtPosition(typedModule, position)
+                                if (key is BinderKey.LocalBinder) {
+                                    return listOf(locToLocation(state.uri, key.loc))
+                                }
+                                // Coordinate didn't resolve (e.g. producer-scheme
+                                // edge or a synthetic Local(0,0) placeholder) —
+                                // fall back to the legacy name search.
                                 val defLoc = findLocalBindingLoc(typedModule, expr.name)
                                 if (defLoc != null) return listOf(locToLocation(state.uri, defLoc))
                             }
@@ -2651,6 +2662,252 @@ class MezzeTextDocumentService(
         }
         visit(expr)
         return found
+    }
+
+    // ==================================================================
+    // Scope-aware local-binding resolution (L1/L2 — BindingRef-driven).
+    //
+    // The typed AST every TypedVar carries a `BindingRef` — for in-file
+    // locals a `Local(depth, index)` de Bruijn coordinate produced by
+    // TypedAstBuilder.resolveBinding. Resolving/matching locals by BARE
+    // NAME (the old findLocalBindingLoc / collectReferencesInExpr) picks
+    // the WRONG binder under shadowing. These helpers mirror the producer's
+    // scheme exactly so navigation/highlight/count follow the real binder.
+    //
+    // Producer scheme (TypedAstBuilder):
+    //   * scope stack of (names, isLambdaBoundary) frames.
+    //   * lambda params push a frame with isLambdaBoundary = true.
+    //   * a do-block pushes ONE non-lambda frame only when the stack is
+    //     empty (top-level block); its `let`s are APPENDED to the current
+    //     innermost frame (they do NOT open a new frame).
+    //   * a match case pushes a non-lambda frame with its pattern bindings.
+    //   * depth = number of lambda-boundary frames strictly INNER to the
+    //     binder's frame (relative to the use site); index = position of
+    //     the name within its frame's name list (first occurrence).
+    //
+    // TypedAstBuilder never emits Param/Capture in a TypedVar.binding (those
+    // arise only in the post-lowering mono/IR layer, which the LSP does not
+    // consume) — so for the LSP a local is always Local(depth, index).
+    // ==================================================================
+
+    /** Canonical identity of the binder a reference resolves to. */
+    private sealed interface BinderKey {
+        /** An in-file local binder, identified by its unique source Loc. */
+        data class LocalBinder(val loc: Loc) : BinderKey
+        /** A top-level / cross-module binder, identified by content hash. */
+        data class TopLevel(val hash: com.mezze.language.typedast.Hash) : BinderKey
+    }
+
+    private class ScopeFrame(val isLambdaBoundary: Boolean) {
+        val names = mutableListOf<String>()
+        val locs = mutableListOf<Loc>()
+        fun add(name: String, loc: Loc) { names.add(name); locs.add(loc) }
+    }
+
+    /**
+     * Walks one decl's expression tree with a scope stack mirroring
+     * TypedAstBuilder.resolveBinding. Invokes [onVar] for every TypedVar with
+     * the binder Loc it resolves to (null when the reference is not an in-file
+     * Local — e.g. ByHash / Native / an out-of-range coordinate).
+     */
+    private fun walkWithScopes(
+        root: com.mezze.language.typedast.TypedExpr,
+        onVar: (com.mezze.language.typedast.TypedVar, Loc?) -> Unit
+    ) {
+        val stack = ArrayDeque<ScopeFrame>()
+
+        fun resolveLocalLoc(depth: Int, index: Int): Loc? {
+            // Walk out from the innermost frame, counting lambda boundaries,
+            // until we've crossed `depth` of them — that frame holds the binder.
+            var crossed = 0
+            for (i in stack.indices.reversed()) {
+                val frame = stack[i]
+                if (crossed == depth) {
+                    // Producer resolves `index` against the frame that HOLDS the
+                    // name; the first frame at this depth boundary that contains
+                    // a slot at `index` is the one. In practice the binder frame
+                    // is exactly this one.
+                    return frame.locs.getOrNull(index)
+                }
+                if (frame.isLambdaBoundary) crossed++
+            }
+            return null
+        }
+
+        fun visit(e: com.mezze.language.typedast.TypedExpr) {
+            when (e) {
+                is com.mezze.language.typedast.TypedVar -> {
+                    val loc = when (val b = e.binding) {
+                        is com.mezze.language.typedast.BindingRef.Local ->
+                            resolveLocalLoc(b.depth, b.index)
+                        else -> null
+                    }
+                    onVar(e, loc)
+                }
+                is com.mezze.language.typedast.TypedLambda -> {
+                    val frame = ScopeFrame(isLambdaBoundary = true)
+                    for (p in e.params) frame.add(p.name, p.loc)
+                    stack.addLast(frame)
+                    visit(e.body)
+                    stack.removeLast()
+                }
+                is com.mezze.language.typedast.TypedBlock -> {
+                    // The producer pushes a fresh non-lambda frame for a do-block
+                    // ONLY when the scope stack is empty (a top-level block); an
+                    // inner do-block appends its lets to the current frame.
+                    val pushed = stack.isEmpty()
+                    if (pushed) stack.addLast(ScopeFrame(isLambdaBoundary = false))
+                    val frame = stack.last()
+                    for (stmt in e.statements) {
+                        when (stmt) {
+                            is com.mezze.language.typedast.TypedStatement.Let -> {
+                                visit(stmt.value)
+                                if (stmt.name !in frame.names) frame.add(stmt.name, stmt.loc)
+                            }
+                            is com.mezze.language.typedast.TypedStatement.Expr -> visit(stmt.expr)
+                        }
+                    }
+                    visit(e.result)
+                    if (pushed) stack.removeLast()
+                }
+                is com.mezze.language.typedast.TypedMatch -> {
+                    visit(e.scrutinee)
+                    for (case in e.cases) {
+                        val frame = ScopeFrame(isLambdaBoundary = false)
+                        for (b in case.bindings) frame.add(b.name, b.loc)
+                        stack.addLast(frame)
+                        for (ilb in case.ifLetBindings) visit(ilb.expr)
+                        case.guard?.let { visit(it) }
+                        visit(case.body)
+                        stack.removeLast()
+                    }
+                }
+                is com.mezze.language.typedast.TypedIf -> {
+                    visit(e.condition); visit(e.thenBranch); visit(e.elseBranch)
+                }
+                is com.mezze.language.typedast.TypedCall -> { visit(e.function); visit(e.arg) }
+                is com.mezze.language.typedast.TypedRecord -> {
+                    for (entry in e.entries) when (entry) {
+                        is com.mezze.language.typedast.TypedRecordEntry.Field -> visit(entry.value)
+                        is com.mezze.language.typedast.TypedRecordEntry.Spread -> visit(entry.expr)
+                    }
+                }
+                is com.mezze.language.typedast.TypedFieldAccess -> visit(e.record)
+                is com.mezze.language.typedast.TypedRecordUpdate -> {
+                    visit(e.record)
+                    for (entry in e.updates) when (entry) {
+                        is com.mezze.language.typedast.TypedRecordEntry.Field -> visit(entry.value)
+                        is com.mezze.language.typedast.TypedRecordEntry.Spread -> visit(entry.expr)
+                    }
+                }
+                is com.mezze.language.typedast.TypedVariantConstruct -> e.payload?.let { visit(it) }
+                is com.mezze.language.typedast.TypedSeq -> {
+                    for (el in e.elements) when (el) {
+                        is com.mezze.language.typedast.TypedSeqElement.Regular -> visit(el.expr)
+                        is com.mezze.language.typedast.TypedSeqElement.Spread -> visit(el.expr)
+                    }
+                }
+                is com.mezze.language.typedast.TypedPerform -> {
+                    for (h in e.handlers) h.params?.let { visit(it) }
+                    visit(e.body)
+                }
+                is com.mezze.language.typedast.TypedPerformOp -> visit(e.arg)
+                is com.mezze.language.typedast.TypedPipe -> { visit(e.left); visit(e.right) }
+                is com.mezze.language.typedast.TypedStringLit -> {
+                    for (part in e.parts) {
+                        if (part is com.mezze.language.typedast.TypedStringPart.Interpolation) visit(part.expr)
+                    }
+                }
+                else -> { /* leaves */ }
+            }
+        }
+        visit(root)
+    }
+
+    /**
+     * The [BinderKey] the TypedVar at [position] refers to, or null if the
+     * cursor is not on an in-file local/top-level var occurrence. Locates the
+     * enclosing top-level decl, then resolves the var's BindingRef structurally.
+     */
+    private fun resolveBinderKeyAtPosition(
+        module: com.mezze.language.typedast.TypedModule,
+        position: Position
+    ): BinderKey? {
+        val line = position.line + 1
+        val col = position.character + 1
+        for (decl in module.decls) {
+            if (decl !is com.mezze.language.typedast.TypedLetDecl) continue
+            var result: BinderKey? = null
+            walkWithScopes(decl.value) { v, binderLoc ->
+                if (result != null) return@walkWithScopes
+                if (!locContains(v.loc, line, col)) return@walkWithScopes
+                result = binderKeyForVar(v, binderLoc)
+            }
+            if (result != null) return result
+        }
+        return null
+    }
+
+    /** Map a resolved TypedVar (+ its binder loc) to a canonical BinderKey. */
+    private fun binderKeyForVar(
+        v: com.mezze.language.typedast.TypedVar,
+        binderLoc: Loc?
+    ): BinderKey? = when (val b = v.binding) {
+        is com.mezze.language.typedast.BindingRef.Local ->
+            binderLoc?.let { BinderKey.LocalBinder(it) }
+        is com.mezze.language.typedast.BindingRef.ByHash -> BinderKey.TopLevel(b.hash)
+        else -> null
+    }
+
+    private fun locContains(loc: Loc, line: Int, col: Int): Boolean {
+        if (line < loc.startLine || line > loc.endLine) return false
+        if (line == loc.startLine && col < loc.startCol) return false
+        if (line == loc.endLine && col > loc.endCol) return false
+        return true
+    }
+
+    /**
+     * Collect every occurrence (definition site + uses) that co-refers with
+     * [target], resolving each TypedVar's binder structurally rather than by
+     * bare name. Name equality is used only as a cheap pre-filter.
+     */
+    private fun collectBindingOccurrences(
+        module: com.mezze.language.typedast.TypedModule,
+        target: BinderKey,
+        name: String,
+        uri: String,
+        locations: MutableList<Location>
+    ) {
+        for (decl in module.decls) {
+            if (decl !is com.mezze.language.typedast.TypedLetDecl) continue
+            // A top-level decl whose hash matches is itself a def-site occurrence.
+            if (target is BinderKey.TopLevel && decl.hash == target.hash && decl.name == name) {
+                locations.add(locToLocation(uri, decl.loc))
+            }
+            // The binder's own definition site (for a local target).
+            if (target is BinderKey.LocalBinder && target.loc.file == decl.loc.file) {
+                // The binder loc lives inside this decl's value tree; the walk
+                // below emits references, and the binder loc itself is added when
+                // it coincides with a use. Definition sites (let/param/pattern)
+                // are surfaced via the dedicated def-loc emission below.
+            }
+            walkWithScopes(decl.value) { v, binderLoc ->
+                if (v.name != name) return@walkWithScopes
+                val key = binderKeyForVar(v, binderLoc) ?: return@walkWithScopes
+                if (key == target) locations.add(locToLocation(uri, v.loc))
+            }
+        }
+        // For a local target, also include the binder's definition site itself.
+        if (target is BinderKey.LocalBinder) {
+            if (locations.none { sameRange(it, uri, target.loc) }) {
+                locations.add(0, locToLocation(uri, target.loc))
+            }
+        }
+    }
+
+    private fun sameRange(location: Location, uri: String, loc: Loc): Boolean {
+        val expected = locToLocation(uri, loc)
+        return location.uri == expected.uri && location.range == expected.range
     }
 
     /** Find the Location of an imported symbol (points to the use declaration or source file). */
@@ -5701,7 +5958,12 @@ class MezzeTextDocumentService(
                 val storeCount = store?.getUsages(decl.hash)?.size ?: 0
                 val count = if (storeCount > 0) storeCount else {
                     val locs = mutableListOf<Location>()
-                    collectReferencesInModule(typedModule, decl.name, uri, locs)
+                    // Count references to THIS top-level binder (by hash), not
+                    // every same-named occurrence — a local `x` shadowing a
+                    // top-level `x` must not inflate the top-level's count. (L1)
+                    collectBindingOccurrences(
+                        typedModule, BinderKey.TopLevel(decl.hash), decl.name, uri, locs
+                    )
                     locs.size
                 }
                 lensAt(decl.loc, decl.name, count, "reference", "references", "mezze.showReferences")
@@ -5825,7 +6087,12 @@ class MezzeTextDocumentService(
             // as "references" for text that isn't a reference at all.
             if (locations.isEmpty() && typedModule != null &&
                 cursorOnSymbolOccurrence(typedModule, position, word)) {
-                collectReferencesInModule(typedModule, word, uri, locations)
+                val target = resolveBinderKeyAtPosition(typedModule, position)
+                if (target != null) {
+                    collectBindingOccurrences(typedModule, target, word, uri, locations)
+                } else {
+                    collectReferencesInModule(typedModule, word, uri, locations)
+                }
             }
 
             locations
@@ -5857,7 +6124,16 @@ class MezzeTextDocumentService(
                 ?: return@supplyAsync emptyList()
 
             val locs = mutableListOf<Location>()
-            collectReferencesInModule(typedModule, word, uri, locs)
+            // Resolve the binder under the cursor and highlight only occurrences
+            // that co-refer with it — a shadowed local must not light up the
+            // outer binding (and vice-versa). Falls back to the name walk when
+            // the cursor isn't on a resolvable var (e.g. a decl name). (L1)
+            val target = resolveBinderKeyAtPosition(typedModule, params.position)
+            if (target != null) {
+                collectBindingOccurrences(typedModule, target, word, uri, locs)
+            } else {
+                collectReferencesInModule(typedModule, word, uri, locs)
+            }
 
             locs.map { loc ->
                 DocumentHighlight(loc.range, DocumentHighlightKind.Read)
@@ -5887,7 +6163,14 @@ class MezzeTextDocumentService(
                 ?: return@supplyAsync null
 
             val locs = mutableListOf<Location>()
-            collectReferencesInModule(typedModule, word, uri, locs)
+            // Link only the occurrences that co-refer with the binder under the
+            // cursor (structural, shadow-safe). (L1)
+            val target = resolveBinderKeyAtPosition(typedModule, params.position)
+            if (target != null) {
+                collectBindingOccurrences(typedModule, target, word, uri, locs)
+            } else {
+                collectReferencesInModule(typedModule, word, uri, locs)
+            }
             // Need at least the def + one use (or two occurrences) to be useful.
             if (locs.size < 2) return@supplyAsync null
             LinkedEditingRanges(locs.map { it.range })
