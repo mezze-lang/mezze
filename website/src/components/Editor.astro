@@ -57,11 +57,10 @@ const { code = '', placeholder = 'Waiting for the Mezze runtime…' } = Astro.pr
     font-size: .84rem;
     line-height: 1.6;
     tab-size: 2;
-    /* Wrap rather than scroll sideways. A long line stays readable, the pane
-       never widens, and the two layers agree because they share these rules. */
+    /* Wrap rather than scroll sideways — but only at whitespace. break-word
+       splits mid-token, which makes a long string literal look cut in half. */
     white-space: pre-wrap;
-    overflow-wrap: break-word;
-    word-break: break-word;
+    overflow-wrap: normal;
     letter-spacing: 0;
   }
   .ed-hl { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; pointer-events: none; color: var(--ink); }
