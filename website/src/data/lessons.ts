@@ -28,14 +28,14 @@ export const lessons: Lesson[] = [
 # This editor is live. Change anything and press Run — or hover a name to
 # see the type the compiler inferred for it.
 let name = "Mezze"
+
 let year = 2026
+
 let ready = True
 
 let main = {} -> perform Console in do
   println { msg = "\$(name) — \$(year.to_str {})" }
   println { msg = "ready: \$(ready.to_str {})" }
-
-  # Interpolation never guesses: a value has to become a Str first.
   println { msg = "7 / 2 = \$((7 / 2).to_str {})" }`,
   },
   {
@@ -49,14 +49,17 @@ let main = {} -> perform Console in do
     ],
     code: `use std::effects::log::{ Console, println }
 
-# Every parameter is named — there are no positional arguments in Mezze.
-let clamp = { val, low, high } ->
-  if val < low then low else if val > high then high else val
+# Every parameter is named — Mezze has no positional arguments at all.
+let clamp = { val, low, high } -> if val < low then low else if val > high then high else val
 
 # So a call reads the way it is written, in any order.
 let main = {} -> perform Console in do
-  println { msg = clamp { val = 42, low = 0, high = 10 }.to_str {} }
-  println { msg = clamp { low = 0, high = 10, val = 5 }.to_str {} }`,
+  println {
+    msg = clamp { val = 42, low = 0, high = 10 }.to_str {},
+  }
+  println {
+    msg = clamp { low = 0, high = 10, val = 5 }.to_str {},
+  }`,
   },
   {
     slug: "records",
@@ -75,11 +78,9 @@ let point = { x = 3, y = 4 }
 
 let main = {} -> perform Console in do
   println { msg = "x = \$(point.x.to_str {})" }
-
   # Copy with a change. The original is untouched.
   let moved = { ...point, x = 10 }
   println { msg = "moved: \$(moved.x.to_str {}), original: \$(point.x.to_str {})" }
-
   # Destructure — the same syntax a parameter list uses.
   let { x, y } = point
   println { msg = "\$(x.to_str {}), \$(y.to_str {})" }`,
@@ -99,7 +100,7 @@ let main = {} -> perform Console in do
 type Shape = |
   Circle { radius: Int },
   Rect { w: Int, h: Int },
-  Point
+  Point,
 |
 
 # match must cover every case — delete an arm and this stops compiling.
@@ -108,10 +109,10 @@ let area: { shape: Shape } -> Int = { shape } -> match shape is
   Rect { w, h } -> w * h
   Point -> 0
 
+
 let main = {} -> perform Console in do
   let circle = area { shape = Circle { radius = 5 } }
   let rect = area { shape = Rect { w = 3, h = 4 } }
-
   println { msg = "circle: \$(circle.to_str {})" }
   println { msg = "rect:   \$(rect.to_str {})" }`,
   },
@@ -131,12 +132,12 @@ type Reading = { city: Str, temp: Int }
 
 # The name is documentation: a Reading IS that record, not a wrapper
 # around it, so anything with the right fields fits.
-let describe: { r: Reading } -> Str = { r } ->
-  "\$(r.city): \$(r.temp.to_str {})°C"
+let describe: { r: Reading } -> Str = { r } -> "\$(r.city): \$(r.temp.to_str {})°C"
 
 let main = {} -> perform Console in do
-  println { msg = describe { r = { city = "Lisbon", temp = 21 } } }
-
+  println {
+    msg = describe { r = { city = "Lisbon", temp = 21 } },
+  }
   # Built the plain way, still a Reading.
   let cairo = { city = "Cairo", temp = 35 }
   println { msg = describe { r = cairo } }`,
@@ -161,10 +162,7 @@ let open: { r: { id: Int, ... } } -> Int = { r } -> r.id
 let main = {} -> perform Console in do
   let small = { id = 1 }
   let big = { id = 2, name = "ada", active = True }
-
   println { msg = "closed: \$(closed { r = small }.to_str {})" }
-
-  # Only the open one accepts the wider record.
   println { msg = "open:   \$(open { r = big }.to_str {})" }`,
   },
   {
@@ -179,17 +177,14 @@ let main = {} -> perform Console in do
     code: `use std::effects::log::{ Log, Console, QuietConsole, println }
 
 # <Log> is an effect row. It says this function talks to the outside world,
-# and the type carries that all the way up to whoever calls it.
-let audit: { order: Int } -> {} <Log> = { order } ->
-  println { msg = "order \$(order.to_str {}) seen" }
+# and the type carries that up to whoever calls it.
+let audit: { id: Int } -> {} <Log> = { id } -> println { msg = "order \$(id.to_str {}) seen" }
 
 let main = {} -> do
   # A handler decides what the effect means. Console prints it...
-  perform Console in audit { order = 1 }
-
-  # ...QuietConsole throws it away. Same function, no change to its code.
-  perform QuietConsole in audit { order = 2 }
-
+  perform Console in audit { id = 1 }
+  # ...QuietConsole throws it away. Same function, unchanged.
+  perform QuietConsole in audit { id = 2 }
   perform Console in println { msg = "done" }`,
   },
   {
@@ -208,12 +203,9 @@ type User = { name: Str, age: Int }
 
 let main = {} -> perform Console in do
   let u = { name = "ada", age = 36 }
-
   # A dot call finds the method for this value's type.
   println { msg = u.to_dbg_str {} }
   println { msg = (42).to_dbg_str {} }
-
-  # Int has its own inherent methods too.
   println { msg = "abs: \$((0 - 7).abs {}.to_str {})" }`,
   },
   {
@@ -239,11 +231,11 @@ impl Priced for Book where {
 }
 
 # with Priced 'a means: any type that implements Priced.
-let show: { it: 'a } with Priced 'a -> Str = { it } ->
-  "\$(it.cents {}.to_str {}) cents"
+let show: { it: 'a } with Priced 'a -> Str = { it } -> "\$(it.cents {}.to_str {}) cents"
 
-let main = {} -> perform Console in
-  println { msg = show { it = { title = "Dune", price = 1299 } } }`,
+let main = {} -> perform Console in println {
+  msg = show { it = { title = "Dune", price = 1299 } },
+}`,
   },
   {
     slug: "custom-effects",
@@ -266,11 +258,9 @@ impl Config for Defaults where {
   get = { key } -> if key == "host" then "localhost" else "?"
 }
 
-let greet: { } -> Str <Config> = {} ->
-  "connecting to \$(Config.get { key = "host" })"
+let greet: {} -> Str <Config> = {} -> "connecting to \$(Config.get { key = "host" })"
 
-let main = {} -> perform Console in perform Defaults in
-  println { msg = greet {} }`,
+let main = {} -> perform Console in perform Defaults in println { msg = greet {} }`,
   },
   {
     slug: "full-program",
@@ -298,9 +288,7 @@ let main = {} -> perform Console in do
     { name = "olive oil", price = 899, qty = 2 },
     { name = "pita", price = 199, qty = 3 },
   ]
-
   cart.map { f = { x } -> println { msg = "\$(x.name): \$(x.total {}.to_str {})" } }
-
   let sum = cart.fold { init = 0, f = { acc, x } -> acc + x.total {} }
   println { msg = "total: \$(sum.to_str {}) cents" }`,
   },

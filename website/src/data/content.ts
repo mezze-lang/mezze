@@ -53,8 +53,7 @@ export const playground = {
       code: `use std::effects::log::{ Log, Console, QuietConsole, println }
 
 # <Log> says this touches the outside world. The caller cannot miss it.
-let audit: { order: Str } -> {} <Log> = { order } ->
-  println { msg = "saw \\$(order)" }
+let audit: { order: Str } -> {} <Log> = { order } -> println { msg = "saw \\$(order)" }
 
 let main = {} -> do
   perform Console in audit { order = "A-1" }
@@ -70,7 +69,6 @@ type Item = { name: Str, price: Int }
 let main = {} -> perform Console in do
   let item = { name = "olive oil", price = 899 }
   let sale = { ...item, price = 499 }
-
   println { msg = "\\$(sale.name): \\$(sale.price.to_str {})" }`,
       output: 'olive oil: 499',
     },
@@ -88,11 +86,10 @@ let main = {} -> perform Console in perform LoomAsync in do
   # Both start now; neither waits for the other.
   let a = Async.spawn { f = {} -> fetch { url = "/users" } }
   let b = Async.spawn { f = {} -> fetch { url = "/orders" } }
-
   # await hands back a Result, so a failure cannot be dropped.
   println { msg = get_or_else { result = a.await {}, def = "?" } }
   println { msg = get_or_else { result = b.await {}, def = "?" } }`,
-      output: 'GET /users\nGET /orders\n/users\n/orders',
+      output: 'GET /users\nGET /orders\n/users\n/orders\n\n(the two GET lines race — order varies run to run)',
     },
     {
       label: 'Abilities',
@@ -108,8 +105,7 @@ impl Priced for Book where {
   cents = { it } -> it.price
 }
 
-let main = {} -> perform Console in
-  println { msg = ({ price = 1299 }.cents {}).to_str {} }`,
+let main = {} -> perform Console in println { msg = ({ price = 1299 }.cents {}).to_str {} }`,
       output: '1299',
     },
   ],

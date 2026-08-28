@@ -1,9 +1,0 @@
-use std::effects::log::{ Console, println }
-
-type Item = { name: Str, price: Int }
-
-let main = {} -> perform Console in do
-  let item = { name = "olive oil", price = 899 }
-  let sale = { ...item, price = 499 }
-
-  println { msg = "\\$(sale.name): \\$(sale.price.to_str {})" }
