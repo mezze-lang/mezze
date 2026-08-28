@@ -304,6 +304,7 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     },
     check: () => void report(window.checkMezze!(srcEl.value)),
     fmt: () => {
+      hideTip()
       srcEl.value = String(window.formatMezze!(srcEl.value, editorCols()))
       paint()
       show('Formatted.', 'ok')
@@ -333,6 +334,9 @@ export function mountEditor(root: HTMLElement): EditorHandle {
 
   const handle: EditorHandle = {
     setSource(code) {
+      // Changing lesson replaces what the tooltip was describing, and fires no
+      // pointer event — without this it hangs over the new source.
+      hideTip()
       srcEl.value = code
       paint()
       show(ready ? 'Ready. Press Run.' : 'Loading the compiler…')

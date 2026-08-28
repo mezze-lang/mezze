@@ -85,6 +85,9 @@ import { highlight } from '../lib/highlight'
 
     const select = (i: number) => {
       current = i
+      // The nodes the tooltip described are about to be replaced, and swapping
+      // samples fires no pointer event — so nothing else would take it down.
+      hideHoverTip()
       tabs.forEach((t, k) => t.classList.toggle('on', k === i))
       codeEl.innerHTML = highlight(playground.tabs[i].code)
       blurbEl.textContent = playground.tabs[i].blurb
