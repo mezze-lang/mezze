@@ -9,5 +9,7 @@ let main = {} -> perform Console in do
   # Same call, fields the other way round.
   println { msg = label { unit = "gram", name = "za'atar" } }
 
+
+  # Add a field later and these calls still compile.
   let honey = label { name = "honey", unit = "jar" }
   println { msg = honey }

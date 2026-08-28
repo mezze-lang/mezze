@@ -1,6 +1,6 @@
 use std::effects::log::{ Console, println }
 
-# Give your own type the same dot-methods as a built-in one.
+# An interface your own types can implement.
 ability Money for 'a where {
   cents: { it: 'a } -> Int
 }
@@ -11,6 +11,5 @@ impl Money for Eur where {
   cents = { it } -> it.amount
 }
 
-let main = {} -> perform Console in do
-  let price = { amount = 1299 }
-  println { msg = price.cents {}.to_str {} }
+let main = {} -> perform Console in
+  println { msg = { amount = 1299 }.cents {}.to_str {} }

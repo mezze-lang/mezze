@@ -1,12 +1,14 @@
 use std::effects::log::{ Console, println }
 
-# Miss a case and it will not compile.
+# A closed set of cases, some carrying a payload.
 type Status = | Queued, Running, Done { ms: Int } |
 
+# Miss a case and it will not compile.
 let describe = { s } -> match s is
   Queued -> "waiting"
   Running -> "in progress"
   Done { ms } -> "finished in \$(ms.to_str {})"
+
 
 let main = {} -> perform Console in do
   println { msg = describe { s = Queued } }

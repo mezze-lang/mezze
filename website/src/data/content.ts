@@ -57,14 +57,17 @@ export const playground = {
 # The same function, two destinations.
 let audit = { order } -> println { msg = "saw \$(order)" }
 
+let report = { n } -> println { msg = "\$(n) orders seen" }
+
 let main = {} -> do
   # Console prints it...
   perform Console in audit { order = "A-1" }
 
   # ...QuietConsole drops it. Nothing in audit changed.
   perform QuietConsole in audit { order = "A-2" }
-  perform Console in println { msg = "done" }`,
-      output: "saw A-1\ndone",
+
+  perform Console in report { n = "2" }`,
+      output: "saw A-1\n2 orders seen",
     },
     {
       dish: "lemon",
@@ -81,6 +84,8 @@ let main = {} -> perform Console in do
   # Same call, fields the other way round.
   println { msg = label { unit = "gram", name = "za'atar" } }
 
+
+  # Add a field later and these calls still compile.
   let honey = label { name = "honey", unit = "jar" }
   println { msg = honey }`,
       output: "olive oil sold by the litre\nza’atar sold by the gram\nhoney sold by the jar",
@@ -112,13 +117,15 @@ let main = {} -> perform Console in do
       blurb: "Miss a case, it will not compile",
       code: `use std::effects::log::{ Console, println }
 
-# Miss a case and it will not compile.
+# A closed set of cases, some carrying a payload.
 type Status = | Queued, Running, Done { ms: Int } |
 
+# Miss a case and it will not compile.
 let describe = { s } -> match s is
   Queued -> "waiting"
   Running -> "in progress"
   Done { ms } -> "finished in \$(ms.to_str {})"
+
 
 let main = {} -> perform Console in do
   println { msg = describe { s = Queued } }
@@ -152,7 +159,7 @@ let main = {} -> perform Console in perform LoomAsync in do
       blurb: "Dot-methods on your own types",
       code: `use std::effects::log::{ Console, println }
 
-# Give your own type the same dot-methods as a built-in one.
+# An interface your own types can implement.
 ability Money for 'a where {
   cents: { it: 'a } -> Int
 }
@@ -163,9 +170,8 @@ impl Money for Eur where {
   cents = { it } -> it.amount
 }
 
-let main = {} -> perform Console in do
-  let price = { amount = 1299 }
-  println { msg = price.cents {}.to_str {} }`,
+let main = {} -> perform Console in
+  println { msg = { amount = 1299 }.cents {}.to_str {} }`,
       output: "1299",
     },
   ],
