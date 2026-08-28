@@ -88,12 +88,11 @@ let area: { shape: Shape } -> Int = { shape } -> match shape is
   Point -> 0
 
 let main = {} -> perform Console in do
-  let circle = area { shape = Circle { radius = 2 } }
+  let circle = area { shape = Circle { radius = 5 } }
   let rect = area { shape = Rect { w = 3, h = 4 } }
 
   println { msg = "circle: \$(circle.to_str {})" }
-  println { msg = "rect:   \$(rect.to_str {})" }
-  println { msg = "point:  \$(area { shape = Point }.to_str {})" }`,
+  println { msg = "rect:   \$(rect.to_str {})" }`,
   },
   {
     slug: "aliases",
@@ -142,10 +141,10 @@ let main = {} -> perform Console in do
   let small = { id = 1 }
   let big = { id = 2, name = "ada", active = True }
 
-  println { msg = "closed: \$((closed { r = small }).to_str {})" }
+  println { msg = "closed: \$(closed { r = small }.to_str {})" }
 
   # Only the open one accepts the wider record.
-  println { msg = "open:   \$((open { r = big }).to_str {})" }`,
+  println { msg = "open:   \$(open { r = big }.to_str {})" }`,
   },
   {
     slug: "functions",
@@ -169,8 +168,8 @@ let twice: { f: { n: Int } -> Int, n: Int } -> Int = { f, n } ->
 let inc = { n } -> n + 1
 
 let main = {} -> perform Console in do
-  println { msg = "\$((clamp { val = 42, low = 0, high = 10 }).to_str {})" }
-  println { msg = "\$((twice { f = inc, n = 5 }).to_str {})" }`,
+  println { msg = "\$(clamp { val = 42, low = 0, high = 10 }.to_str {})" }
+  println { msg = "\$(twice { f = inc, n = 5 }.to_str {})" }`,
   },
   {
     slug: "effects",
@@ -219,7 +218,7 @@ let main = {} -> perform Console in do
   println { msg = (42).to_dbg_str {} }
 
   # Int has its own inherent methods too.
-  println { msg = "abs: \$(((0 - 7).abs {}).to_str {})" }`,
+  println { msg = "abs: \$((0 - 7).abs {}.to_str {})" }`,
   },
   {
     slug: "custom-abilities",
@@ -232,7 +231,7 @@ let main = {} -> perform Console in do
     ],
     code: `use std::effects::log::{ Console, println }
 
-# An ability is an interface. \`it\` is the receiver.
+# An ability is an interface. The receiver is named it.
 ability Priced for 'a where {
   cents: { it: 'a } -> Int
 }
@@ -243,44 +242,39 @@ impl Priced for Book where {
   cents = { it } -> it.price
 }
 
-# \`with Priced 'a\` means: any type that implements Priced.
-let show_total: { it: 'a } with Priced 'a -> Str = { it } ->
-  "\$((it.cents {}).to_str {}) cents"
+# with Priced 'a means: any type that implements Priced.
+let show: { it: 'a } with Priced 'a -> Str = { it } ->
+  "\$(it.cents {}.to_str {}) cents"
 
-let main = {} -> perform Console in do
-  println { msg = show_total { it = { title = "Dune", price = 1299 } } }`,
+let main = {} -> perform Console in
+  println { msg = show { it = { title = "Dune", price = 1299 } } }`,
   },
   {
     slug: "custom-effects",
     title: "Your own effects",
     blurb: "Effects are library code, not syntax.",
     body: [
-      "Effects are not built in. `effect Error having 'e` declares one, and `having` gives it an associated type so each handler picks its own error type.",
-      "The handler decides the meaning. `abort` stops the computation and returns a value instead — that is how this one turns a raise into an `Err`.",
+      "Effects are not built in. `effect Config` declares one: a name, and the operations it offers.",
+      "The handler decides what it means. `Defaults` answers from a lookup; another handler could read a file or a flag, and `greet` would not change.",
       "Exceptions, early return and retries are all ordinary code here. There is no syntax to wait for.",
     ],
     code: `use std::effects::log::{ Console, println }
 
-# Effects are not built in — you declare your own.
-effect Error having 'e where {
-  raise: { err: 'e } -> 'a <Error>
+# Effects are not built in — declare your own.
+effect Config where {
+  get: { key: Str } -> Str <Config>
 }
 
-# A handler decides what raising means. This one stops and returns an Err.
-impl Error for ErrorToResult having 'e = 'err where {
-  raise = { err } -> abort { val = Err { error = err } }
+# A handler gives the operation meaning. This one answers from a record.
+impl Config for Defaults where {
+  get = { key } -> if key == "host" then "localhost" else "?"
 }
 
-let safe_div = { a, b } ->
-  if b == 0 then Error.raise { err = "divide by zero" } else Ok { val = a / b }
+let greet: { } -> Str <Config> = {} ->
+  "connecting to \$(Config.get { key = "host" })"
 
-let report = { r } -> match r is
-  Ok { val } -> "ok: \$(val.to_str {})"
-  Err { error } -> "failed: \$(error)"
-
-let main = {} -> perform Console in do
-  println { msg = report { r = perform ErrorToResult in safe_div { a = 10, b = 2 } } }
-  println { msg = report { r = perform ErrorToResult in safe_div { a = 10, b = 0 } } }`,
+let main = {} -> perform Console in perform Defaults in
+  println { msg = greet {} }`,
   },
   {
     slug: "full-program",
@@ -304,19 +298,14 @@ impl Priced for Item where {
   total = { it } -> it.price * it.qty
 }
 
-let line: { it: Item } -> Str = { it } ->
-  "  \$(it.name) x\$(it.qty.to_str {}) = \$((it.total {}).to_str {})"
-
 let main = {} -> perform Console in do
   let cart = [
     { name = "olive oil", price = 899, qty = 2 },
-    { name = "za'atar", price = 450, qty = 1 },
     { name = "pita", price = 199, qty = 3 },
   ]
 
-  println { msg = "cart:" }
-  let lines = seq::map { xs = cart, f = { x } -> line { it = x } }
-  println { msg = seq::fold { xs = lines, init = "", f = { acc, x } -> "\$(acc)\$(x)\\n" } }
+  seq::map { xs = cart, f = { x } ->
+    println { msg = "\$(x.name): \$(x.total {}.to_str {})" } }
 
   let sum = seq::fold { xs = cart, init = 0, f = { acc, x } -> acc + x.total {} }
   println { msg = "total: \$(sum.to_str {}) cents" }`,

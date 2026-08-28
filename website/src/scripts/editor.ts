@@ -96,6 +96,23 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     probe.remove()
   }
 
+  /**
+   * How many characters fit across the editor right now.
+   *
+   * The formatter is fixed at 100 columns for the CLI, which either overflows
+   * a narrow pane or wastes a wide one. Measuring here lets Format wrap to
+   * what the reader actually has.
+   */
+  const editorCols = (): number => {
+    if (!charW) measureChar()
+    const cs = getComputedStyle(srcEl)
+    const usable = srcEl.clientWidth
+      - parseFloat(cs.paddingLeft)
+      - parseFloat(cs.paddingRight)
+    // Clamp: below ~40 the output is unreadable, above 120 it stops helping.
+    return Math.max(40, Math.min(120, Math.floor(usable / charW)))
+  }
+
   /** 1-based (line, col) under the pointer, or null if outside the text. */
   const posAt = (x: number, y: number): [number, number] | null => {
     const r = srcEl.getBoundingClientRect()
@@ -211,7 +228,7 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     },
     check: () => void report(window.checkMezze!(srcEl.value)),
     fmt: () => {
-      srcEl.value = String(window.formatMezze!(srcEl.value))
+      srcEl.value = String(window.formatMezze!(srcEl.value, editorCols()))
       paint()
       show('Formatted.', 'ok')
     },

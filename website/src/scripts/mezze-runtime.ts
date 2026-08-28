@@ -17,7 +17,8 @@ declare global {
     __mezzePromise?: Promise<MezzeRuntime>
     runMezze?: (source: string) => string
     checkMezze?: (source: string) => string
-    formatMezze?: (source: string) => string
+    /** cols is optional; 0 or omitted keeps the CLI width. */
+    formatMezze?: (source: string, cols?: number) => string
     typeAt?: (source: string, line: number, col: number) => string
   }
 }

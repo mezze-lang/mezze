@@ -33,7 +33,9 @@ public final class MezzeWeb {
     @JS(args = {"fn"}, value = "globalThis.runMezze = (src) => fn(src);")
     private static native void installRun(Function<JSString, JSString> fn);
 
-    @JS(args = {"fn"}, value = "globalThis.formatMezze = (src) => fn(src);")
+    // src \u0000 cols — same NUL convention as typeAt, so the native signature
+    // stays single-argument. cols is optional and defaults to the CLI width.
+    @JS(args = {"fn"}, value = "globalThis.formatMezze = (src, cols) => fn(src + '\\u0000' + (cols || 0));")
     private static native void installFmt(Function<JSString, JSString> fn);
 
     @JS(args = {"fn"}, value = "globalThis.checkMezze = (src) => JSON.parse(fn(src));")
@@ -163,9 +165,22 @@ public final class MezzeWeb {
         }
     }
 
-    public static String format(String source) {
+    /**
+     * Format, wrapping to the width the reader actually has.
+     *
+     * The CLI formatter is fixed at 100 columns by design, and stays that way.
+     * In a browser the editor pane can be much narrower or wider than that, so
+     * the playground measures its own width and passes it here. Only where
+     * lines break changes; every other style rule is the same.
+     *
+     * @param cols target line width; 0 or less keeps the standard 100.
+     */
+    public static String format(String source, int cols) {
         try {
-            return new Formatter().format(source, null);
+            Formatter f = cols > 0
+                ? new Formatter(new WidthOverride(cols))
+                : new Formatter();
+            return f.format(source, null);
         } catch (Throwable t) {
             return source;   // unparseable: leave the user's text alone
         }
@@ -206,7 +221,17 @@ public final class MezzeWeb {
         run("use std::effects::log::{ Console, println }\n"
           + "let main = {} -> perform Console in println { msg = \"Hello, Mezze!\" }\n");
         installRun(js -> JSString.of(run(js.asString())));
-        installFmt(js -> JSString.of(format(js.asString())));
+        installFmt(js -> {
+            // src \u0000 cols — same convention as typeAt.
+            String[] parts = js.asString().split("\u0000", -1);
+            String src = parts[0];
+            int cols = 0;
+            if (parts.length > 1) {
+                try { cols = Integer.parseInt(parts[1]); }
+                catch (NumberFormatException e) { cols = 0; }
+            }
+            return JSString.of(format(src, cols));
+        });
         installCheck(js -> JSString.of(check(js.asString())));
         installTypeAt(js -> {
             // src \u0000 line \u0000 col — avoids a multi-arg native signature.

@@ -8,8 +8,7 @@ import com.mezze.language.parsedast.*
  * Converts ParsedModule back to formatted source code with consistent style.
  * Comments are attached to declarations via leadingComments/trailingComment fields.
  */
-class PrettyPrinter {
-    private val config = FormatterConfig
+class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
     private val output = StringBuilder()
     private var indentLevel = 0
     private var currentColumn = 0
