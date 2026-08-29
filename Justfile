@@ -121,12 +121,18 @@ push-wasm:
     node {{site}}/tools/compress-wasm.mjs
     sops exec-env secrets.yaml 'set -euo pipefail; B=$(cd infra && pulumi stack output runtimeBucket); for f in mezze.js mezze.js.wasm; do echo "  uploading $f"; if [ "$f" = mezze.js.wasm ]; then CT=application/wasm; else CT=text/javascript; fi; npx --yes wrangler@latest r2 object put "$B/wasm/$f" --file "{{site}}/public/wasm/.br/$f" --remote --content-encoding br --content-type "$CT" --cache-control "public, max-age=31536000, immutable"; done'
 
-# Depends on `release`, not `build`: deploying after a bare `build` would ship
-# whatever wasm and hover data happened to be lying around, which may predate
-# the compiler changes in this checkout. The wasm is stripped from dist/ — it
-# is served from R2, and Pages would reject it for size anyway.
-# Full pipeline, then upload website/dist/ to Cloudflare Pages
-deploy: release push-wasm
+# The compressed WASM runtime is uploaded to R2 BEFORE the site is built and
+# deployed — they are one unit: mezze.js is fetched from the R2 origin the site
+# was built to point at (PUBLIC_WASM_BASE), so the runtime must already be live
+# at that URL when the referring HTML ships. Order: wasm -> hovers (artifacts) ->
+# push-wasm (compress + upload) -> build ONCE with the R2 URL -> deploy Pages.
+#
+# Note this deliberately does NOT depend on `release`: `release` ends in a site
+# `build` with no PUBLIC_WASM_BASE, which deploy would only have to throw away and
+# rebuild. We take `release`'s artifact halves (wasm, hovers) and do the single
+# authoritative build here, after the runtime URL is known.
+# Full pipeline: build the runtime, upload it, then build+deploy the site against it
+deploy: wasm hovers push-wasm
     @cd infra && pulumi stack select {{stack}} >/dev/null 2>&1
     sops exec-env secrets.yaml 'set -euo pipefail; URL=$(cd infra && pulumi stack output runtimeUrl); echo "  runtime: $URL"; PUBLIC_WASM_BASE="$URL" npm --prefix {{site}} run build; rm -rf {{site}}/dist/wasm; npx --yes wrangler@latest pages deploy {{site}}/dist --project-name {{project}} --branch main'
 # Deploy without a fresh build (uses whatever is in website/dist/)
