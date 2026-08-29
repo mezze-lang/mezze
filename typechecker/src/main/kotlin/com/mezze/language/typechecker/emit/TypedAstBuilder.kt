@@ -174,7 +174,7 @@ class TypedAstBuilder(
     ) {
         if (!decl.isSimpleBinding && decl.pattern is ParsedRecordPattern) {
             val pattern = decl.pattern as ParsedRecordPattern
-            val destrName = "__destructured_${decls.size}"
+            val destrName = "${com.mezze.language.ast.MagicParams.DESTRUCTURE_DECL_PREFIX}${decls.size}"
             val loc = decl.loc
             val rawType = constraintResults[destrName]?.let { substitution.apply(it.type) }
                 ?: constraintResults["__destructured__"]?.let { substitution.apply(it.type) }
@@ -825,9 +825,16 @@ class TypedAstBuilder(
         val loc = expr.loc
         val memberAccess = expr.function as ParsedMemberAccess
         val receiverExpr = buildExpr(memberAccess.receiver, file)
-        val argExpr = buildExpr(expr.arguments, file)
 
         val solvedFnType = methodInfo.methodFunctionType?.let { substitution.apply(it) }
+
+        // Thread the SOLVED method parameter type into the argument as its
+        // contextType — the same #261 fix `buildFunctionCall` applies on the
+        // ordinary-call path. Lets the callback lambda's params be stamped with
+        // the concrete types the solver pinned (hover: `x : Item` not `x : 'a`).
+        val methodParamType = (solvedFnType as? MezzeType.FunctionType)?.paramType
+        val argExpr = if (methodParamType != null) buildExpr(expr.arguments, file, methodParamType)
+                      else buildExpr(expr.arguments, file)
 
         // #160: when the inherent impl was deferred (the receiver's concrete
         // type was only known after solving, e.g. `help {..}.to_str {}`), pick
@@ -1009,7 +1016,7 @@ class TypedAstBuilder(
                         // already-LOWERED statements is a lowering artifact — it would shift
                         // the block's content hash if the lowerer's expansion changed, on
                         // byte-identical source. srcIdx is source-pure AND unique per statement.
-                        val destrName = "__destr_${srcIdx}"
+                        val destrName = "${com.mezze.language.ast.MagicParams.DESTRUCTURE_PREFIX}${srcIdx}"
                         val destrHash = ParsedDeclHasher.hashExpr(stmt.value)
                         val valueType = stmt.typeAnnotation
                             ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
@@ -1570,9 +1577,15 @@ class TypedAstBuilder(
         stmts: MutableList<TypedStatement>
     ) {
         walkRecordDestructure(entries, parentVarName, parentType, loc,
-            emitBinding = { name, hash, type, access ->
+            emitBinding = { name, hash, type, access, bindingLoc ->
                 identifierContext[name] = type
-                stmts.add(TypedStatement.Let(name, hash, type, access, loc))
+                // Emit the field binding with the FIELD's own token loc, not the
+                // whole-statement loc — so hover on `host` in `let { host, port,
+                // ... } = prod` resolves to THIS binding (`host : Str`) rather than
+                // matching the synthetic `__destr_N` scrutinee binding (which keeps
+                // the wide statement loc). Without a per-field loc every binding
+                // shares one span and the first (synthetic) one wins the lookup.
+                stmts.add(TypedStatement.Let(name, hash, type, access, bindingLoc))
             },
             emitNested = { nestedEntries, fieldName, fieldType, fieldAccess ->
                 // #316 (Leak A): name the nested temp by its SOURCE field path
@@ -1598,9 +1611,11 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         walkRecordDestructure(entries, parentVarName, parentType, loc,
-            emitBinding = { name, hash, type, access ->
+            emitBinding = { name, hash, type, access, bindingLoc ->
                 val scheme = V2TypeScheme(emptyList(), emptyList(), type)
-                decls.add(TypedLetDecl(hash, name, emptyList(), access, scheme, isPublic, loc))
+                // Field's own token loc (see emitRecordDestructureFields) so hover
+                // resolves to this binding, not the synthetic scrutinee decl.
+                decls.add(TypedLetDecl(hash, name, emptyList(), access, scheme, isPublic, bindingLoc))
                 if (isPublic) {
                     exports[name] = ExportEntry(name, hash, type, ExportKind.FUNCTION)
                 }
@@ -1621,7 +1636,7 @@ class TypedAstBuilder(
         parentVarName: String,
         parentType: MezzeType,
         loc: Loc,
-        emitBinding: (name: String, hash: Hash, type: MezzeType, access: TypedFieldAccess) -> Unit,
+        emitBinding: (name: String, hash: Hash, type: MezzeType, access: TypedFieldAccess, bindingLoc: Loc) -> Unit,
         emitNested: (entries: List<ParsedRecordPatternEntry>, fieldName: String, fieldType: MezzeType, fieldAccess: TypedFieldAccess) -> Unit
     ) {
         for (entry in entries) {
@@ -1632,13 +1647,25 @@ class TypedAstBuilder(
             }
             val parentBinding = resolveBinding(parentVarName, null)
             val parentVar = TypedVar(parentVarName, parentBinding, parentType, loc)
-            val fieldAccess = TypedFieldAccess(parentVar, fieldName, -1, fieldType, loc)
 
-            when (val p = entry.pattern) {
-                null -> emitBinding(fieldName, fieldHash(parentVarName, fieldName), fieldType, fieldAccess)
-                is ParsedVariablePattern -> emitBinding(p.name, fieldHash(parentVarName, p.name), fieldType, fieldAccess)
+            // The binder's own token loc (narrow) — see #328. Used both for the
+            // emitted binding AND for its field-access value, so the binder-name
+            // hover branch (`cursor before value start`) fires and findInExpr does
+            // not swallow the token with a wide-loc `__destr_N.field` expression.
+            val p = entry.pattern
+            val bindingLoc = when (p) {
+                is ParsedVariablePattern -> p.loc
+                else -> entry.loc
+            }
+            val fieldAccess = TypedFieldAccess(parentVar, fieldName, -1, fieldType, bindingLoc)
+
+            when (p) {
+                // Punned `{ host }` (null pattern) and any non-variable leaf.
+                null -> emitBinding(fieldName, fieldHash(parentVarName, fieldName), fieldType, fieldAccess, bindingLoc)
+                // Renamed `{ host = h }`: the binder `h` is the variable pattern.
+                is ParsedVariablePattern -> emitBinding(p.name, fieldHash(parentVarName, p.name), fieldType, fieldAccess, bindingLoc)
                 is ParsedRecordPattern -> emitNested(p.entries, fieldName, fieldType, fieldAccess)
-                else -> emitBinding(fieldName, fieldHash(parentVarName, fieldName), fieldType, fieldAccess)
+                else -> emitBinding(fieldName, fieldHash(parentVarName, fieldName), fieldType, fieldAccess, bindingLoc)
             }
         }
     }

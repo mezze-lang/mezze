@@ -39,6 +39,13 @@ object TypedAstLookup {
         for (decl in module.decls) {
             when (decl) {
                 is TypedLetDecl -> {
+                    // Skip the synthetic scrutinee decl a top-level record
+                    // destructuring lowers to (`__destructured_N`, holding the
+                    // whole record). Its wide loc would otherwise swallow a cursor
+                    // on a field name; the real per-field decls (narrow loc) match.
+                    if (com.mezze.language.ast.MagicParams.isDestructureTemp(decl.name)) {
+                        // no-op: fall through to the next decl
+                    } else
                     // Check if position is on the binding name
                     if (containsPosition(decl.loc, line, col)) {
                         // Nested-let name hit: when the cursor lands on
@@ -353,12 +360,28 @@ object TypedAstLookup {
                 for (stmt in expr.statements) {
                     when (stmt) {
                         is TypedStatement.Let -> {
-                            // Binding-name region: cursor is inside the
-                            // statement's loc, and BEFORE the value's start.
                             val inStmt = containsPosition(stmt.loc, line, col)
+                            // A record-destructure field binding (`host` in
+                            // `let { host, .. } = e`) lowers to a Let whose value is
+                            // `__destr_N.host` — binder and value SHARE the same narrow
+                            // field-token loc, so the usual "cursor before value" test
+                            // can't fire. When the cursor is on such a field binder,
+                            // return the field binding directly (`host : Str`), not the
+                            // synthetic `__destr_N` receiver findInExpr would otherwise
+                            // surface. The synthetic scrutinee Let itself is skipped.
+                            val isDestrField = !com.mezze.language.ast.MagicParams.isDestructureTemp(stmt.name) &&
+                                (stmt.value as? TypedFieldAccess)?.record?.let {
+                                    it is TypedVar && com.mezze.language.ast.MagicParams.isDestructureTemp(it.name)
+                                } == true
+                            if (inStmt && isDestrField) {
+                                return LookupResult.Binding(stmt.name, stmt.type, stmt.loc)
+                            }
+                            // Binding-name region: cursor is inside the statement's
+                            // loc, BEFORE the value's start. Skip the synthetic
+                            // scrutinee binder (`__destr_N`, whole-record type).
                             val beforeValue = line < stmt.value.loc.startLine ||
                                 (line == stmt.value.loc.startLine && col < stmt.value.loc.startCol)
-                            if (inStmt && beforeValue) {
+                            if (inStmt && beforeValue && !com.mezze.language.ast.MagicParams.isDestructureTemp(stmt.name)) {
                                 return LookupResult.Binding(stmt.name, stmt.type, stmt.loc)
                             }
                             findNestedLetAtName(stmt.value, line, col)?.let { return it }

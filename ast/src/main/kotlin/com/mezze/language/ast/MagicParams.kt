@@ -69,6 +69,18 @@ object MagicParams {
     /** Internal solver-injected type-var name prefix (invariant checks skip these). */
     const val INTERNAL_PREFIX = "__internal_"
 
+    /** Synthetic scrutinee binder a record-destructuring `let { a, b } = e` lowers
+     *  to, holding the whole record while per-field bindings extract from it.
+     *  `__destr_N` in a do-block, `__destructured_N` at top level. Never a user
+     *  name — tooling (hover/goto-def) must not surface it. */
+    const val DESTRUCTURE_PREFIX = "__destr_"
+    const val DESTRUCTURE_DECL_PREFIX = "__destructured_"
+
+    /** True if [name] is a compiler-injected record-destructure scrutinee/temp
+     *  binding (not a user-written binder). */
+    fun isDestructureTemp(name: String): Boolean =
+        name.startsWith(DESTRUCTURE_PREFIX) || name.startsWith(DESTRUCTURE_DECL_PREFIX)
+
     /** True if [name] is an intrinsic symbol the FFI bridge owns (native or crash),
      *  which the typechecker types as fresh/bottom and exempts from undefined-var. */
     fun isIntrinsicSymbol(name: String): Boolean =

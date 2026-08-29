@@ -861,14 +861,20 @@ class Monomorphizer(
             // match means this wasn't a deferred call on this concrete type).
             if (receiverType !is MezzeType.VarType) {
                 val matches = cands.filter { c -> c.targets.any { typeMatchesTarget(receiverType, it) } }
-                return matches.singleOrNull()?.opHash
+                matches.singleOrNull()?.let { return it.opHash }
+                // No structural match — but the receiver may be the EXPANDED form of
+                // the impl's nominal target (e.g. `Item` inlined to its RecordType
+                // `{name,price,qty}`, which typeMatchesTarget won't equate with
+                // `TypeApplication(Item)`). Fall through to the single-user-declared
+                // impl case below, which is the deferred user-ability call regardless
+                // of whether the receiver surfaced as nominal or structural.
             }
-            // Polymorphic receiver (the spliced fold-folder case: `x` never got
-            // unified to the concrete element type because fold is generic). We
-            // cannot match by type, so resolve ONLY the unambiguous case: a single
-            // impl for this op whose target is a user-declared type. This is the
-            // deferred user-ability call we must rewrite; it can never be a numeric
-            // operator (multi-impl, builtin targets).
+            // Resolve the unambiguous deferred user-ability call: a single impl for
+            // this op whose target is a user-declared type. Covers both the still-
+            // polymorphic fold-folder receiver (`VarType`) and the case above where
+            // the concrete receiver is a structural record that won't nominally match
+            // its own impl target. Never a numeric operator (those are multi-impl,
+            // builtin-target — excluded — and resolved by primitive inlining).
             val sole = cands.singleOrNull() ?: return null
             return if (sole.targets.all { isUserDeclaredTarget(it) }) sole.opHash else null
         }
