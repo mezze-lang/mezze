@@ -92,4 +92,40 @@ class DoBlockCallBindingTypeTest {
                 ?.errors?.joinToString("\n") { it.message },
         )
     }
+
+    @Test
+    @org.junit.jupiter.api.Disabled("KNOWN BUG — see the comment below")
+    fun `a do-block let of an effect operation records the solved type`() {
+        // `Async.spawn { f = {} -> "hello" }` binds `Promise 'a`, not
+        // `Promise Str`. The same expression at the top level gets it right,
+        // and so does the enclosing function's return type — only the do-block
+        // binding keeps the unsolved variable.
+        //
+        // Ruled out while narrowing this:
+        //   - not the emitter: substitution.apply(value.type) returns
+        //     `Promise 'a`, so the solver never pinned the variable
+        //   - not missing instantiation: the op type IS freshly instantiated
+        //   - not the annotation path: there is no annotation here, so the fix
+        //     in 98fdd87fd does not apply
+        //
+        // Decisive: two spawns in one block with DIFFERENT callback types both
+        // come out `Promise 'a`. Were instantiation and unification working,
+        // one would pin to Str and the other to Int.
+        //
+        // So: the result type variable of an effect operation is not unified
+        // with its callback's return type when the call is bound by a do-block
+        // let. tryGenerateEffectOperationCall does not unify arguments itself —
+        // it returns a type for something downstream to constrain.
+        val src = """
+            use std::effects::async::{ Async, LoomAsync }
+
+            let f = {} -> perform LoomAsync in do
+              let a = Async.spawn { f = {} -> "hello" }
+              let b = Async.spawn { f = {} -> 42 }
+              a
+        """.trimIndent()
+
+        assertEquals("Promise Str", bindingTypeAt(src, 4, 7))
+        assertEquals("Promise Int", bindingTypeAt(src, 5, 7))
+    }
 }
