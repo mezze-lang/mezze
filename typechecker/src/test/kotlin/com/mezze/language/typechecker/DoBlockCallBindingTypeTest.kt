@@ -94,7 +94,6 @@ class DoBlockCallBindingTypeTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("KNOWN BUG — see the comment below")
     fun `a do-block let of an effect operation records the solved type`() {
         // `Async.spawn { f = {} -> "hello" }` binds `Promise 'a`, not
         // `Promise Str`. The same expression at the top level gets it right,

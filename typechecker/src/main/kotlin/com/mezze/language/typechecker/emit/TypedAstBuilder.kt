@@ -753,13 +753,26 @@ class TypedAstBuilder(
                     val argExpr = buildExpr(expr.arguments, file)
                     val effectDecl = registry.lookupEffect(receiverName)
                         ?: importContext?.importedEffects?.get(receiverName)
+                    // The solver already unified this call's result var with the
+                    // op's instantiated return (e.g. `spawn`'s `Promise 'a` tied to
+                    // the callback's return). Prefer that per-call-site solved type —
+                    // it's the SAME source the ordinary-call path uses below (line
+                    // ~787). Falling back to re-converting the op's DECLARED return
+                    // annotation yields a fresh unbound `'a` (`Promise 'a`): fine at
+                    // the top level, where `contextType` is already solved, but wrong
+                    // for a do-block `let` whose `contextType` is still a bare var —
+                    // there the raw annotation leaks through and two spawns with
+                    // different callbacks both come out `Promise 'a`.
+                    val solvedCallReturn = callReturnTypes[loc]?.let { substitution.apply(it) }
                     val resolvedReturnType = effectDecl?.operations
                         ?.firstOrNull { it.name == opName }
                         ?.let { convertParsedTypeAnnotation(it.returnType) }
                     val applied = substitution.apply(contextType)
-                    val finalType = if (applied is MezzeType.VarType && resolvedReturnType != null) {
-                        resolvedReturnType
-                    } else applied
+                    val finalType = when {
+                        solvedCallReturn != null && solvedCallReturn !is MezzeType.VarType -> solvedCallReturn
+                        applied is MezzeType.VarType && resolvedReturnType != null -> resolvedReturnType
+                        else -> applied
+                    }
                     return TypedPerformOp(effectHash, opName, argExpr, finalType, loc)
                 }
             }
