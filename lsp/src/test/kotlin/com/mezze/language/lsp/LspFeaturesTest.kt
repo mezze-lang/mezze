@@ -3435,6 +3435,7 @@ class LspFeaturesTest {
         }
     }
 
+
     private fun hoverAt(uri: String, line: Int, character: Int): Hover? {
         return server.textDocumentService.hover(HoverParams().apply {
             textDocument = TextDocumentIdentifier(uri)

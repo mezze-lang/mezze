@@ -67,4 +67,29 @@ class DoBlockCallBindingTypeTest {
 
         assertEquals("Str", bindingTypeAt(src, 2, 5))
     }
+
+    @Test
+    fun `a do-block binding keeps its declared type name`() {
+        // The same annotated value resolves .get_or_else at the top level and
+        // fails inside a do-block with "Cannot access field 'get_or_else' on
+        // variant type: | Ok { val: Str }, Err { error: Str } |" — the binding
+        // kept the structural variant and lost the name `Result`, so method
+        // lookup had nothing to match the impl against.
+        val src = """
+            let top: Result Str Str = Ok { val = "hi" }
+            let a = top.get_or_else { def = "?" }
+
+            let f = {} -> do
+              let inner: Result Str Str = Ok { val = "hi" }
+              inner.get_or_else { def = "?" }
+        """.trimIndent()
+
+        val parsed = parser.parseParsedModule(src, "name.mz")
+        val r = typeChecker.checkParsedModule(parsed, Paths.get("."), null, true)
+        assertTrue(
+            r is TypeChecker.TypeCheckResult.Success,
+            "expected it to typecheck; got: " + (r as? TypeChecker.TypeCheckResult.Failure)
+                ?.errors?.joinToString("\n") { it.message },
+        )
+    }
 }
