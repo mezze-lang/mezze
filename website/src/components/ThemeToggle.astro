@@ -27,10 +27,13 @@
   const SUN = 'M12 7.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z'
   const MOON = 'M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z'
 
-  const isDark = () =>
-    root.dataset.theme
-      ? root.dataset.theme === 'dark'
-      : matchMedia('(prefers-color-scheme: dark)').matches
+  // Light unless data-theme says otherwise — matching the CSS, which stopped
+  // consulting prefers-color-scheme so the site opens light for everyone.
+  // Reading the OS here too made the toggle disagree with the page: on a
+  // dark-mode machine it showed the dark icon over a light page, and the first
+  // click appeared to do nothing because it was "switching" to what was
+  // already on screen.
+  const isDark = () => root.dataset.theme === 'dark'
 
   function paint() {
     if (!glyph || !rays) return
