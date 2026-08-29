@@ -74,8 +74,15 @@ public final class MezzeWeb {
                     return "TYPE ERROR: " + firstMessage(String.valueOf(r));
                 }
                 List<FunctionIR> fns = s.getLoweredFunctions();
+                // The entry is identified by CONTENT HASH, not name. Resolve
+                // `main`'s hash from the lowered functions; passing the literal
+                // "main" would blow up in Hash's hex validation.
+                String entryHash = null;
+                for (FunctionIR fn : fns) {
+                    if ("main".equals(fn.getName())) { entryHash = fn.getHash().getHex(); break; }
+                }
                 MezzeLanguage.setFunctionsForDirectExecution(
-                    fns, s.getLoweredPerformers(), Path.of("/tmp"), "main");
+                    fns, s.getLoweredPerformers(), Path.of("/tmp"), entryHash);
                 try (Context ctx = Context.newBuilder(MezzeLanguage.ID).allowAllAccess(true).build()) {
                     ctx.eval(Source.newBuilder(MezzeLanguage.ID, "# playground", "__pg__.mz")
                              .buildLiteral());

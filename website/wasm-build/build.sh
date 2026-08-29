@@ -69,7 +69,17 @@ GRAAL_CACHE="$HERE/.graalvm-$GRAAL_VERSION"
 rm -rf "$STAGE" && mkdir -p "$STAGE" "$GRAAL_CACHE"
 
 for m in $MODULES; do
-  jar=$(ls -t "$REPO/$m"/build/libs/*.jar 2>/dev/null | grep -v sources | head -1)
+  # Newest non-sources jar. Done with a glob + arithmetic mtime compare rather
+  # than `ls -t | grep | head -1`: that pipeline SIGPIPEs `ls`/`grep` when
+  # `head` closes early, and under `set -o pipefail` a 141 there aborts the
+  # whole build (intermittently, by directory size).
+  jar=""; jar_mtime=0
+  for cand in "$REPO/$m"/build/libs/*.jar; do
+    [[ -f "$cand" ]] || continue
+    [[ "$cand" == *sources* ]] && continue
+    cand_mtime=$(mtime "$cand")
+    if [[ "$cand_mtime" -ge "$jar_mtime" ]]; then jar="$cand"; jar_mtime="$cand_mtime"; fi
+  done
   [[ -n "$jar" ]] || { echo "no jar for :$m — did the build fail?" >&2; exit 1; }
   cp "$jar" "$STAGE/"
 done
@@ -94,7 +104,11 @@ graal_fetch truffle truffle-api
 graal_fetch truffle truffle-dsl-processor
 
 # Kotlin runtime and serialization, straight from the Gradle cache.
-(cd "$REPO" && ./gradlew --quiet :cli:printRuntimeClasspath) \
+# Capture gradle's output into a variable first: piping it straight into
+# `tail -1` lets tail close the pipe while gradle is still writing, which
+# SIGPIPEs gradle and — under `set -o pipefail` — aborts the whole script.
+runtime_cp="$(cd "$REPO" && ./gradlew --quiet :cli:printRuntimeClasspath)"
+printf '%s\n' "$runtime_cp" \
   | grep -E '^/.*:/' | tail -1 \
   | tr ':' '\n' \
   | grep -E '/(kotlin-stdlib|kotlinx-serialization)[^/]*[.]jar$' \
