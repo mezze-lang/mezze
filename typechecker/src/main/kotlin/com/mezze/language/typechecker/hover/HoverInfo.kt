@@ -661,10 +661,20 @@ object HoverInfo {
      */
     fun effectDeclByName(state: Context, result: TypeCheckResult?, effectName: String): ParsedEffectDecl? =
         state.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == effectName }
+            ?: result?.allEffects?.get(effectName)
+            ?: com.mezze.language.typechecker.ModuleResolver.getAllParsedModules().values
+                .firstNotNullOfOrNull { m ->
+                    m.decls.filterIsInstance<ParsedEffectDecl>().find { it.name == effectName }
+                }
 
     /** Ability-decl analogue of [effectDeclByName] (local → imported → scan). */
     fun abilityDeclByName(state: Context, result: TypeCheckResult?, abilityName: String): ParsedAbilityDecl? =
         state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.find { it.name == abilityName }
+            ?: result?.importedAbilities?.get(abilityName)
+            ?: com.mezze.language.typechecker.ModuleResolver.getAllParsedModules().values
+                .firstNotNullOfOrNull { m ->
+                    m.decls.filterIsInstance<ParsedAbilityDecl>().find { it.name == abilityName }
+                }
 
     /**
      * Resolve doc + metadata for `name` at hover time, walking from
