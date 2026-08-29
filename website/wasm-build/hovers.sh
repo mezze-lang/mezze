@@ -48,3 +48,6 @@ say "Typechecking and extracting hovers"
 java -cp "$CP:$WORK/classes" HoverExtractor "$WORK/samples"/*.mz > "$OUT"
 
 say "Wrote $(wc -c < "$OUT" | tr -d ' ') bytes to src/data/hovers.json"
+
+# Record which samples this was built from, so a later edit is caught.
+node "$WEBSITE/tools/hover-stamp.mjs" --write
