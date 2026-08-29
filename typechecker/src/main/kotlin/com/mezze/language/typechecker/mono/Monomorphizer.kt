@@ -204,7 +204,18 @@ class Monomorphizer(
                 && req.closureBodies.isNotEmpty()
                 && closuresEnabled
             ) {
-                LambdaSubstitution.substituteClosures(newBody, req.closureBodies)
+                val spliced = LambdaSubstitution.substituteClosures(newBody, req.closureBodies)
+                // The spliced-in closure body may itself call a constraint-driven
+                // ability method on a now-concrete receiver (a fold folder
+                // `{ acc, x } -> acc + x.total {}` where `x : Item`). Its call was
+                // emitted while the receiver was still polymorphic, so it carries NO
+                // impl ref and stays routed through the field-access/dict path — at
+                // runtime that throws `Field not found: <op>`. Now that the closure
+                // param is concrete, resolve each such call against the impl whose
+                // target type matches the receiver and rewrite it to a direct
+                // op-hash ByHash call. (`req.abilityImpls` covers the generic's OWN
+                // body, rewritten above; this covers the grafted closure.)
+                rewriteClosureMethodCallsByReceiver(spliced)
             } else newBody
 
             specializations[specHash] = Specialization(
@@ -810,6 +821,122 @@ class Monomorphizer(
      * the index), the body is returned unchanged. Recursion mirrors the
      * shape of `TypeSubstitution.applyExpr`.
      */
+    /**
+     * A spliced-in closure body (e.g. a fold folder `{ acc, x } -> acc + x.total {}`)
+     * carries ability-method calls that were emitted while the receiver was still
+     * polymorphic, so they hold no impl ref and default to a field-access/dict call
+     * that throws `Field not found: <op>` at runtime. Now that the closure param is
+     * concrete, resolve each such call by matching the receiver's type against the
+     * ability impls in `implIndex` and rewrite it to a direct op-hash ByHash call.
+     * Runs the SAME per-method rewrite as [rewriteConstrainedMethodCalls] but keys
+     * on the RECEIVER's type rather than a pre-resolved AbilityImplRef list.
+     */
+    private fun rewriteClosureMethodCallsByReceiver(expr: TypedExpr): TypedExpr {
+        if (implIndex.isEmpty()) return expr
+        // op name → all (targetTypes, opHash) an impl provides.
+        data class OpTarget(val targets: List<MezzeType>, val opHash: Hash)
+        val opTargets = HashMap<String, MutableList<OpTarget>>()
+        for (impl in implIndex.values) {
+            for (opName in impl.operations.keys) {
+                opTargets.getOrPut(opName) { mutableListOf() }
+                    .add(OpTarget(impl.targetTypes, Hash.computeOpHash(impl.hash, opName)))
+            }
+        }
+        if (opTargets.isEmpty()) return expr
+
+        // A target type is "user-declared" (nominal, carries a content hash) vs
+        // a builtin primitive (Int/Float/…) or type-variable. Numeric operator
+        // abilities (NumAdd/NumMul/…) target ONLY builtins and always have many
+        // impls, so restricting to a single-impl op whose sole target is a
+        // user-declared type both (a) excludes every numeric operator — those are
+        // resolved by primitive inlining, never here — and (b) is exactly the
+        // shape of a user ability like `Priced for Item`.
+        fun isUserDeclaredTarget(t: MezzeType): Boolean =
+            t is MezzeType.TypeApplication && t.identity is com.mezze.language.ast.TypeIdentity.Declared
+
+        fun resolveOpHash(fieldName: String, receiverType: MezzeType): Hash? {
+            val cands = opTargets[fieldName] ?: return null
+            // Concrete receiver: dispatch precisely by matching its type to an
+            // impl target (exactly one match, else leave untouched — a no/ambiguous
+            // match means this wasn't a deferred call on this concrete type).
+            if (receiverType !is MezzeType.VarType) {
+                val matches = cands.filter { c -> c.targets.any { typeMatchesTarget(receiverType, it) } }
+                return matches.singleOrNull()?.opHash
+            }
+            // Polymorphic receiver (the spliced fold-folder case: `x` never got
+            // unified to the concrete element type because fold is generic). We
+            // cannot match by type, so resolve ONLY the unambiguous case: a single
+            // impl for this op whose target is a user-declared type. This is the
+            // deferred user-ability call we must rewrite; it can never be a numeric
+            // operator (multi-impl, builtin targets).
+            val sole = cands.singleOrNull() ?: return null
+            return if (sole.targets.all { isUserDeclaredTarget(it) }) sole.opHash else null
+        }
+
+        fun rw(e: TypedExpr): TypedExpr = when (e) {
+            is TypedCall -> {
+                val fn = e.function
+                val newArg = rw(e.arg)
+                if (fn is TypedFieldAccess) {
+                    val opHash = resolveOpHash(fn.field, fn.record.type)
+                    if (opHash != null) {
+                        e.copy(
+                            function = TypedVar(fn.field, BindingRef.ByHash(opHash), fn.type, fn.loc),
+                            arg = newArg,
+                        )
+                    } else e.copy(function = fn.copy(record = rw(fn.record)), arg = newArg)
+                } else e.copy(function = rw(fn), arg = newArg)
+            }
+            is TypedFieldAccess -> e.copy(record = rw(e.record))
+            is com.mezze.language.typedast.TypedLambda -> e.copy(body = rw(e.body))
+            is com.mezze.language.typedast.TypedRecord -> e.copy(entries = e.entries.map {
+                when (it) {
+                    is com.mezze.language.typedast.TypedRecordEntry.Field -> it.copy(value = rw(it.value))
+                    is com.mezze.language.typedast.TypedRecordEntry.Spread -> it.copy(expr = rw(it.expr))
+                }
+            })
+            is com.mezze.language.typedast.TypedRecordUpdate -> e.copy(
+                record = rw(e.record),
+                updates = e.updates.map {
+                    when (it) {
+                        is com.mezze.language.typedast.TypedRecordEntry.Field -> it.copy(value = rw(it.value))
+                        is com.mezze.language.typedast.TypedRecordEntry.Spread -> it.copy(expr = rw(it.expr))
+                    }
+                })
+            is com.mezze.language.typedast.TypedVariantConstruct -> e.copy(payload = e.payload?.let { rw(it) })
+            is com.mezze.language.typedast.TypedMatch -> e.copy(
+                scrutinee = rw(e.scrutinee),
+                cases = e.cases.map { c -> c.copy(guard = c.guard?.let { rw(it) }, body = rw(c.body)) })
+            is com.mezze.language.typedast.TypedIf -> e.copy(condition = rw(e.condition), thenBranch = rw(e.thenBranch), elseBranch = rw(e.elseBranch))
+            is com.mezze.language.typedast.TypedBlock -> e.copy(
+                statements = e.statements.map { s ->
+                    when (s) {
+                        is com.mezze.language.typedast.TypedStatement.Let -> s.copy(value = rw(s.value))
+                        is com.mezze.language.typedast.TypedStatement.Expr -> s.copy(expr = rw(s.expr))
+                    }
+                },
+                result = rw(e.result))
+            is com.mezze.language.typedast.TypedSeq -> e.copy(elements = e.elements.map { el ->
+                when (el) {
+                    is com.mezze.language.typedast.TypedSeqElement.Regular -> el.copy(expr = rw(el.expr))
+                    is com.mezze.language.typedast.TypedSeqElement.Spread -> el.copy(expr = rw(el.expr))
+                }
+            })
+            is com.mezze.language.typedast.TypedPipe -> e.copy(left = rw(e.left), right = rw(e.right))
+            is com.mezze.language.typedast.TypedPerform -> e.copy(body = rw(e.body))
+            is com.mezze.language.typedast.TypedPerformOp -> e.copy(arg = rw(e.arg))
+            is com.mezze.language.typedast.TypedStringLit -> e.copy(parts = e.parts.map { part ->
+                when (part) {
+                    is com.mezze.language.typedast.TypedStringPart.Literal -> part
+                    is com.mezze.language.typedast.TypedStringPart.Interpolation ->
+                        com.mezze.language.typedast.TypedStringPart.Interpolation(rw(part.expr))
+                }
+            })
+            else -> e
+        }
+        return rw(expr)
+    }
+
     private fun rewriteConstrainedMethodCalls(
         expr: TypedExpr,
         abilityImpls: List<AbilityImplRef>,
