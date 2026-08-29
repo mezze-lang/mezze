@@ -57,21 +57,43 @@ const iconList = dishes.map((d) => d.icon)
     </script>
   </head>
   <body>
+    <!-- Our own scrollbar. The browser's is hidden because Firefox's reserves
+         layout space and reflows the page when shown; this is fixed-position,
+         so it overlays. aria-hidden: it is decorative, and the real scroll
+         position is already exposed by the page itself. -->
+    <div class="scrollbar" aria-hidden="true"></div>
     <SiteHeader />
     <main class:list={['site-main', `is-${width}`]}><slot /></main>
 
     <style is:global>
       *, *::before, *::after { box-sizing: border-box; }
 
-      /* Overlay scrollbars for the page itself. Firefox reserves a permanent
-         gutter otherwise, so a bar sits at the right edge whether or not
-         anyone is scrolling. `scrollbar-gutter: stable` would keep the space
-         reserved, which is the opposite of what is wanted here; thin +
-         transparent track lets the content run to the edge and the thumb
-         appear only over it. Chrome and Safari already overlay by default. */
-      html {
-        scrollbar-width: thin;
-        scrollbar-color: color-mix(in srgb, var(--soft) 40%, transparent) transparent;
+      /* The page scrollbar is hidden and replaced with one we draw ourselves.
+         Firefox's own bar cannot overlay: any scrollbar-width other than
+         `none` reserves layout space, so revealing it on scroll reflowed the
+         whole page sideways. (`thin` only made it narrower; a transparent
+         scrollbar-color does not remove the track either.)
+         So it stays off in both engines, and .scrollbar below — a fixed
+         element, outside flow — is shown while a scroll is in flight. */
+      html { scrollbar-width: none; }
+      html::-webkit-scrollbar { width: 0; height: 0; }
+
+      .scrollbar {
+        position: fixed;
+        top: 0; right: 2px;
+        width: 6px;
+        border-radius: 3px;
+        background: color-mix(in srgb, var(--soft) 45%, transparent);
+        /* Positioned by the script; opacity is the only thing animated, so
+           showing it never touches layout. */
+        opacity: 0;
+        transition: opacity .25s;
+        pointer-events: none;
+        z-index: 60;
+      }
+      html.is-scrolling .scrollbar { opacity: 1; }
+      @media (prefers-reduced-motion: reduce) {
+        .scrollbar { transition: none; }
       }
 
       body {
@@ -160,6 +182,77 @@ const iconList = dishes.map((d) => d.icon)
           show(current)
         }),
       )
+
+      /**
+       * Show the page scrollbar only while scrolling.
+       *
+       * CSS hides it outright (see the style block above); this puts it back
+       * for as long as a scroll is in flight, then takes it away again a beat
+       * after it stops. passive, because the handler never calls
+       * preventDefault and a non-passive scroll listener blocks the browser's
+       * own scrolling on touch.
+       */
+      /**
+       * Draw the page scrollbar ourselves, shown only while scrolling.
+       *
+       * The browser's own is hidden in CSS. Firefox reserves layout space for
+       * a scrollbar at any scrollbar-width except `none`, so revealing its
+       * bar on scroll shifted the whole page sideways; this one is
+       * fixed-position and cannot. The trade is that it is not draggable —
+       * on Firefox you can have overlay or draggable, not both.
+       */
+      const thumb = document.querySelector<HTMLElement>('.scrollbar')
+      if (thumb) {
+        /** Gap above and below the thumb, matching the 2px it sits in from the right. */
+        const INSET = 4
+        /** Shortest the thumb is allowed to get, so it stays visible on a long page. */
+        const MIN_HEIGHT = 32
+        /** How long after scrolling stops before it fades out. */
+        const LINGER_MS = 700
+
+        let idle: number | undefined
+        let queued = false
+
+        const draw = () => {
+          queued = false
+          const view = innerHeight
+          const total = document.documentElement.scrollHeight
+          const scrollable = total - view
+
+          // Nothing to scroll: no thumb. Also guards the division below.
+          if (scrollable <= 0) {
+            thumb.style.height = '0px'
+            return
+          }
+
+          const track = view - INSET * 2
+          const height = Math.max(MIN_HEIGHT, (view / total) * track)
+          const y = (scrollY / scrollable) * (track - height)
+          thumb.style.height = height + 'px'
+          thumb.style.transform = `translateY(${INSET + y}px)`
+        }
+
+        // Scroll fires far more often than the screen repaints, so coalesce to
+        // one measurement per frame — reading scrollHeight forces layout.
+        const schedule = () => {
+          if (queued) return
+          queued = true
+          requestAnimationFrame(draw)
+        }
+
+        draw()
+        addEventListener(
+          'scroll',
+          () => {
+            root.classList.add('is-scrolling')
+            schedule()
+            clearTimeout(idle)
+            idle = window.setTimeout(() => root.classList.remove('is-scrolling'), LINGER_MS)
+          },
+          { passive: true },
+        )
+        addEventListener('resize', schedule, { passive: true })
+      }
     </script>
     {subscribe.formId && (
       <script
