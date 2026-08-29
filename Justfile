@@ -118,7 +118,8 @@ infra-destroy: _stack
 # Push the runtime to the R2 bucket
 push-wasm:
     @cd infra && pulumi stack select {{stack}} >/dev/null 2>&1
-    sops exec-env secrets.yaml 'set -euo pipefail; B=$(cd infra && pulumi stack output runtimeBucket); for f in mezze.js mezze.js.wasm; do echo "  uploading $f"; npx --yes wrangler@latest r2 object put "$B/wasm/$f" --file "{{site}}/public/wasm/$f" --remote --cache-control "public, max-age=31536000, immutable"; done'
+    node {{site}}/tools/compress-wasm.mjs
+    sops exec-env secrets.yaml 'set -euo pipefail; B=$(cd infra && pulumi stack output runtimeBucket); for f in mezze.js mezze.js.wasm; do echo "  uploading $f"; if [ "$f" = mezze.js.wasm ]; then CT=application/wasm; else CT=text/javascript; fi; npx --yes wrangler@latest r2 object put "$B/wasm/$f" --file "{{site}}/public/wasm/.br/$f" --remote --content-encoding br --content-type "$CT" --cache-control "public, max-age=31536000, immutable"; done'
 
 # Depends on `release`, not `build`: deploying after a bare `build` would ship
 # whatever wasm and hover data happened to be lying around, which may predate

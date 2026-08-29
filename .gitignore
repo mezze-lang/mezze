@@ -83,3 +83,6 @@ website/wasm-build/.hover/
 
 # wrangler's local cache
 .wrangler/
+
+# Brotli-compressed copies for R2, rebuilt on every deploy.
+website/public/wasm/.br/
