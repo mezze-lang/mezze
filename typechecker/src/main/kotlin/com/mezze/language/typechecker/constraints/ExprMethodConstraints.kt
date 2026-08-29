@@ -619,8 +619,7 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
                 // wrong module's method. Fall back to the name-set for hashless
                 // receivers (builtins / transparent aliases), exactly as the primary
                 // path does.
-                val innerHash = ((innerType as? MezzeType.VariantType)?.identity as? TypeIdentity.Declared)?.hash
-                    ?: ((innerType as? MezzeType.TypeApplication)?.identity as? TypeIdentity.Declared)?.hash
+                val innerHash = com.mezze.language.typechecker.util.declaredHashOf(innerType)
                 val byHash = if (innerHash != null) allCandidates.filter { it.targetTypeHash == innerHash } else emptyList()
                 val candidates = if (byHash.isNotEmpty()) byHash
                     else allCandidates.filter { it.targetTypeName in innerNames }
@@ -723,8 +722,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     // inherent-method impls from different modules (name-only matching would pick
     // by load order → silent mis-dispatch). Falls back to name when the receiver
     // has no type hash (builtins). See project_classparam_runtime_dispatch_tuple.
-    val receiverTypeHash = ((receiverType as? MezzeType.VariantType)?.identity as? TypeIdentity.Declared)?.hash
-        ?: ((receiverType as? MezzeType.TypeApplication)?.identity as? TypeIdentity.Declared)?.hash
+    val receiverTypeHash = com.mezze.language.typechecker.util.declaredHashOf(receiverType)
     val methodInfo = if (deferImplByReceiver) {
         // Homogeneous candidates — any is a valid signature representative; the
         // concrete impl is picked from candidateImpls at emit time.
@@ -769,6 +767,10 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             // Bidirectional push now that the param type is known (lambda args only).
             argumentResult = pushParamTypeIntoArgs(expr.arguments, argumentResult, strippedParamType, context)
 
+            // When deferring impl selection (#160 homogeneous), do NOT pin the
+            // receiver to the representative candidate's `it` type — that would
+            // force e.g. Bool. The receiver's real type is fixed by OTHER
+            // constraints, and emit picks the impl accordingly.
             // When deferring impl selection (#160 homogeneous), do NOT pin the
             // receiver to the representative candidate's `it` type — that would
             // force e.g. Bool. The receiver's real type is fixed by OTHER

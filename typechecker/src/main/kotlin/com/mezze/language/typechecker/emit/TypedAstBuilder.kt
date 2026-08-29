@@ -850,8 +850,7 @@ class TypedAstBuilder(
             // impls from different modules pick correctly instead of by first-name-
             // match (silent wrong-body dispatch). Name only when the receiver has
             // no hash (builtins). Mirrors ExprMethodConstraints' resolution.
-            val receiverHash = ((solvedReceiver as? MezzeType.VariantType)?.identity as? TypeIdentity.Declared)?.hash
-                ?: ((solvedReceiver as? MezzeType.TypeApplication)?.identity as? TypeIdentity.Declared)?.hash
+            val receiverHash = com.mezze.language.typechecker.util.declaredHashOf(solvedReceiver)
             val byHash = if (receiverHash != null) {
                 methodInfo.candidateImpls.firstOrNull { it.targetTypeHash == receiverHash }?.implContentHash
             } else null

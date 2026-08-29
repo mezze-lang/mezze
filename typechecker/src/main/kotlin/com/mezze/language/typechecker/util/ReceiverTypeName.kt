@@ -1,6 +1,31 @@
 package com.mezze.language.typechecker.util
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.TypeIdentity
+import com.mezze.language.typedast.Hash
+
+/**
+ * The content hash of a solved receiver's DECLARED nominal identity, or null
+ * when the receiver has no declared identity (builtins, structural/anonymous
+ * records, type variables). This is the AUTHORITATIVE, rename-safe, module-
+ * distinct key for selecting a method/ability impl — dispatch must key on it,
+ * never on the type NAME (two modules' `Widget` share a name but not a hash).
+ *
+ * Single source of truth for "what is this receiver's declaration hash?" — the
+ * three method/ability resolution+emit sites (ExprMethodConstraints main and
+ * inner-receiver paths, TypedAstBuilder) previously each read only VariantType
+ * and TypeApplication, silently OMITTING RecordType. A `type X = {..}` receiver
+ * is a RecordType carrying TypeIdentity.Declared, so omitting it dropped the
+ * hash → those sites fell back to name-match-by-load-order (BUG E: two same-
+ * named record types in different modules cross-dispatched). Covering all three
+ * nominal shapes here fixes every consumer at once.
+ */
+fun declaredHashOf(type: MezzeType): Hash? = when (type) {
+    is MezzeType.VariantType -> (type.identity as? TypeIdentity.Declared)?.hash
+    is MezzeType.TypeApplication -> (type.identity as? TypeIdentity.Declared)?.hash
+    is MezzeType.RecordType -> (type.identity as? TypeIdentity.Declared)?.hash
+    else -> null
+}
 
 /**
  * Nominal type name of a solved receiver — used to pick a deferred
