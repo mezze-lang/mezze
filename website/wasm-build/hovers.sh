@@ -32,17 +32,7 @@ javac -nowarn -cp "$CP" -d "$WORK/classes" "$HERE/tools/HoverExtractor.java"
 
 # The samples live in content.ts; write each tab out as a .mz file first.
 say "Extracting samples"
-node -e '
-  const fs = require("fs")
-  const src = fs.readFileSync(process.argv[1], "utf8")
-  const re = /dish: "([^"]+)",[\s\S]*?code: `([\s\S]*?)`,/g
-  let m, n = 0
-  while ((m = re.exec(src))) {
-    fs.writeFileSync(`${process.argv[2]}/${m[1].toLowerCase()}.mz`, m[2])
-    n++
-  }
-  if (!n) { console.error("no samples found in content.ts"); process.exit(1) }
-' "$WEBSITE/src/data/content.ts" "$WORK/samples"
+node "$HERE/extract-samples.mjs" "$WEBSITE/src/data/content.ts" "$WORK/samples"
 
 say "Typechecking and extracting hovers"
 java -cp "$CP:$WORK/classes" HoverExtractor "$WORK/samples"/*.mz > "$OUT"

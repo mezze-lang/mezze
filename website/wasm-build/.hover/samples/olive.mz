@@ -1,9 +1,9 @@
 use std::effects::log::{ Console, QuietConsole, println }
 
 # The same function, two destinations.
-let audit = { order } -> println { msg = "saw \$(order)" }
+let audit = { order } -> println { msg = "saw $(order)" }
 
-let report = { n } -> println { msg = "\$(n) orders seen" }
+let report = { n } -> println { msg = "$(n) orders seen" }
 
 let main = {} -> do
   # Console prints it...

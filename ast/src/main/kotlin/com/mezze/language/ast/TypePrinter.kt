@@ -133,6 +133,22 @@ fun prettyPrintType(type: MezzeType): String {
     return prettyPrintTypeWithMapping(type, typeVarMapping)
 }
 
+/**
+ * Two types printed against ONE shared naming of their type variables.
+ *
+ * For "expected X but got Y": printed separately, each side numbers its
+ * variables from 'a and the same variable can appear under two different names
+ * — or worse, two different variables under the same one. Sharing the mapping
+ * keeps the pair comparable, which is the whole point of showing them together.
+ */
+fun prettyPrintTypePair(first: MezzeType, second: MezzeType): Pair<String, String> {
+    val shared = collectTypeVariables(
+        MezzeType.RecordType(mapOf("a" to first, "b" to second)),
+    )
+    return prettyPrintTypeWithMapping(first, shared) to
+        prettyPrintTypeWithMapping(second, shared)
+}
+
 private fun collectTypeVariables(type: MezzeType): Map<TypeVar, String> {
     val orderedVars = collectTypeVarsInOrder(type).distinct()
 

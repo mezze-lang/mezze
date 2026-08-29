@@ -77,7 +77,18 @@ export function mountEditor(root: HTMLElement): EditorHandle {
   srcEl.addEventListener('scroll', syncScroll)
   // Leaving the editor is a natural point to validate: the reader has stopped
   // typing, and it costs a typecheck rather than a run.
-  srcEl.addEventListener('blur', liveCheck)
+  // Leaving the editor is the moment to say what is wrong. While typing,
+  // liveCheck only paints squiggles — a message on every keystroke would
+  // flicker through half-finished states. On blur the reader has stopped, so
+  // report properly: same rendering as pressing Check.
+  srcEl.addEventListener('blur', () => {
+    if (typeof window.checkMezze !== 'function') return
+    try {
+      report(window.checkMezze(srcEl.value))
+    } catch {
+      // Leave the last good state rather than clearing the editor.
+    }
+  })
   srcEl.addEventListener('keydown', (e) => {
     if (e.key !== 'Tab') return
     e.preventDefault()

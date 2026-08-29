@@ -7,7 +7,7 @@ type Status = | Queued, Running, Done { ms: Int } |
 let describe = { s } -> match s is
   Queued -> "waiting"
   Running -> "in progress"
-  Done { ms } -> "finished in \$(ms.to_str {})"
+  Done { ms } -> "finished in $(ms.to_str {})"
 
 
 let main = {} -> perform Console in do

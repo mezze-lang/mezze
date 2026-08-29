@@ -1,9 +1,10 @@
 package com.mezze.language.typechecker.printing
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.prettyPrintType
+import com.mezze.language.ast.prettyPrintTypePair
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.constraints.ErrorContext
-import com.mezze.language.typechecker.printing.TypeVarRenamer
 import com.mezze.language.typechecker.solving.UnificationResult
 
 object ErrorMessageBuilder {
@@ -47,9 +48,7 @@ object ErrorMessageBuilder {
                 val fieldMismatch = findFieldTypeMismatch(type1, type2)
                 if (fieldMismatch != null) {
                     val (path, actualLeaf, expectedLeaf) = fieldMismatch
-                    val rename = TypeVarRenamer()
-                    val expectedStr = TypeDiffPrinter.formatType(expectedLeaf, 0, rename)
-                    val actualStr = TypeDiffPrinter.formatType(actualLeaf, 0, rename)
+                    val (expectedStr, actualStr) = prettyPrintTypePair(expectedLeaf, actualLeaf)
                     val callSite = when {
                         funcName != null -> " in call to `$funcName`"
                         else -> ""
@@ -57,9 +56,7 @@ object ErrorMessageBuilder {
                     return "Field `$path` expects $expectedStr but got $actualStr$callSite"
                 }
 
-                val rename = TypeVarRenamer()
-                val expected = TypeDiffPrinter.formatType(type2, 0, rename)
-                val actual = TypeDiffPrinter.formatType(type1, 0, rename)
+                val (expected, actual) = prettyPrintTypePair(type2, type1)
 
                 val header = if (argName != null && funcName != null) {
                     "Type mismatch for argument '$argName' in call to '$funcName': expected $expected but got $actual"
@@ -79,9 +76,7 @@ object ErrorMessageBuilder {
                     return "Type annotation mismatch for '$bindingName': $reason"
                 }
 
-                val rename = TypeVarRenamer()
-                val expected = TypeDiffPrinter.formatType(type2, 0, rename)
-                val actual = TypeDiffPrinter.formatType(type1, 0, rename)
+                val (expected, actual) = prettyPrintTypePair(type2, type1)
 
                 val collectionHint = seqListMismatchHint(expected = type2, actual = type1)
                 return if (errorContext.isReturnType) {
@@ -92,9 +87,7 @@ object ErrorMessageBuilder {
             }
             is ErrorContext.FieldAccess -> {
                 val fieldName = errorContext.fieldName
-                val rename = TypeVarRenamer()
-                val expected = TypeDiffPrinter.formatType(type2, 0, rename)
-                val actual = TypeDiffPrinter.formatType(type1, 0, rename)
+                val (expected, actual) = prettyPrintTypePair(type2, type1)
 
                 return "Field '$fieldName' has type $actual but expected $expected"
             }
@@ -104,21 +97,18 @@ object ErrorMessageBuilder {
             is ErrorContext.BinaryOperation -> {
                 val op = errorContext.operator
                 val side = if (errorContext.isLeftOperand) "left" else "right"
-                val expected = TypeDiffPrinter.formatType(type2)
-                val actual = TypeDiffPrinter.formatType(type1)
+                val (expected, actual) = prettyPrintTypePair(type2, type1)
 
                 return "Type mismatch in '$op' operator ($side operand): expected $expected but got $actual"
             }
             is ErrorContext.SeqElement -> {
-                val expected = TypeDiffPrinter.formatType(type2)
-                val actual = TypeDiffPrinter.formatType(type1)
+                val (expected, actual) = prettyPrintTypePair(type2, type1)
 
                 return "Seq element at index ${errorContext.elementIndex} has type $actual but seq expects $expected"
             }
             is ErrorContext.ReturnType -> {
                 val funcName = errorContext.functionName
-                val expected = TypeDiffPrinter.formatType(type2)
-                val actual = TypeDiffPrinter.formatType(type1)
+                val (expected, actual) = prettyPrintTypePair(type2, type1)
 
                 return if (funcName != null) {
                     "Return type mismatch in function '$funcName': expected $expected but got $actual"
@@ -127,7 +117,7 @@ object ErrorMessageBuilder {
                 }
             }
             is ErrorContext.StringInterpolation -> {
-                val actual = TypeDiffPrinter.formatType(type1)
+                val actual = prettyPrintType(type1)
                 return "String interpolation requires String type, but expression has type $actual"
             }
             is ErrorContext.Simple -> {
@@ -144,9 +134,7 @@ object ErrorMessageBuilder {
         val t2 = failure.type2 ?: return header
 
         findFieldTypeMismatch(t1, t2)?.let { (path, actualLeaf, expectedLeaf) ->
-            val rename = TypeVarRenamer()
-            val expectedStr = TypeDiffPrinter.formatType(expectedLeaf, 0, rename)
-            val actualStr = TypeDiffPrinter.formatType(actualLeaf, 0, rename)
+            val (expectedStr, actualStr) = prettyPrintTypePair(expectedLeaf, actualLeaf)
             return "$header — field `$path` expects $expectedStr but got $actualStr"
         }
         val mismatch = findClosedRecordMismatch(t1, t2) ?: return header
@@ -382,8 +370,7 @@ object ErrorMessageBuilder {
         }
 
         if (stringContext.isNotEmpty()) {
-            val expected = TypeDiffPrinter.formatType(type2)
-            val actual = TypeDiffPrinter.formatType(type1)
+            val (expected, actual) = prettyPrintTypePair(type2, type1)
 
             return when {
                 stringContext.contains("Function application argument") -> {
@@ -418,8 +405,7 @@ object ErrorMessageBuilder {
         context: ErrorContext.PatternMatch,
         stringContext: String
     ): String {
-        val expected = TypeDiffPrinter.formatType(type2)
-        val actual = TypeDiffPrinter.formatType(type1)
+        val (expected, actual) = prettyPrintTypePair(type2, type1)
 
         val variantType = when {
             type1 is MezzeType.VariantType -> type1

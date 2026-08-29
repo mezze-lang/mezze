@@ -10,6 +10,6 @@ let main = {} -> perform Console in do
   println { msg = base.host }
   println { msg = prod.host }
 
-  # Destructuring is exhaustive — \`...\` opts out of the rest.
+  # Destructuring is exhaustive — `...` opts out of the rest.
   let { host, port, ... } = prod
-  println { msg = "\$(host):\$(port.to_str {})" }
+  println { msg = "$(host):$(port.to_str {})" }

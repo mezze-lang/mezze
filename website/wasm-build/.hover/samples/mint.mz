@@ -4,7 +4,7 @@ use std::result::{ get_or_else }
 
 # Two requests at once, not one after the other.
 let fetch = { url } -> do
-  println { msg = "GET \$(url)" }
+  println { msg = "GET $(url)" }
   url
 
 let main = {} -> perform Console in perform LoomAsync in do
