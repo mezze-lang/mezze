@@ -39,13 +39,13 @@
 }
 .page .tabs { display: flex; flex-wrap: wrap; gap: .25rem; }
 .page .tab {
-  font: inherit; font-family: ui-monospace, Menlo, monospace; font-size: .71rem;
+  font: inherit; font-family: var(--mono); font-size: .71rem;
   padding: .28rem .7rem; border: 0; border-radius: var(--r-sm);
   background: transparent; color: var(--soft); cursor: pointer;
 }
 .page .tab.on { background: var(--raised); color: var(--ink); }
 .page .run {
-  margin-left: auto; font: inherit; font-family: ui-monospace, Menlo, monospace;
+  margin-left: auto; font: inherit; font-family: var(--mono);
   font-size: .71rem; padding: .28rem .8rem; border: 0; border-radius: var(--r-sm);
   background: var(--primary); color: var(--on-primary); cursor: pointer;
 }
@@ -53,13 +53,13 @@
 .page .code {
   margin: 0; padding: 1.1rem 1.2rem; overflow-x: auto; background: transparent;
   border-top: 1px solid var(--rule);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: .79rem; line-height: 1.72;
 }
 .page .out {
   padding: .7rem 1.2rem; background: transparent;
   border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
-  font-family: ui-monospace, Menlo, monospace; font-size: .74rem;
+  font-family: var(--mono); font-size: .74rem;
   border-radius: 0 0 var(--r-md) var(--r-md);
   display: flex; align-items: center; gap: .5rem; color: var(--soft);
 }
@@ -70,7 +70,7 @@
 .page .feats p { margin: 0; font-size: .85rem; color: var(--soft); }
 
 .page .states { display: flex; flex-wrap: wrap; gap: .45rem; padding: 0 0 1.5rem; }
-.page .st { font-family: ui-monospace, Menlo, monospace; font-size: .71rem; padding: .26rem .7rem; border-radius: var(--r-pill); }
+.page .st { font-family: var(--mono); font-size: .71rem; padding: .26rem .7rem; border-radius: var(--r-pill); }
 .page .st.ok { background: var(--ok-bg); color: var(--ok); }
 .page .st.err { background: var(--err-bg); color: var(--err); }
 .page .st.warn { background: var(--warn-bg); color: var(--warn); }

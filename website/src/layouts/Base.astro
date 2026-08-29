@@ -98,7 +98,8 @@ const iconList = dishes.map((d) => d.icon)
 
       h1, h2, h3 { letter-spacing: -.02em; text-wrap: balance; }
       a { color: var(--primary); }
-      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+      code, pre, textarea { font-feature-settings: var(--mono-features); }
+      code { font-family: var(--mono); font-size: .9em; }
 
       @media (prefers-reduced-motion: reduce) {
         *, *::before, *::after { transition: none !important; animation: none !important; }

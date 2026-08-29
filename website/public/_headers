@@ -16,5 +16,10 @@
 # cached copy. A week of immutability meant new artwork simply did not appear.
 # must-revalidate keeps the bytes cached but forces a conditional request, so a
 # changed file is picked up on the next visit at the cost of one 304.
+# Vendored and versioned by filename — a new cut of the font would be a new
+# file, so these can be cached hard.
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
 /icons/*
   Cache-Control: public, max-age=3600, must-revalidate

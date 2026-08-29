@@ -12,6 +12,25 @@
    a first visit on a dark-mode machine never saw the light design at all.
    =========================================================================== */
 
+/* JetBrains Mono, vendored (OFL — see public/fonts/OFL.txt).
+   Two weights only: 400 for code, 700 for the keywords and constructors the
+   syntax highlighter emphasises. swap, so the samples are readable in the
+   system font while ~90KB downloads. */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* --- the dish palette (same hue in both themes) --------------------- */
   --olive:      #5E7A2E;
@@ -82,6 +101,18 @@
   --page-w: 78rem;
   /* Scales down on phones: a fixed 2rem is a third of a 375px screen. */
   --page-pad: clamp(1rem, 4vw, 2rem);
+
+  /* One monospace stack, read by every code surface — editor, samples, hover
+     tips, blog. It was spelled out in six places, which is how the editor's
+     two stacked layers could have drifted apart. */
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Ligatures on: -> becomes an arrow, == and != join up. Safe in the editor
+     because the tokeniser has no rule for operators, so they stay plain text
+     in both the textarea and the highlight layer above it — a span in the
+     middle of -> would break the ligature in one layer only and the two would
+     drift apart. */
+  --mono-features: "calt" 1, "liga" 1;
   --tour-pad: 1.25rem;
   --r-pill: 999px;
   --shadow: 0 1px 2px rgb(36 31 25 / .05), 0 4px 16px rgb(36 31 25 / .04);
