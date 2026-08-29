@@ -553,7 +553,24 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     )
                 } else {
                     patternResult.bindings.map { (name, type) ->
-                        BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type = type)
+                        // Bind to the WRITTEN annotation where there is one.
+                        //
+                        // The two are made equal by the constraint above, but
+                        // only once the solver runs — and method dispatch
+                        // happens during generation. A record literal produces
+                        // a bare structural type, so `let r: Result Str Str =
+                        // Ok { … }` bound `r` to something with no name for an
+                        // impl to match, and `r.get_or_else {}` failed with
+                        // "Cannot access field ... on variant type" while the
+                        // identical binding at the top level worked.
+                        //
+                        // Only the binding in the typing context changes;
+                        // bindingType still drives the equality constraint and
+                        // generalization, so the value restriction is untouched.
+                        val bound = if (stmt.pattern is ParsedVariablePattern) {
+                            annotatedType ?: type
+                        } else type
+                        BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type = bound)
                     }.toMap()
                 }
 

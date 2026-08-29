@@ -1,0 +1,323 @@
+import com.mezze.language.parser.MezzeParser;
+import com.mezze.language.parsedast.ParsedModule;
+import com.mezze.language.typechecker.TypeChecker;
+import com.mezze.language.truffleir.FunctionIR;
+import com.mezze.interpreter.runtime.MezzeLanguage;
+import com.mezze.language.formatter.Formatter;
+import com.mezze.language.formatter.WidthOverride;
+import com.mezze.language.typechecker.lookup.TypedAstLookup;
+import com.mezze.language.typedast.TypedModule;
+import com.mezze.language.ast.TypePrinterKt;
+import com.mezze.language.typechecker.diagnostics.DiagnosticJson;
+import com.mezze.language.typechecker.diagnostics.JsonDiagnosticFormatter;
+import com.mezze.language.typechecker.printing.ErrorFormatter;
+import com.mezze.language.typechecker.printing.ParseErrorFormatter;
+import com.mezze.language.typechecker.hover.HoverInfo;
+import com.mezze.language.typechecker.TypeCheckOutputKt;
+import com.mezze.language.typechecker.SourceContext;
+import com.mezze.language.parsedast.Loc;
+import com.mezze.language.parser.ParseException;
+import org.graalvm.polyglot.*;
+import org.graalvm.webimage.api.JS;
+import org.graalvm.webimage.api.JSString;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.function.Function;
+
+/**
+ * Browser entry point. Installs three globals:
+ *   runMezze(src)    -> program output, or a one-line diagnostic
+ *   formatMezze(src) -> formatted source
+ *
+ * @JS.Export is not implemented in Web Image, so globals are installed by
+ * assigning a Java lambda onto globalThis. Strings must cross as JSString.
+ */
+public final class MezzeWeb {
+
+    @JS(args = {"fn"}, value = "globalThis.runMezze = (src) => fn(src);")
+    private static native void installRun(Function<JSString, JSString> fn);
+
+    // src \u0000 cols — same NUL convention as typeAt, so the native signature
+    // stays single-argument. cols is optional and defaults to the CLI width.
+    @JS(args = {"fn"}, value = "globalThis.formatMezze = (src, cols) => fn(src + '\\u0000' + (cols || 0));")
+    private static native void installFmt(Function<JSString, JSString> fn);
+
+    @JS(args = {"fn"}, value = "globalThis.checkMezze = (src) => JSON.parse(fn(src));")
+    private static native void installCheck(Function<JSString, JSString> fn);
+
+    // line/col are 1-based, matching Loc.
+    @JS(args = {"fn"}, value = "globalThis.typeAt = (src, line, col) => fn(src + '\\u0000' + line + '\\u0000' + col);")
+    private static native void installTypeAt(Function<JSString, JSString> fn);
+
+    public static String run(String source) {
+        // Empty or main-less input crashes deep in the pipeline
+        // (ArrayIndexOutOfBounds / "crash: Unhandled exception") because there
+        // is no entry function to compile. Catch it here with a useful message.
+        if (source == null || source.isBlank()) return "(nothing to run)";
+        if (!source.contains("let main")) {
+            return "No `main` to run.\n"
+                 + "  Define an entry point, for example:\n"
+                 + "      let main = {} -> 1";
+        }
+        PrintStream saved = System.out;
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        try {
+            System.setOut(new PrintStream(buf, true, StandardCharsets.UTF_8));
+            try {
+                ParsedModule m = new MezzeParser().parseParsedModule(source, "/tmp/playground.mz");
+                TypeChecker.TypeCheckResult r =
+                    new TypeChecker().checkParsedModule(m, Path.of("/tmp"), null, true);
+                if (!(r instanceof TypeChecker.TypeCheckResult.Success s)) {
+                    return "TYPE ERROR: " + firstMessage(String.valueOf(r));
+                }
+                List<FunctionIR> fns = s.getLoweredFunctions();
+                MezzeLanguage.setFunctionsForDirectExecution(
+                    fns, s.getLoweredPerformers(), Path.of("/tmp"), "main");
+                try (Context ctx = Context.newBuilder(MezzeLanguage.ID).allowAllAccess(true).build()) {
+                    ctx.eval(Source.newBuilder(MezzeLanguage.ID, "# playground", "__pg__.mz")
+                             .buildLiteral());
+                }
+            } finally {
+                System.setOut(saved);
+            }
+            String out = buf.toString(StandardCharsets.UTF_8);
+            return out.isEmpty() ? "(no output)" : out;
+        } catch (Throwable t) {
+            System.setOut(saved);
+            String captured = buf.toString(StandardCharsets.UTF_8);
+            String prefix = captured.isEmpty() ? "" : captured + "\n";
+            String performer = unsupportedPerformer(t);
+            if (performer != null) {
+                return prefix
+                     + "Not supported in the browser: " + performer + "\n"
+                     + "  This program typechecks correctly — run it with `mez` to execute it.";
+            }
+            return prefix + "ERROR: " + String.valueOf(t.getMessage()).split("\n")[0];
+        }
+    }
+
+    /**
+     * Typecheck only — no execution. Returns the same JSON envelope as
+     * `mez check --json`: severity, stable error code, location, hints and
+     * fixHints. Cheap enough to run on every keystroke for squiggles.
+     */
+    public static String check(String source) {
+        if (source == null || source.isBlank()) {
+            return "{\"status\":\"ok\",\"summary\":{\"errors\":0,\"warnings\":0},\"diagnostics\":[]}";
+        }
+        try {
+            ParsedModule m = new MezzeParser().parseParsedModule(source, "/tmp/playground.mz");
+            TypeChecker.TypeCheckResult r =
+                new TypeChecker().checkParsedModule(m, Path.of("/tmp"), null, true);
+            if (r instanceof TypeChecker.TypeCheckResult.Success s) {
+                return JsonDiagnosticFormatter.INSTANCE.render(
+                    // Pass the typed module so `bindings` is populated:
+                    // name + inferred type + location, which drives hover.
+                    JsonDiagnosticFormatter.INSTANCE.ok(
+                        "playground.mz", null, s.getTypedModule(), s.getWarnings()));
+            }
+            java.util.List<DiagnosticJson> diags = new java.util.ArrayList<>();
+            java.util.List<String> pretty = new java.util.ArrayList<>();
+            if (r instanceof TypeChecker.TypeCheckResult.Failure f) {
+                for (TypeChecker.TypeCheckError e : f.getErrors()) {
+                    diags.add(JsonDiagnosticFormatter.INSTANCE.fromTypeCheckError(e));
+                    // The CLI-s own rendering, reused rather than reimplemented:
+                    // error code, --> location, source snippet with a caret,
+                    // hints and notes. colorize=false: the pane is plain text
+                    // and colours itself by severity.
+                    // The parser is handed /tmp/playground.mz so module
+                    // resolution has a real path; strip it back to the bare
+                    // name the reader typed into.
+                    pretty.add(ErrorFormatter.INSTANCE.format(e, source, false)
+                        .replace("/tmp/playground.mz", "playground.mz"));
+                }
+            }
+            return withPretty(
+                JsonDiagnosticFormatter.INSTANCE.render(
+                    JsonDiagnosticFormatter.INSTANCE.errors("playground.mz", null, diags)),
+                pretty);
+        } catch (Throwable t) {
+            if (t instanceof ParseException pe) {
+                DiagnosticJson dj = JsonDiagnosticFormatter.INSTANCE.fromParseException(pe);
+                return withPretty(
+                    JsonDiagnosticFormatter.INSTANCE.render(
+                        JsonDiagnosticFormatter.INSTANCE.errors("playground.mz", null,
+                            java.util.List.of(dj))),
+                    java.util.List.of(
+                        ParseErrorFormatter.INSTANCE.format(pe)
+                            .replace("/tmp/playground.mz", "playground.mz")));
+            }
+            return "{\"status\":\"ERRORS\",\"diagnostics\":[{\"severity\":\"ERROR\",\"message\":"
+                 + jsonStr(String.valueOf(t.getMessage())) + "}]}";
+        }
+    }
+
+    /**
+     * Splice a "pretty" array of CLI-rendered errors into the check envelope.
+     *
+     * Appended as a sibling of "diagnostics" rather than a field inside each
+     * one, so the structured JSON stays byte-identical to `mez check --json`.
+     * Index i of "pretty" corresponds to index i of "diagnostics".
+     */
+    private static String withPretty(String jsonEnvelope, java.util.List<String> pretty) {
+        if (pretty.isEmpty()) return jsonEnvelope;
+        int close = jsonEnvelope.lastIndexOf('}');
+        if (close < 0) return jsonEnvelope;
+        StringBuilder sb = new StringBuilder(jsonEnvelope.substring(0, close));
+        sb.append(",\"pretty\":[");
+        for (int i = 0; i < pretty.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(jsonText(pretty.get(i)));
+        }
+        return sb.append("]}").toString();
+    }
+
+
+    /** JSON string escaper that preserves newlines — snippets are multi-line. */
+    private static String jsonText(String s) {
+        StringBuilder sb = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"'  -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 32) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+                }
+            }
+        }
+        return sb.append("\"").toString();
+    }
+
+    private static String jsonStr(String s) {
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ") + "\"";
+    }
+
+    /**
+     * Type at a cursor position — real hover, covering locals, parameters and
+     * subexpressions, not just top-level bindings.
+     *
+     * Reuses TypedAstLookup, the same utility the LSP's hover uses: it walks the
+     * TypedAST for the innermost node whose Loc contains (line, col).
+     * Returns "name : Type", or "" when nothing resolves there.
+     */
+    public static String typeAt(String source, int line, int col) {
+        if (source == null || source.isBlank()) return "";
+        try {
+            ParsedModule m = new MezzeParser().parseParsedModule(source, "/tmp/playground.mz");
+            TypeChecker tc = new TypeChecker();
+            TypeChecker.TypeCheckResult r = tc.checkParsedModule(m, Path.of("/tmp"), null, true);
+
+            // Both outcomes carry a typed module, so hover keeps working on
+            // code that does not currently typecheck — which is exactly when a
+            // reader is most likely to be hovering.
+            com.mezze.language.typechecker.TypeCheckResult hoverResult =
+                TypeCheckOutputKt.toHoverResult(r);
+
+            HoverInfo.Context ctx = new HoverInfo.Context(
+                source,
+                hoverResult,
+                tc.getTypeAliases(),
+                m,
+                hoverResult,   // lastSuccessful: single-shot, so the same result
+                null,          // selfUri: no document to link back to
+                null,          // resolveFileUri: nothing on disk in a browser
+                null,          // docFromStore: no project store
+                null);         // storeAbilityDecls: likewise
+
+            // HoverInfo is 0-based (LSP Position); typeAt is called with the
+            // 1-based Loc convention the editor uses.
+            String md = HoverInfo.INSTANCE.at(ctx, line - 1, col - 1);
+            return md == null ? "" : md;
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * Format, wrapping to the width the reader actually has.
+     *
+     * The CLI formatter is fixed at 100 columns by design, and stays that way.
+     * In a browser the editor pane can be much narrower or wider than that, so
+     * the playground measures its own width and passes it here. Only where
+     * lines break changes; every other style rule is the same.
+     *
+     * @param cols target line width; 0 or less keeps the standard 100.
+     */
+    public static String format(String source, int cols) {
+        try {
+            Formatter f = cols > 0
+                ? new Formatter(new WidthOverride(cols))
+                : new Formatter();
+            return f.format(source, null);
+        } catch (Throwable t) {
+            return source;   // unparseable: leave the user's text alone
+        }
+    }
+
+    /**
+     * Walk the cause chain for BrowserNatives.UnsupportedEffect. Polyglot wraps
+     * host exceptions, so the throwable we see is rarely the one thrown; and in
+     * a WASM build the wrapper may only carry the message.
+     */
+    private static String unsupportedPerformer(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (c instanceof BrowserNatives.UnsupportedEffect u) return u.performer;
+            String m = c.getMessage();
+            if (m != null && m.contains("UnsupportedEffect")) {
+                int i = m.lastIndexOf(':');
+                if (i >= 0 && i + 1 < m.length()) return m.substring(i + 1).trim();
+            }
+        }
+        return null;
+    }
+
+    /** The Failure toString is enormous; pull out just the diagnostic. */
+    private static String firstMessage(String s) {
+        int i = s.indexOf("message=");
+        if (i < 0) return s.length() > 300 ? s.substring(0, 300) : s;
+        int end = s.indexOf(", loc=", i);
+        return end > 0 ? s.substring(i + 8, end) : s.substring(i + 8, Math.min(i + 308, s.length()));
+    }
+
+    public static void main(String[] args) {
+        System.setProperty("polyglot.engine.allowUnsupportedPlatform", "true");
+        System.setProperty("polyglot.engine.WarnInterpreterOnly", "false");
+        System.setProperty("polyglot.engine.userResourceCache", "/tmp/tcache");
+        BrowserOverrides.install();
+        // Warm the stdlib so the first user call is fast (~750ms -> ~110ms),
+        // and smoke-test the whole pipeline on the way up.
+        run("use std::effects::log::{ Console, println }\n"
+          + "let main = {} -> perform Console in println { msg = \"Hello, Mezze!\" }\n");
+        installRun(js -> JSString.of(run(js.asString())));
+        installFmt(js -> {
+            // src \u0000 cols — same convention as typeAt.
+            String[] parts = js.asString().split("\u0000", -1);
+            String src = parts[0];
+            int cols = 0;
+            if (parts.length > 1) {
+                try { cols = Integer.parseInt(parts[1]); }
+                catch (NumberFormatException e) { cols = 0; }
+            }
+            return JSString.of(format(src, cols));
+        });
+        installCheck(js -> JSString.of(check(js.asString())));
+        installTypeAt(js -> {
+            // src \u0000 line \u0000 col — avoids a multi-arg native signature.
+            String[] parts = js.asString().split("\u0000", -1);
+            if (parts.length != 3) return JSString.of("");
+            try {
+                return JSString.of(typeAt(parts[0],
+                    Integer.parseInt(parts[1]), Integer.parseInt(parts[2])));
+            } catch (NumberFormatException e) { return JSString.of(""); }
+        });
+        System.out.println("mezze-wasm ready: runMezze(src), formatMezze(src)");
+    }
+}

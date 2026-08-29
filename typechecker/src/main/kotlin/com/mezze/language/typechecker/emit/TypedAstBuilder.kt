@@ -618,9 +618,23 @@ class TypedAstBuilder(
                     }
                 }
 
-                val fieldTypes = entries
-                    .filterIsInstance<TypedRecordEntry.Field>()
-                    .associate { it.name to it.value.type }
+                // Spread first, then explicit fields — `{ ...base, x = 1 }` starts
+                // from base's fields and overrides x, so a later explicit entry
+                // must win. Taking only the Field entries (as this did) recorded
+                // `{ x: Int }` for `{ ...point, x = 10 }`, dropping every field
+                // the spread contributed. Constraint generation had it right, so
+                // the program still typechecked and only the TypedAST was wrong —
+                // which is what hover, inlay hints and go-to-definition read.
+                val fieldTypes = LinkedHashMap<String, MezzeType>()
+                for (e in entries) {
+                    when (e) {
+                        is TypedRecordEntry.Spread -> {
+                            val spread = substitution.apply(e.expr.type)
+                            if (spread is MezzeType.RecordType) fieldTypes.putAll(spread.fields)
+                        }
+                        is TypedRecordEntry.Field -> fieldTypes[e.name] = e.value.type
+                    }
+                }
                 val recordType = labelRecordWithAlias(MezzeType.RecordType(fieldTypes))
 
                 TypedRecord(entries, recordType, loc)

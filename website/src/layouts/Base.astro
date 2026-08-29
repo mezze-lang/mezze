@@ -1,0 +1,266 @@
+---
+/**
+ * The one layout. Every page gets the same header and footer from here —
+ * pages never render their own chrome, so it cannot drift between them.
+ *
+ *   width="page"  (default) centred column, for normal content
+ *   width="full"  edge-to-edge, for app-like pages such as the tour
+ */
+import '../styles/main.css'
+import SiteHeader from '../components/SiteHeader.astro'
+import { subscribe } from '../data/content'
+import { dishes } from '../data/dishes'
+
+interface Props {
+  title: string
+  description?: string
+  width?: 'page' | 'full'
+}
+
+const {
+  title,
+  description = 'Mezze — a functional language where effects are part of the type.',
+  width = 'page',
+} = Astro.props
+
+// The pre-paint script cannot use imports, so the icon paths are baked in
+// here rather than duplicated by hand.
+const iconList = dishes.map((d) => d.icon)
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
+    <link rel="icon" type="image/png" href={dishes[0].icon} data-favicon />
+    <script is:inline define:vars={{ iconList }}>
+      // Both of these run before first paint, so the page never shows one
+      // state and then corrects itself.
+      const root = document.documentElement
+
+      const t = localStorage.getItem('mezze-theme')
+      if (t === 'dark' || t === 'light') root.dataset.theme = t
+
+      // The markup ships dish 0; without this the saved dish only takes effect
+      // after hydration, so the first frame is always olive.
+      const saved = Number(sessionStorage.getItem('mezze-dish'))
+      if (saved > 0) {
+        root.dataset.dish = String(saved)
+        // The tab icon ships as dish 0 too; correct it in the same breath.
+        const icons = iconList
+        const fav = document.querySelector('[data-favicon]')
+        if (fav && icons[saved]) fav.href = icons[saved]
+      }
+    </script>
+  </head>
+  <body>
+    <!-- Our own scrollbar. The browser's is hidden because Firefox's reserves
+         layout space and reflows the page when shown; this is fixed-position,
+         so it overlays. aria-hidden: it is decorative, and the real scroll
+         position is already exposed by the page itself. -->
+    <div class="scrollbar" aria-hidden="true"></div>
+    <SiteHeader />
+    <main class:list={['site-main', `is-${width}`]}><slot /></main>
+
+    <style is:global>
+      *, *::before, *::after { box-sizing: border-box; }
+
+      /* The page scrollbar is hidden and replaced with one we draw ourselves.
+         Firefox's own bar cannot overlay: any scrollbar-width other than
+         `none` reserves layout space, so revealing it on scroll reflowed the
+         whole page sideways. (`thin` only made it narrower; a transparent
+         scrollbar-color does not remove the track either.)
+         So it stays off in both engines, and .scrollbar below — a fixed
+         element, outside flow — is shown while a scroll is in flight. */
+      html { scrollbar-width: none; }
+      html::-webkit-scrollbar { width: 0; height: 0; }
+
+      .scrollbar {
+        position: fixed;
+        top: 0; right: 2px;
+        width: 6px;
+        border-radius: 3px;
+        background: color-mix(in srgb, var(--soft) 45%, transparent);
+        /* Positioned by the script; opacity is the only thing animated, so
+           showing it never touches layout. */
+        opacity: 0;
+        transition: opacity .25s;
+        pointer-events: none;
+        z-index: 60;
+      }
+      html.is-scrolling .scrollbar { opacity: 1; }
+      @media (prefers-reduced-motion: reduce) {
+        .scrollbar { transition: none; }
+      }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        background: var(--ground);
+        color: var(--ink);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 16px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .site-main { flex: 1 1 auto; min-height: 0; }
+      .site-main.is-page {
+        max-width: var(--page-w);
+        margin: 0 auto;
+        padding: 0 var(--page-pad);
+        width: 100%;
+      }
+      .site-main.is-full { padding-inline: var(--page-pad); max-width: 100%; overflow-x: hidden; }
+
+      h1, h2, h3 { letter-spacing: -.02em; text-wrap: balance; }
+      a { color: var(--primary); }
+      code, pre, textarea { font-feature-settings: var(--mono-features); }
+      code { font-family: var(--mono); font-size: .9em; }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { transition: none !important; animation: none !important; }
+      }
+    </style>
+
+    <script>
+      import { dishes } from '../data/dishes'
+
+      const KEY = 'mezze-dish'
+      const root = document.documentElement
+
+      /** Paint one dish: primary colour everywhere, matching icon shown. */
+      function show(i: number) {
+        const d = dishes[i]
+        root.style.setProperty('--primary', d.primary)
+        root.style.setProperty('--on-primary', d.onPrimary)
+        const imgs = document.querySelectorAll<HTMLImageElement>('[data-mascot] img')
+        imgs.forEach((img) => {
+          img.classList.toggle('on', img.dataset.dish === d.key)
+        })
+        const fav = document.querySelector<HTMLLinkElement>('[data-favicon]')
+        if (fav) fav.href = d.icon
+        sessionStorage.setItem(KEY, String(i))
+        // Let a page follow the dish — the landing page pairs each one with
+        // its own code sample.
+        document.dispatchEvent(new CustomEvent('mezze-dish', { detail: { index: i, key: d.key } }))
+      }
+
+      // Fixed order: a fresh visit starts at the first dish and clicking
+      // advances through the list. The position survives navigation within
+      // a visit, so the site does not flip colour on every page change.
+      const saved = sessionStorage.getItem(KEY)
+      let current = saved === null ? 0 : Number(saved) % dishes.length
+      show(current)
+
+      // Hand off from the pre-paint CSS to the inline styles show() just set,
+      // then allow the cross-fade — so the first frame is correct and only
+      // later clicks animate.
+      root.removeAttribute('data-dish')
+      requestAnimationFrame(() => {
+        document.querySelectorAll('[data-mascot]').forEach((el) => el.classList.add('is-live'))
+      })
+
+      // The tour sizes itself to the viewport minus the header. The header is
+      // content-driven, so measure it rather than hardcoding a guess.
+      const bar = document.querySelector('.site-bar')
+      if (bar) {
+        const publish = () =>
+          root.style.setProperty('--bar-h', bar.getBoundingClientRect().height + 'px')
+        publish()
+        new ResizeObserver(publish).observe(bar)
+      }
+
+      document.querySelectorAll('[data-mascot]:not(.is-static)').forEach((el) =>
+        el.addEventListener('click', () => {
+          current = (current + 1) % dishes.length
+          show(current)
+        }),
+      )
+
+      /**
+       * Show the page scrollbar only while scrolling.
+       *
+       * CSS hides it outright (see the style block above); this puts it back
+       * for as long as a scroll is in flight, then takes it away again a beat
+       * after it stops. passive, because the handler never calls
+       * preventDefault and a non-passive scroll listener blocks the browser's
+       * own scrolling on touch.
+       */
+      /**
+       * Draw the page scrollbar ourselves, shown only while scrolling.
+       *
+       * The browser's own is hidden in CSS. Firefox reserves layout space for
+       * a scrollbar at any scrollbar-width except `none`, so revealing its
+       * bar on scroll shifted the whole page sideways; this one is
+       * fixed-position and cannot. The trade is that it is not draggable —
+       * on Firefox you can have overlay or draggable, not both.
+       */
+      const thumb = document.querySelector<HTMLElement>('.scrollbar')
+      if (thumb) {
+        /** Gap above and below the thumb, matching the 2px it sits in from the right. */
+        const INSET = 4
+        /** Shortest the thumb is allowed to get, so it stays visible on a long page. */
+        const MIN_HEIGHT = 32
+        /** How long after scrolling stops before it fades out. */
+        const LINGER_MS = 700
+
+        let idle: number | undefined
+        let queued = false
+
+        const draw = () => {
+          queued = false
+          const view = innerHeight
+          const total = document.documentElement.scrollHeight
+          const scrollable = total - view
+
+          // Nothing to scroll: no thumb. Also guards the division below.
+          if (scrollable <= 0) {
+            thumb.style.height = '0px'
+            return
+          }
+
+          const track = view - INSET * 2
+          const height = Math.max(MIN_HEIGHT, (view / total) * track)
+          const y = (scrollY / scrollable) * (track - height)
+          thumb.style.height = height + 'px'
+          thumb.style.transform = `translateY(${INSET + y}px)`
+        }
+
+        // Scroll fires far more often than the screen repaints, so coalesce to
+        // one measurement per frame — reading scrollHeight forces layout.
+        const schedule = () => {
+          if (queued) return
+          queued = true
+          requestAnimationFrame(draw)
+        }
+
+        draw()
+        addEventListener(
+          'scroll',
+          () => {
+            root.classList.add('is-scrolling')
+            schedule()
+            clearTimeout(idle)
+            idle = window.setTimeout(() => root.classList.remove('is-scrolling'), LINGER_MS)
+          },
+          { passive: true },
+        )
+        addEventListener('resize', schedule, { passive: true })
+      }
+    </script>
+    {subscribe.formId && (
+      <script
+        async
+        is:inline
+        src={`https://eocampaign1.com/form/${subscribe.formId}.js`}
+        data-form={subscribe.formId}
+      ></script>
+    )}
+  </body>
+</html>

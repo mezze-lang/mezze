@@ -1,0 +1,25 @@
+# Cloudflare Pages reads this file.
+#
+# The wasm runtime is ~55MB (about 16MB gzipped). It is the single largest cost
+# on the site, so it must be cached hard and revalidated never — a new build
+# ships a new filename if the contents change.
+
+/wasm/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Astro fingerprints these, so they are safe to cache forever too.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Short, with revalidation: these live in public/ so Astro never fingerprints
+# them, which means a redesigned icon keeps its old URL and cannot displace a
+# cached copy. A week of immutability meant new artwork simply did not appear.
+# must-revalidate keeps the bytes cached but forces a conditional request, so a
+# changed file is picked up on the next visit at the cost of one 304.
+# Vendored and versioned by filename — a new cut of the font would be a new
+# file, so these can be cached hard.
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/icons/*
+  Cache-Control: public, max-age=3600, must-revalidate

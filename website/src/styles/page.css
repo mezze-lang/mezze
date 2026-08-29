@@ -1,0 +1,199 @@
+/* ===========================================================================
+   Landing page — ported from the approved design.
+   Kept in this plain stylesheet (not scoped <style> blocks) because Astro's
+   scoped-style compiler silently dropped several of these rules.
+   =========================================================================== */
+
+.page { padding-block: 1rem 3rem; }
+
+
+.page .hero {
+  display: grid;
+  /* Same 2fr 1fr / 2rem as .play-wrap below, so the mascot centres over the
+     aside column rather than hugging the right edge above a narrower one. */
+  grid-template-columns: 2fr 1fr; align-items: center;
+  gap: 2rem; padding: 2.6rem 0 1.8rem;
+}
+/* Desktop only: the mobile grid re-places this with justify-self: end. */
+@media (min-width: 761px) {
+  .page .hero-mascot { justify-self: center; }
+}
+.page .hero h1 {
+  margin: 0 0 1rem; font-size: clamp(1.9rem, 3.8vw, 2.6rem);
+  line-height: 1.2; font-weight: 800; letter-spacing: -.025em;
+}
+.page .lede { margin: 0 0 1.3rem; font-size: 1.02rem; color: var(--soft); max-width: 38rem; }
+.page .cta { display: flex; flex-wrap: wrap; gap: .55rem; }
+.page .micro { margin: .5rem 0 0; font-size: .8rem; color: var(--soft); }
+.page .micro a { color: var(--primary); }
+
+.page .tags { display: flex; flex-wrap: wrap; gap: .35rem; padding: 0 0 1.4rem; }
+
+.page .play { padding: 0 0 1.5rem; }
+.page .play > * { border-inline: 1px solid var(--rule); }
+.page .playbar {
+  /* wraps: four tabs plus Run do not fit on a phone in one row */
+  display: flex; flex-wrap: wrap; align-items: center; gap: .6rem;
+  padding: .5rem .6rem; border-radius: var(--r-md) var(--r-md) 0 0;
+  background: transparent; border-top: 1px solid var(--rule);
+}
+.page .tabs { display: flex; flex-wrap: wrap; gap: .25rem; }
+.page .tab {
+  font: inherit; font-family: var(--mono); font-size: .71rem;
+  padding: .28rem .7rem; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--soft); cursor: pointer;
+}
+.page .tab.on { background: var(--raised); color: var(--ink); }
+.page .run {
+  margin-left: auto; font: inherit; font-family: var(--mono);
+  font-size: .71rem; padding: .28rem .8rem; border: 0; border-radius: var(--r-sm);
+  background: var(--primary); color: var(--on-primary); cursor: pointer;
+}
+.page .run:disabled { opacity: .5; cursor: default; }
+.page .code {
+  margin: 0; padding: 1.1rem 1.2rem; overflow-x: auto; background: transparent;
+  border-top: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: .79rem; line-height: 1.72;
+}
+.page .out {
+  padding: .7rem 1.2rem; background: transparent;
+  border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+  font-family: var(--mono); font-size: .74rem;
+  border-radius: 0 0 var(--r-md) var(--r-md);
+  display: flex; align-items: center; gap: .5rem; color: var(--soft);
+}
+.page .out .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--olive); flex: none; }
+
+.page .feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1.6rem 2.6rem; padding: .2rem 0 1.4rem; }
+.page .feats h3 { margin: 0 0 .28rem; font-size: 1rem; font-weight: 700; }
+.page .feats p { margin: 0; font-size: .85rem; color: var(--soft); }
+
+.page .states { display: flex; flex-wrap: wrap; gap: .45rem; padding: 0 0 1.5rem; }
+.page .st { font-family: var(--mono); font-size: .71rem; padding: .26rem .7rem; border-radius: var(--r-pill); }
+.page .st.ok { background: var(--ok-bg); color: var(--ok); }
+.page .st.err { background: var(--err-bg); color: var(--err); }
+.page .st.warn { background: var(--warn-bg); color: var(--warn); }
+.page .st.info { background: var(--info-bg); color: var(--info); }
+.page .st.note { background: var(--note-bg); color: var(--note); }
+.page .st.dbg  { background: var(--dbg-bg);  color: var(--dbg); }
+
+
+
+@media (max-width: 820px) {
+  /* Headline spans the full width; the lede and the mascot share the row
+     below it, mascot on the right. Kept, not hidden: it is the dish switcher,
+     and the header one is decorative. */
+  .page .hero {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "head head" "lede mascot" "cta cta" "micro micro";
+    align-items: center; gap: .5rem .9rem;
+    /* Deeper bottom padding than the desktop 1.8rem looks like it needs: on a
+       phone the sections stack, so this is the only thing separating the hero
+       footnote from the section below it. */
+    padding: 1.6rem 0 2.4rem;
+  }
+  .page .hero > div:first-child { display: contents; }
+  .page .hero h1 { grid-area: head; }
+  .page .hero .lede { grid-area: lede; margin: 0; max-width: none; }
+  .page .hero .cta { grid-area: cta; margin-top: .3rem; }
+  .page .hero .micro { grid-area: micro; margin-top: -.1rem; }
+  .page .hero-mascot { grid-area: mascot; justify-self: end; }
+  .page .hero-mascot .mascot { width: 84px; height: 84px; }
+  .page .feats { grid-template-columns: 1fr; gap: 1.4rem; }
+}
+
+@media (max-width: 480px) {
+  .page .hero-mascot .mascot { width: 68px; height: 68px; }
+  .page .code { font-size: .72rem; padding: .9rem 1rem; }
+  .page .playbar { padding: .5rem .5rem; }
+  .page .tab { padding: .28rem .55rem; }
+}
+
+/* buttons */
+.btn {
+  display: inline-block; font-size: .85rem; padding: .55rem 1.2rem;
+  border-radius: var(--r-pill); text-decoration: none;
+  border: 1px solid transparent; transition: background .12s, border-color .12s, color .12s;
+}
+.btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.btn-primary { background: var(--primary); color: var(--on-primary); }
+.btn-primary:hover { background: color-mix(in srgb, var(--primary) 86%, #000); }
+.btn-ghost { border-color: var(--rule); color: var(--ink); }
+.btn-ghost:hover { border-color: var(--primary); color: var(--primary); }
+
+/* --- playground + side copy --------------------------------------------- */
+.page .play-wrap {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 2rem;
+  align-items: start;
+  /* min-width:0 or a long code line widens the whole grid. */
+  min-width: 0;
+}
+.page .play-wrap > * { min-width: 0; }
+.page .play-aside { padding-top: 0; }
+.page .play-aside h2 {
+  margin: 0 0 .5rem; font-size: 1.6rem; font-weight: 800;
+  letter-spacing: -.02em; color: var(--primary);
+  /* Tight leading, then pull up by the half-leading that remains. Inheriting
+     the body line-height put ~6px of space above the cap, which read as the
+     heading sitting lower than the toolbar it should align with. */
+  line-height: 1.1;
+  margin-top: -.18rem;
+}
+.page .play-lede { margin: 0 0 .9rem; font-size: .95rem; color: var(--soft); }
+.page .play-note {
+  margin: 0; padding-top: .8rem; font-size: .88rem; color: var(--soft);
+  border-top: 1px solid var(--rule);
+}
+
+@media (max-width: 900px) {
+  /* Stacked, the three parts want a different order than the two-column
+     layout gives them. Side by side the aside reads as one block beside the
+     sample; stacked, its last paragraph describes the sample specifically, so
+     it belongs under it:
+
+       Mezze + summary
+       code sample
+       what this sample shows
+
+     Done with grid placement rather than by moving anything in the markup, so
+     the desktop layout and the DOM order stay exactly as they are — the note
+     still follows the copy it belongs with for a screen reader.
+     A wider gap than the desktop 2rem column gap translates to, because
+     stacked there is nothing beside the text to read as a boundary. */
+  .page .play-wrap {
+    grid-template-columns: 1fr;
+    grid-template-areas: "head" "lede" "sample" "note";
+    /* Row gap only between the blocks; the heading and its summary belong
+       together, so that pair closes up below. */
+    gap: 1.6rem;
+  }
+  /* display: contents so the aside's children place themselves into the grid
+     individually; the aside itself lays out nothing. */
+  .page .play-aside { display: contents; }
+  .page .play-aside h2 { grid-area: head; font-size: 1.3rem; margin: 0; }
+  /* Pulled up against the heading: the 1.6rem row gap is meant to separate the
+     three blocks, not to split a heading from the sentence under it. */
+  .page .play-lede { grid-area: lede; margin: -1.1rem 0 0; }
+  .page .play-note {
+    grid-area: note;
+    /* The rule moves below: above the description it separated the sample from
+       its own caption, which are the two things that belong together here. Under
+       it, it closes the section off. */
+    /* The rule belongs to the caption above it, so it sits close — and the air
+       goes below, where the next section starts. It was the other way round:
+       1.4rem above and only the .feats 0.2rem below, so the rule floated clear
+       of the text it closes and nearly touched what follows. */
+    padding: 0 0 .7rem;
+    margin-bottom: 1rem;
+    border-top: none;
+    border-bottom: 1px solid var(--rule);
+    /* Pulled up against the sample it describes. The row gap has to stay wide
+       enough for the copy blocks above, and .play adds 1.5rem of its own bottom
+       padding, so without this the caption floats ~3rem clear of the code. */
+    margin-top: -1.9rem;
+  }
+  .page .play { grid-area: sample; }
+}

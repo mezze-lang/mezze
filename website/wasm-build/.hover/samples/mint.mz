@@ -1,0 +1,15 @@
+use std::effects::async::{ Async, LoomAsync }
+use std::effects::log::{ Console, println }
+use std::result::{ get_or_else }
+
+# Two requests at once, not one after the other.
+let fetch = { url } -> do
+  println { msg = "GET $(url)" }
+  url
+
+let main = {} -> perform Console in perform LoomAsync in do
+  let a = Async.spawn { f = {} -> fetch { url = "/users" } }
+  let b = Async.spawn { f = {} -> fetch { url = "/orders" } }
+
+  println { msg = get_or_else { result = a.await {}, def = "?" } }
+  println { msg = get_or_else { result = b.await {}, def = "?" } }

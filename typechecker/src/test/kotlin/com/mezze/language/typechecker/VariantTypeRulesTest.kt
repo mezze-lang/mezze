@@ -480,7 +480,7 @@ class VariantTypeRulesTest {
 
             let x: Color = Cat
         """.trimIndent()
-        assertTypeCheckFails(code, "Cat")
+        assertTypeCheckFails(code, "Animal")
     }
 
     @Test
@@ -492,7 +492,7 @@ class VariantTypeRulesTest {
 
             let x: Color = Cat
         """.trimIndent()
-        assertTypeCheckFails(code, "Cat")
+        assertTypeCheckFails(code, "Animal")
     }
 
     @Test

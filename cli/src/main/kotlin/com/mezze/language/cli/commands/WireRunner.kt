@@ -1,5 +1,6 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.language.typechecker.printing.ParseErrorFormatter
 import com.mezze.wire.Bye
 import com.mezze.wire.Evict
 import com.mezze.wire.Exited

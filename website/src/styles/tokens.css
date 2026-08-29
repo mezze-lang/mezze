@@ -1,0 +1,197 @@
+/* ===========================================================================
+   Mezze design tokens
+   ---------------------------------------------------------------------------
+   Every colour is named for a dish. Change a value here and the whole site
+   follows — nothing else in the codebase should hard-code a hex.
+
+   Light is the default, for everyone, including a fresh private window.
+     :root                 -> light
+     [data-theme="dark"]   -> dark, and only when the reader asks for it
+
+   prefers-color-scheme is deliberately NOT consulted: following the OS meant
+   a first visit on a dark-mode machine never saw the light design at all.
+   =========================================================================== */
+
+/* JetBrains Mono, vendored (OFL — see public/fonts/OFL.txt).
+   Two weights only: 400 for code, 700 for the keywords and constructors the
+   syntax highlighter emphasises. swap, so the samples are readable in the
+   system font while ~90KB downloads. */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* --- the dish palette (same hue in both themes) --------------------- */
+  --olive:      #5E7A2E;
+  --aubergine:  #7A4E9E;
+  --tomato:     #D6453C;
+  --lemon:      #F2C230;
+  --onion:      #E8608F;
+  --mint:       #5FA8A0;
+  /* --- primary: swap this one line to re-skin the site ---------------- */
+  --primary:      var(--olive);
+  --on-primary:   #FFFEFA;
+  --primary-soft: color-mix(in srgb, var(--primary) 12%, transparent);
+
+  /* --- surfaces ------------------------------------------------------- */
+  --ground:  #FFFEFA;
+  --surface: #FFFBF0;   /* code blocks, panels */
+  --raised:  #F6EFDE;   /* toolbars, bands */
+  --panel:   #FFFFFF;
+
+  /* --- text ----------------------------------------------------------- */
+  --ink:   #241F19;
+  --soft:  #6E675B;
+  --faint: #A79C8C;
+  --rule:  #EDE6D6;
+
+  /* --- highlighter marks (light, so ink stays readable on top) -------- */
+  --mark-onion: color-mix(in srgb, var(--onion) 38%, #FFF);
+  --mark-lemon: color-mix(in srgb, var(--lemon) 52%, #FFF);
+  --mark-auber: color-mix(in srgb, var(--aubergine) 26%, #FFF);
+  --mark-tomato: color-mix(in srgb, var(--tomato) 30%, #FFF);
+  --mark-mint:  color-mix(in srgb, var(--mint) 34%, #FFF);
+  --mark-olive:  color-mix(in srgb, var(--olive) 38%, #FFF);
+  --squiggle:   var(--lemon);
+
+  /* --- semantic ------------------------------------------------------- */
+  --ok:   color-mix(in srgb, var(--olive) 82%, #000);
+  --err:  color-mix(in srgb, var(--tomato) 78%, #000);
+  --warn: color-mix(in srgb, var(--lemon) 62%, #000);
+  --info: color-mix(in srgb, var(--mint) 76%, #000);
+  --note: color-mix(in srgb, var(--onion) 76%, #000);
+  --dbg:  color-mix(in srgb, var(--aubergine) 84%, #000);
+  --ok-bg:   color-mix(in srgb, var(--olive) 22%, transparent);
+  --err-bg:  color-mix(in srgb, var(--tomato) 14%, transparent);
+  --warn-bg: color-mix(in srgb, var(--lemon) 28%, transparent);
+  --info-bg: color-mix(in srgb, var(--mint) 20%, transparent);
+  --note-bg: color-mix(in srgb, var(--onion) 18%, transparent);
+  --dbg-bg:  color-mix(in srgb, var(--aubergine) 18%, transparent);
+
+  /* --- code syntax ---------------------------------------------------- */
+  --syn-kw:   color-mix(in srgb, var(--aubergine) 88%, #000);
+  --syn-fn:   color-mix(in srgb, var(--mint) 62%, #000);
+  --syn-type: #A85A2B;   /* a warm brown: distinct from tomato and lemon */
+  --syn-str:  color-mix(in srgb, var(--olive) 90%, #000);
+  --syn-com:  var(--faint);
+  --syn-num:  color-mix(in srgb, var(--tomato) 82%, #000);
+  --syn-mark: var(--onion);
+  --syn-tv:     color-mix(in srgb, var(--mint) 55%, #000);
+  --syn-eff:    color-mix(in srgb, var(--onion) 68%, #000);
+  --syn-mth:    color-mix(in srgb, var(--aubergine) 62%, #000);
+  --syn-fld:    var(--ink);
+  --syn-interp: color-mix(in srgb, var(--onion) 68%, #000);
+  --syn-err:    var(--err);
+
+  /* --- shape & motion -------------------------------------------------- */
+  --r-sm: 7px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --page-w: 78rem;
+  /* Scales down on phones: a fixed 2rem is a third of a 375px screen. */
+  --page-pad: clamp(1rem, 4vw, 2rem);
+
+  /* One monospace stack, read by every code surface — editor, samples, hover
+     tips, blog. It was spelled out in six places, which is how the editor's
+     two stacked layers could have drifted apart. */
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Ligatures on: -> becomes an arrow, == and != join up. Safe in the editor
+     because the tokeniser has no rule for operators, so they stay plain text
+     in both the textarea and the highlight layer above it — a span in the
+     middle of -> would break the ligature in one layer only and the two would
+     drift apart. */
+  --mono-features: "calt" 1, "liga" 1;
+  --tour-pad: 1.25rem;
+  --r-pill: 999px;
+  --shadow: 0 1px 2px rgb(36 31 25 / .05), 0 4px 16px rgb(36 31 25 / .04);
+}
+
+
+/* --- explicit dark toggle (wins over a light OS) ---------------------- */
+:root[data-theme="dark"] {
+  --olive:     #8FB56A;
+  --aubergine: #B98FD6;
+  --tomato:    #F0736A;
+  --lemon:     #E8CC5E;
+  --onion:     #F58AAF;
+  --mint:      #7FC9C0;
+  --on-primary: #16130F;
+
+  --ground:  #17140F;
+  --surface: #1E1A14;
+  --raised:  #262119;
+  --panel:   #1B1712;
+
+  --ink:   #F0EBE0;
+  --soft:  #A9A192;
+  --faint: #6E675B;
+  --rule:  #322C22;
+
+  --mark-onion: color-mix(in srgb, var(--onion) 34%, transparent);
+  --mark-lemon: color-mix(in srgb, var(--lemon) 32%, transparent);
+  --mark-auber: color-mix(in srgb, var(--aubergine) 44%, transparent);
+  --mark-tomato: color-mix(in srgb, var(--tomato) 34%, transparent);
+  --mark-mint:  color-mix(in srgb, var(--mint) 34%, transparent);
+  --mark-olive:  color-mix(in srgb, var(--olive) 30%, transparent);
+
+  --ok:   color-mix(in srgb, var(--olive) 70%, #FFF);
+  --err:  color-mix(in srgb, var(--tomato) 74%, #FFF);
+  --warn: color-mix(in srgb, var(--lemon) 84%, #FFF);
+  --info: color-mix(in srgb, var(--mint) 76%, #FFF);
+
+  --note: color-mix(in srgb, var(--onion) 78%, #FFF);
+
+  --dbg:  color-mix(in srgb, var(--aubergine) 72%, #FFF);
+
+  --ok-bg:   color-mix(in srgb, var(--olive) 26%, transparent);
+
+  --err-bg:  color-mix(in srgb, var(--tomato) 24%, transparent);
+
+  --warn-bg: color-mix(in srgb, var(--lemon) 24%, transparent);
+
+  --info-bg: color-mix(in srgb, var(--mint) 24%, transparent);
+
+  --note-bg: color-mix(in srgb, var(--onion) 24%, transparent);
+
+  --dbg-bg:  color-mix(in srgb, var(--aubergine) 28%, transparent);
+
+  --syn-kw:     color-mix(in srgb, var(--aubergine) 82%, #FFF);
+
+  --syn-fn:     color-mix(in srgb, var(--mint) 86%, #FFF);
+
+  --syn-type:   #E0A070;
+
+  --syn-str:    color-mix(in srgb, var(--olive) 72%, #FFF);
+
+  --syn-com:    var(--faint);
+
+  --syn-num:    color-mix(in srgb, var(--tomato) 84%, #FFF);
+
+  --syn-mark:   var(--onion);
+
+  --syn-tv:     color-mix(in srgb, var(--mint) 70%, #FFF);
+
+  --syn-eff:    color-mix(in srgb, var(--onion) 86%, #FFF);
+
+  --syn-mth:    color-mix(in srgb, var(--aubergine) 66%, #FFF);
+
+  --syn-fld:    var(--ink);
+
+  --syn-interp: color-mix(in srgb, var(--onion) 86%, #FFF);
+
+  --syn-err:    var(--err);
+  --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 4px 16px rgb(0 0 0 / .2);
+}
+

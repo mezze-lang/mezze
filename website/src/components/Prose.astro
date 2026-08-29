@@ -1,0 +1,7 @@
+---
+/** Renders copy from src/data, applying the ~mark~ / ~~squiggle~~ / ^TBD^ syntax. */
+import { format } from '../lib/text'
+
+const { text, as: Tag = 'span', class: cls } = Astro.props
+---
+<Tag class={cls} set:html={format(text)} />

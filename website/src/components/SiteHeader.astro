@@ -1,0 +1,28 @@
+---
+import Mascot from './Mascot.astro'
+import ThemeToggle from './ThemeToggle.astro'
+import { site, subscribe } from '../data/content'
+
+// Rendered once, by Base. Pages never include it themselves.
+const path = Astro.url.pathname
+const isCurrent = (href: string) => path === href || path.startsWith(href + '/')
+---
+<header class="site-bar">
+  <div class="site-bar-inner">
+    <a href="/" class="brand"><Mascot size={19} static /><span class="brand-name">{site.name}</span></a>
+    <nav>
+      {site.nav.map((i) => (
+        <a href={i.href} class:list={{ on: isCurrent(i.href) }}
+           aria-current={isCurrent(i.href) ? 'page' : undefined}>{i.label}</a>
+      ))}
+    </nav>
+    <span class="site-bar-actions">
+      {subscribe.formId && (
+        <a class="pill" data-eo-form-toggle-id={subscribe.formId} href="#">
+          {subscribe.cta}
+        </a>
+      )}
+      <ThemeToggle />
+    </span>
+  </div>
+</header>

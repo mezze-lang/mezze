@@ -1,0 +1,37 @@
+/* ===========================================================================
+   Inline formatting produced by src/lib/text.ts
+   Kept in this plain stylesheet (not a scoped <style>) so the classes survive
+   Astro's per-component CSS scoping — they are applied via set:html.
+   =========================================================================== */
+
+mark {
+  background: none;
+  color: inherit;
+  padding: 0 .1em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.mark-onion { background: linear-gradient(transparent 54%, var(--mark-onion) 54%); }
+.mark-lemon { background: linear-gradient(transparent 54%, var(--mark-lemon) 54%); }
+.mark-auber { background: linear-gradient(transparent 54%, var(--mark-auber) 54%); }
+.mark-mint  { background: linear-gradient(transparent 54%, var(--mark-mint) 54%); }
+.mark-olive { background: linear-gradient(transparent 54%, var(--mark-olive) 54%); }
+.mark-tomato{ background: linear-gradient(transparent 54%, var(--mark-tomato) 54%); }
+
+.squiggle { position: relative; display: inline-block; }
+.sq-olive     { --squiggle: var(--olive); }
+.sq-aubergine { --squiggle: var(--aubergine); }
+.sq-tomato    { --squiggle: var(--tomato); }
+.sq-lemon     { --squiggle: var(--lemon); }
+.sq-onion     { --squiggle: var(--onion); }
+.sq-mint      { --squiggle: var(--mint); }
+.squiggle svg {
+  position: absolute;
+  left: 0; right: 0; bottom: -.3em;
+  width: 100%; height: 9px;
+  fill: none;
+  stroke: var(--squiggle);
+  stroke-width: 3.3;
+  stroke-linecap: round;
+  pointer-events: none;
+}

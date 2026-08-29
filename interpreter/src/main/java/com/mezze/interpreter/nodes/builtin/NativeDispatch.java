@@ -58,6 +58,25 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     /**
+     * Replace a native handler after static init. Used by non-JVM builds (the
+     * browser/WASM build) to swap host-touching natives — filesystem, stdin,
+     * process, HTTP — for browser equivalents or for a clear "unsupported"
+     * throw. Returns the previous handler, or null if the name was unbound.
+     *
+     * Call before evaluating user code; handlers are cached per node once hit.
+     */
+    public static NativeHandler overrideHandler(String name, NativeHandler handler) {
+        NativeHandler previous = HANDLERS.get(name);
+        HANDLERS.put(name, handler);
+        return previous;
+    }
+
+    /** Every registered native name — lets a build enumerate what to override. */
+    public static java.util.Set<String> registeredNativeNames() {
+        return java.util.Collections.unmodifiableSet(HANDLERS.keySet());
+    }
+
+    /**
      * Extended handler interface that receives the node for context access.
      * Used by async handlers that need TruffleLanguage.Env for thread creation.
      */

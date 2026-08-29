@@ -1,0 +1,182 @@
+---
+import Base from '../layouts/Base.astro'
+import Mascot from '../components/Mascot.astro'
+import Prose from '../components/Prose.astro'
+import { hero, playground, features } from '../data/content'
+import { highlight } from '../lib/highlight'
+---
+<Base title="Mezze">
+  <div class="shell">
+    <div class="page">
+
+      <section class="hero">
+        <div>
+          <Prose as="h1" text={hero.headline} />
+          <p class="lede">{hero.lede}</p>
+          <div class="cta">
+            <a class="btn btn-primary" href={hero.primaryCta.href}>{hero.primaryCta.label}</a>
+          </div>
+          <p class="micro">{hero.footnote}</p>
+        </div>
+        <div class="hero-mascot"><Mascot size={168} /></div>
+      </section>
+
+      <section class="play-wrap">
+        <section class="play">
+          <div class="playbar">
+            <span class="tabs">
+              {playground.tabs.map((t, i) => (
+                <button class:list={['tab', { on: i === 0 }]} data-idx={i}>{t.label}</button>
+              ))}
+            </span>
+            <button class="run">▶ Run</button>
+          </div>
+          <pre class="code"><code id="panel-code" set:html={highlight(playground.tabs[0].code)} /></pre>
+          <div class="out"><span class="dot"></span><span id="panel-msg">Press Run.</span></div>
+        </section>
+
+        <aside class="play-aside">
+          <h2>Mezze</h2>
+          <p class="play-lede">{playground.aside}</p>
+          <p class="play-note" id="panel-blurb">{playground.tabs[0].blurb}</p>
+        </aside>
+      </section>
+
+      <section class="feats">
+        {features.map((f) => (
+          <article>
+            <Prose as="h3" text={f.title} />
+            <Prose as="p" text={f.body} />
+          </article>
+        ))}
+      </section>
+
+    </div>
+  </div>
+
+  <script>
+    import { playground } from '../data/content'
+    import { highlight } from '../lib/highlight'
+    import { prewarmMezze } from '../scripts/mezze-runtime'
+    import hovers from '../data/hovers.json'
+    import { renderHover } from '../lib/hover'
+    import { hideHoverTip, showHoverTip } from '../scripts/hover-tip'
+
+    // Nothing here needs the runtime — the samples are highlighted at build
+    // time and their output recorded. Fetch it during the first idle moment
+    // anyway, so the tour starts instantly for anyone who goes there next.
+    prewarmMezze()
+
+    // The panel replays each sample's recorded output rather than compiling.
+    // Every one of these was run through the real compiler; the tour is where
+    // code is actually editable and executed.
+    const codeEl = document.getElementById('panel-code') as HTMLElement
+    // The <pre> is the visible box; <code> is only as tall as its text, so a
+    // pointer moving into the panel's padding leaves <code> without firing
+    // mouseleave and the tooltip stayed up over nothing.
+    const paneEl = codeEl.parentElement as HTMLElement
+    const blurbEl = document.getElementById('panel-blurb') as HTMLElement
+    const msgEl = document.getElementById('panel-msg') as HTMLElement
+    const runBtn = document.querySelector('.run') as HTMLButtonElement
+    const tabs = Array.from(document.querySelectorAll('.tab')) as HTMLElement[]
+
+    let current = 0
+    const IDLE = 'Press Run.'
+
+    const select = (i: number) => {
+      current = i
+      // The nodes the tooltip described are about to be replaced, and swapping
+      // samples fires no pointer event — so nothing else would take it down.
+      hideHoverTip()
+      tabs.forEach((t, k) => t.classList.toggle('on', k === i))
+      codeEl.innerHTML = highlight(playground.tabs[i].code)
+      blurbEl.textContent = playground.tabs[i].blurb
+      msgEl.textContent = IDLE
+    }
+
+    tabs.forEach((tab) =>
+      tab.addEventListener('click', () => select(Number(tab.dataset.idx))),
+    )
+
+    // Each dish owns a sample, so clicking the mascot walks the examples with
+    // the colour. Tabs still work on their own — this only follows the mascot.
+    document.addEventListener('mezze-dish', (e) => {
+      const key = (e as CustomEvent).detail?.key
+      const i = playground.tabs.findIndex((t) => t.dish === key)
+      if (i >= 0) select(i)
+    })
+
+    // ---- hover types ------------------------------------------------------
+    // Types were extracted at build time by wasm-build/hovers.sh, using the
+    // same lookup the tour does — so the landing page gets real inferred types
+    // without downloading the runtime.
+    // hovers.json is keyed by dish — the same key hovers.sh writes its
+    // extracted samples under.
+    const TAB_KEYS = playground.tabs.map((t) => t.dish)
+    const hideTip = hideHoverTip
+
+    /**
+     * 1-based (line, col) under the pointer, or null.
+     *
+     * Asks the browser which character is under the cursor rather than doing
+     * the arithmetic: the highlighter wraps tokens in spans and the <pre> has
+     * padding, so measuring from the element box lands on the wrong column.
+     */
+    const posAt = (x: number, y: number): [number, number] | null => {
+      const doc = document as Document & {
+        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+      }
+      const caret = doc.caretPositionFromPoint?.(x, y)
+      if (!caret || !codeEl.contains(caret.offsetNode)) return null
+
+      // Count text before this node to recover the offset into the whole sample.
+      const walker = document.createTreeWalker(codeEl, NodeFilter.SHOW_TEXT)
+      let offset = 0
+      let node: Node | null
+      while ((node = walker.nextNode())) {
+        if (node === caret.offsetNode) {
+          offset += caret.offset
+          break
+        }
+        offset += node.textContent?.length ?? 0
+      }
+      if (!node) return null
+
+      const before = (codeEl.textContent ?? '').slice(0, offset)
+      const line = before.split('\n').length
+      const col = offset - before.lastIndexOf('\n')
+      return [line, col]
+    }
+
+    paneEl.addEventListener('mousemove', (e) => {
+      const p = posAt(e.clientX, e.clientY)
+      if (!p) return hideTip()
+      const map = (hovers as Record<string, Record<string, string>>)[TAB_KEYS[current]]
+      const t = map?.[p[0] + ':' + p[1]]
+      if (!t) return hideTip()
+      // hovers.json holds the compiler's own hover markdown — the same text an
+      // editor shows — so it goes through the same renderer as the tour.
+      showHoverTip(renderHover(t), e.clientX, e.clientY)
+    })
+    paneEl.addEventListener('mouseleave', hideTip)
+    // mouseleave alone strands the tooltip when the window loses focus, the
+    // pointer exits through the window edge, or the reader clicks elsewhere.
+    window.addEventListener('blur', hideTip)
+    document.addEventListener('mouseleave', hideTip)
+    document.addEventListener('pointerdown', (e) => {
+      if (!paneEl.contains(e.target as Node)) hideTip()
+    })
+    // Switching dish replaces the code under the pointer, so whatever the
+    // tooltip is describing no longer exists.
+    window.addEventListener('scroll', hideTip, { passive: true })
+
+    runBtn.disabled = false
+    runBtn.addEventListener('click', () => {
+      msgEl.textContent = 'running…'
+      // A beat of delay so pressing Run feels like it did something.
+      setTimeout(() => {
+        msgEl.textContent = playground.tabs[current].output
+      }, 180)
+    })
+  </script>
+</Base>

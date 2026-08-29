@@ -1,0 +1,6 @@
+node_modules/
+dist/
+
+# Pulumi.<stack>.yaml IS committed — it holds the stack's encryptionsalt, and
+# the stack is not reproducible without it. No plaintext secrets go in it;
+# those come from sops-decrypted env vars at run time.

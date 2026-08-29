@@ -1,0 +1,15 @@
+use std::effects::log::{ Console, println }
+
+# A record is just named fields — no class, no constructor.
+let base = { host = "localhost", port = 8080, tls = False }
+
+# Copy with one field changed; the original is untouched.
+let prod = { ...base, host = "mezze-lang.org", tls = True }
+
+let main = {} -> perform Console in do
+  println { msg = base.host }
+  println { msg = prod.host }
+
+  # Destructuring is exhaustive — `...` opts out of the rest.
+  let { host, port, ... } = prod
+  println { msg = "$(host):$(port.to_str {})" }

@@ -1,0 +1,83 @@
+/**
+ * EmailOctopus signup modal — colour only.
+ *
+ * Their script injects the modal into our DOM rather than an iframe, so
+ * ordinary CSS reaches it. Layout, spacing and content stay theirs; what
+ * changes here is only what would otherwise be a white panel with a Bootstrap
+ * blue button sitting on a dark page.
+ *
+ * Everything reads from tokens, so the modal follows the current dish and both
+ * themes with no second palette to keep in sync.
+ *
+ * !important throughout: their stylesheet is injected at runtime by an async
+ * script that is the last thing in <body>, so it lands after ours and wins
+ * every tie on equal specificity.
+ *
+ * Their class names could change under us. Each rule degrades quietly — if a
+ * selector stops matching, that part reverts to EmailOctopus's own styling,
+ * which is plain but usable.
+ */
+
+/* --- the panel ------------------------------------------------------- */
+.modal-container-inner {
+  background: var(--panel) !important;
+  color: var(--ink) !important;
+}
+
+/* The backdrop behind it. Named separately from the panel because a white
+   sheet behind a themed panel is as wrong as a white panel. */
+.modal-container {
+  background: color-mix(in srgb, var(--ink) 45%, transparent) !important;
+}
+
+/* Their copy carries inline colours from the dashboard editor, which beat a
+   class selector — hence the element-level override. */
+.modal-container-inner h1,
+.modal-container-inner h1 span,
+.modal-container-inner .text-block,
+.modal-container-inner .text-block div,
+.modal-container-inner .text-block span {
+  color: var(--ink) !important;
+}
+
+.modal-container-inner .close {
+  color: var(--soft) !important;
+}
+
+/* --- email field ----------------------------------------------------- */
+/* Left at their sizing; only the colours change, so a light-on-light or
+   dark-on-dark field cannot happen. */
+.emailoctopus-form .form-control {
+  background: var(--ground) !important;
+  border-color: var(--rule) !important;
+  color: var(--ink) !important;
+}
+
+.emailoctopus-form .form-control::placeholder {
+  color: var(--faint) !important;
+}
+
+/* --- Subscribe button ------------------------------------------------ */
+/* .btn-primary is Bootstrap's, which is where the blue came from. */
+.emailoctopus-form input[type="submit"],
+.emailoctopus-form .btn-primary {
+  background: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: var(--on-primary) !important;
+}
+
+.emailoctopus-form input[type="submit"]:hover,
+.emailoctopus-form .btn-primary:hover {
+  /* Darken rather than name a second colour: --primary follows the dish, so a
+     fixed hover shade would be wrong five times out of six. */
+  filter: brightness(.92);
+}
+
+/* --- messages -------------------------------------------------------- */
+.emailoctopus-success-message { color: var(--ok) !important; }
+.emailoctopus-error-message { color: var(--err) !important; }
+
+/* The "Powered by EmailOctopus" credit. */
+.modal-container-inner .mastfoot {
+  display: none !important;
+}

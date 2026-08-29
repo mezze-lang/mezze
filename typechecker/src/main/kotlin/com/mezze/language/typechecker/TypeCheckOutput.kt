@@ -72,3 +72,32 @@ data class ResolvedImport(
 enum class ImportKind {
     FUNCTION, TYPE, EFFECT, ABILITY, PERFORMER
 }
+
+/**
+ * Build the LSP/hover-facing [TypeCheckResult] from a raw checker result.
+ *
+ * Every position-based feature (hover, inlay hints, find-references, rename)
+ * reads `typedModule` off this object, and a `Failure` still carries one — so
+ * both outcomes are mapped here and hover keeps answering while the buffer is
+ * mid-edit and failing.
+ *
+ * Shared so the LSP and the WASM playground cannot drift: the playground
+ * previously did none of this and simply returned nothing on any error.
+ */
+fun TypeChecker.TypeCheckResult.toHoverResult(): TypeCheckResult = when (this) {
+    is TypeChecker.TypeCheckResult.Success -> TypeCheckResult(
+        importedAbilities = importContext?.importedAbilities ?: emptyMap(),
+        importedEffects = importContext?.importedEffects ?: emptyMap(),
+        importedImpls = importContext?.importedImpls ?: emptyMap(),
+        allEffects = importContext?.let { ic ->
+            ic.importedEffects + ic.effectsByHash.values.associateBy { it.name }
+        } ?: emptyMap(),
+        typedModule = typedModule,
+        warnings = warnings.map { TypeCheckWarning(it.message, it.loc, it.code) },
+        expectedTypeAt = expectedTypeAt,
+    )
+    is TypeChecker.TypeCheckResult.Failure -> TypeCheckResult(
+        typedModule = typedModule,
+        expectedTypeAt = expectedTypeAt,
+    )
+}

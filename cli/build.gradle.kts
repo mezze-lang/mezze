@@ -682,3 +682,20 @@ fun parseNativeImageFlags(file: File): Map<String, List<String>> {
     }
     return sections
 }
+
+/**
+ * Prints the classpath the WASM build needs, one path per line joined by ":".
+ *
+ * That is :cli's runtime classpath PLUS precompileOnly. The CLI keeps
+ * :interpreter off its normal classpath on purpose (it reaches those classes
+ * by string literal through Truffle), but MezzeWeb calls MezzeLanguage
+ * directly, so the browser build genuinely needs both.
+ */
+tasks.register("printRuntimeClasspath") {
+    val cp = sourceSets.main.get().runtimeClasspath + precompileOnly
+    // Depend on the classpath, not just resolve it: jar names carry a build
+    // timestamp, so merely printing them yields paths for jars that were
+    // never built. Everything named here exists by the time it is printed.
+    dependsOn(cp)
+    doLast { println(cp.asPath) }
+}

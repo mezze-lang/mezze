@@ -1,0 +1,139 @@
+---
+import Base from '../layouts/Base.astro'
+import { lessons } from '../data/lessons'
+import Editor from '../components/Editor.astro'
+---
+<Base title="Tour — Mezze" width="full" description="Learn Mezze feature by feature, running every example in your browser.">
+  <div class="tour">
+    <!-- LEFT: narrow vertical exercise rail + prose -->
+    <div class="tour-left">
+      <nav class="rail">
+        {lessons.map((l, i) => (
+          <button class="rail-item" data-idx={i} title={l.title}>
+            <span class="rail-num">{String(i + 1).padStart(2, '0')}</span>
+          </button>
+        ))}
+      </nav>
+
+      <article class="prose">
+        <h1 id="t-title"></h1>
+        <p class="t-blurb" id="t-blurb"></p>
+        <div id="t-body"></div>
+        <div class="steps">
+          <button id="t-prev">← Previous</button>
+          <span id="t-pos"></span>
+          <button id="t-next">Next →</button>
+        </div>
+      </article>
+    </div>
+
+    <!-- RIGHT: editor on top, larger output below -->
+    <div class="tour-right">
+      <Editor />
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { lessons } from '../data/lessons'
+  import { format } from '../lib/text'
+  import { mountEditor } from '../scripts/editor'
+
+  const $ = <T extends Element>(sel: string) => document.querySelector(sel) as T
+  const editor = mountEditor($('[data-editor]'))
+
+  const railItems = Array.from(document.querySelectorAll<HTMLElement>('.rail-item'))
+  const prevBtn = $<HTMLButtonElement>('#t-prev')
+  const nextBtn = $<HTMLButtonElement>('#t-next')
+
+  /** The lesson prose supports `code` and **bold** only. */
+  let current = -1
+  const go = (i: number) => {
+    const n = Math.max(0, Math.min(lessons.length - 1, i))
+    if (n === current) return
+    current = n
+    const l = lessons[n]
+    $('#t-title').textContent = l.title
+    $('#t-blurb').textContent = l.blurb
+    $('#t-body').innerHTML = l.body.map((para) => `<p>${format(para)}</p>`).join('')
+    $('#t-pos').textContent = `${n + 1} / ${lessons.length}`
+    railItems.forEach((el, k) => el.classList.toggle('is-active', k === n))
+    // The ends are dead ends: show that rather than letting a click do nothing.
+    prevBtn.disabled = n === 0
+    nextBtn.disabled = n === lessons.length - 1
+    editor.setSource(l.code)
+    history.replaceState(null, '', '#' + l.slug)
+  }
+
+  railItems.forEach((el) => (el.onclick = () => go(Number(el.dataset.idx))))
+  prevBtn.onclick = () => go(current - 1)
+  nextBtn.onclick = () => go(current + 1)
+
+  const hashIdx = lessons.findIndex((l) => l.slug === location.hash.slice(1))
+  go(hashIdx >= 0 ? hashIdx : 0)
+</script>
+
+<style is:global>
+  .tour {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1.4rem;
+    align-items: stretch;
+    /* Fill what is left below the sticky header. The header is ~3.6rem;
+       the padding below is part of the same budget so nothing is clipped. */
+    height: calc(100dvh - var(--bar-h, 3.6rem));
+    min-height: 32rem;
+    padding-block: 0;
+  }
+  @media (max-width: 1000px) {
+    .tour {
+      grid-template-columns: 1fr;
+      height: auto;
+      padding-block: var(--tour-pad);
+    }
+  }
+
+  /* ---- LEFT: far-left vertical rail + prose ---- */
+  .tour-left {
+    display: grid;
+    grid-template-columns: 3.4rem minmax(0, 1fr);
+    grid-template-rows: 100%;   /* so the rail stretches and its border reaches the bottom */
+    gap: 1rem; min-height: 0; min-width: 0;
+  }
+
+  .rail {
+    display: flex; flex-direction: column; gap: .3rem;
+    overflow-y: auto;
+    overflow-x: hidden;      /* items are sized to fit; never scroll sideways */
+    padding: var(--tour-pad) .55rem var(--tour-pad) .15rem;
+    border-right: 1px solid var(--rule);
+  }
+  .rail-item {
+    flex: none; width: 2.4rem; height: 2.4rem;
+    display: grid; place-items: center;
+    font: inherit; border: 1px solid transparent; border-radius: 6px;
+    background: transparent; color: var(--soft); cursor: pointer;
+  }
+  .rail-item:hover { background: var(--panel); color: var(--ink); }
+  .rail-item.is-active { background: var(--panel); border-color: var(--primary); color: var(--primary); }
+  .rail-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; }
+
+  .prose { overflow-y: auto; padding: var(--tour-pad) .75rem var(--tour-pad) 0; min-height: 0; }
+  .prose h1 { margin: 0 0 .25rem; font-size: 1.6rem; }
+  .t-blurb { margin: 0 0 1.25rem; color: var(--soft); font-size: .92rem; }
+  .prose p { margin: 0 0 1rem; max-width: 62ch; }
+  .prose code { background: var(--panel); padding: .1em .35em; border-radius: 3px; font-size: .9em; }
+  .steps { display: flex; align-items: center; gap: 1rem; margin-top: 1.5rem; }
+  .steps button { font: inherit; font-size: .88rem; padding: .3rem .9rem; border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--rule)); border-radius: 5px; background: var(--ground); color: var(--primary); cursor: pointer; transition: background .15s, border-color .15s; }
+  .steps button:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 10%, var(--ground)); border-color: var(--primary); }
+  .steps button:disabled { opacity: .4; cursor: default; }
+  #t-pos { color: var(--soft); font-size: .82rem; }
+
+  /* ---- RIGHT: editor on top, bigger output below ---- */
+  /* min-width:0 matters: a flex item defaults to min-width:auto and refuses to
+     shrink below its content, so one long line in the editor widens the whole
+     column and scrolls the page sideways. */
+  .tour-right { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding-block: var(--tour-pad); }
+  @media (max-width: 1000px) { .tour-right { height: 40rem; } }
+
+</style>

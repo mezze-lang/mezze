@@ -1,0 +1,23 @@
+---
+/** A palette-coloured pill. `colour` is a dish name from the token file. */
+interface Props {
+  colour?: 'olive' | 'lemon' | 'onion' | 'tomato' | 'mint' | 'auber'
+}
+const { colour = 'onion' } = Astro.props
+const map: Record<string, string> = {
+  olive: 'var(--olive)', lemon: 'var(--lemon)', onion: 'var(--onion)',
+  tomato: 'var(--tomato)', mint: 'var(--mint)', auber: 'var(--aubergine)',
+}
+---
+<span class="tag" style={`--c:${map[colour]}`}><slot /></span>
+
+<style>
+  .tag {
+    font-size: .72rem;
+    padding: .22rem .68rem;
+    border-radius: var(--r-pill);
+    color: var(--c);
+    background: color-mix(in srgb, var(--c) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+  }
+</style>

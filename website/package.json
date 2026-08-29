@@ -1,0 +1,21 @@
+{
+  "name": "mezze-website",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "node tools/hover-stamp.mjs && astro check && astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "build:wasm": "./wasm-build/build.sh",
+    "build:all": "npm run build:wasm && npm run build"
+  },
+  "dependencies": {
+    "@astrojs/check": "^0.9.10",
+    "astro": "^7.2.7",
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  }
+}

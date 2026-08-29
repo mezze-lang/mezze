@@ -1,5 +1,7 @@
 package com.mezze.language.lsp
 
+import com.mezze.language.typechecker.lookup.TypedAstLookup
+
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.Launcher
 import org.eclipse.lsp4j.launch.LSPLauncher
@@ -3454,6 +3456,40 @@ class LspFeaturesTest {
         openFile(uri, path.toFile().readText())
         return uri to path.toFile().readText()
     }
+
+
+    @Test
+    fun `hover on a type declaration shows its definition, not just its name`() {
+        // Every ParsedTypeDef variant must render as written in source. Records
+        // and variants used to fall through a `when`'s `else` branch to a bare
+        // `type Money`, which only restates the name being pointed at.
+        val (uri, _) = openSingleFile("""
+            type Money = { currency: Str, amount: Int }
+            type Color = | Red, Green, Blue |
+            type Open = { id: Int, ... }
+            newtype UserId = Str
+            type Count = Int
+        """.trimIndent())
+
+        // (line, char-on-the-type-name, expected substring)
+        val cases = listOf(
+            Triple(0, 5, "{ currency: Str, amount: Int }"),
+            Triple(1, 5, "| Red, Green, Blue |"),
+            Triple(2, 5, "..."),
+            Triple(3, 8, "newtype UserId = Str"),
+            Triple(4, 5, "type Count = Int"),
+        )
+        for ((line, ch, expected) in cases) {
+            val hover = hoverAt(uri, line = line, character = ch)
+            assertNotNull(hover, "expected a Hover on line $line")
+            val content = hoverText(hover!!)
+            assertTrue(
+                content.contains(expected),
+                "line $line: expected \"$expected\" in hover, got: $content",
+            )
+        }
+    }
+
 
     private fun hoverAt(uri: String, line: Int, character: Int): Hover? {
         return server.textDocumentService.hover(HoverParams().apply {

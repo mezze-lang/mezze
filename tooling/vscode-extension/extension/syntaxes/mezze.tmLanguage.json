@@ -114,7 +114,7 @@
 
     "booleans": {
       "name": "constant.language.boolean.mezze",
-      "match": "\\b(true|false)\\b"
+      "match": "\\b(True|False)\\b"
     },
 
     "keywords": {

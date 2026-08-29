@@ -17,13 +17,38 @@ in
     pkgs-unstable.kotlin
     graalvm
     pkgs.zlib
-    pkgs.nodejs
+    # Pinned major: the website (Astro) and the VSCode extension build against
+    # this. Bare `pkgs.nodejs` is an alias that drifts with nixpkgs, which would
+    # silently change the major version under the website's lockfile.
+    pkgs.nodejs_24
     # tree-sitter CLI for the tooling/tree-sitter-mezze grammar
     # (generate parser.c, build native lib, run corpus tests).
     pkgs.tree-sitter
+    # website deployment — see the Justfile
+    pkgs.pulumi-bin
+    pkgs.pulumiPackages.pulumi-nodejs
+    pkgs.just                     # command runner
+    pkgs.sops                     # secret file encryption
+    pkgs.age                      # asymmetric backend for sops
   ] ++ lib.optionals pkgs.stdenv.isLinux [
     pkgs.gcc
   ];
+
+  # --- website deployment (Pulumi + Cloudflare) -----------------------------
+  env.PULUMI_SKIP_UPDATE_CHECK = "true";
+
+  # pulumiPackages.pulumi-nodejs puts an OLD cloudflare provider (6.13) on PATH,
+  # and an ambient plugin wins over ~/.pulumi/plugins. infra/package.json pins
+  # 6.19, and PageRule/ZoneSetting differ between the two — so ignore ambient
+  # plugins and use the version the project actually asked for.
+  env.PULUMI_IGNORE_AMBIENT_PLUGINS = "true";
+  # State lives in ~/.pulumi/ rather than Pulumi Cloud — back it up, it holds
+  # the resource-ID map and losing it means Pulumi cannot reconcile what is
+  # already provisioned against the code.
+  env.PULUMI_BACKEND_URL = "file://~";
+  # Nothing to prompt for: real secrets never enter Pulumi state, they arrive
+  # as sops-decrypted env vars on each run.
+  env.PULUMI_CONFIG_PASSPHRASE = "";
 
   languages = {
     java = {
@@ -123,6 +148,20 @@ in
       fi
     '';
 
+    web-dev.exec = ''
+      echo "🌐 Starting website dev server..."
+      cd website
+      [ -d node_modules ] || npm install
+      npm run dev -- "$@"
+    '';
+
+    web-build.exec = ''
+      echo "🌐 Building website..."
+      cd website
+      [ -d node_modules ] || npm install
+      npm run build
+    '';
+
     smoke-tests.exec = ''
       echo "🧪 Running CLI smoke tests..."
       ./docker-test-project/run-tests.sh "$@"
@@ -147,6 +186,10 @@ in
     echo "  smoke-tests    - Run comprehensive CLI smoke tests"
     echo "  ts-build       - Generate + build tree-sitter-mezze grammar"
     echo "  ts-test        - Run tree-sitter corpus tests"
+    echo ""
+    echo "🌐 Website:"
+    echo "  web-dev        - Website dev server (website/)"
+    echo "  web-build      - Build website to website/dist"
     echo ""
     echo "📝 Examples:"
     echo "  mezze-dev parse examples/basic/hello_world.mezze"

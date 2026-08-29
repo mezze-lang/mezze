@@ -15,9 +15,9 @@ import com.mezze.language.parser.MezzeParser
  * val formatted = formatter.format(sourceCode)
  * ```
  */
-class Formatter {
+class Formatter(widths: FormatterWidths = FormatterConfig) {
     private val parser = MezzeParser()
-    private val prettyPrinter = PrettyPrinter()
+    private val prettyPrinter = PrettyPrinter(widths)
 
     /**
      * Format Mezze source code.
