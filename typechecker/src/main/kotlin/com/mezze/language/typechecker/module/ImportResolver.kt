@@ -4,6 +4,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility
 import com.mezze.language.typedast.Hash
+import com.mezze.language.typedast.TypedExpr
 import com.mezze.language.typedast.TypedLambda
 import com.mezze.language.typedast.TypedModule as TypedAstModule
 import com.mezze.language.typechecker.util.parsedUsePathToCore
@@ -832,17 +833,38 @@ class ImportResolver(
                 // survives. Concrete record / variant / nominal body types
                 // always win.
                 val exportedFn = exports[opName]
-                val exportReturnType = (exportedFn?.mezzeType as? MezzeType.FunctionType)?.returnType
+                val exportFnType = exportedFn?.mezzeType as? MezzeType.FunctionType
+                val exportReturnType = exportFnType?.returnType
 
-                val rawReturnType = if (bodyReturnType is MezzeType.VarType && exportReturnType != null) {
-                    exportReturnType
-                } else {
-                    bodyReturnType
+                // The impl body's return may be an unpinned var (a thin forwarder
+                // like `get_or_else = {it,def} -> get_or_else{result=it,def=def}`
+                // whose forwarded-call return the impl's own checking never tied back
+                // to `def`). The export carries the real signature, e.g.
+                // `{result: Result 'a 'e, def: 'a} -> 'a`, where the return shares `'a`
+                // with a PARAM. Params are harvested separately with their OWN var
+                // instances, so lifting the export's return verbatim leaves it
+                // disconnected — `top.get_or_else{def=..}` then records `'a` instead of
+                // the arg's type. Re-tie the return to the impl's OWN param var by
+                // matching the export param field whose type is the export's return.
+                val remappedReturn: MezzeType? =
+                    if (bodyReturnType is MezzeType.VarType && exportFnType != null)
+                        remapExportReturnToImplParamVar(exportFnType, opExpr)
+                    else null
+
+                val rawReturnType = remappedReturn
+                    ?: if (bodyReturnType is MezzeType.VarType && exportReturnType != null) exportReturnType
+                    else bodyReturnType
+
+                // A remapped return IS a real impl-param var (its name may be plain,
+                // e.g. `a`, not `'a`) — it is deliberately shared, not a placeholder.
+                // Only the NON-remapped fallback needs the placeholder guard, which
+                // drops the internal `unknown`-style vars TypedAstBuilder leaves on
+                // bodies it couldn't pin.
+                if (remappedReturn == null) {
+                    val isPlaceholder = rawReturnType is MezzeType.VarType &&
+                        !rawReturnType.variable.name.startsWith("'")
+                    if (isPlaceholder) continue
                 }
-
-                val isPlaceholder = rawReturnType is MezzeType.VarType &&
-                    !rawReturnType.variable.name.startsWith("'")
-                if (isPlaceholder) continue
 
                 opMap[opName] = rawReturnType
             }
@@ -851,6 +873,34 @@ class ImportResolver(
             }
         }
         return result
+    }
+
+    /**
+     * When an imported inherent method forwards to a same-named free function
+     * (`get_or_else = {it,def} -> get_or_else{result=it,def=def}`), its body
+     * return is an unpinned var and we fall back to the EXPORT's declared return.
+     * That return often shares a type var with one of the export's PARAMS
+     * (`{…, def: 'a} -> 'a`). Because params are harvested into a separate map
+     * with their own var instances, the export's return var is disconnected from
+     * the impl's param var — so the call-site records `'a` instead of the pinned
+     * argument type. This re-ties them: find the export param field whose type IS
+     * the export's return var, then return the SAME field's var off the impl's
+     * own params. Returns null when the return isn't a bare var shared with a
+     * param (nothing to re-tie — caller keeps the export return as-is).
+     */
+    private fun remapExportReturnToImplParamVar(
+        exportFnType: MezzeType.FunctionType,
+        opExpr: TypedExpr,
+    ): MezzeType? {
+        val exportRetVar = (exportFnType.returnType as? MezzeType.VarType)?.variable ?: return null
+        val exportParams = (exportFnType.paramType as? MezzeType.RecordType)?.fields ?: return null
+        // The export param field carrying the return's var (e.g. `def: 'a`).
+        val sharedField = exportParams.entries.firstOrNull { (_, ty) ->
+            (ty as? MezzeType.VarType)?.variable == exportRetVar
+        }?.key ?: return null
+        // Read that field off the impl lambda's own params to get the impl's var.
+        val implParams = (opExpr as? TypedLambda)?.params ?: return null
+        return implParams.firstOrNull { it.name == sharedField }?.type
     }
 
     /**

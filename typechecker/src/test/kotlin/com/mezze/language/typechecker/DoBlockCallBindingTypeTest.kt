@@ -94,6 +94,19 @@ class DoBlockCallBindingTypeTest {
     }
 
     @Test
+    fun `top-level let of an inherent-method call records the solved type`() {
+        val src = """
+            use std::result::{ get_or_else }
+
+            let top: Result Str Str = Ok { val = "hi" }
+            let a = top.get_or_else { def = "?" }
+        """.trimIndent()
+
+        // `a` is on line 4, col 5.
+        assertEquals("Str", bindingTypeAt(src, 4, 5))
+    }
+
+    @Test
     fun `a do-block let of an effect operation records the solved type`() {
         // `Async.spawn { f = {} -> "hello" }` binds `Promise 'a`, not
         // `Promise Str`. The same expression at the top level gets it right,

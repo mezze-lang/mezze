@@ -933,11 +933,19 @@ class TypedAstBuilder(
             }
         }
 
-        val callReturnType = when (val ft = substitution.apply(fn.type)) {
-            is MezzeType.FunctionType -> substitution.apply(ft.returnType)
-            else -> {
-                val perCallSite = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
-                perCallSite ?: substitution.apply(contextType)
+        // Prefer the solver's per-call-site result (callReturnTypes[loc], set by
+        // tryGenerate*MethodCall) when it's concrete. methodFunctionType carries the
+        // method's DECLARED signature whose return var is not always the var the
+        // solver pinned at this call — reading `fn.type`'s return alone then leaves a
+        // generic result unbound: `top.get_or_else { def = "?" }` on `Result Str Str`
+        // recorded `'a` instead of `Str`. Fall back to the fn-type return, then the
+        // context type.
+        val solvedCallSite = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+        val callReturnType = when {
+            solvedCallSite != null && solvedCallSite !is MezzeType.VarType -> solvedCallSite
+            else -> when (val ft = substitution.apply(fn.type)) {
+                is MezzeType.FunctionType -> substitution.apply(ft.returnType)
+                else -> solvedCallSite ?: substitution.apply(contextType)
             }
         }
 

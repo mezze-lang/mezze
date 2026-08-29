@@ -707,14 +707,27 @@ class ContextBuilder {
             val rawReturnType = op.returnType?.let { convertParsedTypeAnnotation(it) }
                 ?: opReturnTypes[op.name] ?: MezzeType.VarType(TypeVar.fresh())
 
-            val returnType = alignToTarget(rawReturnType, targetVarsInOrder, targetTypeVarsByName)
-            val alignedParamType = if (targetVarsInOrder.isNotEmpty() && paramType is MezzeType.RecordType)
-                alignToTarget(paramType, targetVarsInOrder, targetTypeVarsByName)
-            else paramType
+            // Align the param record and the return TOGETHER, as one FunctionType,
+            // through a SINGLE alignToTarget pass. Aligning them separately runs two
+            // independent var-remaps, so a type var shared between a param and the
+            // return (e.g. `get_or_else: {…, def: 'a} -> 'a`) is re-split into two
+            // distinct instances — and `top.get_or_else{def=..}` then records `'a`
+            // instead of the pinned argument type. One pass preserves the sharing.
+            val methodType: MezzeType.FunctionType =
+                if (targetVarsInOrder.isNotEmpty() && paramType is MezzeType.RecordType) {
+                    val alignedWhole = alignToTarget(
+                        MezzeType.FunctionType(paramType = paramType, returnType = rawReturnType, effects = opEffects[op.name]),
+                        targetVarsInOrder, targetTypeVarsByName
+                    )
+                    alignedWhole as? MezzeType.FunctionType
+                        ?: MezzeType.FunctionType(paramType = paramType, returnType = rawReturnType, effects = opEffects[op.name])
+                } else {
+                    MezzeType.FunctionType(paramType = paramType, returnType = rawReturnType, effects = opEffects[op.name])
+                }
 
             result = result.extendWithAnonymousMethod(TypingContext.InherentMethodInfo(
                 targetTypeName = targetTypeName, methodName = op.name,
-                methodType = MezzeType.FunctionType(paramType = alignedParamType, returnType = returnType, effects = opEffects[op.name]),
+                methodType = methodType,
                 implContentHash = implKey,
                 // See addAnonymousImpl — populate the target type's content hash for
                 // hash-preferring dispatch (currentTypeDecls covers imported types).
