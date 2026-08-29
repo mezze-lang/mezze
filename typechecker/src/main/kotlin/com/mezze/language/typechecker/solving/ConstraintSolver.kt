@@ -112,6 +112,24 @@ class ConstraintSolver(
 
     internal fun getGeneratedCodecImpls(): Collection<AbilityChecker.GeneratedCodecImpl> = abilityChecker.getGeneratedCodecImpls()
 
+    /**
+     * True when every one of [typeArgs] is a concrete type (no unresolved vars)
+     * AND an impl of [abilityName] exists for that argument tuple. Such a
+     * constraint is already fully discharged — it carries no obligation to a
+     * caller, so a finalized function type should NOT keep it as a residual.
+     * (Structural builtins like Inspect are always satisfied for a concrete
+     * type; user abilities require a matching impl.)
+     */
+    internal fun isAbilityConstraintFullyDischarged(
+        abilityName: String,
+        typeArgs: List<MezzeType>,
+        abilityHash: com.mezze.language.typedast.Hash?,
+    ): Boolean {
+        if (typeArgs.isEmpty()) return false
+        if (!typeArgs.all { abilityChecker.isConcrete(it) }) return false
+        return abilityChecker.checkAbilityImplementation(abilityName, typeArgs, abilityHash)
+    }
+
     private val mustBeOpenTypes = mutableSetOf<TypeVar>()
     private val mustBeOpenRowVars = mutableSetOf<RowVar>()
     private val mustBeOpenBindings = mutableSetOf<String>()

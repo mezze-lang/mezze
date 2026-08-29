@@ -231,7 +231,7 @@ class ConstraintGenerator(
                             }
 
                             val solvedBindingsWithAbilities = solvedBindings.mapValues { (name, solvedType) ->
-                                addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution, solveResult.resolvedAssociatedBindings)
+                                addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution, solveResult.resolvedAssociatedBindings, solver::isAbilityConstraintFullyDischarged, dropDischargedConstraints = item.typeAnnotation == null)
                             }
 
                             val hasEffectsOrPerformed = result.effects.isNotEmpty() || result.effectInstances.isNotEmpty() || result.performed
@@ -939,7 +939,15 @@ class ConstraintGenerator(
         type: MezzeType,
         abilityConstraints: List<Constraint.AbilityRequired>,
         substitution: Substitution,
-        resolvedAssociatedBindings: Map<Pair<String, Int>, Map<String, MezzeType>> = emptyMap()
+        resolvedAssociatedBindings: Map<Pair<String, Int>, Map<String, MezzeType>> = emptyMap(),
+        // Answers "are these concrete args satisfied by an impl?" — supplied by the
+        // caller (which owns the solver). Null ⇒ treat nothing as dischargeable
+        // (conservative: never drop for the concrete-satisfied reason). Only
+        // consulted when [dropDischargedConstraints] is true — which the caller sets
+        // false for a decl carrying an explicit annotation, so the inferred type
+        // still reflects that written signature for the annotation-match to compare.
+        isDischarged: ((abilityName: String, args: List<MezzeType>, abilityHash: com.mezze.language.typedast.Hash?) -> Boolean)? = null,
+        dropDischargedConstraints: Boolean = false
     ): MezzeType {
         DebugLogger.debugSection(Category.ConstraintGenerator, "addAbilityConstraintsToFunctionType") {
             val lines = mutableListOf("Type: $type")
@@ -1014,7 +1022,24 @@ class ConstraintGenerator(
             is MezzeType.VarType -> "v:" + arg.variable.name
             else -> "t:" + arg.toString()
         }
+        // A finalized function type should not carry an ability constraint that is
+        // already fully DISCHARGED — one whose resolved args are all concrete AND
+        // satisfied by an impl. Such a constraint imposes nothing on a caller (an
+        // arg-free `main = {} -> show { it = { price = 1 } }` must infer `{} -> Str`,
+        // and `{} -> (42).to_dbg_str {}` must not keep `Inspect Int`). This is
+        // deliberately narrow: it fires ONLY when every arg is ground AND an impl
+        // matches — a still-open var, an unsatisfiable concrete arg, or a missing
+        // discharge oracle all KEEP the constraint, so genuine polymorphism
+        // (`show : {it:'a} with Priced 'a`), unsatisfiable residuals, and the
+        // explicit-annotation path above are all untouched.
+        fun isFullyDischarged(c: MezzeType.FunctionAbilityConstraint): Boolean {
+            if (!dropDischargedConstraints) return false
+            val resolved = c.typeArgs.map { substitution.apply(it) }
+            if (resolved.isEmpty() || resolved.any { collectFreeTypeVars(it).isNotEmpty() }) return false
+            return isDischarged?.invoke(c.abilityName, resolved, c.abilityHash) ?: false
+        }
         val allConstraints = (type.abilityConstraints + functionAbilityConstraints)
+            .filterNot { c -> isFullyDischarged(c) }
             .sortedByDescending { it.associatedTypeBindings.size }
             .distinctBy { c -> c.abilityName to c.typeArgs.map(::argKey).distinct() }
 
