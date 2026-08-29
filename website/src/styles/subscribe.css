@@ -1,0 +1,34 @@
+/**
+ * EmailOctopus signup modal — colour only.
+ *
+ * Their script injects the modal into our DOM rather than an iframe, so
+ * ordinary CSS reaches it. The layout, spacing and content are theirs and stay
+ * theirs; the only thing changed here is the Subscribe button's colour, which
+ * was Bootstrap blue and clashed with the palette.
+ *
+ * !important because their stylesheet is injected at runtime by an async
+ * script that is the last thing in <body>, so it lands after ours and wins
+ * every tie on equal specificity.
+ *
+ * The colour reads from --primary, so the button follows the current dish and
+ * both themes without a second palette to keep in sync.
+ */
+
+.emailoctopus-form input[type="submit"],
+.emailoctopus-form .btn-primary {
+  background: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: var(--on-primary) !important;
+}
+
+.emailoctopus-form input[type="submit"]:hover,
+.emailoctopus-form .btn-primary:hover {
+  /* Darken rather than name a second colour: --primary follows the dish, so a
+     fixed hover shade would be wrong five times out of six. */
+  filter: brightness(.92);
+}
+
+/* The "Powered by EmailOctopus" credit. */
+.modal-container-inner .mastfoot {
+  display: none !important;
+}

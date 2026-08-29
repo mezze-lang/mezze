@@ -12,3 +12,4 @@
 @import './chrome.css';   /* header, mascot, theme toggle, syntax classes */
 @import './page.css';     /* landing page */
 @import './blog.css';     /* blog index and posts */
+@import './subscribe.css'; /* EmailOctopus modal, restyled to our palette */
