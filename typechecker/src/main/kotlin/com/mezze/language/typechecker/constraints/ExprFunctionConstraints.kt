@@ -623,6 +623,7 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         methodCallResolutions = bodyResult.methodCallResolutions,
         callReturnTypes = bodyResult.callReturnTypes,
         matchCaseBindings = bodyResult.matchCaseBindings,
+        matchScrutineeTypes = bodyResult.matchScrutineeTypes,
     )
 }
 

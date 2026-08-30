@@ -79,39 +79,56 @@ class MatchValidator(
             }
         }
 
+        // BUG D (#332): PRIMARY path — the scrutinee's SOLVED type, recorded at
+        // constraint generation keyed by the scrutinee's Loc. This covers EVERY
+        // scrutinee expression (local `let` binding, field access, call result,
+        // parenthesized expr), not just a bare function parameter. The parameter
+        // re-derivation below is a legacy fallback for the rare case where the
+        // loc-keyed type is still an unresolved var (e.g. a fully generic
+        // scrutinee), where surfacing nothing is correct anyway.
+        val scrutineeLoc = matchExpr.scrutinee.loc
+        for ((_, result) in constraintResults) {
+            val recorded = result.matchScrutineeTypes[scrutineeLoc] ?: continue
+            surfaceScrutineeType(substitution.apply(recorded))?.let { return it }
+        }
+
+        // Legacy fallback: recover the scrutinee type from the enclosing decl's
+        // PARAMETER shape when the scrutinee is a bare parameter identifier. Kept
+        // for the case where the loc-keyed record above is absent (defensive).
         val scrutinee = matchExpr.scrutinee
         if (scrutinee is ParsedIdentifier) {
             val varName = scrutinee.localName
             for ((_, result) in constraintResults) {
                 val resolvedType = substitution.apply(result.type)
-                val paramType = extractParamType(resolvedType, varName)
-                if (paramType != null) {
-                    val finalType = substitution.apply(paramType)
-                    val expanded = when (finalType) {
-                        is MezzeType.TypeApplication ->
-                            expandTypeApplicationToVariant(finalType, registry) ?: finalType
-                        else -> finalType
-                    }
-                    if (expanded is MezzeType.VariantType) return expanded
-                    // #83: also surface a non-enumerable primitive scrutinee (Int,
-                    // Str, ...) so validateParsedExhaustiveness can require a
-                    // catch-all. Only for literal-only matches (this path already
-                    // runs solely when there's no constructor pattern).
-                    if (isNonEnumerablePrimitive(expanded)) return expanded
-                    // #203: a seq/list scrutinee, so validateParsedExhaustiveness can
-                    // require an empty + open-cons pair (or a catch-all). A fixed-length
-                    // pattern like `[a, b]` covers only length 2 and is not total.
-                    if (expanded is MezzeType.SeqType || expanded is MezzeType.ListType) return expanded
-                    // #218: a record scrutinee matched with record patterns
-                    // (`match r is { c = Red } -> …`). Surface it so
-                    // validateParsedExhaustiveness can check its finite (variant/Bool)
-                    // fields — the outer record has no constructor pattern, so this is
-                    // the only call site that fires for it.
-                    if (expanded is MezzeType.RecordType) return expanded
-                }
+                val paramType = extractParamType(resolvedType, varName) ?: continue
+                surfaceScrutineeType(substitution.apply(paramType))?.let { return it }
             }
         }
 
+        return null
+    }
+
+    /**
+     * Given a scrutinee's solved type, surface the finite/enumerable shape that
+     * `validateParsedExhaustiveness` knows how to check — or null when the type
+     * has no exhaustiveness obligation (a fully generic var, a function, etc.).
+     * Shared by the loc-keyed primary path and the parameter fallback.
+     */
+    private fun surfaceScrutineeType(finalType: MezzeType): MezzeType? {
+        val expanded = when (finalType) {
+            is MezzeType.TypeApplication ->
+                expandTypeApplicationToVariant(finalType, registry) ?: finalType
+            else -> finalType
+        }
+        // A variant scrutinee — check every constructor is covered.
+        if (expanded is MezzeType.VariantType) return expanded
+        // #83: a non-enumerable primitive (Int, Str, …) — require a catch-all.
+        if (isNonEnumerablePrimitive(expanded)) return expanded
+        // #203: a seq/list — require empty + open-cons pair (or a catch-all);
+        // a fixed-length pattern like `[a, b]` covers only length 2.
+        if (expanded is MezzeType.SeqType || expanded is MezzeType.ListType) return expanded
+        // #218: a record matched with record patterns — check its finite fields.
+        if (expanded is MezzeType.RecordType) return expanded
         return null
     }
 
@@ -342,8 +359,11 @@ class MatchValidator(
      */
     private fun seqExhaustivenessErrors(matchExpr: ParsedMatch): ValidationResult {
         var hasCatchAll = false
-        var coversEmpty = false
-        var coversAllNonEmpty = false
+        // Exact lengths covered by fixed-length arms (`[a, b]` -> 2). An open-cons
+        // arm `[e1..em, ...rest]` covers every length >= m; `minOpenConsWidth` is
+        // the smallest such m seen (Int.MAX_VALUE if there is no open-cons arm).
+        val fixedLengths = mutableSetOf<Int>()
+        var minOpenConsWidth = Int.MAX_VALUE
 
         for (case in matchExpr.cases) {
             val unguarded = case.guard == null && case.ifLetBindings.isEmpty()
@@ -352,15 +372,14 @@ class MatchValidator(
                 when (pattern) {
                     is ParsedWildcardPattern, is ParsedVariablePattern -> hasCatchAll = true
                     is ParsedSeqPattern -> {
-                        val hasRest = pattern.restPattern != null
-                        when {
-                            pattern.elements.isEmpty() && hasRest -> hasCatchAll = true      // [...all] / [..._]
-                            pattern.elements.isEmpty() && !hasRest -> coversEmpty = true      // []
-                            pattern.elements.size == 1 && hasRest -> coversAllNonEmpty = true // [x, ...rest], [Some x, ...t]
-                            // A wider open-cons (`[a, b, ...rest]`, covers len>=2) or a
-                            // fixed-length pattern (`[a]`, `[a, b]`) covers only some
-                            // lengths — neither alone makes the non-empty case total.
-                            else -> {}
+                        val width = pattern.elements.size
+                        if (pattern.restPattern != null) {
+                            // `[..._]` (width 0) is a catch-all; `[e1..em, ...rest]`
+                            // covers all lengths >= m.
+                            if (width == 0) hasCatchAll = true
+                            else minOpenConsWidth = minOf(minOpenConsWidth, width)
+                        } else {
+                            fixedLengths.add(width) // `[]` -> 0, `[a]` -> 1, ...
                         }
                     }
                     else -> {}
@@ -368,9 +387,20 @@ class MatchValidator(
             }
         }
 
-        val exhaustive = hasCatchAll || (coversEmpty && coversAllNonEmpty)
+        // Totality on the length axis: a catch-all, OR an open-cons of width m
+        // whose shorter lengths 0..m-1 are each covered by a fixed-length arm —
+        // then fixed arms cover {0..m-1} and the open-cons covers {m, m+1, ...},
+        // so every length is handled. This generalizes the common `[]` + `[x,
+        // ...rest]` pair (m == 1) to `[]`,`[x]`,`[x,y]` + `[x,y,...rest]` (m == 3).
+        val openConsCoversTail = minOpenConsWidth != Int.MAX_VALUE &&
+            (0 until minOpenConsWidth).all { it in fixedLengths }
+        val exhaustive = hasCatchAll || openConsCoversTail
         if (exhaustive) return ValidationResult.Success()
 
+        val coversEmpty = 0 in fixedLengths
+        // The non-empty case is total only when an open-cons closes its tail; a
+        // bare pile of fixed lengths never covers arbitrarily long seqs.
+        val coversAllNonEmpty = openConsCoversTail
         val missing = when {
             !coversEmpty && !coversAllNonEmpty ->
                 "the empty seq `[]` and a non-empty seq `[x, ...rest]`"

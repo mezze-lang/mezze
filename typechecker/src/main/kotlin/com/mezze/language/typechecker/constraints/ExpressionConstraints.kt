@@ -94,6 +94,9 @@ class ExpressionConstraintGenerator {
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
         val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
         val callReturnTypes = mutableMapOf<Loc, MezzeType>()
+        // BUG D (#332): scrutinee-loc → inference-time scrutinee type, propagated
+        // up so exhaustiveness can see every match scrutinee (not just params).
+        val matchScrutineeTypes = mutableMapOf<Loc, MezzeType>()
         val duplicateBindings = mutableListOf<ConstraintResult.DuplicateBinding>()
         val tailCalls = mutableSetOf<Loc>()
         // #84 linter: unused bindings found in nested sub-expressions (match
@@ -116,6 +119,7 @@ class ExpressionConstraintGenerator {
             referencedBindings.addAll(result.referencedBindings)
             methodCallResolutions.putAll(result.methodCallResolutions)
             callReturnTypes.putAll(result.callReturnTypes)
+            matchScrutineeTypes.putAll(result.matchScrutineeTypes)
             duplicateBindings.addAll(result.duplicateBindings)
             tailCalls.addAll(result.tailCalls)
             unusedVars.addAll(result.unusedVariables)
@@ -135,6 +139,7 @@ class ExpressionConstraintGenerator {
             referencedBindings = referencedBindings,
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes,
+            matchScrutineeTypes = matchScrutineeTypes,
             duplicateBindings = duplicateBindings,
             tailCalls = tailCalls,
             unusedVariables = unusedVars,

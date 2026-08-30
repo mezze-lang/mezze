@@ -44,6 +44,11 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
 
     val collector = ConstraintCollector()
     collector.merge(scrutineeResult)
+    // BUG D (#332): record the scrutinee's inference-time type keyed by its Loc,
+    // so exhaustiveness (which runs on the parsed AST) can resolve it via the
+    // final substitution for ANY scrutinee expression — a local `let` binding,
+    // a field access, a call result — not only a bare function parameter.
+    collector.matchScrutineeTypes[expr.scrutinee.loc] = scrutineeResult.type
     val unusedVars = mutableListOf<ConstraintResult.UnusedVariable>()
     val patternWarnings = mutableListOf<String>()
     // #195 mono-fix #1: per-match-case binding types

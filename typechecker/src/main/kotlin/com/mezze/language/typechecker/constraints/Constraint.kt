@@ -247,6 +247,17 @@ data class ConstraintResult(
     // specialized mono blob, defeating inline op dispatch on the renamed
     // bindings.
     val matchCaseBindings: Map<Loc, Map<String, MezzeType>> = emptyMap(),
+    // BUG D (#332): the SOLVED type of each match's scrutinee expression, keyed
+    // by the scrutinee's Loc. Exhaustiveness (MatchValidator) runs on the PARSED
+    // AST and previously re-derived the scrutinee type from the enclosing
+    // function's PARAMETER shape — which only works when the scrutinee is a bare
+    // parameter identifier. For `let n = a+1; match n is …` or `match r.n is …`
+    // that re-derivation returned null and exhaustiveness was SILENTLY SKIPPED,
+    // so a non-exhaustive Int/Str/variant match type-checked and later crashed at
+    // runtime with no matching arm. Recording the inference-time scrutinee type
+    // here (resolved by the validator via the final substitution) lets
+    // exhaustiveness see EVERY scrutinee, not just direct parameters.
+    val matchScrutineeTypes: Map<Loc, MezzeType> = emptyMap(),
 ) {
     data class MethodCallInfo(
         val abilityName: String?,        // null for inherent methods
