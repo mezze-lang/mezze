@@ -1,15 +1,20 @@
 use std::effects::log::{ Console, println }
 
-# A closed set of cases, some carrying a payload.
-type Status = | Queued, Running, Done { ms: Int } |
-
-# Miss a case and it will not compile.
-let describe = { s } -> match s is
-  Queued -> "waiting"
-  Running -> "in progress"
-  Done { ms } -> "finished in $(ms.to_str {})"
-
+let orders = [
+  { item = "olive oil", qty = 2, price = 1200 },
+  { item = "za'atar",   qty = 5, price = 300 },
+  { item = "sumac",     qty = 1, price = 450 },
+]
 
 let main = {} -> perform Console in do
-  println { msg = describe { s = Queued } }
-  println { msg = describe { s = Done { ms = 42 } } }
+  orders
+    .filter { p = { x } -> x.qty > 1 }
+    .map { f = { x } -> "$(x.item): $((x.qty * x.price).to_str {})" }
+    .for_each { f = { x } -> println { msg = x } }
+
+  let total = orders.map { f = { x } -> x.qty * x.price }.sum {}
+  println { msg = "total $(total.to_str {})" }
+
+
+
+

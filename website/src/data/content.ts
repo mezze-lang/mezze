@@ -20,7 +20,7 @@
 
 export const site = {
   name: 'mezze',
-  tagline: 'A functional language with effects in the type.',
+  tagline: 'A functional language with first class effects running on GraalVM.',
   nav: [
     { label: 'Taste', href: '/taste' },
     { label: 'Dev Blog', href: '/dev-blog' },
@@ -30,8 +30,7 @@ export const site = {
 export const hero = {
   headline: 'Write what it ~onion~does~.\nThe types ~~olive:keep up~~.',
   lede:
-    'Every function tells you what it touches — files, network, tasks, failure — and ' +
-    'you never annotate one. Full inference, structural types, running on the JVM.',
+    'Every function tells you what it touches, files, network, failure, and you never annotate one. Full type safety, performance of GraalVM.',
   primaryCta: { label: 'Taste of Mezze', href: '/taste' },
   footnote: 'Runs in your browser. Nothing to install to try it.',
 }
@@ -67,9 +66,7 @@ export const topics = [
 export const playground = {
   /** Sits beside the samples, above the per-tab blurb. */
   aside:
-    'A functional language where what a function does to the world is part ' +
-    'of its type — and you never write that type down.',
-  caption: "Every sample here was run through the compiler — the output is what it printed.",
+    'Type safety that stays out of your way. Built for concurrent and distributed programming. Swap out effects when you need to. Ship a native binary or a polyglot jar, whichever the job wants.',
   tabs: [
     {
       dish: "olive",
@@ -89,113 +86,149 @@ let main = {} -> do
   # ...QuietConsole drops it. Nothing in audit changed.
   perform QuietConsole in audit { order = "A-2" }
 
-  perform Console in report { n = "2" }`,
+  perform Console in report { n = "2" }
+
+
+
+
+
+`,
       output: "saw A-1\n2 orders seen",
     },
     {
       dish: "lemon",
-      label: "Named arguments",
-      blurb: "Order never matters",
-      code: `use std::effects::log::{ Console, println }
+      label: "Async",
+      blurb: "Two requests at once",
+      code: `use std::effects::http::{ Http, HttpClient, fetch_all, body_string }
+use std::effects::async::{ LoomAsync }
+use std::effects::log::{ Console, println }
 
-# Every argument is named, so the order is yours.
-let label = { name, unit } -> "\$(name) sold by the \$(unit)"
+# Both requests go out at once — fetch_all is parallel.
+let body = { resp } -> match resp is
+  Ok { val } -> body_string { resp = val }.get_or_else { def = "?" }
+  Err { error = _ } -> "failed"
 
-let main = {} -> perform Console in do
-  println { msg = label { name = "olive oil", unit = "litre" } }
+# <Http, Async> is in the type. Swap HttpClient for a mock and
+# the same code runs in a test with no network.
+let main = {} -> perform Console in perform LoomAsync in perform HttpClient in
+  fetch_all { urls = ["https://mezze-lang.org/", "https://example.com/"] }
+    .for_each { f = { x } -> println { msg = body { resp = x } } }
 
-  # Same call, fields the other way round.
-  println { msg = label { unit = "gram", name = "za'atar" } }
 
 
-  # Add a field later and these calls still compile.
-  let honey = label { name = "honey", unit = "jar" }
-  println { msg = honey }`,
-      output: "olive oil sold by the litre\nza’atar sold by the gram\nhoney sold by the jar",
+
+
+
+`,
+      output: "<!doctype html>...\n<!doctype html>...",
     },
     {
       dish: "onion",
-      label: "Records",
-      blurb: "Copy with a change",
+      label: "Pattern matching",
+      blurb: "Every arm returns a new record",
       code: `use std::effects::log::{ Console, println }
 
-# A record is just named fields — no class, no constructor.
-let base = { host = "localhost", port = 8080, tls = False }
+type Status = | Queued, Shipped { days: Int }, Cancelled { why: Str } |
+type Order = { id: Str, qty: Int, status: Status }
 
-# Copy with one field changed; the original is untouched.
-let prod = { ...base, host = "mezze-lang.org", tls = True }
+# Each arm returns a new order — the original is never touched.
+let advance : { order: Order } -> Order = { order } -> match order.status is
+  Queued -> { ...order, status = Shipped { days = 2 } }
+  Shipped { days = 0 } -> { ...order, status = Cancelled { why = "late" } }
+  Shipped { days } -> { ...order, status = Shipped { days = days - 1 } }
+  Cancelled { why = _ } -> order
+
+let describe = { order } -> match order.status is
+  Queued -> "\$(order.id) waiting"
+  Shipped { days } -> "\$(order.id) arrives in \$(days.to_str {})"
+  Cancelled { why } -> "\$(order.id) cancelled: \$(why)"
 
 let main = {} -> perform Console in do
-  println { msg = base.host }
-  println { msg = prod.host }
-
-  # Destructuring is exhaustive — \`...\` opts out of the rest.
-  let { host, port, ... } = prod
-  println { msg = "\$(host):\$(port.to_str {})" }`,
-      output: "localhost\nmezze-lang.org\nmezze-lang.org:8080",
+  let order = { id = "A-1", qty = 3, status = Queued }
+  println { msg = describe { order } }
+  println { msg = describe { order = advance { order } } }`,
+      output: "A-1 waiting\nA-1 arrives in 2",
     },
     {
       dish: "tomato",
-      label: "Exhaustive match",
-      blurb: "Miss a case, it will not compile",
+      label: "Chaining",
+      blurb: "Pipelines read top to bottom",
       code: `use std::effects::log::{ Console, println }
 
-# A closed set of cases, some carrying a payload.
-type Status = | Queued, Running, Done { ms: Int } |
-
-# Miss a case and it will not compile.
-let describe = { s } -> match s is
-  Queued -> "waiting"
-  Running -> "in progress"
-  Done { ms } -> "finished in \$(ms.to_str {})"
-
+let orders = [
+  { item = "olive oil", qty = 2, price = 1200 },
+  { item = "za'atar",   qty = 5, price = 300 },
+  { item = "sumac",     qty = 1, price = 450 },
+]
 
 let main = {} -> perform Console in do
-  println { msg = describe { s = Queued } }
-  println { msg = describe { s = Done { ms = 42 } } }`,
-      output: "waiting\nfinished in 42",
+  orders
+    .filter { p = { x } -> x.qty > 1 }
+    .map { f = { x } -> "\$(x.item): \$((x.qty * x.price).to_str {})" }
+    .for_each { f = { x } -> println { msg = x } }
+
+  let total = orders.map { f = { x } -> x.qty * x.price }.sum {}
+  println { msg = "total \$(total.to_str {})" }
+
+
+
+
+`,
+      output: "olive oil: 2400\nza’atar: 1500\ntotal 4350",
     },
     {
       dish: "mint",
-      label: "Concurrency",
-      blurb: "Two requests at once",
-      code: `use std::effects::async::{ Async, LoomAsync }
-use std::effects::log::{ Console, println }
-use std::result::{ get_or_else }
-
-# Two requests at once, not one after the other.
-let fetch = { url } -> do
-  println { msg = "GET \$(url)" }
-  url
-
-let main = {} -> perform Console in perform LoomAsync in do
-  let a = Async.spawn { f = {} -> fetch { url = "/users" } }
-  let b = Async.spawn { f = {} -> fetch { url = "/orders" } }
-
-  println { msg = get_or_else { result = a.await {}, def = "?" } }
-  println { msg = get_or_else { result = b.await {}, def = "?" } }`,
-      output: "GET /users\nGET /orders\n/users\n/orders\n\n(the GET lines race — order varies run to run)",
-    },
-    {
-      dish: "aubergine",
       label: "Abilities",
-      blurb: "Dot-methods on your own types",
+      blurb: "One interface, any of your types",
       code: `use std::effects::log::{ Console, println }
 
-# An interface your own types can implement.
-ability Money for 'a where {
+# One interface, implemented for two unrelated types.
+ability Priced for 'a where {
   cents: { it: 'a } -> Int
 }
 
-type Eur = { amount: Int }
+type Book = { title: Str, pounds: Int }
+type Coffee = { shots: Int }
 
-impl Money for Eur where {
-  cents = { it } -> it.amount
-}
+impl Priced for Book where { cents = { it } -> it.pounds * 100 }
+impl Priced for Coffee where { cents = { it } -> it.shots * 175 }
 
-let main = {} -> perform Console in
-  println { msg = { amount = 1299 }.cents {}.to_str {} }`,
-      output: "1299",
+let main = {} -> perform Console in do
+  println { msg = { title = "Dune", pounds = 12 }.cents {}.to_str {} }
+  println { msg = { shots = 2 }.cents {}.to_str {} }
+
+
+
+
+`,
+      output: "1200\n350",
+    },
+    {
+      dish: "aubergine",
+      label: "Exceptions",
+      blurb: "Throw once, choose the shape",
+      code: `use std::effects::exception::{ Exception, ExceptionToResult }
+use std::effects::log::{ Console, println }
+
+type Err = | Missing { key: Str } |
+
+let lookup = { key } -> match key is
+  "host" -> Ok { val = "mezze-lang.org" }
+  "port" -> Ok { val = "443" }
+  _ -> Err { error = Missing { key } }
+
+# Each .try {} unwraps, or short-circuits the whole block.
+let config = {} -> do
+  let host = lookup { key = "host" }.try {}
+  let port = lookup { key = "port" }.try {}
+  Ok { val = "\$(host):\$(port)" }
+
+let main = {} -> perform Console in do
+  let ok = perform ExceptionToResult in config {}
+  println { msg = ok.to_dbg_str {} }
+
+`,
+      output: "Ok { val = \"mezze-lang.org:443\" }",
     },
   ],
 }
@@ -209,34 +242,39 @@ export const features = [
       'someone reading it, ~~lemon:never~~ to satisfy the compiler.',
   },
   {
-    title: 'A few small pieces, ~onion~reused everywhere~',
-    body:
-      'Records are the whole story: arguments are records, so every call names its ' +
-      'fields. Learn one shape and it holds from a two-field literal to a module API.',
-  },
-  {
     title: 'Swap out the ~tomato~side effects~ when you need to',
     body:
       'The same function runs against the real filesystem or an in-memory one, a live ' +
       'clock or a frozen one. Tests get a different ~~tomato:handler~~, not different code.',
   },
   {
+    title: 'A few small pieces, ~onion~reused everywhere~',
+    body:
+      'Records at core, arguments are just ~~onion:records~~, so every call names its ' +
+      'fields. Effects are records of functions and so are Abilities. Learn record, variant, effect, and ability and you have the language covered.',
+  },
+  {
     title: 'First-class ~olive~continuations~',
     body:
-      'Exceptions and early return are ordinary functions here, not syntax the language ' +
+      'Async, exceptions, and early return are ~~olive:ordinary functions~~ here, not syntax language ' +
       'had to grow. Write your own control flow and it looks like everyone else\'s.',
   },
   {
-    title: 'Fearless concurrency, ~mint~built on Loom~',
+    title: 'Structured concurrency, ~mint~built on Loom~',
     body:
-      'Millions of virtual threads, and cancellation that actually interrupts a parked ' +
-      'task. STM, atoms, channels, agents and latches ship with it.',
+      'Millions of ~~mint:virtual threads~~, spawning a new one is cheap. ' +
+      'Software Transactional Memory, Atoms, Channels, Cancellation all built to work together.',
   },
   {
     title: 'Competitively fast on ~auber~GraalVM~',
     body:
-      'Optimised data structures, loop fusion, and mutation that is ~~aubergine:safe~~ because the ' +
-      'type system keeps it in scope. AOT native binaries when you want them.',
+      'Optimised data structures, loop fusion, and safe mutation effect. AOT ~~aubergine:native binaries~~ when you want them.',
+  },
+  {
+    title: 'Keep the libraries you already have^TBD^',
+    body:
+      'Mezze runs on GraalVM, so calling the Java, Kotlin, Python, and Javascript you already have ' +
+      'is the plan. Designed, not yet shipped.',
   },
   {
     title: 'Distributed computing^TBD^',
@@ -244,11 +282,4 @@ export const features = [
       'Durable workflows and distributed execution, built on the same effect system. ' +
       'Designed, not yet shipped.',
   },
-  {
-    title: 'Keep the libraries you already have^TBD^',
-    body:
-      'Mezze runs on GraalVM, so calling the Java, Kotlin and Python you already have ' +
-      'is the plan. Designed, not yet shipped.',
-  },
 ]
-

@@ -1,15 +1,20 @@
-use std::effects::async::{ Async, LoomAsync }
 use std::effects::log::{ Console, println }
-use std::result::{ get_or_else }
 
-# Two requests at once, not one after the other.
-let fetch = { url } -> do
-  println { msg = "GET $(url)" }
-  url
+# One interface, implemented for two unrelated types.
+ability Priced for 'a where {
+  cents: { it: 'a } -> Int
+}
 
-let main = {} -> perform Console in perform LoomAsync in do
-  let a = Async.spawn { f = {} -> fetch { url = "/users" } }
-  let b = Async.spawn { f = {} -> fetch { url = "/orders" } }
+type Book = { title: Str, pounds: Int }
+type Coffee = { shots: Int }
 
-  println { msg = get_or_else { result = a.await {}, def = "?" } }
-  println { msg = get_or_else { result = b.await {}, def = "?" } }
+impl Priced for Book where { cents = { it } -> it.pounds * 100 }
+impl Priced for Coffee where { cents = { it } -> it.shots * 175 }
+
+let main = {} -> perform Console in do
+  println { msg = { title = "Dune", pounds = 12 }.cents {}.to_str {} }
+  println { msg = { shots = 2 }.cents {}.to_str {} }
+
+
+
+

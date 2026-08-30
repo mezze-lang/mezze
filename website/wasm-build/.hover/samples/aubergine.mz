@@ -1,15 +1,20 @@
+use std::effects::exception::{ Exception, ExceptionToResult }
 use std::effects::log::{ Console, println }
 
-# An interface your own types can implement.
-ability Money for 'a where {
-  cents: { it: 'a } -> Int
-}
+type Err = | Missing { key: Str } |
 
-type Eur = { amount: Int }
+let lookup = { key } -> match key is
+  "host" -> Ok { val = "mezze-lang.org" }
+  "port" -> Ok { val = "443" }
+  _ -> Err { error = Missing { key } }
 
-impl Money for Eur where {
-  cents = { it } -> it.amount
-}
+# Each .try {} unwraps, or short-circuits the whole block.
+let config = {} -> do
+  let host = lookup { key = "host" }.try {}
+  let port = lookup { key = "port" }.try {}
+  Ok { val = "$(host):$(port)" }
 
-let main = {} -> perform Console in
-  println { msg = { amount = 1299 }.cents {}.to_str {} }
+let main = {} -> perform Console in do
+  let ok = perform ExceptionToResult in config {}
+  println { msg = ok.to_dbg_str {} }
+
