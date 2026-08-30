@@ -77,19 +77,15 @@ class ExceptionAssocTypeInferenceTest {
         assertEquals("Result Int Str", bindingTypeAt(annotated, 5, 7))
     }
 
-    // `bad` is an Ok-only MID-block binding never joined with an Err. Fix #1
-    // (the annotation synthesizing the associated-type instance) fully infers
-    // safe_div's `<Exception having 'error = Str>` and pins the do-block's
-    // RETURNED value (`good`), but a mid-block Ok-only binding keeps a free error
-    // slot until a post-solve pass pins it to the ambient handler's error type.
-    // These stay @Disabled until that pass lands (then `bad` = Result Int Str too).
-    @org.junit.jupiter.api.Disabled("bad's error slot pinned by post-solve pass (WIP)")
+    // `bad` is an Ok-only MID-block binding never joined with an Err. The
+    // post-solve error-channel default (Constraint.DefaultAssociatedType) pins its
+    // Result error slot to the ambient ExceptionToResult handler's `Str`, so it
+    // matches its returned sibling `good`.
     @Test
     fun `annotated - the throw-path binding has a fully inferred error type`() {
         assertEquals("Result Int Str", bindingTypeAt(annotated, 6, 7))
     }
 
-    @org.junit.jupiter.api.Disabled("bad's error slot pinned by post-solve pass (WIP)")
     @Test
     fun `annotated - good and bad have the same type`() {
         assertEquals(bindingTypeAt(annotated, 5, 7), bindingTypeAt(annotated, 6, 7))
@@ -102,7 +98,6 @@ class ExceptionAssocTypeInferenceTest {
         assertEquals("Result Int Str", bindingTypeAt(inferred, 5, 7))
     }
 
-    @org.junit.jupiter.api.Disabled("bad's error slot pinned by post-solve pass (WIP)")
     @Test
     fun `unannotated - the mid-block binding's error type is also inferred to Str`() {
         assertEquals("Result Int Str", bindingTypeAt(inferred, 6, 7))

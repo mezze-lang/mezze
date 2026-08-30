@@ -207,6 +207,33 @@ sealed interface Constraint {
         // builtins with no hash — selection falls back to the name then.
         val targetTypeHash: Hash? = null,
     )
+
+    /**
+     * A best-effort DEFAULT that runs ONLY after the main solve completes: if,
+     * under the final substitution, [bindingType] has solved to the SAME
+     * type-constructor as [shape] (e.g. both `Result`), unify their arguments
+     * pairwise so any still-free var in [bindingType] takes the concrete type
+     * [shape] fixes in that position. A discharging `perform` uses this to pin
+     * the error channel of a mid-block Ok-only binding (`let bad =
+     * safe_div{...}.ok{}` → `Result Int Str`, not `Result Int 'a`) to the
+     * ambient handler's discharged associated type, WITHOUT coercing a binding
+     * whose value is a plain `Int` (different constructor → no-op) or
+     * double-wrapping an already-shaped one.
+     *
+     * SOUND by construction: it only ever runs `unify(solvedBinding, shape)`
+     * when the two share a constructor, and a unify FAILURE is IGNORED (never an
+     * error) — so it can only bind free vars, never override a concrete slot nor
+     * reshape a non-matching type. [shape]'s own vars are freshened at emit time
+     * so binding them is harmless.
+     */
+    data class DefaultAssociatedType(
+        val bindingType: MezzeType,
+        val shape: MezzeType,
+        override val context: String? = null,
+        override val loc: Loc? = null
+    ) : Constraint {
+        override fun mapTypes(f: (MezzeType) -> MezzeType) = copy(bindingType = f(bindingType), shape = f(shape))
+    }
 }
 
 data class ConstraintResult(
@@ -270,11 +297,24 @@ data class ConstraintResult(
     // names the gen-time pass missed. Idempotent: re-folding already-seen effects
     // is a set union no-op.
     val pendingClosureArgEffects: List<PendingClosureHarvest> = emptyList(),
+    // For a do-block: each intermediate `let` binding's inferred type paired with
+    // the effect names its value surfaced. An enclosing `perform` reads this to
+    // emit a best-effort [Constraint.DefaultAssociatedType] that pins the error
+    // channel of a mid-block value carrying the discharged effect to the handler's
+    // discharged associated type (post-solve, never a coercion). Populated only by
+    // generateDo for its OWN direct bindings — NOT bubbled up through merge(), so
+    // it never crosses a nested-block boundary.
+    val doBindingEffects: List<DoBindingEffect> = emptyList(),
 ) {
     /** A deferred callback-effect harvest for BUG C (#331). [argType] is the
      *  `<...>` HOF call's argument type as seen at gen-time (may contain VarType
      *  fields); [caughtByOp] are effect names the op discharges (row subtraction). */
     data class PendingClosureHarvest(val argType: MezzeType, val caughtByOp: Set<String>)
+
+    /** A do-block `let` binding's type + the effect names its value surfaced,
+     *  used by an enclosing `perform` to pin the binding's discharged-effect
+     *  associated type post-solve. See [Constraint.DefaultAssociatedType]. */
+    data class DoBindingEffect(val bindingType: MezzeType, val effectNames: Set<String>)
     data class MethodCallInfo(
         val abilityName: String?,        // null for inherent methods
         val methodName: String,

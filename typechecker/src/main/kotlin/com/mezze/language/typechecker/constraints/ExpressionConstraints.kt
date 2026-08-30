@@ -108,6 +108,11 @@ class ExpressionConstraintGenerator {
         // collectConstraintWarnings turns them into W0101 warnings. Without this,
         // an unused binding inside a do-block was silently dropped.
         val unusedVars = mutableListOf<ConstraintResult.UnusedVariable>()
+        // Do-block intermediate `let` bindings + the effects their value surfaced,
+        // forwarded to an enclosing `perform` (which pins the discharged-effect
+        // associated type). Deliberately NOT merged in merge() — set only by
+        // generateDo for its OWN direct bindings so it never crosses a block boundary.
+        val doBindingEffects = mutableListOf<ConstraintResult.DoBindingEffect>()
 
         fun merge(result: ConstraintResult) {
             constraints.addAll(result.constraints)
@@ -148,6 +153,7 @@ class ExpressionConstraintGenerator {
             duplicateBindings = duplicateBindings,
             tailCalls = tailCalls,
             unusedVariables = unusedVars,
+            doBindingEffects = doBindingEffects,
         )
     }
 

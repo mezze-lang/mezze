@@ -57,6 +57,9 @@ class ConstraintSolver(
         // have had a chance to pin the receiver tyvar. Deferred until it is
         // concrete (see solveInherentMethodResolve).
         is Constraint.InherentMethodResolve -> 4
+        // Applied post-solve only (applyErrorChannelDefaults); never in the
+        // priority-sorted worklist. Ordered last as a harmless backstop.
+        is Constraint.DefaultAssociatedType -> 5
     }
 
     // The "subject" type vars a constraint's failure is really about — the
@@ -87,6 +90,9 @@ class ConstraintSolver(
             // #160: the receiver is the subject whose wrong/absent type triggers
             // "no <method> for type <T>"; result/args vars are per-call incidentals.
             is Constraint.InherentMethodResolve -> addVarsOf(constraint.receiverType)
+            // Never solved in the worklist nor a source of failures, so it has no
+            // cascade subject; the binding var is the closest thing.
+            is Constraint.DefaultAssociatedType -> addVarsOf(constraint.bindingType)
         }
         return vars
     }
@@ -203,10 +209,16 @@ class ConstraintSolver(
         val errors = mutableListOf<ConstraintError>()
         val warnings = mutableListOf<String>()
 
-        val (inferredEqualities, inferenceErrors) = variantSolver.inferVariantTypes(constraints)
+        // Best-effort error-channel DEFAULTS from discharging performs are held out
+        // of the main solve entirely; applyErrorChannelDefaults runs them last, once
+        // every binding's type is ground. They never constrain the main solution.
+        val (defaultAssocConstraints, solvableConstraints) =
+            constraints.partition { it is Constraint.DefaultAssociatedType }
+
+        val (inferredEqualities, inferenceErrors) = variantSolver.inferVariantTypes(solvableConstraints)
         collectInferenceErrors(inferenceErrors, constraints, errors)
 
-        val allConstraints = constraints + inferredEqualities
+        val allConstraints = solvableConstraints + inferredEqualities
         val (mustBeOpenConstraints, constraintsAfterOpen) = allConstraints.partition { it is Constraint.MustBeOpen }
         for (constraint in mustBeOpenConstraints) {
             solveConstraint(constraint, substitution)
@@ -240,6 +252,13 @@ class ConstraintSolver(
         // receiver that STILL isn't concrete is genuinely undispatchable.
         substitution = resolveDeferredInherentMethods(substitution, errors)
         resolveMustBeOpenRowVars(substitution)
+
+        // Best-effort error-channel defaults from discharging performs — run LAST,
+        // only if the main solve succeeded, so every binding type is ground. Never
+        // produces an error (a shape mismatch is simply skipped).
+        if (errors.isEmpty() && defaultAssocConstraints.isNotEmpty()) {
+            substitution = applyErrorChannelDefaults(defaultAssocConstraints, substitution)
+        }
 
         return if (errors.isEmpty()) {
             // For each ability associated-type resolution this solve saw, record
@@ -669,6 +688,40 @@ class ConstraintSolver(
         return substitution
     }
 
+    /**
+     * Best-effort error-channel DEFAULTS from a discharging `perform`. For each
+     * [Constraint.DefaultAssociatedType], resolve both sides under the final
+     * substitution; if the solved binding is a [MezzeType.TypeApplication] with
+     * the SAME constructor and arity as the handler's suspension shape, unify the
+     * two so any still-free var in the binding's argument positions (the error
+     * channel) takes the concrete type the shape fixes there.
+     *
+     * SOUND & NARROW: a unify FAILURE is silently ignored (never an error) and the
+     * pass only runs when constructors match, so it can only bind free vars — it
+     * never coerces a plain `Int` binding to a Result, never reshapes a
+     * non-matching type, and never overrides an already-concrete slot. The shape's
+     * own vars were freshened at emit time, so binding them is inert.
+     */
+    private fun applyErrorChannelDefaults(
+        defaults: List<Constraint>,
+        inputSubst: Substitution
+    ): Substitution {
+        var substitution = inputSubst
+        for (constraint in defaults) {
+            if (constraint !is Constraint.DefaultAssociatedType) continue
+            val solvedBinding = substitution.apply(constraint.bindingType)
+            val solvedShape = substitution.apply(constraint.shape)
+            if (solvedBinding !is MezzeType.TypeApplication || solvedShape !is MezzeType.TypeApplication) continue
+            if (solvedBinding.constructor != solvedShape.constructor) continue
+            if (solvedBinding.args.size != solvedShape.args.size) continue
+            when (val r = unify(solvedBinding, solvedShape, registry)) {
+                is UnificationResult.Success -> substitution = r.substitution.compose(substitution)
+                is UnificationResult.Failure -> { /* shape mismatch — leave the binding untouched */ }
+            }
+        }
+        return substitution
+    }
+
     private fun finalizeDeferredAbilities(
         inputSubst: Substitution,
         errors: MutableList<ConstraintError>
@@ -761,6 +814,9 @@ class ConstraintSolver(
             is Constraint.MustBeOpen -> solveMustBeOpen(constraint, currentSubst)
             is Constraint.RecordPatternExhaustive -> solveRecordPatternExhaustive(constraint, currentSubst)
             is Constraint.InherentMethodResolve -> solveInherentMethodResolve(constraint, currentSubst)
+            // Applied in a dedicated post-solve pass (applyErrorChannelDefaults),
+            // never in the main worklist — a no-op here is a defensive backstop.
+            is Constraint.DefaultAssociatedType -> ConstraintResult.Success(Substitution.empty)
         }
     }
 

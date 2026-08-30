@@ -71,6 +71,8 @@ object ConstraintDumper {
             "RecordPatternExhaustive(${formatLoc(constraint)}): ${prettyPrintType(constraint.recordType)}"
         is Constraint.InherentMethodResolve ->
             "InherentMethodResolve(${formatLoc(constraint)}): ${prettyPrintType(constraint.receiverType)}.${constraint.methodName} -> ${prettyPrintType(constraint.resultType)} [${constraint.candidates.joinToString(", ") { it.targetTypeName }}]"
+        is Constraint.DefaultAssociatedType ->
+            "DefaultAssociatedType(${formatLoc(constraint)}): ${prettyPrintType(constraint.bindingType)} ?~ ${prettyPrintType(constraint.shape)}"
     }
 
     private fun formatErrorContext(ctx: ErrorContext?): String = when (ctx) {
