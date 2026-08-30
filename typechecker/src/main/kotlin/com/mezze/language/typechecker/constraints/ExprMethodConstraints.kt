@@ -723,12 +723,51 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     // by load order → silent mis-dispatch). Falls back to name when the receiver
     // has no type hash (builtins). See project_classparam_runtime_dispatch_tuple.
     val receiverTypeHash = com.mezze.language.typechecker.util.declaredHashOf(receiverType)
+    // Does a resolved-CONCRETE receiver actually match this candidate's target
+    // type? An unresolved receiver (still a VarType) is genuinely polymorphic /
+    // deferred — accept it (later constraints pin it). A concrete receiver whose
+    // declared identity (hash first, then name) DIFFERS from the impl's target is
+    // a call of the method on the WRONG type (BUG A: `(42).unwrap {}` against an
+    // `impl Box`) — reject by resolving to null so the call falls through to a
+    // structural field access, which fails cleanly instead of being accepted and
+    // crashing at runtime.
+    // Reject a single candidate ONLY for an unambiguous plain-nominal mismatch:
+    // the receiver is a concrete user record/variant (or scalar) whose declared
+    // identity differs from the candidate's target. Parameterized-container impls
+    // register under mangled target names (`Seq_Promise`) that never equal the
+    // receiver's bare name (`Seq`) and whose element type isn't known here — so we
+    // must NOT reject them (they dispatch correctly at runtime). When in any doubt,
+    // accept (preserve the prior permissive behavior); we only ADD rejections for
+    // the clear `Int`/`Box` case.
+    fun recvIsPlainNominal(t: MezzeType): Boolean = when (t) {
+        is MezzeType.RecordType -> t.identity is TypeIdentity.Declared
+        is MezzeType.VariantType -> t.identity is TypeIdentity.Declared
+        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.CharType, is MezzeType.BytesType -> true
+        else -> false
+    }
+
+    fun candidateMatchesReceiver(cand: TypingContext.InherentMethodInfo): Boolean {
+        if (receiverType is MezzeType.VarType) return true        // polymorphic — defer
+        // Only a plain-nominal / scalar receiver + a plain (non-mangled) target
+        // are eligible for a mismatch reject; anything else stays permissive.
+        val eligible = recvIsPlainNominal(receiverType) && !cand.targetTypeName.contains('_')
+        if (!eligible) return true
+        if (receiverTypeHash != null && cand.targetTypeHash != null)
+            return receiverTypeHash == cand.targetTypeHash
+        if (receiverTypeName != null) return cand.targetTypeName == receiverTypeName
+        return true
+    }
+
     val methodInfo = if (deferImplByReceiver) {
         // Homogeneous candidates — any is a valid signature representative; the
         // concrete impl is picked from candidateImpls at emit time.
         inherentMethods.first()
     } else if (inherentMethods.size == 1) {
-        inherentMethods.first()
+        // Single candidate — accept only if the receiver actually is (or could
+        // still resolve to) its target type; else unresolved (BUG A).
+        inherentMethods.first().takeIf { candidateMatchesReceiver(it) }
     } else if (receiverTypeHash != null) {
         // The receiver carries a declaration hash: identity is AUTHORITATIVE.
         // Match strictly by hash. Do NOT fall through to a name match — a
@@ -747,6 +786,32 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         // flags exactly this), so resolve to UNRESOLVED and let the fresh result
         // VarType stay open rather than silently mis-dispatch.
         null
+    }
+
+    // BUG A: a CONCRETE receiver that matches no candidate's target is calling an
+    // inherent method on the wrong type (`(42).unwrap {}` against `impl Box`).
+    // Resolution above yields methodInfo=null, which otherwise types the call as an
+    // open var and SILENTLY ACCEPTS it — then it crashes at runtime as a bad field
+    // access. Emit a real diagnostic instead — but ONLY for the unambiguous case:
+    //   - the receiver is concrete (not a VarType — a polymorphic receiver defers),
+    //   - it is a PLAIN NOMINAL type (a user record/variant or a scalar), NOT a
+    //     parameterized container (Seq/List/Map/…) whose impls are registered under
+    //     mangled target names like `Seq_Promise` that never equal the receiver's
+    //     bare name `Seq` — matching those needs the solved element type, which
+    //     isn't available here, so we must not reject them, and
+    //   - every candidate target is likewise a plain name (no `_` mangling).
+    // This keeps the rejection to genuine type mismatches and never fires on the
+    // legitimate container-impl dispatch (`ps.race {}` on a Promise seq).
+    val candidatesArePlain = inherentMethods.all { !it.targetTypeName.contains('_') }
+    if (methodInfo == null && !deferImplByReceiver &&
+        recvIsPlainNominal(receiverType) && candidatesArePlain && inherentMethods.isNotEmpty()) {
+        val recvName = receiverTypeName ?: receiverType.toString()
+        throw TypeCheckError(
+            "No inherent method '$methodName' for type '$recvName'. " +
+                "It exists for: ${inherentMethods.map { it.targetTypeName }.distinct().joinToString(", ")}.",
+            expr.loc,
+            code = ErrorCode.T0201_TYPE_MISMATCH,
+        )
     }
 
     // (after issue #213 pinned non-generic returns to e.g. `Int`) survive.
