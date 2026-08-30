@@ -47,7 +47,7 @@ class BufferModuleTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             let buf2 = buffer::write { buf = buf, bytes = b }
             buffer::size { buf = buf2 }
         """)
@@ -60,8 +60,8 @@ class BufferModuleTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let b1 = bytes::from_string { s = "Hello" }
-            let b2 = bytes::from_string { s = "World" }
+            let b1 = bytes::from_str { s = "Hello" }
+            let b2 = bytes::from_str { s = "World" }
             let buf2 = buffer::write { buf = buf, bytes = b1 }
             let buf3 = buffer::write { buf = buf2, bytes = b2 }
             buffer::size { buf = buf3 }
@@ -93,24 +93,24 @@ class BufferModuleTest {
     }
 
     @Test
-    fun `test buffer write_string`() {
+    fun `test buffer write_str`() {
         val result = eval("""
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
             buffer::size { buf = buf2 }
         """)
         assertEquals(5L, result)
     }
 
     @Test
-    fun `test buffer write_string multiple`() {
+    fun `test buffer write_str multiple`() {
         val result = eval("""
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
-            let buf3 = buffer::write_string { buf = buf2, s = " " }
-            let buf4 = buffer::write_string { buf = buf3, s = "World" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
+            let buf3 = buffer::write_str { buf = buf2, s = " " }
+            let buf4 = buffer::write_str { buf = buf3, s = "World" }
             buffer::size { buf = buf4 }
         """)
         assertEquals(11L, result)
@@ -124,7 +124,7 @@ class BufferModuleTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Test" }
+            let buf2 = buffer::write_str { buf = buf, s = "Test" }
             let b = buffer::to_bytes { buf = buf2 }
             bytes::size { b = b }
         """)
@@ -137,7 +137,7 @@ class BufferModuleTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hi" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hi" }
             let b = buffer::to_bytes { buf = buf2 }
             match bytes::to_str { b = b } is
                 Ok { val } -> val
@@ -152,9 +152,9 @@ class BufferModuleTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Test" }
+            let buf2 = buffer::write_str { buf = buf, s = "Test" }
             let b1 = buffer::to_bytes { buf = buf2 }
-            let buf3 = buffer::write_string { buf = buf2, s = "More" }
+            let buf3 = buffer::write_str { buf = buf2, s = "More" }
             buffer::size { buf = buf3 }
         """)
         assertEquals(8L, result)
@@ -200,7 +200,7 @@ class BufferModuleTest {
         val result = eval("""
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
             let buf3 = buffer::clear { buf = buf2 }
             buffer::size { buf = buf3 }
         """)
@@ -212,7 +212,7 @@ class BufferModuleTest {
         val result = eval("""
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
             let buf3 = buffer::clear { buf = buf2 }
             buffer::is_empty { buf = buf3 }
         """)
@@ -225,9 +225,9 @@ class BufferModuleTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "First" }
+            let buf2 = buffer::write_str { buf = buf, s = "First" }
             let buf3 = buffer::clear { buf = buf2 }
-            let buf4 = buffer::write_string { buf = buf3, s = "Second" }
+            let buf4 = buffer::write_str { buf = buf3, s = "Second" }
             let b = buffer::to_bytes { buf = buf4 }
             match bytes::to_str { b = b } is
                 Ok { val } -> val
@@ -244,9 +244,9 @@ class BufferModuleTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "A" }
+            let buf2 = buffer::write_str { buf = buf, s = "A" }
             let buf3 = buffer::write_byte { buf = buf2, b = 66 }
-            let b = bytes::from_string { s = "C" }
+            let b = bytes::from_str { s = "C" }
             let buf4 = buffer::write { buf = buf3, bytes = b }
             buffer::size { buf = buf4 }
         """)
@@ -259,9 +259,9 @@ class BufferModuleTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "A" }
+            let buf2 = buffer::write_str { buf = buf, s = "A" }
             let buf3 = buffer::write_byte { buf = buf2, b = 66 }
-            let b = bytes::from_string { s = "C" }
+            let b = bytes::from_str { s = "C" }
             let buf4 = buffer::write { buf = buf3, bytes = b }
             let result = buffer::to_bytes { buf = buf4 }
             match bytes::to_str { b = result } is

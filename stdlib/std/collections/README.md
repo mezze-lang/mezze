@@ -207,7 +207,7 @@ Test file: `BufferModuleTest.kt`
 | `empty` | :white_check_mark: | |
 | `write` | :white_check_mark: | |
 | `write_byte` | :white_check_mark: | |
-| `write_string` | :white_check_mark: | |
+| `write_str` | :white_check_mark: | |
 | `to_bytes` | :white_check_mark: | |
 | `size` | :white_check_mark: | |
 | `is_empty` | :white_check_mark: | |
@@ -221,7 +221,7 @@ Test file: `BytesModuleTest.kt`
 | Function | Tested | Notes |
 |----------|--------|-------|
 | `empty` | :white_check_mark: | |
-| `from_string` | :white_check_mark: | |
+| `from_str` | :white_check_mark: | |
 | `from_seq` | :white_check_mark: | |
 | `from_hex` | :white_check_mark: | |
 | `from_base64` | :white_check_mark: | |

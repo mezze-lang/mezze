@@ -327,7 +327,7 @@ class CrossModuleImplFieldItMismatchTest {
               perform MockHttpClient { rules = [
                 { methods = [Get], url = Glob { pattern = "**" },
                   response = Ok { val = {
-                    status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" }
+                    status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" }
                   } } }
               ] } in do
                 let api = client { base_url = "https://api.acme.com" }

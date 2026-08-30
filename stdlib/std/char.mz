@@ -44,7 +44,7 @@ impl TryInto Char | ConversionError { msg: Str } | for Str where {
 pub let from_int: { code: Int } -> Option Char = { code } -> __native_char_from_int { code = code }
 
 ## Get the first character of a string. Returns None if empty.
-pub let from_string: { s: Str } -> Option Char = { s } -> __native_char_from_string { s = s }
+pub let from_str: { s: Str } -> Option Char = { s } -> __native_char_from_string { s = s }
 
 ## Get the Unicode code point of a character.
 pub let to_int: { c: Char } -> Int = { c } -> __native_char_to_int { c = c }

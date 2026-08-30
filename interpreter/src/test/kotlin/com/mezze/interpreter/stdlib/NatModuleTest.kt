@@ -241,10 +241,10 @@ class NatModuleTest {
     }
 
     @Test
-    fun `test nat from_string - valid`() {
+    fun `test nat from_str - valid`() {
         val source = """
             use std::nat
-            match nat::from_string { s = "42" } is
+            match nat::from_str { s = "42" } is
                 Some { val } -> val
                 None -> -1
         """.trimIndent()
@@ -253,10 +253,10 @@ class NatModuleTest {
     }
 
     @Test
-    fun `test nat from_string - invalid returns None`() {
+    fun `test nat from_str - invalid returns None`() {
         val source = """
             use std::nat
-            match nat::from_string { s = "not a number" } is
+            match nat::from_str { s = "not a number" } is
                 Some { val } -> 1
                 None -> 0
         """.trimIndent()
@@ -265,10 +265,10 @@ class NatModuleTest {
     }
 
     @Test
-    fun `test nat from_string - negative returns None`() {
+    fun `test nat from_str - negative returns None`() {
         val source = """
             use std::nat
-            match nat::from_string { s = "-5" } is
+            match nat::from_str { s = "-5" } is
                 Some { val } -> 1
                 None -> 0
         """.trimIndent()

@@ -236,7 +236,7 @@ class IntIntegrationTest {
     void fromStringParsesValidInteger() {
         Object result = MezzeTestHelper.run("""
             use std::int
-            match int::from_string { s = "42" } is
+            match int::from_str { s = "42" } is
                 Some { val } -> val
                 None -> -1
             """);
@@ -247,7 +247,7 @@ class IntIntegrationTest {
     void fromStringReturnsNoneForInvalid() {
         Object result = MezzeTestHelper.run("""
             use std::int
-            match int::from_string { s = "abc" } is
+            match int::from_str { s = "abc" } is
                 Some { val } -> val
                 None -> -999
             """);

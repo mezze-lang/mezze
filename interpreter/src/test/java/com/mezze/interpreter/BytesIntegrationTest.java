@@ -26,7 +26,7 @@ class BytesIntegrationTest {
     void bytesFromString() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             bytes::size { b = b }
             """);
         assertEquals(5L, result);
@@ -50,7 +50,7 @@ class BytesIntegrationTest {
     void bytesGetReturnsCorrectByte() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             match bytes::get { b = b, i = 0 } is
                 Some { val } -> val
                 None -> -1
@@ -62,7 +62,7 @@ class BytesIntegrationTest {
     void bytesGetOutOfBoundsReturnsNone() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hi" }
+            let b = bytes::from_str { s = "Hi" }
             match bytes::get { b = b, i = 10 } is
                 Some { val } -> val
                 None -> -1
@@ -83,7 +83,7 @@ class BytesIntegrationTest {
     void bytesIsEmptyFalse() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            bytes::is_empty { b = bytes::from_string { s = "x" } }
+            bytes::is_empty { b = bytes::from_str { s = "x" } }
             """);
         assertEquals(false, result);
     }
@@ -96,7 +96,7 @@ class BytesIntegrationTest {
     void bytesSlice() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
+            let b = bytes::from_str { s = "Hello World" }
             let sliced = bytes::slice { b = b, start = 0, end = 5 }
             bytes::size { b = sliced }
             """);
@@ -107,7 +107,7 @@ class BytesIntegrationTest {
     void bytesTake() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             let taken = bytes::take { b = b, n = 3 }
             bytes::to_hex { b = taken }
             """);
@@ -118,7 +118,7 @@ class BytesIntegrationTest {
     void bytesDrop() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             let dropped = bytes::drop { b = b, n = 2 }
             bytes::size { b = dropped }
             """);
@@ -133,8 +133,8 @@ class BytesIntegrationTest {
     void bytesConcat() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b1 = bytes::from_string { s = "Hello" }
-            let b2 = bytes::from_string { s = " World" }
+            let b1 = bytes::from_str { s = "Hello" }
+            let b2 = bytes::from_str { s = " World" }
             let combined = bytes::concat { b1 = b1, b2 = b2 }
             bytes::size { b = combined }
             """);
@@ -149,7 +149,7 @@ class BytesIntegrationTest {
     void bytesToHex() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hi" }
+            let b = bytes::from_str { s = "Hi" }
             bytes::to_hex { b = b }
             """);
         assertEquals("4869", result); // H=48, i=69
@@ -185,7 +185,7 @@ class BytesIntegrationTest {
     void bytesToBase64() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             bytes::to_base64 { b = b }
             """);
         assertEquals("SGVsbG8=", result);
@@ -210,8 +210,8 @@ class BytesIntegrationTest {
     void bytesContainsFound() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let haystack = bytes::from_string { s = "Hello World" }
-            let needle = bytes::from_string { s = "World" }
+            let haystack = bytes::from_str { s = "Hello World" }
+            let needle = bytes::from_str { s = "World" }
             bytes::contains { b = haystack, pattern = needle }
             """);
         assertEquals(true, result);
@@ -221,8 +221,8 @@ class BytesIntegrationTest {
     void bytesContainsNotFound() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let haystack = bytes::from_string { s = "Hello World" }
-            let needle = bytes::from_string { s = "Foo" }
+            let haystack = bytes::from_str { s = "Hello World" }
+            let needle = bytes::from_str { s = "Foo" }
             bytes::contains { b = haystack, pattern = needle }
             """);
         assertEquals(false, result);
@@ -232,8 +232,8 @@ class BytesIntegrationTest {
     void bytesStartsWithTrue() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
-            let prefix = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello World" }
+            let prefix = bytes::from_str { s = "Hello" }
             bytes::starts_with { b = b, prefix = prefix }
             """);
         assertEquals(true, result);
@@ -243,8 +243,8 @@ class BytesIntegrationTest {
     void bytesEndsWithTrue() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
-            let suffix = bytes::from_string { s = "World" }
+            let b = bytes::from_str { s = "Hello World" }
+            let suffix = bytes::from_str { s = "World" }
             bytes::ends_with { b = b, suffix = suffix }
             """);
         assertEquals(true, result);
@@ -254,8 +254,8 @@ class BytesIntegrationTest {
     void bytesIndexOfFound() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let haystack = bytes::from_string { s = "Hello World" }
-            let needle = bytes::from_string { s = "World" }
+            let haystack = bytes::from_str { s = "Hello World" }
+            let needle = bytes::from_str { s = "World" }
             match bytes::index_of { b = haystack, pattern = needle } is
                 Some { val } -> val
                 None -> -1
@@ -321,7 +321,7 @@ class BytesIntegrationTest {
     void bytesToStringSuccess() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             match bytes::to_str { b = b } is
                 Ok { val } -> val
                 Err { error } -> error
@@ -337,7 +337,7 @@ class BytesIntegrationTest {
     void bytesRoundtripHex() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let original = bytes::from_string { s = "Test123" }
+            let original = bytes::from_str { s = "Test123" }
             let hex = bytes::to_hex { b = original }
             match bytes::from_hex { s = hex } is
                 Some { val } -> bytes::size { b = val }
@@ -350,7 +350,7 @@ class BytesIntegrationTest {
     void bytesRoundtripBase64() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let original = bytes::from_string { s = "Binary Data!" }
+            let original = bytes::from_str { s = "Binary Data!" }
             let encoded = bytes::to_base64 { b = original }
             match bytes::from_base64 { s = encoded } is
                 Some { val } -> bytes::size { b = val }

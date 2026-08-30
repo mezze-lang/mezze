@@ -258,10 +258,10 @@ class IntInterpreterTest {
     }
 
     @Test
-    fun `from_string parses valid integer`() {
+    fun `from_str parses valid integer`() {
         val code = """
             use std::int
-            match int::from_string { s = "42" } is
+            match int::from_str { s = "42" } is
                 Some { val } -> val
                 None -> -1
         """
@@ -270,10 +270,10 @@ class IntInterpreterTest {
     }
 
     @Test
-    fun `from_string returns None for invalid`() {
+    fun `from_str returns None for invalid`() {
         val code = """
             use std::int
-            match int::from_string { s = "abc" } is
+            match int::from_str { s = "abc" } is
                 Some { val } -> val
                 None -> -999
         """

@@ -388,7 +388,7 @@ public class BasicIntegrationTest {
     void testBytesModule() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             bytes::size { b = b }
             """);
         assertEquals(5L, result);
@@ -399,8 +399,8 @@ public class BasicIntegrationTest {
         // Test - calling same function twice
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let x = bytes::size { b = bytes::from_string { s = "Hello" } }
-            let y = bytes::size { b = bytes::from_string { s = "World" } }
+            let x = bytes::size { b = bytes::from_str { s = "Hello" } }
+            let y = bytes::size { b = bytes::from_str { s = "World" } }
             x + y
             """);
         assertEquals(10L, result);

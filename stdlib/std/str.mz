@@ -6,7 +6,7 @@ use std::int
 use std::collections::bytes
 
 impl Into Bytes for Str where {
-  into = { it } -> bytes::from_string { s = it }
+  into = { it } -> bytes::from_str { s = it }
 }
 
 impl Eq for Str where {

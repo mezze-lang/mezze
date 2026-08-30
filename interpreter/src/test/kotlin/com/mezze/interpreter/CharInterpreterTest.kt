@@ -37,10 +37,10 @@ class CharInterpreterTest {
     }
 
     @Test
-    fun `from_string gets first character`() {
+    fun `from_str gets first character`() {
         val result = eval("""
             use std::char
-            match char::from_string { s = "Hello" } is
+            match char::from_str { s = "Hello" } is
                 Some { val } -> char::to_int { c = val }
                 None -> -1
         """)
@@ -48,10 +48,10 @@ class CharInterpreterTest {
     }
 
     @Test
-    fun `from_string returns None for empty string`() {
+    fun `from_str returns None for empty string`() {
         val result = eval("""
             use std::char
-            match char::from_string { s = "" } is
+            match char::from_str { s = "" } is
                 Some { val } -> 1
                 None -> 0
         """)

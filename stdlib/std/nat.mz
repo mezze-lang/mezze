@@ -119,7 +119,7 @@ pub let from_int: { n: Int } -> Option Nat = { n } -> __native_nat_from_int { n 
 pub let from_float: { n: Float } -> Option Nat = { n } -> __native_nat_from_float { n = n }
 
 ## Parse a string as a Nat. Returns None on failure.
-pub let from_string: { s: Str } -> Option Nat = { s } -> __native_nat_from_string { s = s }
+pub let from_str: { s: Str } -> Option Nat = { s } -> __native_nat_from_string { s = s }
 
 ## Return the smaller of two Nats.
 pub let min: { l: Nat, r: Nat } -> Nat = { l, r } -> __native_nat_min { l = l, r = r }

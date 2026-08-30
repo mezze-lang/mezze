@@ -202,10 +202,10 @@ class NatInterpreterTest {
     }
 
     @Test
-    fun `from_string parses valid natural number`() {
+    fun `from_str parses valid natural number`() {
         val code = """
             use std::nat
-            match nat::from_string { s = "42" } is
+            match nat::from_str { s = "42" } is
                 Some { val } -> 1
                 None -> 0
         """
@@ -214,10 +214,10 @@ class NatInterpreterTest {
     }
 
     @Test
-    fun `from_string returns None for invalid string`() {
+    fun `from_str returns None for invalid string`() {
         val code = """
             use std::nat
-            match nat::from_string { s = "abc" } is
+            match nat::from_str { s = "abc" } is
                 Some { val } -> 1
                 None -> 0
         """
@@ -226,10 +226,10 @@ class NatInterpreterTest {
     }
 
     @Test
-    fun `from_string returns None for negative number string`() {
+    fun `from_str returns None for negative number string`() {
         val code = """
             use std::nat
-            match nat::from_string { s = "-5" } is
+            match nat::from_str { s = "-5" } is
                 Some { val } -> 1
                 None -> 0
         """

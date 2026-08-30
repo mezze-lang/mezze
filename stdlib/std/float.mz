@@ -118,7 +118,7 @@ pub let from_int: { n: Int } -> Float = { n } -> __native_float_from_int { n = n
 pub let from_nat: { n: Nat } -> Float = { n } -> __native_float_from_nat { n = n }
 
 ## Parse a string as a float. Returns None on failure.
-pub let from_string: { s: Str } -> Option Float = { s } -> __native_float_from_string { s = s }
+pub let from_str: { s: Str } -> Option Float = { s } -> __native_float_from_string { s = s }
 
 ## Absolute value.
 pub let abs: { n: Float } -> Float = { n } -> __native_float_abs { n = n }

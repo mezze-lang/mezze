@@ -121,7 +121,7 @@ class FloatModuleTest {
     @Test
     fun `test float from_int function`() {
         val source = """
-            use std::float::{from_int, from_string}
+            use std::float::{from_int, from_str}
             let result = from_int { n = 42 }
         """.trimIndent()
 
@@ -130,10 +130,10 @@ class FloatModuleTest {
     }
 
     @Test
-    fun `test float from_string function`() {
+    fun `test float from_str function`() {
         val source = """
-            use std::float::{from_string}
-            let result = from_string { s = "3.14" }
+            use std::float::{from_str}
+            let result = from_str { s = "3.14" }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

@@ -153,7 +153,7 @@ pub let read_text : { path: Str } -> Result Str FsError <FileSystem> = { path } 
 
 ## Write a Str as UTF-8. Create-or-replace.
 pub let write_text : { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
-  FileSystem.write_bytes { path = path, bytes = bytes::from_string { s = text } }
+  FileSystem.write_bytes { path = path, bytes = bytes::from_str { s = text } }
 
 ## Read text with a default on error. Common for config loading.
 pub let read_text_or : { path: Str, default: Str } -> Str <FileSystem> = { path, default } ->
@@ -205,7 +205,7 @@ pub let append_bytes : { path: Str, bytes: Bytes } -> Result {} FsError <FileSys
 
 ## Append UTF-8 text.
 pub let append_text : { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
-  append_bytes { path = path, bytes = bytes::from_string { s = text } }
+  append_bytes { path = path, bytes = bytes::from_str { s = text } }
 
 ## ---------- Directory + write conveniences ----------
 

@@ -186,7 +186,7 @@ class NatIntegrationTest {
     void fromStringParsesValidNaturalNumber() {
         Object result = MezzeTestHelper.run("""
             use std::nat
-            match nat::from_string { s = "42" } is
+            match nat::from_str { s = "42" } is
                 Some { val } -> 1
                 None -> 0
             """);
@@ -197,7 +197,7 @@ class NatIntegrationTest {
     void fromStringReturnsNoneForInvalidString() {
         Object result = MezzeTestHelper.run("""
             use std::nat
-            match nat::from_string { s = "abc" } is
+            match nat::from_str { s = "abc" } is
                 Some { val } -> 1
                 None -> 0
             """);
@@ -208,7 +208,7 @@ class NatIntegrationTest {
     void fromStringReturnsNoneForNegativeNumberString() {
         Object result = MezzeTestHelper.run("""
             use std::nat
-            match nat::from_string { s = "-5" } is
+            match nat::from_str { s = "-5" } is
                 Some { val } -> 1
                 None -> 0
             """);

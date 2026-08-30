@@ -47,10 +47,10 @@ class BytesModuleTest {
     }
 
     @Test
-    fun `test bytes from_string function`() {
+    fun `test bytes from_str function`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -104,7 +104,7 @@ class BytesModuleTest {
     fun `test bytes length function returns Int`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             let len: Int = bytes::size { b = b }
         """.trimIndent()
 
@@ -128,7 +128,7 @@ class BytesModuleTest {
     fun `test bytes get function returns Option Int`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             let maybeByte = bytes::get { b = b, i = 0 }
             match maybeByte is
                 Some { val } -> val
@@ -147,7 +147,7 @@ class BytesModuleTest {
     fun `test bytes slice function`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
+            let b = bytes::from_str { s = "Hello World" }
             let sliced = bytes::slice { b = b, start = 0, end = 5 }
         """.trimIndent()
 
@@ -159,7 +159,7 @@ class BytesModuleTest {
     fun `test bytes take function`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             let taken = bytes::take { b = b, n = 3 }
         """.trimIndent()
 
@@ -171,7 +171,7 @@ class BytesModuleTest {
     fun `test bytes drop function`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             let dropped = bytes::drop { b = b, n = 2 }
         """.trimIndent()
 
@@ -187,8 +187,8 @@ class BytesModuleTest {
     fun `test bytes concat function`() {
         val source = """
             use std::collections::bytes
-            let b1 = bytes::from_string { s = "Hello" }
-            let b2 = bytes::from_string { s = " World" }
+            let b1 = bytes::from_str { s = "Hello" }
+            let b2 = bytes::from_str { s = " World" }
             let combined = bytes::concat { b1 = b1, b2 = b2 }
         """.trimIndent()
 
@@ -200,7 +200,7 @@ class BytesModuleTest {
     fun `test bytes repeat function`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "ab" }
+            let b = bytes::from_str { s = "ab" }
             let repeated = bytes::repeat { b = b, n = 3 }
         """.trimIndent()
 
@@ -216,8 +216,8 @@ class BytesModuleTest {
     fun `test bytes contains function returns Bool`() {
         val source = """
             use std::collections::bytes
-            let haystack = bytes::from_string { s = "Hello World" }
-            let needle = bytes::from_string { s = "World" }
+            let haystack = bytes::from_str { s = "Hello World" }
+            let needle = bytes::from_str { s = "World" }
             let found: Bool = bytes::contains { b = haystack, pattern = needle }
         """.trimIndent()
 
@@ -229,8 +229,8 @@ class BytesModuleTest {
     fun `test bytes starts_with function returns Bool`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
-            let prefix = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello World" }
+            let prefix = bytes::from_str { s = "Hello" }
             let result: Bool = bytes::starts_with { b = b, prefix = prefix }
         """.trimIndent()
 
@@ -242,8 +242,8 @@ class BytesModuleTest {
     fun `test bytes ends_with function returns Bool`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
-            let suffix = bytes::from_string { s = "World" }
+            let b = bytes::from_str { s = "Hello World" }
+            let suffix = bytes::from_str { s = "World" }
             let result: Bool = bytes::ends_with { b = b, suffix = suffix }
         """.trimIndent()
 
@@ -255,8 +255,8 @@ class BytesModuleTest {
     fun `test bytes index_of function returns Option Int`() {
         val source = """
             use std::collections::bytes
-            let haystack = bytes::from_string { s = "Hello World" }
-            let needle = bytes::from_string { s = "World" }
+            let haystack = bytes::from_str { s = "Hello World" }
+            let needle = bytes::from_str { s = "World" }
             let maybeIndex = bytes::index_of { b = haystack, pattern = needle }
             match maybeIndex is
                 Some { val } -> val
@@ -315,7 +315,7 @@ class BytesModuleTest {
     fun `test bytes to_hex function returns String`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hi" }
+            let b = bytes::from_str { s = "Hi" }
             let hex: Str = bytes::to_hex { b = b }
         """.trimIndent()
 
@@ -327,7 +327,7 @@ class BytesModuleTest {
     fun `test bytes to_base64 function returns String`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             let encoded: Str = bytes::to_base64 { b = b }
         """.trimIndent()
 
@@ -339,7 +339,7 @@ class BytesModuleTest {
     fun `test bytes to_str function returns Result`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             let result = bytes::to_str { b = b }
             match result is
                 Ok { val } -> val
@@ -367,10 +367,10 @@ class BytesModuleTest {
     // ========================================
 
     @Test
-    fun `test bytes from_string rejects non-string argument`() {
+    fun `test bytes from_str rejects non-string argument`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = 123 }
+            let b = bytes::from_str { s = 123 }
         """.trimIndent()
 
         assertFails {
@@ -394,7 +394,7 @@ class BytesModuleTest {
     fun `test bytes get rejects non-int index`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             let byte = bytes::get { b = b, i = "zero" }
         """.trimIndent()
 
@@ -407,7 +407,7 @@ class BytesModuleTest {
     fun `test bytes concat rejects non-bytes arguments`() {
         val source = """
             use std::collections::bytes
-            let b1 = bytes::from_string { s = "Hello" }
+            let b1 = bytes::from_str { s = "Hello" }
             let combined = bytes::concat { b1 = b1, b2 = "not bytes" }
         """.trimIndent()
 
@@ -438,7 +438,7 @@ class BytesModuleTest {
     fun `test bytes roundtrip hex encoding`() {
         val source = """
             use std::collections::bytes
-            let original = bytes::from_string { s = "Test" }
+            let original = bytes::from_str { s = "Test" }
             let hex = bytes::to_hex { b = original }
             let decoded = bytes::from_hex { s = hex }
             match decoded is
@@ -454,8 +454,8 @@ class BytesModuleTest {
     fun `test bytes chained operations`() {
         val source = """
             use std::collections::bytes
-            let b1 = bytes::from_string { s = "Hello" }
-            let b2 = bytes::from_string { s = " World" }
+            let b1 = bytes::from_str { s = "Hello" }
+            let b2 = bytes::from_str { s = " World" }
             let combined = bytes::concat { b1 = b1, b2 = b2 }
             let taken = bytes::take { b = combined, n = 5 }
             let hex = bytes::to_hex { b = taken }

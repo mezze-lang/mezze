@@ -1298,15 +1298,15 @@ class MutationRuntimeTest {
     @Test
     fun `test MutString read and write`() {
         val code = """
-            use std::effects::mutation::{LocalMut, string_to_mut, read_string, write_string}
+            use std::effects::mutation::{LocalMut, string_to_mut, read_str, write_str}
             use std::str
 
             let main = {} ->
                 perform LocalMut in do
                     let s = string_to_mut { s = "hello" }
-                    let v1 = read_string { s = s }
-                    write_string { s = s, v = "world" }
-                    let v2 = read_string { s = s }
+                    let v1 = read_str { s = s }
+                    write_str { s = s, v = "world" }
+                    let v2 = read_str { s = s }
                     str::size { s = v1 } * 10 + str::size { s = v2 }
 
             main {}
@@ -1339,7 +1339,7 @@ class MutationRuntimeTest {
     @Test
     fun `test MutString append and prepend`() {
         val code = """
-            use std::effects::mutation::{LocalMut, string_to_mut, string_append, string_prepend, read_string}
+            use std::effects::mutation::{LocalMut, string_to_mut, string_append, string_prepend, read_str}
             use std::str
 
             let main = {} ->
@@ -1347,7 +1347,7 @@ class MutationRuntimeTest {
                     let s = string_to_mut { s = "world" }
                     string_prepend { s = s, prefix = "hello " }
                     string_append { s = s, suffix = "!" }
-                    let result = read_string { s = s }
+                    let result = read_str { s = s }
                     str::size { s = result }
 
             main {}
@@ -1359,13 +1359,13 @@ class MutationRuntimeTest {
     @Test
     fun `test MutString reverse`() {
         val code = """
-            use std::effects::mutation::{LocalMut, string_to_mut, string_reverse, read_string}
+            use std::effects::mutation::{LocalMut, string_to_mut, string_reverse, read_str}
 
             let main = {} ->
                 perform LocalMut in do
                     let s = string_to_mut { s = "abc" }
                     string_reverse { s = s }
-                    let result = read_string { s = s }
+                    let result = read_str { s = s }
                     result
 
             main {}
@@ -1376,16 +1376,16 @@ class MutationRuntimeTest {
     @Test
     fun `test MutString insert and delete`() {
         val code = """
-            use std::effects::mutation::{LocalMut, string_to_mut, string_insert, string_delete, read_string}
+            use std::effects::mutation::{LocalMut, string_to_mut, string_insert, string_delete, read_str}
             use std::str
 
             let main = {} ->
                 perform LocalMut in do
                     let s = string_to_mut { s = "helloworld" }
                     string_insert { s = s, i = 5, text = " " }
-                    let v1 = read_string { s = s }
+                    let v1 = read_str { s = s }
                     string_delete { s = s, start = 0, end = 6 }
-                    let v2 = read_string { s = s }
+                    let v2 = read_str { s = s }
                     str::size { s = v1 } * 10 + str::size { s = v2 }
 
             main {}
@@ -1417,7 +1417,7 @@ class MutationRuntimeTest {
     @Test
     fun `test MutString set_char_at`() {
         val code = """
-            use std::effects::mutation::{LocalMut, string_to_mut, string_set_char_at, read_string}
+            use std::effects::mutation::{LocalMut, string_to_mut, string_set_char_at, read_str}
             use std::char
 
             let main = {} ->
@@ -1426,7 +1426,7 @@ class MutationRuntimeTest {
                     match char::from_int { code = 88 } is
                         Some { val = x } -> do
                             string_set_char_at { s = s, i = 1, c = x }
-                            read_string { s = s }
+                            read_str { s = s }
                         None -> "error"
 
             main {}
@@ -1437,7 +1437,7 @@ class MutationRuntimeTest {
     @Test
     fun `test MutString with_capacity`() {
         val code = """
-            use std::effects::mutation::{LocalMut, string_with_capacity, string_append, string_len, read_string}
+            use std::effects::mutation::{LocalMut, string_with_capacity, string_append, string_len, read_str}
 
             let main = {} ->
                 perform LocalMut in do

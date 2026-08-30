@@ -148,10 +148,10 @@ class FloatModuleTest {
     // === Additional tests for missing functions ===
 
     @Test
-    fun `test float from_string - valid float`() {
+    fun `test float from_str - valid float`() {
         val source = """
             use std::float
-            match float::from_string { s = "3.14" } is
+            match float::from_str { s = "3.14" } is
                 Some { val } -> val
                 None -> -999.0
         """.trimIndent()
@@ -161,10 +161,10 @@ class FloatModuleTest {
     }
 
     @Test
-    fun `test float from_string - integer string`() {
+    fun `test float from_str - integer string`() {
         val source = """
             use std::float
-            match float::from_string { s = "42" } is
+            match float::from_str { s = "42" } is
                 Some { val } -> val
                 None -> -999.0
         """.trimIndent()
@@ -174,10 +174,10 @@ class FloatModuleTest {
     }
 
     @Test
-    fun `test float from_string - negative float`() {
+    fun `test float from_str - negative float`() {
         val source = """
             use std::float
-            match float::from_string { s = "-2.718" } is
+            match float::from_str { s = "-2.718" } is
                 Some { val } -> val
                 None -> -999.0
         """.trimIndent()
@@ -187,10 +187,10 @@ class FloatModuleTest {
     }
 
     @Test
-    fun `test float from_string - invalid string`() {
+    fun `test float from_str - invalid string`() {
         val source = """
             use std::float
-            match float::from_string { s = "not a number" } is
+            match float::from_str { s = "not a number" } is
                 Some { val } -> val
                 None -> -999.0
         """.trimIndent()

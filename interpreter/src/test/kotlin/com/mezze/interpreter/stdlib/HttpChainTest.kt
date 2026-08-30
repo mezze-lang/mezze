@@ -40,7 +40,7 @@ class HttpChainTest {
             let mock_response: Response = {
                 status = 200,
                 headers = map::empty {},
-                body = bytes::from_string { s = "ok" },
+                body = bytes::from_str { s = "ok" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -70,7 +70,7 @@ class HttpChainTest {
             let mock_response: Response = {
                 status = 201,
                 headers = map::empty {},
-                body = bytes::from_string { s = "created" },
+                body = bytes::from_str { s = "created" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -98,7 +98,7 @@ class HttpChainTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "got it" },
+                status = 200, headers = map::empty {}, body = bytes::from_str { s = "got it" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -125,7 +125,7 @@ class HttpChainTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" },
+                status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -204,7 +204,7 @@ class HttpChainTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "hello!" },
+                status = 200, headers = map::empty {}, body = bytes::from_str { s = "hello!" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -236,7 +236,7 @@ class HttpChainTest {
                 v = "application/json"
             }
             let mock_response: Response = {
-                status = 200, headers = headers, body = bytes::from_string { s = "{}" },
+                status = 200, headers = headers, body = bytes::from_str { s = "{}" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -264,7 +264,7 @@ class HttpChainTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" },
+                status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -309,7 +309,7 @@ class HttpChainTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 201, headers = map::empty {}, body = bytes::from_string { s = "made" },
+                status = 201, headers = map::empty {}, body = bytes::from_str { s = "made" },
                 url = ""
             }
             let rules: [MockRule] = [

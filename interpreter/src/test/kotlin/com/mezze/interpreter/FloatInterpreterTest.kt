@@ -224,10 +224,10 @@ class FloatInterpreterTest {
     }
 
     @Test
-    fun `from_string parses valid float`() {
+    fun `from_str parses valid float`() {
         val code = """
             use std::float
-            match float::from_string { s = "3.14" } is
+            match float::from_str { s = "3.14" } is
                 Some { val } -> 1
                 None -> 0
         """
@@ -236,10 +236,10 @@ class FloatInterpreterTest {
     }
 
     @Test
-    fun `from_string returns None for invalid`() {
+    fun `from_str returns None for invalid`() {
         val code = """
             use std::float
-            match float::from_string { s = "abc" } is
+            match float::from_str { s = "abc" } is
                 Some { val } -> 1
                 None -> 0
         """
