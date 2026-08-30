@@ -659,6 +659,48 @@ class MatchValidator(
                     continue
                 }
 
+                // H2: the field type is a bare, still-generic type variable (`'a`) —
+                // it resolves to no concrete variant here. If an arm destructures it
+                // with a REFUTABLE sub-pattern (a constructor pattern, e.g.
+                // `Full { v = Full { … } }`), that arm assumes a specific shape of the
+                // abstract `'a`. Whatever `'a` instantiates to (`Box Str` at a call
+                // site), a value of a DIFFERENT shape is unmatched, so the match cannot
+                // be proven exhaustive without a catch-all sub-pattern for this field.
+                // Previously `resolveClosedVariant` returned null for `'a` and the
+                // `?: continue` below SILENTLY skipped the field → the match type-checked
+                // then trapped at runtime with "Non-exhaustive match: no variant tag
+                // matched". (A bare/opaque field bind is irrefutable → still fine.)
+                if (isGenericTypeVarField(fieldType)) {
+                    val hasCatchAll = subPatterns.any { it == null || isCatchAllPattern(it) }
+                    // Constructor sub-patterns applied to this generic field, grouped
+                    // by the variant that OWNS the matched constructor. A single-
+                    // constructor variant (`Pair 'a 'b = | Pair {…} |`) is fully
+                    // covered by matching its one constructor, so it's fine. A multi-
+                    // constructor variant (`Box = | Full, Empty |`) matched on only
+                    // SOME of its constructors leaves the rest unmatched — and because
+                    // the field is generic, no later arm can cover them, so require a
+                    // catch-all sub-pattern.
+                    if (!hasCatchAll) {
+                        val byOwner = mutableMapOf<Set<String>, MutableSet<String>>()
+                        for (sub in subPatterns) {
+                            if (sub !is ParsedConstructorPattern) continue
+                            val ownerCtors = ownerVariantConstructors(sub.constructor) ?: continue
+                            byOwner.getOrPut(ownerCtors) { mutableSetOf() }.add(sub.constructor)
+                        }
+                        for ((ownerCtors, covered) in byOwner) {
+                            val missingInner = ownerCtors - covered
+                            if (missingInner.isNotEmpty()) {
+                                errors.add(ValidationError.NonExhaustiveMatch(
+                                    coveredConstructors = covered.toList(),
+                                    missingConstructors = missingInner.map { "$ctorName { $fieldName = $it … } (or add a wildcard)" },
+                                    loc = matchExpr.loc
+                                ))
+                            }
+                        }
+                    }
+                    continue
+                }
+
                 // A single finite field is fully handled by the per-field recursion
                 // below; ≥2 were already product-checked above, so skip them here to
                 // avoid double-reporting (the product check subsumes per-field).
@@ -758,6 +800,33 @@ class MatchValidator(
             else -> null
         } ?: return null
         return if (v.rowVar == null) v else null
+    }
+
+    /**
+     * H2: is this field type a bare, still-generic type variable (`'a`) — i.e. a
+     * VarType that names a type PARAMETER, not an unresolved declared type name?
+     * Type parameters start with `'`; a VarType built from an unresolved decl name
+     * (`inner: Inner`) does resolve to a declaration, so it is NOT generic.
+     */
+    private fun isGenericTypeVarField(type: MezzeType): Boolean =
+        type is MezzeType.VarType &&
+            type.variable.name.startsWith("'") &&
+            variantFromDeclName(type.variable.name) == null
+
+    /**
+     * H2: the full constructor-name set of the CLOSED variant declaration that owns
+     * `ctorName`, or null if it isn't a (closed) variant constructor. Used to decide
+     * whether a constructor sub-pattern on a generic field is total (single-ctor
+     * variant → yes) or refutable (multi-ctor, only some matched → no).
+     */
+    private fun ownerVariantConstructors(ctorName: String): Set<String>? {
+        for ((_, typeDecl) in typeDeclarations) {
+            val def = typeDecl.definition as? ParsedVariantDef ?: continue
+            if (def.isOpen) continue
+            val names = def.constructors.map { it.name }
+            if (ctorName in names) return names.toSet()
+        }
+        return null
     }
 
     /** Build a closed VariantType for a declared variant type NAME, or null. */
