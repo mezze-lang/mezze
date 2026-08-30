@@ -78,25 +78,25 @@ class ResultModuleTest {
         assertEquals("wrapped", eval(source))
     }
 
-    // === get_or_else ===
+    // === get_or ===
 
     @Test
-    fun `test result get_or_else - Ok`() {
+    fun `test result get_or - Ok`() {
         val source = """
             use std::result
             let res: Result Int Str = Ok { val = 42 }
-            result::get_or_else { result = res, def = 0 }
+            result::get_or { result = res, def = 0 }
         """.trimIndent()
 
         assertEquals(42L, eval(source))
     }
 
     @Test
-    fun `test result get_or_else - Err`() {
+    fun `test result get_or - Err`() {
         val source = """
             use std::result
             let res: Result Int Str = Err { error = "oops" }
-            result::get_or_else { result = res, def = 99 }
+            result::get_or { result = res, def = 99 }
         """.trimIndent()
 
         assertEquals(99L, eval(source))

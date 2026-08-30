@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * - Map queries (keys, values)
  * - Higher-order functions (map_values, filter, fold, from_keys)
  * - Map operations (merge, merge_with)
- * - Lookup with default (get_or_default)
+ * - Lookup with default (get_or)
  * - Update operations (update, remove_all)
  * - Equality (equals)
  */
@@ -326,21 +326,21 @@ class MapIntegrationTest {
     // ========================================
 
     @Test
-    void getOrDefaultReturnsValueWhenKeyExists() {
+    void getOrReturnsValueWhenKeyExists() {
         Object result = MezzeTestHelper.run("""
             use std::collections::map
             let m = map::insert { m = map::empty {}, k = "key", v = 42 }
-            map::get_or_default { m = m, k = "key", def = 0 }
+            map::get_or { m = m, k = "key", def = 0 }
             """);
         assertEquals(42L, result);
     }
 
     @Test
-    void getOrDefaultReturnsDefaultWhenKeyMissing() {
+    void getOrReturnsDefWhenKeyMissing() {
         Object result = MezzeTestHelper.run("""
             use std::collections::map
             let m = map::insert { m = map::empty {}, k = "key", v = 42 }
-            map::get_or_default { m = m, k = "missing", def = 99 }
+            map::get_or { m = m, k = "missing", def = 99 }
             """);
         assertEquals(99L, result);
     }
@@ -402,7 +402,7 @@ class MapIntegrationTest {
             let m1 = map::insert { m = map::empty {}, k = "a", v = 1 }
             let m2 = map::insert { m = m1, k = "b", v = 2 }
             let m3 = map::insert { m = m2, k = "c", v = 3 }
-            let toRemove = list::of_seq { elements = ["a", "c"] }
+            let toRemove = list::from_seq { xs = ["a", "c"] }
             let m4 = map::remove_all { m = m3, ks = toRemove }
             map::size { m = m4 }
             """);

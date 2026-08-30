@@ -396,7 +396,7 @@ class FileSystemEffectTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, MemoryFS, read_text_or }
             perform MemoryFS in
-              read_text_or { path = "/nope", default = "fallback" }
+              read_text_or { path = "/nope", def = "fallback" }
         """.trimIndent()
         assertEquals("fallback", eval(code))
     }

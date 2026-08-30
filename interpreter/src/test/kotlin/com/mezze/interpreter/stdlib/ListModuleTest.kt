@@ -270,11 +270,11 @@ class ListModuleTest {
     }
 
     @Test
-    fun `test list of_seq`() {
+    fun `test list from_seq`() {
         val result = eval("""
             use std::collections::list
             let arr = [1, 2, 3, 4, 5]
-            let xs = list::of_seq { elements = arr }
+            let xs = list::from_seq { xs = arr }
             list::size { xs = xs }
         """)
         assertEquals(5L, result)
@@ -494,7 +494,7 @@ class ListModuleTest {
     fun `test list sort`() {
         val result = eval("""
             use std::collections::list
-            let xs = list::of_seq { elements = [3, 1, 4, 1, 5, 9, 2, 6] }
+            let xs = list::from_seq { xs = [3, 1, 4, 1, 5, 9, 2, 6] }
             let sorted = list::sort { xs = xs }
             match list::head { xs = sorted } is
                 Some { val } -> val
@@ -507,7 +507,7 @@ class ListModuleTest {
     fun `test list sort_by`() {
         val result = eval("""
             use std::collections::list
-            let xs = list::of_seq { elements = [3, 1, 4, 1, 5] }
+            let xs = list::from_seq { xs = [3, 1, 4, 1, 5] }
             let sorted = list::sort_by { xs = xs, cmp = { a, b } -> a <= b }
             match list::head { xs = sorted } is
                 Some { val } -> val
@@ -520,7 +520,7 @@ class ListModuleTest {
     fun `test list sort_by - descending`() {
         val result = eval("""
             use std::collections::list
-            let xs = list::of_seq { elements = [3, 1, 4, 1, 5] }
+            let xs = list::from_seq { xs = [3, 1, 4, 1, 5] }
             let sorted = list::sort_by { xs = xs, cmp = { a, b } -> a >= b }
             match list::head { xs = sorted } is
                 Some { val } -> val

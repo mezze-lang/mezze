@@ -64,22 +64,22 @@ class OptionInterpreterTest {
     // ========================================
 
     @Test
-    fun `get_or_else returns value for Some`() {
+    fun `get_or returns value for Some`() {
         val code = """
             use std::option
             let opt: (Option Int) = Some { val = 42 }
-            option::get_or_else { opt = opt, def = 0 }
+            option::get_or { opt = opt, def = 0 }
         """
         val result = eval(code)
         assertEquals(42L, result)
     }
 
     @Test
-    fun `get_or_else returns default for None`() {
+    fun `get_or returns default for None`() {
         val code = """
             use std::option
             let opt: (Option Int) = None
-            option::get_or_else { opt = opt, def = 99 }
+            option::get_or { opt = opt, def = 99 }
         """
         val result = eval(code)
         assertEquals(99L, result)
@@ -95,7 +95,7 @@ class OptionInterpreterTest {
             use std::option
             let opt: (Option Int) = Some { val = 21 }
             let doubled = option::map { opt = opt, f = { val } -> val * 2 }
-            option::get_or_else { opt = doubled, def = 0 }
+            option::get_or { opt = doubled, def = 0 }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -121,7 +121,7 @@ class OptionInterpreterTest {
             let result = option::flat_map { opt = opt, f = { val } ->
                 if val > 0 then Some { val = val * 2 } else None
             }
-            option::get_or_else { opt = result, def = 0 }
+            option::get_or { opt = result, def = 0 }
         """
         val result = eval(code)
         assertEquals(10L, result)
@@ -162,7 +162,7 @@ class OptionInterpreterTest {
             let opt1: (Option Int) = Some { val = 1 }
             let opt2: (Option Int) = Some { val = 2 }
             let result = option::or_else { opt1 = opt1, opt2 = opt2 }
-            option::get_or_else { opt = result, def = 0 }
+            option::get_or { opt = result, def = 0 }
         """
         val result = eval(code)
         assertEquals(1L, result)
@@ -175,7 +175,7 @@ class OptionInterpreterTest {
             let opt1: (Option Int) = None
             let opt2: (Option Int) = Some { val = 2 }
             let result = option::or_else { opt1 = opt1, opt2 = opt2 }
-            option::get_or_else { opt = result, def = 0 }
+            option::get_or { opt = result, def = 0 }
         """
         val result = eval(code)
         assertEquals(2L, result)
@@ -192,7 +192,7 @@ class OptionInterpreterTest {
             let inner: (Option Int) = Some { val = 42 }
             let outer: (Option (Option Int)) = Some { val = inner }
             let result = option::flatten { opt = outer }
-            option::get_or_else { opt = result, def = 0 }
+            option::get_or { opt = result, def = 0 }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -304,7 +304,7 @@ class OptionInterpreterTest {
             let a: (Option Int) = Some { val = 3 }
             let b: (Option Int) = Some { val = 4 }
             let result = option::zip_with { a = a, b = b, f = { x, y } -> x + y }
-            option::get_or_else { opt = result, def = 0 }
+            option::get_or { opt = result, def = 0 }
         """
         val result = eval(code)
         assertEquals(7L, result)
@@ -355,7 +355,7 @@ class OptionInterpreterTest {
             let a: (Option Int) = Some { val = 10 }
             let b: (Option Int) = Some { val = 5 }
             let result = option::map2 { opt_a = a, opt_b = b, f = { a, b } -> a + b }
-            option::get_or_else { opt = result, def = 0 }
+            option::get_or { opt = result, def = 0 }
         """
         val result = eval(code)
         assertEquals(15L, result)

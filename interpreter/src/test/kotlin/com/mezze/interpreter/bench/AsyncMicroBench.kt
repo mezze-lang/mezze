@@ -100,7 +100,7 @@ class AsyncMicroBench {
                     xs = seq::range { start = 0, end = $n },
                     f = { x } -> Async.spawn { f = {} -> x },
                 }
-                result::get_or_else { result = try_all { ps = ps }, def = [] }
+                result::get_or { result = try_all { ps = ps }, def = [] }
                 $n
         """.trimIndent()
         BenchRecorder.bench(
@@ -135,7 +135,7 @@ class AsyncMicroBench {
                     xs = seq::range { start = 1, end = $n + 1 },
                     f = { x } -> Async.spawn { f = {} -> x },
                 }
-                let results = result::get_or_else { result = try_all { ps = ps }, def = [] }
+                let results = result::get_or { result = try_all { ps = ps }, def = [] }
                 seq::fold { xs = results, init = 0, f = { acc, x } -> acc + x }
         """.trimIndent()
         // sum 1..n
@@ -318,7 +318,7 @@ class AsyncMicroBench {
                         xs = seq::range { start = 1, end = $n + 1 },
                         f = { x } -> Async.spawn { f = {} -> x },
                     }
-                    let results = result::get_or_else { result = try_all { ps = ps }, def = [] }
+                    let results = result::get_or { result = try_all { ps = ps }, def = [] }
                     seq::fold { xs = results, init = 0, f = { acc, x } -> acc + x }
             """.trimIndent()
             val expected = (n.toLong() * (n + 1)) / 2

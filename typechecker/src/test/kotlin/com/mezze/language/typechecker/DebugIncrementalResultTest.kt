@@ -32,7 +32,7 @@ class DebugIncrementalResultTest {
         Ok { val } -> Ok { val = val }
         Err { error } -> Err { error = f { error } }""",
 
-            """pub let get_or_else: { result: (Result 'a 'e), def: 'a } -> 'a = { result, def } ->
+            """pub let get_or: { result: (Result 'a 'e), def: 'a } -> 'a = { result, def } ->
     match result is
         Ok { val } -> val
         Err { error } -> def"""

@@ -21,16 +21,16 @@ class DebugIncompleteGetOrElseTest {
     }
 
     @Test
-    fun `test incomplete get_or_else as extracted by TestFullResultStep`() {
+    fun `test incomplete get_or as extracted by TestFullResultStep`() {
         // This is what TestFullResultStep actually extracts if function extraction is broken
         // This SHOULD fail because it's missing the Err case
         val code = """
-            pub let get_or_else: { result: (Result 'a 'e), def: 'a } -> 'a = { result, def } ->
+            pub let get_or: { result: (Result 'a 'e), def: 'a } -> 'a = { result, def } ->
                 match result is
                     Ok { val } -> val
         """.trimIndent()
 
-        println("Testing INCOMPLETE get_or_else (missing Err case):")
+        println("Testing INCOMPLETE get_or (missing Err case):")
         println(code)
 
         val exception = assertThrows<Exception> {

@@ -578,7 +578,7 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                         // happens during generation. A record literal produces
                         // a bare structural type, so `let r: Result Str Str =
                         // Ok { … }` bound `r` to something with no name for an
-                        // impl to match, and `r.get_or_else {}` failed with
+                        // impl to match, and `r.get_or {}` failed with
                         // "Cannot access field ... on variant type" while the
                         // identical binding at the top level worked.
                         //

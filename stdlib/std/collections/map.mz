@@ -68,13 +68,6 @@ pub let merge : { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = { m1, m2 } ->
 pub let merge_with : { m1: Map 'k 'v, m2: Map 'k 'v, f: { l: 'v, r: 'v } -> 'v <...> } -> Map 'k 'v <...> = { m1, m2, f } ->
   __native_map_merge_with { m1 = m1, m2 = m2, f = f }
 
-## Returns the value for key k, or def if not found.
-pub let get_or_default : { m: Map 'k 'v, k: 'k, def: 'v } -> 'v = { m, k, def } ->
-  match get { m = m, k = k } is
-    Some { val } -> val
-    None -> def
-
-
 ## Updates the value for key k using f; removes if f returns None.
 pub let update : { m: Map 'k 'v, k: 'k, f: { x: Option 'v } -> Option 'v <...> } -> Map 'k 'v <...> = { m, k, f } ->
   do
@@ -117,9 +110,11 @@ pub let count : { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Int <...>
 pub let contains_value : { m: Map 'k 'v, v: 'v } -> Bool = { m, v } ->
   __native_map_contains_value { m = m, v = v }
 
-## Returns the value for key k, or default if not found.
-pub let get_or : { m: Map 'k 'v, k: 'k, default: 'v } -> 'v = { m, k, default } ->
-  __native_map_get_or_default { m = m, k = k, default = default }
+## Returns the value for key k, or def if not found.
+pub let get_or : { m: Map 'k 'v, k: 'k, def: 'v } -> 'v = { m, k, def } ->
+  match get { m = m, k = k } is
+    Some { val } -> val
+    None -> def
 
 ## Creates a single-entry map.
 pub let singleton : { k: 'k, v: 'v } -> Map 'k 'v = { k, v } ->
@@ -225,7 +220,7 @@ impl Map 'k 'v where {
   filter = { it, p } -> filter { m = it, p = p },
   fold = { it, init, f } -> fold { m = it, init = init, f = f },
   merge = { it, m2 } -> merge { m1 = it, m2 = m2 },
-  get_or_default = { it, k, def } -> get_or_default { m = it, k = k, def = def },
+  get_or = { it, k, def } -> get_or { m = it, k = k, def = def },
   any = { it, p } -> any { m = it, p = p },
   all = { it, p } -> all { m = it, p = p },
   find = { it, p } -> find { m = it, p = p },

@@ -420,11 +420,11 @@ class NewtypeImplRuntimeTest {
         void promiseAwaitMethod() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::{ Async, LoomAsync, Promise, await }
-                use std::result::{ get_or_else }
+                use std::result::{ get_or }
                 let main = {} -> perform LoomAsync in do
                   let p = Async.spawn {f = {} -> 42}
                   let r = await { p = p }
-                  get_or_else { result = r, def = -1 }
+                  get_or { result = r, def = -1 }
                 main {}
                 """);
             assertEquals(42L, result);

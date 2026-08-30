@@ -193,7 +193,7 @@ class ReaderEffectTest {
 
             perform SystemTime in perform LoomAsync in perform WithReader { val = "req-7" } in do
               let p = Async.spawn { f = {} -> Reader.ask {} }
-              result::get_or_else { result = await { p = p }, def = "missing" }
+              result::get_or { result = await { p = p }, def = "missing" }
         """
         assertEquals("req-7", eval(source))
     }
@@ -210,8 +210,8 @@ class ReaderEffectTest {
               let p_outer = Async.spawn { f = {} -> Reader.ask {} }
               let p_inner = perform WithReader { val = "inner" } in do
                 Async.spawn { f = {} -> Reader.ask {} }
-              let outer_res = result::get_or_else { result = await { p = p_outer }, def = "missing" }
-              let inner_res = result::get_or_else { result = await { p = p_inner }, def = "missing" }
+              let outer_res = result::get_or { result = await { p = p_outer }, def = "missing" }
+              let inner_res = result::get_or { result = await { p = p_inner }, def = "missing" }
               "$(outer_res):$(inner_res)"
         """
         assertEquals("outer:inner", eval(source))
@@ -231,7 +231,7 @@ class ReaderEffectTest {
                   sleep { ms = 20 }
                   Reader.ask {}
                 }
-              result::get_or_else { result = await { p = p }, def = "missing" }
+              result::get_or { result = await { p = p }, def = "missing" }
         """
         assertEquals("captured", eval(source))
     }
@@ -248,7 +248,7 @@ class ReaderEffectTest {
             perform SystemTime in perform LoomAsync in perform WithReader { val = "shared" } in do
               let p = Async.spawn { f = {} -> Reader.ask {} }
               let parent_view_before_await = Reader.ask {}
-              let child_view = result::get_or_else { result = await { p = p }, def = "missing" }
+              let child_view = result::get_or { result = await { p = p }, def = "missing" }
               let parent_view_after_await = Reader.ask {}
               "$(parent_view_before_await):$(child_view):$(parent_view_after_await)"
         """
@@ -274,7 +274,7 @@ class ReaderEffectTest {
               let results = all { ps = promises }
               let unwrapped = seq::map {
                 xs = results,
-                f = { x } -> result::get_or_else { result = x, def = "missing" },
+                f = { x } -> result::get_or { result = x, def = "missing" },
               }
               seq::fold {
                 xs = unwrapped,
@@ -303,7 +303,7 @@ class ReaderEffectTest {
 
             perform SystemTime in perform LoomAsync in perform WithReader { val = "mixed" } in do
               let p = Async.spawn { f = task }
-              result::get_or_else { result = await { p = p }, def = "missing" }
+              result::get_or { result = await { p = p }, def = "missing" }
         """
         assertEquals("mixed", eval(source))
     }
@@ -324,13 +324,13 @@ class ReaderEffectTest {
             let grandchild : {} -> Str = {} -> "ok"
 
             let child : {} -> Str <Async> = {} ->
-              result::get_or_else {
+              result::get_or {
                 result = await { p = Async.spawn { f = grandchild } },
                 def = "child-miss",
               }
 
             perform SystemTime in perform LoomAsync in
-              result::get_or_else {
+              result::get_or {
                 result = await { p = Async.spawn { f = child } },
                 def = "root-miss",
               }
@@ -349,9 +349,9 @@ class ReaderEffectTest {
             use std::result
 
             perform SystemTime in perform LoomAsync in
-              result::get_or_else {
+              result::get_or {
                 result = await { p = Async.spawn { f = {} ->
-                  result::get_or_else {
+                  result::get_or {
                     result = await { p = Async.spawn { f = {} -> "ok" } },
                     def = "child-miss",
                   }
@@ -386,16 +386,16 @@ class ReaderEffectTest {
             let grandchild : {} -> Str <Reader, Async, Time> = {} -> do
               sleep { ms = 2 }
               let p = Async.spawn { f = great_grandchild }
-              result::get_or_else { result = await { p = p }, def = "missing" }
+              result::get_or { result = await { p = p }, def = "missing" }
 
             let child : {} -> Str <Reader, Async, Time> = {} -> do
               sleep { ms = 2 }
               let p = Async.spawn { f = grandchild }
-              result::get_or_else { result = await { p = p }, def = "missing" }
+              result::get_or { result = await { p = p }, def = "missing" }
 
             perform SystemTime in perform LoomAsync in perform WithReader { val = "deep-root" } in do
               let p = Async.spawn { f = child }
-              result::get_or_else { result = await { p = p }, def = "missing" }
+              result::get_or { result = await { p = p }, def = "missing" }
         """
         assertEquals("deep-root", eval(source))
     }
@@ -421,30 +421,30 @@ class ReaderEffectTest {
               # Shadow with "L4"; spawn layer5 under that.
               perform WithReader { val = "L4" } in do
                 let p = Async.spawn { f = layer5 }
-                result::get_or_else { result = await { p = p }, def = "missing" }
+                result::get_or { result = await { p = p }, def = "missing" }
 
             let layer3 : {} -> Str <Reader, Async> = {} -> do
               # Read here under whatever was inherited from layer2.
               let here = Reader.ask {}
               let p = Async.spawn { f = layer4 }
-              let leaf = result::get_or_else { result = await { p = p }, def = "missing" }
+              let leaf = result::get_or { result = await { p = p }, def = "missing" }
               "$(here)/$(leaf)"
 
             let layer2 : {} -> Str <Async> = {} -> do
               # Shadow with "L2"; spawn layer3 under that.
               perform WithReader { val = "L2" } in do
                 let p = Async.spawn { f = layer3 }
-                result::get_or_else { result = await { p = p }, def = "missing" }
+                result::get_or { result = await { p = p }, def = "missing" }
 
             let layer1 : {} -> Str <Reader, Async> = {} -> do
               let here = Reader.ask {}
               let p = Async.spawn { f = layer2 }
-              let sub = result::get_or_else { result = await { p = p }, def = "missing" }
+              let sub = result::get_or { result = await { p = p }, def = "missing" }
               "$(here)/$(sub)"
 
             perform SystemTime in perform LoomAsync in perform WithReader { val = "ROOT" } in do
               let p = Async.spawn { f = layer1 }
-              result::get_or_else { result = await { p = p }, def = "missing" }
+              result::get_or { result = await { p = p }, def = "missing" }
         """
         // L1 reads ROOT.
         // L2 shadows with L2.
@@ -472,8 +472,8 @@ class ReaderEffectTest {
             let child : {} -> Str <Reader, Async> = {} -> do
               let p1 = Async.spawn { f = leaf }
               let p2 = Async.spawn { f = leaf }
-              let r1 = result::get_or_else { result = await { p = p1 }, def = "miss" }
-              let r2 = result::get_or_else { result = await { p = p2 }, def = "miss" }
+              let r1 = result::get_or { result = await { p = p1 }, def = "miss" }
+              let r2 = result::get_or { result = await { p = p2 }, def = "miss" }
               "$(r1)+$(r2)"
 
             perform SystemTime in perform LoomAsync in perform WithReader { val = "root" } in do
@@ -484,7 +484,7 @@ class ReaderEffectTest {
               let results = all { ps = promises }
               let unwrapped = seq::map {
                 xs = results,
-                f = { x } -> result::get_or_else { result = x, def = "miss" },
+                f = { x } -> result::get_or { result = x, def = "miss" },
               }
               seq::fold {
                 xs = unwrapped,

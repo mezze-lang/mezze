@@ -95,7 +95,6 @@ Test file: `ListModuleTest.kt`, `ListInterpreterTest.kt`
 | `unzip` | :white_check_mark: | |
 | `to_seq` | :white_check_mark: | |
 | `from_seq` | :white_check_mark: | |
-| `of_seq` | :white_check_mark: | |
 | `range` | :white_check_mark: | |
 | `repeat` | :white_check_mark: | |
 | `intersperse` | :white_check_mark: | |
@@ -129,7 +128,7 @@ Test file: `MapModuleTest.kt`
 | `from_keys` | :white_check_mark: | |
 | `merge` | :white_check_mark: | |
 | `merge_with` | :white_check_mark: | |
-| `get_or_default` | :white_check_mark: | |
+| `get_or` | :white_check_mark: | |
 | `update` | :white_check_mark: | |
 | `remove_all` | :white_check_mark: | |
 | `equals` | :white_check_mark: | |

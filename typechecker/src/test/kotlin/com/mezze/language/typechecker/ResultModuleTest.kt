@@ -54,11 +54,11 @@ class ResultModuleTest {
     }
 
     @Test
-    fun `test result get_or_else function`() {
+    fun `test result get_or function`() {
         val source = """
             use std::result
             let ok_val = Ok { val = 42 }
-            let result = result::get_or_else { result = ok_val, def = 0 }
+            let result = result::get_or { result = ok_val, def = 0 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

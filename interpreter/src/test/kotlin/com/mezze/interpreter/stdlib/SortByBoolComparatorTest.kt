@@ -17,7 +17,7 @@ class SortByBoolComparatorTest {
         val r = MezzeTestHelper.run(
             """
             use std::collections::list
-            let xs = list::of_seq { elements = [3, 1, 4, 1, 5, 9, 2] }
+            let xs = list::from_seq { xs = [3, 1, 4, 1, 5, 9, 2] }
             let sorted = list::sort_by { xs = xs, cmp = { a, b } -> a <= b }
             match list::head { xs = sorted } is
               Some { val } -> val
@@ -32,7 +32,7 @@ class SortByBoolComparatorTest {
         val r = MezzeTestHelper.run(
             """
             use std::collections::list
-            let xs = list::of_seq { elements = [3, 1, 4, 1, 5, 9, 2] }
+            let xs = list::from_seq { xs = [3, 1, 4, 1, 5, 9, 2] }
             let sorted = list::sort_by { xs = xs, cmp = { a, b } -> a >= b }
             match list::head { xs = sorted } is
               Some { val } -> val
@@ -47,7 +47,7 @@ class SortByBoolComparatorTest {
         val r = MezzeTestHelper.run(
             """
             use std::collections::list
-            let xs = list::of_seq { elements = [1, 2, 3, 4] }
+            let xs = list::from_seq { xs = [1, 2, 3, 4] }
             if list::is_sorted_by { xs = xs, cmp = { a, b } -> a <= b } then 1 else 0
             """.trimIndent()
         )

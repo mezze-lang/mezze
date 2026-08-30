@@ -401,7 +401,7 @@ class OSThreadConcurrencyTest {
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
-                let results = result::get_or_else { result = try_all {ps = [p1, p2, p3]}, def = [] }
+                let results = result::get_or { result = try_all {ps = [p1, p2, p3]}, def = [] }
                 sum {xs = results}
         """
         val result = eval(code)

@@ -973,7 +973,7 @@ class TypedAstBuilder(
         // tryGenerate*MethodCall) when it's concrete. methodFunctionType carries the
         // method's DECLARED signature whose return var is not always the var the
         // solver pinned at this call — reading `fn.type`'s return alone then leaves a
-        // generic result unbound: `top.get_or_else { def = "?" }` on `Result Str Str`
+        // generic result unbound: `top.get_or { def = "?" }` on `Result Str Str`
         // recorded `'a` instead of `Str`. Fall back to the fn-type return, then the
         // context type.
         val solvedCallSite = callReturnTypes[expr.loc]?.let { substitution.apply(it) }

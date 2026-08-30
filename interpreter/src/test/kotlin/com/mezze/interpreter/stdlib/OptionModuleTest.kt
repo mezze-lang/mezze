@@ -48,25 +48,25 @@ class OptionModuleTest {
         assertEquals(-1L, eval(source))
     }
 
-    // === get_or_else ===
+    // === get_or ===
 
     @Test
-    fun `test option get_or_else - Some`() {
+    fun `test option get_or - Some`() {
         val source = """
             use std::option
             let opt = Some { val = 42 }
-            option::get_or_else { opt = opt, def = 0 }
+            option::get_or { opt = opt, def = 0 }
         """.trimIndent()
 
         assertEquals(42L, eval(source))
     }
 
     @Test
-    fun `test option get_or_else - None`() {
+    fun `test option get_or - None`() {
         val source = """
             use std::option
             let opt: Option Int = None
-            option::get_or_else { opt = opt, def = 99 }
+            option::get_or { opt = opt, def = 99 }
         """.trimIndent()
 
         assertEquals(99L, eval(source))

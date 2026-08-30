@@ -25,7 +25,7 @@ class SelectTest {
 
             perform LoomAsync in do
               let r = park_any { predicates = [{} -> False, {} -> True, {} -> False] }
-              option::get_or_else { opt = r, def = -1 }
+              option::get_or { opt = r, def = -1 }
         """.trimIndent()
         assertEquals(1L, eval(source))
     }
@@ -56,7 +56,7 @@ class SelectTest {
                 {} -> deref { atom = flag } == 99,
                 {} -> deref { atom = flag } == 1,
               ] }
-              option::get_or_else { opt = r, def = -1 }
+              option::get_or { opt = r, def = -1 }
         """.trimIndent()
         assertEquals(1L, eval(source))
     }
@@ -73,7 +73,7 @@ class SelectTest {
                 { when = {} -> True,  run = {} -> 20 },
                 { when = {} -> True,  run = {} -> 30 },
               ] }
-              option::get_or_else { opt = r, def = -1 }
+              option::get_or { opt = r, def = -1 }
         """.trimIndent()
         assertEquals(20L, eval(source))
     }
@@ -112,11 +112,11 @@ class SelectTest {
               let pb = Async.spawn { f = {} -> recv { ch = ch } }
               let r = select { branches = [
                 { when = {} -> pa.is_done {},
-                  run  = {} -> result::get_or_else { result = await { p = pa }, def = -1 } },
+                  run  = {} -> result::get_or { result = await { p = pa }, def = -1 } },
                 { when = {} -> pb.is_done {},
-                  run  = {} -> result::get_or_else { result = await { p = pb }, def = -1 } },
+                  run  = {} -> result::get_or { result = await { p = pb }, def = -1 } },
               ] }
-              option::get_or_else { opt = r, def = -2 }
+              option::get_or { opt = r, def = -2 }
         """.trimIndent()
         assertEquals(7L, eval(source))
     }
@@ -132,7 +132,7 @@ class SelectTest {
                 { when = {} -> False, run = {} -> 1 },
                 { when = {} -> True,  run = {} -> 2 },
               ] }
-              option::get_or_else { opt = r, def = -1 }
+              option::get_or { opt = r, def = -1 }
         """.trimIndent()
         assertEquals(2L, eval(source))
     }
@@ -151,7 +151,7 @@ class SelectTest {
                 {} -> deref { atom = flag } == 99,
                 {} -> deref { atom = flag } == 5,
               ] }
-              option::get_or_else { opt = r, def = -1 }
+              option::get_or { opt = r, def = -1 }
         """.trimIndent()
         assertEquals(1L, eval(source))
     }

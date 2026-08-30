@@ -246,7 +246,7 @@ class HttpChainTest {
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/" }.send {}
               match resp is
-                Ok { val } -> option::get_or_else { opt = val.header { name = "Content-Type" }, def = "missing" }
+                Ok { val } -> option::get_or { opt = val.header { name = "Content-Type" }, def = "missing" }
                 Err { error } -> "send-err"
         """)
         assertEquals("application/json", result)

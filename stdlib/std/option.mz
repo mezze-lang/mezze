@@ -75,7 +75,7 @@ pub let map : { opt: Option 'a, f: { val: 'a } -> 'b <...> } -> Option 'b <...> 
 
 
 ## Unwrap the value, or return def if None.
-pub let get_or_else : { opt: Option 'a, def: 'a } -> 'a = { opt, def } -> match opt is
+pub let get_or : { opt: Option 'a, def: 'a } -> 'a = { opt, def } -> match opt is
   Some { val } -> val
   None -> def
 
@@ -183,7 +183,7 @@ pub let zip_with : { a: Option 'a, b: Option 'b, f: { x: 'a, y: 'b } -> 'c <...>
 impl Option 'a where {
   map = { it, f } -> map { opt = it, f = f },
   flat_map = { it, f } -> flat_map { opt = it, f = f },
-  get_or_else = { it, def } -> get_or_else { opt = it, def = def },
+  get_or = { it, def } -> get_or { opt = it, def = def },
   is_some = { it } -> is_some { opt = it },
   is_none = { it } -> is_none { opt = it },
   filter = { it, p } -> filter { opt = it, p = p },
