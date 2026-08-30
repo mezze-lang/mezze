@@ -402,6 +402,9 @@ object DuplicateDeclarationValidator {
 
         private fun validateDuplicateAbilityImpls(module: ParsedModule) {
         val firstImplByKey = mutableMapOf<String, ParsedImplAbilityDecl>()
+        // H3/#333: prior impls of each ability (by label), to detect a STRUCTURAL
+        // overlap (`['a]` vs `[Int]`) that the exact-key map misses.
+        val priorImplsByLabel = mutableMapOf<String, MutableList<ParsedImplAbilityDecl>>()
 
         for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
             val targetTypeNames = impl.targetTypes.map { parsedTypeAnnotationToString(it) }
@@ -437,6 +440,35 @@ object DuplicateDeclarationValidator {
                 )
             }
             firstImplByKey[key] = impl
+
+            // H3/#333: even without an EXACT-key collision, a blanket container impl
+            // (`['a]`, `Box 'a`) STRUCTURALLY overlaps a concrete one of the same
+            // shape (`[Int]`, `Box Int`) — some concrete type satisfies both, so
+            // runtime dispatch would be ambiguous (it silently picked the blanket).
+            // Reject the overlap (coherence): only one impl may claim a given type.
+            if (!impl.isInherent) {
+                val prior = priorImplsByLabel.getOrPut(implLabel) { mutableListOf() }
+                // A bare-`'a` generic receiver overlapping a concrete one is already
+                // handled by validateGenericVsConcrete (below) with a richer message;
+                // this check ONLY closes the container-generic gap (`['a]`, `Box 'a`)
+                // that the bare-`'a` classifier misses, so skip when either side is a
+                // bare-`'a` generic to avoid pre-empting that path (GenericImplTest E1/E2).
+                val clash = prior.firstOrNull { p ->
+                    !isGenericReceiver(p) && !isGenericReceiver(impl) && implTargetsOverlap(p, impl)
+                }
+                if (clash != null) {
+                    throw TypeCheckError(
+                        "Overlapping ability impls: `$implLabel` for `${targetTypeNames.joinToString(" ")}` overlaps the impl " +
+                        "for `${clash.targetTypes.joinToString(" ") { parsedTypeAnnotationToString(it) }}` at ${locString(clash.loc)}. " +
+                        "A generic impl (e.g. `['a]`, `Box 'a`) already covers every concrete instance of that shape, so a more " +
+                        "specific impl for the same shape is not allowed. Keep one: remove the concrete impl to use the generic " +
+                        "everywhere, or remove the generic and add concrete impls one type at a time.",
+                        impl.loc,
+                        code = ErrorCode.V0407_OVERLAPPING_INSTANCE,
+                    )
+                }
+                prior.add(impl)
+            }
         }
 
         validateGenericVsConcrete(module)
@@ -523,6 +555,54 @@ object DuplicateDeclarationValidator {
         if (targets.size != 1) return false
         val target = targets.first()
         return target is ParsedNamedType && target.name.startsWith("'")
+    }
+
+    /** True if a parsed type annotation is a type variable (`'a`). */
+    private fun isTypeVar(ann: ParsedTypeAnnotation): Boolean =
+        ann is ParsedNamedType && ann.name.startsWith("'")
+
+    /**
+     * H3/#333: do two impl target-type annotations OVERLAP — i.e. does some
+     * concrete type satisfy both? A blanket container impl (`['a]`, `Box 'a`)
+     * overlaps a concrete one of the SAME shape (`[Int]`, `Box Int`) because
+     * `[Int]` satisfies `['a]`. Overlap = structural unify-ability: a type
+     * variable on either side unifies with anything; otherwise the two must
+     * share the same constructor and every argument must pairwise-overlap.
+     * (`['a]` vs `Box Int` do NOT overlap — Seq vs Box.) This closes the
+     * coherence hole where `impl Sz for [Int]` + `impl Sz for ['a]` were
+     * BOTH admitted (their exact structural keys differ) and dispatch then
+     * silently picked the blanket for a `[Int]` receiver.
+     */
+    private fun targetsOverlap(a: ParsedTypeAnnotation, b: ParsedTypeAnnotation): Boolean {
+        if (isTypeVar(a) || isTypeVar(b)) return true
+        return when {
+            a is ParsedTypeApp && b is ParsedTypeApp ->
+                a.constructor == b.constructor && a.args.size == b.args.size &&
+                    a.args.zip(b.args).all { (x, y) -> targetsOverlap(x, y) }
+            a is ParsedQualifiedType && b is ParsedQualifiedType ->
+                a.modulePath == b.modulePath && a.typeName == b.typeName &&
+                    a.args.size == b.args.size &&
+                    a.args.zip(b.args).all { (x, y) -> targetsOverlap(x, y) }
+            a is ParsedSeqType && b is ParsedSeqType ->
+                targetsOverlap(a.elementType, b.elementType)
+            a is ParsedNamedType && b is ParsedNamedType -> a.name == b.name
+            else -> structuralTypeKey(a) == structuralTypeKey(b)
+        }
+    }
+
+    /** True when the two impls' full class-arg tuples pairwise-overlap (same
+     *  arity, each position overlaps). The tuple is the ability's class type
+     *  arguments (the co-operands of a class-param ability like `NumAdd 'r for
+     *  'l`, held in `abilityTypeArgs`) PLUS the receiver target(s) (`targetTypes`).
+     *  Both must be compared: `NumAdd Float for Float` and `NumAdd Int for Float`
+     *  share the receiver `Float` but differ on the co-operand, so they do NOT
+     *  overlap — only comparing `targetTypes` would wrongly flag them. Used for
+     *  the same-ability same-module coherence check. */
+    private fun implTargetsOverlap(a: ParsedImplAbilityDecl, b: ParsedImplAbilityDecl): Boolean {
+        val aTuple = a.abilityTypeArgs + a.targetTypes
+        val bTuple = b.abilityTypeArgs + b.targetTypes
+        return aTuple.size == bTuple.size &&
+            aTuple.zip(bTuple).all { (x, y) -> targetsOverlap(x, y) }
     }
 
     /**
