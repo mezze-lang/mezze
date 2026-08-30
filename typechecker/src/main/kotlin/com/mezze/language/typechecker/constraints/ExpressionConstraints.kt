@@ -97,6 +97,9 @@ class ExpressionConstraintGenerator {
         // BUG D (#332): scrutinee-loc → inference-time scrutinee type, propagated
         // up so exhaustiveness can see every match scrutinee (not just params).
         val matchScrutineeTypes = mutableMapOf<Loc, MezzeType>()
+        // BUG C (#331): deferred callback-effect harvests for `<...>` HOF calls,
+        // re-run post-solve so a polymorphic-intermediary callback isn't laundered.
+        val pendingClosureArgEffects = mutableListOf<ConstraintResult.PendingClosureHarvest>()
         val duplicateBindings = mutableListOf<ConstraintResult.DuplicateBinding>()
         val tailCalls = mutableSetOf<Loc>()
         // #84 linter: unused bindings found in nested sub-expressions (match
@@ -120,6 +123,7 @@ class ExpressionConstraintGenerator {
             methodCallResolutions.putAll(result.methodCallResolutions)
             callReturnTypes.putAll(result.callReturnTypes)
             matchScrutineeTypes.putAll(result.matchScrutineeTypes)
+            pendingClosureArgEffects.addAll(result.pendingClosureArgEffects)
             duplicateBindings.addAll(result.duplicateBindings)
             tailCalls.addAll(result.tailCalls)
             unusedVars.addAll(result.unusedVariables)
@@ -140,6 +144,7 @@ class ExpressionConstraintGenerator {
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes,
             matchScrutineeTypes = matchScrutineeTypes,
+            pendingClosureArgEffects = pendingClosureArgEffects,
             duplicateBindings = duplicateBindings,
             tailCalls = tailCalls,
             unusedVariables = unusedVars,

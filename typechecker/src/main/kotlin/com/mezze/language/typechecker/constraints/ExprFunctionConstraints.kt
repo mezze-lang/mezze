@@ -624,6 +624,7 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         callReturnTypes = bodyResult.callReturnTypes,
         matchCaseBindings = bodyResult.matchCaseBindings,
         matchScrutineeTypes = bodyResult.matchScrutineeTypes,
+        pendingClosureArgEffects = bodyResult.pendingClosureArgEffects,
     )
 }
 
@@ -992,6 +993,13 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
             // the harvested effects — they should NOT flow to the caller.
             val caughtByOp = collectCaughtByAncestor(functionType.paramType)
             val rowVarEffects: Set<String> = if (effectRow.rowVar != null) {
+                // BUG C (#331): defer a post-solve re-harvest of the SAME argument.
+                // At gen-time a callback field routed through a polymorphic
+                // intermediary is a VarType and its effects are skipped; the
+                // decl-finalization pass re-harvests the solved argument.
+                collector.pendingClosureArgEffects.add(
+                    ConstraintResult.PendingClosureHarvest(argumentResult.type, caughtByOp)
+                )
                 collectClosureArgEffects(argumentResult.type) - caughtByOp
             } else emptySet()
             if (caughtByOp.isNotEmpty()) {
@@ -1079,9 +1087,13 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     val caughtByOp2 = if (functionResult.type is MezzeType.FunctionType) {
         collectCaughtByAncestor((functionResult.type as MezzeType.FunctionType).paramType)
     } else emptySet()
-    val rowVarEffects = if (functionResult.effects.isNotEmpty())
+    val rowVarEffects = if (functionResult.effects.isNotEmpty()) {
+        // BUG C (#331): defer a post-solve re-harvest (see the sibling site above).
+        collector.pendingClosureArgEffects.add(
+            ConstraintResult.PendingClosureHarvest(argumentResult.type, caughtByOp2)
+        )
         collectClosureArgEffects(argumentResult.type) - caughtByOp2
-    else emptySet()
+    } else emptySet()
     if (functionResult.type is MezzeType.FunctionType) {
         val fnType = functionResult.type as MezzeType.FunctionType
         collector.effects.addAll(fnType.effects?.effects ?: emptySet())

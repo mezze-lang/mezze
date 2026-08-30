@@ -258,7 +258,23 @@ data class ConstraintResult(
     // here (resolved by the validator via the final substitution) lets
     // exhaustiveness see EVERY scrutinee, not just direct parameters.
     val matchScrutineeTypes: Map<Loc, MezzeType> = emptyMap(),
+    // BUG C (#331): callback-effect harvest for a `<...>` HOF call
+    // (collectClosureArgEffects) runs at constraint-GEN time and skips any arg
+    // field that is not YET a concrete FunctionType (`as? FunctionType ?: continue`).
+    // When the effectful callback reaches the slot through a polymorphic
+    // intermediary (`apply_eff { f = id { g = leaky } }`), the field is a VarType
+    // at gen-time, its `<Log>` is dropped, and a pure-declared wrapper is wrongly
+    // accepted. We record each such harvest's raw argument type + the effects the
+    // op catches, so the decl-finalization pass (which holds the final
+    // substitution) can RE-harvest the SOLVED argument and fold in any effect
+    // names the gen-time pass missed. Idempotent: re-folding already-seen effects
+    // is a set union no-op.
+    val pendingClosureArgEffects: List<PendingClosureHarvest> = emptyList(),
 ) {
+    /** A deferred callback-effect harvest for BUG C (#331). [argType] is the
+     *  `<...>` HOF call's argument type as seen at gen-time (may contain VarType
+     *  fields); [caughtByOp] are effect names the op discharges (row subtraction). */
+    data class PendingClosureHarvest(val argType: MezzeType, val caughtByOp: Set<String>)
     data class MethodCallInfo(
         val abilityName: String?,        // null for inherent methods
         val methodName: String,

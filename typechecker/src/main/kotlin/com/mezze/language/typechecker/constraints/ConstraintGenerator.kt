@@ -399,6 +399,46 @@ class ConstraintGenerator(
         }.filterValues { it.isNotEmpty() }
     }
 
+    /**
+     * BUG C (#331): re-run the callback-effect harvest on the SOLVED argument
+     * types of this decl's `<...>` HOF calls and fold any effect names the
+     * gen-time pass missed into [inferredType]'s top-level effect row. The
+     * gen-time harvest skips an arg field that is still a VarType (a callback
+     * routed through a polymorphic intermediary); post-solve that field resolves
+     * to its concrete FunctionType, so re-harvesting recovers its effects. Only
+     * adds effects — never removes — so it can tighten `validateEffectsNot-
+     * Overpromised`'s under-promise check without loosening anything. Returns
+     * [inferredType] unchanged when there is nothing to add or it is not a
+     * function type.
+     */
+    private fun enrichWithReHarvestedClosureEffects(
+        inferredType: MezzeType,
+        pending: List<ConstraintResult.PendingClosureHarvest>,
+        substitution: Substitution,
+    ): MezzeType {
+        if (pending.isEmpty() || inferredType !is MezzeType.FunctionType) return inferredType
+        val extra = mutableSetOf<String>()
+        for (harvest in pending) {
+            val solvedArg = substitution.apply(harvest.argType)
+            if (solvedArg !is MezzeType.RecordType) continue
+            for ((_, fieldType) in solvedArg.fields) {
+                val fnType = substitution.apply(fieldType) as? MezzeType.FunctionType ?: continue
+                val effRow = fnType.effects ?: continue
+                extra.addAll(effRow.effects - harvest.caughtByOp)
+                for (instance in effRow.effectInstances) {
+                    if (instance.name !in harvest.caughtByOp) extra.add(instance.name)
+                }
+            }
+        }
+        if (extra.isEmpty()) return inferredType
+        val existing = inferredType.effects
+        val merged = (existing?.effects ?: emptySet()) + extra
+        if (existing != null && merged == existing.effects) return inferredType
+        val newRow = existing?.copy(effects = merged)
+            ?: MezzeType.EffectRow(effects = merged)
+        return inferredType.copy(effects = newRow)
+    }
+
     private fun validateLetAnnotation(
         item: ParsedLetDecl,
         preConvertedAnnotationType: MezzeType,
@@ -463,8 +503,14 @@ class ConstraintGenerator(
         // implicitly promises pure). Missing rows = "pure", still a
         // constraint the body must satisfy.
         if (annotation is ParsedFunctionType && !bodyContainsNativeCall(item.value)) {
+            // BUG C (#331): fold in effects the gen-time callback harvest missed
+            // because a `<...>` HOF's callback arg was a VarType then (e.g. routed
+            // through a polymorphic intermediary). Re-harvest the SOLVED arg types.
+            val effectsWithReHarvest = enrichWithReHarvestedClosureEffects(
+                inferredTypeWithAbilities, result.pendingClosureArgEffects, substitution
+            )
             annotationValidator.validateEffectsNotOverpromised(
-                preConvertedAnnotationType, inferredTypeWithAbilities,
+                preConvertedAnnotationType, effectsWithReHarvest,
                 varName, item.value.loc
             )
         }
