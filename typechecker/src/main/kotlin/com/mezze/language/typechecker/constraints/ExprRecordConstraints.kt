@@ -157,18 +157,26 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
     // the open-var branch keeps its original permissive shape.
     for ((fieldName, explicitType) in explicitFieldTypes) {
         val spreadType = spreadFieldTypes[fieldName] ?: continue
-        // Skip record-typed fields: an override there may legitimately be a
-        // row-open record-update whose result type isn't structurally identical
-        // to the (closed) spread field type, and the record-literal result is
-        // always closed (rowVar=null), so a plain Equality would spuriously
-        // report "missing <field>" on a nested update. The soundness hole this
-        // guards is primitive-vs-primitive (Int overridden with Str), so
-        // constraining non-record fields is enough to catch it.
-        if (spreadType is MezzeType.RecordType || explicitType is MezzeType.RecordType) continue
+        // A spread update is type-preserving: the override must keep each field's
+        // type. For a NON-record field this is a plain equality (#75). For a
+        // RECORD-typed field we cannot demand structural equality — a legitimate
+        // nested update (`{ ...r, inner = { ...r.inner, y = 2 } }`) yields an inner
+        // record whose row openness differs from the (closed) promised field type,
+        // and the record-literal result is always closed, so an Equality would
+        // spuriously report a missing/extra field. But fully skipping record fields
+        // is a SOUNDNESS HOLE (H1): `{ ...r, inner = { x = "s" } }` where
+        // r.inner.x : Int type-checked, then `s.inner.x + 1` crashed at runtime with
+        // "Cannot add String and Long". So: open the promised field type on a fresh
+        // row var (extra override fields are absorbed) and unify the override INTO
+        // it. Any shared field whose type CHANGED (Int→Str) fails to unify and is
+        // rejected; a wider/nested-update override still succeeds.
+        val expected = if (spreadType is MezzeType.RecordType && spreadType.rowVar == null)
+            spreadType.copy(rowVar = RowVar.fresh())
+        else spreadType
         collector.constraints.add(
             Constraint.Equality(
                 left = explicitType,
-                right = spreadType,
+                right = expected,
                 context = "Record update field '$fieldName' must keep its type",
                 loc = expr.loc
             )
