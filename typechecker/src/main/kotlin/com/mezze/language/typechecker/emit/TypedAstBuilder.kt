@@ -1051,7 +1051,27 @@ class TypedAstBuilder(
                         }
 
                         val value = buildExpr(stmt.value, file, valueType)
-                        val resolvedType = substitution.apply(value.type)
+                        // Bind to the WRITTEN annotation's type when there is one, so the
+                        // binding keeps the declared nominal identity (e.g. `Post`, a named
+                        // record) instead of the value's bare structural shape. A record
+                        // literal produces an Anonymous `RecordType`; using it here loses
+                        // the name, so a later ability-method call `post.summarize {}` has a
+                        // nameless receiver, `impl Summary for Post` can't be resolved at
+                        // dispatch, and the call is lowered as a plain field-access that
+                        // crashes at runtime (`Field not found: summarize`). Top-level lets
+                        // already keep the annotated type (ConstraintGenerator's
+                        // authoritativeType); this makes the do-block path consistent. The
+                        // typechecker already proved the value conforms to the annotation,
+                        // so preferring it is a pure identity-preservation, not a re-check.
+                        // Guard: only when the annotation resolves to a concrete shape
+                        // (not a bare type var, e.g. `let x : 'a = 5`), so we never trade
+                        // the value's known type for an unsolved annotation var.
+                        val structuralType = substitution.apply(value.type)
+                        val resolvedType = if (stmt.typeAnnotation != null && valueType !is MezzeType.VarType) {
+                            valueType
+                        } else {
+                            structuralType
+                        }
 
                         val isRecursive = isLambdaValue && value is TypedLambda &&
                                            refsName(value.body, name)
