@@ -80,4 +80,62 @@ class DoBlockAbilityDispatchTest {
         val result = MezzeTestHelper.runWithOutput(src)
         assertEquals("amina", result.output().trim())
     }
+
+    // The regression this fixes: a record literal whose shape matches an in-scope
+    // `type X = {..}` ADOPTS `X` even WITHOUT an annotation ("if a type alias
+    // matching a record shape is in scope, we use it. ALWAYS"). So the ability call
+    // dispatches on an UNANNOTATED binding too — top-level AND in a do-block. This
+    // regressed when `type X = {..}` became a transparent alias and record-literal
+    // alias adoption was retired to a no-op (9d03c52d2).
+
+    /** Unannotated top-level binding: the literal adopts `Post` by shape. */
+    @Test
+    @Timeout(value = 60, unit = TimeUnit.SECONDS)
+    fun `ability method on an unannotated top-level record binding dispatches by shape`() {
+        val src = """
+            use std::effects::log::{ Console, println }
+            ability Summary for 'a where { summarize: { it: 'a } -> Str }
+            type Post = { user: Str, body: Str }
+            impl Summary for Post where { summarize = { it } -> it.user }
+            let post = { user = "amina", body = "shipped" }
+            let main = {} -> perform Console in println { msg = post.summarize {} }
+            main {}
+        """.trimIndent()
+        assertEquals("amina", MezzeTestHelper.runWithOutput(src).output().trim())
+    }
+
+    /** Unannotated do-block binding: same adoption by shape, dispatches. */
+    @Test
+    @Timeout(value = 60, unit = TimeUnit.SECONDS)
+    fun `ability method on an unannotated do-block record binding dispatches by shape`() {
+        val src = """
+            use std::effects::log::{ Console, println }
+            ability Summary for 'a where { summarize: { it: 'a } -> Str }
+            type Post = { user: Str, body: Str }
+            impl Summary for Post where { summarize = { it } -> it.user }
+            let main = {} -> perform Console in do
+              let post = { user = "amina", body = "shipped" }
+              println { msg = post.summarize {} }
+            main {}
+        """.trimIndent()
+        assertEquals("amina", MezzeTestHelper.runWithOutput(src).output().trim())
+    }
+
+    /** The reported repro, UNANNOTATED, under `perform Console`. */
+    @Test
+    @Timeout(value = 60, unit = TimeUnit.SECONDS)
+    fun `ability method on an unannotated do-block binding under perform Console prints`() {
+        val src = """
+            use std::effects::log::{ Console, println }
+            ability Summary for 'a where { summarize: { it: 'a } -> Str }
+            type Post = { user: Str, body: Str }
+            impl Summary for Post where { summarize = { it } -> it.user }
+            let main = {} -> perform Console in do
+              let post = { user = "amina", body = "bug fix and shipped it" }
+              println { msg = post.summarize {} }
+            main {}
+        """.trimIndent()
+        val result = MezzeTestHelper.runWithOutput(src)
+        assertEquals("amina", result.output().trim())
+    }
 }

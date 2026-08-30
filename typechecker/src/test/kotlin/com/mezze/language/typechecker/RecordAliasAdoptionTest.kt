@@ -37,6 +37,18 @@ class RecordAliasAdoptionTest {
         val r = tc.typeCheck(parser.parseParsedModule(b.trimIndent(), "t.mz"), Paths.get("."), enablePrelude = true)
         return r.getVariableType(name)?.let { prettyPrintTypeWithAliases(it, tc.getTypeAliases()) }
     }
+
+    // RAW print — NO alias resolution. A record that merely PRINTS as `Lang` via
+    // alias-aware printing but carries `TypeIdentity.Anonymous` would print
+    // structurally here, so this catches an adoption that only lives at display
+    // time (which is invisible to `typeOf` and is exactly how the record→alias
+    // adoption silently regressed under the transparent-alias refactor, breaking
+    // ability dispatch on the value). A truly adopted record prints its Declared
+    // name even without the alias table.
+    private fun rawTypeOf(name: String, b: String): String? {
+        val r = tc.typeCheck(parser.parseParsedModule(b.trimIndent(), "t.mz"), Paths.get("."), enablePrelude = true)
+        return r.getVariableType(name)?.let { prettyPrintType(it) }
+    }
     private fun err(b: String): String? =
         try { tc.typeCheck(parser.parseParsedModule(b.trimIndent(), "t.mz"), Paths.get("."), enablePrelude = true); null }
         catch (e: TypeCheckError) { e.message }
@@ -48,6 +60,15 @@ class RecordAliasAdoptionTest {
     @Test
     fun `a bare literal exactly matching a closed alias adopts its name`() {
         assertEquals("Lang", typeOf("x", "$lang\nlet x = { name = \"Mezze\", released = False }"))
+    }
+
+    @Test
+    fun `adoption stamps the nominal identity, not just the display label`() {
+        // The raw type (no alias resolution) must ALREADY read as `Lang` — the
+        // record carries `Declared(Lang)`, which is what makes ability dispatch on
+        // the value resolve `impl … for Lang`. If it only printed `Lang` via the
+        // alias table, this would come back structural (`{ name: Str, ... }`).
+        assertEquals("Lang", rawTypeOf("x", "$lang\nlet x = { name = \"Mezze\", released = False }"))
     }
 
     @Test
