@@ -70,6 +70,9 @@ class ConstraintGenerator(
                     .aliasedAnnotationForTypeDecl(decl)?.let { ann -> ann to decl.typeParams }
             }
         },
+        associatedTypesForEffect = { name ->
+            registry.effectDeclarations[name]?.associatedTypes ?: emptyList()
+        },
     )
 
     private val implValidator = ImplValidator(
