@@ -478,7 +478,7 @@ class NonEmptyListModuleTest {
         val result = eval("""
             use std::collections::nonemptylist
             let xs = nonemptylist::cons { x = 3, xs = nonemptylist::cons { x = 1, xs = nonemptylist::singleton { x = 2 } } }
-            let ys = nonemptylist::sort_by { xs = xs, cmp = {l, r} -> r - l }
+            let ys = nonemptylist::sort_by { xs = xs, cmp = {l, r} -> l >= r }
             nonemptylist::head { xs = ys }
         """)
         assertEquals(3L, result)

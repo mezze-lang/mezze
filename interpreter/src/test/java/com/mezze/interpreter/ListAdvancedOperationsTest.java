@@ -822,7 +822,7 @@ class ListAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             let xs = list::from_seq { xs = [5, 4, 3, 2, 1] }
-            list::is_sorted_by { xs = xs, cmp = { a, b } -> b - a }
+            list::is_sorted_by { xs = xs, cmp = { a, b } -> a >= b }
             """);
         assertEquals(true, result);  // Sorted in descending order
     }
@@ -832,7 +832,7 @@ class ListAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5] }
-            list::is_sorted_by { xs = xs, cmp = { a, b } -> b - a }
+            list::is_sorted_by { xs = xs, cmp = { a, b } -> a >= b }
             """);
         assertEquals(false, result);  // Not sorted in descending order
     }
@@ -842,7 +842,7 @@ class ListAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             let xs = list::from_seq { xs = [42] }
-            list::is_sorted_by { xs = xs, cmp = { a, b } -> a - b }
+            list::is_sorted_by { xs = xs, cmp = { a, b } -> a <= b }
             """);
         assertEquals(true, result);
     }

@@ -156,9 +156,11 @@ pub let reverse: { xs: ['a] } -> ['a] = { xs } -> __native_seq_reverse { xs = xs
 ## Sorts elements in ascending order.
 pub let sort: { xs: ['a] } -> ['a] = { xs } -> __native_seq_sort { xs = xs }
 
-## Sorts using a custom comparator returning Int.
-pub let sort_by : { xs: ['a], cmp: { a: 'a, b: 'a } -> Int <...> } -> ['a] <...> = { xs, cmp } ->
-  __native_seq_sort_by { xs = xs, cmp = cmp }
+## Sorts using a `less-or-equal` comparator: `cmp { a, b }` returns True when `a`
+## should come before `b`. Matches how ordering is expressed everywhere else in
+## the language (`Ord`'s `lt`/`le`, the `<`/`<=` operators) — no three-way Int.
+pub let sort_by : { xs: ['a], cmp: { a: 'a, b: 'a } -> Bool <...> } -> ['a] <...> = { xs, cmp } ->
+  __native_seq_sort_by { xs = xs, cmp = { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1 }
 
 ## Removes duplicate elements, keeping the first occurrence.
 pub let unique: { xs: ['a] } -> ['a] = { xs } -> __native_seq_unique { xs = xs }

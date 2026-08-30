@@ -116,9 +116,10 @@ pub let from_seq : { xs: ['a] } -> NonEmptyList 'a = { xs } -> __native_nel_from
 pub let sort : { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } ->
   __native_nel_sort { xs = xs }
 
-## Sorts using a custom comparator.
-pub let sort_by : { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Int <...> } -> NonEmptyList 'a <...> = { xs, cmp } ->
-  __native_nel_sort_by { xs = xs, cmp = cmp }
+## Sorts using a `less-or-equal` comparator: `cmp { l, r }` returns True when `l`
+## should come before `r` (matches `Ord`'s `lt`/`le` and the `<`/`<=` operators).
+pub let sort_by : { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Bool <...> } -> NonEmptyList 'a <...> = { xs, cmp } ->
+  __native_nel_sort_by { xs = xs, cmp = { l, r } -> if cmp { l = l, r = r } then 0 - 1 else 1 }
 
 ## Method implementations for NonEmptyList.
 impl NonEmptyList 'a where {

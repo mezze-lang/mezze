@@ -284,7 +284,7 @@ class SeqModuleTest {
         val result = eval("""
             use std::collections::seq
             let xs = [3, 1, 4, 1, 5]
-            let ys = seq::sort_by { xs = xs, cmp = { a, b } -> b - a }
+            let ys = seq::sort_by { xs = xs, cmp = { a, b } -> a >= b }
             match seq::head { xs = ys } is
                 Some { val } -> val
                 None -> -1

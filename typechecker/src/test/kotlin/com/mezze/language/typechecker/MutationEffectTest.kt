@@ -465,7 +465,7 @@ class MutationEffectTest {
 
             let sort_descending: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
-                sort_by {seq = arr, cmp = {a, b} -> b - a}
+                sort_by {seq = arr, cmp = {a, b} -> a >= b}
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
@@ -1061,7 +1061,7 @@ class MutationEffectTest {
 
             let sort_descending: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
-                sort_by {seq = arr, cmp = {a, b} -> b - a}
+                sort_by {seq = arr, cmp = {a, b} -> a >= b}
                 seq_to_immut {seq = arr}
         """.trimIndent()
 

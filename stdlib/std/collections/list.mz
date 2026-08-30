@@ -220,9 +220,10 @@ pub let intersperse : { xs: List 'a, sep: 'a } -> List 'a = { xs, sep } ->
 ## Sorts elements in ascending order.
 pub let sort : { xs: List 'a } -> List 'a = { xs } -> __native_list_sort { xs = xs }
 
-## Sorts using a custom comparator.
-pub let sort_by : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> List 'a <...> = { xs, cmp } ->
-  __native_list_sort_by { xs = xs, cmp = cmp }
+## Sorts using a `less-or-equal` comparator: `cmp { a, b }` returns True when `a`
+## should come before `b` (matches `Ord`'s `lt`/`le` and the `<`/`<=` operators).
+pub let sort_by : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Bool <...> } -> List 'a <...> = { xs, cmp } ->
+  __native_list_sort_by { xs = xs, cmp = { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1 }
 
 ## Returns the first element matching the predicate, or None.
 let find_go : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
@@ -533,27 +534,28 @@ pub let lexicographic_compare : { xs: List 'a, ys: List 'a, cmp: { a: 'a, b: 'a 
   __native_list_lexicographic_compare { xs = xs, ys = ys, cmp = cmp }
 
 ## Adjacent-pair walk with short-circuit on first out-of-order pair.
-let is_sorted_by_go : { prev: 'a, rest: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Bool <...> = { prev, rest, cmp } ->
+let is_sorted_by_go : { prev: 'a, rest: List 'a, cmp: { a: 'a, b: 'a } -> Bool <...> } -> Bool <...> = { prev, rest, cmp } ->
   match uncons { xs = rest } is
     None -> True
     Some { val = { head, tail } } ->
-      if cmp { a = prev, b = head } > 0
-        then False
-        else is_sorted_by_go { prev = head, rest = tail, cmp = cmp }
+      if cmp { a = prev, b = head }
+        then is_sorted_by_go { prev = head, rest = tail, cmp = cmp }
+        else False
 
-## Returns True if elements are sorted by the given comparator.
-pub let is_sorted_by : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Bool <...> = { xs, cmp } ->
+## Returns True if elements are sorted by the given `less-or-equal` comparator
+## (`cmp { a, b }` is True when `a` should come before `b`).
+pub let is_sorted_by : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Bool <...> } -> Bool <...> = { xs, cmp } ->
   match uncons { xs = xs } is
     None -> True
     Some { val = { head, tail } } -> is_sorted_by_go { prev = head, rest = tail, cmp = cmp }
 
 ## Returns True if elements are in ascending order.
 pub let is_sorted : { xs: List 'a } with Ord 'a -> Bool = { xs } ->
-  is_sorted_by { xs = xs, cmp = {a, b} -> if a > b then 1 else 0 }
+  is_sorted_by { xs = xs, cmp = {a, b} -> a <= b }
 
 ## Returns True if elements are in descending order.
 pub let is_sorted_descending : { xs: List 'a } with Ord 'a -> Bool = { xs } ->
-  is_sorted_by { xs = xs, cmp = {a, b} -> if a < b then 1 else 0 }
+  is_sorted_by { xs = xs, cmp = {a, b} -> a >= b }
 
 ## Binary search in a sorted list, returning the index or None.
 pub let binary_search : { xs: List 'a, target: 'a } -> Option Int = { xs, target } ->

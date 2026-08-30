@@ -508,11 +508,7 @@ class ListModuleTest {
         val result = eval("""
             use std::collections::list
             let xs = list::of_seq { elements = [3, 1, 4, 1, 5] }
-            let sorted = list::sort_by { xs = xs, cmp = { a, b } ->
-                if a > b then 1
-                else if a < b then -1
-                else 0
-            }
+            let sorted = list::sort_by { xs = xs, cmp = { a, b } -> a <= b }
             match list::head { xs = sorted } is
                 Some { val } -> val
                 None -> -1
@@ -525,11 +521,7 @@ class ListModuleTest {
         val result = eval("""
             use std::collections::list
             let xs = list::of_seq { elements = [3, 1, 4, 1, 5] }
-            let sorted = list::sort_by { xs = xs, cmp = { a, b } ->
-                if a < b then 1
-                else if a > b then -1
-                else 0
-            }
+            let sorted = list::sort_by { xs = xs, cmp = { a, b } -> a >= b }
             match list::head { xs = sorted } is
                 Some { val } -> val
                 None -> -1

@@ -141,9 +141,10 @@ pub let char_to_immut : { c: MutChar } -> Char <Mut> = { c } ->
 pub let sort : { seq: MutSeq Int } -> {} <Mut> = { seq } ->
   Mut.mutate { act = {} -> __native_mut_seq_sort { seq = seq } }
 
-## Sort a MutSeq in place using a custom comparator.
-pub let sort_by : { seq: MutSeq 'a, cmp: { a: 'a, b: 'a } -> Int } -> {} <Mut> = { seq, cmp } ->
-  Mut.mutate { act = {} -> __native_mut_seq_sort_by { seq = seq, cmp = cmp } }
+## Sort a MutSeq in place using a `less-or-equal` comparator: `cmp { a, b }`
+## returns True when `a` should come before `b` (matches `Ord`'s `lt`/`le`).
+pub let sort_by : { seq: MutSeq 'a, cmp: { a: 'a, b: 'a } -> Bool } -> {} <Mut> = { seq, cmp } ->
+  Mut.mutate { act = {} -> __native_mut_seq_sort_by { seq = seq, cmp = { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1 } }
 
 ## Reverse a MutSeq in place.
 pub let reverse : { seq: MutSeq 'a } -> {} <Mut> = { seq } ->
