@@ -300,6 +300,35 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
         val constraints = mutableListOf<Constraint>()
         constraints.addAll(payloadResult.constraints)
         constraints.addAll(newtypeFieldConstraints)
+
+        // H4: `Ticket { n = 5 }` where `Ticket` is a plain RECORD type (not a
+        // variant or newtype) — pin the result to `Ticket`'s DECLARED type so the
+        // construction carries its nominal identity. HasConstructor below only
+        // resolves variant/newtype constructors; for a record-type name it never
+        // binds `resultType`, leaving it an unsolved VarType. That was harmless at
+        // the top level (the annotation pinned it) but when the value flows into a
+        // generic `{ x: 'a }` param the arg's field type stays a var, mono can't
+        // derive concrete typeArgs, the `with Ability 'a` constraint is never
+        // resolved to an impl, and the ability-method call crashes at runtime with
+        // an uncached CallIndirect once the ability has ≥2 impls.
+        val recordDeclForCtor = context.typeDeclarations[expr.constructor]
+            ?.takeIf { it.definition is ParsedRecordDef }
+        if (recordDeclForCtor != null) {
+            val declaredType = try {
+                convertParsedTypeAnnotation(
+                    ParsedNamedType(name = expr.constructor, loc = expr.loc)
+                )
+            } catch (_: Exception) { null }
+            if (declaredType != null) {
+                constraints.add(Constraint.Equality(
+                    left = resultType,
+                    right = declaredType,
+                    context = "Record-type construction ${expr.constructor}",
+                    loc = expr.loc,
+                ))
+            }
+        }
+
         constraints.add(
             Constraint.HasConstructor(
                 variantType = resultType,
