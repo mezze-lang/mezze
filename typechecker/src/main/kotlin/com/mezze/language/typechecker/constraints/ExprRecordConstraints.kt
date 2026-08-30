@@ -266,7 +266,59 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
         rowVar = resultRowVar
     )
 
-    return collector.toResult(recordType)
+    return collector.toResult(adoptRecordAlias(recordType, context))
+}
+
+/**
+ * "If a type alias matching a record shape is in scope, we use it. ALWAYS."
+ *
+ * A CLOSED record literal whose field set and field TYPES exactly match a unique
+ * in-scope CLOSED `type X = { … }` declaration ADOPTS `X`'s nominal identity
+ * (`TypeIdentity.Declared(hash, X)`). This is what makes `let p = { user = "a",
+ * body = "b" }` infer as `Post` rather than a bare `{ user, body }`, so an ability
+ * method call `p.summarize {}` resolves `impl Summary for Post` (the receiver
+ * carries a Declared identity for dispatch to key on). Transparency is preserved:
+ * the record keeps its fields, so a `Post`-adopted value still unifies structurally
+ * everywhere a bare `{ user, body }` is accepted (Anonymous↔Declared record unify).
+ *
+ * Only fires when the match is UNIQUE (same-shape closed aliases are already
+ * rejected at declaration, #187, so a shape match is unique in practice; the
+ * uniqueness guard is defensive). Never stamps an OPEN record, a record that
+ * already carries a non-Anonymous identity, or a record whose fields don't all
+ * render-equal a single alias's declared fields (a field still `'a` at gen-time
+ * simply doesn't match — adoption is conservative, never a coercion).
+ *
+ * This regressed when `type X = {..}` became a transparent alias (9d03c52d2 gutted
+ * TypedAstBuilder.labelRecordWithAlias to a no-op); doing adoption HERE (at
+ * constraint generation) rather than at emit makes the identity flow to dispatch
+ * and mono too, not just display.
+ */
+internal fun ExpressionConstraintGenerator.adoptRecordAlias(
+    record: MezzeType.RecordType,
+    context: ConstraintContext
+): MezzeType.RecordType {
+    if (record.rowVar != null) return record
+    if (record.identity != TypeIdentity.Anonymous) return record
+    if (record.fields.isEmpty()) return record
+
+    val renderedRecordFields: Map<String, String> =
+        record.fields.mapValues { (_, ty) -> prettyPrintType(ty) }
+
+    val matches = context.typeDeclarations.entries.mapNotNull { (aliasName, typeDecl) ->
+        val def = typeDecl.definition as? ParsedRecordDef ?: return@mapNotNull null
+        if (def.isOpen) return@mapNotNull null
+        val aliasFieldNames = def.fields.map { it.name }.toSet()
+        if (aliasFieldNames != record.fields.keys) return@mapNotNull null
+        val fieldsMatch = def.fields.all { field ->
+            val declared = prettyPrintType(convertParsedFieldType(field.type))
+            renderedRecordFields[field.name] == declared
+        }
+        if (fieldsMatch) aliasName to typeDecl else null
+    }
+
+    val (aliasName, typeDecl) = matches.singleOrNull() ?: return record
+    val hash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+    return record.copy(identity = TypeIdentity.Declared(hash, aliasName))
 }
 
 internal fun ExpressionConstraintGenerator.memberAccessFieldLoc(expr: ParsedMemberAccess): Loc {
