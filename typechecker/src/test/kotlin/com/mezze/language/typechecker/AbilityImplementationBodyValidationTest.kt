@@ -198,7 +198,7 @@ class AbilityImplementationBodyValidationTest {
 
             impl Parse for Str where {
               parse = {it, str} ->
-                match int::from_string {s = str} is
+                match int::from_str {s = str} is
                   Some {val} -> val
                   None -> 0
             }

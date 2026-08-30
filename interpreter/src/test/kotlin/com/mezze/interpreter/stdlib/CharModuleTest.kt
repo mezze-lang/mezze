@@ -38,10 +38,10 @@ class CharModuleTest {
     }
 
     @Test
-    fun `test char from_string - valid`() {
+    fun `test char from_str - valid`() {
         val result = eval("""
             use std::char
-            match char::from_string { s = "Hello" } is
+            match char::from_str { s = "Hello" } is
                 Some { val } -> char::to_int { c = val }
                 None -> -1
         """)
@@ -49,10 +49,10 @@ class CharModuleTest {
     }
 
     @Test
-    fun `test char from_string - empty string`() {
+    fun `test char from_str - empty string`() {
         val result = eval("""
             use std::char
-            match char::from_string { s = "" } is
+            match char::from_str { s = "" } is
                 Some { val } -> 1
                 None -> 0
         """)

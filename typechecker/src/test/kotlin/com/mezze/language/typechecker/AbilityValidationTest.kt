@@ -86,7 +86,7 @@ class AbilityValidationTest {
 
             impl Convert for Int Str where {
               convert: {it: Str} -> Int = {it} ->
-                match int::from_string {s = it} is
+                match int::from_str {s = it} is
                   Some {val} -> val
                   None -> 0
             }

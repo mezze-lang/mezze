@@ -96,7 +96,7 @@ impl Format for Str UrlParamFmt where {
 ## impl DecodeFormat Str for UrlParamFmt — inverse for scalar primitives.
 ## Composite decoders all return DecodeError.
 impl DecodeFormat for Str UrlParamFmt where {
-  decode_int = { val, config, path } -> match int::from_string { s = val } is
+  decode_int = { val, config, path } -> match int::from_str { s = val } is
     Some { val = n } -> Ok { val = n }
     None -> Err {
       error = {
@@ -106,7 +106,7 @@ impl DecodeFormat for Str UrlParamFmt where {
         found = Some { val = val },
       },
     },
-  decode_float = { val, config, path } -> match float::from_string { s = val } is
+  decode_float = { val, config, path } -> match float::from_str { s = val } is
     Some { val = f } -> Ok { val = f }
     None -> Err {
       error = {
@@ -116,7 +116,7 @@ impl DecodeFormat for Str UrlParamFmt where {
         found = Some { val = val },
       },
     },
-  decode_nat = { val, config, path } -> match nat::from_string { s = val } is
+  decode_nat = { val, config, path } -> match nat::from_str { s = val } is
     Some { val = n } -> Ok { val = n }
     None -> Err {
       error = {
@@ -140,7 +140,7 @@ impl DecodeFormat for Str UrlParamFmt where {
         found = Some { val = val },
       },
     },
-  decode_char = { val, config, path } -> match char::from_string { s = val } is
+  decode_char = { val, config, path } -> match char::from_str { s = val } is
     Some { val = c } -> Ok { val = c }
     None -> Err {
       error = {
@@ -150,7 +150,7 @@ impl DecodeFormat for Str UrlParamFmt where {
         found = Some { val = val },
       },
     },
-  decode_frac = { val, config, path } -> match float::from_string { s = val } is
+  decode_frac = { val, config, path } -> match float::from_str { s = val } is
     Some { val = f } -> Ok { val = __native_float_to_frac { f = f } }
     None -> Err {
       error = {

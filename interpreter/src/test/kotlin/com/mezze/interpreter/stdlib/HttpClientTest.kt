@@ -40,7 +40,7 @@ class HttpClientTest {
             let mock_response: Response = {
                 status = 200,
                 headers = map::empty {},
-                body = bytes::from_string { s = "ok" },
+                body = bytes::from_str { s = "ok" },
                 url = ""
             }
 
@@ -73,7 +73,7 @@ class HttpClientTest {
             let mock_response: Response = {
                 status = 200,
                 headers = map::empty {},
-                body = bytes::from_string { s = "ok" },
+                body = bytes::from_str { s = "ok" },
                 url = ""
             }
 
@@ -130,7 +130,7 @@ class HttpClientTest {
             let mock_response: Response = {
                 status = 201,
                 headers = map::empty {},
-                body = bytes::from_string { s = "created" },
+                body = bytes::from_str { s = "created" },
                 url = ""
             }
 
@@ -143,7 +143,7 @@ class HttpClientTest {
                     method = Post,
                     url = "http://test.com/create",
                     headers = map::empty {},
-                    body = Some { val = bytes::from_string { s = "{}" } },
+                    body = Some { val = bytes::from_str { s = "{}" } },
                     timeout_ms = None
                 }
                 let config: HttpConfig = {

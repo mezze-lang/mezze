@@ -308,7 +308,7 @@ impl DecodeFormat for Json JsonFmt where {
       },
     },
   decode_char = { val, config, path } -> match val is
-    JString { val = v } -> match char::from_string { s = v } is
+    JString { val = v } -> match char::from_str { s = v } is
       Some { val = c } -> Ok { val = c }
       None -> Err {
         error = {

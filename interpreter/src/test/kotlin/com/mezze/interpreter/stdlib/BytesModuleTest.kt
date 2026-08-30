@@ -28,10 +28,10 @@ class BytesModuleTest {
     }
 
     @Test
-    fun `test bytes from_string`() {
+    fun `test bytes from_str`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             bytes::size { b = b }
         """)
         assertEquals(5L, result)
@@ -97,7 +97,7 @@ class BytesModuleTest {
     fun `test bytes length`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
+            let b = bytes::from_str { s = "Hello World" }
             bytes::size { b = b }
         """)
         assertEquals(11L, result)
@@ -116,7 +116,7 @@ class BytesModuleTest {
     fun `test bytes is_empty - false`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "x" }
+            let b = bytes::from_str { s = "x" }
             bytes::is_empty { b = b }
         """)
         assertEquals(false, result)
@@ -126,7 +126,7 @@ class BytesModuleTest {
     fun `test bytes get`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             match bytes::get { b = b, i = 0 } is
                 Some { val } -> val
                 None -> 0
@@ -138,7 +138,7 @@ class BytesModuleTest {
     fun `test bytes get out of bounds`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hi" }
+            let b = bytes::from_str { s = "Hi" }
             match bytes::get { b = b, i = 10 } is
                 Some { val } -> False
                 None -> True
@@ -152,7 +152,7 @@ class BytesModuleTest {
     fun `test bytes slice`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
+            let b = bytes::from_str { s = "Hello World" }
             let s = bytes::slice { b = b, start = 0, end = 5 }
             bytes::size { b = s }
         """)
@@ -163,7 +163,7 @@ class BytesModuleTest {
     fun `test bytes take`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
+            let b = bytes::from_str { s = "Hello World" }
             let t = bytes::take { b = b, n = 5 }
             bytes::size { b = t }
         """)
@@ -174,7 +174,7 @@ class BytesModuleTest {
     fun `test bytes drop`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
+            let b = bytes::from_str { s = "Hello World" }
             let d = bytes::drop { b = b, n = 6 }
             bytes::size { b = d }
         """)
@@ -187,8 +187,8 @@ class BytesModuleTest {
     fun `test bytes concat`() {
         val result = eval("""
             use std::collections::bytes
-            let b1 = bytes::from_string { s = "Hello" }
-            let b2 = bytes::from_string { s = "World" }
+            let b1 = bytes::from_str { s = "Hello" }
+            let b2 = bytes::from_str { s = "World" }
             let b3 = bytes::concat { b1 = b1, b2 = b2 }
             bytes::size { b = b3 }
         """)
@@ -199,9 +199,9 @@ class BytesModuleTest {
     fun `test bytes concat_all`() {
         val result = eval("""
             use std::collections::bytes
-            let b1 = bytes::from_string { s = "A" }
-            let b2 = bytes::from_string { s = "B" }
-            let b3 = bytes::from_string { s = "C" }
+            let b1 = bytes::from_str { s = "A" }
+            let b2 = bytes::from_str { s = "B" }
+            let b3 = bytes::from_str { s = "C" }
             let bs = [b1, b2, b3]
             let combined = bytes::concat_all { bs = bs }
             bytes::size { b = combined }
@@ -213,7 +213,7 @@ class BytesModuleTest {
     fun `test bytes repeat`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hi" }
+            let b = bytes::from_str { s = "Hi" }
             let r = bytes::repeat { b = b, n = 3 }
             bytes::size { b = r }
         """)
@@ -226,8 +226,8 @@ class BytesModuleTest {
     fun `test bytes index_of - found`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
-            let pattern = bytes::from_string { s = "World" }
+            let b = bytes::from_str { s = "Hello World" }
+            let pattern = bytes::from_str { s = "World" }
             match bytes::index_of { b = b, pattern = pattern } is
                 Some { val } -> val
                 None -> -1
@@ -239,8 +239,8 @@ class BytesModuleTest {
     fun `test bytes index_of - not found`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
-            let pattern = bytes::from_string { s = "xyz" }
+            let b = bytes::from_str { s = "Hello" }
+            let pattern = bytes::from_str { s = "xyz" }
             match bytes::index_of { b = b, pattern = pattern } is
                 Some { val } -> False
                 None -> True
@@ -252,8 +252,8 @@ class BytesModuleTest {
     fun `test bytes contains - true`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
-            let pattern = bytes::from_string { s = "World" }
+            let b = bytes::from_str { s = "Hello World" }
+            let pattern = bytes::from_str { s = "World" }
             bytes::contains { b = b, pattern = pattern }
         """)
         assertEquals(true, result)
@@ -263,8 +263,8 @@ class BytesModuleTest {
     fun `test bytes contains - false`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
-            let pattern = bytes::from_string { s = "xyz" }
+            let b = bytes::from_str { s = "Hello" }
+            let pattern = bytes::from_str { s = "xyz" }
             bytes::contains { b = b, pattern = pattern }
         """)
         assertEquals(false, result)
@@ -274,8 +274,8 @@ class BytesModuleTest {
     fun `test bytes starts_with - true`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
-            let prefix = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello World" }
+            let prefix = bytes::from_str { s = "Hello" }
             bytes::starts_with { b = b, prefix = prefix }
         """)
         assertEquals(true, result)
@@ -285,8 +285,8 @@ class BytesModuleTest {
     fun `test bytes starts_with - false`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
-            let prefix = bytes::from_string { s = "World" }
+            let b = bytes::from_str { s = "Hello World" }
+            let prefix = bytes::from_str { s = "World" }
             bytes::starts_with { b = b, prefix = prefix }
         """)
         assertEquals(false, result)
@@ -296,8 +296,8 @@ class BytesModuleTest {
     fun `test bytes ends_with - true`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
-            let suffix = bytes::from_string { s = "World" }
+            let b = bytes::from_str { s = "Hello World" }
+            let suffix = bytes::from_str { s = "World" }
             bytes::ends_with { b = b, suffix = suffix }
         """)
         assertEquals(true, result)
@@ -307,8 +307,8 @@ class BytesModuleTest {
     fun `test bytes ends_with - false`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello World" }
-            let suffix = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello World" }
+            let suffix = bytes::from_str { s = "Hello" }
             bytes::ends_with { b = b, suffix = suffix }
         """)
         assertEquals(false, result)
@@ -358,7 +358,7 @@ class BytesModuleTest {
     fun `test bytes to_str`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             match bytes::to_str { b = b } is
                 Ok { val } -> val
                 Err { error } -> "failed"
@@ -371,7 +371,7 @@ class BytesModuleTest {
         val result = eval("""
             use std::collections::bytes
             use std::collections::seq
-            let b = bytes::from_string { s = "Hi" }
+            let b = bytes::from_str { s = "Hi" }
             let arr = bytes::to_seq { b = b }
             seq::size { xs = arr }
         """)
@@ -382,7 +382,7 @@ class BytesModuleTest {
     fun `test bytes to_hex`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hi" }
+            let b = bytes::from_str { s = "Hi" }
             bytes::to_hex { b = b }
         """)
         assertEquals("4869", result)
@@ -392,7 +392,7 @@ class BytesModuleTest {
     fun `test bytes to_base64`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_string { s = "Hello" }
+            let b = bytes::from_str { s = "Hello" }
             bytes::to_base64 { b = b }
         """)
         assertEquals("SGVsbG8=", result)
@@ -402,7 +402,7 @@ class BytesModuleTest {
     fun `test bytes roundtrip hex`() {
         val result = eval("""
             use std::collections::bytes
-            let b1 = bytes::from_string { s = "Test" }
+            let b1 = bytes::from_str { s = "Test" }
             let hex = bytes::to_hex { b = b1 }
             match bytes::from_hex { s = hex } is
                 Some { val } ->
@@ -418,7 +418,7 @@ class BytesModuleTest {
     fun `test bytes roundtrip base64`() {
         val result = eval("""
             use std::collections::bytes
-            let b1 = bytes::from_string { s = "Test" }
+            let b1 = bytes::from_str { s = "Test" }
             let b64 = bytes::to_base64 { b = b1 }
             match bytes::from_base64 { s = b64 } is
                 Some { val } ->

@@ -63,10 +63,10 @@ class NatModuleTest {
     }
 
     @Test
-    fun `test nat from_string function`() {
+    fun `test nat from_str function`() {
         val source = """
             use std::nat
-            let result = nat::from_string { s = "123" }
+            let result = nat::from_str { s = "123" }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -150,7 +150,7 @@ class NatModuleTest {
             use std::nat
             let from_int_result = nat::from_int { n = 42 }
             let from_float_result = nat::from_float { n = 3.14 }
-            let from_string_result = nat::from_string { s = "123" }
+            let from_string_result = nat::from_str { s = "123" }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

@@ -61,11 +61,11 @@ class ByteBufferModuleTest {
     // ========================================
 
     @Test
-    fun `test buffer write_string function`() {
+    fun `test buffer write_str function`() {
         val source = """
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -90,7 +90,7 @@ class ByteBufferModuleTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let data = bytes::from_string { s = "Hello" }
+            let data = bytes::from_str { s = "Hello" }
             let buf2 = buffer::write { buf = buf, bytes = data }
         """.trimIndent()
 
@@ -136,7 +136,7 @@ class ByteBufferModuleTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
             let data = buffer::to_bytes { buf = buf2 }
             let len = bytes::size { b = data }
         """.trimIndent()
@@ -154,7 +154,7 @@ class ByteBufferModuleTest {
         val source = """
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
             let buf3 = buffer::clear { buf = buf2 }
         """.trimIndent()
 
@@ -171,9 +171,9 @@ class ByteBufferModuleTest {
         val source = """
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
             let buf3 = buffer::write_byte { buf = buf2, b = 32 }
-            let buf4 = buffer::write_string { buf = buf3, s = "World" }
+            let buf4 = buffer::write_str { buf = buf3, s = "World" }
             let result = buffer::to_bytes { buf = buf4 }
         """.trimIndent()
 
@@ -186,11 +186,11 @@ class ByteBufferModuleTest {
     // ========================================
 
     @Test
-    fun `test buffer write_string rejects non-string`() {
+    fun `test buffer write_str rejects non-string`() {
         val source = """
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = 123 }
+            let buf2 = buffer::write_str { buf = buf, s = 123 }
         """.trimIndent()
 
         assertFails {

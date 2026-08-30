@@ -395,7 +395,7 @@ class SuspendTypeAbilityTest {
 
             let getNumber: {} -> Int <FileSystem, Log> = {} -> do
                 println { msg = "Getting number" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
                 42
 
             let result = getNumber {} + 10

@@ -136,7 +136,7 @@ pub let modulo: { l: Int, r: Int } -> Int = { l, r } -> __native_int_modulo { l 
 pub let to_str: { n: Int } -> Str = { n } -> __native_int_to_str { n = n }
 
 ## Parse a string as an integer. Returns None on failure.
-pub let from_string: { s: Str } -> Option Int = { s } -> __native_int_from_string { s = s }
+pub let from_str: { s: Str } -> Option Int = { s } -> __native_int_from_string { s = s }
 
 ## Convert a Nat to an Int.
 pub let from_nat: { n: Nat } -> Int = { n } -> __native_int_from_nat { n = n }

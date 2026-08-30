@@ -199,12 +199,12 @@ pub let with_auth : { req: Request, auth: Str } -> Request = { req, auth } ->
   with_header { req = req, key = "Authorization", value = auth }
 
 ## Decode response body as a UTF-8 string.
-pub let body_string : { resp: Response } -> Result Str Str = { resp } ->
+pub let body_str : { resp: Response } -> Result Str Str = { resp } ->
   bytes::to_str { b = resp.body }
 
 ## Decode response body as JSON.
 pub let body_json : { resp: Response } -> Result Json DecodeError = { resp } -> do
-  match body_string { resp = resp } is
+  match body_str { resp = resp } is
     Ok { val } -> parse_str { s = val }
     Err { error } -> Err {
       error = {
@@ -242,7 +242,7 @@ pub let get_content_type : { resp: Response } -> Option Str = { resp } ->
 
 ## Get the Content-Length header as Int.
 pub let get_content_length : { resp: Response } -> Option Int = { resp } -> match get_header { resp = resp, name = "content-length" } is
-  Some { val } -> int::from_string { s = val }
+  Some { val } -> int::from_str { s = val }
   None -> None
 
 
@@ -298,12 +298,12 @@ pub let request : { url: Str } -> Request = { url } ->
 
 ## Body setter — wrap raw bytes (already encoded).
 pub let with_text : { req: Request, val: Str } -> Request = { req, val } ->
-  with_body { req = req, body = bytes::from_string { s = val } }
+  with_body { req = req, body = bytes::from_str { s = val } }
 
 ## Body setter — encode JSON, set Content-Type: application/json.
 pub let with_json : { req: Request, val: Json } -> Request = { req, val } -> do
-  let body_str = to_str { json = val }
-  let body_bytes = bytes::from_string { s = body_str }
+  let body_text = to_str { json = val }
+  let body_bytes = bytes::from_str { s = body_text }
   let r = with_body { req = req, body = body_bytes }
   with_content_type { req = r, content_type = "application/json" }
 
@@ -365,14 +365,14 @@ pub let ensure_ok : { resp: Result Response HttpError } -> Result Response HttpE
       if is_success { resp = val }
       then resp
       else do
-        let body_str = match body_string { resp = val } is
+        let body_text = match body_str { resp = val } is
           Ok { val = s } -> s
           Err { error = _ } -> ""
         Err {
           error = RequestFailed {
             url = val.url,
             status = val.status,
-            body = body_str,
+            body = body_text,
           },
         }
 
@@ -405,7 +405,7 @@ impl Request where {
 ## that aren't just field reads.
 impl Response where {
   ## Decode body as UTF-8 string.
-  text          = { it } -> body_string { resp = it },
+  text          = { it } -> body_str { resp = it },
   ## Decode body as JSON.
   json          = { it } -> body_json { resp = it },
   ## 2xx status check.
@@ -668,3 +668,143 @@ pub let is_server_issue : { err: HttpError } -> Bool = { err } -> match err is
   Timeout { url, ms } -> True
   TlsError { url, reason } -> True
   _ -> False
+
+
+# ─── Response builders ────────────────────────────────────────────────
+#
+# Build a full Response without hand-writing the
+# `{ status, headers, body, url }` record. Used directly, and by the mock
+# builders below so a canned reply is a one-liner.
+
+## A Response with an arbitrary status code and a plain-text body.
+pub let response_status : { code: Int, body: Str } -> Response = { code, body } ->
+  {
+    status = code,
+    headers = map::empty {},
+    body = bytes::from_str { s = body },
+    url = "",
+  }
+
+## A 200 OK response with a plain-text body.
+pub let response_ok_text : { body: Str } -> Response = { body } ->
+  response_status { code = 200, body = body }
+
+## A 200 OK response whose body is the encoded JSON, with
+## `Content-Type: application/json`.
+pub let response_json : { body: Json } -> Response = { body } ->
+  {
+    status = 200,
+    headers = map::insert { m = map::empty {}, k = "Content-Type", v = "application/json" },
+    body = bytes::from_str { s = to_str { json = body } },
+    url = "",
+  }
+
+
+# ─── Mock rule builders ───────────────────────────────────────────────
+#
+# Collapse a hand-built `MockRule` (methods + Glob url + Ok/Response
+# record) into one call. Give them to a `MockHttpClient`:
+#
+#   perform MockHttpClient { rules = [ mock_get { url = "*", body = "pong" } ] } in ...
+#
+# `url` is a glob (`*` matches anything). For non-2xx or custom methods
+# use `mock_status`.
+
+## A rule: any GET matching `url` returns a 200 text `body`.
+pub let mock_get : { url: Str, body: Str } -> MockRule = { url, body } ->
+  {
+    methods = [Get],
+    url = Glob { pattern = url },
+    response = Ok { val = response_ok_text { body = body } },
+  }
+
+## A rule: any POST matching `url` returns a 201 text `body`.
+pub let mock_post : { url: Str, body: Str } -> MockRule = { url, body } ->
+  {
+    methods = [Post],
+    url = Glob { pattern = url },
+    response = Ok { val = response_status { code = 201, body = body } },
+  }
+
+## A rule: any PUT matching `url` returns a 200 text `body`.
+pub let mock_put : { url: Str, body: Str } -> MockRule = { url, body } ->
+  {
+    methods = [Put],
+    url = Glob { pattern = url },
+    response = Ok { val = response_ok_text { body = body } },
+  }
+
+## A rule: any DELETE matching `url` returns a 200 text `body`.
+pub let mock_delete : { url: Str, body: Str } -> MockRule = { url, body } ->
+  {
+    methods = [Delete],
+    url = Glob { pattern = url },
+    response = Ok { val = response_ok_text { body = body } },
+  }
+
+## A rule: any GET matching `url` returns a 200 JSON `body`
+## (`Content-Type: application/json`).
+pub let mock_json : { url: Str, body: Json } -> MockRule = { url, body } ->
+  {
+    methods = [Get],
+    url = Glob { pattern = url },
+    response = Ok { val = response_json { body = body } },
+  }
+
+## A rule: any of `methods` matching `url` returns `code` with a text `body`.
+## The general form — the verb helpers above are shorthands for it.
+pub let mock_status : { url: Str, methods: [Method], code: Int, body: Str } -> MockRule = { url, methods, code, body } ->
+  {
+    methods = methods,
+    url = Glob { pattern = url },
+    response = Ok { val = response_status { code = code, body = body } },
+  }
+
+
+# ─── Result chain terminals ───────────────────────────────────────────
+#
+# Chain-friendly finishers for the `Result Response HttpError` a `.send {}`
+# returns, so a fetch is one expression instead of a `match`:
+#
+#   request { url }.send {}.text_or { def = "offline" }
+#
+# The impl lives here (not in std::result) because these decoders are
+# Response-specific; the generic `impl Result 'a 'e` stays untouched.
+
+## Decode the Ok Response body as UTF-8; return `def` on any Err OR a
+## decode failure. The one-call replacement for
+## `match resp is Ok {..} -> body_str{..}.get_or_else{..}  Err -> def`.
+pub let text_or : { resp: Result Response HttpError, def: Str } -> Str = { resp, def } -> match resp is
+  Ok { val } -> match body_str { resp = val } is
+    Ok { val = s } -> s
+    Err { error = _ } -> def
+  Err { error = _ } -> def
+
+## Decode the Ok Response body as JSON; return `def` on any Err OR a
+## decode failure.
+pub let json_or : { resp: Result Response HttpError, def: Json } -> Json = { resp, def } -> match resp is
+  Ok { val } -> match body_json { resp = val } is
+    Ok { val = j } -> j
+    Err { error = _ } -> def
+  Err { error = _ } -> def
+
+## Run `f` on the Ok Response (for its effects); a no-op on Err.
+pub let on_ok : { resp: Result Response HttpError, f: { resp: Response } -> {} <...> } -> {} <...> = { resp, f } -> match resp is
+  Ok { val } -> f { resp = val }
+  Err { error = _ } -> {}
+
+## Run `f` on the Err (for its effects); a no-op on Ok.
+pub let on_err : { resp: Result Response HttpError, f: { err: HttpError } -> {} <...> } -> {} <...> = { resp, f } -> match resp is
+  Ok { val } -> {}
+  Err { error } -> f { err = error }
+
+## Chainable finishers on the `Result Response HttpError` from `.send {}`.
+## A specialized inherent impl on the concrete Result — the generic
+## `impl Result 'a 'e` (map/get_or_else/…) still applies to every other
+## Result. Each method delegates to the free function above.
+impl Result Response HttpError where {
+  text_or = { it, def: Str }  -> text_or { resp = it, def = def },
+  json_or = { it, def: Json } -> json_or { resp = it, def = def },
+  on_ok   = { it, f }         -> on_ok   { resp = it, f = f },
+  on_err  = { it, f }         -> on_err  { resp = it, f = f },
+}

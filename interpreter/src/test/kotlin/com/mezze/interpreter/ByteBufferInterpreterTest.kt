@@ -41,11 +41,11 @@ class ByteBufferInterpreterTest {
     // ========================================
 
     @Test
-    fun `test buffer write_string adds content`() {
+    fun `test buffer write_str adds content`() {
         val source = """
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
             buffer::size { buf = buf2 }
         """.trimIndent()
 
@@ -70,7 +70,7 @@ class ByteBufferInterpreterTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let data = bytes::from_string { s = "Hello" }
+            let data = bytes::from_str { s = "Hello" }
             let buf2 = buffer::write { buf = buf, bytes = data }
             buffer::size { buf = buf2 }
         """.trimIndent()
@@ -83,9 +83,9 @@ class ByteBufferInterpreterTest {
         val source = """
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
             let buf3 = buffer::write_byte { buf = buf2, b = 32 }
-            let buf4 = buffer::write_string { buf = buf3, s = "World" }
+            let buf4 = buffer::write_str { buf = buf3, s = "World" }
             buffer::size { buf = buf4 }
         """.trimIndent()
 
@@ -102,7 +102,7 @@ class ByteBufferInterpreterTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
             let data = buffer::to_bytes { buf = buf2 }
             bytes::size { b = data }
         """.trimIndent()
@@ -116,7 +116,7 @@ class ByteBufferInterpreterTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hi" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hi" }
             let data = buffer::to_bytes { buf = buf2 }
             bytes::to_hex { b = data }
         """.trimIndent()
@@ -153,7 +153,7 @@ class ByteBufferInterpreterTest {
         val source = """
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "X" }
+            let buf2 = buffer::write_str { buf = buf, s = "X" }
             buffer::is_empty { buf = buf2 }
         """.trimIndent()
 
@@ -169,7 +169,7 @@ class ByteBufferInterpreterTest {
         val source = """
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello World" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello World" }
             let buf3 = buffer::clear { buf = buf2 }
             buffer::size { buf = buf3 }
         """.trimIndent()
@@ -182,7 +182,7 @@ class ByteBufferInterpreterTest {
         val source = """
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Hello" }
+            let buf2 = buffer::write_str { buf = buf, s = "Hello" }
             let buf3 = buffer::clear { buf = buf2 }
             buffer::is_empty { buf = buf3 }
         """.trimIndent()
@@ -199,9 +199,9 @@ class ByteBufferInterpreterTest {
         val source = """
             use std::collections::buffer
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "First" }
+            let buf2 = buffer::write_str { buf = buf, s = "First" }
             let buf3 = buffer::clear { buf = buf2 }
-            let buf4 = buffer::write_string { buf = buf3, s = "Second" }
+            let buf4 = buffer::write_str { buf = buf3, s = "Second" }
             buffer::size { buf = buf4 }
         """.trimIndent()
 
@@ -214,9 +214,9 @@ class ByteBufferInterpreterTest {
             use std::collections::buffer
             use std::collections::bytes
             let buf = buffer::empty {}
-            let buf2 = buffer::write_string { buf = buf, s = "Part1" }
+            let buf2 = buffer::write_str { buf = buf, s = "Part1" }
             let data1 = buffer::to_bytes { buf = buf2 }
-            let buf3 = buffer::write_string { buf = buf2, s = "Part2" }
+            let buf3 = buffer::write_str { buf = buf2, s = "Part2" }
             buffer::size { buf = buf3 }
         """.trimIndent()
 
@@ -234,11 +234,11 @@ class ByteBufferInterpreterTest {
             use std::collections::buffer
             let buf = buffer::empty {}
             let s = "0123456789"
-            let buf1 = buffer::write_string { buf = buf, s = s }
-            let buf2 = buffer::write_string { buf = buf1, s = s }
-            let buf3 = buffer::write_string { buf = buf2, s = s }
-            let buf4 = buffer::write_string { buf = buf3, s = s }
-            let buf5 = buffer::write_string { buf = buf4, s = s }
+            let buf1 = buffer::write_str { buf = buf, s = s }
+            let buf2 = buffer::write_str { buf = buf1, s = s }
+            let buf3 = buffer::write_str { buf = buf2, s = s }
+            let buf4 = buffer::write_str { buf = buf3, s = s }
+            let buf5 = buffer::write_str { buf = buf4, s = s }
             buffer::size { buf = buf5 }
         """.trimIndent()
 

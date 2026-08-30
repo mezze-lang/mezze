@@ -139,7 +139,7 @@ class HttpStageDTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" },
+                status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -165,7 +165,7 @@ class HttpStageDTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" },
+                status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -188,7 +188,7 @@ class HttpStageDTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 404, headers = map::empty {}, body = bytes::from_string { s = "not found" },
+                status = 404, headers = map::empty {}, body = bytes::from_str { s = "not found" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -216,7 +216,7 @@ class HttpStageDTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 500, headers = map::empty {}, body = bytes::from_string { s = "boom" },
+                status = 500, headers = map::empty {}, body = bytes::from_str { s = "boom" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -260,7 +260,7 @@ class HttpStageDTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 500, headers = map::empty {}, body = bytes::from_string { s = "boom" },
+                status = 500, headers = map::empty {}, body = bytes::from_str { s = "boom" },
                 url = ""
             }
             let rules: [MockRule] = [
@@ -293,7 +293,7 @@ class HttpStageDTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" },
+                status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
                 url = ""
             }
             let rules: [MockRule] = [

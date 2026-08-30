@@ -281,11 +281,11 @@ pub let set_false : { b: MutBool } -> {} <Mut> = { b } ->
   Mut.mutate { act = {} -> __native_mut_bool_set_false { b = b } }
 
 ## Read the current value of a MutString.
-pub let read_string : { s: MutString } -> Str <Mut> = { s } ->
+pub let read_str : { s: MutString } -> Str <Mut> = { s } ->
   Mut.mutate { act = {} -> __native_mut_string_read { s = s } }
 
 ## Overwrite a MutString with a new value.
-pub let write_string : { s: MutString, v: Str } -> {} <Mut> = { s, v } ->
+pub let write_str : { s: MutString, v: Str } -> {} <Mut> = { s, v } ->
   Mut.mutate { act = {} -> __native_mut_string_write { s = s, v = v } }
 
 ## Get the length of a MutString.

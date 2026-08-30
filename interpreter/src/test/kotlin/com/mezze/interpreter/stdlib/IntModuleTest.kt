@@ -179,10 +179,10 @@ class IntModuleTest {
     }
 
     @Test
-    fun `test int from_string - valid integer`() {
+    fun `test int from_str - valid integer`() {
         val source = """
             use std::int
-            match int::from_string { s = "42" } is
+            match int::from_str { s = "42" } is
                 Some { val } -> val
                 None -> -999
         """.trimIndent()
@@ -191,10 +191,10 @@ class IntModuleTest {
     }
 
     @Test
-    fun `test int from_string - negative integer`() {
+    fun `test int from_str - negative integer`() {
         val source = """
             use std::int
-            match int::from_string { s = "-123" } is
+            match int::from_str { s = "-123" } is
                 Some { val } -> val
                 None -> -999
         """.trimIndent()
@@ -203,10 +203,10 @@ class IntModuleTest {
     }
 
     @Test
-    fun `test int from_string - invalid string`() {
+    fun `test int from_str - invalid string`() {
         val source = """
             use std::int
-            match int::from_string { s = "not a number" } is
+            match int::from_str { s = "not a number" } is
                 Some { val } -> val
                 None -> -999
         """.trimIndent()

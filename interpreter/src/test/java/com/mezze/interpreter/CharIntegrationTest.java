@@ -39,7 +39,7 @@ class CharIntegrationTest {
     void fromStringGetsFirstCharacter() {
         Object result = MezzeTestHelper.run("""
             use std::char
-            match char::from_string { s = "Hello" } is
+            match char::from_str { s = "Hello" } is
                 Some { val } -> char::to_int { c = val }
                 None -> -1
             """);
@@ -50,7 +50,7 @@ class CharIntegrationTest {
     void fromStringReturnsNoneForEmptyString() {
         Object result = MezzeTestHelper.run("""
             use std::char
-            match char::from_string { s = "" } is
+            match char::from_str { s = "" } is
                 Some { val } -> 1
                 None -> 0
             """);

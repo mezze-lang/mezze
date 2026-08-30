@@ -26,7 +26,7 @@ impl Ord for Bytes where {
 pub let empty: {} -> Bytes = {} -> __native_bytes_empty {}
 
 ## Creates bytes from a UTF-8 string.
-pub let from_string: { s: Str } -> Bytes = { s } -> __native_bytes_from_string { s = s }
+pub let from_str: { s: Str } -> Bytes = { s } -> __native_bytes_from_string { s = s }
 
 ## Creates bytes from a seq of integers (0-255).
 pub let from_seq: { arr: [Int] } -> Bytes = { arr } -> __native_bytes_from_seq { arr = arr }

@@ -71,7 +71,7 @@ class AbilityConstraintTest {
                 let encoded = body.encode_repr { fmt = json_fmt, config = default_config }
                 match encoded is
                     Ok { val } -> do
-                        let body_bytes = bytes::from_string { s = to_str { json = val } }
+                        let body_bytes = bytes::from_str { s = to_str { json = val } }
                         request { url = url }
                             .with_method { val = Post }
                             .with_body { val = body_bytes }
@@ -101,7 +101,7 @@ class AbilityConstraintTest {
                 let encoded = body.encode_repr { fmt = json_fmt, config = default_config }
                 match encoded is
                     Ok { val } -> do
-                        let body_bytes = bytes::from_string { s = to_str { json = val } }
+                        let body_bytes = bytes::from_str { s = to_str { json = val } }
                         request { url = url }
                             .with_method { val = Put }
                             .with_body { val = body_bytes }
@@ -131,7 +131,7 @@ class AbilityConstraintTest {
                 let encoded = body.encode_repr { fmt = json_fmt, config = default_config }
                 match encoded is
                     Ok { val } -> do
-                        let body_bytes = bytes::from_string { s = to_str { json = val } }
+                        let body_bytes = bytes::from_str { s = to_str { json = val } }
                         request { url = url }
                             .with_method { val = Patch }
                             .with_body { val = body_bytes }

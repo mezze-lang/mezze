@@ -206,7 +206,7 @@ class FloatIntegrationTest {
     void fromStringParsesValidFloat() {
         Object result = MezzeTestHelper.run("""
             use std::float
-            match float::from_string { s = "3.14" } is
+            match float::from_str { s = "3.14" } is
                 Some { val } -> 1
                 None -> 0
             """);
@@ -217,7 +217,7 @@ class FloatIntegrationTest {
     void fromStringReturnsNoneForInvalid() {
         Object result = MezzeTestHelper.run("""
             use std::float
-            match float::from_string { s = "abc" } is
+            match float::from_str { s = "abc" } is
                 Some { val } -> 1
                 None -> 0
             """);

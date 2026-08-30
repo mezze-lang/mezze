@@ -16,7 +16,7 @@ pub let write: { buf: ByteBuffer, bytes: Bytes } -> ByteBuffer = { buf, bytes } 
 pub let write_byte: { buf: ByteBuffer, b: Int } -> ByteBuffer = { buf, b } -> __native_buffer_write_byte { buf = buf, b = b }
 
 ## Writes a UTF-8 string to the buffer.
-pub let write_string: { buf: ByteBuffer, s: Str } -> ByteBuffer = { buf, s } -> __native_buffer_write_string { buf = buf, s = s }
+pub let write_str: { buf: ByteBuffer, s: Str } -> ByteBuffer = { buf, s } -> __native_buffer_write_string { buf = buf, s = s }
 
 ## Copies the buffer contents to immutable Bytes.
 pub let to_bytes: { buf: ByteBuffer } -> Bytes = { buf } -> __native_buffer_to_bytes { buf = buf }

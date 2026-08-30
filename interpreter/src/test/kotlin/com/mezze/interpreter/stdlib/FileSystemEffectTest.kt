@@ -35,7 +35,7 @@ class FileSystemEffectTest {
             use std::effects::filesystem::{ FileSystem, MemoryFS }
             use std::collections::bytes
             perform MemoryFS in do
-              let payload = bytes::from_string { s = "hello world" }
+              let payload = bytes::from_str { s = "hello world" }
               let _ = FileSystem.write_bytes { path = "/f", bytes = payload }
               match FileSystem.read_bytes { path = "/f" } is
                 Ok { val = b } -> match bytes::to_str { b = b } is
@@ -86,7 +86,7 @@ class FileSystemEffectTest {
             perform MemoryFS in do
               let _ = FileSystem.write_bytes {
                 path = "/f",
-                bytes = bytes::from_string { s = "abcde" }
+                bytes = bytes::from_str { s = "abcde" }
               }
               match FileSystem.stat { path = "/f" } is
                 Ok { val = s } -> match s.kind is
@@ -122,11 +122,11 @@ class FileSystemEffectTest {
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes {
                 path = "/d/a",
-                bytes = bytes::from_string { s = "A" }
+                bytes = bytes::from_str { s = "A" }
               }
               let _ = FileSystem.write_bytes {
                 path = "/d/b",
-                bytes = bytes::from_string { s = "B" }
+                bytes = bytes::from_str { s = "B" }
               }
               match FileSystem.list { path = "/d" } is
                 Ok { val = xs } -> seq::size { xs = xs }
@@ -145,7 +145,7 @@ class FileSystemEffectTest {
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes {
                 path = "/d/f",
-                bytes = bytes::from_string { s = "xy" }
+                bytes = bytes::from_str { s = "xy" }
               }
               match FileSystem.list_with_stat { path = "/d" } is
                 Ok { val = entries } -> seq::size { xs = entries }
@@ -162,7 +162,7 @@ class FileSystemEffectTest {
             perform MemoryFS in do
               let _ = FileSystem.write_bytes {
                 path = "/f",
-                bytes = bytes::from_string { s = "x" }
+                bytes = bytes::from_str { s = "x" }
               }
               let _ = FileSystem.delete { path = "/f" }
               match FileSystem.stat { path = "/f" } is
@@ -183,7 +183,7 @@ class FileSystemEffectTest {
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes {
                 path = "/d/a",
-                bytes = bytes::from_string { s = "A" }
+                bytes = bytes::from_str { s = "A" }
               }
               match FileSystem.delete { path = "/d" } is
                 Ok { val } -> "ok"
@@ -217,7 +217,7 @@ class FileSystemEffectTest {
             perform MemoryFS in do
               let _ = FileSystem.write_bytes {
                 path = "/src",
-                bytes = bytes::from_string { s = "content" }
+                bytes = bytes::from_str { s = "content" }
               }
               let _ = FileSystem.copy_file { src = "/src", dest = "/dest" }
               match FileSystem.read_bytes { path = "/dest" } is
@@ -237,7 +237,7 @@ class FileSystemEffectTest {
             perform MemoryFS in do
               let _ = FileSystem.write_bytes {
                 path = "/src",
-                bytes = bytes::from_string { s = "content" }
+                bytes = bytes::from_str { s = "content" }
               }
               let _ = FileSystem.move_file { src = "/src", dest = "/dest" }
               match FileSystem.stat { path = "/src" } is
@@ -265,7 +265,7 @@ class FileSystemEffectTest {
                 Ok { val = h } -> do
                   let _ = FileSystem.write_chunk {
                     handle = h,
-                    bytes = bytes::from_string { s = "hello" }
+                    bytes = bytes::from_str { s = "hello" }
                   }
                   FileSystem.close { handle = h }
                 Err { error } -> Err { error = error }
@@ -294,7 +294,7 @@ class FileSystemEffectTest {
             perform MemoryFS in do
               let _ = FileSystem.write_bytes {
                 path = "/f",
-                bytes = bytes::from_string { s = "ab" }
+                bytes = bytes::from_str { s = "ab" }
               }
               match FileSystem.open { path = "/f", mode = Read } is
                 Ok { val = h } -> do
@@ -317,13 +317,13 @@ class FileSystemEffectTest {
             perform MemoryFS in do
               let _ = FileSystem.write_bytes {
                 path = "/f",
-                bytes = bytes::from_string { s = "hello " }
+                bytes = bytes::from_str { s = "hello " }
               }
               let _ = match FileSystem.open { path = "/f", mode = Append } is
                 Ok { val = h } -> do
                   let _ = FileSystem.write_chunk {
                     handle = h,
-                    bytes = bytes::from_string { s = "world" }
+                    bytes = bytes::from_str { s = "world" }
                   }
                   FileSystem.close { handle = h }
                 Err { error } -> Err { error = error }
@@ -361,7 +361,7 @@ class FileSystemEffectTest {
             perform MemoryFS in do
               let _ = FileSystem.write_bytes {
                 path = "/f",
-                bytes = bytes::from_string { s = "x" }
+                bytes = bytes::from_str { s = "x" }
               }
               match FileSystem.open { path = "/f", mode = Read } is
                 Ok { val = h } -> do
@@ -532,7 +532,7 @@ class FileSystemEffectTest {
               let _ = FileSystem.create_directory { path = "/d/sub" }
               let _ = FileSystem.write_bytes {
                 path = "/d/sub/f",
-                bytes = bytes::from_string { s = "x" }
+                bytes = bytes::from_str { s = "x" }
               }
               match delete_recursive { path = "/d" } is
                 Ok { val } -> "ok"
@@ -569,7 +569,7 @@ class FileSystemEffectTest {
               let _ = with_write { path = "/d/f", mode = Write, f = { handle } ->
                 FileSystem.write_chunk {
                   handle = handle,
-                  bytes = bytes::from_string { s = "written" }
+                  bytes = bytes::from_str { s = "written" }
                 }
               }
               match read_text { path = "/d/f" } is
@@ -590,7 +590,7 @@ class FileSystemEffectTest {
             perform LocalDisk in do
               let _ = FileSystem.write_bytes {
                 path = "$path",
-                bytes = bytes::from_string { s = "roundtrip" }
+                bytes = bytes::from_str { s = "roundtrip" }
               }
               match FileSystem.read_bytes { path = "$path" } is
                 Ok { val = b } -> match bytes::to_str { b = b } is
@@ -626,7 +626,7 @@ class FileSystemEffectTest {
             perform LocalDisk in do
               let _ = FileSystem.write_bytes {
                 path = "$src",
-                bytes = bytes::from_string { s = "kernel-copy" }
+                bytes = bytes::from_str { s = "kernel-copy" }
               }
               let _ = FileSystem.copy_file { src = "$src", dest = "$dst" }
               match FileSystem.read_bytes { path = "$dst" } is
@@ -648,7 +648,7 @@ class FileSystemEffectTest {
               let _ = with_write { path = "$path", mode = Write, f = { handle } ->
                 FileSystem.write_chunk {
                   handle = handle,
-                  bytes = bytes::from_string { s = "abcdefg" }
+                  bytes = bytes::from_str { s = "abcdefg" }
                 }
               }
               match with_read { path = "$path", f = { handle } ->
@@ -676,11 +676,11 @@ class FileSystemEffectTest {
             perform LocalDisk in do
               let _ = FileSystem.write_bytes {
                 path = "$f1",
-                bytes = bytes::from_string { s = "A" }
+                bytes = bytes::from_str { s = "A" }
               }
               let _ = FileSystem.write_bytes {
                 path = "$f2",
-                bytes = bytes::from_string { s = "BB" }
+                bytes = bytes::from_str { s = "BB" }
               }
               match FileSystem.list_with_stat { path = "$dir" } is
                 Ok { val = entries } -> seq::size { xs = entries }
