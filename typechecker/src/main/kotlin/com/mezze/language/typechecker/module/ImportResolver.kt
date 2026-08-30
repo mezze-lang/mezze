@@ -317,6 +317,29 @@ class ImportResolver(
                 )
             }
             is ModuleLoadResult.Failure -> {
+                // #340: `use std::collections::{ map, seq }` names a directory-only path
+                // (`std::collections` has no module file — it's a folder of submodules),
+                // so the load fails with a bare "Module not found". If the grouped items
+                // are actually SUBMODULES of that path, say so and show the real fix
+                // instead of the generic error. (Grouped submodule imports aren't yet
+                // supported — one `use` per submodule — but the diagnostic should teach
+                // that rather than leave a newcomer guessing.)
+                val submoduleItems = path.items.filter { item ->
+                    loader.loadModule(ModulePath(path.module + item.name)) is ModuleLoadResult.Success
+                }
+                if (submoduleItems.isNotEmpty()) {
+                    val names = submoduleItems.joinToString(", ") { it.name }
+                    val perLine = submoduleItems.joinToString("\n   ") { "use ${modulePath}::${it.name}" }
+                    val one = submoduleItems.size == 1
+                    return ProcessResult.Failure(listOf(ModuleError.ImportError(
+                        modulePath = modulePath,
+                        itemName = names,
+                        reason = "$names ${if (one) "is a submodule" else "are submodules"} of '$modulePath', " +
+                            "not ${if (one) "an item" else "items"} it exports. A `{ … }` group selects " +
+                            "declarations FROM one module; it can't group submodules. Import each on its own line:" +
+                            "\n   $perLine"
+                    )))
+                }
                 ProcessResult.Failure(loadResult.errors)
             }
         }

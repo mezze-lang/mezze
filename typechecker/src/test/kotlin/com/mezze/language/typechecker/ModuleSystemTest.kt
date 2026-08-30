@@ -92,10 +92,37 @@ class ModuleSystemTest {
         val exception = assertThrows(ModuleError.ModuleNotFound::class.java) {
             typeChecker.typeCheck(parsedModule, tempDir)
         }
-        
+
         assertTrue(exception.message!!.contains("non_existent::module"))
     }
-    
+
+    @Test
+    fun `#340 grouped SUBMODULE import gives a submodule-aware error, not bare Module not found`() {
+        // `pkg` is a directory of submodules (pkg/a.mz, pkg/b.mz), not a module file.
+        // `use pkg::{ a, b }` names the directory, so the load fails — but the items
+        // are submodules, so the error must SAY so and show the one-use-per-submodule
+        // fix, instead of the generic "Module not found".
+        val srcDir = tempDir.resolve("src")
+        Files.createDirectories(srcDir.resolve("pkg"))
+        Files.writeString(srcDir.resolve("pkg/a.mz"), "pub let ay = { } -> 1")
+        Files.writeString(srcDir.resolve("pkg/b.mz"), "pub let bee = { } -> 2")
+
+        val main = """
+            use pkg::{ a, b }
+            let x = 5
+        """.trimIndent()
+        Files.writeString(srcDir.resolve("main.mz"), main)
+
+        val parsed = parser.parseParsedModule(main, "main.mz")
+        val ex = assertThrows(Exception::class.java) {
+            typeChecker.typeCheck(parsed, srcDir)
+        }
+        val msg = ex.message ?: ""
+        assertTrue(msg.contains("submodule"), "expected submodule guidance, got: $msg")
+        assertTrue(msg.contains("use pkg::a") && msg.contains("use pkg::b"),
+            "expected per-submodule fix lines, got: $msg")
+    }
+
     @Test
     fun testPrivateExport() {
         // Create a module with limited exports
