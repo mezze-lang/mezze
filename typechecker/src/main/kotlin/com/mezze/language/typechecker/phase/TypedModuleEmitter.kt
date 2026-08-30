@@ -230,10 +230,25 @@ private fun compileModule(
     }
 
     val stdlibModulesForMono = PrecompiledStdlib.stdlibTypedModules.values.toList()
+    // BUG B / #333: collect declared record-type field shapes from the UN-wrapped
+    // modules (wrapTopLevel strips TypedTypeDecls from `wrapped`) so mono can
+    // structurally recover an identity-less record receiver's nominal impl.
+    val recordShapesForMono = HashMap<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>>()
+    for (m in (listOf(typedModule) + importedModules + stdlibModulesForMono)) {
+        for (d in m.decls) {
+            if (d is com.mezze.language.typedast.TypedTypeDecl) {
+                val def = d.definition
+                if (def is com.mezze.language.typedast.TypedRecordDef) {
+                    recordShapesForMono.putIfAbsent(d.hash, def.fields)
+                }
+            }
+        }
+    }
     val monoResult = MonoDriver.run(
         entry = wrapped,
         imported = importedModules,
-        resolutionOnly = stdlibModulesForMono
+        resolutionOnly = stdlibModulesForMono,
+        recordShapes = recordShapesForMono,
     )
 
     val stdlibFns = try { PrecompiledStdlib.preloweredFunctions } catch (_: Throwable) { emptyMap() }

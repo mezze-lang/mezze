@@ -95,11 +95,28 @@ object MonoDriver {
         entry: TypedModule,
         imported: List<TypedModule> = emptyList(),
         resolutionOnly: List<TypedModule> = emptyList(),
+        /** BUG B / #333: declared record-type field shapes, keyed by the type decl's
+         *  content hash. Supplied by the caller because `entry` is post-`wrapTopLevel`,
+         *  which strips `TypedTypeDecl`s — so shapes must come from the un-wrapped
+         *  modules. Used to structurally recover the nominal identity of an
+         *  identity-less record receiver at ability-impl resolution. */
+        recordShapes: Map<Hash, Map<String, MezzeType>> = emptyMap(),
     ): Result {
         // Index ordinary let decls.
         val declIndex = HashMap<Hash, TypedLetDecl>()
+        // Merge any record shapes still present on the passed modules (defensive; the
+        // caller's map is the authoritative source since `entry` is wrapped).
+        val recordShapeByHash = HashMap<Hash, Map<String, MezzeType>>(recordShapes)
         for (m in (listOf(entry) + imported + resolutionOnly)) {
-            for (d in m.decls) if (d is TypedLetDecl) declIndex[d.hash] = d
+            for (d in m.decls) {
+                if (d is TypedLetDecl) declIndex[d.hash] = d
+                if (d is com.mezze.language.typedast.TypedTypeDecl) {
+                    val def = d.definition
+                    if (def is com.mezze.language.typedast.TypedRecordDef) {
+                        recordShapeByHash.putIfAbsent(d.hash, def.fields)
+                    }
+                }
+            }
         }
 
         // Index ability impl operation bodies as synthetic generic decls.
@@ -189,7 +206,7 @@ object MonoDriver {
             for (d in m.decls) {
                 if (d !is TypedLetDecl) continue
                 if (d.typeParams.isNotEmpty()) continue
-                collectSeedsFromExpr(d.value, declIndex, abilityOpIndex, abilityImpls, seeds, seedLocs, counters)
+                collectSeedsFromExpr(d.value, declIndex, abilityOpIndex, abilityImpls, seeds, seedLocs, counters, recordShapeByHash)
             }
         }
 
@@ -296,7 +313,8 @@ object MonoDriver {
         allImpls: List<TypedAbilityImpl>,
         out: MutableList<Monomorphizer.SpecRequest>,
         outLocs: MutableList<Loc>,
-        counters: Counters
+        counters: Counters,
+        recordShapes: Map<Hash, Map<String, MezzeType>>,
     ) {
         if (expr is TypedCall) {
             val fn = expr.function
@@ -325,7 +343,7 @@ object MonoDriver {
                         // <Show 'a> on the function type resolves to an
                         // AbilityImplRef using the binding for 'a.
                         val resolvedImpls = resolveAbilityConstraints(
-                            callee, args, abilityImpls = allImpls
+                            callee, args, abilityImpls = allImpls, recordShapes = recordShapes
                         )
                         // #424: if the flag is on, harvest closure args
                         // from this call site — mono keys the spec on
@@ -362,60 +380,60 @@ object MonoDriver {
             // (receiver.type, methodName) pair to an ability op and seed
             // the op for specialization.
             if (fn is TypedFieldAccess) {
-                seedFromMethodCall(fn, expr, abilityOpIndex, out, outLocs, counters)
+                seedFromMethodCall(fn, expr, abilityOpIndex, out, outLocs, counters, recordShapes)
             }
 
-            collectSeedsFromExpr(fn, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
-            collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+            collectSeedsFromExpr(fn, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+            collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             return
         }
         // Recurse through every other expression shape.
         when (expr) {
-            is TypedLambda -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+            is TypedLambda -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             is TypedRecord -> for (e in expr.entries) when (e) {
-                is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
-                is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             }
             is TypedRecordUpdate -> {
-                collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
                 for (e in expr.updates) when (e) {
-                    is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
-                    is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                    is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                    is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
                 }
             }
-            is TypedFieldAccess -> collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
-            is TypedVariantConstruct -> expr.payload?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters) }
+            is TypedFieldAccess -> collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+            is TypedVariantConstruct -> expr.payload?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes) }
             is TypedMatch -> {
-                collectSeedsFromExpr(expr.scrutinee, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                collectSeedsFromExpr(expr.scrutinee, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
                 for (c in expr.cases) {
-                    c.guard?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters) }
-                    collectSeedsFromExpr(c.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                    c.guard?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes) }
+                    collectSeedsFromExpr(c.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
                 }
             }
             is TypedIf -> {
-                collectSeedsFromExpr(expr.condition, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
-                collectSeedsFromExpr(expr.thenBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
-                collectSeedsFromExpr(expr.elseBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                collectSeedsFromExpr(expr.condition, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.thenBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.elseBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             }
             is TypedBlock -> {
                 for (s in expr.statements) when (s) {
-                    is TypedStatement.Let -> collectSeedsFromExpr(s.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
-                    is TypedStatement.Expr -> collectSeedsFromExpr(s.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                    is TypedStatement.Let -> collectSeedsFromExpr(s.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                    is TypedStatement.Expr -> collectSeedsFromExpr(s.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
                 }
-                collectSeedsFromExpr(expr.result, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                collectSeedsFromExpr(expr.result, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             }
             is TypedSeq -> for (el in expr.elements) when (el) {
-                is TypedSeqElement.Regular -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
-                is TypedSeqElement.Spread -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                is TypedSeqElement.Regular -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                is TypedSeqElement.Spread -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             }
             is TypedPipe -> {
-                collectSeedsFromExpr(expr.left, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
-                collectSeedsFromExpr(expr.right, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                collectSeedsFromExpr(expr.left, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.right, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             }
-            is TypedPerform -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
-            is TypedPerformOp -> collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+            is TypedPerform -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+            is TypedPerformOp -> collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             is TypedStringLit -> for (part in expr.parts) {
-                if (part is TypedStringPart.Interpolation) collectSeedsFromExpr(part.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters)
+                if (part is TypedStringPart.Interpolation) collectSeedsFromExpr(part.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             }
             else -> Unit
         }
@@ -436,7 +454,8 @@ object MonoDriver {
         abilityOpIndex: Map<String, List<AbilityOpEntry>>,
         out: MutableList<Monomorphizer.SpecRequest>,
         outLocs: MutableList<Loc>,
-        counters: Counters
+        counters: Counters,
+        recordShapes: Map<Hash, Map<String, MezzeType>>,
     ) {
         val callLoc = call.loc
         val callArg = call.arg
@@ -465,7 +484,14 @@ object MonoDriver {
         val match = genericCandidates.firstOrNull { entry ->
             entry.impl.targetTypes.any { typeMatchesTarget(receiverType, it) }
         } ?: run {
-            if (genericCandidates.size == 1) genericCandidates.first() else {
+            if (genericCandidates.size == 1) genericCandidates.first()
+            // BUG B / #333: an identity-less record receiver never matches a nominal
+            // record target via typeMatchesTarget (which keys records on identity).
+            // Recover it structurally, but ONLY when exactly one candidate impl's
+            // declared record shape claims the receiver — never force an ambiguous choice.
+            else genericCandidates.singleOrNull { entry ->
+                entry.impl.targetTypes.any { anonymousRecordMatchesDeclaredRecord(receiverType, it, recordShapes) }
+            } ?: run {
                 counters.methodNoMatchingImpl++
                 return
             }
@@ -733,7 +759,8 @@ object MonoDriver {
     private fun resolveAbilityConstraints(
         callee: TypedLetDecl,
         typeArgs: List<MezzeType>,
-        abilityImpls: List<TypedAbilityImpl>
+        abilityImpls: List<TypedAbilityImpl>,
+        recordShapes: Map<Hash, Map<String, MezzeType>>,
     ): List<AbilityImplRef> {
         val fnType = callee.scheme.type as? MezzeType.FunctionType ?: return emptyList()
         if (fnType.abilityConstraints.isEmpty()) return emptyList()
@@ -752,22 +779,84 @@ object MonoDriver {
                 if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
             }
             // Find an impl whose abilityHash and targetTypes match.
-            val match = abilityImpls.firstOrNull { impl ->
-                impl.abilityHash == abilityHash &&
-                    impl.targetTypes.size == concreteArgs.size &&
+            val abilityImplsForHash = abilityImpls.filter {
+                it.abilityHash == abilityHash && it.targetTypes.size == concreteArgs.size
+            }
+            val match = abilityImplsForHash.firstOrNull { impl ->
+                impl.targetTypes.zip(concreteArgs).all { (target, concrete) ->
+                    typeMatchesTarget(concrete, target)
+                }
+            }
+            // BUG B / #333: an identity-less record receiver (a `{..}` literal that
+            // flowed into a generic `x: 'a` param) carries `TypeIdentity.Anonymous`, so
+            // `typeMatchesTarget` — which keys on nominal identity for record targets —
+            // never matches it against a nominal `impl Ability for T` target, and the
+            // impl ref is dropped (the `x.total{}` method call then falls back to a raw
+            // field read → runtime "Field not found"). Recover the nominal impl by
+            // structurally matching the anonymous receiver against the impls' declared
+            // record targets, but ONLY when EXACTLY ONE impl of this ability claims the
+            // receiver's shape — never force a choice when the shape is ambiguous.
+            val resolvedMatch = match ?: run {
+                val structural = abilityImplsForHash.filter { impl ->
                     impl.targetTypes.zip(concreteArgs).all { (target, concrete) ->
-                        typeMatchesTarget(concrete, target)
+                        anonymousRecordMatchesDeclaredRecord(concrete, target, recordShapes)
                     }
+                }
+                structural.singleOrNull()
             } ?: continue
             // The "primary" type for AbilityImplRef.targetType is the
             // first type arg — same convention used elsewhere.
             out.add(AbilityImplRef(
                 abilityHash = abilityHash,
-                implHash = match.hash,
+                implHash = resolvedMatch.hash,
                 targetType = concreteArgs.firstOrNull() ?: MezzeType.IntType
             ))
         }
         return out
+    }
+
+    /**
+     * BUG B / #333: structural match of an IDENTITY-LESS record receiver against a
+     * NOMINAL record impl target.
+     *
+     * [concrete] qualifies only when it is a [MezzeType.RecordType] carrying
+     * `TypeIdentity.Anonymous` — a `{..}` literal that lost its nominal label flowing
+     * into a generic `x: 'a` param. [target] is the impl's `for T` shape; when T is a
+     * declared record it appears here as a `TypeApplication`/`RecordType` carrying a
+     * `Declared` identity, so we look T's declared field shape up in [recordShapes]
+     * (keyed by the Declared content hash) and accept when the receiver's fields are a
+     * SUPERSET of T's declared fields with matching field types — the same "written
+     * shape satisfies the declared shape" rule ability-impl matching uses everywhere.
+     *
+     * This deliberately re-introduces a STRUCTURAL match (mono normally dispatches
+     * records by nominal identity). It is confined to the identity-less-receiver case
+     * and, at both call sites, is gated on EXACTLY ONE impl of the ability claiming the
+     * receiver — so it can never silently pick between two same-shaped nominal impls.
+     */
+    private fun anonymousRecordMatchesDeclaredRecord(
+        concrete: MezzeType,
+        target: MezzeType,
+        recordShapes: Map<Hash, Map<String, MezzeType>>,
+    ): Boolean {
+        if (concrete !is MezzeType.RecordType) return false
+        if (concrete.identity != com.mezze.language.ast.TypeIdentity.Anonymous) return false
+        // The target must denote a DECLARED record type (a nominal `for T`). Its declared
+        // field shape is looked up by the target's Declared content hash.
+        val targetIdentity = when (target) {
+            is MezzeType.TypeApplication -> target.identity
+            is MezzeType.RecordType -> target.identity
+            is MezzeType.VariantType -> target.identity
+            else -> return false
+        }
+        val declaredHash = (targetIdentity as? com.mezze.language.ast.TypeIdentity.Declared)?.hash
+            ?: return false
+        val declaredFields = recordShapes[declaredHash] ?: return false
+        // Superset match: every declared field is present in the receiver with a matching
+        // field type. Extra receiver fields are permitted — they cannot make a declared
+        // shape stop being satisfied.
+        return declaredFields.all { (name, declaredFieldType) ->
+            concrete.fields[name] == declaredFieldType
+        }
     }
 
 }
