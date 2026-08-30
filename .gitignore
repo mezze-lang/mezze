@@ -86,3 +86,4 @@ website/wasm-build/.hover/
 
 # Brotli-compressed copies for R2, rebuilt on every deploy.
 website/public/wasm/.br/
+.claude/
