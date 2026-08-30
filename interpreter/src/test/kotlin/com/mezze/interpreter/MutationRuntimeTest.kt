@@ -364,7 +364,7 @@ class MutationRuntimeTest {
     @Test
     fun `test MutSeq push and pop`() {
         val code = """
-            use std::effects::mutation::{LocalMut, seq_with_capacity, push, pop, len}
+            use std::effects::mutation::{LocalMut, seq_with_capacity, push, pop, size}
 
             let main = {} ->
                 perform LocalMut in do
@@ -373,7 +373,7 @@ class MutationRuntimeTest {
                     push { seq = seq, v = 2 }
                     push { seq = seq, v = 3 }
                     let popped = pop { seq = seq }
-                    let length = len { seq = seq }
+                    let length = size { seq = seq }
                     match popped is
                         Some { val } -> val * 10 + length
                         None -> -1
@@ -442,13 +442,13 @@ class MutationRuntimeTest {
     @Test
     fun `test MutSeq clear`() {
         val code = """
-            use std::effects::mutation::{LocalMut, seq_to_mut, clear, len}
+            use std::effects::mutation::{LocalMut, seq_to_mut, clear, size}
 
             let main = {} ->
                 perform LocalMut in do
                     let seq = seq_to_mut { seq = [1, 2, 3, 4, 5] }
                     clear { seq = seq }
-                    len { seq = seq }
+                    size { seq = seq }
 
             main {}
         """.trimIndent()
@@ -458,13 +458,13 @@ class MutationRuntimeTest {
     @Test
     fun `test MutSeq insert`() {
         val code = """
-            use std::effects::mutation::{LocalMut, seq_to_mut, insert, get, len}
+            use std::effects::mutation::{LocalMut, seq_to_mut, insert, get, size}
 
             let main = {} ->
                 perform LocalMut in do
                     let seq = seq_to_mut { seq = [1, 3, 4] }
                     let _ = insert { seq = seq, i = 1, v = 2 }
-                    let length = len { seq = seq }
+                    let length = size { seq = seq }
                     let val = get { seq = seq, i = 1 }
                     match val is
                         Some { val } -> val * 10 + length
@@ -479,13 +479,13 @@ class MutationRuntimeTest {
     @Test
     fun `test MutSeq remove`() {
         val code = """
-            use std::effects::mutation::{LocalMut, seq_to_mut, remove, len}
+            use std::effects::mutation::{LocalMut, seq_to_mut, remove, size}
 
             let main = {} ->
                 perform LocalMut in do
                     let seq = seq_to_mut { seq = [1, 2, 3, 4] }
                     let removed = remove { seq = seq, i = 1 }
-                    let length = len { seq = seq }
+                    let length = size { seq = seq }
                     match removed is
                         Some { val } -> val * 10 + length
                         None -> -1

@@ -64,7 +64,7 @@ class EffectOpNameClashChainDispatchTest {
                 let b = E2.read_b {}
                 a == "from_E1" && b == 42
               }
-              result::get_or_else { result = await { p = p }, def = False }
+              result::get_or { result = await { p = p }, def = False }
         """
         assertEquals(true, eval(source))
     }
@@ -104,7 +104,7 @@ class EffectOpNameClashChainDispatchTest {
                 let b = E2.shared {}
                 a == "from_E1" && b == 99
               }
-              result::get_or_else { result = await { p = p }, def = False }
+              result::get_or { result = await { p = p }, def = False }
         """
         assertEquals(true, eval(source))
     }
@@ -144,7 +144,7 @@ class EffectOpNameClashChainDispatchTest {
                 let b = E2.shared {}
                 a == "from_E1" && b == 99
               }
-              result::get_or_else { result = await { p = p }, def = False }
+              result::get_or { result = await { p = p }, def = False }
         """
         assertEquals(true, eval(source))
     }
@@ -185,7 +185,7 @@ class EffectOpNameClashChainDispatchTest {
                 let b = E2.read {}
                 a == "value_from_E1" && b == "value_from_E2"
               }
-              result::get_or_else { result = await { p = p }, def = False }
+              result::get_or { result = await { p = p }, def = False }
         """
         assertEquals(true, eval(source))
     }
@@ -232,7 +232,7 @@ class EffectOpNameClashChainDispatchTest {
                 let c = E3.fetch {}
                 a == "alpha" && b == 7 && c == True
               }
-              result::get_or_else { result = await { p = p }, def = False }
+              result::get_or { result = await { p = p }, def = False }
         """
         assertEquals(true, eval(source))
     }
@@ -273,9 +273,9 @@ class EffectOpNameClashChainDispatchTest {
                   let b = E2.shared {}
                   a == "from_E1" && b == 99
                 }
-                result::get_or_else { result = await { p = p_inner }, def = False }
+                result::get_or { result = await { p = p_inner }, def = False }
               }
-              result::get_or_else { result = await { p = p_outer }, def = False }
+              result::get_or { result = await { p = p_outer }, def = False }
         """
         assertEquals(true, eval(source))
     }
@@ -324,7 +324,7 @@ class EffectOpNameClashChainDispatchTest {
                   let b = E2.shared {}
                   a == "from_E1" && b == 99
               }
-              result::get_or_else { result = await { p = p }, def = False }
+              result::get_or { result = await { p = p }, def = False }
         """
         assertEquals(true, eval(source))
     }
@@ -360,7 +360,7 @@ class EffectOpNameClashChainDispatchTest {
                   let v = Reader.ask {}
                   v == "inner"
                 }
-                result::get_or_else { result = await { p = p }, def = False }
+                result::get_or { result = await { p = p }, def = False }
         """
         assertEquals(true, eval(source))
     }
@@ -393,7 +393,7 @@ class EffectOpNameClashChainDispatchTest {
                 let n = Fake.spawn {}
                 n == 12345
               }
-              result::get_or_else { result = await { p = p }, def = False }
+              result::get_or { result = await { p = p }, def = False }
         """
         assertEquals(true, eval(source))
     }
@@ -438,7 +438,7 @@ class EffectOpNameClashChainDispatchTest {
                 let v = E1.tag {}
                 v == "E1(E2)"
               }
-              result::get_or_else { result = await { p = p }, def = False }
+              result::get_or { result = await { p = p }, def = False }
         """
         assertEquals(true, eval(source))
     }
@@ -473,7 +473,7 @@ class EffectOpNameClashChainDispatchTest {
                 let b = E2.shared {}
                 a == "from_E1" && b == 99
               }
-              result::get_or_else { result = await { p = p }, def = False }
+              result::get_or { result = await { p = p }, def = False }
         """
         assertEquals(true, eval(source))
     }

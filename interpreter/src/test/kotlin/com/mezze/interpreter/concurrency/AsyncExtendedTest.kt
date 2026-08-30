@@ -42,7 +42,7 @@ class AsyncExtendedTest {
                     l = {} -> 10,
                     r = {} -> 20
                 }
-                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
+                result::get_or { result = r.l, def = 0 } + result::get_or { result = r.r, def = 0 }
         """
         val result = eval(code)
         assertEquals(30L, result)
@@ -59,7 +59,7 @@ class AsyncExtendedTest {
                     l = {} -> 100,
                     r = {} -> 200
                 }
-                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
+                result::get_or { result = r.l, def = 0 } + result::get_or { result = r.r, def = 0 }
         """
         val result = eval(code)
         assertEquals(300L, result)
@@ -76,7 +76,7 @@ class AsyncExtendedTest {
                     l = {} -> "hello",
                     r = {} -> 42
                 }
-                result::get_or_else { result = r.r, def = 0 }
+                result::get_or { result = r.r, def = 0 }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -98,7 +98,7 @@ class AsyncExtendedTest {
                     b = {} -> 2,
                     c = {} -> 3
                 }
-                result::get_or_else { result = r.a, def = 0 } + result::get_or_else { result = r.b, def = 0 } + result::get_or_else { result = r.c, def = 0 }
+                result::get_or { result = r.a, def = 0 } + result::get_or { result = r.b, def = 0 } + result::get_or { result = r.c, def = 0 }
         """
         val result = eval(code)
         assertEquals(6L, result)
@@ -117,7 +117,7 @@ class AsyncExtendedTest {
                     b = {} -> 2,
                     c = {} -> True
                 }
-                result::get_or_else { result = r.b, def = 0 }
+                result::get_or { result = r.b, def = 0 }
         """
         val result = eval(code)
         assertEquals(2L, result)
@@ -136,7 +136,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = result::get_or_else { result = try_par_map {xs = xs, f = {x} -> x * 2}, def = [] }
+                let result = result::get_or { result = try_par_map {xs = xs, f = {x} -> x * 2}, def = [] }
                 # Verify the result array has correct length and values
                 match result is
                     [a, b, c, d, e] -> a + b + c + d + e
@@ -155,7 +155,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs = [5, 4, 3, 2, 1]
-                let result = result::get_or_else { result = try_par_map {xs = xs, f = {x} -> x + 10}, def = [] }
+                let result = result::get_or { result = try_par_map {xs = xs, f = {x} -> x + 10}, def = [] }
                 # Verify order is preserved by checking first element is 15
                 match result is
                     [a, b, c, d, e] ->
@@ -177,7 +177,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs: [Int] = []
-                let result = result::get_or_else { result = try_par_map {xs = xs, f = {x} -> x * 2}, def = [] }
+                let result = result::get_or { result = try_par_map {xs = xs, f = {x} -> x * 2}, def = [] }
                 seq::size {xs = result}
         """
         val result = eval(code)
@@ -192,7 +192,7 @@ class AsyncExtendedTest {
 
             perform OSThreadAsync in do
                 let xs = [10, 20, 30]
-                let result = result::get_or_else { result = try_par_map {xs = xs, f = {x} -> x / 10}, def = [] }
+                let result = result::get_or { result = try_par_map {xs = xs, f = {x} -> x / 10}, def = [] }
                 match result is
                     [a, b, c] -> a + b + c
                     _ -> -1
@@ -215,7 +215,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs = [1, 2, 3]
-                let _ = result::get_or_else { result = try_par_for_each {xs = xs, f = {x} -> {}}, def = {} }
+                let _ = result::get_or { result = try_par_for_each {xs = xs, f = {x} -> {}}, def = {} }
                 # Return a known value to verify completion
                 42
         """
@@ -231,7 +231,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs: [Int] = []
-                let _ = result::get_or_else { result = try_par_for_each {xs = xs, f = {x} -> {}}, def = {} }
+                let _ = result::get_or { result = try_par_for_each {xs = xs, f = {x} -> {}}, def = {} }
                 # Return a known value to verify completion
                 42
         """
@@ -251,7 +251,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs = [1, 2, 3, 4, 5, 6]
-                let result = result::get_or_else { result = try_par_filter {xs = xs, f = {x} -> x % 2 == 0}, def = [] }
+                let result = result::get_or { result = try_par_filter {xs = xs, f = {x} -> x % 2 == 0}, def = [] }
                 match result is
                     [a, b, c] -> a + b + c
                     _ -> -1
@@ -268,7 +268,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs = [10, 5, 20, 3, 15]
-                let result = result::get_or_else { result = try_par_filter {xs = xs, f = {x} -> x >= 10}, def = [] }
+                let result = result::get_or { result = try_par_filter {xs = xs, f = {x} -> x >= 10}, def = [] }
                 match result is
                     [a, b, c] -> a * 10000 + b * 100 + c
                     _ -> -1
@@ -286,7 +286,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs = [1, 2, 3]
-                let result = result::get_or_else { result = try_par_filter {xs = xs, f = {x} -> x > 100}, def = [] }
+                let result = result::get_or { result = try_par_filter {xs = xs, f = {x} -> x > 100}, def = [] }
                 seq::size {xs = result}
         """
         val result = eval(code)
@@ -301,7 +301,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs = [1, 2, 3]
-                let result = result::get_or_else { result = try_par_filter {xs = xs, f = {x} -> x > 0}, def = [] }
+                let result = result::get_or { result = try_par_filter {xs = xs, f = {x} -> x > 0}, def = [] }
                 match result is
                     [a, b, c] -> a + b + c
                     _ -> -1
@@ -324,7 +324,7 @@ class AsyncExtendedTest {
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
-                result::get_or_else { result = try_any {ps = [p1, p2, p3]}, def = -1 }
+                result::get_or { result = try_any {ps = [p1, p2, p3]}, def = -1 }
         """
         val result = eval(code) as Long
         // any returns the first completed result - could be 1, 2, or 3
@@ -339,7 +339,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                result::get_or_else { result = try_any {ps = [p]}, def = -1 }
+                result::get_or { result = try_any {ps = [p]}, def = -1 }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -418,7 +418,7 @@ class AsyncExtendedTest {
                     l = {} -> 5,
                     r = {} -> 10
                 }
-                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
+                result::get_or { result = r.l, def = 0 } + result::get_or { result = r.r, def = 0 }
         """
         val result = eval(code)
         assertEquals(15L, result)
@@ -432,7 +432,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs = [1, 2, 3]
-                let result = result::get_or_else { result = try_par_map {xs = xs, f = {x} -> x * 10}, def = [] }
+                let result = result::get_or { result = try_par_map {xs = xs, f = {x} -> x * 10}, def = [] }
                 match result is
                     [a, b, c] -> a + b + c
                     _ -> -1
@@ -449,7 +449,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = result::get_or_else { result = try_par_filter {xs = xs, f = {x} -> x > 2}, def = [] }
+                let result = result::get_or { result = try_par_filter {xs = xs, f = {x} -> x > 2}, def = [] }
                 match result is
                     [a, b, c] -> a + b + c
                     _ -> -1
@@ -488,8 +488,8 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let r = join {
-                    l = {} -> result::get_or_else { result = try_par_map {xs = [1, 2], f = {x} -> x * 2}, def = [] },
-                    r = {} -> result::get_or_else { result = try_par_map {xs = [3, 4], f = {x} -> x * 3}, def = [] }
+                    l = {} -> result::get_or { result = try_par_map {xs = [1, 2], f = {x} -> x * 2}, def = [] },
+                    r = {} -> result::get_or { result = try_par_map {xs = [3, 4], f = {x} -> x * 3}, def = [] }
                 }
                 # r.l = Ok { val = [2, 4] }, r.r = Ok { val = [9, 12] }
                 match r.l is
@@ -515,7 +515,7 @@ class AsyncExtendedTest {
             perform LoomAsync in do
                 let xs = [1, 2, 3]
                 # Each element spawns a task that doubles it
-                let results = result::get_or_else { result = try_par_map {xs = xs, f = {x} -> do
+                let results = result::get_or { result = try_par_map {xs = xs, f = {x} -> do
                     let p = Async.spawn {f = {} -> x * 2}
                     match await {p = p} is
                         Ok { val } -> val
@@ -539,9 +539,9 @@ class AsyncExtendedTest {
             perform LoomAsync in do
                 let xs = [1, 2, 3, 4, 5, 6]
                 # Filter evens
-                let evens = result::get_or_else { result = try_par_filter {xs = xs, f = {x} -> x % 2 == 0}, def = [] }
+                let evens = result::get_or { result = try_par_filter {xs = xs, f = {x} -> x % 2 == 0}, def = [] }
                 # For each should process 3 items (2, 4, 6)
-                let _ = result::get_or_else { result = try_par_for_each {xs = evens, f = {x} -> {}}, def = {} }
+                let _ = result::get_or { result = try_par_for_each {xs = evens, f = {x} -> {}}, def = {} }
                 # Return count of evens by pattern matching
                 match evens is
                     [_, _, _] -> 3

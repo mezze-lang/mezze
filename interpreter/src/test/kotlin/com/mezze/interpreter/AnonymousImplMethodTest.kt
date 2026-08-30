@@ -876,20 +876,20 @@ class AnonymousImplMethodTest {
     }
 
     @Test
-    fun `Option get_or_else on Some`() {
+    fun `Option get_or on Some`() {
         assertEquals(42L, eval("""
             use std::option
             let x = Some {val = 42}
-            x.get_or_else {def = 0}
+            x.get_or {def = 0}
         """))
     }
 
     @Test
-    fun `Option get_or_else on None`() {
+    fun `Option get_or on None`() {
         assertEquals(0L, eval("""
             use std::option
             let x: Option Int = None
-            x.get_or_else {def = 0}
+            x.get_or {def = 0}
         """))
     }
 
@@ -897,7 +897,7 @@ class AnonymousImplMethodTest {
     fun `Option map on Some`() {
         assertEquals(84L, eval("""
             use std::option
-            Some {val = 42}.map {f = {val} -> val + val}.get_or_else {def = 0}
+            Some {val = 42}.map {f = {val} -> val + val}.get_or {def = 0}
         """))
     }
 
@@ -914,7 +914,7 @@ class AnonymousImplMethodTest {
     fun `Option flat_map on Some`() {
         assertEquals(42L, eval("""
             use std::option
-            Some {val = 42}.flat_map {f = {val} -> Some {val = val}}.get_or_else {def = 0}
+            Some {val = 42}.flat_map {f = {val} -> Some {val = val}}.get_or {def = 0}
         """))
     }
 
@@ -1012,20 +1012,20 @@ class AnonymousImplMethodTest {
     }
 
     @Test
-    fun `Result get_or_else on Ok`() {
+    fun `Result get_or on Ok`() {
         assertEquals(42L, eval("""
             use std::result
             let x = Ok {val = 42}
-            x.get_or_else {def = 0}
+            x.get_or {def = 0}
         """))
     }
 
     @Test
-    fun `Result get_or_else on Err`() {
+    fun `Result get_or on Err`() {
         assertEquals(0L, eval("""
             use std::result
             let x: Result Int Str = Err {error = "oops"}
-            x.get_or_else {def = 0}
+            x.get_or {def = 0}
         """))
     }
 
@@ -1033,7 +1033,7 @@ class AnonymousImplMethodTest {
     fun `Result map on Ok`() {
         assertEquals(84L, eval("""
             use std::result
-            Ok {val = 42}.map {f = {val} -> val + val}.get_or_else {def = 0}
+            Ok {val = 42}.map {f = {val} -> val + val}.get_or {def = 0}
         """))
     }
 
@@ -1050,7 +1050,7 @@ class AnonymousImplMethodTest {
     fun `Result flat_map on Ok`() {
         assertEquals(42L, eval("""
             use std::result
-            Ok {val = 42}.flat_map {f = {val} -> Ok {val = val}}.get_or_else {def = 0}
+            Ok {val = 42}.flat_map {f = {val} -> Ok {val = val}}.get_or {def = 0}
         """))
     }
 

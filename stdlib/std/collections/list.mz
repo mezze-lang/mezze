@@ -191,10 +191,6 @@ pub let to_seq : { xs: List 'a } -> ['a] = { xs } -> __native_list_to_seq { xs =
 ## Creates a list from a Seq.
 pub let from_seq : { xs: ['a] } -> List 'a = { xs } -> __native_list_from_seq { xs = xs }
 
-## Creates a list from a Seq (alias for from_seq).
-pub let of_seq : { elements: ['a] } -> List 'a = { elements } ->
-  __native_list_from_seq { xs = elements }
-
 ## Creates an integer range [start, end).
 pub let range : { start: Int, end: Int } -> List Int = { start, end } ->
   __native_list_range { start = start, end = end }

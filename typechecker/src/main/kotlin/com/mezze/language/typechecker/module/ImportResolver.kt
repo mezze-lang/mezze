@@ -860,13 +860,13 @@ class ImportResolver(
                 val exportReturnType = exportFnType?.returnType
 
                 // The impl body's return may be an unpinned var (a thin forwarder
-                // like `get_or_else = {it,def} -> get_or_else{result=it,def=def}`
+                // like `get_or = {it,def} -> get_or{result=it,def=def}`
                 // whose forwarded-call return the impl's own checking never tied back
                 // to `def`). The export carries the real signature, e.g.
                 // `{result: Result 'a 'e, def: 'a} -> 'a`, where the return shares `'a`
                 // with a PARAM. Params are harvested separately with their OWN var
                 // instances, so lifting the export's return verbatim leaves it
-                // disconnected — `top.get_or_else{def=..}` then records `'a` instead of
+                // disconnected — `top.get_or{def=..}` then records `'a` instead of
                 // the arg's type. Re-tie the return to the impl's OWN param var by
                 // matching the export param field whose type is the export's return.
                 val remappedReturn: MezzeType? =
@@ -900,7 +900,7 @@ class ImportResolver(
 
     /**
      * When an imported inherent method forwards to a same-named free function
-     * (`get_or_else = {it,def} -> get_or_else{result=it,def=def}`), its body
+     * (`get_or = {it,def} -> get_or{result=it,def=def}`), its body
      * return is an unpinned var and we fall back to the EXPORT's declared return.
      * That return often shares a type var with one of the export's PARAMS
      * (`{…, def: 'a} -> 'a`). Because params are harvested into a separate map

@@ -175,8 +175,8 @@ pub let get : { seq: MutSeq 'a, i: Int } -> Option 'a <Mut> = { seq, i } ->
 pub let set : { seq: MutSeq 'a, i: Int, v: 'a } -> Bool <Mut> = { seq, i, v } ->
   Mut.mutate { act = {} -> __native_mut_seq_set { seq = seq, i = i, v = v } }
 
-## Get the length of a MutSeq.
-pub let len : { seq: MutSeq 'a } -> Int <Mut> = { seq } ->
+## Get the size (element count) of a MutSeq.
+pub let size : { seq: MutSeq 'a } -> Int <Mut> = { seq } ->
   Mut.mutate { act = {} -> __native_mut_seq_len { seq = seq } }
 
 ## Remove all elements from a MutSeq.

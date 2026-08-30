@@ -23,7 +23,7 @@ public class AsyncInterpreterTest {
 
             perform LoomAsync {} in do
                 let p = Async.spawn {f = {} -> 42}
-                result::get_or_else { result = await {p = p}, def = -1 }
+                result::get_or { result = await {p = p}, def = -1 }
         """);
         assertEquals(42L, result);
     }
@@ -39,7 +39,7 @@ public class AsyncInterpreterTest {
                     l = {} -> 10,
                     r = {} -> 20
                 }
-                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
+                result::get_or { result = r.l, def = 0 } + result::get_or { result = r.r, def = 0 }
         """);
         assertEquals(30L, result);
     }
@@ -68,7 +68,7 @@ public class AsyncInterpreterTest {
 
             perform OSThreadAsync {} in do
                 let p = Async.spawn {f = {} -> 42}
-                result::get_or_else { result = await {p = p}, def = -1 }
+                result::get_or { result = await {p = p}, def = -1 }
         """);
         assertEquals(42L, result);
     }
@@ -84,7 +84,7 @@ public class AsyncInterpreterTest {
                     l = {} -> 10,
                     r = {} -> 20
                 }
-                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
+                result::get_or { result = r.l, def = 0 } + result::get_or { result = r.r, def = 0 }
         """);
         assertEquals(30L, result);
     }

@@ -710,8 +710,8 @@ class ContextBuilder {
             // Align the param record and the return TOGETHER, as one FunctionType,
             // through a SINGLE alignToTarget pass. Aligning them separately runs two
             // independent var-remaps, so a type var shared between a param and the
-            // return (e.g. `get_or_else: {…, def: 'a} -> 'a`) is re-split into two
-            // distinct instances — and `top.get_or_else{def=..}` then records `'a`
+            // return (e.g. `get_or: {…, def: 'a} -> 'a`) is re-split into two
+            // distinct instances — and `top.get_or{def=..}` then records `'a`
             // instead of the pinned argument type. One pass preserves the sharing.
             val methodType: MezzeType.FunctionType =
                 if (targetVarsInOrder.isNotEmpty() && paramType is MezzeType.RecordType) {

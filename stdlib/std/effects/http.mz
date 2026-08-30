@@ -773,7 +773,7 @@ pub let mock_status : { url: Str, methods: [Method], code: Int, body: Str } -> M
 
 ## Decode the Ok Response body as UTF-8; return `def` on any Err OR a
 ## decode failure. The one-call replacement for
-## `match resp is Ok {..} -> body_str{..}.get_or_else{..}  Err -> def`.
+## `match resp is Ok {..} -> body_str{..}.get_or{..}  Err -> def`.
 pub let text_or : { resp: Result Response HttpError, def: Str } -> Str = { resp, def } -> match resp is
   Ok { val } -> match body_str { resp = val } is
     Ok { val = s } -> s
@@ -800,7 +800,7 @@ pub let on_err : { resp: Result Response HttpError, f: { err: HttpError } -> {} 
 
 ## Chainable finishers on the `Result Response HttpError` from `.send {}`.
 ## A specialized inherent impl on the concrete Result — the generic
-## `impl Result 'a 'e` (map/get_or_else/…) still applies to every other
+## `impl Result 'a 'e` (map/get_or/…) still applies to every other
 ## Result. Each method delegates to the free function above.
 impl Result Response HttpError where {
   text_or = { it, def: Str }  -> text_or { resp = it, def = def },

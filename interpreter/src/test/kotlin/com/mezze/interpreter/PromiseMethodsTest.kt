@@ -28,7 +28,7 @@ class PromiseMethodsTest {
               let p  = Async.spawn { f = {} -> 10 }
               let q  = map_ok { p = p, f = { val } -> val + 5 }
               let r  = await { p = q }
-              result::get_or_else { result = r, def = -1 }
+              result::get_or { result = r, def = -1 }
         """
         assertEquals(15L, eval(source))
     }
@@ -43,7 +43,7 @@ class PromiseMethodsTest {
               let p  = Async.spawn { f = {} -> 3 }
               let q  = and_then { p = p, f = { val } -> Async.spawn { f = {} -> val + 100 } }
               let r  = await { p = q }
-              result::get_or_else { result = r, def = -1 }
+              result::get_or { result = r, def = -1 }
         """
         assertEquals(103L, eval(source))
     }
@@ -57,7 +57,7 @@ class PromiseMethodsTest {
             perform LoomAsync in do
               let p  = Async.spawn { f = {} -> 42 }
               let o  = try_await { p = p }
-              option::get_or_else { opt = o, def = -1 }
+              option::get_or { opt = o, def = -1 }
         """
         assertEquals(42L, eval(source))
     }
@@ -72,7 +72,7 @@ class PromiseMethodsTest {
               let p  = Async.spawn { f = {} -> 10 }
               let q  = p.map_ok { f = { val } -> val + 5 }
               let r  = await { p = q }
-              result::get_or_else { result = r, def = -1 }
+              result::get_or { result = r, def = -1 }
         """
         assertEquals(15L, eval(source))
     }
@@ -87,7 +87,7 @@ class PromiseMethodsTest {
               let p  = Async.spawn { f = {} -> 3 }
               let q  = p.and_then { f = { val } -> Async.spawn { f = {} -> val + 100 } }
               let r  = await { p = q }
-              result::get_or_else { result = r, def = -1 }
+              result::get_or { result = r, def = -1 }
         """
         assertEquals(103L, eval(source))
     }
@@ -101,7 +101,7 @@ class PromiseMethodsTest {
             perform LoomAsync in do
               let p  = Async.spawn { f = {} -> 42 }
               let o  = p.try_await {}
-              option::get_or_else { opt = o, def = -1 }
+              option::get_or { opt = o, def = -1 }
         """
         assertEquals(42L, eval(source))
     }
@@ -121,7 +121,7 @@ class PromiseMethodsTest {
                   AsyncTimedOut { ms = _ }   -> 0
               }
               let r = await { p = q }
-              result::get_or_else { result = r, def = -1 }
+              result::get_or { result = r, def = -1 }
         """
         assertEquals(999L, eval(source))
     }

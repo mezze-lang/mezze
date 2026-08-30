@@ -358,10 +358,10 @@ class ListInterpreterTest {
     }
 
     @Test
-    fun `of_seq creates list from seq elements`() {
+    fun `from_seq creates list from seq elements`() {
         val code = """
             use std::collections::list
-            let xs = list::of_seq { elements = [10, 20, 30] }
+            let xs = list::from_seq { xs = [10, 20, 30] }
             list::size { xs = xs }
         """
         val result = eval(code)

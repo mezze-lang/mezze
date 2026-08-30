@@ -231,21 +231,21 @@ class MapModuleTest {
     // ===== Utility Functions =====
 
     @Test
-    fun `test map get_or_default - key exists`() {
+    fun `test map get_or - key exists`() {
         val result = eval("""
             use std::collections::map
             let m = map::insert { m = map::empty {}, k = "a", v = 42 }
-            map::get_or_default { m = m, k = "a", def = 0 }
+            map::get_or { m = m, k = "a", def = 0 }
         """)
         assertEquals(42L, result)
     }
 
     @Test
-    fun `test map get_or_default - key missing`() {
+    fun `test map get_or - key missing`() {
         val result = eval("""
             use std::collections::map
             let m = map::insert { m = map::empty {}, k = "a", v = 42 }
-            map::get_or_default { m = m, k = "b", def = 0 }
+            map::get_or { m = m, k = "b", def = 0 }
         """)
         assertEquals(0L, result)
     }

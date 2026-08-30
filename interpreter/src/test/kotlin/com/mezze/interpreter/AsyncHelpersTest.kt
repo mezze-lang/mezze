@@ -27,8 +27,8 @@ class AsyncHelpersTest {
                 l = {} -> 10,
                 r = {} -> 20,
               }
-              let l_val = result::get_or_else { result = r.l, def = -1 }
-              let r_val = result::get_or_else { result = r.r, def = -1 }
+              let l_val = result::get_or { result = r.l, def = -1 }
+              let r_val = result::get_or { result = r.r, def = -1 }
               l_val + r_val
         """.trimIndent()
         assertEquals(30L, eval(source))
@@ -47,9 +47,9 @@ class AsyncHelpersTest {
                 b = {} -> 2,
                 c = {} -> 3,
               }
-              let a_val = result::get_or_else { result = r.a, def = -1 }
-              let b_val = result::get_or_else { result = r.b, def = -1 }
-              let c_val = result::get_or_else { result = r.c, def = -1 }
+              let a_val = result::get_or { result = r.a, def = -1 }
+              let b_val = result::get_or { result = r.b, def = -1 }
+              let c_val = result::get_or { result = r.c, def = -1 }
               a_val + b_val + c_val
         """.trimIndent()
         assertEquals(6L, eval(source))
@@ -68,7 +68,7 @@ class AsyncHelpersTest {
               let p2 = Async.spawn { f = {} -> 200 }
               let p3 = Async.spawn { f = {} -> 300 }
               let results = all { ps = [p1, p2, p3] }
-              seq::map { xs = results, f = { x } -> result::get_or_else { result = x, def = -1 } }
+              seq::map { xs = results, f = { x } -> result::get_or { result = x, def = -1 } }
         """.trimIndent()
         val result = eval(source)
         assertTrue(result is MezzeSeq<*>)
@@ -117,7 +117,7 @@ class AsyncHelpersTest {
               let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> x * 10 } }
               seq::map {
                 xs = ps,
-                f = { x } -> result::get_or_else { result = await { p = x }, def = -1 },
+                f = { x } -> result::get_or { result = await { p = x }, def = -1 },
               }
         """.trimIndent()
         val result = eval(source)
@@ -171,7 +171,7 @@ class AsyncHelpersTest {
               }
               let tagged = seq::map {
                 xs = ps,
-                f = { x } -> result::get_or_else {
+                f = { x } -> result::get_or {
                   result = await { p = x },
                   def = { elem = -1, keep = False },
                 },

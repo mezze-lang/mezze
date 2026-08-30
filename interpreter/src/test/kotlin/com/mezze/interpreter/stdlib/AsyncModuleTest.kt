@@ -35,7 +35,7 @@ class AsyncModuleTest {
     fun `test LoomAsync executes computation`() {
         val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
-            result::get_or_else { result = await {p = p}, def = -1 }
+            result::get_or { result = await {p = p}, def = -1 }
         """))
         assertEquals(42L, result)
     }
@@ -46,7 +46,7 @@ class AsyncModuleTest {
     fun `test spawn and await returns result`() {
         val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
-            result::get_or_else { result = await {p = p}, def = -1 }
+            result::get_or { result = await {p = p}, def = -1 }
         """))
         assertEquals(42L, result)
     }
@@ -56,8 +56,8 @@ class AsyncModuleTest {
         val result = eval(withLoomAsync("""
             let p1 = Async.spawn {f = {} -> 10}
             let p2 = Async.spawn {f = {} -> 20}
-            let r1 = result::get_or_else { result = await {p = p1}, def = -1 }
-            let r2 = result::get_or_else { result = await {p = p2}, def = -1 }
+            let r1 = result::get_or { result = await {p = p1}, def = -1 }
+            let r2 = result::get_or { result = await {p = p2}, def = -1 }
             r1 + r2
         """))
         assertEquals(30L, result)
@@ -69,7 +69,7 @@ class AsyncModuleTest {
     fun `test is_done on completed promise`() {
         val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
-            let _ = result::get_or_else { result = await {p = p}, def = -1 }
+            let _ = result::get_or { result = await {p = p}, def = -1 }
             is_done {p = p}
         """))
         assertEquals(true, result)
@@ -83,7 +83,7 @@ class AsyncModuleTest {
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
             let p3 = Async.spawn {f = {} -> 3}
-            let results = result::get_or_else { result = try_all {ps = [p1, p2, p3]}, def = [] }
+            let results = result::get_or { result = try_all {ps = [p1, p2, p3]}, def = [] }
             seq::size {xs = results}
         """))
         assertEquals(3L, result)
@@ -94,7 +94,7 @@ class AsyncModuleTest {
         val result = eval(withLoomAsync("""
             let p1 = Async.spawn {f = {} -> 10}
             let p2 = Async.spawn {f = {} -> 20}
-            let results = result::get_or_else { result = try_all {ps = [p1, p2]}, def = [] }
+            let results = result::get_or { result = try_all {ps = [p1, p2]}, def = [] }
             match seq::get {xs = results, i = 0} is
                 Some {val} -> val
                 None -> 0
@@ -126,7 +126,7 @@ class AsyncModuleTest {
                 l = {} -> 10,
                 r = {} -> 20
             }
-            result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
+            result::get_or { result = r.l, def = 0 } + result::get_or { result = r.r, def = 0 }
         """))
         assertEquals(30L, result)
     }
@@ -141,7 +141,7 @@ class AsyncModuleTest {
                 b = {} -> 2,
                 c = {} -> 3
             }
-            result::get_or_else { result = r.a, def = 0 } + result::get_or_else { result = r.b, def = 0 } + result::get_or_else { result = r.c, def = 0 }
+            result::get_or { result = r.a, def = 0 } + result::get_or { result = r.b, def = 0 } + result::get_or { result = r.c, def = 0 }
         """))
         assertEquals(6L, result)
     }
@@ -151,7 +151,7 @@ class AsyncModuleTest {
     @Test
     fun `test map applies function concurrently`() {
         val result = eval(withLoomAsync("""
-            let results = result::get_or_else { result = try_par_map {xs = [1, 2, 3], f = {x} -> x * 2}, def = [] }
+            let results = result::get_or { result = try_par_map {xs = [1, 2, 3], f = {x} -> x * 2}, def = [] }
             seq::size {xs = results}
         """))
         assertEquals(3L, result)
@@ -160,7 +160,7 @@ class AsyncModuleTest {
     @Test
     fun `test map preserves order`() {
         val result = eval(withLoomAsync("""
-            let results = result::get_or_else { result = try_par_map {xs = [10, 20, 30], f = {x} -> x + 1}, def = [] }
+            let results = result::get_or { result = try_par_map {xs = [10, 20, 30], f = {x} -> x + 1}, def = [] }
             match seq::get {xs = results, i = 0} is
                 Some {val} -> val
                 None -> 0
@@ -173,7 +173,7 @@ class AsyncModuleTest {
     @Test
     fun `test for_each returns unit`() {
         val result = eval(withLoomAsync("""
-            result::get_or_else { result = try_par_for_each {xs = [1, 2, 3], f = {x} -> {}}, def = {} }
+            result::get_or { result = try_par_for_each {xs = [1, 2, 3], f = {x} -> {}}, def = {} }
             42
         """))
         assertEquals(42L, result)
@@ -184,7 +184,7 @@ class AsyncModuleTest {
     @Test
     fun `test filter keeps matching elements`() {
         val result = eval(withLoomAsync("""
-            let results = result::get_or_else { result = try_par_filter {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}, def = [] }
+            let results = result::get_or { result = try_par_filter {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}, def = [] }
             seq::size {xs = results}
         """))
         assertEquals(2L, result)
@@ -212,7 +212,7 @@ class AsyncModuleTest {
             use std::result
 
             perform LoomAsync in do
-                result::get_or_else { result = run {f = {} -> 42}, def = -1 }
+                result::get_or { result = run {f = {} -> 42}, def = -1 }
         """)
         assertEquals(42L, result)
     }
@@ -282,9 +282,9 @@ class AsyncModuleTest {
         val result = eval(withLoomAsync("""
             let outer = Async.spawn {f = {} -> do
                 let inner = Async.spawn {f = {} -> 42}
-                result::get_or_else { result = await {p = inner}, def = -1 }
+                result::get_or { result = await {p = inner}, def = -1 }
             }
-            result::get_or_else { result = await {p = outer}, def = -1 }
+            result::get_or { result = await {p = outer}, def = -1 }
         """))
         assertEquals(42L, result)
     }
@@ -308,7 +308,7 @@ class AsyncModuleTest {
     fun `test complex async workflow`() {
         val result = eval(withLoomAsync("""
             # Spawn multiple tasks
-            let tasks = result::get_or_else { result = try_par_map {
+            let tasks = result::get_or { result = try_par_map {
                 xs = [1, 2, 3, 4, 5],
                 f = {x} -> x * x
             }, def = [] }

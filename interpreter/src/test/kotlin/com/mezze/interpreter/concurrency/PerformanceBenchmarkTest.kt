@@ -89,7 +89,7 @@ class PerformanceBenchmarkTest {
             appendLine("        $i")
             appendLine("    }")
         }
-        appendLine("    result::get_or_else { result = try_all { ps = [${(1..n).joinToString(", ") { "op$it" }}] }, def = [] }")
+        appendLine("    result::get_or { result = try_all { ps = [${(1..n).joinToString(", ") { "op$it" }}] }, def = [] }")
     }
 
     // Helper: sequential N sleeps in a single body — uses sleep so
@@ -199,7 +199,7 @@ class PerformanceBenchmarkTest {
                     appendLine("    }")
                 }
                 val opIds = durations.indices.joinToString(", ") { "op${it + 1}" }
-                appendLine("    result::get_or_else { result = try_all { ps = [$opIds] }, def = [] }")
+                appendLine("    result::get_or { result = try_all { ps = [$opIds] }, def = [] }")
             }
             eval(src)
         }
@@ -291,7 +291,7 @@ class PerformanceBenchmarkTest {
                         for (i in 1..count) {
                             appendLine("    let op$i = Async.spawn { f = {} -> $i }")
                         }
-                        appendLine("    result::get_or_else { result = try_all { ps = [${(1..count).joinToString(", ") { "op$it" }}] }, def = [] }")
+                        appendLine("    result::get_or { result = try_all { ps = [${(1..count).joinToString(", ") { "op$it" }}] }, def = [] }")
                     }
                     eval(src)
                 }

@@ -9,9 +9,9 @@ import java.nio.file.Paths
  * #334: a call whose declared return is a named TypeApplication with free vars
  * (`await : {..} -> Result 'a AsyncError`) used to collapse to a bare type var at
  * generation time. Inherent-method dispatch runs during generation, so a receiver
- * with two candidate methods (`get_or_else` lives on both Result and Option) could
+ * with two candidate methods (`get_or` lives on both Result and Option) could
  * not be dispatched — the call fell through to a structural field access and failed
- * with "Cannot access field 'get_or_else' on variant type: | Ok ..., Err ... |".
+ * with "Cannot access field 'get_or' on variant type: | Ok ..., Err ... |".
  * Preserving the named Result identity at the call site fixes dispatch.
  */
 class AbilityOpResultNamedTypeTest {
@@ -30,16 +30,16 @@ class AbilityOpResultNamedTypeTest {
 
     @Test
     fun `inherent method on an ability-op Result result resolves without annotation`() {
-        // `a.await {}` returns Result Str AsyncError; `.get_or_else` (2 candidates:
+        // `a.await {}` returns Result Str AsyncError; `.get_or` (2 candidates:
         // Result + Option) must dispatch on the preserved Result identity.
         check(
             """
             use std::effects::async::{ Async, LoomAsync }
-            use std::result::{ get_or_else }
+            use std::result::{ get_or }
             let main = {} -> perform LoomAsync in do
               let a = Async.spawn { f = {} -> "hi" }
               let r = a.await {}
-              r.get_or_else { def = "?" }
+              r.get_or { def = "?" }
             """
         )
     }

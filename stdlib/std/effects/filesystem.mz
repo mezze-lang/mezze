@@ -156,10 +156,10 @@ pub let write_text : { path: Str, text: Str } -> Result {} FsError <FileSystem> 
   FileSystem.write_bytes { path = path, bytes = bytes::from_str { s = text } }
 
 ## Read text with a default on error. Common for config loading.
-pub let read_text_or : { path: Str, default: Str } -> Str <FileSystem> = { path, default } ->
+pub let read_text_or : { path: Str, def: Str } -> Str <FileSystem> = { path, def } ->
   match read_text { path = path } is
     Ok { val } -> val
-    Err { error } -> default
+    Err { error } -> def
 
 ## ---------- Metadata queries derived from stat ----------
 

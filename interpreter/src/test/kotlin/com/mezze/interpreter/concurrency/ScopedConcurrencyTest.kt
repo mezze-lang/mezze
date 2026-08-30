@@ -164,7 +164,7 @@ class ScopedConcurrencyTest {
                         Ok {val} -> val
                         Err {error = _} -> -1
 
-                    r1 + r2 + result::get_or_else { result = joined.l, def = 0 } + result::get_or_else { result = joined.r, def = 0 }
+                    r1 + r2 + result::get_or { result = joined.l, def = 0 } + result::get_or { result = joined.r, def = 0 }
                 }
         """
         val result = eval(code)
@@ -218,7 +218,7 @@ class ScopedConcurrencyTest {
                 scoped {f = {sc} -> do
                     let p = scope_spawn {sc = sc, f = {} -> do
                         # Use concurrent map inside spawned task
-                        let results = result::get_or_else { result = try_par_map {
+                        let results = result::get_or { result = try_par_map {
                             xs = [1, 2, 3],
                             f = {x} -> x * 10
                         }, def = [] }

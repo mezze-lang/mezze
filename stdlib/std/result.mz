@@ -47,7 +47,7 @@ pub let map_err : { result: Result 'a 'e, f: { error: 'e } -> 'f <...> } -> Resu
 
 
 ## Unwrap the value, or return def if Err.
-pub let get_or_else : { result: Result 'a 'e, def: 'a } -> 'a = { result, def } ->
+pub let get_or : { result: Result 'a 'e, def: 'a } -> 'a = { result, def } ->
   match result is
     Ok { val } -> val
     Err { error } -> def
@@ -148,7 +148,7 @@ impl Result 'a 'e where {
   map = { it, f } -> map { result = it, f = f },
   map_err = { it, f } -> map_err { result = it, f = f },
   flat_map = { it, f } -> flat_map { result = it, f = f },
-  get_or_else = { it, def } -> get_or_else { result = it, def = def },
+  get_or = { it, def } -> get_or { result = it, def = def },
   is_ok = { it } -> is_ok { result = it },
   is_err = { it } -> is_err { result = it },
   or_else = { it, f } -> or_else { result = it, f = f },

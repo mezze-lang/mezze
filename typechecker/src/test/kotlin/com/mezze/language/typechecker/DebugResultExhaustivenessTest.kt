@@ -20,10 +20,10 @@ class DebugResultExhaustivenessTest {
     }
 
     @Test
-    fun `debug get_or_else exhaustiveness check`() {
+    fun `debug get_or exhaustiveness check`() {
         val code = """
-            # Test just the get_or_else function
-            pub let get_or_else: { result: (Result 'a 'e), def: 'a } -> 'a = { result, def } ->
+            # Test just the get_or function
+            pub let get_or: { result: (Result 'a 'e), def: 'a } -> 'a = { result, def } ->
                 match result is
                     Ok { val } -> val
                     Err { error } -> def
@@ -54,7 +54,7 @@ class DebugResultExhaustivenessTest {
                     Err { error } -> Err { error = f { error } }
 
             # Get the success value or return a default
-            pub let get_or_else: { result: (Result 'a 'e), def: 'a } -> 'a = { result, def } ->
+            pub let get_or: { result: (Result 'a 'e), def: 'a } -> 'a = { result, def } ->
                 match result is
                     Ok { val } -> val
                     Err { error } -> def

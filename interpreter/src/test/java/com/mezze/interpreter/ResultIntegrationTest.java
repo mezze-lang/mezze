@@ -58,21 +58,21 @@ class ResultIntegrationTest {
     // ========================================
 
     @Test
-    void getOrElseReturnsValueForOk() {
+    void getOrReturnsValueForOk() {
         Object result = MezzeTestHelper.run("""
             use std::result
             let res: (Result Int Str) = Ok { val = 42 }
-            result::get_or_else { result = res, def = 0 }
+            result::get_or { result = res, def = 0 }
             """);
         assertEquals(42L, result);
     }
 
     @Test
-    void getOrElseReturnsDefaultForErr() {
+    void getOrReturnsDefForErr() {
         Object result = MezzeTestHelper.run("""
             use std::result
             let res: (Result Int Str) = Err { error = "failed" }
-            result::get_or_else { result = res, def = 99 }
+            result::get_or { result = res, def = 99 }
             """);
         assertEquals(99L, result);
     }
@@ -87,7 +87,7 @@ class ResultIntegrationTest {
             use std::result
             let res: (Result Int Str) = Ok { val = 21 }
             let doubled = result::map { result = res, f = { val } -> val * 2 }
-            result::get_or_else { result = doubled, def = 0 }
+            result::get_or { result = doubled, def = 0 }
             """);
         assertEquals(42L, result);
     }
@@ -125,7 +125,7 @@ class ResultIntegrationTest {
             let chained = result::flat_map { result = res, f = { val } ->
                 if val > 0 then Ok { val = val * 2 } else Err { error = "negative" }
             }
-            result::get_or_else { result = chained, def = 0 }
+            result::get_or { result = chained, def = 0 }
             """);
         assertEquals(10L, result);
     }
@@ -136,7 +136,7 @@ class ResultIntegrationTest {
             use std::result
             let res: (Result Int Str) = Err { error = "first error" }
             let recovered = result::or_else { result = res, f = { error } -> Ok { val = 99 } }
-            result::get_or_else { result = recovered, def = 0 }
+            result::get_or { result = recovered, def = 0 }
             """);
         assertEquals(99L, result);
     }
@@ -152,7 +152,7 @@ class ResultIntegrationTest {
             let inner: (Result Int Str) = Ok { val = 42 }
             let outer: (Result (Result Int Str) Str) = Ok { val = inner }
             let flat = result::flatten { result = outer }
-            result::get_or_else { result = flat, def = 0 }
+            result::get_or { result = flat, def = 0 }
             """);
         assertEquals(42L, result);
     }
@@ -326,7 +326,7 @@ class ResultIntegrationTest {
             let a: (Result Int Str) = Ok { val = 10 }
             let b: (Result Int Str) = Ok { val = 5 }
             let combined = result::map2 { result_a = a, result_b = b, f = { a, b } -> a + b }
-            result::get_or_else { result = combined, def = 0 }
+            result::get_or { result = combined, def = 0 }
             """);
         assertEquals(15L, result);
     }

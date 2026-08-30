@@ -67,7 +67,7 @@ public class PreludeIntegrationTest {
     void optionMethodsWithUse() {
         Object result = MezzeTestHelper.run("""
             use std::option
-            Some {val = 42}.map {f = {val} -> val + 1}.get_or_else {def = 0}
+            Some {val = 42}.map {f = {val} -> val + 1}.get_or {def = 0}
         """);
         assertEquals(43L, result);
     }
@@ -76,7 +76,7 @@ public class PreludeIntegrationTest {
     void resultMethodsWithUse() {
         Object result = MezzeTestHelper.run("""
             use std::result
-            Ok {val = 10}.map {f = {val} -> val * 2}.get_or_else {def = 0}
+            Ok {val = 10}.map {f = {val} -> val * 2}.get_or {def = 0}
         """);
         assertEquals(20L, result);
     }

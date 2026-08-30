@@ -54,11 +54,11 @@ class OptionModuleTest {
     }
 
     @Test
-    fun `test option get_or_else function`() {
+    fun `test option get_or function`() {
         val source = """
             use std::option
             let some_val = Some { val = 42 }
-            let result = option::get_or_else { opt = some_val, def = 0 }
+            let result = option::get_or { opt = some_val, def = 0 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

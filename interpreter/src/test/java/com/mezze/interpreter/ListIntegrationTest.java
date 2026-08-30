@@ -328,10 +328,10 @@ class ListIntegrationTest {
     }
 
     @Test
-    void ofSeqCreatesListFromSeqElements() {
+    void fromSeqCreatesListFromSeqElements() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
-            let xs = list::of_seq { elements = [10, 20, 30] }
+            let xs = list::from_seq { xs = [10, 20, 30] }
             list::size { xs = xs }
             """);
         assertEquals(3L, result);
