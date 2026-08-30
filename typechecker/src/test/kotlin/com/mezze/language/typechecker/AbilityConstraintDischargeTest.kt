@@ -11,7 +11,7 @@ import org.junit.jupiter.api.BeforeEach
  * An ability constraint on a called function must be DISCHARGED when the call
  * supplies a concrete argument that has an impl — not propagated onto the
  * caller. A user-declared ability must behave like the builtin abilities do:
- * `usesBuiltin = {} -> (42).to_dbg_str {}` infers `{} -> Str` (no residual),
+ * `usesBuiltin = {} -> (42).to_dbg {}` infers `{} -> Str` (no residual),
  * so a user `Priced` used the same way must too.
  */
 class AbilityConstraintDischargeTest {
@@ -37,9 +37,9 @@ class AbilityConstraintDischargeTest {
     @Test
     fun `builtin ability discharges against a concrete receiver (baseline)`() {
         // The known-good contrast: builtin abilities do NOT leak.
-        val code = "let main = {} -> (42).to_dbg_str {}"
+        val code = "let main = {} -> (42).to_dbg {}"
         assertEquals(emptyList<MezzeType.FunctionAbilityConstraint>(), mainConstraints(code),
-            "builtin to_dbg_str against a concrete Int must not leak a constraint onto main")
+            "builtin to_dbg against a concrete Int must not leak a constraint onto main")
     }
 
     @Test

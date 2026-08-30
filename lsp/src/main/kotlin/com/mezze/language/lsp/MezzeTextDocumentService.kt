@@ -3713,7 +3713,7 @@ class MezzeTextDocumentService(
         // interpolation hole is unified with StringType. The typechecker doesn't
         // record that as an `expectedTypeAt` entry, but we can see it
         // syntactically — if the receiver sits inside an unclosed `$(` on this
-        // line, prefer methods that produce a string. `to_str`/`to_dbg_str`
+        // line, prefer methods that produce a string. `to_str`/`to_dbg`
         // (and any other Str-returning method) then float to the top.
         val expectedOverride = if (isInsideStringInterpolation(beforeCursor)) MezzeType.StringType else null
 
@@ -3822,7 +3822,7 @@ class MezzeTextDocumentService(
     /**
      * Score each candidate against `expected`: a candidate whose known return
      * type unifies with `expected` sorts first (`0_`), others last (`5_`).
-     * When `expected` is Str, `to_dbg_str` is also floated to the top — it
+     * When `expected` is Str, `to_dbg` is also floated to the top — it
      * renders ANY value to a string, so in a string context it's always a
      * sensible pick even for a non-Str receiver.
      */
@@ -3837,7 +3837,7 @@ class MezzeTextDocumentService(
         // in candidateReturnTypes (the precompiled inherent-impl body type can
         // come back as an unresolved tyvar), so recognize them by name so they
         // still float to the top of an interpolation / Str-expected context.
-        val strRenderers = setOf("to_str", "to_dbg_str")
+        val strRenderers = setOf("to_str", "to_dbg")
         return items.map { item ->
             val candType = candidateReturnTypes[item.label]
             val matches = when {
@@ -4008,10 +4008,10 @@ class MezzeTextDocumentService(
             // matters because a forward-referenced polymorphic receiver
             // (`let x = help{…}`) is only baked to its concrete type in a fully
             // SOLVED module — a mere type error (e.g. `$(x)` needing Str) leaves
-            // it an unresolved tyvar. `to_dbg_str {}` works on ANY type and
+            // it an unresolved tyvar. `to_dbg {}` works on ANY type and
             // returns Str (so it satisfies string-interpolation too), making the
             // synthesized edit typecheck regardless of the receiver.
-            lines[li] = line.substring(0, dotIdx) + ".to_dbg_str {}" + line.substring(dotIdx + 1)
+            lines[li] = line.substring(0, dotIdx) + ".to_dbg {}" + line.substring(dotIdx + 1)
             val stripped = lines.joinToString("\n")
 
             val fileName = uriToPath(state.uri)?.fileName?.toString()
@@ -4054,7 +4054,7 @@ class MezzeTextDocumentService(
      * Expression-chain analogue of [stripDotAndResolveReceiver]. For a
      * dangling dot after a call/index/group (`x.is_odd {}.`, `nums.first {}.`)
      * the receiver has no single name to look up — so we COMPLETE the dot into
-     * a valid, side-effect-free `.to_dbg_str {}` call, typecheck the whole
+     * a valid, side-effect-free `.to_dbg {}` call, typecheck the whole
      * module to Success, then read the type of the enclosing expression that
      * ENDS at the original closing delimiter (the receiver chain's result).
      *
@@ -4080,8 +4080,8 @@ class MezzeTextDocumentService(
             if (closer != '}' && closer != ')' && closer != ']') return null
 
             // Complete the dangling dot into a valid Str-returning call so the
-            // module TYPECHECKS (Success). `to_dbg_str {}` works on any type.
-            lines[li] = line.substring(0, dotIdx) + ".to_dbg_str {}" + line.substring(dotIdx + 1)
+            // module TYPECHECKS (Success). `to_dbg {}` works on any type.
+            lines[li] = line.substring(0, dotIdx) + ".to_dbg {}" + line.substring(dotIdx + 1)
             val stripped = lines.joinToString("\n")
 
             val fileName = uriToPath(state.uri)?.fileName?.toString()

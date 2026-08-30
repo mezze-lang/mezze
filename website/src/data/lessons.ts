@@ -211,7 +211,7 @@ let main = {} -> perform Console in
     title: "Abilities",
     blurb: "Inspect is derived; to_str is not.",
     body: [
-      "`Inspect` is special: it is the one ability the compiler **derives for every type**, so `.to_dbg_str {}` works on anything, including a type you declared a line ago.",
+      "`Inspect` is special: it is the one ability the compiler **derives for every type**, so `.to_dbg {}` works on anything, including a type you declared a line ago.",
       "`to_str` is **not** an ability. Each type defines its own as an inherent method, which is why `Int` has one and `User` does not.",
       "A dot call resolves against the receiver's type either way. The next lesson defines an ability of your own.",
     ],
@@ -224,7 +224,7 @@ let main = {} -> perform Console in do
 
   # Inspect is the one ability the compiler
   # derives for every type, so this always works.
-  println { msg = u.to_dbg_str {} }
+  println { msg = u.to_dbg {} }
 
   # to_str is not an ability. Each type defines
   # its own, which is why Int has one and User

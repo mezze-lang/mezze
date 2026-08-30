@@ -146,7 +146,7 @@ class TypedASTCompiler(
     private val dictMethodsForHash = mutableMapOf<Hash, Set<String>>()
 
     /**
-     * Current function's dictionary param names (e.g., "__dict_to_dbg_str").
+     * Current function's dictionary param names (e.g., "__dict_to_dbg").
      * Set during compileFunctionBody when the function needs dict passing.
      * These are appended as extra params after the regular params.
      */

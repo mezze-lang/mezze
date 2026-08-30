@@ -3,34 +3,34 @@ use std::str
 use std::collections::seq
 
 let main = {} -> perform Console in do
-  println { msg = "int:  $(42.to_dbg_str {})" }
-  println { msg = "bool: $(True.to_dbg_str {})" }
-  println { msg = "str:  $("hello".to_dbg_str {})" }
-  println { msg = "seq:  $([1, 2, 3].to_dbg_str {})" }
-  println { msg = "42.to_dbg_str = $(42.to_dbg_str {})" }
+  println { msg = "int:  $(42.to_dbg {})" }
+  println { msg = "bool: $(True.to_dbg {})" }
+  println { msg = "str:  $("hello".to_dbg {})" }
+  println { msg = "seq:  $([1, 2, 3].to_dbg {})" }
+  println { msg = "42.to_dbg = $(42.to_dbg {})" }
   let neg = 0 - 42
   let a = neg.abs {}
-  println { msg = "(-42).abs = $(a.to_dbg_str {})" }
+  println { msg = "(-42).abs = $(a.to_dbg {})" }
   let e1 = 7.is_even {}
   let e2 = 8.is_even {}
-  println { msg = "7.is_even = $(e1.to_dbg_str {})" }
-  println { msg = "8.is_even = $(e2.to_dbg_str {})" }
+  println { msg = "7.is_even = $(e1.to_dbg {})" }
+  println { msg = "8.is_even = $(e2.to_dbg {})" }
   let mn = 5.min { r = 3 }
   let mx = 5.max { r = 3 }
-  println { msg = "5.min 3 = $(mn.to_dbg_str {})" }
-  println { msg = "5.max 3 = $(mx.to_dbg_str {})" }
+  println { msg = "5.min 3 = $(mn.to_dbg {})" }
+  println { msg = "5.max 3 = $(mx.to_dbg {})" }
   let s = "Hello, Mezze!"
   println { msg = "upper: $(s.to_upper {})" }
   println { msg = "lower: $(s.to_lower {})" }
   println { msg = "trim:  $("  padded  ".trim {})" }
   let sum = 3 + 4
-  println { msg = "3 + 4 = $(sum.to_dbg_str {})" }
+  println { msg = "3 + 4 = $(sum.to_dbg {})" }
   let eq = 3.eq { r = 3 }
-  println { msg = "3 == 3: $(eq.to_dbg_str {})" }
+  println { msg = "3 == 3: $(eq.to_dbg {})" }
   let gt = 5.gt { r = 3 }
-  println { msg = "5 > 3:  $(gt.to_dbg_str {})" }
+  println { msg = "5 > 3:  $(gt.to_dbg {})" }
   let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   let evens = seq::filter { xs = nums, p = { x } -> x % 2 == 0 }
   let doubled = seq::map { xs = evens, f = { x } -> x * 2 }
   let total = seq::fold { xs = doubled, init = 0, f = { acc, x } -> acc + x }
-  println { msg = "sum of doubled evens in 1..10: $(total.to_dbg_str {})" }
+  println { msg = "sum of doubled evens in 1..10: $(total.to_dbg {})" }

@@ -41,6 +41,6 @@ let quicksort = { seq } -> perform LocalMut in do
 
 let main = {} -> perform Console in do
   let input = [38, 27, 43, 3, 9, 82, 10]
-  println { msg = "input:  $(input.to_dbg_str {})" }
+  println { msg = "input:  $(input.to_dbg {})" }
   let sorted = quicksort { seq = input }
-  println { msg = "sorted: $(sorted.to_dbg_str {})" }
+  println { msg = "sorted: $(sorted.to_dbg {})" }

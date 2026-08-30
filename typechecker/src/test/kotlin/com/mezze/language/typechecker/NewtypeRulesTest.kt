@@ -259,7 +259,7 @@ class NewtypeRulesTest {
     @Test fun `RULE auto-derived - Inspect works on newtype without explicit impl`() {
         ok("auto-derive.inspect", """
             newtype Age = Int
-            pub let s = Age.(42).to_dbg_str {}
+            pub let s = Age.(42).to_dbg {}
         """)
     }
 

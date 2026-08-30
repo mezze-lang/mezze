@@ -158,11 +158,11 @@ class NewtypeProbeTest {
     @Test
     fun `Q7_generic_impl_on_newtype`() {
         // Does an ability method on a newtype receiver resolve?
-        run("Q7. .to_dbg_str on newtype (auto-derived Inspect)",
+        run("Q7. .to_dbg on newtype (auto-derived Inspect)",
             """
             pub newtype UserId = Str
             pub let a : UserId = UserId.("u1")
-            pub let s = a.to_dbg_str {}
+            pub let s = a.to_dbg {}
             """)
     }
 }

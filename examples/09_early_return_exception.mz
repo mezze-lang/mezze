@@ -18,6 +18,6 @@ let main = {} -> perform Console in do
     "none found"
   println { msg = "no early return: $(result2)" }
   let ok = perform ExceptionToResult in Ok { val = safe_div { a = 10, b = 3 } }
-  println { msg = "10 / 3 = $(ok.to_dbg_str {})" }
+  println { msg = "10 / 3 = $(ok.to_dbg {})" }
   let err = perform ExceptionToResult in Ok { val = safe_div { a = 10, b = 0 } }
-  println { msg = "10 / 0 = $(err.to_dbg_str {})" }
+  println { msg = "10 / 0 = $(err.to_dbg {})" }

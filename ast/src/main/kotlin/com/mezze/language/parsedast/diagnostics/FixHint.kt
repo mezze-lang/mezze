@@ -125,7 +125,7 @@ sealed class FixHint {
      * Append a method call to the expression at [loc]: `expr` → `expr.<method> {}`.
      * Used when a value needs a trailing conversion to satisfy the expected type —
      * chiefly T0201 in string interpolation, where a non-`Str` needs `.to_str {}`
-     * or `.to_dbg_str {}`. [methods] holds the candidate method names in
+     * or `.to_dbg {}`. [methods] holds the candidate method names in
      * preference order; the client offers one quick fix per method.
      */
     data class WrapInMethodCall(

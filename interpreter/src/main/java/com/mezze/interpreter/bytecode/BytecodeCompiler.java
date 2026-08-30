@@ -677,7 +677,7 @@ public final class BytecodeCompiler {
                     // path below), so a MezzeSuspend flowing through
                     // an interp part escapes as SuspendedInBlockException
                     // caught at the fn root's outer TryCatch (#361).
-                    // Group B scalar-receiver dispatch (Long.to_dbg_str{}
+                    // Group B scalar-receiver dispatch (Long.to_dbg{}
                     // etc.) is now handled by tryFoldInspectMethod +
                     // InlineScalarInspect (#346), so the previous blocker
                     // is gone.
@@ -1869,10 +1869,10 @@ public final class BytecodeCompiler {
                     emitInlineBinaryOp(folded, b, argCount, localMap);
                     return;
                 }
-                // #346 Group B: fold `x.to_dbg_str{}` / `x.to_str{}` on
+                // #346 Group B: fold `x.to_dbg{}` / `x.to_str{}` on
                 // scalar (or any) receiver into an inline stringify.
                 // Same shape as tryFoldInlineOp: the desugar is
-                // CallIndirect(ReadField(x, "to_dbg_str"), MakeRecord{it=x}).
+                // CallIndirect(ReadField(x, "to_dbg"), MakeRecord{it=x}).
                 // Without this, the ReadField hits ReadFieldByName's
                 // doNotRecord fallback on a Long/Double/Bool/Str/Char
                 // receiver and throws. Mirrors DirectInspectNode's
@@ -1880,7 +1880,7 @@ public final class BytecodeCompiler {
                 NodeIR receiver = tryFoldInspectMethod(ci);
                 if (receiver != null) {
                     ReadFieldIR rf = (ReadFieldIR) ci.getFunction();
-                    boolean dbgStyle = "to_dbg_str".equals(rf.getFieldName());
+                    boolean dbgStyle = "to_dbg".equals(rf.getFieldName());
                     b.beginInlineScalarInspect(dbgStyle);
                     emitNode(receiver, b, argCount, localMap);
                     b.endInlineScalarInspect();
@@ -2233,8 +2233,8 @@ public final class BytecodeCompiler {
      * would crash at runtime.
      */
     /**
-     * #346 Group B: detect the desugared shape of `x.to_dbg_str{}` /
-     * `x.to_str{}` — {@code CallIndirect(ReadField(x, "to_dbg_str"),
+     * #346 Group B: detect the desugared shape of `x.to_dbg{}` /
+     * `x.to_str{}` — {@code CallIndirect(ReadField(x, "to_dbg"),
      * MakeRecord{it = x})} — and return the receiver expression `x`
      * for the caller to feed into {@code InlineScalarInspect}. Returns
      * null when the CallIndirect isn't this shape.
@@ -2247,7 +2247,7 @@ public final class BytecodeCompiler {
     private static NodeIR tryFoldInspectMethod(CallIndirectIR ci) {
         if (!(ci.getFunction() instanceof ReadFieldIR rf)) return null;
         String name = rf.getFieldName();
-        if (!"to_dbg_str".equals(name) && !"to_str".equals(name)) return null;
+        if (!"to_dbg".equals(name) && !"to_str".equals(name)) return null;
         // The arg must be a MakeRecord — we don't actually need to
         // inspect it since the receiver comes from the ReadField's
         // record slot. But require the shape so we don't fold

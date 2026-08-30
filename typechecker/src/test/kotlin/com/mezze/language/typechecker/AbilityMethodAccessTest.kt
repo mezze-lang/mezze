@@ -26,16 +26,16 @@ class AbilityMethodAccessTest {
     private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parseParsedModule(code, "test.mz"), Paths.get("."))
 
     @Test
-    fun `test Inspect to_dbg_str access should return function type`() {
+    fun `test Inspect to_dbg access should return function type`() {
         assertDoesNotThrow {
-            parseAndTypeCheck("let x = Inspect.to_dbg_str")
+            parseAndTypeCheck("let x = Inspect.to_dbg")
         }
     }
 
     @Test
-    fun `test Inspect to_dbg_str can be stored and called later`() {
+    fun `test Inspect to_dbg can be stored and called later`() {
         assertDoesNotThrow {
-            parseAndTypeCheck("let stringify = Inspect.to_dbg_str\nlet result = stringify {it = 42}")
+            parseAndTypeCheck("let stringify = Inspect.to_dbg\nlet result = stringify {it = 42}")
         }
     }
 

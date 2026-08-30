@@ -9,4 +9,4 @@ let sum_steps = { limit } ->
   if limit <= 1 then 0
   else collatz_steps { n = limit } + sum_steps { limit = limit - 1 }
 
-let main = {} -> perform Console in println { msg = sum_steps { limit = 500 }.to_dbg_str {} }
+let main = {} -> perform Console in println { msg = sum_steps { limit = 500 }.to_dbg {} }

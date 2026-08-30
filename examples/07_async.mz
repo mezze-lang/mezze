@@ -4,13 +4,13 @@ use std::collections::seq
 
 # Simulate work by summing 1..n
 let compute = { label, n } -> do
-  println { msg = "  [$(label)] computing sum 1..$(n.to_dbg_str {})" }
+  println { msg = "  [$(label)] computing sum 1..$(n.to_dbg {})" }
   let result = seq::fold {
     xs = seq::range { start = 1, end = n + 1 },
     init = 0,
     f = { acc, x } -> acc + x,
   }
-  println { msg = "  [$(label)] done -> $(result.to_dbg_str {})" }
+  println { msg = "  [$(label)] done -> $(result.to_dbg {})" }
   result
 
 let main = {} -> perform Console in perform LoomAsync in do
@@ -20,15 +20,15 @@ let main = {} -> perform Console in perform LoomAsync in do
   let r1 = p1.await {}
   let r2 = p2.await {}
   let sum = r1 + r2
-  println { msg = "A + B = $(sum.to_dbg_str {})" }
+  println { msg = "A + B = $(sum.to_dbg {})" }
   println { msg = "--- join (structured) ---" }
   let pair = Async.join { l = {} -> compute { label = "L", n = 50 }, r = {} ->
     compute { label = "R", n = 75 } }
   let js = pair.l + pair.r
-  println { msg = "L + R = $(js.to_dbg_str {})" }
+  println { msg = "L + R = $(js.to_dbg {})" }
   println { msg = "--- all (wait for multiple) ---" }
   let p3 = Async.spawn { f = {} -> compute { label = "X", n = 10 } }
   let p4 = Async.spawn { f = {} -> compute { label = "Y", n = 20 } }
   let p5 = Async.spawn { f = {} -> compute { label = "Z", n = 30 } }
   let all = Async.all { ps = [p3, p4, p5] }
-  println { msg = "all results = $(all.to_dbg_str {})" }
+  println { msg = "all results = $(all.to_dbg {})" }

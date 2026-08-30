@@ -2,4 +2,4 @@ use std::effects::log::{ Console, println }
 
 let fib = { n } -> if n < 2 then n else fib { n = n - 1 } + fib { n = n - 2 }
 
-let main = {} -> perform Console in println { msg = fib { n = 32 }.to_dbg_str {} }
+let main = {} -> perform Console in println { msg = fib { n = 32 }.to_dbg {} }

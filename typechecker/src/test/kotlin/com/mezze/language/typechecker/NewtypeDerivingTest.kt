@@ -56,7 +56,7 @@ class NewtypeDerivingTest {
     fun `test newtype Inspect always works`() {
         val source = """
             newtype Email = Str
-            let show = {e: Email} -> e.to_dbg_str {}
+            let show = {e: Email} -> e.to_dbg {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

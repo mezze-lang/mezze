@@ -101,7 +101,7 @@ object BuiltInAbilities {
 
         if ("Inspect" !in result) {
             result["Inspect"] = mapOf(
-                "to_dbg_str" to { _: MezzeType.VarType ->
+                "to_dbg" to { _: MezzeType.VarType ->
                     MezzeType.FunctionType(
                         paramType = MezzeType.RecordType(fields = emptyMap(), rowVar = null),
                         returnType = MezzeType.StringType

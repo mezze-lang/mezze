@@ -5,7 +5,7 @@ error[T0201]: String interpolation requires String type, but expression has type
                                                               ^^^^
  2 | 
    |
-  = hint: interpolated expressions must produce a `Str` (use `.to_str {}` or `.to_dbg_str {}`)
+  = hint: interpolated expressions must produce a `Str` (use `.to_str {}` or `.to_dbg {}`)
 
 error: aborting due to 1 previous error
 

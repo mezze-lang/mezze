@@ -126,7 +126,7 @@ class GenericImplParseTest {
     fun `impl operation with multiple method-level constraints parses`() {
         val source = """
             impl Inspect 'a for ['a] where {
-                to_dbg_str: {} with Eq 'a, Inspect 'a -> Str = {} -> "[]"
+                to_dbg: {} with Eq 'a, Inspect 'a -> Str = {} -> "[]"
             }
         """.trimIndent()
 

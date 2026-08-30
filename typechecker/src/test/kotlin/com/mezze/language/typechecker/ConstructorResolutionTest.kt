@@ -52,13 +52,13 @@ class ConstructorResolutionTest {
         // With method-call syntax, ability methods are called on values directly.
         // The typechecker resolves the method as an ability method and infers the result type.
         val result = typeCheckAndGetResult("""
-            let test = 42.to_dbg_str {}
+            let test = 42.to_dbg {}
         """.trimIndent())
 
         val testType = result.getVariableType("test")
         assertNotNull(testType, "test should have an inferred type")
         assertTrue(testType is MezzeType.StringType,
-            "to_dbg_str should return Str, got: $testType")
+            "to_dbg should return Str, got: $testType")
     }
 
     @Test
@@ -214,7 +214,7 @@ class ConstructorResolutionTest {
             type Option 'a = | None, Some { val: 'a } |
 
             let x = Some { val = 42 }
-            let test = 42.to_dbg_str {}
+            let test = 42.to_dbg {}
         """.trimIndent())
 
         // Variant constructor type checks correctly
@@ -225,7 +225,7 @@ class ConstructorResolutionTest {
         val testType = result.getVariableType("test")
         assertNotNull(testType, "Should find test binding")
         assertTrue(testType is MezzeType.StringType,
-            "to_dbg_str should return Str, got: $testType")
+            "to_dbg should return Str, got: $testType")
     }
 
     @Test
@@ -273,7 +273,7 @@ class ConstructorResolutionTest {
     @Test
     fun `test multiple ability method calls in same program all typecheck correctly`() {
         val result = typeCheckAndGetResult("""
-            let test1 = 42.to_dbg_str {}
+            let test1 = 42.to_dbg {}
             let test2 = 1.eq {r = 2}
             let test3 = 1.lt {r = 2}
             let test4 = 1.add {r = 2}
@@ -282,7 +282,7 @@ class ConstructorResolutionTest {
         val test1Type = result.getVariableType("test1")
         assertNotNull(test1Type, "Should find test1 type")
         assertTrue(test1Type is MezzeType.StringType,
-            "to_dbg_str should return Str, got: $test1Type")
+            "to_dbg should return Str, got: $test1Type")
 
         val test2Type = result.getVariableType("test2")
         assertNotNull(test2Type, "Should find test2 type")
@@ -324,12 +324,12 @@ class ConstructorResolutionTest {
             type MyType = | SomeVariant { data: Int } |
 
             # This is an ability method call on a value
-            let ability_call = 42.to_dbg_str {}
+            let ability_call = 42.to_dbg {}
         """.trimIndent())
 
         val abilityCallType = result.getVariableType("ability_call")
         assertNotNull(abilityCallType, "Should find ability_call type")
         assertTrue(abilityCallType is MezzeType.StringType,
-            "to_dbg_str should return Str, got: $abilityCallType")
+            "to_dbg should return Str, got: $abilityCallType")
     }
 }

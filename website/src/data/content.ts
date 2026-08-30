@@ -225,7 +225,7 @@ let config = {} -> do
 
 let main = {} -> perform Console in do
   let ok = perform ExceptionToResult in config {}
-  println { msg = ok.to_dbg_str {} }
+  println { msg = ok.to_dbg {} }
 
 `,
       output: "Ok { val = \"mezze-lang.org:443\" }",

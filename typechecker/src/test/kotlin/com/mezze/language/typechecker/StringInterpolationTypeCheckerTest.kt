@@ -432,7 +432,7 @@ class StringInterpolationTypeCheckerTest {
     fun `test constrained polymorphic with interpolation and Inspect`() {
         assertTypeChecks("""
             let debug: {label: Str, val: 'a} with Inspect 'a -> Str = {label, val} ->
-                "$(label): $(val.to_dbg_str {})"
+                "$(label): $(val.to_dbg {})"
 
             debug {label = "number", val = 42}
         """.trimIndent())

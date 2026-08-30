@@ -262,11 +262,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     /**
      * #346 Group B — inline auto-derived Inspect impl for a receiver.
      * Rewrites the desugared shape
-     * {@code CallIndirect(ReadField(x, "to_dbg_str"|"to_str"),
+     * {@code CallIndirect(ReadField(x, "to_dbg"|"to_str"),
      * MakeRecord{it=x})} into a single stringify op. BDSL emits this
      * via the peephole in {@code BytecodeCompiler.tryFoldInspectMethod};
      * the operand is the receiver, the boolean constant is dbgStyle
-     * ("to_dbg_str" quotes strings + wraps chars; "to_str" is raw).
+     * ("to_dbg" quotes strings + wraps chars; "to_str" is raw).
      *
      * Matches DirectInspectNode's shape so behaviour is identical to
      * the AST auto-derive.
@@ -294,7 +294,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         /**
          * `@TruffleBoundary` on doChar/doString: string concat via `+` lowers
          * to StringConcatHelper.stringCoder, blocklisted under SVM runtime
-         * compilation. `to_dbg_str` on scalars is cold — boundary is free. #402.
+         * compilation. `to_dbg` on scalars is cold — boundary is free. #402.
          */
         @Specialization(guards = "isChar(v)")
         @TruffleBoundary
@@ -658,11 +658,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // that happens NOT to match a specific method (like the failing
         // `(x + y).add {...}` where AST also throws) hit this path.
         //
-        // Group B (task #346): scalar-receiver `.to_dbg_str{}` /
+        // Group B (task #346): scalar-receiver `.to_dbg{}` /
         // `.to_str{}` on Long/Double/Bool/Str/Char also lands here but
         // AST's auto-derived Inspect impl produces a string. Fixing
         // this requires either (1) a peephole in BytecodeCompiler that
-        // rewrites CallIndirect(ReadField(scalar, "to_dbg_str"), ...)
+        // rewrites CallIndirect(ReadField(scalar, "to_dbg"), ...)
         // to a direct inline stringify, or (2) a MezzeFunction wrapper
         // returned from here. Both are nontrivial — parked. Users hit
         // this path only when the hasReadField gate is dropped, and

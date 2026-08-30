@@ -81,7 +81,7 @@ class AbilityEffectErrorsTest {
     @Test
     fun `test typo in built-in ability should suggest correct name`() {
         val source = """
-            let x = Insepct.to_dbg_str {}
+            let x = Insepct.to_dbg {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -106,8 +106,8 @@ class AbilityEffectErrorsTest {
         }
         assertTrue(exception.message?.contains("nonexistent") == true,
             "Error should mention 'nonexistent': ${exception.message}")
-        assertTrue(exception.message?.contains("to_dbg_str") == true,
-            "Error should suggest 'to_dbg_str': ${exception.message}")
+        assertTrue(exception.message?.contains("to_dbg") == true,
+            "Error should suggest 'to_dbg': ${exception.message}")
     }
 
     // ========================================================================

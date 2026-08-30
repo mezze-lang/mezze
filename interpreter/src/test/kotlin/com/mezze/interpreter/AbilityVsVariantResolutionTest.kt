@@ -33,7 +33,7 @@ class AbilityVsVariantResolutionTest {
         val source = """
             let test_val = 42
             let main = {} -> do
-                let str = test_val.to_dbg_str {}
+                let str = test_val.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -52,7 +52,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> do
-                let str = tree.to_dbg_str {}
+                let str = tree.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -67,7 +67,7 @@ class AbilityVsVariantResolutionTest {
             let nested = Just { val = Just { val = 42 } }
 
             let main = {} -> do
-                let str = nested.to_dbg_str {}
+                let str = nested.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -80,7 +80,7 @@ class AbilityVsVariantResolutionTest {
             let person = { name = "Alice", age = 30 }
 
             let main = {} -> do
-                let str = person.to_dbg_str {}
+                let str = person.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -102,10 +102,10 @@ class AbilityVsVariantResolutionTest {
 
             let main = {} -> do
                 # Variant construction should work
-                let str1 = success.to_dbg_str {}
-                let str2 = failure.to_dbg_str {}
+                let str1 = success.to_dbg {}
+                let str2 = failure.to_dbg {}
                 # Ability member access should work
-                let str3 = 100.to_dbg_str {}
+                let str3 = 100.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -121,8 +121,8 @@ class AbilityVsVariantResolutionTest {
             let something = Some { val = 42 }
 
             let main = {} -> do
-                let str1 = nothing.to_dbg_str {}
-                let str2 = something.to_dbg_str {}
+                let str1 = nothing.to_dbg {}
+                let str2 = something.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -138,7 +138,7 @@ class AbilityVsVariantResolutionTest {
         val source = """
             # NO perform, NO handler - ability should still work
             let main = {} -> do
-                let str = 42.to_dbg_str {}
+                let str = 42.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -174,7 +174,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> perform Console in do
-                println {msg = "Tree: $(tree.to_dbg_str {})"}
+                println {msg = "Tree: $(tree.to_dbg {})"}
                 {}
         """.trimIndent()
 
@@ -197,7 +197,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> do
-                let str = small_tree.to_dbg_str {}
+                let str = small_tree.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -207,7 +207,7 @@ class AbilityVsVariantResolutionTest {
     @Test
     fun `test ability in function argument`() {
         val source = """
-            let show = {val} -> val.to_dbg_str {}
+            let show = {val} -> val.to_dbg {}
 
             let main = {} -> do
                 let result = show {val = [1, 2, 3]}
@@ -223,7 +223,7 @@ class AbilityVsVariantResolutionTest {
             let numbers = [1, 2, 3, 4, 5]
             let to_strs = {xs} -> match xs is
                 [] -> []
-                [x, ...rest] -> [...to_strs {xs = rest}, x.to_dbg_str {}]
+                [x, ...rest] -> [...to_strs {xs = rest}, x.to_dbg {}]
 
             let main = {} -> do
                 let strings = to_strs {xs = numbers}
@@ -253,7 +253,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> do
-                let str = tree.to_dbg_str {}
+                let str = tree.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -268,7 +268,7 @@ class AbilityVsVariantResolutionTest {
             let color = Red
 
             let main = {} -> do
-                let str = color.to_dbg_str {}
+                let str = color.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -292,7 +292,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> do
-                let str = list.to_dbg_str {}
+                let str = list.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -309,7 +309,7 @@ class AbilityVsVariantResolutionTest {
             let arr = [1, 2, 3, 4, 5]
 
             let main = {} -> do
-                let str = arr.to_dbg_str {}
+                let str = arr.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -322,7 +322,7 @@ class AbilityVsVariantResolutionTest {
             let str = "Hello, World!"
 
             let main = {} -> do
-                let result = str.to_dbg_str {}
+                let result = str.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -333,8 +333,8 @@ class AbilityVsVariantResolutionTest {
     fun `test ability on booleans`() {
         val source = """
             let main = {} -> do
-                let str1 = True.to_dbg_str {}
-                let str2 = False.to_dbg_str {}
+                let str1 = True.to_dbg {}
+                let str2 = False.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -347,7 +347,7 @@ class AbilityVsVariantResolutionTest {
             let unit = {}
 
             let main = {} -> do
-                let str = unit.to_dbg_str {}
+                let str = unit.to_dbg {}
                 {}
         """.trimIndent()
 
@@ -412,7 +412,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> do
-                let str = deep.to_dbg_str {}
+                let str = deep.to_dbg {}
                 {}
         """.trimIndent()
 

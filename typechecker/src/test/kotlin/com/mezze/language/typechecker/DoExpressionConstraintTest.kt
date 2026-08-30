@@ -344,7 +344,7 @@ class DoExpressionConstraintTest {
         val source = """
             let test = {x} -> do
               let val = True
-              val.to_dbg_str {}
+              val.to_dbg {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

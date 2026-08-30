@@ -249,7 +249,7 @@ class AbilityEffectNameCollisionTest {
     @Test
     fun `test Inspect method call still works`() {
         val code = """
-            let my_str = 42.to_dbg_str {}
+            let my_str = 42.to_dbg {}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

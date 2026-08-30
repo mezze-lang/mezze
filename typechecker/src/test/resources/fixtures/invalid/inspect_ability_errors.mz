@@ -1,12 +1,12 @@
 # Test that Inspect ability is properly validated
 # These tests should fail type checking
 # Cannot inspect a function type
-let inspectFunction = { f } -> f.to_dbg_str {}  # ERROR: Functions don't have Inspect
+let inspectFunction = { f } -> f.to_dbg {}  # ERROR: Functions don't have Inspect
 
 # Cannot inspect a record without type info
-let inspectUnknownRecord = { r } -> r.to_dbg_str {}  # ERROR: Records don't have Inspect (unless fields do)
+let inspectUnknownRecord = { r } -> r.to_dbg {}  # ERROR: Records don't have Inspect (unless fields do)
 
 # Cannot inspect a variant without type info
-let inspectUnknownVariant = { v } -> v.to_dbg_str {}  # ERROR: Variants don't have Inspect directly
+let inspectUnknownVariant = { v } -> v.to_dbg {}  # ERROR: Variants don't have Inspect directly
 
 let main = {} -> {}

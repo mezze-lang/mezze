@@ -203,7 +203,7 @@ public class UserDefinedAbilityTest {
     @Test
     void testInspectOnInt() {
         Object result = MezzeTestHelper.run("""
-            42.to_dbg_str {}
+            42.to_dbg {}
             """);
         assertEquals("42", result);
     }
@@ -211,15 +211,15 @@ public class UserDefinedAbilityTest {
     @Test
     void testInspectOnString() {
         Object result = MezzeTestHelper.run("""
-            "hello".to_dbg_str {}
+            "hello".to_dbg {}
             """);
         assertEquals("\"hello\"", result);
     }
 
     @Test
     void testInspectOnBool() {
-        Object result1 = MezzeTestHelper.run("True.to_dbg_str {}");
-        Object result2 = MezzeTestHelper.run("False.to_dbg_str {}");
+        Object result1 = MezzeTestHelper.run("True.to_dbg {}");
+        Object result2 = MezzeTestHelper.run("False.to_dbg {}");
         assertEquals("True", result1);
         assertEquals("False", result2);
     }
@@ -227,7 +227,7 @@ public class UserDefinedAbilityTest {
     @Test
     void testInspectOnArray() {
         Object result = MezzeTestHelper.run("""
-            [1, 2, 3].to_dbg_str {}
+            [1, 2, 3].to_dbg {}
             """);
         assertEquals("[1, 2, 3]", result);
     }
@@ -235,7 +235,7 @@ public class UserDefinedAbilityTest {
     @Test
     void testInspectOnRecord() {
         Object result = MezzeTestHelper.run("""
-            {x = 1, y = 2}.to_dbg_str {}
+            {x = 1, y = 2}.to_dbg {}
             """);
         // Record field order may vary, so check contains
         String str = (String) result;
@@ -246,8 +246,8 @@ public class UserDefinedAbilityTest {
     @Test
     void testInspectInLambda() {
         Object result = MezzeTestHelper.run("""
-            let to_dbg_str = {val} -> val.to_dbg_str {}
-            to_dbg_str {val = 42}
+            let to_dbg = {val} -> val.to_dbg {}
+            to_dbg {val = 42}
             """);
         assertEquals("42", result);
     }
@@ -256,7 +256,7 @@ public class UserDefinedAbilityTest {
     void testInspectInStringInterpolation() {
         Object result = MezzeTestHelper.run("""
             let val = 42
-            "Value: $(val.to_dbg_str {})"
+            "Value: $(val.to_dbg {})"
             """);
         assertEquals("Value: 42", result);
     }

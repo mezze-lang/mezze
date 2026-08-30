@@ -14,18 +14,18 @@ let main = {} -> perform Console in do
   let a0 = deref { var = alice }
   let b0 = deref { var = bob }
   println { msg = "Before:" }
-  println { msg = "  alice = $(a0.to_dbg_str {})" }
-  println { msg = "  bob   = $(b0.to_dbg_str {})" }
+  println { msg = "  alice = $(a0.to_dbg {})" }
+  println { msg = "  bob   = $(b0.to_dbg {})" }
   perform OptimisticSTM in transfer { from = alice, to = bob, amount = 100 }
   perform OptimisticSTM in transfer { from = alice, to = bob, amount = 200 }
   perform OptimisticSTM in transfer { from = alice, to = bob, amount = 150 }
   let a1 = deref { var = alice }
   let b1 = deref { var = bob }
   println { msg = "After transfers (100 + 200 + 150 = 450):" }
-  println { msg = "  alice = $(a1.to_dbg_str {})" }
-  println { msg = "  bob   = $(b1.to_dbg_str {})" }
+  println { msg = "  alice = $(a1.to_dbg {})" }
+  println { msg = "  bob   = $(b1.to_dbg {})" }
   let total = perform OptimisticSTM in do
     let a = STM.read { var = alice }
     let b = STM.read { var = bob }
     a + b
-  println { msg = "  total = $(total.to_dbg_str {}) (should be 1500)" }
+  println { msg = "  total = $(total.to_dbg {}) (should be 1500)" }

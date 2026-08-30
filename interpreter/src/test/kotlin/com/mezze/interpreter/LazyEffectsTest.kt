@@ -620,7 +620,7 @@ class LazyEffectsTest {
     // ========================================================================
 
     @Test
-    fun `test Inspect to_dbg_str on result of lazy effect`() {
+    fun `test Inspect to_dbg on result of lazy effect`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
             use std::effects::log::{Log, Console, info}
@@ -632,7 +632,7 @@ class LazyEffectsTest {
                 Ok {val = safe_div {a = 4, b = 0}}
 
             let main = {} -> perform Console in
-                info {msg = "Result: $((handle {}).to_dbg_str {})"}
+                info {msg = "Result: $((handle {}).to_dbg {})"}
             main {}
         """.trimIndent()
 
@@ -643,7 +643,7 @@ class LazyEffectsTest {
 
     @Test
     @Disabled("#392 — residual under MEZZE_EAGER=1; passes in isolation, fails after prior test in same class. NOT an Engine-cache leak (empirically refuted: clearing slotTable + userStubCache + stdlibCallTargetCache + importedCallTargetCache in disposeContext does NOT fix). Real root cause likely: (a) a stale value baked as @ConstantOperand in MezzeBytecodeRootNode bytecode (per-Engine, unclearable from disposeContext) OR (b) test-order-dependent poisoning of MezzeVariant.TagRegistry / HandlerChainEntry ThreadLocal / HandlerChainRegistry state. Next diagnostic pass: instrument thread-local + TagRegistry state at test teardown, not Engine caches.")
-    fun `test Inspect to_dbg_str on success path of lazy effect`() {
+    fun `test Inspect to_dbg on success path of lazy effect`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
             use std::effects::log::{Log, Console, info}
@@ -656,7 +656,7 @@ class LazyEffectsTest {
             let handle = {} -> perform ExceptionToResult in Ok {val = res}
 
             let main = {} -> perform Console in
-                info {msg = "Result: $((handle {}).to_dbg_str {})"}
+                info {msg = "Result: $((handle {}).to_dbg {})"}
             main {}
         """.trimIndent()
 
@@ -1014,14 +1014,14 @@ class LazyEffectsTest {
             use std::effects::log::{Console, info}
 
             let get_name = {id} ->
-                if id == 0 then Exception.throw {error = "invalid id"} else "User$(id.to_dbg_str {})"
+                if id == 0 then Exception.throw {error = "invalid id"} else "User$(id.to_dbg {})"
 
             let name = get_name {id = 42}
 
             let handle = {} -> perform ExceptionToResult in Ok {val = "Hello, $(name)!"}
 
             let main = {} -> perform Console in
-                info {msg = (handle {}).to_dbg_str {}}
+                info {msg = (handle {}).to_dbg {}}
             main {}
         """.trimIndent()
 

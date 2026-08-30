@@ -167,7 +167,7 @@ class NewtypeComprehensiveTest {
         fun `newtype DOES have Inspect (universal)`() {
             val source = """
                 newtype Email = Str
-                let dbg = {e: Email} -> e.to_dbg_str {}
+                let dbg = {e: Email} -> e.to_dbg {}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)

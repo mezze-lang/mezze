@@ -2372,7 +2372,7 @@ class LspFeaturesTest {
     fun `dot completion ranks methods matching the expected type first`() {
         // The completion order should be best-fit for the expected type at the
         // cursor (bidirectional): assigning `x.` to a Str-typed binding must
-        // float Str-returning methods (to_str, to_dbg_str) above the rest via
+        // float Str-returning methods (to_str, to_dbg) above the rest via
         // sortText "0_". Uses the realistic edit sequence so completion actually
         // resolves x : Int mid-edit.
         val valid = "let f = {x: Int} -> do\n  let s: Str = x\n  s\n"
@@ -2397,7 +2397,7 @@ class LspFeaturesTest {
         // covered by the sibling test. So only assert order when ranking
         // actually happened (some item is in the top "0_" group).
         if (comps.isEmpty()) return
-        val strReturners = setOf("to_str", "to_dbg_str")
+        val strReturners = setOf("to_str", "to_dbg")
         val topGroup = comps.filter { it.sortText?.startsWith("0_") == true }.map { it.label }
         if (topGroup.isEmpty()) return  // nothing ranked (served from cache) — not this test's concern
         assertTrue(topGroup.any { it in strReturners },
@@ -2484,7 +2484,7 @@ class LspFeaturesTest {
         // before the trailing `.` is the `}` closing the arg, and the innermost
         // node there is the arg record. The receiver we actually want is the
         // ENCLOSING call `x.is_odd {}`, whose result is Bool. Completion must
-        // therefore offer Bool methods (to_str / to_dbg_str), never `it`.
+        // therefore offer Bool methods (to_str / to_dbg), never `it`.
         val valid = "use std::effects::log::{ println, Console }\n" +
             "let main = {} -> perform Console in do\n" +
             "  let x = help { a = 5, b = 6 }\n" +
@@ -2516,7 +2516,7 @@ class LspFeaturesTest {
         }
         assertTrue(foreign.isEmpty(),
             "call-chain receiver Bool must not leak foreign methods, got: ${foreign.take(8)}")
-        assertTrue(methods.any { it == "Bool.to_str" || it == "Bool.to_dbg_str" },
+        assertTrue(methods.any { it == "Bool.to_str" || it == "Bool.to_dbg" },
             "expected Bool renderer methods on the call result, got: ${methods.take(12)}")
     }
 
@@ -2559,7 +2559,7 @@ class LspFeaturesTest {
 
     @Test
     fun `dot completion inside string interpolation ranks Str-returning methods first`() {
-        // A `.` inside `"…$( x. )…"` demands a Str, so `to_str` / `to_dbg_str`
+        // A `.` inside `"…$( x. )…"` demands a Str, so `to_str` / `to_dbg`
         // (and any Str-returner) should sort to the very top even though the
         // receiver is an Int. Realistic edit: open valid, then type the dot.
         val valid = "let f = {x: Int} -> \"hi \$(x)\"\n"
@@ -2579,14 +2579,14 @@ class LspFeaturesTest {
         }).get(5, TimeUnit.SECONDS)
         val comps = if (result.isLeft) result.left else result.right.items
         if (comps.isEmpty()) return  // resolution failure is covered elsewhere
-        // BOTH to_str and to_dbg_str must be in the top-ranked group (sortText
+        // BOTH to_str and to_dbg must be in the top-ranked group (sortText
         // "0_"): they return Str, which the interpolation hole demands.
         val topGroup = comps.filter { it.kind == CompletionItemKind.Method && it.sortText?.startsWith("0_") == true }
             .map { it.label }.toSet()
         assertTrue("to_str" in topGroup,
             "to_str must rank in the top (0_) group inside interpolation, got 0_-group: $topGroup")
-        assertTrue("to_dbg_str" in topGroup,
-            "to_dbg_str must rank in the top (0_) group inside interpolation, got 0_-group: $topGroup")
+        assertTrue("to_dbg" in topGroup,
+            "to_dbg must rank in the top (0_) group inside interpolation, got 0_-group: $topGroup")
     }
 
     @Test
@@ -2691,9 +2691,9 @@ class LspFeaturesTest {
         val toStr = actions.mapNotNull { if (it.isRight) it.right else null }
             .firstOrNull { it.title.contains("to_str") }
             ?: fail("expected an 'Append `.to_str {}`' action, got: $titles; diag.data=${t0201.data}")
-        // Both to_str and to_dbg_str should be offered.
-        assertTrue(titles.any { it.contains("to_dbg_str") },
-            "expected a to_dbg_str option too, got: $titles")
+        // Both to_str and to_dbg should be offered.
+        assertTrue(titles.any { it.contains("to_dbg") },
+            "expected a to_dbg option too, got: $titles")
         val edit = toStr.edit?.changes?.values?.flatten()?.firstOrNull() ?: fail("no edit on the to_str action")
         val after = applyEdit(src, edit)
         assertTrue(after.contains("x.to_str {}"),

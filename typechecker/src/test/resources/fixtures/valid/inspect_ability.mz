@@ -2,45 +2,45 @@
 # Inspect is available for all primitive types.
 # After #218, inferred ability constraints from the body propagate to the
 # function's arrow type so the monomorphizer can resolve them at call sites.
-let inspectInt = { x } -> x.to_dbg_str {}  # expected: inspectInt : { x: 'a } with Inspect 'a -> Str
+let inspectInt = { x } -> x.to_dbg {}  # expected: inspectInt : { x: 'a } with Inspect 'a -> Str
 
-let inspectBool = { b } -> b.to_dbg_str {}  # expected: inspectBool : { b: 'a } with Inspect 'a -> Str
+let inspectBool = { b } -> b.to_dbg {}  # expected: inspectBool : { b: 'a } with Inspect 'a -> Str
 
-let inspectStr = { s } -> s.to_dbg_str {}  # expected: inspectStr : { s: 'a } with Inspect 'a -> Str
+let inspectStr = { s } -> s.to_dbg {}  # expected: inspectStr : { s: 'a } with Inspect 'a -> Str
 
-let inspectFloat = { f } -> f.to_dbg_str {}  # expected: inspectFloat : { f: 'a } with Inspect 'a -> Str
+let inspectFloat = { f } -> f.to_dbg {}  # expected: inspectFloat : { f: 'a } with Inspect 'a -> Str
 
-let inspectNat = { n } -> n.to_dbg_str {}  # expected: inspectNat : { n: 'a } with Inspect 'a -> Str
+let inspectNat = { n } -> n.to_dbg {}  # expected: inspectNat : { n: 'a } with Inspect 'a -> Str
 
-let inspectFrac = { fr } -> fr.to_dbg_str {}  # expected: inspectFrac : { fr: 'a } with Inspect 'a -> Str
+let inspectFrac = { fr } -> fr.to_dbg {}  # expected: inspectFrac : { fr: 'a } with Inspect 'a -> Str
 
-let polyInspect = { x } -> x.to_dbg_str {}  # expected: polyInspect : { x: 'a } with Inspect 'a -> Str
+let polyInspect = { x } -> x.to_dbg {}  # expected: polyInspect : { x: 'a } with Inspect 'a -> Str
 
 # Using inspect in a match expression
 let inspectMatch = { opt } -> match opt is
-  Some { val } -> val.to_dbg_str {}
+  Some { val } -> val.to_dbg {}
   None -> "none"
 
 
-let inspectCond = { flag, x, y } -> if flag then x.to_dbg_str {} else y.to_dbg_str {}  # expected: inspectCond : { flag: Bool, x: 'a, y: 'b } with Inspect 'a, Inspect 'b -> Str
+let inspectCond = { flag, x, y } -> if flag then x.to_dbg {} else y.to_dbg {}  # expected: inspectCond : { flag: Bool, x: 'a, y: 'b } with Inspect 'a, Inspect 'b -> Str
 
 # Combined with NumAdd: both constraints surface. Heterogeneous `+` means x and y
 # may differ; the `having 'out` result var 'c is what must be Inspect-able.
-let inspectAndAdd = { x, y } -> (x + y).to_dbg_str {}  # expected: inspectAndAdd : { x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c, Inspect 'c -> Str
+let inspectAndAdd = { x, y } -> (x + y).to_dbg {}  # expected: inspectAndAdd : { x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c, Inspect 'c -> Str
 
-let inspectField = { r } -> r.value.to_dbg_str {}  # expected: inspectField : { r: { value: 'a } } with Inspect 'a -> Str
+let inspectField = { r } -> r.value.to_dbg {}  # expected: inspectField : { r: { value: 'a } } with Inspect 'a -> Str
 
 # Inspect with pattern matching on variants with data - Inspect is implicit
 let inspectVariantData = { v } -> match v is
-  Value { x } -> x.to_dbg_str {}
+  Value { x } -> x.to_dbg {}
   Empty -> "empty"
 
 
-let multiInspect = { a, b, c } -> "$(a.to_dbg_str {})$(b.to_dbg_str {})$(c.to_dbg_str {})"  # expected: multiInspect : { a: 'a, b: 'b, c: 'c } with Inspect 'a, Inspect 'b, Inspect 'c -> Str
+let multiInspect = { a, b, c } -> "$(a.to_dbg {})$(b.to_dbg {})$(c.to_dbg {})"  # expected: multiInspect : { a: 'a, b: 'b, c: 'c } with Inspect 'a, Inspect 'b, Inspect 'c -> Str
 
 # Inspect with list elements - Inspect is implicit
 let inspectListHead = { lst } -> match lst is
-  Cons { head, tail } -> head.to_dbg_str {}
+  Cons { head, tail } -> head.to_dbg {}
   Nil -> "empty"
 
 

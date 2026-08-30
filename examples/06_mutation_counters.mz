@@ -43,9 +43,9 @@ let fib_mut = { n } -> perform LocalMut in do
 let main = {} -> perform Console in do
   let words = ["hello", "world", "hello", "mezze", "world", "hello"]
   let freqs = freq_count { words = words }
-  println { msg = "word frequencies: $(freqs.to_dbg_str {})" }
-  println { msg = "fib(0) = $(fib_mut { n = 0 }.to_dbg_str {})" }
-  println { msg = "fib(1) = $(fib_mut { n = 1 }.to_dbg_str {})" }
-  println { msg = "fib(5) = $(fib_mut { n = 5 }.to_dbg_str {})" }
-  println { msg = "fib(10) = $(fib_mut { n = 10 }.to_dbg_str {})" }
-  println { msg = "fib(20) = $(fib_mut { n = 20 }.to_dbg_str {})" }
+  println { msg = "word frequencies: $(freqs.to_dbg {})" }
+  println { msg = "fib(0) = $(fib_mut { n = 0 }.to_dbg {})" }
+  println { msg = "fib(1) = $(fib_mut { n = 1 }.to_dbg {})" }
+  println { msg = "fib(5) = $(fib_mut { n = 5 }.to_dbg {})" }
+  println { msg = "fib(10) = $(fib_mut { n = 10 }.to_dbg {})" }
+  println { msg = "fib(20) = $(fib_mut { n = 20 }.to_dbg {})" }

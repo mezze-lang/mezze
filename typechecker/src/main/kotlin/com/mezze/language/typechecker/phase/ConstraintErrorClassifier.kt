@@ -47,7 +47,7 @@ internal fun classifyConstraintError(
             )
         is ErrorContext.StringInterpolation ->
             ErrorCode.T0201_TYPE_MISMATCH to listOf(
-                "interpolated expressions must produce a `Str` (use `.to_str {}` or `.to_dbg_str {}`)"
+                "interpolated expressions must produce a `Str` (use `.to_str {}` or `.to_dbg {}`)"
             )
         is ErrorContext.Simple,
         null -> classifyByConstraintAndMessage(constraint, error.message)
@@ -69,12 +69,12 @@ internal fun classifyConstraintError(
         wrapConstructorHint(constraint)?.let { add(it) }
 
         // String interpolation needs a `Str` — offer to append `.to_str {}` /
-        // `.to_dbg_str {}` to the interpolated expression. The diagnostic's own
+        // `.to_dbg {}` to the interpolated expression. The diagnostic's own
         // hint text already says this; this makes it a one-click fix.
         if (ctx is ErrorContext.StringInterpolation) {
             val loc = error.constraint.loc
             if (loc != null) {
-                add(FixHint.WrapInMethodCall(loc, listOf("to_str", "to_dbg_str")))
+                add(FixHint.WrapInMethodCall(loc, listOf("to_str", "to_dbg")))
             }
         }
     }

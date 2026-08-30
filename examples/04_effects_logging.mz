@@ -2,9 +2,9 @@ use std::effects::log::{ Log, Console, QuietConsole, println, info, warn, debug 
 
 # This function uses the Log effect
 let process_order = { id, amount } -> do
-  info { msg = "Processing order #$(id.to_dbg_str {})" }
-  if amount > 1000 then warn { msg = "Large order: $(amount.to_dbg_str {})" } else debug { msg = "Normal order: $(amount.to_dbg_str {})" }
-  info { msg = "Order #$(id.to_dbg_str {}) complete" }
+  info { msg = "Processing order #$(id.to_dbg {})" }
+  if amount > 1000 then warn { msg = "Large order: $(amount.to_dbg {})" } else debug { msg = "Normal order: $(amount.to_dbg {})" }
+  info { msg = "Order #$(id.to_dbg {}) complete" }
   amount
 
 let main = {} -> perform Console in do

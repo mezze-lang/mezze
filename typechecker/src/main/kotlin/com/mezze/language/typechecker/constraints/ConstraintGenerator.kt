@@ -1072,7 +1072,7 @@ class ConstraintGenerator(
         // already fully DISCHARGED — one whose resolved args are all concrete AND
         // satisfied by an impl. Such a constraint imposes nothing on a caller (an
         // arg-free `main = {} -> show { it = { price = 1 } }` must infer `{} -> Str`,
-        // and `{} -> (42).to_dbg_str {}` must not keep `Inspect Int`). This is
+        // and `{} -> (42).to_dbg {}` must not keep `Inspect Int`). This is
         // deliberately narrow: it fires ONLY when every arg is ground AND an impl
         // matches — a still-open var, an unsatisfiable concrete arg, or a missing
         // discharge oracle all KEEP the constraint, so genuine polymorphism

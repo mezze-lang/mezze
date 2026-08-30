@@ -373,7 +373,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // hasReadField gate dropped:
         //   - Group A/C (nested pattern + guard-after-iflet order): fixed
         //     by cfd364caf, 7ea2bdc82, ae7a0698a.
-        //   - Group B (scalar .to_dbg_str{} / .to_str{}): fixed by
+        //   - Group B (scalar .to_dbg{} / .to_str{}): fixed by
         //     BytecodeCompiler.tryFoldInspectMethod peephole +
         //     InlineScalarInspect @Operation.
         // Known holdout (accepted): user newtype Eq impl bodies pattern-
