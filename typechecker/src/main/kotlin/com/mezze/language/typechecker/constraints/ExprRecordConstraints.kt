@@ -39,6 +39,14 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
     // field name. Used by the post-loop to constrain override values to the
     // spread's field type (a spread update is type-preserving).
     val spreadFieldTypes = mutableMapOf<String, MezzeType>()
+    // #335: pass-through rows for spread sources whose type is still a VarType at
+    // generation time (the common `{ r } -> { ...r, x = ... }` lambda-param case).
+    // The source's fields aren't known yet, so the result record must stay OPEN on
+    // this row var and the source must be constrained to carry the explicit
+    // overrides plus this same tail — so `promote { r = base }.other_field` keeps
+    // every unmentioned field of `base`. Deferred to the post-loop because the
+    // explicit field entries can follow the spread entry.
+    val varSpreadSources = mutableListOf<Pair<MezzeType, RowVar>>()
 
     val fieldContext = context.clearExpectedType()
     // Bidirectional: if we're checking this literal against a known record type,
@@ -121,18 +129,13 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
                         }
                     }
                     spreadResult.type is MezzeType.VarType -> {
-                        val spreadRecordType = MezzeType.RecordType(
-                            fields = emptyMap(),
-                            rowVar = RowVar.fresh()
-                        )
-                        collector.constraints.add(
-                            Constraint.Equality(
-                                left = spreadResult.type,
-                                right = spreadRecordType,
-                                context = "Spread expression must be a record type",
-                                loc = entry.expr.loc
-                            )
-                        )
+                        // #335: the source is an unresolved record (e.g. a lambda
+                        // param). Record a shared pass-through tail; the post-loop
+                        // constrains the source to { overrides... | tail } and opens
+                        // the result record on the SAME tail, so the source's
+                        // unmentioned fields flow into the result type instead of
+                        // being dropped.
+                        varSpreadSources.add(spreadResult.type as MezzeType.VarType to RowVar.fresh())
                     }
                     else -> {
                         throw TypeCheckError(
@@ -167,6 +170,24 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
                 left = explicitType,
                 right = spreadType,
                 context = "Record update field '$fieldName' must keep its type",
+                loc = expr.loc
+            )
+        )
+    }
+
+    // #335: for every spread source that was still a VarType, tie it to the result.
+    // The source must be an open record carrying the explicit override fields plus
+    // a fresh pass-through tail; the result record is opened on that same tail so
+    // the source's other (unmentioned) fields become part of the result type.
+    // Without this, `{ r } -> { ...r, x = 1 }` inferred `{ x: Int }` and dropped
+    // every field of `r` — a later `.field` access then failed to type-check.
+    val resultRowVar: RowVar? = varSpreadSources.lastOrNull()?.second
+    for ((source, tail) in varSpreadSources) {
+        collector.constraints.add(
+            Constraint.Equality(
+                left = source,
+                right = MezzeType.RecordType(fields = explicitFieldTypes.toMap(), rowVar = tail),
+                context = "Spread expression must be a record type",
                 loc = expr.loc
             )
         )
@@ -232,7 +253,9 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
 
     val recordType = MezzeType.RecordType(
         fields = fields,
-        rowVar = null
+        // #335: open on the pass-through tail when a VarType spread contributed
+        // fields we can't yet name; closed otherwise (the usual case).
+        rowVar = resultRowVar
     )
 
     return collector.toResult(recordType)
