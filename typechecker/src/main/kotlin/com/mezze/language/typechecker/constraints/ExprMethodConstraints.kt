@@ -712,7 +712,14 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         }
     }
 
-    val resultType = MezzeType.VarType(TypeVar.fresh())
+    // #334: default to a fresh var; reassigned below to the method's INSTANTIATED
+    // named return type when that is a TypeApplication, so the call result keeps
+    // its `Result`/`Option`/… identity at generation time. Without this, a chained
+    // `let r = a.await {}; r.get_or_else {…}` binds `r` to a bare var and the
+    // multi-candidate `.get_or_else` (Result + Option) cannot be dispatched during
+    // generation — it falls through to a structural field access and fails with
+    // "Cannot access field 'get_or_else' on variant type …".
+    var resultType: MezzeType = MezzeType.VarType(TypeVar.fresh())
     val constraints = mutableListOf<Constraint>()
     constraints.addAll(receiverResult.constraints)
 
@@ -859,6 +866,23 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
                 loc = expr.loc
             ))
 
+            // #334: when the method's return type is a NAMED TypeApplication
+            // (`Result 'a 'e`, `Option 'a`, …) — possibly wrapped in a SuspendType
+            // when the method performs an effect (`await : … -> Result 'a AsyncError
+            // <Async>`) — make the call result BE that named type (a fresh
+            // instantiation preserving the constructor + Declared identity, the
+            // effect wrapper, and freshening the type args) rather than a bare var
+            // pinned to it only during solving. This keeps the name visible at
+            // generation time so a downstream multi-candidate inherent method on the
+            // result (e.g. `.get_or_else`, which lives on both Result and Option)
+            // dispatches by identity instead of falling through to a structural
+            // field access ("Cannot access field … on variant type …"). Other return
+            // shapes keep the fresh var — there is no name to preserve.
+            val methodReturn = freshMethodType.returnType
+            val namedReturn = (methodReturn as? MezzeType.SuspendType)?.valueType ?: methodReturn
+            if (namedReturn is MezzeType.TypeApplication) {
+                resultType = instantiateTypeWithFreshVars(methodReturn)
+            }
             constraints.add(Constraint.Equality(
                 left = resultType,
                 right = freshMethodType.returnType,
