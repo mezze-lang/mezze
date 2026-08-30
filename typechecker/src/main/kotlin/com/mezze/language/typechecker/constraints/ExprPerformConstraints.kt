@@ -198,6 +198,35 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
             )
 
             performResultType = resolvedSuspensionType
+
+            // A `perform` that discharges an effect into a Result/Option channel
+            // (e.g. ExceptionToResult routes a thrown `'error` into `Err {error}`)
+            // fixes the associated type of EVERY value in the body carrying that
+            // effect — not just the tail. But it must only PIN the error channel,
+            // never coerce a mid-block `let x = op {}` whose value is a plain `Int`.
+            // So emit a best-effort DefaultAssociatedType per such binding: it fires
+            // ONLY post-solve, and ONLY when the binding solved to the SAME
+            // constructor as the handler's suspension shape (freshened so its own
+            // vars are throwaways). A bare `Int` binding, or an already-concrete
+            // error slot, is left untouched. This gives a mid-block
+            // `let bad = safe_div{...}.ok{}` the `Result Int Str` its returned
+            // sibling `good` already gets, closing the "associated type inferred but
+            // not USED at the binding" leak.
+            if (concreteBindings.isNotEmpty()) {
+                for (bindingEffect in exprResult.doBindingEffects) {
+                    if (effectName in bindingEffect.effectNames) {
+                        continuationConstraints.add(
+                            Constraint.DefaultAssociatedType(
+                                bindingType = bindingEffect.bindingType,
+                                shape = instantiateTypeWithFreshVars(resolvedSuspensionType),
+                                context = "value performing '$effectName' takes the associated " +
+                                    "type that handler '${handler.performer.localName}' fixes",
+                                loc = expr.loc
+                            )
+                        )
+                    }
+                }
+            }
         }
     }
 

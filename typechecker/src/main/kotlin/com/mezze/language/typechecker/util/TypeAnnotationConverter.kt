@@ -37,6 +37,19 @@ object TypeAnnotationConverter {
          * that isn't a transparent alias.
          */
         val resolveTypeAlias: (String) -> Pair<ParsedTypeAnnotation, List<String>>? = { null },
+        /**
+         * Associated-type parameter names an effect declares (e.g. `Exception`
+         * declares `['error]`). Used to synthesize a fresh-var EffectInstance
+         * for an effect written WITHOUT a `having` clause: omitting `having` is
+         * allowed by design, but the associated type must still be inferred, not
+         * left unresolved. A row that carries no instance can never receive the
+         * body's solved `'error` (unifyEffectRows only unifies associated types
+         * on effects instanced on BOTH sides), so the declared `<Exception>`
+         * would silently drop it and callers would see `Result Int 'a`. Seeding
+         * a `having 'error = 'fresh` slot lets unification thread the body's
+         * concrete type through. Empty list → no associated types → no seed.
+         */
+        val associatedTypesForEffect: (String) -> List<String> = { emptyList() },
     )
 
     fun convertWith(
@@ -95,20 +108,47 @@ object TypeAnnotationConverter {
                         sharedRowVar.getOrCreate()
                     } else null
                     val hashes = config.resolveEffectHashes(parsedRow.effects.toSet())
-                    if (config.convertEffectAnnotations && parsedRow.effectAnnotations.isNotEmpty()) {
-                        val effectInstances = parsedRow.effectAnnotations.map { ea ->
+                    if (config.convertEffectAnnotations) {
+                        // Explicit `having` clauses first.
+                        val annotated = parsedRow.effectAnnotations.map { ea ->
                             MezzeType.EffectInstance(
                                 name = ea.name,
                                 associatedTypes = ea.associatedTypes.mapValues { (_, ta) -> recurse(ta) }
                             )
-                        }.toSet()
-                        MezzeType.EffectRow(
-                            effects = parsedRow.effects.toSet(),
-                            effectInstances = effectInstances,
-                            rowVar = rowVar,
-                            performed = parsedRow.isPerformed,
-                            effectHashes = hashes
-                        )
+                        }
+                        val explicitlyInstanced = annotated.map { it.name }.toSet()
+                        // Effects written WITHOUT `having` that nonetheless DECLARE
+                        // associated types: seed a fresh var per associated type so
+                        // the body's solved type (e.g. `Str` from a `throw`) can be
+                        // unified in and threaded to callers. Omission is allowed;
+                        // under-determination is not. Without this seed the declared
+                        // row carries no instance, unifyEffectRows finds no common
+                        // instanced effect, and the associated type leaks as `'a`.
+                        val synthesized = parsedRow.effects
+                            .filter { it !in explicitlyInstanced }
+                            .mapNotNull { name ->
+                                val assocNames = config.associatedTypesForEffect(name)
+                                if (assocNames.isEmpty()) null
+                                else MezzeType.EffectInstance(
+                                    name = name,
+                                    associatedTypes = assocNames.associate { assoc ->
+                                        val normalized = assoc.removePrefix("'")
+                                        normalized to MezzeType.VarType(TypeVar.fresh())
+                                    }
+                                )
+                            }
+                        val effectInstances = (annotated + synthesized).toSet()
+                        if (effectInstances.isEmpty()) {
+                            MezzeType.EffectRow.simple(parsedRow.effects.toSet(), rowVar, parsedRow.isPerformed, hashes)
+                        } else {
+                            MezzeType.EffectRow(
+                                effects = parsedRow.effects.toSet(),
+                                effectInstances = effectInstances,
+                                rowVar = rowVar,
+                                performed = parsedRow.isPerformed,
+                                effectHashes = hashes
+                            )
+                        }
                     } else {
                         MezzeType.EffectRow.simple(parsedRow.effects.toSet(), rowVar, parsedRow.isPerformed, hashes)
                     }

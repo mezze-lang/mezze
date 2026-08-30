@@ -73,5 +73,6 @@ object ConstraintSimplifier {
         // #160: resultType is a fresh tyvar per call site, so two distinct calls
         // never canonicalize equal (safe to normalize only the diagnostic fields).
         is Constraint.InherentMethodResolve -> c.copy(loc = null, context = null)
+        is Constraint.DefaultAssociatedType -> c.copy(loc = null, context = null)
     }
 }

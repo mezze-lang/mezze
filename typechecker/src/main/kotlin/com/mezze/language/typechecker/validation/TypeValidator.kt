@@ -160,7 +160,9 @@ class TypeValidator(
                 is Constraint.AssociatedTypeResolution,
                 // #160: fully resolved by the solver (solveInherentMethodResolve);
                 // a mismatch there is already an error, so no re-validation here.
-                is Constraint.InherentMethodResolve -> {}
+                is Constraint.InherentMethodResolve,
+                // Best-effort defaulting handled in the solver; never a validation error.
+                is Constraint.DefaultAssociatedType -> {}
             }
         }
 

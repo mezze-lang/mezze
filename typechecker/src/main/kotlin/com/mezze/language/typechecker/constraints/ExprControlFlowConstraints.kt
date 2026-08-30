@@ -448,6 +448,19 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
 
                 val bindingType = exprResult.type
 
+                // Record this intermediate binding's surfaced effects so an
+                // enclosing `perform` can pin the error channel of a value carrying
+                // the discharged effect (e.g. a `.ok {}`-wrapped result) to the
+                // handler's discharged associated type — post-solve, never a
+                // coercion. See Constraint.DefaultAssociatedType.
+                val bindingEffectNames = exprResult.effects +
+                    exprResult.effectInstances.map { it.name }.toSet()
+                if (bindingEffectNames.isNotEmpty()) {
+                    collector.doBindingEffects.add(
+                        ConstraintResult.DoBindingEffect(bindingType, bindingEffectNames)
+                    )
+                }
+
                 if (annotatedType != null) {
                     collector.constraints.add(
                         Constraint.Equality(
