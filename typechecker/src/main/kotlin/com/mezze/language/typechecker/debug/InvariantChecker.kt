@@ -62,4 +62,29 @@ object InvariantChecker {
             }
         }
     }
+
+    /**
+     * S0.2 probe (warn-only, measurement phase). Reports emitted constraint-result
+     * types that still contain a bare VarType, so we can distinguish LEGITIMATE
+     * polymorphism (`let id = {x} -> x` : `'a -> 'a`, a fine generalized type) from
+     * a genuinely UNRESOLVED receiver that will mis-dispatch downstream (the
+     * "defaults to Bytes" class). This does NOT throw — enabling it as a hard
+     * invariant requires first characterising which VarTypes are expected. Gated
+     * behind `mezze.invariants.probe=true` so it never affects the normal gate.
+     */
+    fun probeUnresolvedVars(
+        constraintResults: Map<String, ConstraintResult>,
+        phase: String,
+    ) {
+        if (System.getProperty("mezze.invariants.probe", "false") != "true") return
+        for ((key, result) in constraintResults) {
+            val vars = collectFreeTypeVars(result.type)
+            if (vars.isNotEmpty()) {
+                System.err.println(
+                    "[invariant-probe $phase] '$key' emitted type has ${vars.size} free var(s): " +
+                    vars.joinToString(", ") { it.name } + "  ::  ${result.type}"
+                )
+            }
+        }
+    }
 }

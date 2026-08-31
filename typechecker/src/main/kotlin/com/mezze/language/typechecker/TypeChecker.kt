@@ -449,6 +449,7 @@ class TypeChecker(
                 }
 
                 InvariantChecker.checkConstraintResultsConsistent(globallyResolvedConstraintResults, "post-resolve")
+                InvariantChecker.probeUnresolvedVars(globallyResolvedConstraintResults, "post-resolve")
 
                 val aggregated = aggregateConstraintResults(constraintResults, substitution)
 
