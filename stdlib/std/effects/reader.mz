@@ -22,7 +22,6 @@
 ##   let id : Str = Reader.ask {}
 ##
 ## See docs/async/scoped-effect-spec.md for the full design.
-
 effect Reader having 'a where {
   ## Read the current binding from the nearest enclosing handler.
   ## Calling this without an enclosing `perform WithReader …` frame
@@ -33,7 +32,7 @@ effect Reader having 'a where {
 ## Trivial impl: binds the value for the body. Multiple binds of
 ## the same carrier shadow — innermost wins inside the inner body.
 impl Reader for WithReader { val: 'a } having 'a = 'a where {
-  ask = {} -> val,
+  ask = {} -> val
 }
 
 ## Shorthand: bind a value for the body. Equivalent to
@@ -43,8 +42,8 @@ impl Reader for WithReader { val: 'a } having 'a = 'a where {
 ##   let result = with_reader { val = "req-7", body = {} ->
 ##     handle_request {}
 ##   }
-pub let with_reader : { val: 'a, body: {} -> 'b <Reader, ...> } -> 'b <...> = { val, body } ->
+pub let with_reader: { val: 'a, body: {} -> 'b <Reader, ...> } -> 'b <...> = { val, body } ->
   perform WithReader { val = val } in body {}
 
 ## Shorthand for `Reader.ask {}` — read the current binding.
-pub let ask : {} -> 'a <Reader> = {} -> Reader.ask {}
+pub let ask: {} -> 'a <Reader> = {} -> Reader.ask {}

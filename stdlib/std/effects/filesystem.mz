@@ -10,7 +10,6 @@
 ##
 ## Path manipulation (path_join, file_name, parent, extension, ...)
 ## lives in std::fs — no effect row, pure string surgery.
-
 use std::collections::bytes
 use std::collections::seq
 use std::int
@@ -22,51 +21,35 @@ use std::fs
 ## NotFound is a legal FileKind, not an FsError — inspection stays
 ## fast for existence checks in tight loops. Errors from stat only
 ## fire on permission / IO failures.
-pub type FileKind = |
-  File,
-  Directory,
-  NotFound,
-  Other,
-|
+pub type FileKind = | File, Directory, NotFound, Other |
 
 ## Metadata for a single entry. Returned by stat and inside DirEntry.
-pub type FileStat = {
-  kind:     FileKind,
-  size:     Int,
-  modified: Int,
-}
+pub type FileStat = { kind: FileKind, size: Int, modified: Int }
 
 ## Directory entry with metadata. Returned by list_with_stat — one
 ## record per entry, name and stat bundled.
-pub type DirEntry = {
-  name: Str,
-  stat: FileStat,
-}
+pub type DirEntry = { name: Str, stat: FileStat }
 
 ## Open modes for the streaming primitive.
 ##   Read     — read-only. Path must exist.
 ##   Write    — truncate-or-create. Existing content replaced.
 ##   Append   — create-if-missing, position at end.
-pub type OpenMode = |
-  Read,
-  Write,
-  Append,
-|
+pub type OpenMode = | Read, Write, Append |
 
 ## Errors returned by FileSystem ops. Constructor names are prefixed
 ## with `Fs` to avoid collisions with FileKind's `NotFound` and with
 ## other stdlib error ADTs.
 pub type FsError = |
-  FsNotFound          { path: Str },
-  FsPermissionDenied  { path: Str, operation: Str },
-  FsIOError           { path: Str, message: Str },
-  FsDiskFull          { path: Str, bytes_needed: Int },
-  FsAlreadyExists     { path: Str },
-  FsNotEmpty          { path: Str },
-  FsNotADirectory     { path: Str },
-  FsReadOnly          { path: Str },
-  FsClosedHandle      { path: Str },
-  FsInvalidUtf8       { path: Str, message: Str },
+  FsNotFound { path: Str },
+  FsPermissionDenied { path: Str, operation: Str },
+  FsIOError { path: Str, message: Str },
+  FsDiskFull { path: Str, bytes_needed: Int },
+  FsAlreadyExists { path: Str },
+  FsNotEmpty { path: Str },
+  FsNotADirectory { path: Str },
+  FsReadOnly { path: Str },
+  FsClosedHandle { path: Str },
+  FsInvalidUtf8 { path: Str, message: Str },
 |
 
 ## Opaque handle for streaming I/O. Backed by a native FileChannel
@@ -78,124 +61,123 @@ pub newtype FileHandle = __NativeFileHandle
 ## ==================================================================
 ## Effect — 13 primitive ops in 4 groups.
 ## ==================================================================
-
 effect FileSystem where {
   ## Whole-file — each maps to an optimized native call
-  read_bytes:  { path: Str } -> Result Bytes FsError <FileSystem>,
+  read_bytes: { path: Str } -> Result Bytes FsError <FileSystem>,
   write_bytes: { path: Str, bytes: Bytes } -> Result {} FsError <FileSystem>,
-
   ## Metadata — stat returns NotFound as a FileKind, not an error
-  stat:           { path: Str } -> Result FileStat FsError <FileSystem>,
-  list:           { path: Str } -> Result [Str] FsError <FileSystem>,
+  stat: { path: Str } -> Result FileStat FsError <FileSystem>,
+  list: { path: Str } -> Result [Str] FsError <FileSystem>,
   list_with_stat: { path: Str } -> Result [DirEntry] FsError <FileSystem>,
-
   ## Structural mutation — each is a kernel syscall
-  delete:           { path: Str } -> Result {} FsError <FileSystem>,
+  delete: { path: Str } -> Result {} FsError <FileSystem>,
   create_directory: { path: Str } -> Result {} FsError <FileSystem>,
-  copy_file:        { src: Str, dest: Str } -> Result {} FsError <FileSystem>,
-  move_file:        { src: Str, dest: Str } -> Result {} FsError <FileSystem>,
-
+  copy_file: { src: Str, dest: Str } -> Result {} FsError <FileSystem>,
+  move_file: { src: Str, dest: Str } -> Result {} FsError <FileSystem>,
   ## Streaming — open/read_chunk/write_chunk/close
-  open:        { path: Str, mode: OpenMode } -> Result FileHandle FsError <FileSystem>,
-  read_chunk:  { handle: FileHandle, max_bytes: Int } -> Result Bytes FsError <FileSystem>,
+  open: { path: Str, mode: OpenMode } -> Result FileHandle FsError <FileSystem>,
+  read_chunk: { handle: FileHandle, max_bytes: Int } -> Result Bytes FsError <FileSystem>,
   write_chunk: { handle: FileHandle, bytes: Bytes } -> Result {} FsError <FileSystem>,
-  close:       { handle: FileHandle } -> Result {} FsError <FileSystem>,
+  close: { handle: FileHandle } -> Result {} FsError <FileSystem>
 }
 
 ## Real filesystem via java.nio. Kernel fast paths for copy/move/stat.
 impl FileSystem for LocalDisk where {
-  read_bytes       = { path } -> __native_fs_read_bytes { path = path },
-  write_bytes      = { path, bytes } -> __native_fs_write_bytes { path = path, bytes = bytes },
-  stat             = { path } -> __native_fs_stat { path = path },
-  list             = { path } -> __native_fs_list { path = path },
-  list_with_stat   = { path } -> __native_fs_list_with_stat { path = path },
-  delete           = { path } -> __native_fs_delete { path = path },
+  read_bytes = { path } -> __native_fs_read_bytes { path = path },
+  write_bytes = { path, bytes } -> __native_fs_write_bytes { path = path, bytes = bytes },
+  stat = { path } -> __native_fs_stat { path = path },
+  list = { path } -> __native_fs_list { path = path },
+  list_with_stat = { path } -> __native_fs_list_with_stat { path = path },
+  delete = { path } -> __native_fs_delete { path = path },
   create_directory = { path } -> __native_fs_create_directory { path = path },
-  copy_file        = { src, dest } -> __native_fs_copy_file { src = src, dest = dest },
-  move_file        = { src, dest } -> __native_fs_move_file { src = src, dest = dest },
-  open             = { path, mode } -> __native_fs_open { path = path, mode = mode },
-  read_chunk       = { handle, max_bytes } -> __native_fs_read_chunk { handle = handle, max_bytes = max_bytes },
-  write_chunk      = { handle, bytes } -> __native_fs_write_chunk { handle = handle, bytes = bytes },
-  close            = { handle } -> __native_fs_close { handle = handle },
+  copy_file = { src, dest } -> __native_fs_copy_file { src = src, dest = dest },
+  move_file = { src, dest } -> __native_fs_move_file { src = src, dest = dest },
+  open = { path, mode } -> __native_fs_open { path = path, mode = mode },
+  read_chunk = { handle, max_bytes } ->
+    __native_fs_read_chunk { handle = handle, max_bytes = max_bytes },
+  write_chunk = { handle, bytes } -> __native_fs_write_chunk { handle = handle, bytes = bytes },
+  close = { handle } -> __native_fs_close { handle = handle },
 }
 
 ## In-memory filesystem for tests. ConcurrentHashMap-backed; test
 ## isolation via memfs_clear (called from test setup).
 impl FileSystem for MemoryFS where {
-  read_bytes       = { path } -> __native_memfs_read_bytes { path = path },
-  write_bytes      = { path, bytes } -> __native_memfs_write_bytes { path = path, bytes = bytes },
-  stat             = { path } -> __native_memfs_stat { path = path },
-  list             = { path } -> __native_memfs_list { path = path },
-  list_with_stat   = { path } -> __native_memfs_list_with_stat { path = path },
-  delete           = { path } -> __native_memfs_delete { path = path },
+  read_bytes = { path } -> __native_memfs_read_bytes { path = path },
+  write_bytes = { path, bytes } -> __native_memfs_write_bytes { path = path, bytes = bytes },
+  stat = { path } -> __native_memfs_stat { path = path },
+  list = { path } -> __native_memfs_list { path = path },
+  list_with_stat = { path } -> __native_memfs_list_with_stat { path = path },
+  delete = { path } -> __native_memfs_delete { path = path },
   create_directory = { path } -> __native_memfs_create_directory { path = path },
-  copy_file        = { src, dest } -> __native_memfs_copy_file { src = src, dest = dest },
-  move_file        = { src, dest } -> __native_memfs_move_file { src = src, dest = dest },
-  open             = { path, mode } -> __native_memfs_open { path = path, mode = mode },
-  read_chunk       = { handle, max_bytes } -> __native_memfs_read_chunk { handle = handle, max_bytes = max_bytes },
-  write_chunk      = { handle, bytes } -> __native_memfs_write_chunk { handle = handle, bytes = bytes },
-  close            = { handle } -> __native_memfs_close { handle = handle },
+  copy_file = { src, dest } -> __native_memfs_copy_file { src = src, dest = dest },
+  move_file = { src, dest } -> __native_memfs_move_file { src = src, dest = dest },
+  open = { path, mode } -> __native_memfs_open { path = path, mode = mode },
+  read_chunk = { handle, max_bytes } ->
+    __native_memfs_read_chunk { handle = handle, max_bytes = max_bytes },
+  write_chunk = { handle, bytes } -> __native_memfs_write_chunk { handle = handle, bytes = bytes },
+  close = { handle } -> __native_memfs_close { handle = handle },
 }
 
 ## ==================================================================
 ## Derived helpers — pure Mezze, built on the 13 primitives.
 ## ==================================================================
-
 ## ---------- Text convenience ----------
-
 ## Read a file's contents as UTF-8. Errors on invalid UTF-8.
-pub let read_text : { path: Str } -> Result Str FsError <FileSystem> = { path } ->
+pub let read_text: { path: Str } -> Result Str FsError <FileSystem> = { path } ->
   match FileSystem.read_bytes { path = path } is
     Ok { val = b } -> match bytes::to_str { b = b } is
       Ok { val = s } -> Ok { val = s }
       Err { error = msg } -> Err { error = FsInvalidUtf8 { path = path, message = msg } }
     Err { error } -> Err { error = error }
 
+
 ## Write a Str as UTF-8. Create-or-replace.
-pub let write_text : { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
+pub let write_text: { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
   FileSystem.write_bytes { path = path, bytes = bytes::from_str { s = text } }
 
 ## Read text with a default on error. Common for config loading.
-pub let read_text_or : { path: Str, def: Str } -> Str <FileSystem> = { path, def } ->
+pub let read_text_or: { path: Str, def: Str } -> Str <FileSystem> = { path, def } ->
   match read_text { path = path } is
     Ok { val } -> val
     Err { error } -> def
 
+
 ## ---------- Metadata queries derived from stat ----------
+pub let exists: { path: Str } -> Result Bool FsError <FileSystem> = { path } -> match FileSystem.stat { path = path } is
+  Ok { val = s } -> match s.kind is
+    NotFound -> Ok { val = False }
+    _ -> Ok { val = True }
+  Err { error } -> Err { error = error }
 
-pub let exists : { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
-    Ok { val = s } -> match s.kind is
-      NotFound -> Ok { val = False }
-      _ -> Ok { val = True }
-    Err { error } -> Err { error = error }
 
-pub let is_file : { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
+pub let is_file: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
   match FileSystem.stat { path = path } is
     Ok { val = s } -> match s.kind is
       File -> Ok { val = True }
       _ -> Ok { val = False }
     Err { error } -> Err { error = error }
 
-pub let is_directory : { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
+
+pub let is_directory: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
   match FileSystem.stat { path = path } is
     Ok { val = s } -> match s.kind is
       Directory -> Ok { val = True }
       _ -> Ok { val = False }
     Err { error } -> Err { error = error }
 
-pub let file_size : { path: Str } -> Result Int FsError <FileSystem> = { path } ->
+
+pub let file_size: { path: Str } -> Result Int FsError <FileSystem> = { path } ->
   match FileSystem.stat { path = path } is
     Ok { val = s } -> Ok { val = s.size }
     Err { error } -> Err { error = error }
 
-## ---------- Append via streaming ----------
 
+## ---------- Append via streaming ----------
 ## Append bytes to a file. Uses open(Append) + write_chunk + close.
 ## On backends where open(Append) sets O_APPEND this is one syscall
 ## for the write plus open/close overhead — same perf as a dedicated
 ## append primitive would give.
-pub let append_bytes : { path: Str, bytes: Bytes } -> Result {} FsError <FileSystem> = { path, bytes } ->
+pub let append_bytes: { path: Str, bytes: Bytes } -> Result {} FsError <FileSystem> = { path, bytes } ->
   match FileSystem.open { path = path, mode = Append } is
     Ok { val = h } -> do
       let write_result = FileSystem.write_chunk { handle = h, bytes = bytes }
@@ -203,14 +185,14 @@ pub let append_bytes : { path: Str, bytes: Bytes } -> Result {} FsError <FileSys
       write_result
     Err { error } -> Err { error = error }
 
+
 ## Append UTF-8 text.
-pub let append_text : { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
+pub let append_text: { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
   append_bytes { path = path, bytes = bytes::from_str { s = text } }
 
 ## ---------- Directory + write conveniences ----------
-
 ## Create directory + all missing ancestors.
-pub let create_directories : { path: Str } -> Result {} FsError <FileSystem> = { path } ->
+pub let create_directories: { path: Str } -> Result {} FsError <FileSystem> = { path } ->
   match is_directory { path = path } is
     Ok { val = True } -> Ok { val = {} }
     Ok { val = False } -> do
@@ -219,8 +201,9 @@ pub let create_directories : { path: Str } -> Result {} FsError <FileSystem> = {
       FileSystem.create_directory { path = path }
     Err { error } -> Err { error = error }
 
+
 ## Ensure path is an existing directory. Create if absent.
-pub let ensure_directory : { path: Str } -> Result {} FsError <FileSystem> = { path } ->
+pub let ensure_directory: { path: Str } -> Result {} FsError <FileSystem> = { path } ->
   match FileSystem.stat { path = path } is
     Ok { val = s } -> match s.kind is
       Directory -> Ok { val = {} }
@@ -228,13 +211,14 @@ pub let ensure_directory : { path: Str } -> Result {} FsError <FileSystem> = { p
       _ -> Err { error = FsNotADirectory { path = path } }
     Err { error } -> Err { error = error }
 
+
 ## Write text, creating parent directories if needed.
-pub let write_text_mkdirs : { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } -> do
-  let _ = create_directories { path = fs::parent { path = path } }
-  write_text { path = path, text = text }
+pub let write_text_mkdirs: { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
+  do
+    let _ = create_directories { path = fs::parent { path = path } }
+    write_text { path = path, text = text }
 
 ## ---------- Recursive delete ----------
-
 ## Delete a file or directory tree.
 ##
 ## For directories, deletes children first (recursively), then the
@@ -244,7 +228,7 @@ pub let write_text_mkdirs : { path: Str, text: Str } -> Result {} FsError <FileS
 ## Errors from any recursive step propagate immediately: the fold
 ## short-circuits, and the parent directory is NOT deleted if any
 ## child failed. Matches Rust's `std::fs::remove_dir_all` semantics.
-pub let delete_recursive : { path: Str } -> Result {} FsError <FileSystem> = { path } ->
+pub let delete_recursive: { path: Str } -> Result {} FsError <FileSystem> = { path } ->
   match FileSystem.stat { path = path } is
     Err { error } -> Err { error = error }
     Ok { val = s } -> match s.kind is
@@ -259,27 +243,33 @@ pub let delete_recursive : { path: Str } -> Result {} FsError <FileSystem> = { p
           f = { acc, x } -> match acc is
             Err { error } -> Err { error = error }
             Ok { val } -> delete_recursive {
-              path = fs::path_join { parts = [path, x.name] }
+              path = fs::path_join { parts = [path, x.name] },
             }
+,
         } is
           Err { error } -> Err { error = error }
           Ok { val } -> FileSystem.delete { path = path }
 
-## ---------- Streaming safety ----------
 
+## ---------- Streaming safety ----------
 ## Auto-closing read wrapper. `f` receives the handle; on return or
 ## error, the handle is closed.
-pub let with_read : { path: Str, f: { handle: FileHandle } -> 'a <FileSystem, ...> } -> Result 'a FsError <FileSystem, ...> = { path, f } ->
-  match FileSystem.open { path = path, mode = Read } is
+pub let with_read
+  : { path: Str, f: { handle: FileHandle } -> 'a <FileSystem, ...> }
+  -> Result 'a FsError <FileSystem, ...>
+  = { path, f } -> match FileSystem.open { path = path, mode = Read } is
     Ok { val = h } -> do
       let result = f { handle = h }
       let _ = FileSystem.close { handle = h }
       Ok { val = result }
     Err { error } -> Err { error = error }
 
+
 ## Auto-closing write wrapper.
-pub let with_write : { path: Str, mode: OpenMode, f: { handle: FileHandle } -> 'a <FileSystem, ...> } -> Result 'a FsError <FileSystem, ...> = { path, mode, f } ->
-  match FileSystem.open { path = path, mode = mode } is
+pub let with_write
+  : { path: Str, mode: OpenMode, f: { handle: FileHandle } -> 'a <FileSystem, ...> }
+  -> Result 'a FsError <FileSystem, ...>
+  = { path, mode, f } -> match FileSystem.open { path = path, mode = mode } is
     Ok { val = h } -> do
       let result = f { handle = h }
       let _ = FileSystem.close { handle = h }

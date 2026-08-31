@@ -3,7 +3,7 @@ use std::collections::seq
 ## Durable workflow effect with named steps and checkpointing.
 effect Workflow where {
   ## Execute a named step whose result is persisted.
-  step: { name: Str, f: {} -> 'a <...> } -> 'a <Workflow, ...>,
+  step: { name: Str, f: {} -> 'a <...> } -> 'a <Workflow>,
   ## Sleep for a duration (workflow time, not wall clock).
   sleep: { ms: Int } -> {} <Workflow>,
   ## Get the current workflow run ID.
@@ -25,16 +25,18 @@ impl Workflow for LocalWorkflow where {
 }
 
 ## Run a workflow with the local in-memory handler.
-pub let run_local : { workflow: {} -> 'a <Workflow> } -> 'a = { workflow } -> perform LocalWorkflow in workflow {}
+pub let run_local: { workflow: {} -> 'a <Workflow> } -> 'a = { workflow } -> perform LocalWorkflow in workflow {}
 
 ## Retry a step up to max_attempts times.
-pub let retry : { name: Str, max_attempts: Int, f: {} -> 'a <...> } -> 'a <Workflow, ...> = { name, max_attempts, f } ->
+pub let retry: { name: Str, max_attempts: Int, f: {} -> 'a <...> } -> 'a <Workflow, ...> = { name, max_attempts, f } ->
   Workflow.step { name = name, f = f }
 
 ## Execute a step with a timeout, returning None on timeout.
-pub let with_timeout : { name: Str, timeout_ms: Int, f: {} -> 'a <...> } -> Option 'a <Workflow, ...> = { name, timeout_ms, f } ->
-  Some { val = Workflow.step { name = name, f = f } }
+pub let with_timeout
+  : { name: Str, timeout_ms: Int, f: {} -> 'a <...> }
+  -> Option 'a <Workflow, ...>
+  = { name, timeout_ms, f } -> Some { val = Workflow.step { name = name, f = f } }
 
 ## Execute multiple named steps and collect results.
-pub let steps : { work: [{ name: Str, f: {} -> 'a <...> }] } -> ['a] <Workflow, ...> = { work } ->
+pub let steps: { work: [{ name: Str, f: {} -> 'a <...> }] } -> ['a] <Workflow, ...> = { work } ->
   seq::map { xs = work, f = { x } -> Workflow.step { name = x.name, f = x.f } }

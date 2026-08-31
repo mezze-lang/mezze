@@ -3,17 +3,16 @@
 ## Paths are Str throughout — the "/"-separated form. This module
 ## does string surgery only; nothing here reaches the filesystem.
 ## Effect-carrying operations live in std::effects::filesystem.
-
 use std::str::{ split, join }
 use std::collections::seq
 use std::int
 
 ## Join path components with "/".
-pub let path_join : { parts: [Str] } -> Str = { parts } ->
+pub let path_join: { parts: [Str] } -> Str = { parts } ->
   join { strings = parts, separator = "/" }
 
 ## Get the file name (last component) from a path.
-pub let file_name : { path: Str } -> Str = { path } -> do
+pub let file_name: { path: Str } -> Str = { path } -> do
   let parts = split { s = path, delimiter = "/" }
   let len = seq::size { xs = parts }
   match len > 0 is
@@ -22,23 +21,23 @@ pub let file_name : { path: Str } -> Str = { path } -> do
       None -> ""
     False -> ""
 
+
 ## Get the parent directory of a path.
-pub let parent : { path: Str } -> Str = { path } -> do
+pub let parent: { path: Str } -> Str = { path } -> do
   let parts = split { s = path, delimiter = "/" }
   let len = seq::size { xs = parts }
   match len > 1 is
     True -> do
       let init_parts = seq::slice { xs = parts, start = 0, end = len - 1 }
       let joined = join { strings = init_parts, separator = "/" }
-      # Absolute paths like "/a" produce init_parts = [""] which joins
-      # to "". Restore leading "/" for that case.
       match joined == "" is
         True -> "/"
         False -> joined
     False -> "/"
 
+
 ## Get the file extension, if any.
-pub let extension : { path: Str } -> Option Str = { path } -> do
+pub let extension: { path: Str } -> Option Str = { path } -> do
   let name = file_name { path = path }
   let parts = split { s = name, delimiter = "." }
   let len = seq::size { xs = parts }
@@ -46,20 +45,23 @@ pub let extension : { path: Str } -> Option Str = { path } -> do
     True -> seq::get { xs = parts, i = len - 1 }
     False -> None
 
+
 ## Check if a path has the given file extension.
-pub let has_extension : { path: Str, ext: Str } -> Bool = { path, ext } ->
-  match extension { path = path } is
-    Some { val } -> val == ext
-    None -> False
+pub let has_extension: { path: Str, ext: Str } -> Bool = { path, ext } -> match extension { path = path } is
+  Some { val } -> val == ext
+  None -> False
+
 
 ## Split a path into its "/"-separated components (empty for root).
-pub let components : { path: Str } -> [Str] = { path } ->
-  seq::filter { xs = split { s = path, delimiter = "/" }, p = { x } -> x != "" }
+pub let components: { path: Str } -> [Str] = { path } ->
+  seq::filter {
+    xs = split { s = path, delimiter = "/" },
+    p = { x } -> x != "",
+  }
 
 ## Return True iff path begins with "/".
-pub let is_absolute : { path: Str } -> Bool = { path } ->
-  match seq::size { xs = split { s = path, delimiter = "/" } } is
-    0 -> False
-    _ -> match seq::get { xs = split { s = path, delimiter = "/" }, i = 0 } is
-      Some { val } -> val == ""
-      None -> False
+pub let is_absolute: { path: Str } -> Bool = { path } -> match seq::size { xs = split { s = path, delimiter = "/" } } is
+  0 -> False
+  _ -> match seq::get { xs = split { s = path, delimiter = "/" }, i = 0 } is
+    Some { val } -> val == ""
+    None -> False

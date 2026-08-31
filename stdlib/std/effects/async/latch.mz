@@ -18,25 +18,24 @@ impl Latch where {
 }
 
 ## Create a new latch with the given count (must be non-negative).
-pub let latch : { count: Int } -> Latch <Async> = { count } ->
-  __native_latch_new { count = count }
+pub let latch: { count: Int } -> Latch <Async> = { count } -> __native_latch_new { count = count }
 
 ## Decrement the count by one. Releases waiters when count reaches zero.
-pub let count_down : { latch: Latch } -> {} <Async> = { latch } ->
+pub let count_down: { latch: Latch } -> {} <Async> = { latch } ->
   __native_latch_count_down { latch = latch }
 
 ## Wait until the count reaches zero.
-pub let await_latch : { latch: Latch } -> {} <Async> = { latch } ->
+pub let await_latch: { latch: Latch } -> {} <Async> = { latch } ->
   __native_latch_await { latch = latch }
 
 ## Park-aware await: routes through park.
-pub let await_latch_async : { latch: Latch } -> {} <Async, ...> = { latch } ->
+pub let await_latch_async: { latch: Latch } -> {} <Async, ...> = { latch } ->
   park { predicate = {} -> __native_latch_get_count { latch = latch } == 0 }
 
 ## Wait until count reaches zero or timeout expires. Returns True if released.
-pub let await_latch_timeout : { latch: Latch, ms: Int } -> Bool <Async> = { latch, ms } ->
+pub let await_latch_timeout: { latch: Latch, ms: Int } -> Bool <Async> = { latch, ms } ->
   __native_latch_await_timeout { latch = latch, ms = ms }
 
 ## Get the current count.
-pub let get_count : { latch: Latch } -> Int <Async> = { latch } ->
+pub let get_count: { latch: Latch } -> Int <Async> = { latch } ->
   __native_latch_get_count { latch = latch }

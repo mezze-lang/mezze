@@ -14,6 +14,7 @@ impl Tryable for Option 'a having 'inner = 'a where {
   try = { it } -> match it is
     Some { val } -> val
     None -> Exception.throw { error = NoneOpt }
+
 }
 
 impl Eq for Option 'a where {
@@ -68,54 +69,58 @@ impl Default for Option where {
 }
 
 ## Apply f to the inner value, or return None.
-pub let map : { opt: Option 'a, f: { val: 'a } -> 'b <...> } -> Option 'b <...> = { opt, f } ->
+pub let map: { opt: Option 'a, f: { val: 'a } -> 'b <...> } -> Option 'b <...> = { opt, f } ->
   match opt is
     Some { val } -> Some { val = f { val } }
     None -> None
 
 
 ## Unwrap the value, or return def if None.
-pub let get_or : { opt: Option 'a, def: 'a } -> 'a = { opt, def } -> match opt is
+pub let get_or: { opt: Option 'a, def: 'a } -> 'a = { opt, def } -> match opt is
   Some { val } -> val
   None -> def
 
 
 ## True if the option contains a value.
-pub let is_some : { opt: Option 'a } -> Bool = { opt } -> match opt is
+pub let is_some: { opt: Option 'a } -> Bool = { opt } -> match opt is
   Some { val } -> True
   None -> False
 
 
 ## True if the option is empty.
-pub let is_none : { opt: Option 'a } -> Bool = { opt } -> match opt is
+pub let is_none: { opt: Option 'a } -> Bool = { opt } -> match opt is
   Some { val } -> False
   None -> True
 
 
 ## Keep the value only if predicate p holds.
-pub let filter : { opt: Option 'a, p: { val: 'a } -> Bool <...> } -> Option 'a <...> = { opt, p } ->
+pub let filter: { opt: Option 'a, p: { val: 'a } -> Bool <...> } -> Option 'a <...> = { opt, p } ->
   match opt is
     Some { val } -> if p { val } then Some { val = val } else None
     None -> None
 
 
 ## Apply f to the inner value (f itself returns an Option).
-pub let flat_map : { opt: Option 'a, f: { val: 'a } -> Option 'b <...> } -> Option 'b <...> = { opt, f } ->
-  match opt is
+pub let flat_map
+  : { opt: Option 'a, f: { val: 'a } -> Option 'b <...> }
+  -> Option 'b <...>
+  = { opt, f } -> match opt is
     Some { val } -> f { val }
     None -> None
 
 
 ## Return opt1 if Some, otherwise opt2.
-pub let or_else : { opt1: Option 'a, opt2: Option 'a } -> Option 'a = { opt1, opt2 } ->
+pub let or_else: { opt1: Option 'a, opt2: Option 'a } -> Option 'a = { opt1, opt2 } ->
   match opt1 is
     Some { val } -> opt1
     None -> opt2
 
 
 ## Combine two Options with f. None if either is None.
-pub let map2 : { opt_a: Option 'a, opt_b: Option 'b, f: { a: 'a, b: 'b } -> 'c <...> } -> Option 'c <...> = { opt_a, opt_b, f } ->
-  match opt_a is
+pub let map2
+  : { opt_a: Option 'a, opt_b: Option 'b, f: { a: 'a, b: 'b } -> 'c <...> }
+  -> Option 'c <...>
+  = { opt_a, opt_b, f } -> match opt_a is
     Some { val = a } -> match opt_b is
       Some { val = b } -> Some { val = f { a = a, b = b } }
       None -> None
@@ -123,48 +128,52 @@ pub let map2 : { opt_a: Option 'a, opt_b: Option 'b, f: { a: 'a, b: 'b } -> 'c <
 
 
 ## Run action if Some; do nothing if None.
-pub let if_some : { opt: Option 'a, action: { val: 'a } -> {} <...> } -> {} <...> = { opt, action } ->
+pub let if_some: { opt: Option 'a, action: { val: 'a } -> {} <...> } -> {} <...> = { opt, action } ->
   match opt is
     Some { val } -> action { val }
     None -> {}
 
 
 ## Run action if None; do nothing if Some.
-pub let if_none : { opt: Option 'a, action: {} -> {} <...> } -> {} <...> = { opt, action } ->
+pub let if_none: { opt: Option 'a, action: {} -> {} <...> } -> {} <...> = { opt, action } ->
   match opt is
     Some { val } -> {}
     None -> action {}
 
 
 ## Fold over the Option with separate handlers for None and Some.
-pub let fold : { opt: Option 'a, on_none: {} -> 'b <...>, on_some: { val: 'a } -> 'b <...> } -> 'b <...> = { opt, on_none, on_some } ->
-  match opt is
+pub let fold
+  : { opt: Option 'a, on_none: {} -> 'b <...>, on_some: { val: 'a } -> 'b <...> }
+  -> 'b <...>
+  = { opt, on_none, on_some } -> match opt is
     Some { val } -> on_some { val }
     None -> on_none {}
 
 
 ## Flatten a nested Option into a single layer.
-pub let flatten : { opt: Option (Option 'a) } -> Option 'a = { opt } -> match opt is
+pub let flatten: { opt: Option (Option 'a) } -> Option 'a = { opt } -> match opt is
   Some { val } -> val
   None -> None
 
 
 ## Convert to Result, using the given error for None.
-pub let to_result : { opt: Option 'a, error: 'e } -> Result 'a 'e = { opt, error } ->
+pub let to_result: { opt: Option 'a, error: 'e } -> Result 'a 'e = { opt, error } ->
   match opt is
     Some { val } -> Ok { val = val }
     None -> Err { error = error }
 
 
 ## Convert to a single-element list, or empty list if None.
-pub let to_list : { opt: Option 'a } -> ['a] = { opt } -> match opt is
+pub let to_list: { opt: Option 'a } -> ['a] = { opt } -> match opt is
   Some { val } -> [val]
   None -> []
 
 
 ## Zip two Options into an Option of a pair.
-pub let zip : { a: Option 'a, b: Option 'b } -> Option { fst: 'a, snd: 'b } = { a, b } ->
-  match a is
+pub let zip
+  : { a: Option 'a, b: Option 'b }
+  -> Option { fst: 'a, snd: 'b }
+  = { a, b } -> match a is
     Some { val = av } -> match b is
       Some { val = bv } -> Some { val = { fst = av, snd = bv } }
       None -> None
@@ -172,8 +181,10 @@ pub let zip : { a: Option 'a, b: Option 'b } -> Option { fst: 'a, snd: 'b } = { 
 
 
 ## Zip two Options, combining their values with f.
-pub let zip_with : { a: Option 'a, b: Option 'b, f: { x: 'a, y: 'b } -> 'c <...> } -> Option 'c <...> = { a, b, f } ->
-  match a is
+pub let zip_with
+  : { a: Option 'a, b: Option 'b, f: { x: 'a, y: 'b } -> 'c <...> }
+  -> Option 'c <...>
+  = { a, b, f } -> match a is
     Some { val = av } -> match b is
       Some { val = bv } -> Some { val = f { x = av, y = bv } }
       None -> None
@@ -197,7 +208,7 @@ impl Option 'a where {
 ## Wrap any value in Some via method syntax: `x.some {}` → `Some { val = x }`.
 ## Generic impl — covers every type. Cannot be specialized per-type.
 ability Somable for 'a where {
-  some : { it: 'a } -> Option 'a
+  some: { it: 'a } -> Option 'a
 }
 
 impl Somable for 'a where {

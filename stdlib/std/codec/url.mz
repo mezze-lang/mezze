@@ -5,10 +5,7 @@
 ## nesting. Any `'a` with `impl EncodeRepr` (and a body that only touches
 ## scalar `Format` methods) can be turned into a query value via
 ## `body.encode_repr { fmt = url_param_fmt, config = default_config }`.
-
-use std::codec::core::{
-  Format, DecodeFormat
-}
+use std::codec::core::{ Format, DecodeFormat }
 use std::int
 use std::float
 use std::nat
@@ -19,17 +16,15 @@ use std::str
 pub type UrlParamFmt = {}
 
 ## URL-param format instance.
-pub let url_param_fmt : UrlParamFmt = {}
+pub let url_param_fmt: UrlParamFmt = {}
 
 ## Percent-encode a single URL component (path segment or query value).
 ## Matches JS `encodeURIComponent` / RFC 3986 unreserved set.
-pub let url_encode_component : { s: Str } -> Str = { s } ->
-  __native_url_encode_component { s = s }
+pub let url_encode_component: { s: Str } -> Str = { s } -> __native_url_encode_component { s = s }
 
 ## Inverse of `url_encode_component`. Decodes %xx sequences and `+`
 ## (form-encoded space) back to their UTF-8 source.
-pub let url_decode_component : { s: Str } -> Str = { s } ->
-  __native_url_decode_component { s = s }
+pub let url_decode_component: { s: Str } -> Str = { s } -> __native_url_decode_component { s = s }
 
 ## impl Format Str for UrlParamFmt — scalar encoders only. Composites
 ## (records, lists, maps, sets) aren't representable as a single query
@@ -40,27 +35,29 @@ pub let url_decode_component : { s: Str } -> Str = { s } ->
 ## be embedded in path segments or other contexts that handle escaping
 ## differently.
 impl Format for Str UrlParamFmt where {
-  encode_int    = { val, config, path } -> Ok { val = int::to_str { n = val } },
-  encode_float  = { val, config, path } -> Ok { val = float::to_str { n = val } },
-  encode_nat    = { val, config, path } -> Ok { val = nat::to_str { n = val } },
+  encode_int = { val, config, path } -> Ok { val = int::to_str { n = val } },
+  encode_float = { val, config, path } -> Ok { val = float::to_str { n = val } },
+  encode_nat = { val, config, path } -> Ok { val = nat::to_str { n = val } },
   encode_string = { val, config, path } -> Ok { val = val },
-  encode_bool   = { val, config, path } -> Ok { val = if val then "true" else "false" },
-  encode_char   = { val, config, path } -> Ok { val = char::to_str { c = val } },
-  encode_frac   = { val, config, path } -> do
+  encode_bool = { val, config, path } -> Ok { val = if val then "true" else "false" },
+  encode_char = { val, config, path } -> Ok { val = char::to_str { c = val } },
+  encode_frac = { val, config, path } -> do
     let f = __native_frac_to_float { n = val }
     Ok { val = float::to_str { n = f } },
-  encode_bytes = { val, config, path } -> Err {
-    error = {
-      path = path,
-      message = "Bytes can't be encoded as a URL parameter value",
+  encode_bytes = { val, config, path } ->
+    Err {
+      error = {
+        path = path,
+        message = "Bytes can't be encoded as a URL parameter value",
+      },
     },
-  },
-  encode_record = { fields, config, path } -> Err {
-    error = {
-      path = path,
-      message = "Records can't be encoded as a single URL parameter value",
+  encode_record = { fields, config, path } ->
+    Err {
+      error = {
+        path = path,
+        message = "Records can't be encoded as a single URL parameter value",
+      },
     },
-  },
   encode_variant = { tag, payload, config, path } -> match payload is
     None -> Ok { val = tag }
     Some { val = _ } -> Err {
@@ -69,24 +66,27 @@ impl Format for Str UrlParamFmt where {
         message = "Only no-payload variant tags can be encoded as URL parameters",
       },
     },
-  encode_list = { elems, config, path } -> Err {
-    error = {
-      path = path,
-      message = "Lists can't be encoded as a single URL parameter value",
+  encode_list = { elems, config, path } ->
+    Err {
+      error = {
+        path = path,
+        message = "Lists can't be encoded as a single URL parameter value",
+      },
     },
-  },
-  encode_set = { elems, config, path } -> Err {
-    error = {
-      path = path,
-      message = "Sets can't be encoded as a single URL parameter value",
+  encode_set = { elems, config, path } ->
+    Err {
+      error = {
+        path = path,
+        message = "Sets can't be encoded as a single URL parameter value",
+      },
     },
-  },
-  encode_map = { entries, config, path } -> Err {
-    error = {
-      path = path,
-      message = "Maps can't be encoded as a single URL parameter value",
+  encode_map = { entries, config, path } ->
+    Err {
+      error = {
+        path = path,
+        message = "Maps can't be encoded as a single URL parameter value",
+      },
     },
-  },
   encode_option = { val, config, path } -> match val is
     Some { val = v } -> Ok { val = v }
     None -> Ok { val = "" },
@@ -160,51 +160,52 @@ impl DecodeFormat for Str UrlParamFmt where {
         found = Some { val = val },
       },
     },
-  decode_bytes = { val, config, path } -> Err {
-    error = {
-      path = path,
-      message = "Bytes can't be decoded from a URL parameter value",
-      expected = "Bytes",
-      found = Some { val = val },
+  decode_bytes = { val, config, path } ->
+    Err {
+      error = {
+        path = path,
+        message = "Bytes can't be decoded from a URL parameter value",
+        expected = "Bytes",
+        found = Some { val = val },
+      },
     },
-  },
-  decode_record_field = { val, key, config, path } -> Err {
-    error = {
-      path = path,
-      message = "Records can't be decoded from a URL parameter value",
-      expected = "record field",
-      found = Some { val = key },
+  decode_record_field = { val, key, config, path } ->
+    Err {
+      error = {
+        path = path,
+        message = "Records can't be decoded from a URL parameter value",
+        expected = "record field",
+        found = Some { val = key },
+      },
     },
-  },
-  decode_variant = { val, config, path } -> Ok {
-    val = { tag = val, payload = None },
-  },
-  decode_list = { val, config, path } -> Err {
-    error = {
-      path = path,
-      message = "Lists can't be decoded from a URL parameter value",
-      expected = "List",
-      found = Some { val = val },
+  decode_variant = { val, config, path } -> Ok { val = { tag = val, payload = None } },
+  decode_list = { val, config, path } ->
+    Err {
+      error = {
+        path = path,
+        message = "Lists can't be decoded from a URL parameter value",
+        expected = "List",
+        found = Some { val = val },
+      },
     },
-  },
-  decode_set = { val, config, path } -> Err {
-    error = {
-      path = path,
-      message = "Sets can't be decoded from a URL parameter value",
-      expected = "Set",
-      found = Some { val = val },
+  decode_set = { val, config, path } ->
+    Err {
+      error = {
+        path = path,
+        message = "Sets can't be decoded from a URL parameter value",
+        expected = "Set",
+        found = Some { val = val },
+      },
     },
-  },
-  decode_map = { val, config, path } -> Err {
-    error = {
-      path = path,
-      message = "Maps can't be decoded from a URL parameter value",
-      expected = "Map",
-      found = Some { val = val },
+  decode_map = { val, config, path } ->
+    Err {
+      error = {
+        path = path,
+        message = "Maps can't be decoded from a URL parameter value",
+        expected = "Map",
+        found = Some { val = val },
+      },
     },
-  },
-  decode_option = { val, config, path } -> if str::is_empty { s = val }
-    then Ok { val = None }
-    else Ok { val = Some { val = val } },
+  decode_option = { val, config, path } -> if str::is_empty { s = val } then Ok { val = None } else Ok { val = Some { val = val } },
   transform_field = { name, config } -> name,
 }

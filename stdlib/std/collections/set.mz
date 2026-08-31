@@ -15,171 +15,183 @@ impl Eq for Set 'a where {
 }
 
 ## Creates an empty set.
-pub let empty : {} -> Set 'a = {} -> __native_set_empty {}
+pub let empty: {} -> Set 'a = {} -> __native_set_empty {}
 
 ## Adds an element, returning a new set.
-pub let insert : { s: Set 'a, x: 'a } -> Set 'a = { s, x } -> __native_set_insert { s = s, x = x }
+pub let insert: { s: Set 'a, x: 'a } -> Set 'a = { s, x } -> __native_set_insert { s = s, x = x }
 
 ## Removes an element, returning a new set.
-pub let remove : { s: Set 'a, x: 'a } -> Set 'a = { s, x } -> __native_set_remove { s = s, x = x }
+pub let remove: { s: Set 'a, x: 'a } -> Set 'a = { s, x } -> __native_set_remove { s = s, x = x }
 
 ## Returns True if the element is in the set.
-pub let contains : { s: Set 'a, x: 'a } -> Bool = { s, x } ->
+pub let contains: { s: Set 'a, x: 'a } -> Bool = { s, x } ->
   __native_set_contains { s = s, x = x }
 
 ## Returns the number of elements.
-pub let size : { s: Set 'a } -> Int = { s } -> __native_set_size { s = s }
+pub let size: { s: Set 'a } -> Int = { s } -> __native_set_size { s = s }
 
 ## Returns True if the set has no elements.
-pub let is_empty : { s: Set 'a } -> Bool = { s } -> size { s = s } == 0
+pub let is_empty: { s: Set 'a } -> Bool = { s } -> size { s = s } == 0
 
 ## Returns elements in either set.
-pub let union : { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
+pub let union: { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
   __native_set_union { s1 = s1, s2 = s2 }
 
 ## Returns elements in both sets.
-pub let intersection : { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
+pub let intersection: { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
   __native_set_intersection { s1 = s1, s2 = s2 }
 
 ## Returns elements in s1 but not in s2.
-pub let difference : { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
+pub let difference: { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
   __native_set_difference { s1 = s1, s2 = s2 }
 
 ## Returns True if s1 is a subset of s2.
-pub let is_subset : { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
+pub let is_subset: { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
   __native_set_is_subset { s1 = s1, s2 = s2 }
 
 ## Returns True if s1 is a superset of s2.
-pub let is_superset : { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
+pub let is_superset: { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
   is_subset { s1 = s2, s2 = s1 }
 
 ## Returns True if the two sets have no elements in common.
-pub let is_disjoint : { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
+pub let is_disjoint: { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
   is_empty { s = intersection { s1 = s1, s2 = s2 } }
 
 ## Converts to a Seq.
-pub let to_seq : { s: Set 'a } -> ['a] = { s } -> __native_set_to_seq { s = s }
+pub let to_seq: { s: Set 'a } -> ['a] = { s } -> __native_set_to_seq { s = s }
 
 ## Creates a set from a Seq.
-pub let from_seq : { xs: ['a] } -> Set 'a = { xs } -> __native_set_from_seq { xs = xs }
+pub let from_seq: { xs: ['a] } -> Set 'a = { xs } -> __native_set_from_seq { xs = xs }
 
 ## Converts to a List.
-pub let to_list : { s: Set 'a } -> List 'a = { s } -> __native_set_to_list { s = s }
+pub let to_list: { s: Set 'a } -> List 'a = { s } -> __native_set_to_list { s = s }
 
 ## Creates a set from a List.
-pub let from_list : { xs: List 'a } -> Set 'a = { xs } -> __native_set_from_list { xs = xs }
+pub let from_list: { xs: List 'a } -> Set 'a = { xs } -> __native_set_from_list { xs = xs }
 
 ## Keeps only elements for which the predicate returns True.
-pub let filter : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Set 'a <...> = { s, p } ->
+pub let filter: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Set 'a <...> = { s, p } ->
   __native_set_filter { s = s, p = p }
 
 ## Transforms each element using f.
-pub let map : { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Set 'b <...> = { s, f } ->
+pub let map: { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Set 'b <...> = { s, f } ->
   __native_set_map { s = s, f = f }
 
 ## Folds over all elements with an accumulator.
-pub let fold : { s: Set 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { s, init, f } ->
-  __native_set_fold { s = s, init = init, f = f }
+pub let fold
+  : { s: Set 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> }
+  -> 'acc <...>
+  = { s, init, f } -> __native_set_fold { s = s, init = init, f = f }
 
 ## Creates a single-element set.
-pub let singleton : { x: 'a } -> Set 'a = { x } -> insert { s = empty {}, x = x }
+pub let singleton: { x: 'a } -> Set 'a = { x } -> insert { s = empty {}, x = x }
 
 ## Adds all elements from a seq.
-pub let insert_all : { s: Set 'a, xs: ['a] } -> Set 'a = { s, xs } ->
+pub let insert_all: { s: Set 'a, xs: ['a] } -> Set 'a = { s, xs } ->
   __native_set_insert_all { s = s, xs = xs }
 
 ## Removes all elements found in a seq.
-pub let remove_all : { s: Set 'a, xs: ['a] } -> Set 'a = { s, xs } ->
+pub let remove_all: { s: Set 'a, xs: ['a] } -> Set 'a = { s, xs } ->
   __native_set_remove_all { s = s, xs = xs }
 
 ## Returns True if the two sets are equal.
-pub let equals : { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
+pub let equals: { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
   __native_set_equals { s1 = s1, s2 = s2 }
 
 ## Returns True if any element matches the predicate.
-pub let any : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
+pub let any: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
   __native_set_any { s = s, p = p }
 
 ## Returns True if all elements match the predicate.
-pub let all : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
+pub let all: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
   __native_set_all { s = s, p = p }
 
 ## Returns True if no element matches the predicate.
-pub let none : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
+pub let none: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
   __native_set_none { s = s, p = p }
 
 ## Returns the first element matching the predicate, or None.
-pub let find : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Option 'a <...> = { s, p } ->
+pub let find: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Option 'a <...> = { s, p } ->
   __native_set_find { s = s, p = p }
 
 ## Counts elements matching the predicate.
-pub let count : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Int <...> = { s, p } ->
+pub let count: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Int <...> = { s, p } ->
   __native_set_count { s = s, p = p }
 
 ## Returns the minimum element, or None if empty.
-pub let min : { s: Set 'a } -> Option 'a = { s } -> __native_set_min { s = s }
+pub let min: { s: Set 'a } -> Option 'a = { s } -> __native_set_min { s = s }
 
 ## Returns the maximum element, or None if empty.
-pub let max : { s: Set 'a } -> Option 'a = { s } -> __native_set_max { s = s }
+pub let max: { s: Set 'a } -> Option 'a = { s } -> __native_set_max { s = s }
 
 ## Sums all integer elements.
-pub let sum : { s: Set Int } -> Int = { s } -> __native_set_sum { s = s }
+pub let sum: { s: Set Int } -> Int = { s } -> __native_set_sum { s = s }
 
 ## Returns the product of all integer elements.
-pub let product : { s: Set Int } -> Int = { s } -> __native_set_product { s = s }
+pub let product: { s: Set Int } -> Int = { s } -> __native_set_product { s = s }
 
 ## Reduces elements to a single value, or returns None if empty.
-pub let reduce : { s: Set 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { s, f } ->
+pub let reduce: { s: Set 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { s, f } ->
   __native_set_reduce { s = s, f = f }
 
 ## Returns the minimum element by a key function, or None.
-pub let min_by : { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { s, f } ->
+pub let min_by: { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { s, f } ->
   __native_set_min_by { s = s, f = f }
 
 ## Returns the maximum element by a key function, or None.
-pub let max_by : { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { s, f } ->
+pub let max_by: { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { s, f } ->
   __native_set_max_by { s = s, f = f }
 
 ## Splits into elements matching and not matching the predicate.
-pub let partition : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> { pass: Set 'a, fail: Set 'a } <...> = { s, p } ->
-  __native_set_partition { s = s, p = p }
+pub let partition
+  : { s: Set 'a, p: { val: 'a } -> Bool <...> }
+  -> { pass: Set 'a, fail: Set 'a } <...>
+  = { s, p } -> __native_set_partition { s = s, p = p }
 
 ## Sums all float elements.
-pub let sum_float : { s: Set Float } -> Float = { s } -> __native_set_sum_float { s = s }
+pub let sum_float: { s: Set Float } -> Float = { s } -> __native_set_sum_float { s = s }
 
 ## Returns the product of all float elements.
-pub let product_float : { s: Set Float } -> Float = { s } -> __native_set_product_float { s = s }
+pub let product_float: { s: Set Float } -> Float = { s } -> __native_set_product_float { s = s }
 
 ## Maps each element to a set and merges the results.
-pub let flat_map : { s: Set 'a, f: { val: 'a } -> Set 'b <...> } -> Set 'b <...> = { s, f } ->
+pub let flat_map: { s: Set 'a, f: { val: 'a } -> Set 'b <...> } -> Set 'b <...> = { s, f } ->
   __native_set_flat_map { s = s, f = f }
 
 ## Groups elements by a key function.
-pub let group_by : { s: Set 'a, f: { val: 'a } -> 'b <...> } -> List { key: 'b, values: Set 'a } <...> = { s, f } ->
-  __native_set_group_by { s = s, f = f }
+pub let group_by
+  : { s: Set 'a, f: { val: 'a } -> 'b <...> }
+  -> List { key: 'b, values: Set 'a } <...>
+  = { s, f } -> __native_set_group_by { s = s, f = f }
 
 ## Returns elements in either set but not both.
-pub let symmetric_difference : { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
+pub let symmetric_difference: { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
   __native_set_symmetric_difference { s1 = s1, s2 = s2 }
 
 ## Maps elements with f, collecting only Some results into a Set.
-pub let filter_map : { set: Set 'a, f: { val: 'a } -> Option 'b <...> } -> Set 'b <...> = { set, f } ->
-  __native_set_filter_map { set = set, f = f }
+pub let filter_map
+  : { set: Set 'a, f: { val: 'a } -> Option 'b <...> }
+  -> Set 'b <...>
+  = { set, f } -> __native_set_filter_map { set = set, f = f }
 
 ## Maps elements with f, collecting only Some results into a Seq.
-pub let collect_seq : { set: Set 'a, f: { val: 'a } -> Option 'b <...> } -> ['b] <...> = { set, f } ->
-  __native_set_collect_seq { set = set, f = f }
+pub let collect_seq
+  : { set: Set 'a, f: { val: 'a } -> Option 'b <...> }
+  -> ['b] <...>
+  = { set, f } -> __native_set_collect_seq { set = set, f = f }
 
 ## Maps elements with f, collecting only Some results into a List.
-pub let collect_list : { set: Set 'a, f: { val: 'a } -> Option 'b <...> } -> List 'b <...> = { set, f } ->
-  __native_set_collect_list { set = set, f = f }
+pub let collect_list
+  : { set: Set 'a, f: { val: 'a } -> Option 'b <...> }
+  -> List 'b <...>
+  = { set, f } -> __native_set_collect_list { set = set, f = f }
 
 ## Converts to a SortedSet (elements must be comparable).
-pub let to_sorted_set : { s: Set 'a } -> SortedSet 'a = { s } ->
+pub let to_sorted_set: { s: Set 'a } -> SortedSet 'a = { s } ->
   __native_set_to_sorted_set { s = s }
 
 ## Creates a Set from a SortedSet.
-pub let from_sorted_set : { s: SortedSet 'a } -> Set 'a = { s } ->
+pub let from_sorted_set: { s: SortedSet 'a } -> Set 'a = { s } ->
   __native_set_from_sorted_set { s = s }
 
 ## Method implementations for Set.

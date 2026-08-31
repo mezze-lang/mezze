@@ -56,10 +56,12 @@ impl Default for Frac where {
 pub let add: { l: Frac, r: Frac } -> Frac = { l, r } -> __native_frac_add { l = l, r = r }
 
 ## Subtract two fractions.
-pub let subtract: { l: Frac, r: Frac } -> Frac = { l, r } -> __native_frac_subtract { l = l, r = r }
+pub let subtract: { l: Frac, r: Frac } -> Frac = { l, r } ->
+  __native_frac_subtract { l = l, r = r }
 
 ## Multiply two fractions.
-pub let multiply: { l: Frac, r: Frac } -> Frac = { l, r } -> __native_frac_multiply { l = l, r = r }
+pub let multiply: { l: Frac, r: Frac } -> Frac = { l, r } ->
+  __native_frac_multiply { l = l, r = r }
 
 ## Divide two fractions.
 pub let divide: { l: Frac, r: Frac } -> Frac = { l, r } -> __native_frac_divide { l = l, r = r }
@@ -68,10 +70,12 @@ pub let divide: { l: Frac, r: Frac } -> Frac = { l, r } -> __native_frac_divide 
 pub let equals: { l: Frac, r: Frac } -> Bool = { l, r } -> __native_frac_equals { l = l, r = r }
 
 ## True if l is less than r.
-pub let less_than: { l: Frac, r: Frac } -> Bool = { l, r } -> __native_frac_less_than { l = l, r = r }
+pub let less_than: { l: Frac, r: Frac } -> Bool = { l, r } ->
+  __native_frac_less_than { l = l, r = r }
 
 ## True if l is greater than r.
-pub let greater_than: { l: Frac, r: Frac } -> Bool = { l, r } -> __native_frac_greater_than { l = l, r = r }
+pub let greater_than: { l: Frac, r: Frac } -> Bool = { l, r } ->
+  __native_frac_greater_than { l = l, r = r }
 
 ## Convert a fraction to a Float.
 pub let to_float: { n: Frac } -> Float = { n } -> __native_frac_to_float { n = n }
@@ -113,6 +117,8 @@ impl Frac where {
   denominator = { it } -> __native_frac_denominator { n = it },
   is_positive: { it: Frac } -> Bool = { it } ->
     __native_frac_greater_than { l = it, r = __native_int_to_frac { n = 0 } },
-  is_negative: { it: Frac } -> Bool = { it } -> __native_frac_less_than { l = it, r = __native_int_to_frac { n = 0 } },
-  reciprocal: { it: Frac } -> Frac = { it } -> __native_frac_divide { l = __native_int_to_frac { n = 1 }, r = it },
+  is_negative: { it: Frac } -> Bool = { it } ->
+    __native_frac_less_than { l = it, r = __native_int_to_frac { n = 0 } },
+  reciprocal: { it: Frac } -> Frac = { it } ->
+    __native_frac_divide { l = __native_int_to_frac { n = 1 }, r = it },
 }

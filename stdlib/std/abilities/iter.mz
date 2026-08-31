@@ -15,7 +15,6 @@
 ## row propagates through the combinator chain — pure producers get
 ## full fusion with zero overhead, effectful producers get combinator
 ## fusion with one `next()` call per element.
-
 use std::option
 
 ability ToIter for 'c having 'elem where {

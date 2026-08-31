@@ -6,7 +6,7 @@ effect Return having 'result where {
 
 ## Handler that implements early return by aborting the perform.
 impl Return for EarlyReturn having 'result = 'r where {
-  return = { val } -> abort { val = val },
+  return = { val } -> abort { val = val }
 }
 
 ## Shorthand for Return.return.

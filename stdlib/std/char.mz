@@ -41,7 +41,8 @@ impl TryInto Char | ConversionError { msg: Str } | for Str where {
 }
 
 ## Create a Char from a Unicode code point. Returns None if invalid.
-pub let from_int: { code: Int } -> Option Char = { code } -> __native_char_from_int { code = code }
+pub let from_int: { code: Int } -> Option Char = { code } ->
+  __native_char_from_int { code = code }
 
 ## Get the first character of a string. Returns None if empty.
 pub let from_str: { s: Str } -> Option Char = { s } -> __native_char_from_string { s = s }
@@ -80,7 +81,8 @@ pub let is_lower: { c: Char } -> Bool = { c } -> __native_char_is_lower { c = c 
 pub let eq: { a: Char, b: Char } -> Bool = { a, b } -> __native_char_eq { a = a, b = b }
 
 ## Convert a digit char to its numeric value in the given radix. Returns None if invalid.
-pub let digit_to_int: { c: Char, radix: Int } -> Option Int = { c, radix } -> __native_char_digit_to_int { c = c, radix = radix }
+pub let digit_to_int: { c: Char, radix: Int } -> Option Int = { c, radix } ->
+  __native_char_digit_to_int { c = c, radix = radix }
 
 impl Char where {
   to_int = { it } -> __native_char_to_int { c = it },

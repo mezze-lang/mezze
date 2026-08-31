@@ -18,26 +18,27 @@ impl Mutex where {
 }
 
 ## Create a new mutex.
-pub let mutex : {} -> Mutex <Async> = {} -> __native_mutex_new {}
+pub let mutex: {} -> Mutex <Async> = {} -> __native_mutex_new {}
 
 ## Acquire lock, run f, release lock automatically (recommended).
-pub let with_lock : { mutex: Mutex, f: {} -> 'a <...> } -> 'a <Async, ...> = { mutex, f } ->
+pub let with_lock: { mutex: Mutex, f: {} -> 'a <...> } -> 'a <Async, ...> = { mutex, f } ->
   __native_mutex_with_lock { mutex = mutex, f = f }
 
 ## Acquire the lock (blocking). You must call unlock when done.
-pub let lock : { mutex: Mutex } -> {} <Async> = { mutex } -> __native_mutex_lock { mutex = mutex }
+pub let lock: { mutex: Mutex } -> {} <Async> = { mutex } -> __native_mutex_lock { mutex = mutex }
 
 ## Park-aware lock: routes through park.
-pub let lock_async : { mutex: Mutex } -> {} <Async, ...> = { mutex } ->
+pub let lock_async: { mutex: Mutex } -> {} <Async, ...> = { mutex } ->
   park { predicate = {} -> __native_mutex_try_lock { mutex = mutex } }
 
 ## Release the lock. Must be called by the thread that holds it.
-pub let unlock : { mutex: Mutex } -> {} <Async> = { mutex } -> __native_mutex_unlock { mutex = mutex }
+pub let unlock: { mutex: Mutex } -> {} <Async> = { mutex } ->
+  __native_mutex_unlock { mutex = mutex }
 
 ## Try to acquire the lock without blocking. Returns True if acquired.
-pub let try_lock : { mutex: Mutex } -> Bool <Async> = { mutex } ->
+pub let try_lock: { mutex: Mutex } -> Bool <Async> = { mutex } ->
   __native_mutex_try_lock { mutex = mutex }
 
 ## Check if the current thread holds this mutex.
-pub let is_held_by_current_thread : { mutex: Mutex } -> Bool <Async> = { mutex } ->
+pub let is_held_by_current_thread: { mutex: Mutex } -> Bool <Async> = { mutex } ->
   __native_mutex_is_held_by_current_thread { mutex = mutex }

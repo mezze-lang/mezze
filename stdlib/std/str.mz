@@ -115,13 +115,16 @@ pub let replace_all: { s: Str, old: Str, new: Str } -> Str = { s, old, new } ->
   __native_string_replace_all { s = s, old = old, new = new }
 
 ## Get character at index. Returns None if out of bounds.
-pub let char_at: { s: Str, i: Int } -> Option Char = { s, i } -> __native_string_char_at { s = s, i = i }
+pub let char_at: { s: Str, i: Int } -> Option Char = { s, i } ->
+  __native_string_char_at { s = s, i = i }
 
 ## Find the first index of a substring. Returns None if not found.
-pub let index_of: { s: Str, sub: Str } -> Option Int = { s, sub } -> __native_string_index_of { s = s, sub = sub }
+pub let index_of: { s: Str, sub: Str } -> Option Int = { s, sub } ->
+  __native_string_index_of { s = s, sub = sub }
 
 ## Find the last index of a substring. Returns None if not found.
-pub let last_index_of: { s: Str, sub: Str } -> Option Int = { s, sub } -> __native_string_last_index_of { s = s, sub = sub }
+pub let last_index_of: { s: Str, sub: Str } -> Option Int = { s, sub } ->
+  __native_string_last_index_of { s = s, sub = sub }
 
 ## Strip leading whitespace.
 pub let trim_start: { s: Str } -> Str = { s } -> __native_string_trim_start { s = s }
@@ -160,7 +163,8 @@ pub let to_camel_case: { s: Str } -> Str = { s } -> __native_string_to_camel_cas
 pub let to_kebab_case: { s: Str } -> Str = { s } -> __native_string_to_kebab_case { s = s }
 
 ## Convert to SCREAMING_SNAKE_CASE.
-pub let to_screaming_snake_case: { s: Str } -> Str = { s } -> __native_string_to_screaming_snake_case { s = s }
+pub let to_screaming_snake_case: { s: Str } -> Str = { s } ->
+  __native_string_to_screaming_snake_case { s = s }
 
 impl Sized for Str where {
   size = { it } -> size { s = it },

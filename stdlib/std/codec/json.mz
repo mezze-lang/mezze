@@ -14,7 +14,7 @@ use std::codec::core::{ Format, DecodeFormat }
 pub type JsonFmt = {}
 
 ## JSON format instance for use with Encode/Decode abilities.
-pub let json_fmt : JsonFmt = {}
+pub let json_fmt: JsonFmt = {}
 
 ## JSON value — the intermediate representation for JSON encoding/decoding.
 pub type Json = |
@@ -38,7 +38,7 @@ pub type JsonConfig = {
 }
 
 ## Default JSON configuration (compact, 2-space indent, no transforms).
-pub let default_config : JsonConfig = {
+pub let default_config: JsonConfig = {
   pretty = False,
   indent = 2,
   field_transform = Identity,
@@ -54,7 +54,7 @@ pub let config = { pretty: Bool, indent: Int, field_transform: FieldTransform, s
     skip_null = skip_null,
   }
 
-let json_type_name : { json: Json } -> Str = { json } -> match json is
+let json_type_name: { json: Json } -> Str = { json } -> match json is
   JNull -> "null"
   JBool { val } -> "boolean"
   JInt { val } -> "integer"
@@ -64,18 +64,18 @@ let json_type_name : { json: Json } -> Str = { json } -> match json is
   JObject { fields } -> "object"
 
 
-pub let serialize_to_str : { json: Json, config: JsonConfig } -> Str = { json, config } ->
+pub let serialize_to_str: { json: Json, config: JsonConfig } -> Str = { json, config } ->
   match __native_json_serialize { json = json, pretty = config.pretty } is
     Ok { val } -> val
     Err { error } -> ""
 
 
-pub let to_str : { json: Json } -> Str = { json } -> match __native_json_serialize { json = json, pretty = False } is
+pub let to_str: { json: Json } -> Str = { json } -> match __native_json_serialize { json = json, pretty = False } is
   Ok { val } -> val
   Err { error } -> ""
 
 
-let serialize_compact : { json: Json } -> Str = { json } -> match json is
+let serialize_compact: { json: Json } -> Str = { json } -> match json is
   JNull -> "null"
   JBool { val } -> if val then "true" else "false"
   JInt { val } -> int::to_str { n = val }
@@ -89,7 +89,7 @@ let serialize_compact : { json: Json } -> Str = { json } -> match json is
     "{$(str::join { strings = inner, separator = "," })}"
 
 
-let serialize_pretty : { json: Json, indent: Int, indent_size: Int } -> Str = { json, indent, indent_size } ->
+let serialize_pretty: { json: Json, indent: Int, indent_size: Int } -> Str = { json, indent, indent_size } ->
   do
     let indent_str = str::repeat { s = " ", n = indent }
     let next_indent = indent + indent_size
@@ -118,11 +118,17 @@ let serialize_pretty : { json: Json, indent: Int, indent_size: Int } -> Str = { 
         "{\n$(str::join { strings = inner, separator = ",\n" })\n$(indent_str)}"
 
 
-let escape_string : { s: Str } -> Str = { s } -> s
+let escape_string: { s: Str } -> Str = { s } -> s
 
-pub let parse: { bytes: Bytes } -> Result Json { path: [Str], message: Str, expected: Str, found: Option Str } = { bytes } -> __native_json_parse_bytes { bytes = bytes }
+pub let parse
+  : { bytes: Bytes }
+  -> Result Json { path: [Str], message: Str, expected: Str, found: Option Str }
+  = { bytes } -> __native_json_parse_bytes { bytes = bytes }
 
-pub let parse_str: { s: Str } -> Result Json { path: [Str], message: Str, expected: Str, found: Option Str } = { s } -> __native_json_parse { s = s }
+pub let parse_str
+  : { s: Str }
+  -> Result Json { path: [Str], message: Str, expected: Str, found: Option Str }
+  = { s } -> __native_json_parse { s = s }
 
 pub let transform_field_name = { name: Str, transform: FieldTransform } -> match transform is
   Identity -> name
@@ -141,38 +147,39 @@ pub let inverse_transform_field_name = { name: Str, transform: FieldTransform } 
     ScreamingSnakeCase -> str::to_camel_case { s = name }
 
 
-pub let transform_fields : { json: Json, transform: FieldTransform } -> Json = { json, transform } ->
+pub let transform_fields: { json: Json, transform: FieldTransform } -> Json = { json, transform } ->
   match transform is
     Identity -> json
     _ -> transform_fields_impl { j = json, t = transform }
 
 
-let transform_fields_impl : { j: Json, t: FieldTransform } -> Json = { j, t } ->
-  match j is
-    JNull -> JNull
-    JBool { val } -> JBool { val = val }
-    JInt { val } -> JInt { val = val }
-    JFloat { val } -> JFloat { val = val }
-    JString { val } -> JString { val = val }
-    JArray { items } -> JArray {
-      items = seq::map { xs = items, f = { x } -> transform_fields_impl { j = x, t = t } },
-    }
-    JObject { fields } -> JObject {
-      fields = seq::map { xs = fields, f = { x } ->
-        {
-          key = transform_field_name { name = x.key, transform = t },
-          value = transform_fields_impl { j = x.value, t = t },
-        } },
-    }
+let transform_fields_impl: { j: Json, t: FieldTransform } -> Json = { j, t } -> match j is
+  JNull -> JNull
+  JBool { val } -> JBool { val = val }
+  JInt { val } -> JInt { val = val }
+  JFloat { val } -> JFloat { val = val }
+  JString { val } -> JString { val = val }
+  JArray { items } -> JArray {
+    items = seq::map { xs = items, f = { x } -> transform_fields_impl { j = x, t = t } },
+  }
+  JObject { fields } -> JObject {
+    fields = seq::map { xs = fields, f = { x } ->
+      {
+        key = transform_field_name { name = x.key, transform = t },
+        value = transform_fields_impl { j = x.value, t = t },
+      } },
+  }
 
 
-pub let inverse_transform_fields : { json: Json, transform: FieldTransform } -> Json = { json, transform } ->
-  match transform is
+pub let inverse_transform_fields
+  : { json: Json, transform: FieldTransform }
+  -> Json
+  = { json, transform } -> match transform is
     Identity -> json
     _ -> inverse_transform_fields_impl { j = json, t = transform }
 
 
-let inverse_transform_fields_impl : { j: Json, t: FieldTransform } -> Json = { j, t } ->
+let inverse_transform_fields_impl: { j: Json, t: FieldTransform } -> Json = { j, t } ->
   match j is
     JNull -> JNull
     JBool { val } -> JBool { val = val }

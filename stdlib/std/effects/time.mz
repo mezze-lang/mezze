@@ -25,35 +25,26 @@
 ## For code that runs under Async, prefer Async's own cancellable
 ## sleep helpers where they exist. Time.sleep is a blocking wait
 ## and won't wake early on scope cancellation.
-
-use std::datetime::{
-  Instant, Duration, Zone, DateTime, TestClock,
-  decompose, add, diff, utc,
-  year, month, day, hour, minute, second,
-  duration_zero, sub_duration,
-  test_clock_now, test_clock_advance, test_clock_monotonic
-}
+use std::datetime::{ Instant, Duration, Zone, DateTime, TestClock, decompose, add, diff, utc, year, month, day, hour, minute, second, duration_zero, sub_duration, test_clock_now, test_clock_advance, test_clock_monotonic }
 
 ## The Time effect.
 effect Time where {
   ## Current wall-clock instant. Not monotonic — can jump.
   ## Use for timestamps, expiries, log records.
   now: {} -> Instant <Time>,
-
   ## Monotonic-clock reading, since some arbitrary origin (usually JVM
   ## start). Never goes backwards. Only meaningful as a delta between
   ## two readings. Use for benchmarks, timeouts, rate limits.
   monotonic: {} -> Duration <Time>,
-
   ## Block for the given Duration.
-  sleep: { d: Duration } -> {} <Time>,
+  sleep: { d: Duration } -> {} <Time>
 }
 
 ## Real system clocks + real blocking sleep.
 impl Time for SystemTime where {
-  now       = {} -> __native_instant_now {},
+  now = {} -> __native_instant_now {},
   monotonic = {} -> __native_duration_monotonic {},
-  sleep     = { d } -> __native_time_sleep { d = d },
+  sleep = { d } -> __native_time_sleep { d = d },
 }
 
 ## Test-time impl backed by a mutable TestClock handle. Clock reads
@@ -67,18 +58,18 @@ impl Time for SystemTime where {
 ##     Time.sleep { d = duration_seconds { n = 5 } }
 ##     instant_to_millis { i = Time.now {} }  # => 5000
 impl Time for MockTime { clock: TestClock } where {
-  now       = {} -> test_clock_now       { c = clock },
+  now = {} -> test_clock_now { c = clock },
   monotonic = {} -> test_clock_monotonic { c = clock },
-  sleep     = { d } -> test_clock_advance { c = clock, d = d },
+  sleep = { d } -> test_clock_advance { c = clock, d = d },
 }
 
 ## Frozen-time impl. `now` returns `fixed`, `monotonic` returns zero,
 ## `sleep` is a no-op. Predictable snapshot — no clock movement,
 ## no waiting. Use when your test doesn't care about elapsed time.
 impl Time for FrozenTime { fixed: Instant } where {
-  now       = {} -> fixed,
+  now = {} -> fixed,
   monotonic = {} -> duration_zero {},
-  sleep     = { d } -> {},
+  sleep = { d } -> {},
 }
 
 ## ==================================================================
@@ -86,53 +77,46 @@ impl Time for FrozenTime { fixed: Instant } where {
 ## Kept in this module (not std::datetime) because they carry the
 ## <Time> effect row.
 ## ==================================================================
-
 ## Wall-clock instant right now — same as Time.now.
-pub let now : {} -> Instant <Time> = {} -> Time.now {}
+pub let now: {} -> Instant <Time> = {} -> Time.now {}
 
 ## Monotonic reading right now — same as Time.monotonic.
-pub let monotonic : {} -> Duration <Time> = {} -> Time.monotonic {}
+pub let monotonic: {} -> Duration <Time> = {} -> Time.monotonic {}
 
 ## Sleep for the given Duration — same as Time.sleep.
-pub let sleep : { d: Duration } -> {} <Time> = { d } -> Time.sleep { d = d }
+pub let sleep: { d: Duration } -> {} <Time> = { d } -> Time.sleep { d = d }
 
 ## Decomposed date/time right now, in the given Zone. One clock
 ## read + one pure decompose — snapshot is atomic.
-pub let current_datetime : { z: Zone } -> DateTime <Time> = { z } ->
+pub let current_datetime: { z: Zone } -> DateTime <Time> = { z } ->
   decompose { i = Time.now {}, z = z }
 
 ## Current year in the given Zone. Fast path — no DateTime allocation.
-pub let current_year : { z: Zone } -> Int <Time> = { z } ->
-  year { i = Time.now {}, z = z }
+pub let current_year: { z: Zone } -> Int <Time> = { z } -> year { i = Time.now {}, z = z }
 
 ## Current month (1-12) in the given Zone.
-pub let current_month : { z: Zone } -> Int <Time> = { z } ->
-  month { i = Time.now {}, z = z }
+pub let current_month: { z: Zone } -> Int <Time> = { z } -> month { i = Time.now {}, z = z }
 
 ## Current day-of-month (1-31) in the given Zone.
-pub let current_day : { z: Zone } -> Int <Time> = { z } ->
-  day { i = Time.now {}, z = z }
+pub let current_day: { z: Zone } -> Int <Time> = { z } -> day { i = Time.now {}, z = z }
 
 ## Current hour (0-23) in the given Zone.
-pub let current_hour : { z: Zone } -> Int <Time> = { z } ->
-  hour { i = Time.now {}, z = z }
+pub let current_hour: { z: Zone } -> Int <Time> = { z } -> hour { i = Time.now {}, z = z }
 
 ## Current minute (0-59) in the given Zone.
-pub let current_minute : { z: Zone } -> Int <Time> = { z } ->
-  minute { i = Time.now {}, z = z }
+pub let current_minute: { z: Zone } -> Int <Time> = { z } -> minute { i = Time.now {}, z = z }
 
 ## Current second (0-59) in the given Zone.
-pub let current_second : { z: Zone } -> Int <Time> = { z } ->
-  second { i = Time.now {}, z = z }
+pub let current_second: { z: Zone } -> Int <Time> = { z } -> second { i = Time.now {}, z = z }
 
 ## Duration elapsed since the given wall-clock Instant. Uses `now`
 ## (not `monotonic`) — may go negative if the OS clock jumps back.
 ## For benchmarks prefer `elapsed_monotonic_since`.
-pub let elapsed_since : { s: Instant } -> Duration <Time> = { s } ->
+pub let elapsed_since: { s: Instant } -> Duration <Time> = { s } ->
   diff { s = s, e = Time.now {} }
 
 ## Duration elapsed since a captured monotonic reading. Guaranteed
 ## non-negative on the same JVM instance. Use this for benchmarks
 ## and timeouts.
-pub let elapsed_monotonic_since : { s: Duration } -> Duration <Time> = { s } ->
+pub let elapsed_monotonic_since: { s: Duration } -> Duration <Time> = { s } ->
   sub_duration { a = Time.monotonic {}, b = s }

@@ -6,7 +6,6 @@
 # The impls live here rather than in `std::effects::mutation` to avoid a
 # module cycle: this file already depends on `mutation` for `Mut` and the
 # mutable types, so the impls belong on this side of the edge.
-
 use std::abilities::compare::{ Eq }
 use std::int
 use std::effects::mutation::{ Mut, MutSeq, MutString, MutBytes, size, string_len, string_is_empty, bytes_len }

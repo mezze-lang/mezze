@@ -36,7 +36,7 @@ pub type CodecConfig = {
 }
 
 ## Default codec configuration (identity transform, include nulls, compact).
-pub let default_config : CodecConfig = {
+pub let default_config: CodecConfig = {
   field_transform = Identity,
   null_handling = IncludeNull,
   sort_keys = False,
@@ -172,7 +172,7 @@ ability StreamDecode 'a for 'bytes having 'fmt where {
 }
 
 ## Empty path for top-level encoding/decoding.
-pub let empty_path : [Str] = []
+pub let empty_path: [Str] = []
 
 ## Appends a field name to a codec path.
 pub let append_path = { path: [Str], field: Str } -> seq::add { xs = path, x = field }

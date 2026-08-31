@@ -13,55 +13,55 @@ pub newtype Promise 'a = __NativePromise
 ## Opaque scope for structured concurrency.
 pub newtype Scope 'a = __NativeScope
 
-pub let promise_eq : { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
+pub let promise_eq: { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
   __native_ref_eq { l = l, r = r }
 
-pub let promise_neq : { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
+pub let promise_neq: { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
   __native_ref_neq { l = l, r = r }
 
 impl Eq for Promise 'a where {
-  eq  = { it, r } -> promise_eq  { l = it, r = r },
+  eq = { it, r } -> promise_eq { l = it, r = r },
   neq = { it, r } -> promise_neq { l = it, r = r },
 }
 
-pub let scope_eq : { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
+pub let scope_eq: { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
   __native_ref_eq { l = l, r = r }
 
-pub let scope_neq : { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
+pub let scope_neq: { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
   __native_ref_neq { l = l, r = r }
 
 impl Eq for Scope 'a where {
-  eq  = { it, r } -> scope_eq  { l = it, r = r },
+  eq = { it, r } -> scope_eq { l = it, r = r },
   neq = { it, r } -> scope_neq { l = it, r = r },
 }
 
 ## Block until the Promise resolves, returning success or AsyncError.
-pub let await : { p: Promise 'a } -> Result 'a AsyncError <Async> = { p } ->
+pub let await: { p: Promise 'a } -> Result 'a AsyncError <Async> = { p } ->
   __native_promise_await_result { p = p }
 
 ## Non-blocking snapshot of the Promise's state.
-pub let inspect : { p: Promise 'a } -> PromiseState 'a = { p } ->
+pub let inspect: { p: Promise 'a } -> PromiseState 'a = { p } ->
   __native_promise_inspect { p = p }
 
-pub let is_done : { p: Promise 'a } -> Bool = { p } ->
-  match __native_promise_inspect { p = p } is
-    Pending -> False
-    _ -> True
+pub let is_done: { p: Promise 'a } -> Bool = { p } -> match __native_promise_inspect { p = p } is
+  Pending -> False
+  _ -> True
 
-pub let is_pending : { p: Promise 'a } -> Bool = { p } ->
-  match __native_promise_inspect { p = p } is
-    Pending -> True
-    _ -> False
 
-pub let is_failed : { p: Promise 'a } -> Bool = { p } ->
-  match __native_promise_inspect { p = p } is
-    Failed { err = _ } -> True
-    _ -> False
+pub let is_pending: { p: Promise 'a } -> Bool = { p } -> match __native_promise_inspect { p = p } is
+  Pending -> True
+  _ -> False
 
-pub let is_cancelled : { p: Promise 'a } -> Bool = { p } ->
-  match __native_promise_inspect { p = p } is
-    Failed { err = AsyncCancelled { reason = _ } } -> True
-    _ -> False
+
+pub let is_failed: { p: Promise 'a } -> Bool = { p } -> match __native_promise_inspect { p = p } is
+  Failed { err = _ } -> True
+  _ -> False
+
+
+pub let is_cancelled: { p: Promise 'a } -> Bool = { p } -> match __native_promise_inspect { p = p } is
+  Failed { err = AsyncCancelled { reason = _ } } -> True
+  _ -> False
+
 
 ## Request cancellation. `reason` is mandatory — every cancel names why.
 ##
@@ -69,7 +69,7 @@ pub let is_cancelled : { p: Promise 'a } -> Bool = { p } ->
 ## `AsyncCancelled { reason }`, visible to awaiters and `inspect`
 ## observers. If you don't have a natural category, pass
 ## `Custom { tag = "...", detail = "..." }`.
-pub let cancel : { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async> = { p, reason } ->
+pub let cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async> = { p, reason } ->
   __native_promise_cancel { p = p, reason = reason }
 
 ## ==================================================================
@@ -100,33 +100,33 @@ pub let cancel : { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async
 ## callbacks, and route Mezze's cancel back to the foreign scheduler
 ## via `on_cancel`.
 ## ==================================================================
-
 ## Construct a Promise via a setup callback that receives three
 ## write-side capabilities. See module comment above for semantics.
-pub let promise_from : { setup: { complete: { val: 'a } -> {}, fail: { err: AsyncError } -> {}, on_cancel: { hook: { reason: CancelReason } -> {} <...> } -> {} <...> } -> {} <...> } -> Promise 'a = { setup } ->
-  __native_promise_from { setup = setup }
+pub let promise_from
+  : { setup: { complete: { val: 'a } -> {}, fail: { err: AsyncError } -> {}, on_cancel: { hook: { reason: CancelReason } -> {} <...> } -> {} <...> } -> {} <...> }
+  -> Promise 'a
+  = { setup } -> __native_promise_from { setup = setup }
 
 ## A Promise already resolved with `val`. Sugar over promise_from.
-pub let promise_of : { val: 'a } -> Promise 'a = { val } ->
-  __native_promise_succeed { val = val }
+pub let promise_of: { val: 'a } -> Promise 'a = { val } -> __native_promise_succeed { val = val }
 
 ## A Promise already failed with `err`. Sugar over promise_from.
-pub let promise_failed : { err: AsyncError } -> Promise 'a = { err } ->
+pub let promise_failed: { err: AsyncError } -> Promise 'a = { err } ->
   __native_promise_fail { err = err }
 
 ## Sleep for the given milliseconds. Delegates to Time.sleep.
-pub let sleep : { ms: Int } -> {} <Time> = { ms } ->
+pub let sleep: { ms: Int } -> {} <Time> = { ms } ->
   Time.sleep { d = duration_millis { n = ms } }
 
 ## Voluntarily yield the current task's execution slot.
-pub let yield_now : {} -> {} <Async> = {} -> __native_async_yield_now {}
+pub let yield_now: {} -> {} <Async> = {} -> __native_async_yield_now {}
 
 ## Suspend until predicate returns True.
-pub let park : { predicate: {} -> Bool <...> } -> {} <Async, ...> = { predicate } ->
+pub let park: { predicate: {} -> Bool <...> } -> {} <Async, ...> = { predicate } ->
   __native_async_park_until { predicate = predicate }
 
 ## Run f within a structured concurrency scope.
-pub let scoped : { f: { sc: Scope 'a } -> 'b <...> } -> 'b <Async, ...> = { f } ->
+pub let scoped: { f: { sc: Scope 'a } -> 'b <...> } -> 'b <Async, ...> = { f } ->
   __native_async_scoped { f = f }
 
 ## Chain another async step. Runs f only if p succeeded; on upstream Err
@@ -135,54 +135,59 @@ pub let scoped : { f: { sc: Scope 'a } -> 'b <...> } -> 'b <Async, ...> = { f } 
 ## error fidelity).
 ## Equivalent to Java's CompletableFuture.thenCompose / Rust's and_then.
 ## (named `and_then` because `then` is a reserved keyword.)
-pub let and_then : { p: Promise 'a, f: { val: 'a } -> Promise 'b <Async, ...> } -> Promise 'b <Async, ...> = { p, f } -> Async.spawn { f = {} -> do
-    let v = unwrap { result =await { p = p } }
-    unwrap { result =await { p = f { val = v } } }
-  }
+pub let and_then
+  : { p: Promise 'a, f: { val: 'a } -> Promise 'b <Async, ...> }
+  -> Promise 'b <Async, ...>
+  = { p, f } -> Async.spawn { f = {} -> do
+    let v = unwrap { result = await { p = p } }
+    unwrap { result = await { p = f { val = v } } } }
 
 ## Apply a pure transform to the success value. On upstream Err, the new
 ## Promise fails with AsyncFailed (lossy on error variant).
 ## Equivalent to Java's CompletableFuture.thenApply / Rust's map_ok.
-pub let map_ok : { p: Promise 'a, f: { val: 'a } -> 'b <...> } -> Promise 'b <Async, ...> = { p, f } -> Async.spawn { f = {} ->
-    f { val = unwrap { result =await { p = p } } }
-  }
+pub let map_ok: { p: Promise 'a, f: { val: 'a } -> 'b <...> } -> Promise 'b <Async, ...> = { p, f } ->
+  Async.spawn { f = {} -> f { val = unwrap { result = await { p = p } } } }
 
 ## Recover from failure. f runs only on Err; Ok values pass through.
 ## Equivalent to Java's CompletableFuture.exceptionally / Scala's recover.
-pub let recover : { p: Promise 'a, f: { err: AsyncError } -> 'a <...> } -> Promise 'a <Async, ...> = { p, f } -> Async.spawn { f = {} ->
-    match await { p = p } is
-      Ok  { val }       -> val
-      Err { error = e } -> f { err = e }
-  }
+pub let recover
+  : { p: Promise 'a, f: { err: AsyncError } -> 'a <...> }
+  -> Promise 'a <Async, ...>
+  = { p, f } -> Async.spawn { f = {} -> match await { p = p } is
+    Ok { val } -> val
+    Err { error = e } -> f { err = e }
+ }
 
 ## Side-effecting observer that sees both branches. Returns a Promise
 ## resolving to the same value as p (or failing the same way), after f
 ## has run. Equivalent to Java's CompletableFuture.whenComplete.
-pub let on_complete : { p: Promise 'a, f: { result: Result 'a AsyncError } -> {} <...> } -> Promise 'a <Async, ...> = { p, f } -> Async.spawn { f = {} -> do
+pub let on_complete
+  : { p: Promise 'a, f: { result: Result 'a AsyncError } -> {} <...> }
+  -> Promise 'a <Async, ...>
+  = { p, f } -> Async.spawn { f = {} -> do
     let r = await { p = p }
     f { result = r }
-    unwrap { result =r }
-  }
+    unwrap { result = r } }
 
 ## Block on the Promise; return None on any failure, dropping error info.
-pub let try_await : { p: Promise 'a } -> Option 'a <Async> = { p } ->
-  match await { p = p } is
-    Ok  { val }       -> Some { val = val }
-    Err { error = _ } -> None
+pub let try_await: { p: Promise 'a } -> Option 'a <Async> = { p } -> match await { p = p } is
+  Ok { val } -> Some { val = val }
+  Err { error = _ } -> None
+
 
 impl Promise 'a where {
-  await        = { it } -> await        { p = it },
-  inspect      = { it } -> inspect      { p = it },
-  is_done      = { it } -> is_done      { p = it },
-  is_pending   = { it } -> is_pending   { p = it },
-  is_failed    = { it } -> is_failed    { p = it },
+  await = { it } -> await { p = it },
+  inspect = { it } -> inspect { p = it },
+  is_done = { it } -> is_done { p = it },
+  is_pending = { it } -> is_pending { p = it },
+  is_failed = { it } -> is_failed { p = it },
   is_cancelled = { it } -> is_cancelled { p = it },
-  cancel       = { it, reason } -> cancel { p = it, reason = reason },
-  and_then     = { it, f } -> and_then    { p = it, f = f },
-  map_ok       = { it, f } -> map_ok      { p = it, f = f },
-  recover      = { it, f } -> recover     { p = it, f = f },
-  on_complete  = { it, f } -> on_complete { p = it, f = f },
-  try_await    = { it } -> try_await { p = it },
+  cancel = { it, reason } -> cancel { p = it, reason = reason },
+  and_then = { it, f } -> and_then { p = it, f = f },
+  map_ok = { it, f } -> map_ok { p = it, f = f },
+  recover = { it, f } -> recover { p = it, f = f },
+  on_complete = { it, f } -> on_complete { p = it, f = f },
+  try_await = { it } -> try_await { p = it },
 }
 
 ## Method surface for a seq of promises. Mirrors the top-level
@@ -192,9 +197,9 @@ impl Promise 'a where {
 ## inherent impl on a parametric container as long as some nominal type
 ## in the receiver tree is local.
 impl [Promise 'a] where {
-  race    = { it } -> race    { ps = it },
-  await_all    = { it } -> all     { ps = it },
-  await_settle = { it } -> settle  { ps = it },
+  race = { it } -> race { ps = it },
+  await_all = { it } -> all { ps = it },
+  await_settle = { it } -> settle { ps = it },
   try_all = { it } -> try_all { ps = it },
 }
 
@@ -222,13 +227,13 @@ impl [Promise 'a] where {
 ##                       for programmatic matching, put the specifics in
 ##                       detail.
 pub type CancelReason = |
-  UserRequested     { msg: Str },
-  Timeout           { deadline_ms: Int },
+  UserRequested { msg: Str },
+  Timeout { deadline_ms: Int },
   ScopeTeardown,
-  SiblingFailed     { at: Int },
+  SiblingFailed { at: Int },
   LostRace,
   ExternalInterrupt,
-  Custom            { tag: Str, detail: Str },
+  Custom { tag: Str, detail: Str },
 |
 
 ## Error type for async operations.
@@ -267,22 +272,17 @@ pub type CancelOutcome = |
 ## - `OnSuccess`    — first success wins; cancel the rest
 ## - `OnAllSettled` — wait for everyone; return per-item Results
 ## - `OnFirst`      — first to settle (success or failure) wins; cancel the rest
-pub type JoinPolicy = |
-  OnFailure,
-  OnSuccess,
-  OnAllSettled,
-  OnFirst,
-|
+pub type JoinPolicy = | OnFailure, OnSuccess, OnAllSettled, OnFirst |
 
 ## Per-policy outcome of `scoped_with`. Pattern-match exhaustiveness
 ## guarantees you handle every case the chosen policy can produce.
 pub type JoinOutcome 'a = |
-  OnFailureOutcome   { results: ['a] },
-  OnFailureCaught    { failed_at: Int, err: AsyncError, partial: [Option 'a] },
-  OnSuccessOutcome   { winner: 'a, losers_cancelled: Int },
+  OnFailureOutcome { results: ['a] },
+  OnFailureCaught { failed_at: Int, err: AsyncError, partial: [Option 'a] },
+  OnSuccessOutcome { winner: 'a, losers_cancelled: Int },
   OnSuccessAllFailed { errs: [AsyncError] },
-  OnAllOutcome       { results: [Result 'a AsyncError] },
-  OnFirstOutcome     { result: Result 'a AsyncError, settled_at: Int, cancelled: Int },
+  OnAllOutcome { results: [Result 'a AsyncError] },
+  OnFirstOutcome { result: Result 'a AsyncError, settled_at: Int, cancelled: Int },
 |
 
 ## Unified async effect for spawning, awaiting, and structured concurrency.
@@ -307,7 +307,7 @@ pub type JoinOutcome 'a = |
 ## like) if you need cooperative cancel.
 effect Async where {
   ## Spawn a computation, returning a Promise immediately.
-  spawn: { f: {} -> 'a <...> } -> Promise 'a <Async, ...>
+  spawn: { f: {} -> 'a <...> } -> Promise 'a <Async>
 }
 
 ## Default handler using Project Loom virtual threads.
@@ -344,17 +344,19 @@ impl Async for OSThreadAsync where {
 impl Async for OSThreadAsyncWith { pool_size: Int } where {
   initialize_scope = {} -> __native_async_init_scope_os {},
   finalize_scope = {} -> __native_async_finalize_scope_os { tracker = scope },
-  spawn = { f } -> __native_async_spawn_tracked_os { f = f, pool_size = pool_size, tracker = scope },
+  spawn = { f } ->
+    __native_async_spawn_tracked_os { f = f, pool_size = pool_size, tracker = scope },
 }
 
 ## Spawn and immediately await (synchronous helper).
 ## Returns the Result from `await` — callers decide how to handle failure.
-pub let run : { f: {} -> 'a <...> } -> Result 'a AsyncError <Async, ...> = { f } -> do
-  let p = Async.spawn { f = f }
-  await { p = p }
+pub let run: { f: {} -> 'a <...> } -> Result 'a AsyncError <Async, ...> = { f } ->
+  do
+    let p = Async.spawn { f = f }
+    await { p = p }
 
 ## Spawn and detach (fire and forget).
-pub let go : { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
+pub let go: { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
   let _ = Async.spawn { f = f }
   {}
 
@@ -364,85 +366,100 @@ pub let go : { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
 ## as plain functions so the Async effect can eventually shrink to
 ## just the primitives. For now both paths coexist.
 ## ==================================================================
-
 ## Wait for any of a list of promises to settle, returning the first
 ## non-cancelled outcome as `Result 'a AsyncError`. Losing siblings are
 ## auto-cancelled when the winner commits.
 ##
 ## Built on `park` (suspend until predicate True) + `inspect` (pure
 ## non-blocking state read) + `cancel`.
-pub let race : { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps } -> do
-  park { predicate = {} -> seq::any { xs = ps, p = { x } -> is_done { p = x } } }
-  match seq::find { xs = ps, p = { x } -> is_done { p = x } } is
-    None -> Err { error = AsyncFailed { msg = "race: park woke but no promise settled" } }
-    Some { val = winner } -> do
-      seq::for_each { xs = ps, f = { x } ->
-        match is_done { p = x } is
+pub let race: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps } ->
+  do
+    park { predicate = {} -> seq::any { xs = ps, p = { x } -> is_done { p = x } } }
+    match seq::find { xs = ps, p = { x } -> is_done { p = x } } is
+      None -> Err {
+        error = AsyncFailed { msg = "race: park woke but no promise settled" },
+      }
+      Some { val = winner } -> do
+        seq::for_each { xs = ps, f = { x } -> match is_done { p = x } is
           True -> {}
           False -> do
             cancel { p = x, reason = LostRace }
             {}
-      }
-      match inspect { p = winner } is
-        Completed { val = v }   -> Ok { val = v }
-        Failed    { err = e }   -> Err { error = e }
-        Pending                 -> Err { error = AsyncFailed { msg = "race: winner reverted to Pending" } }
+ }
+        match inspect { p = winner } is
+          Completed { val = v } -> Ok { val = v }
+          Failed { err = e } -> Err { error = e }
+          Pending -> Err {
+            error = AsyncFailed { msg = "race: winner reverted to Pending" },
+          }
+
 
 ## Wait for all promises; return each one's Result in input order. Never
 ## raises; the per-promise Result carries success/failure information.
-pub let all : { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async, ...> = { ps } ->
+pub let all: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async, ...> = { ps } ->
   seq::map { xs = ps, f = { x } -> await { p = x } }
 
 ## Run two thunks concurrently, return both Results.
-pub let join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: Result 'a AsyncError, r: Result 'b AsyncError } <Async, ...> =
-  { l, r } -> do
+pub let join
+  : { l: {} -> 'a <...>, r: {} -> 'b <...> }
+  -> { l: Result 'a AsyncError, r: Result 'b AsyncError } <Async, ...>
+  = { l, r } -> do
     let pl = Async.spawn { f = l }
     let pr = Async.spawn { f = r }
     { l = await { p = pl }, r = await { p = pr } }
 
 ## Run three thunks concurrently, return all Results.
-pub let join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: Result 'a AsyncError, b: Result 'b AsyncError, c: Result 'c AsyncError } <Async, ...> = { a, b, c } -> do
-  let pa = Async.spawn { f = a }
-  let pb = Async.spawn { f = b }
-  let pc = Async.spawn { f = c }
-  { a = await { p = pa }, b = await { p = pb }, c = await { p = pc } }
+pub let join3
+  : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> }
+  -> { a: Result 'a AsyncError, b: Result 'b AsyncError, c: Result 'c AsyncError } <Async, ...>
+  = { a, b, c } -> do
+    let pa = Async.spawn { f = a }
+    let pb = Async.spawn { f = b }
+    let pc = Async.spawn { f = c }
+    {
+      a = await { p = pa },
+      b = await { p = pb },
+      c = await { p = pc },
+    }
 
 ## Identical to `all` — kept under the `settle` name for callers that
 ## think of "wait for everyone, see each result" as settle semantics.
-pub let settle : { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async, ...> = { ps } ->
+pub let settle: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async, ...> = { ps } ->
   all { ps = ps }
 
 ## Map over a sequence concurrently; each result wrapped in
 ## `Result 'b AsyncError` so per-element failure is visible. Use
 ## `try_par_map` if you want fail-fast + unwrap semantics.
-pub let par_map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError] <Async, ...> =
-  { xs, f } -> do
+pub let par_map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError] <Async, ...> = { xs, f } ->
+  do
     let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
     all { ps = ps }
 
 ## Run f over each element concurrently for side effects; per-element
 ## Results returned (any failures visible to the caller). Use
 ## `try_par_for_each` if you want fail-fast unit-returning semantics.
-pub let par_for_each : { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError] <Async, ...> =
-  { xs, f } -> par_map { xs = xs, f = f }
+pub let par_for_each
+  : { xs: ['a], f: { x: 'a } -> 'b <...> }
+  -> [Result 'b AsyncError] <Async, ...>
+  = { xs, f } -> par_map { xs = xs, f = f }
 
 ## Filter a sequence with concurrent predicate evaluation; each retained
 ## element wrapped in `Result 'a AsyncError` so per-element predicate
 ## failures are visible. Use `try_par_filter` if you want fail-fast unwrap.
-pub let par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> [Result 'a AsyncError] <Async, ...> =
-  { xs, f } -> do
-    let tagged = par_map {
-      xs = xs,
-      f = { x } -> { elem = x, keep = f { x = x } },
-    }
+pub let par_filter
+  : { xs: ['a], f: { x: 'a } -> Bool <...> }
+  -> [Result 'a AsyncError] <Async, ...>
+  = { xs, f } -> do
+    let tagged = par_map { xs = xs, f = { x } -> { elem = x, keep = f { x = x } } }
     seq::map {
       xs = seq::filter { xs = tagged, p = { x } -> match x is
-        Ok  { val = r }   -> r.keep
+        Ok { val = r } -> r.keep
         Err { error = _ } -> True
-      },
+ },
       f = { x } -> match x is
-        Ok  { val = r }   -> Ok { val = r.elem }
-        Err { error = e } -> Err { error = e },
+        Ok { val = r } -> Ok { val = r.elem }
+        Err { error = e } -> Err { error = e }
+,
     }
 
 ## Wait for p up to ms milliseconds; None if it didn't finish in time.
@@ -451,25 +468,26 @@ pub let par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> [Result 'a Asyn
 ## becomes done after `ms` ms, then park until either the input promise
 ## or the sleeper settles. If the target wins, return its value; if the
 ## sleeper wins, cancel the target and return None.
-pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } -> do
-  let sleeper = Async.spawn { f = {} -> sleep { ms = ms } }
-  park { predicate = {} -> is_done { p = p } || is_done { p = sleeper } }
-  match is_done { p = p } is
-    True -> do
-      cancel { p = sleeper, reason = LostRace }
-      match inspect { p = p } is
-        Completed { val = v } -> Some { val = v }
-        _                     -> None
-    False -> do
-      cancel { p = p, reason = Timeout { deadline_ms = ms } }
-      None
+pub let with_timeout: { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } ->
+  do
+    let sleeper = Async.spawn { f = {} -> sleep { ms = ms } }
+    park { predicate = {} -> is_done { p = p } || is_done { p = sleeper } }
+    match is_done { p = p } is
+      True -> do
+        cancel { p = sleeper, reason = LostRace }
+        match inspect { p = p } is
+          Completed { val = v } -> Some { val = v }
+          _ -> None
+      False -> do
+        cancel { p = p, reason = Timeout { deadline_ms = ms } }
+        None
+
 
 ## ==================================================================
 ## try_* — fail-fast variants. On first Err, cancel the rest and
 ## return that error. On success of every input, return the unwrapped
 ## values. Matches Rust `try_join_all` / `try_join!` semantics.
 ## ==================================================================
-
 ## Wait for all promises; if any fails, cancel the rest and return
 ## the first error. Otherwise return the unwrapped values in input order.
 ##
@@ -481,23 +499,27 @@ pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { 
 ## TODO #169: switch to a fail-fast spawn-of-spawns implementation that
 ## cancels siblings as soon as one errs, rather than the current
 ## "await everything, then check" approach.
-pub let try_all : { ps: [Promise 'a] } -> Result ['a] AsyncError <Async, ...> = { ps } -> do
-  let results = seq::map { xs = ps, f = { x } -> await { p = x } }
-  match seq::find { xs = results, p = { x } -> result::is_err { result = x } } is
-    Some { val = first_err } -> match first_err is
-      Err { error = e } -> Err { error = e }
-      Ok  { val = _ }   -> Err { error = AsyncFailed { msg = "try_all: impossible" } }
-    None ->
-      Ok { val = seq::map { xs = results, f = { x } ->
-        match x is
-          Ok  { val = v }   -> v
+pub let try_all: { ps: [Promise 'a] } -> Result ['a] AsyncError <Async, ...> = { ps } ->
+  do
+    let results = seq::map { xs = ps, f = { x } -> await { p = x } }
+    match seq::find { xs = results, p = { x } -> result::is_err { result = x } } is
+      Some { val = first_err } -> match first_err is
+        Err { error = e } -> Err { error = e }
+        Ok { val = _ } -> Err { error = AsyncFailed { msg = "try_all: impossible" } }
+      None -> Ok {
+        val = seq::map { xs = results, f = { x } -> match x is
+          Ok { val = v } -> v
           Err { error = _ } -> crash { msg = "try_all: impossible" }
-      } }
+ },
+      }
+
 
 ## Run two thunks concurrently. On the first Err, cancel the surviving
 ## sibling and return that error. Otherwise return both unwrapped values.
-pub let try_join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> Result { l: 'a, r: 'b } AsyncError <Async, ...> =
-  { l, r } -> do
+pub let try_join
+  : { l: {} -> 'a <...>, r: {} -> 'b <...> }
+  -> Result { l: 'a, r: 'b } AsyncError <Async, ...>
+  = { l, r } -> do
     let pl = Async.spawn { f = l }
     let pr = Async.spawn { f = r }
     match await { p = pl } is
@@ -505,14 +527,16 @@ pub let try_join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> Result { l: 'a, r
         cancel { p = pr, reason = SiblingFailed { at = 0 } }
         await { p = pr }
         Err { error = e }
-      Ok { val = vl } ->
-        match await { p = pr } is
-          Err { error = e } -> Err { error = e }
-          Ok  { val = vr }  -> Ok { val = { l = vl, r = vr } }
+      Ok { val = vl } -> match await { p = pr } is
+        Err { error = e } -> Err { error = e }
+        Ok { val = vr } -> Ok { val = { l = vl, r = vr } }
+
 
 ## Run three thunks concurrently with fail-fast + auto-cancel semantics.
-pub let try_join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> Result { a: 'a, b: 'b, c: 'c } AsyncError <Async, ...> =
-  { a, b, c } -> do
+pub let try_join3
+  : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> }
+  -> Result { a: 'a, b: 'b, c: 'c } AsyncError <Async, ...>
+  = { a, b, c } -> do
     let pa = Async.spawn { f = a }
     let pb = Async.spawn { f = b }
     let pc = Async.spawn { f = c }
@@ -523,86 +547,95 @@ pub let try_join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } 
         await { p = pb }
         await { p = pc }
         Err { error = e }
-      Ok { val = va } ->
-        match await { p = pb } is
-          Err { error = e } -> do
-            cancel { p = pc, reason = SiblingFailed { at = 1 } }
-            await { p = pc }
-            Err { error = e }
-          Ok { val = vb } ->
-            match await { p = pc } is
-              Err { error = e } -> Err { error = e }
-              Ok  { val = vc }  -> Ok { val = { a = va, b = vb, c = vc } }
+      Ok { val = va } -> match await { p = pb } is
+        Err { error = e } -> do
+          cancel { p = pc, reason = SiblingFailed { at = 1 } }
+          await { p = pc }
+          Err { error = e }
+        Ok { val = vb } -> match await { p = pc } is
+          Err { error = e } -> Err { error = e }
+          Ok { val = vc } -> Ok { val = { a = va, b = vb, c = vc } }
+
 
 ## Map over a sequence concurrently. On first failure, cancel siblings
 ## and return that error. Otherwise return the unwrapped output values
 ## in input order.
-pub let try_par_map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> Result ['b] AsyncError <Async, ...> =
-  { xs, f } -> do
+pub let try_par_map
+  : { xs: ['a], f: { x: 'a } -> 'b <...> }
+  -> Result ['b] AsyncError <Async, ...>
+  = { xs, f } -> do
     let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
     try_all { ps = ps }
 
 ## Run f over each element concurrently; short-circuit on first error,
 ## cancel siblings, return the error. On all-Ok, returns {}.
-pub let try_par_for_each : { xs: ['a], f: { x: 'a } -> 'b <...> } -> Result {} AsyncError <Async, ...> =
-  { xs, f } -> match try_par_map { xs = xs, f = f } is
-    Ok  { val = _ }   -> Ok { val = {} }
+pub let try_par_for_each
+  : { xs: ['a], f: { x: 'a } -> 'b <...> }
+  -> Result {} AsyncError <Async, ...>
+  = { xs, f } -> match try_par_map { xs = xs, f = f } is
+    Ok { val = _ } -> Ok { val = {} }
     Err { error = e } -> Err { error = e }
+
 
 ## Filter a sequence with concurrent predicate evaluation; fail-fast
 ## on first predicate error.
-pub let try_par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Result ['a] AsyncError <Async, ...> =
-  { xs, f } -> do
-    let tagged = try_par_map {
-      xs = xs,
-      f = { x } -> { elem = x, keep = f { x = x } },
-    }
+pub let try_par_filter
+  : { xs: ['a], f: { x: 'a } -> Bool <...> }
+  -> Result ['a] AsyncError <Async, ...>
+  = { xs, f } -> do
+    let tagged = try_par_map { xs = xs, f = { x } -> { elem = x, keep = f { x = x } } }
     match tagged is
       Err { error = e } -> Err { error = e }
-      Ok  { val = ts }  -> Ok { val = seq::map {
-        xs = seq::filter { xs = ts, p = { x } -> x.keep },
-        f = { x } -> x.elem,
-      } }
+      Ok { val = ts } -> Ok {
+        val = seq::map {
+          xs = seq::filter { xs = ts, p = { x } -> x.keep },
+          f = { x } -> x.elem,
+        },
+      }
+
 
 ## Wait for the first successful promise. If every one fails, returns
 ## the first error seen. Built on `try_all` semantics — but since `any`
 ## wants first-success-wins, we await sequentially: as soon as one is
 ## Ok, return its value (cancelling the rest).
-pub let try_any : { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps } -> do
-  let results = seq::map { xs = ps, f = { x } -> await { p = x } }
-  match seq::find { xs = results, p = { x } -> result::is_ok { result = x } } is
-    Some { val = winner } -> match winner is
-      Ok  { val = v }   -> Ok { val = v }
-      Err { error = _ } -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
-    None ->
-      match seq::find { xs = results, p = { x } -> result::is_err { result = x } } is
+pub let try_any: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps } ->
+  do
+    let results = seq::map { xs = ps, f = { x } -> await { p = x } }
+    match seq::find { xs = results, p = { x } -> result::is_ok { result = x } } is
+      Some { val = winner } -> match winner is
+        Ok { val = v } -> Ok { val = v }
+        Err { error = _ } -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
+      None -> match seq::find { xs = results, p = { x } -> result::is_err { result = x } } is
         Some { val = first_err } -> match first_err is
           Err { error = e } -> Err { error = e }
-          Ok  { val = _ }   -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
+          Ok { val = _ } -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
         None -> Err { error = AsyncFailed { msg = "try_any: empty input" } }
 
+
 ## Spawn a task within a structured concurrency scope.
-pub let scope_spawn : { sc: Scope 'a, f: {} -> 'b <...> } -> Promise 'b <Async, ...> = { sc, f } ->
+pub let scope_spawn: { sc: Scope 'a, f: {} -> 'b <...> } -> Promise 'b <Async, ...> = { sc, f } ->
   __native_async_scope_spawn { sc = sc, f = f }
 
 ## Cancel all tasks in a scope.
-pub let scope_cancel_all : { sc: Scope 'a } -> {} <Async, ...> = { sc } ->
+pub let scope_cancel_all: { sc: Scope 'a } -> {} <Async, ...> = { sc } ->
   __native_async_scope_cancel_all { sc = sc }
 
 ## Get the CancellationToken for a scope.
-pub let scope_get_token : { sc: Scope 'a } -> CancellationToken <Async, ...> = { sc } ->
+pub let scope_get_token: { sc: Scope 'a } -> CancellationToken <Async, ...> = { sc } ->
   __native_async_scope_get_token { sc = sc }
 
 ## Check if a scope has been cancelled.
-pub let scope_is_cancelled : { sc: Scope 'a } -> Bool <Async, ...> = { sc } ->
+pub let scope_is_cancelled: { sc: Scope 'a } -> Bool <Async, ...> = { sc } ->
   __native_async_scope_is_cancelled { sc = sc }
 
 ## Wait for every Promise in `ps` to settle, or `ms` milliseconds to elapse —
 ## whichever comes first. Returns True if all settled in time; False if the
 ## deadline fired (and the scope is cancelled so remaining children unwind).
 ## #253: single-call deadline join over a Scope's spawned children.
-pub let scope_join_until : { sc: Scope 'a, ps: [Promise 'b], ms: Int } -> Bool <Async, ...> =
-  { sc, ps, ms } -> do
+pub let scope_join_until
+  : { sc: Scope 'a, ps: [Promise 'b], ms: Int }
+  -> Bool <Async, ...>
+  = { sc, ps, ms } -> do
     let sleeper = Async.spawn { f = {} -> sleep { ms = ms } }
     park { predicate = {} ->
       seq::all { xs = ps, p = { x } -> is_done { p = x } } || is_done { p = sleeper } }
@@ -614,15 +647,16 @@ pub let scope_join_until : { sc: Scope 'a, ps: [Promise 'b], ms: Int } -> Bool <
         scope_cancel_all { sc = sc }
         False
 
+
 ## Method surface for Scope. Mirrors the `scope_*` free functions so
 ## user code can write `sc.spawn { f }` / `sc.cancel_all {}` / etc.
 ## instead of the prefixed forms.
 impl Scope 'a where {
-  spawn        = { it, f }      -> scope_spawn        { sc = it, f = f },
-  cancel_all   = { it }         -> scope_cancel_all   { sc = it },
-  is_cancelled = { it }         -> scope_is_cancelled { sc = it },
-  get_token    = { it }         -> scope_get_token    { sc = it },
-  join_until   = { it, ps, ms } -> scope_join_until   { sc = it, ps = ps, ms = ms },
+  spawn = { it, f } -> scope_spawn { sc = it, f = f },
+  cancel_all = { it } -> scope_cancel_all { sc = it },
+  is_cancelled = { it } -> scope_is_cancelled { sc = it },
+  get_token = { it } -> scope_get_token { sc = it },
+  join_until = { it, ps, ms } -> scope_join_until { sc = it, ps = ps, ms = ms },
 }
 
 # ============================================================================
@@ -642,106 +676,133 @@ impl Scope 'a where {
 # - OnFirst      — first to settle (any way) wins; cancel rest and return
 #                  OnFirstOutcome carrying the result.
 # ============================================================================
-
-pub let scoped_with : { policy: JoinPolicy, body: { sc: Scope 'a } -> [Promise 'a] <Async, ...> } -> JoinOutcome 'a <Async, ...> =
-  { policy, body } -> scoped { f = { sc } -> do
+pub let scoped_with
+  : { policy: JoinPolicy, body: { sc: Scope 'a } -> [Promise 'a] <Async, ...> }
+  -> JoinOutcome 'a <Async, ...>
+  = { policy, body } -> scoped { f = { sc } -> do
     let ps = body { sc = sc }
     match policy is
       OnAllSettled -> OnAllOutcome { results = all { ps = ps } }
-      OnFailure    -> join_on_failure { sc = sc, ps = ps }
-      OnSuccess    -> join_on_success { sc = sc, ps = ps }
-      OnFirst      -> join_on_first   { sc = sc, ps = ps }
-  }
+      OnFailure -> join_on_failure { sc = sc, ps = ps }
+      OnSuccess -> join_on_success { sc = sc, ps = ps }
+      OnFirst -> join_on_first { sc = sc, ps = ps }
+ }
 
 ## OnSuccess: park until at least one promise succeeds OR all fail. On first
 ## success: cancel everyone else, return OnSuccessOutcome with the winner +
 ## the count of cancelled siblings. If everyone failed, return
 ## OnSuccessAllFailed with the per-task errors in input order.
-pub let join_on_success : { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Async, ...> = { sc, ps } -> do
-  park { predicate = {} ->
-    seq::any { xs = ps, p = { x } -> is_done { p = x } && (is_failed { p = x }).not {} } ||
-    seq::all { xs = ps, p = { x } -> is_done { p = x } } }
-  let winner_opt = seq::find { xs = ps, p = { x } -> is_done { p = x } && (is_failed { p = x }).not {} }
-  match winner_opt is
-    Some { val = winner } -> do
-      let winner_val = match inspect { p = winner } is
-        Completed { val = v } -> v
-        Failed    { err = _ } -> crash { msg = "on_success: winner reverted to Failed" }
-        Pending               -> crash { msg = "on_success: winner reverted to Pending" }
-      scope_cancel_all { sc = sc }
-      let cancelled = seq::fold { xs = ps, init = 0, f = { acc, x } ->
-        match promise_eq { l = x, r = winner } is
-          True  -> acc
+pub let join_on_success
+  : { sc: Scope 'a, ps: [Promise 'b] }
+  -> JoinOutcome 'b <Async, ...>
+  = { sc, ps } -> do
+    park { predicate = {} ->
+      seq::any { xs = ps, p = { x } -> is_done { p = x } && (is_failed { p = x }).not {} } || seq::all { xs = ps, p = { x } ->
+        is_done { p = x } } }
+    let winner_opt = seq::find { xs = ps, p = { x } ->
+      is_done { p = x } && (is_failed { p = x }).not {} }
+    match winner_opt is
+      Some { val = winner } -> do
+        let winner_val = match inspect { p = winner } is
+          Completed { val = v } -> v
+          Failed { err = _ } -> crash { msg = "on_success: winner reverted to Failed" }
+          Pending -> crash { msg = "on_success: winner reverted to Pending" }
+
+        scope_cancel_all { sc = sc }
+        let cancelled = seq::fold { xs = ps, init = 0, f = { acc, x } -> match promise_eq { l = x, r = winner } is
+          True -> acc
           False -> match is_done { p = x } is
-            True  -> acc
-            False -> acc + 1 }
-      OnSuccessOutcome { winner = winner_val, losers_cancelled = cancelled }
-    None -> OnSuccessAllFailed {
-      errs = seq::map { xs = ps, f = { x } -> match inspect { p = x } is
-        Failed    { err = e } -> e
-        Completed { val = _ } -> AsyncFailed { msg = "on_success: expected Failed, got Completed" }
-        Pending               -> AsyncFailed { msg = "on_success: expected Failed, got Pending" } },
-    }
+            True -> acc
+            False -> acc + 1
+ }
+        OnSuccessOutcome { winner = winner_val, losers_cancelled = cancelled }
+      None -> OnSuccessAllFailed {
+        errs = seq::map { xs = ps, f = { x } -> match inspect { p = x } is
+          Failed { err = e } -> e
+          Completed { val = _ } -> AsyncFailed { msg = "on_success: expected Failed, got Completed" }
+          Pending -> AsyncFailed { msg = "on_success: expected Failed, got Pending" }
+ },
+      }
+
 
 ## OnFailure: wait for every promise; if any fail, cancel rest and return
 ## OnFailureCaught with partial successes; otherwise return OnFailureOutcome
 ## with the unwrapped values in input order.
-pub let join_on_failure : { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Async, ...> = { sc, ps } -> do
-  let results = all { ps = ps }
-  match seq::find_index { xs = results, p = { x } -> match x is
-    Err { error = _ } -> True
-    Ok  { val = _ }   -> False } is
-    None -> OnFailureOutcome {
-      results = seq::map { xs = results, f = { x } -> match x is
-        Ok  { val = v }   -> v
-        Err { error = _ } -> crash { msg = "on_failure: find_index=None but Err in seq" } },
-    }
-    Some { val = idx } -> do
-      scope_cancel_all { sc = sc }
-      let nth_res = seq::nth { xs = results, i = idx }
-      let err = match nth_res is
-        Some { val = Err { error = e } } -> e
-        Some { val = Ok  { val = _ } }   -> AsyncFailed { msg = "on_failure: nth=Ok at failed idx" }
-        None                             -> AsyncFailed { msg = "on_failure: nth=None at failed idx" }
-      OnFailureCaught {
-        failed_at = idx,
-        err       = err,
-        partial   = seq::map { xs = results, f = { x } -> match x is
-          Ok  { val = v }   -> Some { val = v }
-          Err { error = _ } -> None },
+pub let join_on_failure
+  : { sc: Scope 'a, ps: [Promise 'b] }
+  -> JoinOutcome 'b <Async, ...>
+  = { sc, ps } -> do
+    let results = all { ps = ps }
+    match seq::find_index { xs = results, p = { x } -> match x is
+      Err { error = _ } -> True
+      Ok { val = _ } -> False
+ } is
+      None -> OnFailureOutcome {
+        results = seq::map { xs = results, f = { x } -> match x is
+          Ok { val = v } -> v
+          Err { error = _ } -> crash { msg = "on_failure: find_index=None but Err in seq" }
+ },
       }
+      Some { val = idx } -> do
+        scope_cancel_all { sc = sc }
+        let nth_res = seq::nth { xs = results, i = idx }
+        let err = match nth_res is
+          Some { val = Err { error = e } } -> e
+          Some { val = Ok { val = _ } } -> AsyncFailed { msg = "on_failure: nth=Ok at failed idx" }
+          None -> AsyncFailed { msg = "on_failure: nth=None at failed idx" }
+
+        OnFailureCaught {
+          failed_at = idx,
+          err = err,
+          partial = seq::map { xs = results, f = { x } -> match x is
+            Ok { val = v } -> Some { val = v }
+            Err { error = _ } -> None
+ },
+        }
+
 
 ## OnFirst: first to settle (success or failure) wins. Cancel rest, return
 ## OnFirstOutcome carrying the winner's Result, its input index, and the
 ## count of cancelled siblings.
-pub let join_on_first : { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Async, ...> = { sc, ps } -> do
-  park { predicate = {} -> seq::any { xs = ps, p = { x } -> is_done { p = x } } }
-  let idx_opt = seq::find_index { xs = ps, p = { x } -> is_done { p = x } }
-  match idx_opt is
-    None -> OnFirstOutcome {
-      result     = Err { error = AsyncFailed { msg = "on_first: park woke but no promise settled" } },
-      settled_at = 0,
-      cancelled  = 0,
-    }
-    Some { val = idx } -> do
-      let winner_opt = seq::nth { xs = ps, i = idx }
-      let winner = match winner_opt is
-        Some { val = w } -> w
-        None             -> crash { msg = "on_first: nth=None at idx" }
-      let result = match inspect { p = winner } is
-        Completed { val = v } -> Ok { val = v }
-        Failed    { err = e } -> Err { error = e }
-        Pending               -> Err { error = AsyncFailed { msg = "on_first: winner reverted" } }
-      scope_cancel_all { sc = sc }
-      let cancelled = seq::fold { xs = ps, init = 0, f = { acc, x } ->
-        match promise_eq { l = x, r = winner } is
-          True  -> acc
-          False -> match is_done { p = x } is
-            True  -> acc
-            False -> acc + 1 }
-      OnFirstOutcome { result = result, settled_at = idx, cancelled = cancelled }
+pub let join_on_first: { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Async, ...> = { sc, ps } ->
+  do
+    park { predicate = {} -> seq::any { xs = ps, p = { x } -> is_done { p = x } } }
+    let idx_opt = seq::find_index { xs = ps, p = { x } -> is_done { p = x } }
+    match idx_opt is
+      None -> OnFirstOutcome {
+        result = Err {
+          error = AsyncFailed { msg = "on_first: park woke but no promise settled" },
+        },
+        settled_at = 0,
+        cancelled = 0,
+      }
+      Some { val = idx } -> do
+        let winner_opt = seq::nth { xs = ps, i = idx }
+        let winner = match winner_opt is
+          Some { val = w } -> w
+          None -> crash { msg = "on_first: nth=None at idx" }
 
-# ============================================================================
+        let result = match inspect { p = winner } is
+          Completed { val = v } -> Ok { val = v }
+          Failed { err = e } -> Err { error = e }
+          Pending -> Err {
+            error = AsyncFailed { msg = "on_first: winner reverted" },
+          }
+
+        scope_cancel_all { sc = sc }
+        let cancelled = seq::fold { xs = ps, init = 0, f = { acc, x } -> match promise_eq { l = x, r = winner } is
+          True -> acc
+          False -> match is_done { p = x } is
+            True -> acc
+            False -> acc + 1
+ }
+        OnFirstOutcome {
+          result = result,
+          settled_at = idx,
+          cancelled = cancelled,
+        }
+  # ============================================================================
+
 # Cancellation tokens
 #
 # Cooperative cancellation primitive: a flag that tasks can check (via
@@ -761,7 +822,6 @@ pub let join_on_first : { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <As
 # { p = ... }`, which operate on Promises (different shape, different
 # return type).
 # ============================================================================
-
 ## Cooperative cancellation token supporting hierarchical cancellation.
 pub newtype CancellationToken = __NativeCancellationToken
 
@@ -783,52 +843,57 @@ impl CancellationToken where {
 }
 
 ## Create a new cancellation token.
-pub let token : {} -> CancellationToken <Async> = {} -> __native_cancellation_token_new {}
+pub let token: {} -> CancellationToken <Async> = {} -> __native_cancellation_token_new {}
 
 ## Alias for token.
-pub let new : {} -> CancellationToken <Async> = token
+pub let new: {} -> CancellationToken <Async> = token
 
 ## Cancel the token with a reason, invoking all registered callbacks.
-pub let cancel_token : { token: CancellationToken, reason: Str } -> {} <Async> = { token, reason } ->
+pub let cancel_token: { token: CancellationToken, reason: Str } -> {} <Async> = { token, reason } ->
   __native_cancellation_token_cancel { token = token, reason = reason }
 
 ## Cancel with a default reason.
-pub let cancel_default : { token: CancellationToken } -> {} <Async> = { token } ->
+pub let cancel_default: { token: CancellationToken } -> {} <Async> = { token } ->
   cancel_token { token = token, reason = "Operation cancelled" }
 
 ## Check if the token has been cancelled.
-pub let is_token_cancelled : { token: CancellationToken } -> Bool <Async> = { token } ->
+pub let is_token_cancelled: { token: CancellationToken } -> Bool <Async> = { token } ->
   __native_cancellation_token_is_cancelled { token = token }
 
 ## Get the cancellation reason, or None if not cancelled.
-pub let get_reason : { token: CancellationToken } -> Option Str <Async> = { token } ->
+pub let get_reason: { token: CancellationToken } -> Option Str <Async> = { token } ->
   __native_cancellation_token_get_reason { token = token }
 
 ## Throw an exception if the token is cancelled (cancellation checkpoint).
-pub let check_cancelled : { token: CancellationToken } -> {} <Async> = { token } ->
+pub let check_cancelled: { token: CancellationToken } -> {} <Async> = { token } ->
   __native_cancellation_token_throw_if_cancelled { token = token }
 
 ## Alias for check_cancelled.
-pub let throw_if_cancelled : { token: CancellationToken } -> {} <Async> = check_cancelled
+pub let throw_if_cancelled: { token: CancellationToken } -> {} <Async> = check_cancelled
 
 ## Register a callback invoked on cancellation. Returns a callback ID.
-pub let on_cancel : { token: CancellationToken, callback: {} -> {} <...> } -> Str <Async> = { token, callback } ->
-  __native_cancellation_token_on_cancellation { token = token, callback = callback }
+pub let on_cancel
+  : { token: CancellationToken, callback: {} -> {} <...> }
+  -> Str <Async>
+  = { token, callback } ->
+    __native_cancellation_token_on_cancellation { token = token, callback = callback }
 
 ## Alias for on_cancel.
-pub let on_cancellation : { token: CancellationToken, callback: {} -> {} <...> } -> Str <Async> = on_cancel
+pub let on_cancellation: { token: CancellationToken, callback: {} -> {} <...> } -> Str <Async> = on_cancel
 
 ## Remove a previously registered callback by ID.
-pub let remove_callback : { token: CancellationToken, id: Str } -> {} <Async> = { token, id } ->
+pub let remove_callback: { token: CancellationToken, id: Str } -> {} <Async> = { token, id } ->
   __native_cancellation_token_remove_callback { token = token, id = id }
 
 ## Create a child token cancelled when the parent is cancelled.
-pub let create_child : { token: CancellationToken } -> CancellationToken <Async> = { token } ->
+pub let create_child: { token: CancellationToken } -> CancellationToken <Async> = { token } ->
   __native_cancellation_token_create_child { token = token }
 
 ## Run f if not cancelled, returning Some on success, None if cancelled.
-pub let with_cancellation : { token: CancellationToken, f: {} -> 'a <...> } -> Option 'a <...> = { token, f } ->
-  if is_token_cancelled { token = token } then None else Some { val = f {} }
+pub let with_cancellation
+  : { token: CancellationToken, f: {} -> 'a <...> }
+  -> Option 'a <...>
+  = { token, f } -> if is_token_cancelled { token = token } then None else Some { val = f {} }
 
 ## Park until any predicate is True; return the index of the first to fire.
 ## Returns None if the predicates list is empty (otherwise would deadlock).
@@ -839,22 +904,24 @@ pub let with_cancellation : { token: CancellationToken, f: {} -> 'a <...> } -> O
 ## channel try_recv {} are NOT safe to use directly — wrap the consume
 ## in the corresponding branch's `run` and use a non-consuming check
 ## (e.g. spawn a recv promise and use is_done) in the `when`.
-pub let park_any : { predicates: [{} -> Bool <...>] } -> Option Int <Async, ...> = { predicates } ->
+pub let park_any: { predicates: [{} -> Bool <...>] } -> Option Int <Async, ...> = { predicates } ->
   match seq::is_empty { xs = predicates } is
     True -> None
     False -> do
       park { predicate = {} -> seq::any { xs = predicates, p = { x } -> x {} } }
       seq::find_index { xs = predicates, p = { x } -> x {} }
 
+
 ## A select branch: predicate + action. (`then` is reserved; use `run`.)
 pub type SelectBranch 'a = { when: {} -> Bool <...>, run: {} -> 'a <...> }
 
 ## Wait on multiple sources; run the action for whichever fires first.
 ## Returns None if branches is empty (otherwise would deadlock).
-pub let select : { branches: [SelectBranch 'a] } -> Option 'a <Async, ...> = { branches } -> do
-  let preds = seq::map { xs = branches, f = { x } -> x.when }
-  match park_any { predicates = preds } is
-    None -> None
-    Some { val = i } -> match seq::get { xs = branches, i = i } is
-      Some { val = b } -> Some { val = b.run {} }
+pub let select: { branches: [SelectBranch 'a] } -> Option 'a <Async, ...> = { branches } ->
+  do
+    let preds = seq::map { xs = branches, f = { x } -> x.when }
+    match park_any { predicates = preds } is
       None -> None
+      Some { val = i } -> match seq::get { xs = branches, i = i } is
+        Some { val = b } -> Some { val = b.run {} }
+        None -> None

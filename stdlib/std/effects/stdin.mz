@@ -1,6 +1,5 @@
 # Standard input effect.
 # All operations block until input or EOF. Wrap in <Async> for non-blocking reads.
-
 ## Read operations on the process's stdin.
 effect Stdin where {
   ## Trailing newline is stripped. None on EOF.
@@ -49,26 +48,26 @@ impl Stdin for MockStdin { lines: [Str] } where {
 }
 
 ## Read a line from stdin. Trailing newline stripped. None on EOF.
-pub let read_line : {} -> Option Str <Stdin> = {} -> Stdin.read_line {}
+pub let read_line: {} -> Option Str <Stdin> = {} -> Stdin.read_line {}
 
 ## Read a single character from stdin. None on EOF.
-pub let read_char : {} -> Option Char <Stdin> = {} -> Stdin.read_char {}
+pub let read_char: {} -> Option Char <Stdin> = {} -> Stdin.read_char {}
 
 ## Read up to `max` bytes from stdin. Empty Bytes signals EOF.
-pub let read_bytes : { max: Int } -> Bytes <Stdin> = { max } -> Stdin.read_bytes { max = max }
+pub let read_bytes: { max: Int } -> Bytes <Stdin> = { max } -> Stdin.read_bytes { max = max }
 
 ## True if stdin is a terminal.
-pub let is_tty : {} -> Bool <Stdin> = {} -> Stdin.is_tty {}
+pub let is_tty: {} -> Bool <Stdin> = {} -> Stdin.is_tty {}
 
 ## Read a password with terminal echo disabled. None on EOF or non-terminal stdin.
-pub let read_password : {} -> Option Str <Stdin> = {} -> Stdin.read_password {}
+pub let read_password: {} -> Option Str <Stdin> = {} -> Stdin.read_password {}
 
 ## Current terminal dimensions. `{ rows = 0, cols = 0 }` means stdin isn't a terminal.
-pub let term_size : {} -> { rows: Int, cols: Int } <Stdin> = {} -> Stdin.term_size {}
+pub let term_size: {} -> { rows: Int, cols: Int } <Stdin> = {} -> Stdin.term_size {}
 
 ## Switch the terminal to raw mode. read_char returns each keypress as it arrives.
 ## No-op when stdin isn't a terminal. Pair with unset_raw_mode.
-pub let set_raw_mode : {} -> {} <Stdin> = {} -> Stdin.set_raw_mode {}
+pub let set_raw_mode: {} -> {} <Stdin> = {} -> Stdin.set_raw_mode {}
 
 ## Restore the terminal to cooked (line-buffered, echo on) mode.
-pub let unset_raw_mode : {} -> {} <Stdin> = {} -> Stdin.unset_raw_mode {}
+pub let unset_raw_mode: {} -> {} <Stdin> = {} -> Stdin.unset_raw_mode {}

@@ -5,55 +5,55 @@ pub let pi = 3.141592653589793
 pub let e = 2.718281828459045
 
 ## Returns the smaller of two values.
-pub let min : { l: 'a, r: 'a } with Ord 'a -> 'a = { l, r } -> if l < r then l else r
+pub let min: { l: 'a, r: 'a } with Ord 'a -> 'a = { l, r } -> if l < r then l else r
 
 ## Returns the larger of two values.
-pub let max : { l: 'a, r: 'a } with Ord 'a -> 'a = { l, r } -> if l > r then l else r
+pub let max: { l: 'a, r: 'a } with Ord 'a -> 'a = { l, r } -> if l > r then l else r
 
 ## Raises a float base to a float exponent.
-pub let pow : { base: Float, exp: Float } -> Float = { base, exp } ->
+pub let pow: { base: Float, exp: Float } -> Float = { base, exp } ->
   __native_float_pow { base = base, exp = exp }
 
 ## Raises an integer base to an integer exponent.
-pub let pow_int : { base: Int, exp: Int } -> Int = { base, exp } ->
+pub let pow_int: { base: Int, exp: Int } -> Int = { base, exp } ->
   __native_int_pow { base = base, exp = exp }
 
 ## Raises a natural number base to a natural number exponent.
-pub let pow_nat : { base: Nat, exp: Nat } -> Nat = { base, exp } ->
+pub let pow_nat: { base: Nat, exp: Nat } -> Nat = { base, exp } ->
   __native_nat_pow { base = base, exp = exp }
 
 ## Square root of a float.
-pub let sqrt : { n: Float } -> Float = { n } -> __native_float_sqrt { n = n }
+pub let sqrt: { n: Float } -> Float = { n } -> __native_float_sqrt { n = n }
 
 ## Natural logarithm (base e).
-pub let ln : { n: Float } -> Float = { n } -> __native_float_ln { n = n }
+pub let ln: { n: Float } -> Float = { n } -> __native_float_ln { n = n }
 
 ## Base-10 logarithm.
-pub let log10 : { n: Float } -> Float = { n } -> __native_float_log10 { n = n }
+pub let log10: { n: Float } -> Float = { n } -> __native_float_log10 { n = n }
 
 ## Exponential function (e^n).
-pub let exp : { n: Float } -> Float = { n } -> __native_float_exp { n = n }
+pub let exp: { n: Float } -> Float = { n } -> __native_float_exp { n = n }
 
 ## Largest integer less than or equal to n.
-pub let floor : { n: Float } -> Float = { n } -> __native_float_floor { n = n }
+pub let floor: { n: Float } -> Float = { n } -> __native_float_floor { n = n }
 
 ## Smallest integer greater than or equal to n.
-pub let ceil : { n: Float } -> Float = { n } -> __native_float_ceil { n = n }
+pub let ceil: { n: Float } -> Float = { n } -> __native_float_ceil { n = n }
 
 ## Rounds to the nearest integer.
-pub let round : { n: Float } -> Float = { n } -> __native_float_round { n = n }
+pub let round: { n: Float } -> Float = { n } -> __native_float_round { n = n }
 
 ## True if the value is NaN (not a number).
-pub let is_nan : { n: Float } -> Bool = { n } -> __native_float_is_nan { n = n }
+pub let is_nan: { n: Float } -> Bool = { n } -> __native_float_is_nan { n = n }
 
 ## True if the value is positive or negative infinity.
-pub let is_infinite : { n: Float } -> Bool = { n } -> __native_float_is_infinite { n = n }
+pub let is_infinite: { n: Float } -> Bool = { n } -> __native_float_is_infinite { n = n }
 
 ## True if the value is neither NaN nor infinite.
-pub let is_finite : { n: Float } -> Bool = { n } -> __native_float_is_finite { n = n }
+pub let is_finite: { n: Float } -> Bool = { n } -> __native_float_is_finite { n = n }
 
 ## Returns -1.0, 0.0, or 1.0 indicating the sign.
-pub let sign : { n: Float } -> Float = { n } -> __native_float_sign { n = n }
+pub let sign: { n: Float } -> Float = { n } -> __native_float_sign { n = n }
 
 ## Returns -1, 0, or 1 indicating the sign of an integer.
-pub let sign_int : { n: Int } -> Int = { n } -> __native_int_sign { n = n }
+pub let sign_int: { n: Int } -> Int = { n } -> __native_int_sign { n = n }

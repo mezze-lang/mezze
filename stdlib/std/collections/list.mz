@@ -20,500 +20,603 @@ impl Eq for List 'a where {
 ## crash at runtime (#224). The body delegates to the native compare, so the
 ## precondition can't be inferred from the body and must be explicit.
 impl Ord for List 'a where {
-  lt: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } -> __native_list_compare { xs = it, ys = r } == (0 - 1),
-  le: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } -> __native_list_compare { xs = it, ys = r } != 1,
-  gt: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } -> __native_list_compare { xs = it, ys = r } == 1,
-  ge: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } -> __native_list_compare { xs = it, ys = r } != (0 - 1),
+  lt: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } ->
+    __native_list_compare { xs = it, ys = r } == (0 - 1),
+  le: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } ->
+    __native_list_compare { xs = it, ys = r } != 1,
+  gt: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } ->
+    __native_list_compare { xs = it, ys = r } == 1,
+  ge: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } ->
+    __native_list_compare { xs = it, ys = r } != (0 - 1),
 }
 
 ## Creates an empty list.
-pub let empty : {} -> List 'a = {} -> __native_list_empty {}
+pub let empty: {} -> List 'a = {} -> __native_list_empty {}
 
 ## Constructs a list by prepending head to tail.
-pub let cons : { head: 'a, tail: List 'a } -> List 'a = { head, tail } ->
+pub let cons: { head: 'a, tail: List 'a } -> List 'a = { head, tail } ->
   __native_list_cons { head = head, tail = tail }
 
 ## Prepends x to the front of xs.
-pub let push : { x: 'a, xs: List 'a } -> List 'a = { x, xs } ->
+pub let push: { x: 'a, xs: List 'a } -> List 'a = { x, xs } ->
   __native_list_cons { head = x, tail = xs }
 
 ## Returns True if the list has no elements.
-pub let is_empty : { xs: List 'a } -> Bool = { xs } -> __native_list_is_empty { xs = xs }
+pub let is_empty: { xs: List 'a } -> Bool = { xs } -> __native_list_is_empty { xs = xs }
 
 ## Returns the first element, or None if empty.
-pub let head : { xs: List 'a } -> Option 'a = { xs } -> __native_list_head { xs = xs }
+pub let head: { xs: List 'a } -> Option 'a = { xs } -> __native_list_head { xs = xs }
 
 ## Returns all elements except the first, or None if empty.
-pub let tail : { xs: List 'a } -> Option (List 'a) = { xs } -> __native_list_tail { xs = xs }
+pub let tail: { xs: List 'a } -> Option (List 'a) = { xs } -> __native_list_tail { xs = xs }
 
 ## Returns the number of elements.
-pub let size : { xs: List 'a } -> Int = { xs } -> __native_list_size { xs = xs }
+pub let size: { xs: List 'a } -> Int = { xs } -> __native_list_size { xs = xs }
 
 ## Deconstructs into {head, tail}, or returns None if empty.
-pub let uncons : { xs: List 'a } -> Option { head: 'a, tail: List 'a } = { xs } ->
+pub let uncons: { xs: List 'a } -> Option { head: 'a, tail: List 'a } = { xs } ->
   __native_list_uncons { xs = xs }
 
 ## Creates a single-element list.
-pub let singleton : { x: 'a } -> List 'a = { x } -> cons { head = x, tail = empty {} }
+pub let singleton: { x: 'a } -> List 'a = { x } -> cons { head = x, tail = empty {} }
 
 ## Prepends x to the front (alias for push).
-pub let prepend : { x: 'a, xs: List 'a } -> List 'a = { x, xs } -> cons { head = x, tail = xs }
+pub let prepend: { x: 'a, xs: List 'a } -> List 'a = { x, xs } -> cons { head = x, tail = xs }
 
 ## Concatenates two lists. Walks xs reversed onto ys via fold_left.
-pub let append : { xs: List 'a, ys: List 'a } -> List 'a = { xs, ys } ->
-  fold_left { xs = reverse { xs = xs }, init = ys, f = {acc, x} -> cons { head = x, tail = acc } }
+pub let append: { xs: List 'a, ys: List 'a } -> List 'a = { xs, ys } ->
+  fold_left {
+    xs = reverse { xs = xs },
+    init = ys,
+    f = { acc, x } -> cons { head = x, tail = acc },
+  }
 
 ## Returns the element at index, or None if out of bounds.
-pub let get : { xs: List 'a, index: Int } -> Option 'a = { xs, index } ->
+pub let get: { xs: List 'a, index: Int } -> Option 'a = { xs, index } ->
   __native_list_get { xs = xs, index = index }
 
 ## Take n elements from front — build reverse-accum, reverse at end.
-let take_go : { xs: List 'a, n: Int, acc: List 'a } -> List 'a = { xs, n, acc } ->
-  if n <= 0
-    then acc
-    else match uncons { xs = xs } is
-      None -> acc
-      Some { val = { head, tail } } ->
-        take_go { xs = tail, n = n - 1, acc = cons { head = head, tail = acc } }
+let take_go: { xs: List 'a, n: Int, acc: List 'a } -> List 'a = { xs, n, acc } ->
+  if n <= 0 then acc else match uncons { xs = xs } is
+    None -> acc
+    Some { val = { head, tail } } -> take_go {
+      xs = tail,
+      n = n - 1,
+      acc = cons { head = head, tail = acc },
+    }
+
 
 ## Returns the first n elements.
-pub let take : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+pub let take: { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
   reverse { xs = take_go { xs = xs, n = n, acc = empty {} } }
 
 ## Drop n elements from front — tail-recursive walk, returns rest.
-let drop_go : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
-  if n <= 0
-    then xs
-    else match uncons { xs = xs } is
-      None -> xs
-      Some { val = { head, tail } } -> drop_go { xs = tail, n = n - 1 }
+let drop_go: { xs: List 'a, n: Int } -> List 'a = { xs, n } -> if n <= 0 then xs else match uncons { xs = xs } is
+  None -> xs
+  Some { val = { head, tail } } -> drop_go { xs = tail, n = n - 1 }
+
 
 ## Drops the first n elements.
-pub let drop : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
-  drop_go { xs = xs, n = n }
+pub let drop: { xs: List 'a, n: Int } -> List 'a = { xs, n } -> drop_go { xs = xs, n = n }
 
 ## Applies f to each element, returning a new list.
-pub let map : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'b <...> = { xs, f } ->
-  reverse { xs = fold_left { xs = xs, init = empty {}, f = {acc, x} -> cons { head = f { x = x }, tail = acc } } }
+pub let map: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'b <...> = { xs, f } ->
+  reverse {
+    xs = fold_left { xs = xs, init = empty {}, f = { acc, x } ->
+      cons { head = f { x = x }, tail = acc } },
+  }
 
 ## Keeps only elements for which the predicate returns True.
-pub let filter : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
-  reverse { xs = fold_left { xs = xs, init = empty {}, f = {acc, x} -> if p { x = x } then cons { head = x, tail = acc } else acc } }
+pub let filter: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
+  reverse {
+    xs = fold_left { xs = xs, init = empty {}, f = { acc, x } -> if p { x = x } then cons { head = x, tail = acc } else acc },
+  }
 
 ## Tail-recursive uncons walk — each step peels one cons cell (O(1) via
 ## __native_list_uncons) and tail-calls with the new accumulator. The
 ## cross-fn tail-call trampoline keeps this O(1) stack.
-let fold_left_go : { xs: List 'a, acc: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, acc, f } ->
-  match uncons { xs = xs } is
+let fold_left_go
+  : { xs: List 'a, acc: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> }
+  -> 'acc <...>
+  = { xs, acc, f } -> match uncons { xs = xs } is
     None -> acc
-    Some { val = { head, tail } } ->
-      fold_left_go { xs = tail, acc = f { acc = acc, x = head }, f = f }
+    Some { val = { head, tail } } -> fold_left_go { xs = tail, acc = f { acc = acc, x = head }, f = f }
+
 
 ## Left fold with an initial accumulator value.
-pub let fold_left : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
-  fold_left_go { xs = xs, acc = init, f = f }
+pub let fold_left
+  : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> }
+  -> 'acc <...>
+  = { xs, init, f } -> fold_left_go { xs = xs, acc = init, f = f }
 
 ## Right fold with an initial accumulator value.
 ## Implemented as reverse-then-fold_left so stack usage stays O(1)
 ## regardless of list length. Costs one extra O(n) reverse pass.
-pub let fold_right : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
-  fold_left { xs = reverse { xs = xs }, init = init, f = f }
+pub let fold_right
+  : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> }
+  -> 'acc <...>
+  = { xs, init, f } -> fold_left { xs = reverse { xs = xs }, init = init, f = f }
 
 ## Reduces elements using f, returning None if empty. Uses head as init.
-pub let reduce : { xs: List 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { xs, f } ->
-  match uncons { xs = xs } is
+pub let reduce
+  : { xs: List 'a, f: { acc: 'a, x: 'a } -> 'a <...> }
+  -> Option 'a <...>
+  = { xs, f } -> match uncons { xs = xs } is
     None -> None
-    Some { val = { head, tail } } ->
-      Some { val = fold_left { xs = tail, init = head, f = f } }
+    Some { val = { head, tail } } -> Some { val = fold_left { xs = tail, init = head, f = f } }
+
 
 ## Short-circuiting recursive helper for any/all.
 ## Walks uncons; stops as soon as the target result is seen.
-let any_go : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+let any_go: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   match uncons { xs = xs } is
     None -> False
-    Some { val = { head, tail } } ->
-      if p { x = head } then True else any_go { xs = tail, p = p }
+    Some { val = { head, tail } } -> if p { x = head } then True else any_go { xs = tail, p = p }
 
-let all_go : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+
+let all_go: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   match uncons { xs = xs } is
     None -> True
-    Some { val = { head, tail } } ->
-      if p { x = head } then all_go { xs = tail, p = p } else False
+    Some { val = { head, tail } } -> if p { x = head } then all_go { xs = tail, p = p } else False
+
 
 ## Returns True if any element matches the predicate.
-pub let any : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+pub let any: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   any_go { xs = xs, p = p }
 
 ## Returns True if all elements match the predicate.
-pub let all : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+pub let all: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   all_go { xs = xs, p = p }
 
 ## Returns True if the list contains the element.
 ## Uses any + eq. Requires 'a to have Eq (checked at call site).
-pub let contains : { xs: List 'a, x: 'a } with Eq 'a -> Bool = { xs, x } -> do
+pub let contains: { xs: List 'a, x: 'a } with Eq 'a -> Bool = { xs, x } -> do
   let target = x
-  any { xs = xs, p = {x} -> x == target }
+  any { xs = xs, p = { x } -> x == target }
 
 ## Reverses the list.
-pub let reverse : { xs: List 'a } -> List 'a = { xs } -> __native_list_reverse { xs = xs }
+pub let reverse: { xs: List 'a } -> List 'a = { xs } -> __native_list_reverse { xs = xs }
 
 ## Flattens a list of lists into a single list.
-pub let concat : { xss: List (List 'a) } -> List 'a = { xss } ->
-  __native_list_concat { xss = xss }
+pub let concat: { xss: List (List 'a) } -> List 'a = { xss } -> __native_list_concat { xss = xss }
 
 ## Applies f to each element and flattens the resulting lists.
-pub let flat_map : { xs: List 'a, f: { x: 'a } -> List 'b <...> } -> List 'b <...> = { xs, f } ->
+pub let flat_map: { xs: List 'a, f: { x: 'a } -> List 'b <...> } -> List 'b <...> = { xs, f } ->
   concat { xss = map { xs = xs, f = f } }
 
 ## Walks both lists in parallel, stopping at the shorter one.
 ## Builds in reverse-accum then reverses once at end.
-let zip_go : { xs: List 'a, ys: List 'b, acc: List { fst: 'a, snd: 'b } } -> List { fst: 'a, snd: 'b } = { xs, ys, acc } ->
-  match uncons { xs = xs } is
+let zip_go
+  : { xs: List 'a, ys: List 'b, acc: List { fst: 'a, snd: 'b } }
+  -> List { fst: 'a, snd: 'b }
+  = { xs, ys, acc } -> match uncons { xs = xs } is
     None -> acc
-    Some { val = { head = hx, tail = tx } } ->
-      match uncons { xs = ys } is
-        None -> acc
-        Some { val = { head = hy, tail = ty } } ->
-          zip_go { xs = tx, ys = ty, acc = cons { head = { fst = hx, snd = hy }, tail = acc } }
+    Some { val = { head = hx, tail = tx } } -> match uncons { xs = ys } is
+      None -> acc
+      Some { val = { head = hy, tail = ty } } -> zip_go {
+        xs = tx,
+        ys = ty,
+        acc = cons { head = { fst = hx, snd = hy }, tail = acc },
+      }
+
 
 ## Pairs elements from two lists into records of {fst, snd}.
-pub let zip : { xs: List 'a, ys: List 'b } -> List { fst: 'a, snd: 'b } = { xs, ys } ->
+pub let zip: { xs: List 'a, ys: List 'b } -> List { fst: 'a, snd: 'b } = { xs, ys } ->
   reverse { xs = zip_go { xs = xs, ys = ys, acc = empty {} } }
 
 ## Splits pairs via a single fold_left, then reverses both accumulators once.
-pub let unzip : { xs: List { fst: 'a, snd: 'b } } -> { fsts: List 'a, snds: List 'b } = { xs } -> do
-  let both = fold_left { xs = xs, init = { fs = empty {}, ss = empty {} }, f = {acc, x} -> { fs = cons { head = x.fst, tail = acc.fs }, ss = cons { head = x.snd, tail = acc.ss } } }
-  { fsts = reverse { xs = both.fs }, snds = reverse { xs = both.ss } }
+pub let unzip
+  : { xs: List { fst: 'a, snd: 'b } }
+  -> { fsts: List 'a, snds: List 'b }
+  = { xs } -> do
+    let both = fold_left {
+      xs = xs,
+      init = { fs = empty {}, ss = empty {} },
+      f = { acc, x } ->
+        {
+          fs = cons { head = x.fst, tail = acc.fs },
+          ss = cons { head = x.snd, tail = acc.ss },
+        },
+    }
+    {
+      fsts = reverse { xs = both.fs },
+      snds = reverse { xs = both.ss },
+    }
 
 ## Converts to a Seq.
-pub let to_seq : { xs: List 'a } -> ['a] = { xs } -> __native_list_to_seq { xs = xs }
+pub let to_seq: { xs: List 'a } -> ['a] = { xs } -> __native_list_to_seq { xs = xs }
 
 ## Creates a list from a Seq.
-pub let from_seq : { xs: ['a] } -> List 'a = { xs } -> __native_list_from_seq { xs = xs }
+pub let from_seq: { xs: ['a] } -> List 'a = { xs } -> __native_list_from_seq { xs = xs }
 
 ## Creates an integer range [start, end).
-pub let range : { start: Int, end: Int } -> List Int = { start, end } ->
+pub let range: { start: Int, end: Int } -> List Int = { start, end } ->
   __native_list_range { start = start, end = end }
 
 ## Creates a list of n copies of x.
-let repeat_go : { x: 'a, n: Int, acc: List 'a } -> List 'a = { x, n, acc } ->
-  if n <= 0 then acc
-  else repeat_go { x = x, n = n - 1, acc = cons { head = x, tail = acc } }
+let repeat_go: { x: 'a, n: Int, acc: List 'a } -> List 'a = { x, n, acc } -> if n <= 0 then acc else repeat_go {
+  x = x,
+  n = n - 1,
+  acc = cons { head = x, tail = acc },
+}
 
-pub let repeat : { x: 'a, n: Int } -> List 'a = { x, n } ->
+pub let repeat: { x: 'a, n: Int } -> List 'a = { x, n } ->
   repeat_go { x = x, n = n, acc = empty {} }
 
 ## Inserts a separator between every pair of elements.
 ## fold_left accumulates a list with each element prefixed by sep except the first,
 ## then a final reverse gives the correct order.
-pub let intersperse : { xs: List 'a, sep: 'a } -> List 'a = { xs, sep } ->
-  match uncons { xs = xs } is
-    None -> empty {}
-    Some { val = { head = h0, tail = rest } } ->
-      reverse { xs = fold_left { xs = rest, init = cons { head = h0, tail = empty {} }, f = {acc, x} ->
-        cons { head = x, tail = cons { head = sep, tail = acc } } } }
+pub let intersperse: { xs: List 'a, sep: 'a } -> List 'a = { xs, sep } -> match uncons { xs = xs } is
+  None -> empty {}
+  Some { val = { head = h0, tail = rest } } -> reverse {
+    xs = fold_left {
+      xs = rest,
+      init = cons { head = h0, tail = empty {} },
+      f = { acc, x } -> cons { head = x, tail = cons { head = sep, tail = acc } },
+    },
+  }
+
 
 ## Sorts elements in ascending order.
-pub let sort : { xs: List 'a } -> List 'a = { xs } -> __native_list_sort { xs = xs }
+pub let sort: { xs: List 'a } -> List 'a = { xs } -> __native_list_sort { xs = xs }
 
 ## Sorts using a `less-or-equal` comparator: `cmp { a, b }` returns True when `a`
 ## should come before `b` (matches `Ord`'s `lt`/`le` and the `<`/`<=` operators).
-pub let sort_by : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Bool <...> } -> List 'a <...> = { xs, cmp } ->
-  __native_list_sort_by { xs = xs, cmp = { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1 }
+pub let sort_by
+  : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Bool <...> }
+  -> List 'a <...>
+  = { xs, cmp } -> __native_list_sort_by { xs = xs, cmp = { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1 }
 
 ## Returns the first element matching the predicate, or None.
-let find_go : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
+let find_go: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
   match uncons { xs = xs } is
     None -> None
-    Some { val = { head, tail } } ->
-      if p { x = head } then Some { val = head } else find_go { xs = tail, p = p }
+    Some { val = { head, tail } } -> if p { x = head } then Some { val = head } else find_go { xs = tail, p = p }
 
-pub let find : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
+
+pub let find: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
   find_go { xs = xs, p = p }
 
-let find_index_go : { xs: List 'a, p: { x: 'a } -> Bool <...>, i: Int } -> Option Int <...> = { xs, p, i } ->
-  match uncons { xs = xs } is
+let find_index_go
+  : { xs: List 'a, p: { x: 'a } -> Bool <...>, i: Int }
+  -> Option Int <...>
+  = { xs, p, i } -> match uncons { xs = xs } is
     None -> None
-    Some { val = { head, tail } } ->
-      if p { x = head } then Some { val = i } else find_index_go { xs = tail, p = p, i = i + 1 }
+    Some { val = { head, tail } } -> if p { x = head } then Some { val = i } else find_index_go { xs = tail, p = p, i = i + 1 }
+
 
 ## Returns the index of the first element matching the predicate, or None.
-pub let find_index : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option Int <...> = { xs, p } ->
+pub let find_index: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option Int <...> = { xs, p } ->
   find_index_go { xs = xs, p = p, i = 0 }
 
 ## Splits into elements matching and not matching the predicate.
 ## Single fold_left builds both accumulators in reverse, one reverse per output.
-pub let partition : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { pass: List 'a, fail: List 'a } <...> = { xs, p } -> do
-  let both = fold_left { xs = xs, init = { ps = empty {}, fs = empty {} }, f = {acc, x} ->
-    if p { x = x }
-      then { ps = cons { head = x, tail = acc.ps }, fs = acc.fs }
-      else { ps = acc.ps, fs = cons { head = x, tail = acc.fs } }
-  }
-  { pass = reverse { xs = both.ps }, fail = reverse { xs = both.fs } }
+pub let partition
+  : { xs: List 'a, p: { x: 'a } -> Bool <...> }
+  -> { pass: List 'a, fail: List 'a } <...>
+  = { xs, p } -> do
+    let both = fold_left {
+      xs = xs,
+      init = { ps = empty {}, fs = empty {} },
+      f = { acc, x } -> if p { x = x } then { ps = cons { head = x, tail = acc.ps }, fs = acc.fs } else { ps = acc.ps, fs = cons { head = x, tail = acc.fs } },
+    }
+    {
+      pass = reverse { xs = both.ps },
+      fail = reverse { xs = both.fs },
+    }
 
 ## Returns the last element, or None if empty.
 ## Tail-recursive walk to end.
-let last_go : { xs: List 'a, cur: 'a } -> 'a = { xs, cur } ->
-  match uncons { xs = xs } is
-    None -> cur
-    Some { val = { head, tail } } -> last_go { xs = tail, cur = head }
+let last_go: { xs: List 'a, cur: 'a } -> 'a = { xs, cur } -> match uncons { xs = xs } is
+  None -> cur
+  Some { val = { head, tail } } -> last_go { xs = tail, cur = head }
 
-pub let last : { xs: List 'a } -> Option 'a = { xs } ->
-  match uncons { xs = xs } is
-    None -> None
-    Some { val = { head, tail } } -> Some { val = last_go { xs = tail, cur = head } }
+
+pub let last: { xs: List 'a } -> Option 'a = { xs } -> match uncons { xs = xs } is
+  None -> None
+  Some { val = { head, tail } } -> Some { val = last_go { xs = tail, cur = head } }
+
 
 ## Returns all elements except the last.
 ## fold_left accumulates every element except the current head-of-tail's None case.
 ## Simpler: reverse, drop head, reverse back.
-pub let init : { xs: List 'a } -> List 'a = { xs } ->
-  match uncons { xs = reverse { xs = xs } } is
-    None -> empty {}
-    Some { val = { head = _, tail = rev_tail } } -> reverse { xs = rev_tail }
+pub let init: { xs: List 'a } -> List 'a = { xs } -> match uncons { xs = reverse { xs = xs } } is
+  None -> empty {}
+  Some { val = { head = _, tail = rev_tail } } -> reverse { xs = rev_tail }
+
 
 ## Returns the minimum element, or None if empty.
-pub let min : { xs: List 'a } with Ord 'a -> Option 'a = { xs } ->
-  match uncons { xs = xs } is
-    None -> None
-    Some { val = { head, tail } } ->
-      Some { val = fold_left { xs = tail, init = head, f = {acc, x} -> if x < acc then x else acc } }
+pub let min: { xs: List 'a } with Ord 'a -> Option 'a = { xs } -> match uncons { xs = xs } is
+  None -> None
+  Some { val = { head, tail } } -> Some {
+    val = fold_left { xs = tail, init = head, f = { acc, x } -> if x < acc then x else acc },
+  }
+
 
 ## Returns the maximum element, or None if empty.
-pub let max : { xs: List 'a } with Ord 'a -> Option 'a = { xs } ->
-  match uncons { xs = xs } is
-    None -> None
-    Some { val = { head, tail } } ->
-      Some { val = fold_left { xs = tail, init = head, f = {acc, x} -> if x > acc then x else acc } }
+pub let max: { xs: List 'a } with Ord 'a -> Option 'a = { xs } -> match uncons { xs = xs } is
+  None -> None
+  Some { val = { head, tail } } -> Some {
+    val = fold_left { xs = tail, init = head, f = { acc, x } -> if x > acc then x else acc },
+  }
+
 
 ## Returns the minimum element by a key function, or None if empty.
-pub let min_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } with Ord 'b -> Option 'a <...> = { xs, f } ->
+pub let min_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } with Ord 'b -> Option 'a <...> = { xs, f } ->
   match uncons { xs = xs } is
     None -> None
     Some { val = { head, tail } } -> do
       let seed = { best = head, key = f { x = head } }
-      let r = fold_left { xs = tail, init = seed, f = {acc, x} -> do
+      let r = fold_left { xs = tail, init = seed, f = { acc, x } -> do
         let k = f { x = x }
         if k < acc.key then { best = x, key = k } else acc }
       Some { val = r.best }
 
+
 ## Returns the maximum element by a key function, or None if empty.
-pub let max_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } with Ord 'b -> Option 'a <...> = { xs, f } ->
+pub let max_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } with Ord 'b -> Option 'a <...> = { xs, f } ->
   match uncons { xs = xs } is
     None -> None
     Some { val = { head, tail } } -> do
       let seed = { best = head, key = f { x = head } }
-      let r = fold_left { xs = tail, init = seed, f = {acc, x} -> do
+      let r = fold_left { xs = tail, init = seed, f = { acc, x } -> do
         let k = f { x = x }
         if k > acc.key then { best = x, key = k } else acc }
       Some { val = r.best }
 
+
 ## Sums all integer elements.
-pub let sum : { xs: List Int } -> Int = { xs } -> __native_list_sum { xs = xs }
+pub let sum: { xs: List Int } -> Int = { xs } -> __native_list_sum { xs = xs }
 
 ## Sums all float elements.
-pub let sum_float : { xs: List Float } -> Float = { xs } -> __native_list_sum_float { xs = xs }
+pub let sum_float: { xs: List Float } -> Float = { xs } -> __native_list_sum_float { xs = xs }
 
 ## Returns the product of all integer elements.
-pub let product : { xs: List Int } -> Int = { xs } -> __native_list_product { xs = xs }
+pub let product: { xs: List Int } -> Int = { xs } -> __native_list_product { xs = xs }
 
 ## Returns the product of all float elements.
-pub let product_float : { xs: List Float } -> Float = { xs } ->
+pub let product_float: { xs: List Float } -> Float = { xs } ->
   __native_list_product_float { xs = xs }
 
 ## Groups elements by a key function.
-pub let group_by : { xs: List 'a, f: { x: 'a } -> 'k <...> } -> List { key: 'k, values: List 'a } <...> = { xs, f } ->
-  __native_list_group_by { xs = xs, f = f }
+pub let group_by
+  : { xs: List 'a, f: { x: 'a } -> 'k <...> }
+  -> List { key: 'k, values: List 'a } <...>
+  = { xs, f } -> __native_list_group_by { xs = xs, f = f }
 
 ## Pairs each element with its index.
-pub let enumerate : { xs: List 'a } -> List { value: 'a, index: Int } = { xs } -> do
-  let both = fold_left { xs = xs, init = { acc = empty {}, i = 0 }, f = {acc, x} ->
-    { acc = cons { head = { value = x, index = acc.i }, tail = acc.acc }, i = acc.i + 1 } }
-  reverse { xs = both.acc }
+pub let enumerate: { xs: List 'a } -> List { value: 'a, index: Int } = { xs } ->
+  do
+    let both = fold_left {
+      xs = xs,
+      init = { acc = empty {}, i = 0 },
+      f = { acc, x } ->
+        {
+          acc = cons { head = { value = x, index = acc.i }, tail = acc.acc },
+          i = acc.i + 1,
+        },
+    }
+    reverse { xs = both.acc }
 
 ## Pairs each element with its index (alias for enumerate).
-pub let zip_with_index : { xs: List 'a } -> List { value: 'a, index: Int } = { xs } ->
-  enumerate { xs = xs }
+pub let zip_with_index
+  : { xs: List 'a }
+  -> List { value: 'a, index: Int }
+  = { xs } -> enumerate { xs = xs }
 
 ## Executes f for each element, for side effects only.
-let for_each_go : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> {} <...> = { xs, f } ->
+let for_each_go: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> {} <...> = { xs, f } ->
   match uncons { xs = xs } is
     None -> {}
     Some { val = { head, tail } } -> do
       f { x = head }
       for_each_go { xs = tail, f = f }
 
-pub let for_each : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> {} <...> = { xs, f } ->
+
+pub let for_each: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> {} <...> = { xs, f } ->
   for_each_go { xs = xs, f = f }
 
 ## Like fold_left, but returns all intermediate accumulator values.
 ## Builds acc list reversed then reverses at end. Includes init as first element.
-pub let scan : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> List 'acc <...> = { xs, init, f } -> do
-  let both = fold_left { xs = xs, init = { cur = init, acc = cons { head = init, tail = empty {} } }, f = {acc, x} -> do
-    let nxt = f { acc = acc.cur, x = x }
-    { cur = nxt, acc = cons { head = nxt, tail = acc.acc } } }
-  reverse { xs = both.acc }
+pub let scan
+  : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> }
+  -> List 'acc <...>
+  = { xs, init, f } -> do
+    let both = fold_left {
+      xs = xs,
+      init = {
+        cur = init,
+        acc = cons { head = init, tail = empty {} },
+      },
+      f = { acc, x } -> do
+        let nxt = f { acc = acc.cur, x = x }
+        { cur = nxt, acc = cons { head = nxt, tail = acc.acc } },
+    }
+    reverse { xs = both.acc }
 
 ## Splits at index i into {l, r}.
 ## Reuses take / drop.
-pub let split_at : { xs: List 'a, i: Int } -> { l: List 'a, r: List 'a } = { xs, i } ->
-  { l = take { xs = xs, n = i }, r = drop { xs = xs, n = i } }
+pub let split_at
+  : { xs: List 'a, i: Int }
+  -> { l: List 'a, r: List 'a }
+  = { xs, i } -> {
+    l = take { xs = xs, n = i },
+    r = drop { xs = xs, n = i },
+  }
 
 ## Splits into prefix where predicate holds and the rest.
 ## Reuses take_while / drop_while.
-pub let span : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { l: List 'a, r: List 'a } <...> = { xs, p } ->
-  { l = take_while { xs = xs, p = p }, r = drop_while { xs = xs, p = p } }
+pub let span
+  : { xs: List 'a, p: { x: 'a } -> Bool <...> }
+  -> { l: List 'a, r: List 'a } <...>
+  = { xs, p } -> {
+    l = take_while { xs = xs, p = p },
+    r = drop_while { xs = xs, p = p },
+  }
 
 ## Removes consecutive duplicate elements.
-pub let dedup : { xs: List 'a } -> List 'a = { xs } -> __native_list_dedup { xs = xs }
+pub let dedup: { xs: List 'a } -> List 'a = { xs } -> __native_list_dedup { xs = xs }
 
 ## Removes consecutive duplicates by a key function.
-pub let dedup_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'a <...> = { xs, f } ->
+pub let dedup_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'a <...> = { xs, f } ->
   __native_list_dedup_by { xs = xs, f = f }
 
 ## Returns the nth element, or None if out of bounds (alias for get).
-pub let nth : { xs: List 'a, i: Int } -> Option 'a = { xs, i } ->
+pub let nth: { xs: List 'a, i: Int } -> Option 'a = { xs, i } ->
   __native_list_nth { xs = xs, i = i }
 
 ## Creates a list of n copies of x.
-pub let fill : { n: Int, x: 'a } -> List 'a = { n, x } -> __native_list_fill { n = n, x = x }
+pub let fill: { n: Int, x: 'a } -> List 'a = { n, x } -> __native_list_fill { n = n, x = x }
 
 ## Creates a list of n elements using a generator function.
-pub let fill_with : { n: Int, f: { i: Int } -> 'a <...> } -> List 'a <...> = { n, f } ->
+pub let fill_with: { n: Int, f: { i: Int } -> 'a <...> } -> List 'a <...> = { n, f } ->
   __native_list_fill_with { n = n, f = f }
 
 ## Groups consecutive equal elements into sub-lists.
-pub let group_consecutive : { xs: List 'a } -> List (List 'a) = { xs } ->
+pub let group_consecutive: { xs: List 'a } -> List (List 'a) = { xs } ->
   __native_list_group_consecutive { xs = xs }
 
 ## Groups consecutive elements by a key function.
-pub let group_consecutive_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List (List 'a) <...> = { xs, f } ->
-  __native_list_group_consecutive_by { xs = xs, f = f }
+pub let group_consecutive_by
+  : { xs: List 'a, f: { x: 'a } -> 'b <...> }
+  -> List (List 'a) <...>
+  = { xs, f } -> __native_list_group_consecutive_by { xs = xs, f = f }
 
 ## Takes elements from the front while the predicate holds.
 ## take_while walks + collects into reverse-accum, then reverse at end.
 ## Short-circuits on first predicate-false via helper (fold_left can't).
-let take_while_go : { xs: List 'a, p: { x: 'a } -> Bool <...>, acc: List 'a } -> List 'a <...> = { xs, p, acc } ->
-  match uncons { xs = xs } is
+let take_while_go
+  : { xs: List 'a, p: { x: 'a } -> Bool <...>, acc: List 'a }
+  -> List 'a <...>
+  = { xs, p, acc } -> match uncons { xs = xs } is
     None -> acc
-    Some { val = { head, tail } } ->
-      if p { x = head } then take_while_go { xs = tail, p = p, acc = cons { head = head, tail = acc } } else acc
+    Some { val = { head, tail } } -> if p { x = head } then take_while_go {
+      xs = tail,
+      p = p,
+      acc = cons { head = head, tail = acc },
+    } else acc
 
-pub let take_while : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
-  reverse { xs = take_while_go { xs = xs, p = p, acc = empty {} } }
+
+pub let take_while: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
+  reverse {
+    xs = take_while_go { xs = xs, p = p, acc = empty {} },
+  }
 
 ## Drops elements from the front while the predicate holds.
-let drop_while_go : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
+let drop_while_go: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
   match uncons { xs = xs } is
     None -> xs
-    Some { val = { head, tail } } ->
-      if p { x = head } then drop_while_go { xs = tail, p = p } else xs
+    Some { val = { head, tail } } -> if p { x = head } then drop_while_go { xs = tail, p = p } else xs
 
-pub let drop_while : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
+
+pub let drop_while: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
   drop_while_go { xs = xs, p = p }
 
 ## Returns True if no element matches the predicate.
-pub let none : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+pub let none: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   __native_list_none { xs = xs, p = p }
 
 ## Counts elements matching the predicate.
-pub let count : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p } ->
-  fold_left { xs = xs, init = 0, f = {acc, x} -> if p { x = x } then acc + 1 else acc }
+pub let count: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p } ->
+  fold_left { xs = xs, init = 0, f = { acc, x } -> if p { x = x } then acc + 1 else acc }
 
 ## Removes duplicate elements, keeping the first occurrence.
-pub let unique : { xs: List 'a } -> List 'a = { xs } -> __native_list_unique { xs = xs }
+pub let unique: { xs: List 'a } -> List 'a = { xs } -> __native_list_unique { xs = xs }
 
 ## Alias for unique.
-pub let distinct : { xs: List 'a } -> List 'a = { xs } -> __native_list_distinct { xs = xs }
+pub let distinct: { xs: List 'a } -> List 'a = { xs } -> __native_list_distinct { xs = xs }
 
 ## Flattens a list of lists into a single list (alias for concat).
-pub let flatten : { xss: List (List 'a) } -> List 'a = { xss } ->
-  concat { xss = xss }
+pub let flatten: { xss: List (List 'a) } -> List 'a = { xss } -> concat { xss = xss }
 
 ## Returns True if the two lists are equal.
-pub let equals : { xs: List 'a, ys: List 'a } -> Bool = { xs, ys } ->
+pub let equals: { xs: List 'a, ys: List 'a } -> Bool = { xs, ys } ->
   __native_list_equals { xs = xs, ys = ys }
 
 ## Returns the index of the first occurrence, or None.
-pub let index_of : { xs: List 'a, x: 'a } -> Option Int = { xs, x } ->
+pub let index_of: { xs: List 'a, x: 'a } -> Option Int = { xs, x } ->
   __native_list_index_of { xs = xs, x = x }
 
 ## Returns the index of the last occurrence, or None.
-pub let last_index_of : { xs: List 'a, x: 'a } -> Option Int = { xs, x } ->
+pub let last_index_of: { xs: List 'a, x: 'a } -> Option Int = { xs, x } ->
   __native_list_last_index_of { xs = xs, x = x }
 
 ## Returns a slice from start (inclusive) to end (exclusive).
-pub let slice : { xs: List 'a, start: Int, end: Int } -> List 'a = { xs, start, end } ->
+pub let slice: { xs: List 'a, start: Int, end: Int } -> List 'a = { xs, start, end } ->
   __native_list_slice { xs = xs, start = start, end = end }
 
 ## Splits into chunks of the given size; last chunk may be smaller.
-pub let chunk : { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } ->
+pub let chunk: { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } ->
   __native_list_chunk { xs = xs, size = size }
 
 ## Returns all sliding windows of the given size.
-pub let windows : { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } ->
+pub let windows: { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } ->
   __native_list_windows { xs = xs, size = size }
 
 ## Returns sliding windows with a given step.
-pub let sliding : { xs: List 'a, size: Int, step: Int } -> List (List 'a) = { xs, size, step } ->
+pub let sliding: { xs: List 'a, size: Int, step: Int } -> List (List 'a) = { xs, size, step } ->
   __native_list_sliding { xs = xs, size = size, step = step }
 
 ## Splits into exact chunks, dropping any incomplete final chunk.
-pub let chunks_exact : { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } ->
+pub let chunks_exact: { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } ->
   __native_list_chunks_exact { xs = xs, size = size }
 
 ## Sorts using a key extraction function.
-pub let sort_by_key : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'a <...> = { xs, f } ->
+pub let sort_by_key: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'a <...> = { xs, f } ->
   __native_list_sort_by_key { xs = xs, f = f }
 
 ## Rotates elements left by n positions.
-pub let rotate_left : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+pub let rotate_left: { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
   __native_list_rotate_left { xs = xs, n = n }
 
 ## Rotates elements right by n positions.
-pub let rotate_right : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+pub let rotate_right: { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
   __native_list_rotate_right { xs = xs, n = n }
 
 ## Converts to a Set.
-pub let to_set : { xs: List 'a } -> Set 'a = { xs } -> __native_list_to_set { xs = xs }
+pub let to_set: { xs: List 'a } -> Set 'a = { xs } -> __native_list_to_set { xs = xs }
 
 ## Converts to a Deque.
-pub let to_deque : { xs: List 'a } -> Deque 'a = { xs } -> __native_list_to_deque { xs = xs }
+pub let to_deque: { xs: List 'a } -> Deque 'a = { xs } -> __native_list_to_deque { xs = xs }
 
 ## Converts to a SortedSet.
-pub let to_sorted_set : { xs: List 'a } -> SortedSet 'a = { xs } ->
+pub let to_sorted_set: { xs: List 'a } -> SortedSet 'a = { xs } ->
   __native_list_to_sorted_set { xs = xs }
 
 ## Converts a list of {k, v} records to a Map.
-pub let to_map : { xs: List { k: 'k, v: 'v } } -> Map 'k 'v = { xs } ->
+pub let to_map: { xs: List { k: 'k, v: 'v } } -> Map 'k 'v = { xs } ->
   __native_list_to_map { xs = xs }
 
 ## Converts a list of {k, v} records to a SortedMap.
-pub let to_sorted_map : { xs: List { k: 'k, v: 'v } } -> SortedMap 'k 'v = { xs } ->
+pub let to_sorted_map: { xs: List { k: 'k, v: 'v } } -> SortedMap 'k 'v = { xs } ->
   __native_list_to_sorted_map { xs = xs }
 
 ## Creates a list from a Set.
-pub let from_set : { xs: Set 'a } -> List 'a = { xs } -> __native_list_from_set { xs = xs }
+pub let from_set: { xs: Set 'a } -> List 'a = { xs } -> __native_list_from_set { xs = xs }
 
 ## Creates a list from a Deque.
-pub let from_deque : { xs: Deque 'a } -> List 'a = { xs } -> __native_list_from_deque { xs = xs }
+pub let from_deque: { xs: Deque 'a } -> List 'a = { xs } -> __native_list_from_deque { xs = xs }
 
 ## Creates a list from a SortedSet (in sorted order).
-pub let from_sorted_set : { xs: SortedSet 'a } -> List 'a = { xs } ->
+pub let from_sorted_set: { xs: SortedSet 'a } -> List 'a = { xs } ->
   __native_list_from_sorted_set { xs = xs }
 
 ## Creates a list of {k, v} records from a Map.
-pub let from_map : { m: Map 'k 'v } -> List { k: 'k, v: 'v } = { m } ->
+pub let from_map: { m: Map 'k 'v } -> List { k: 'k, v: 'v } = { m } ->
   __native_list_from_map { m = m }
 
 ## Creates a list of {k, v} records from a SortedMap (in sorted key order).
-pub let from_sorted_map : { m: SortedMap 'k 'v } -> List { k: 'k, v: 'v } = { m } ->
-  __native_list_from_sorted_map { m = m }
+pub let from_sorted_map
+  : { m: SortedMap 'k 'v }
+  -> List { k: 'k, v: 'v }
+  = { m } -> __native_list_from_sorted_map { m = m }
 
 ## Returns the arithmetic mean, or None if empty.
 pub let average: { xs: List Float } -> Option Float = { xs } -> __native_list_average { xs = xs }
 
 ## Returns the population variance, or None if empty.
-pub let variance: { xs: List Float } -> Option Float = { xs } -> __native_list_variance { xs = xs }
+pub let variance: { xs: List Float } -> Option Float = { xs } ->
+  __native_list_variance { xs = xs }
 
 ## Returns the standard deviation, or None if empty.
 pub let stddev: { xs: List Float } -> Option Float = { xs } -> __native_list_stddev { xs = xs }
@@ -522,60 +625,69 @@ pub let stddev: { xs: List Float } -> Option Float = { xs } -> __native_list_std
 pub let median: { xs: List Float } -> Option Float = { xs } -> __native_list_median { xs = xs }
 
 ## Lexicographic comparison; returns -1, 0, or 1.
-pub let compare : { xs: List 'a, ys: List 'a } -> Int = { xs, ys } ->
+pub let compare: { xs: List 'a, ys: List 'a } -> Int = { xs, ys } ->
   __native_list_compare { xs = xs, ys = ys }
 
 ## Lexicographic comparison with a custom comparator.
-pub let lexicographic_compare : { xs: List 'a, ys: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Int <...> = { xs, ys, cmp } ->
-  __native_list_lexicographic_compare { xs = xs, ys = ys, cmp = cmp }
+pub let lexicographic_compare
+  : { xs: List 'a, ys: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> }
+  -> Int <...>
+  = { xs, ys, cmp } -> __native_list_lexicographic_compare { xs = xs, ys = ys, cmp = cmp }
 
 ## Adjacent-pair walk with short-circuit on first out-of-order pair.
-let is_sorted_by_go : { prev: 'a, rest: List 'a, cmp: { a: 'a, b: 'a } -> Bool <...> } -> Bool <...> = { prev, rest, cmp } ->
-  match uncons { xs = rest } is
+let is_sorted_by_go
+  : { prev: 'a, rest: List 'a, cmp: { a: 'a, b: 'a } -> Bool <...> }
+  -> Bool <...>
+  = { prev, rest, cmp } -> match uncons { xs = rest } is
     None -> True
-    Some { val = { head, tail } } ->
-      if cmp { a = prev, b = head }
-        then is_sorted_by_go { prev = head, rest = tail, cmp = cmp }
-        else False
+    Some { val = { head, tail } } -> if cmp { a = prev, b = head } then is_sorted_by_go { prev = head, rest = tail, cmp = cmp } else False
+
 
 ## Returns True if elements are sorted by the given `less-or-equal` comparator
 ## (`cmp { a, b }` is True when `a` should come before `b`).
-pub let is_sorted_by : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Bool <...> } -> Bool <...> = { xs, cmp } ->
-  match uncons { xs = xs } is
+pub let is_sorted_by
+  : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Bool <...> }
+  -> Bool <...>
+  = { xs, cmp } -> match uncons { xs = xs } is
     None -> True
     Some { val = { head, tail } } -> is_sorted_by_go { prev = head, rest = tail, cmp = cmp }
 
+
 ## Returns True if elements are in ascending order.
-pub let is_sorted : { xs: List 'a } with Ord 'a -> Bool = { xs } ->
-  is_sorted_by { xs = xs, cmp = {a, b} -> a <= b }
+pub let is_sorted: { xs: List 'a } with Ord 'a -> Bool = { xs } ->
+  is_sorted_by { xs = xs, cmp = { a, b } -> a <= b }
 
 ## Returns True if elements are in descending order.
-pub let is_sorted_descending : { xs: List 'a } with Ord 'a -> Bool = { xs } ->
-  is_sorted_by { xs = xs, cmp = {a, b} -> a >= b }
+pub let is_sorted_descending: { xs: List 'a } with Ord 'a -> Bool = { xs } ->
+  is_sorted_by { xs = xs, cmp = { a, b } -> a >= b }
 
 ## Binary search in a sorted list, returning the index or None.
-pub let binary_search : { xs: List 'a, target: 'a } -> Option Int = { xs, target } ->
+pub let binary_search: { xs: List 'a, target: 'a } -> Option Int = { xs, target } ->
   __native_list_binary_search { xs = xs, target = target }
 
 ## Returns the insertion point to maintain sorted order.
-pub let binary_search_insert_point : { xs: List 'a, target: 'a } -> Int = { xs, target } ->
+pub let binary_search_insert_point: { xs: List 'a, target: 'a } -> Int = { xs, target } ->
   __native_list_binary_search_insert_point { xs = xs, target = target }
 
 ## Returns the first index where element >= target in a sorted list.
-pub let lower_bound : { xs: List 'a, target: 'a } -> Int = { xs, target } ->
+pub let lower_bound: { xs: List 'a, target: 'a } -> Int = { xs, target } ->
   __native_list_lower_bound { xs = xs, target = target }
 
 ## Returns the first index where element > target in a sorted list.
-pub let upper_bound : { xs: List 'a, target: 'a } -> Int = { xs, target } ->
+pub let upper_bound: { xs: List 'a, target: 'a } -> Int = { xs, target } ->
   __native_list_upper_bound { xs = xs, target = target }
 
 ## Returns {start, end} bounds for target in a sorted list.
-pub let equal_range : { xs: List 'a, target: 'a } -> { start: Int, end: Int } = { xs, target } ->
-  __native_list_equal_range { xs = xs, target = target }
+pub let equal_range
+  : { xs: List 'a, target: 'a }
+  -> { start: Int, end: Int }
+  = { xs, target } -> __native_list_equal_range { xs = xs, target = target }
 
 ## Binary search with a custom comparator.
-pub let binary_search_by : { xs: List 'a, target: 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Option Int <...> = { xs, target, cmp } ->
-  __native_list_binary_search_by { xs = xs, target = target, cmp = cmp }
+pub let binary_search_by
+  : { xs: List 'a, target: 'a, cmp: { a: 'a, b: 'a } -> Int <...> }
+  -> Option Int <...>
+  = { xs, target, cmp } -> __native_list_binary_search_by { xs = xs, target = target, cmp = cmp }
 
 ## Method implementations for List.
 impl List 'a where {
@@ -620,7 +732,7 @@ impl Sized for List 'a where {
 ## Wrap any value in a one-element linked List via method syntax:
 ## `x.list {}` → `cons { head = x, tail = empty {} }`. Generic — covers every type.
 ability Listable for 'a where {
-  list : { it: 'a } -> List 'a
+  list: { it: 'a } -> List 'a
 }
 
 impl Listable for 'a where {

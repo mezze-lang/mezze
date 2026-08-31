@@ -10,116 +10,137 @@ impl Eq for NonEmptyList 'a where {
 
 ## Lexicographic ordering for non-empty lists.
 impl Ord for NonEmptyList 'a where {
-  lt: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } -> __native_nel_compare { xs = it, ys = r } == (0 - 1),
-  le: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } -> __native_nel_compare { xs = it, ys = r } != 1,
-  gt: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } -> __native_nel_compare { xs = it, ys = r } == 1,
-  ge: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } -> __native_nel_compare { xs = it, ys = r } != (0 - 1),
+  lt: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } ->
+    __native_nel_compare { xs = it, ys = r } == (0 - 1),
+  le: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } ->
+    __native_nel_compare { xs = it, ys = r } != 1,
+  gt: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } ->
+    __native_nel_compare { xs = it, ys = r } == 1,
+  ge: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Ord 'a -> Bool = { it, r } ->
+    __native_nel_compare { xs = it, ys = r } != (0 - 1),
 }
 
 ## Creates a single-element non-empty list.
-pub let singleton : { x: 'a } -> NonEmptyList 'a = { x } -> __native_nel_singleton { x = x }
+pub let singleton: { x: 'a } -> NonEmptyList 'a = { x } -> __native_nel_singleton { x = x }
 
 ## Creates a non-empty list from a head and tail.
-pub let from_head_tail : { head: 'a, tail: List 'a } -> NonEmptyList 'a = { head, tail } ->
+pub let from_head_tail: { head: 'a, tail: List 'a } -> NonEmptyList 'a = { head, tail } ->
   __native_nel_from_head_tail { head = head, tail = tail }
 
 ## Returns the first element (always succeeds).
-pub let head : { xs: NonEmptyList 'a } -> 'a = { xs } -> __native_nel_head { xs = xs }
+pub let head: { xs: NonEmptyList 'a } -> 'a = { xs } -> __native_nel_head { xs = xs }
 
 ## Returns all elements except the first.
-pub let tail : { xs: NonEmptyList 'a } -> List 'a = { xs } -> __native_nel_tail { xs = xs }
+pub let tail: { xs: NonEmptyList 'a } -> List 'a = { xs } -> __native_nel_tail { xs = xs }
 
 ## Returns the number of elements.
-pub let size : { xs: NonEmptyList 'a } -> Int = { xs } -> __native_nel_size { xs = xs }
+pub let size: { xs: NonEmptyList 'a } -> Int = { xs } -> __native_nel_size { xs = xs }
 
 ## Prepends an element to the front.
-pub let cons : { x: 'a, xs: NonEmptyList 'a } -> NonEmptyList 'a = { x, xs } ->
+pub let cons: { x: 'a, xs: NonEmptyList 'a } -> NonEmptyList 'a = { x, xs } ->
   __native_nel_cons { x = x, xs = xs }
 
 ## Concatenates two non-empty lists.
-pub let append : { xs: NonEmptyList 'a, ys: NonEmptyList 'a } -> NonEmptyList 'a = { xs, ys } ->
-  __native_nel_append { xs = xs, ys = ys }
+pub let append
+  : { xs: NonEmptyList 'a, ys: NonEmptyList 'a }
+  -> NonEmptyList 'a
+  = { xs, ys } -> __native_nel_append { xs = xs, ys = ys }
 
 ## Creates a non-empty list from a List prefix and a guaranteed element.
-pub let prepend_list : { xs: List 'a, y: 'a } -> NonEmptyList 'a = { xs, y } ->
+pub let prepend_list: { xs: List 'a, y: 'a } -> NonEmptyList 'a = { xs, y } ->
   __native_nel_prepend_list { xs = xs, y = y }
 
 ## Appends a List to a non-empty list.
-pub let append_list : { xs: NonEmptyList 'a, ys: List 'a } -> NonEmptyList 'a = { xs, ys } ->
-  __native_nel_append_list { xs = xs, ys = ys }
+pub let append_list
+  : { xs: NonEmptyList 'a, ys: List 'a }
+  -> NonEmptyList 'a
+  = { xs, ys } -> __native_nel_append_list { xs = xs, ys = ys }
 
 ## Returns the element at the given index.
-pub let get : { xs: NonEmptyList 'a, index: Int } -> 'a = { xs, index } ->
+pub let get: { xs: NonEmptyList 'a, index: Int } -> 'a = { xs, index } ->
   __native_nel_get { xs = xs, index = index }
 
 ## Returns the last element (always succeeds).
-pub let last : { xs: NonEmptyList 'a } -> 'a = { xs } -> __native_nel_last { xs = xs }
+pub let last: { xs: NonEmptyList 'a } -> 'a = { xs } -> __native_nel_last { xs = xs }
 
 ## Applies f to each element, returning a new non-empty list.
-pub let map : { xs: NonEmptyList 'a, f: { x: 'a } -> 'b <...> } -> NonEmptyList 'b <...> = { xs, f } ->
-  __native_nel_map { xs = xs, f = f }
+pub let map
+  : { xs: NonEmptyList 'a, f: { x: 'a } -> 'b <...> }
+  -> NonEmptyList 'b <...>
+  = { xs, f } -> __native_nel_map { xs = xs, f = f }
 
 ## Applies f to each element and flattens the resulting non-empty lists.
-pub let flat_map : { xs: NonEmptyList 'a, f: { x: 'a } -> NonEmptyList 'b <...> } -> NonEmptyList 'b <...> = { xs, f } ->
-  __native_nel_flat_map { xs = xs, f = f }
+pub let flat_map
+  : { xs: NonEmptyList 'a, f: { x: 'a } -> NonEmptyList 'b <...> }
+  -> NonEmptyList 'b <...>
+  = { xs, f } -> __native_nel_flat_map { xs = xs, f = f }
 
 ## Left fold with an initial accumulator value.
-pub let fold_left : { xs: NonEmptyList 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
-  __native_nel_fold_left { xs = xs, init = init, f = f }
+pub let fold_left
+  : { xs: NonEmptyList 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> }
+  -> 'acc <...>
+  = { xs, init, f } -> __native_nel_fold_left { xs = xs, init = init, f = f }
 
 ## Right fold with an initial accumulator value.
-pub let fold_right : { xs: NonEmptyList 'a, init: 'acc, f: { x: 'a, acc: 'acc } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
-  __native_nel_fold_right { xs = xs, init = init, f = f }
+pub let fold_right
+  : { xs: NonEmptyList 'a, init: 'acc, f: { x: 'a, acc: 'acc } -> 'acc <...> }
+  -> 'acc <...>
+  = { xs, init, f } -> __native_nel_fold_right { xs = xs, init = init, f = f }
 
 ## Reduces elements using f (always succeeds since non-empty).
-pub let reduce : { xs: NonEmptyList 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> 'a <...> = { xs, f } ->
-  __native_nel_reduce { xs = xs, f = f }
+pub let reduce
+  : { xs: NonEmptyList 'a, f: { acc: 'a, x: 'a } -> 'a <...> }
+  -> 'a <...>
+  = { xs, f } -> __native_nel_reduce { xs = xs, f = f }
 
 ## Returns True if any element matches the predicate.
-pub let any : { xs: NonEmptyList 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+pub let any: { xs: NonEmptyList 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   __native_nel_any { xs = xs, p = p }
 
 ## Returns True if all elements match the predicate.
-pub let all : { xs: NonEmptyList 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+pub let all: { xs: NonEmptyList 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   __native_nel_all { xs = xs, p = p }
 
 ## Returns True if the list contains the element.
-pub let contains : { xs: NonEmptyList 'a, x: 'a } -> Bool = { xs, x } ->
+pub let contains: { xs: NonEmptyList 'a, x: 'a } -> Bool = { xs, x } ->
   __native_nel_contains { xs = xs, x = x }
 
 ## Reverses the non-empty list.
-pub let reverse : { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } ->
+pub let reverse: { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } ->
   __native_nel_reverse { xs = xs }
 
 ## Pairs elements from two non-empty lists.
-pub let zip : { xs: NonEmptyList 'a, ys: NonEmptyList 'b } -> NonEmptyList { fst: 'a, snd: 'b } = { xs, ys } ->
-  __native_nel_zip { xs = xs, ys = ys }
+pub let zip
+  : { xs: NonEmptyList 'a, ys: NonEmptyList 'b }
+  -> NonEmptyList { fst: 'a, snd: 'b }
+  = { xs, ys } -> __native_nel_zip { xs = xs, ys = ys }
 
 ## Inserts a separator between every pair of elements.
-pub let intersperse : { xs: NonEmptyList 'a, sep: 'a } -> NonEmptyList 'a = { xs, sep } ->
+pub let intersperse: { xs: NonEmptyList 'a, sep: 'a } -> NonEmptyList 'a = { xs, sep } ->
   __native_nel_intersperse { xs = xs, sep = sep }
 
 ## Converts to a List.
-pub let to_list : { xs: NonEmptyList 'a } -> List 'a = { xs } -> __native_nel_to_list { xs = xs }
+pub let to_list: { xs: NonEmptyList 'a } -> List 'a = { xs } -> __native_nel_to_list { xs = xs }
 
 ## Creates a NonEmptyList from a List. Fails if the list is empty.
-pub let from_list : { xs: List 'a } -> NonEmptyList 'a = { xs } ->
+pub let from_list: { xs: List 'a } -> NonEmptyList 'a = { xs } ->
   __native_nel_from_list { xs = xs }
 
 ## Converts to a Seq.
-pub let to_seq : { xs: NonEmptyList 'a } -> ['a] = { xs } -> __native_nel_to_seq { xs = xs }
+pub let to_seq: { xs: NonEmptyList 'a } -> ['a] = { xs } -> __native_nel_to_seq { xs = xs }
 
 ## Creates a NonEmptyList from a Seq. Fails if the seq is empty.
-pub let from_seq : { xs: ['a] } -> NonEmptyList 'a = { xs } -> __native_nel_from_seq { xs = xs }
+pub let from_seq: { xs: ['a] } -> NonEmptyList 'a = { xs } -> __native_nel_from_seq { xs = xs }
 
 ## Sorts elements in ascending order.
-pub let sort : { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } ->
-  __native_nel_sort { xs = xs }
+pub let sort: { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } -> __native_nel_sort { xs = xs }
 
 ## Sorts using a `less-or-equal` comparator: `cmp { l, r }` returns True when `l`
 ## should come before `r` (matches `Ord`'s `lt`/`le` and the `<`/`<=` operators).
-pub let sort_by : { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Bool <...> } -> NonEmptyList 'a <...> = { xs, cmp } ->
-  __native_nel_sort_by { xs = xs, cmp = { l, r } -> if cmp { l = l, r = r } then 0 - 1 else 1 }
+pub let sort_by
+  : { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Bool <...> }
+  -> NonEmptyList 'a <...>
+  = { xs, cmp } -> __native_nel_sort_by { xs = xs, cmp = { l, r } -> if cmp { l = l, r = r } then 0 - 1 else 1 }
 
 ## Method implementations for NonEmptyList.
 impl NonEmptyList 'a where {
@@ -149,7 +170,7 @@ impl Sized for NonEmptyList 'a where {
 ## Wrap any value in a singleton NonEmptyList via method syntax:
 ## `x.nel {}` → single-element `NonEmptyList 'a`. Generic — covers every type.
 ability NonEmptyListable for 'a where {
-  nel : { it: 'a } -> NonEmptyList 'a
+  nel: { it: 'a } -> NonEmptyList 'a
 }
 
 impl NonEmptyListable for 'a where {

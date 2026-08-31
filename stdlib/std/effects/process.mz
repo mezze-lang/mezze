@@ -1,6 +1,5 @@
 # Process lifecycle effect: pid + exit.
 # Mirrors Rust's std::process::id / std::process::exit.
-
 ## Inspect and terminate the running process.
 effect Process where {
   ## Process ID of the running mez interpreter / built binary.
@@ -25,7 +24,7 @@ impl Process for MockProcess { mock_pid: Int } where {
 }
 
 ## Process ID.
-pub let pid : {} -> Int <Process> = {} -> Process.pid {}
+pub let pid: {} -> Int <Process> = {} -> Process.pid {}
 
 ## Exit the process with a given code. Doesn't return.
-pub let exit : { code: Int } -> {} <Process> = { code } -> Process.exit { code = code }
+pub let exit: { code: Int } -> {} <Process> = { code } -> Process.exit { code = code }

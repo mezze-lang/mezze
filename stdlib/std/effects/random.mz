@@ -29,36 +29,36 @@ impl Random for SeededRandom { seed: Int } where {
 }
 
 ## Generate a random float in [0, 1).
-pub let random_float : {} -> Float <Random> = {} -> Random.random_float {}
+pub let random_float: {} -> Float <Random> = {} -> Random.random_float {}
 
 ## Generate a random integer in [min, max].
-pub let random_int : { min: Int, max: Int } -> Int <Random> = { min, max } ->
+pub let random_int: { min: Int, max: Int } -> Int <Random> = { min, max } ->
   Random.random_int { min = min, max = max }
 
 ## Generate a random natural number in [0, max].
-pub let random_nat : { max: Nat } -> Nat <Random> = { max } -> Random.random_nat { max = max }
+pub let random_nat: { max: Nat } -> Nat <Random> = { max } -> Random.random_nat { max = max }
 
 ## Generate a random boolean with given probability of True.
-pub let random_boolean : { probability: Float } -> Bool <Random> = { probability } ->
+pub let random_boolean: { probability: Float } -> Bool <Random> = { probability } ->
   do
     let rand = Random.random_float {}
     rand < probability
 
 ## Generate a random float in [min, max).
-pub let random_range : { min: Float, max: Float } -> Float <Random> = { min, max } ->
+pub let random_range: { min: Float, max: Float } -> Float <Random> = { min, max } ->
   do
     let rand = Random.random_float {}
     min + (rand * (max - min))
 
 ## Re-seed the random generator.
-pub let seed_random : { seed: Int } -> {} <Random> = { seed } -> Random.seed { new_seed = seed }
+pub let seed_random: { seed: Int } -> {} <Random> = { seed } -> Random.seed { new_seed = seed }
 
 ## Uniform distribution in [min, max).
-pub let uniform : { min: Float, max: Float } -> Float <Random> = { min, max } ->
+pub let uniform: { min: Float, max: Float } -> Float <Random> = { min, max } ->
   random_range { min = min, max = max }
 
 ## Normal (Gaussian) distribution using Box-Muller transform.
-pub let normal : { mean: Float, std_dev: Float } -> Float <Random> = { mean, std_dev } ->
+pub let normal: { mean: Float, std_dev: Float } -> Float <Random> = { mean, std_dev } ->
   do
     let u1 = Random.random_float {}
     let u2 = Random.random_float {}
@@ -66,12 +66,12 @@ pub let normal : { mean: Float, std_dev: Float } -> Float <Random> = { mean, std
     mean + (std_dev * z0)
 
 ## Exponential distribution with given rate.
-pub let exponential : { rate: Float } -> Float <Random> = { rate } -> do
+pub let exponential: { rate: Float } -> Float <Random> = { rate } -> do
   let u = Random.random_float {}
   (-1.0 / rate) * core::ln { n = u }
 
 ## Bernoulli trial returning 1 with probability p, else 0.
-pub let bernoulli : { p: Float } -> Int <Random> = { p } -> do
+pub let bernoulli: { p: Float } -> Int <Random> = { p } -> do
   let r = Random.random_float {}
   match r < p is
     True -> 1
@@ -79,7 +79,7 @@ pub let bernoulli : { p: Float } -> Int <Random> = { p } -> do
 
 
 ## Pick a random element from a sequence, or None if empty.
-pub let random_element : { xs: ['a] } -> Option 'a <Random> = { xs } -> do
+pub let random_element: { xs: ['a] } -> Option 'a <Random> = { xs } -> do
   let len = seq::size { xs = xs }
   match len > 0 is
     True -> do
@@ -89,21 +89,23 @@ pub let random_element : { xs: ['a] } -> Option 'a <Random> = { xs } -> do
 
 
 ## Pure Box-Muller transform (no effect needed).
-pub let box_muller : { u1: Float, u2: Float, mean: Float, std_dev: Float } -> Float = { u1, u2, mean, std_dev } ->
-  do
+pub let box_muller
+  : { u1: Float, u2: Float, mean: Float, std_dev: Float }
+  -> Float
+  = { u1, u2, mean, std_dev } -> do
     let z0 = core::sqrt { n = -2.0 * core::ln { n = u1 } } * trig::cos { n = 2.0 * trig::pi * u2 }
     mean + (std_dev * z0)
 
 ## Pure inverse CDF for exponential distribution.
-pub let exponential_inverse : { u: Float, rate: Float } -> Float = { u, rate } ->
+pub let exponential_inverse: { u: Float, rate: Float } -> Float = { u, rate } ->
   (-1.0 / rate) * core::ln { n = u }
 
 ## Linear interpolation for uniform distribution.
-pub let uniform_transform : { u: Float, min: Float, max: Float } -> Float = { u, min, max } ->
+pub let uniform_transform: { u: Float, min: Float, max: Float } -> Float = { u, min, max } ->
   min + (u * (max - min))
 
 ## Probability density function for the normal distribution.
-pub let normal_pdf : { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } ->
+pub let normal_pdf: { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } ->
   do
     let variance = std_dev * std_dev
     let coefficient = 1.0 / core::sqrt { n = 2.0 * trig::pi * variance }
@@ -111,13 +113,15 @@ pub let normal_pdf : { x: Float, mean: Float, std_dev: Float } -> Float = { x, m
     coefficient * core::exp { n = exponent }
 
 ## Approximate CDF for the normal distribution.
-pub let normal_cdf_approx : { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } ->
-  do
+pub let normal_cdf_approx
+  : { x: Float, mean: Float, std_dev: Float }
+  -> Float
+  = { x, mean, std_dev } -> do
     let z = (x - mean) / std_dev
     0.5 * (1.0 + trig::tanh { n = z * core::sqrt { n = 2.0 / trig::pi } })
 
 ## PDF for the exponential distribution.
-pub let exponential_pdf : { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else rate * core::exp { n = rate.neg {} * x }
+pub let exponential_pdf: { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else rate * core::exp { n = rate.neg {} * x }
 
 ## CDF for the exponential distribution.
-pub let exponential_cdf : { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else 1.0 - core::exp { n = rate.neg {} * x }
+pub let exponential_cdf: { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else 1.0 - core::exp { n = rate.neg {} * x }

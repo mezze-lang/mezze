@@ -23,7 +23,7 @@ pub type HttpConfig = {
 }
 
 ## Sensible defaults for HTTP configuration.
-pub let default_http_config : HttpConfig = {
+pub let default_http_config: HttpConfig = {
   timeout_ms = 30000,
   connect_timeout_ms = 10000,
   follow_redirects = True,
@@ -46,7 +46,12 @@ pub type Request = {
 ## this response — preserved so error promotion (e.g. `ensure_ok`'s
 ## `RequestFailed { url, ... }`) can identify the source without an
 ## out-of-band thread.
-pub type Response = { status: Int, headers: Map Str Str, body: Bytes, url: Str }
+pub type Response = {
+  status: Int,
+  headers: Map Str Str,
+  body: Bytes,
+  url: Str,
+}
 
 ## HTTP error variants.
 pub type HttpError = |
@@ -124,7 +129,7 @@ impl Http for MockHttpClient { rules: [MockRule] } where {
 }
 
 ## Build a minimal request with method and URL.
-pub let make_request : { method: Method, url: Str } -> Request = { method, url } ->
+pub let make_request: { method: Method, url: Str } -> Request = { method, url } ->
   {
     method = method,
     url = url,
@@ -137,17 +142,20 @@ pub let make_request : { method: Method, url: Str } -> Request = { method, url }
 ## the explicit Request return type pins the impl op so cross-module
 ## chain dispatch can recover the nominal shape (see #182 notes on the
 ## Client impl).
-pub let make_full_request : { method: Method, url: Str, headers: Map Str Str, body: Option Bytes, timeout_ms: Option Int } -> Request = { method, url, headers, body, timeout_ms } ->
-  {
-    method = method,
-    url = url,
-    headers = headers,
-    body = body,
-    timeout_ms = timeout_ms,
-  }
+pub let make_full_request
+  : { method: Method, url: Str, headers: Map Str Str, body: Option Bytes, timeout_ms: Option Int }
+  -> Request
+  = { method, url, headers, body, timeout_ms } ->
+    {
+      method = method,
+      url = url,
+      headers = headers,
+      body = body,
+      timeout_ms = timeout_ms,
+    }
 
 ## Add a single header to a request.
-pub let with_header : { req: Request, key: Str, value: Str } -> Request = { req, key, value } ->
+pub let with_header: { req: Request, key: Str, value: Str } -> Request = { req, key, value } ->
   {
     method = req.method,
     url = req.url,
@@ -157,7 +165,7 @@ pub let with_header : { req: Request, key: Str, value: Str } -> Request = { req,
   }
 
 ## Merge additional headers into a request.
-pub let with_headers : { req: Request, headers: Map Str Str } -> Request = { req, headers } ->
+pub let with_headers: { req: Request, headers: Map Str Str } -> Request = { req, headers } ->
   {
     method = req.method,
     url = req.url,
@@ -167,7 +175,7 @@ pub let with_headers : { req: Request, headers: Map Str Str } -> Request = { req
   }
 
 ## Set the body of a request.
-pub let with_body : { req: Request, body: Bytes } -> Request = { req, body } ->
+pub let with_body: { req: Request, body: Bytes } -> Request = { req, body } ->
   {
     method = req.method,
     url = req.url,
@@ -177,7 +185,7 @@ pub let with_body : { req: Request, body: Bytes } -> Request = { req, body } ->
   }
 
 ## Set a per-request timeout in milliseconds.
-pub let with_timeout : { req: Request, ms: Int } -> Request = { req, ms } ->
+pub let with_timeout: { req: Request, ms: Int } -> Request = { req, ms } ->
   {
     method = req.method,
     url = req.url,
@@ -187,23 +195,23 @@ pub let with_timeout : { req: Request, ms: Int } -> Request = { req, ms } ->
   }
 
 ## Set the Content-Type header.
-pub let with_content_type : { req: Request, content_type: Str } -> Request = { req, content_type } ->
+pub let with_content_type: { req: Request, content_type: Str } -> Request = { req, content_type } ->
   with_header { req = req, key = "Content-Type", value = content_type }
 
 ## Set the Accept header.
-pub let with_accept : { req: Request, accept: Str } -> Request = { req, accept } ->
+pub let with_accept: { req: Request, accept: Str } -> Request = { req, accept } ->
   with_header { req = req, key = "Accept", value = accept }
 
 ## Set the Authorization header.
-pub let with_auth : { req: Request, auth: Str } -> Request = { req, auth } ->
+pub let with_auth: { req: Request, auth: Str } -> Request = { req, auth } ->
   with_header { req = req, key = "Authorization", value = auth }
 
 ## Decode response body as a UTF-8 string.
-pub let body_str : { resp: Response } -> Result Str Str = { resp } ->
+pub let body_str: { resp: Response } -> Result Str Str = { resp } ->
   bytes::to_str { b = resp.body }
 
 ## Decode response body as JSON.
-pub let body_json : { resp: Response } -> Result Json DecodeError = { resp } -> do
+pub let body_json: { resp: Response } -> Result Json DecodeError = { resp } -> do
   match body_str { resp = resp } is
     Ok { val } -> parse_str { s = val }
     Err { error } -> Err {
@@ -217,37 +225,36 @@ pub let body_json : { resp: Response } -> Result Json DecodeError = { resp } -> 
 
 
 ## Check if response status is 2xx.
-pub let is_success : { resp: Response } -> Bool = { resp } ->
-  resp.status >= 200 && resp.status < 300
+pub let is_success: { resp: Response } -> Bool = { resp } -> resp.status >= 200 && resp.status < 300
 
 ## Check if response status is 3xx.
-pub let is_redirect : { resp: Response } -> Bool = { resp } ->
+pub let is_redirect: { resp: Response } -> Bool = { resp } ->
   resp.status >= 300 && resp.status < 400
 
 ## Check if response status is 4xx.
-pub let is_client_error : { resp: Response } -> Bool = { resp } ->
+pub let is_client_error: { resp: Response } -> Bool = { resp } ->
   resp.status >= 400 && resp.status < 500
 
 ## Check if response status is 5xx.
-pub let is_server_error : { resp: Response } -> Bool = { resp } ->
+pub let is_server_error: { resp: Response } -> Bool = { resp } ->
   resp.status >= 500 && resp.status < 600
 
 ## Get a response header by name (case-insensitive).
-pub let get_header : { resp: Response, name: Str } -> Option Str = { resp, name } ->
+pub let get_header: { resp: Response, name: Str } -> Option Str = { resp, name } ->
   map::get { m = resp.headers, k = str::to_lower { s = name } }
 
 ## Get the Content-Type header.
-pub let get_content_type : { resp: Response } -> Option Str = { resp } ->
+pub let get_content_type: { resp: Response } -> Option Str = { resp } ->
   get_header { resp = resp, name = "content-type" }
 
 ## Get the Content-Length header as Int.
-pub let get_content_length : { resp: Response } -> Option Int = { resp } -> match get_header { resp = resp, name = "content-length" } is
+pub let get_content_length: { resp: Response } -> Option Int = { resp } -> match get_header { resp = resp, name = "content-length" } is
   Some { val } -> int::from_str { s = val }
   None -> None
 
 
 ## Create a Bearer token Authorization header map.
-pub let bearer_auth : { token: Str } -> Map Str Str = { token } ->
+pub let bearer_auth: { token: Str } -> Map Str Str = { token } ->
   map::insert {
     m = map::empty {},
     k = "Authorization",
@@ -255,7 +262,7 @@ pub let bearer_auth : { token: Str } -> Map Str Str = { token } ->
   }
 
 ## Create a Basic auth Authorization header map.
-pub let basic_auth : { username: Str, password: Str } -> Map Str Str = { username, password } ->
+pub let basic_auth: { username: Str, password: Str } -> Map Str Str = { username, password } ->
   do
     let credentials = str::concat {
       l = username,
@@ -269,11 +276,11 @@ pub let basic_auth : { username: Str, password: Str } -> Map Str Str = { usernam
     }
 
 ## Create a custom API key header map.
-pub let api_key_header : { key: Str, value: Str } -> Map Str Str = { key, value } ->
+pub let api_key_header: { key: Str, value: Str } -> Map Str Str = { key, value } ->
   map::insert { m = map::empty {}, k = key, v = value }
 
 ## Create an X-API-Key header map.
-pub let x_api_key : { key: Str } -> Map Str Str = { key } ->
+pub let x_api_key: { key: Str } -> Map Str Str = { key } ->
   map::insert { m = map::empty {}, k = "X-API-Key", v = key }
 
 # ─── Chainable surface ────────────────────────────────────────────────
@@ -289,26 +296,24 @@ pub let x_api_key : { key: Str } -> Map Str Str = { key } ->
 #
 # Underneath every impl method delegates to the corresponding free
 # function — they're not duplicate logic, just chain-friendly aliases.
-
 ## Build a fresh GET Request for a URL. All fields zero-initialized
 ## (no headers, no body, default timeout). Configure further with
 ## `req.with_*` methods, then `req.send {}`.
-pub let request : { url: Str } -> Request = { url } ->
-  make_request { method = Get, url = url }
+pub let request: { url: Str } -> Request = { url } -> make_request { method = Get, url = url }
 
 ## Body setter — wrap raw bytes (already encoded).
-pub let with_text : { req: Request, val: Str } -> Request = { req, val } ->
+pub let with_text: { req: Request, val: Str } -> Request = { req, val } ->
   with_body { req = req, body = bytes::from_str { s = val } }
 
 ## Body setter — encode JSON, set Content-Type: application/json.
-pub let with_json : { req: Request, val: Json } -> Request = { req, val } -> do
+pub let with_json: { req: Request, val: Json } -> Request = { req, val } -> do
   let body_text = to_str { json = val }
   let body_bytes = bytes::from_str { s = body_text }
   let r = with_body { req = req, body = body_bytes }
   with_content_type { req = r, content_type = "application/json" }
 
 ## Method setter — alias of with_method.
-pub let with_method : { req: Request, val: Method } -> Request = { req, val } ->
+pub let with_method: { req: Request, val: Method } -> Request = { req, val } ->
   {
     method = val,
     url = req.url,
@@ -326,31 +331,25 @@ pub let with_method : { req: Request, val: Method } -> Request = { req, val } ->
 ## ability; today the codec only auto-derives for records and variants.
 ##
 ## Empty map is a no-op.
-pub let with_query : { req: Request, params: Map Str Str } -> Request = { req, params } -> do
-  let entries = map::to_seq { m = params }
-  if seq::is_empty { xs = entries }
-  then req
-  else do
-    let pairs = seq::map {
-      xs = entries,
-      f = { x } -> str::concat {
-        l = url_encode_component { s = x.k },
-        r = str::concat {
-          l = "=",
-          r = url_encode_component { s = x.v },
-        },
-      },
-    }
-    let qs = str::join { strings = pairs, separator = "&" }
-    let sep = if str::contains { s = req.url, substring = "?" } then "&" else "?"
-    let new_url = str::concat { l = req.url, r = str::concat { l = sep, r = qs } }
-    {
-      method = req.method,
-      url = new_url,
-      headers = req.headers,
-      body = req.body,
-      timeout_ms = req.timeout_ms,
-    }
+pub let with_query: { req: Request, params: Map Str Str } -> Request = { req, params } ->
+  do
+    let entries = map::to_seq { m = params }
+    if seq::is_empty { xs = entries } then req else do
+      let pairs = seq::map { xs = entries, f = { x } ->
+        str::concat {
+          l = url_encode_component { s = x.k },
+          r = str::concat { l = "=", r = url_encode_component { s = x.v } },
+        } }
+      let qs = str::join { strings = pairs, separator = "&" }
+      let sep = if str::contains { s = req.url, substring = "?" } then "&" else "?"
+      let new_url = str::concat { l = req.url, r = str::concat { l = sep, r = qs } }
+      {
+        method = req.method,
+        url = new_url,
+        headers = req.headers,
+        body = req.body,
+        timeout_ms = req.timeout_ms,
+      }
 
 ## Promote a non-2xx Response to an HttpError. Used to short-circuit
 ## chains that want to treat any failure (transport OR status) as an
@@ -358,45 +357,50 @@ pub let with_query : { req: Request, params: Map Str Str } -> Request = { req, p
 ##
 ##   request { url }.send {}.then { ... } -- needs uniform Err on 4xx/5xx
 ##   ensure_ok { resp = req.send {} }
-pub let ensure_ok : { resp: Result Response HttpError } -> Result Response HttpError = { resp } ->
-  match resp is
+pub let ensure_ok
+  : { resp: Result Response HttpError }
+  -> Result Response HttpError
+  = { resp } -> match resp is
     Err { error = _ } -> resp
-    Ok { val } ->
-      if is_success { resp = val }
-      then resp
-      else do
-        let body_text = match body_str { resp = val } is
-          Ok { val = s } -> s
-          Err { error = _ } -> ""
-        Err {
-          error = RequestFailed {
-            url = val.url,
-            status = val.status,
-            body = body_text,
-          },
-        }
+    Ok { val } -> if is_success { resp = val } then resp else do
+      let body_text = match body_str { resp = val } is
+        Ok { val = s } -> s
+        Err { error = _ } -> ""
+
+      Err {
+        error = RequestFailed { url = val.url, status = val.status, body = body_text },
+      }
+
 
 ## Impl Request gives the chainable surface. Every method is a thin
 ## delegator to a free function above — the impl block is just an
 ## ergonomic wrapper. Method calls return new Requests (immutable
 ## builder).
 impl Request where {
-  with_method      = { it, val: Method }  -> with_method      { req = it, val = val },
-  with_url         = { it, val: Str }     -> { method = it.method, url = val, headers = it.headers, body = it.body, timeout_ms = it.timeout_ms },
-  with_header      = { it, key: Str, value: Str } -> with_header      { req = it, key = key, value = value },
-  with_headers     = { it, headers: Map Str Str } -> with_headers     { req = it, headers = headers },
-  with_body        = { it, val: Bytes }   -> with_body        { req = it, body = val },
-  with_text        = { it, val: Str }     -> with_text        { req = it, val = val },
-  with_json        = { it, val: Json }    -> with_json        { req = it, val = val },
-  with_query       = { it, params: Map Str Str } -> with_query { req = it, params = params },
-  with_timeout     = { it, ms: Int }      -> with_timeout     { req = it, ms = ms },
-  with_auth        = { it, val: Str }     -> with_auth        { req = it, auth = val },
-  with_content_type = { it, val: Str }    -> with_content_type { req = it, content_type = val },
-  with_accept      = { it, val: Str }     -> with_accept      { req = it, accept = val },
+  with_method = { it: 'it, val: Method } -> with_method { req = it, val = val },
+  with_url = { it: 'it, val: Str } ->
+    {
+      method = it.method,
+      url = val,
+      headers = it.headers,
+      body = it.body,
+      timeout_ms = it.timeout_ms,
+    },
+  with_header = { it: 'it, key: Str, value: Str } ->
+    with_header { req = it, key = key, value = value },
+  with_headers = { it: 'it, headers: Map Str Str } -> with_headers { req = it, headers = headers },
+  with_body = { it: 'it, val: Bytes } -> with_body { req = it, body = val },
+  with_text = { it: 'it, val: Str } -> with_text { req = it, val = val },
+  with_json = { it: 'it, val: Json } -> with_json { req = it, val = val },
+  with_query = { it: 'it, params: Map Str Str } -> with_query { req = it, params = params },
+  with_timeout = { it: 'it, ms: Int } -> with_timeout { req = it, ms = ms },
+  with_auth = { it: 'it, val: Str } -> with_auth { req = it, auth = val },
+  with_content_type = { it: 'it, val: Str } -> with_content_type { req = it, content_type = val },
+  with_accept = { it: 'it, val: Str } -> with_accept { req = it, accept = val },
   ## Terminal — perform the request via the ambient Http handler.
-  send             = { it } -> Http.request { req = it, config = default_http_config },
+  send = { it } -> Http.request { req = it, config = default_http_config },
   ## Terminal with config override.
-  send_with        = { it, config: HttpConfig } -> Http.request { req = it, config = config },
+  send_with = { it: 'it, config: HttpConfig } -> Http.request { req = it, config = config },
 }
 
 ## Impl Response gives chainable decoders + predicates + header lookup.
@@ -405,13 +409,13 @@ impl Request where {
 ## that aren't just field reads.
 impl Response where {
   ## Decode body as UTF-8 string.
-  text          = { it } -> body_str { resp = it },
+  text = { it } -> body_str { resp = it },
   ## Decode body as JSON.
-  json          = { it } -> body_json { resp = it },
+  json = { it } -> body_json { resp = it },
   ## 2xx status check.
-  is_ok         = { it } -> is_success { resp = it },
-  is_success    = { it } -> is_success { resp = it },
-  is_redirect   = { it } -> is_redirect { resp = it },
+  is_ok = { it } -> is_success { resp = it },
+  is_success = { it } -> is_success { resp = it },
+  is_redirect = { it } -> is_redirect { resp = it },
   is_client_err = { it } -> is_client_error { resp = it },
   is_server_err = { it } -> is_server_error { resp = it },
   ## Promote a non-2xx status to an Err on a bare Response. Most callers
@@ -419,10 +423,10 @@ impl Response where {
   ## `ensure_ok` function for that. This method is useful when you
   ## already have an unwrapped Response (e.g. from `match resp is Ok ...`)
   ## and want a Result back without re-wrapping.
-  ensure_ok     = { it } -> ensure_ok { resp = Ok { val = it } },
+  ensure_ok = { it } -> ensure_ok { resp = Ok { val = it } },
   ## Case-insensitive header lookup.
-  header        = { it, name: Str } -> get_header { resp = it, name = name },
-  content_type  = { it } -> get_content_type { resp = it },
+  header = { it: 'it, name: Str } -> get_header { resp = it, name = name },
+  content_type = { it } -> get_content_type { resp = it },
   content_length = { it } -> get_content_length { resp = it },
 }
 
@@ -442,7 +446,7 @@ pub type Client = {
 
 ## Build a fresh Client. Empty base URL means use absolute URLs in
 ## each request.
-pub let client : { base_url: Str } -> Client = { base_url } ->
+pub let client: { base_url: Str } -> Client = { base_url } ->
   {
     base_url = base_url,
     default_headers = map::empty {},
@@ -450,34 +454,52 @@ pub let client : { base_url: Str } -> Client = { base_url } ->
   }
 
 ## Build a Client with no base URL — every request uses an absolute URL.
-pub let no_base_client : {} -> Client = {} ->
-  client { base_url = "" }
+pub let no_base_client: {} -> Client = {} -> client { base_url = "" }
 
 ## Join base_url + path. If path is absolute (starts with http:// or
 ## https://) it overrides base_url; otherwise base_url + path with
 ## one slash between.
-let join_url : { base: Str, path: Str } -> Str = { base, path } ->
-  if str::starts_with { s = path, prefix = "http://" } || str::starts_with { s = path, prefix = "https://" }
-  then path
-  else if str::is_empty { s = base }
-  then path
-  else if str::ends_with { s = base, suffix = "/" } && str::starts_with { s = path, prefix = "/" }
-  then str::concat { l = base, r = str::substring { s = path, start = 1, end = str::size { s = path } } }
-  else if str::ends_with { s = base, suffix = "/" } || str::starts_with { s = path, prefix = "/" }
-  then str::concat { l = base, r = path }
-  else str::concat { l = str::concat { l = base, r = "/" }, r = path }
+let join_url: { base: Str, path: Str } -> Str = { base, path } -> if str::starts_with { s = path, prefix = "http://" } || str::starts_with { s = path, prefix = "https://" } then path else if str::is_empty { s = base } then path else if str::ends_with { s = base, suffix = "/" } && str::starts_with { s = path, prefix = "/" } then str::concat {
+  l = base,
+  r = str::substring { s = path, start = 1, end = str::size { s = path } },
+} else if str::ends_with { s = base, suffix = "/" } || str::starts_with { s = path, prefix = "/" } then str::concat { l = base, r = path } else str::concat { l = str::concat { l = base, r = "/" }, r = path }
 
 ## Impl Client gives configuration + verb shortcuts. Each verb method
 ## produces a Request pre-filled with the client's defaults (headers,
 ## timeout, base_url + path).
 impl Client where {
   ## Configuration setters.
-  with_base_url        = { it, val: Str } -> { base_url = val, default_headers = it.default_headers, default_timeout_ms = it.default_timeout_ms },
-  with_default_header  = { it, key: Str, value: Str } -> { base_url = it.base_url, default_headers = map::insert { m = it.default_headers, k = key, v = value }, default_timeout_ms = it.default_timeout_ms },
-  with_default_headers = { it, headers: Map Str Str } -> { base_url = it.base_url, default_headers = map::merge { m1 = it.default_headers, m2 = headers }, default_timeout_ms = it.default_timeout_ms },
-  with_default_timeout = { it, ms: Int } -> { base_url = it.base_url, default_headers = it.default_headers, default_timeout_ms = ms },
+  with_base_url = { it: 'it, val: Str } ->
+    {
+      base_url = val,
+      default_headers = it.default_headers,
+      default_timeout_ms = it.default_timeout_ms,
+    },
+  with_default_header = { it: 'it, key: Str, value: Str } ->
+    {
+      base_url = it.base_url,
+      default_headers = map::insert { m = it.default_headers, k = key, v = value },
+      default_timeout_ms = it.default_timeout_ms,
+    },
+  with_default_headers = { it: 'it, headers: Map Str Str } ->
+    {
+      base_url = it.base_url,
+      default_headers = map::merge { m1 = it.default_headers, m2 = headers },
+      default_timeout_ms = it.default_timeout_ms,
+    },
+  with_default_timeout = { it: 'it, ms: Int } ->
+    {
+      base_url = it.base_url,
+      default_headers = it.default_headers,
+      default_timeout_ms = ms,
+    },
   ## Convenience: set Authorization in default_headers.
-  with_auth            = { it, val: Str } -> { base_url = it.base_url, default_headers = map::insert { m = it.default_headers, k = "Authorization", v = val }, default_timeout_ms = it.default_timeout_ms },
+  with_auth = { it: 'it, val: Str } ->
+    {
+      base_url = it.base_url,
+      default_headers = map::insert { m = it.default_headers, k = "Authorization", v = val },
+      default_timeout_ms = it.default_timeout_ms,
+    },
   ## Verb shortcuts — return a Request pre-filled with the client's defaults.
   ## Verb shortcuts — delegate to make_full_request so the impl op's
   ## return type stays pinned to Request (a nominal TypeApplication)
@@ -485,47 +507,71 @@ impl Client where {
   ## body type at the home module collapses field types to bare
   ## TypeVars and the chain `c.get { path }.send {}` can't unify the
   ## structural result against `Request` in the importer module.
-  get     = { it, path: Str } -> make_full_request {
-    method = Get, url = join_url { base = it.base_url, path = path },
-    headers = it.default_headers, body = None,
-    timeout_ms = Some { val = it.default_timeout_ms },
-  },
-  post    = { it, path: Str } -> make_full_request {
-    method = Post, url = join_url { base = it.base_url, path = path },
-    headers = it.default_headers, body = None,
-    timeout_ms = Some { val = it.default_timeout_ms },
-  },
-  put     = { it, path: Str } -> make_full_request {
-    method = Put, url = join_url { base = it.base_url, path = path },
-    headers = it.default_headers, body = None,
-    timeout_ms = Some { val = it.default_timeout_ms },
-  },
-  delete  = { it, path: Str } -> make_full_request {
-    method = Delete, url = join_url { base = it.base_url, path = path },
-    headers = it.default_headers, body = None,
-    timeout_ms = Some { val = it.default_timeout_ms },
-  },
-  patch   = { it, path: Str } -> make_full_request {
-    method = Patch, url = join_url { base = it.base_url, path = path },
-    headers = it.default_headers, body = None,
-    timeout_ms = Some { val = it.default_timeout_ms },
-  },
-  head    = { it, path: Str } -> make_full_request {
-    method = Head, url = join_url { base = it.base_url, path = path },
-    headers = it.default_headers, body = None,
-    timeout_ms = Some { val = it.default_timeout_ms },
-  },
-  options = { it, path: Str } -> make_full_request {
-    method = Options, url = join_url { base = it.base_url, path = path },
-    headers = it.default_headers, body = None,
-    timeout_ms = Some { val = it.default_timeout_ms },
-  },
+  get = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Get,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  post = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Post,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  put = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Put,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  delete = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Delete,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  patch = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Patch,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  head = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Head,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  options = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Options,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
   ## Verb-free request builder — set method later via .with_method.
-  request = { it, path: Str } -> make_full_request {
-    method = Get, url = join_url { base = it.base_url, path = path },
-    headers = it.default_headers, body = None,
-    timeout_ms = Some { val = it.default_timeout_ms },
-  },
+  request = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Get,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
 }
 
 use std::effects::async::{ Async, par_map, sleep }
@@ -533,16 +579,22 @@ use std::effects::time::{ Time }
 
 ## Internal: retry loop. Self-recursive — kept top-level because Mezze
 ## doesn't bind nested `let` names to themselves.
-let retry_loop : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: Int } -> Result Response HttpError <Http, Async, Time> = { req, attempt, max_attempts, backoff_ms } -> do
-  let resp = Http.request { req = req, config = default_http_config }
-  match resp is
-    Ok { val } -> resp
-    Err { error } ->
-      if attempt >= max_attempts || (is_retryable { err = error }).not {}
-      then resp
-      else do
+let retry_loop
+  : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: Int }
+  -> Result Response HttpError <Http, Async, Time>
+  = { req, attempt, max_attempts, backoff_ms } -> do
+    let resp = Http.request { req = req, config = default_http_config }
+    match resp is
+      Ok { val } -> resp
+      Err { error } -> if attempt >= max_attempts || (is_retryable { err = error }).not {} then resp else do
         sleep { ms = backoff_ms }
-        retry_loop { req = req, attempt = attempt + 1, max_attempts = max_attempts, backoff_ms = backoff_ms }
+        retry_loop {
+          req = req,
+          attempt = attempt + 1,
+          max_attempts = max_attempts,
+          backoff_ms = backoff_ms,
+        }
+
 
 ## Send a Request with retry on transient failures. A failure is
 ## considered retryable when `is_retryable { err }` returns True —
@@ -557,29 +609,40 @@ let retry_loop : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: In
 ##
 ## Returns the first Ok or the last Err. `max_attempts` includes the
 ## initial attempt — `max_attempts = 1` is a single shot with no retry.
-pub let retry : { req: Request, max_attempts: Int, backoff_ms: Int } -> Result Response HttpError <Http, Async, Time> = { req, max_attempts, backoff_ms } ->
-  retry_loop { req = req, attempt = 1, max_attempts = max_attempts, backoff_ms = backoff_ms }
+pub let retry
+  : { req: Request, max_attempts: Int, backoff_ms: Int }
+  -> Result Response HttpError <Http, Async, Time>
+  = { req, max_attempts, backoff_ms } ->
+    retry_loop {
+      req = req,
+      attempt = 1,
+      max_attempts = max_attempts,
+      backoff_ms = backoff_ms,
+    }
 
 ## Fetch multiple URLs concurrently, returning a list of Results.
 ##
 ## `par_map` returns `[Result Response AsyncError]` per spawn; we collapse
 ## each AsyncError into a single HTTP-level ConnectionFailed so callers
 ## see a uniform `[Result Response HttpError]`.
-pub let fetch_all : { urls: [Str] } -> [Result Response HttpError] <Http, Async> = { urls } ->
+pub let fetch_all: { urls: [Str] } -> [Result Response HttpError] <Http, Async> = { urls } ->
   seq::map {
     xs = par_map { xs = urls, f = { x } -> request { url = x }.send {} },
     f = { x } -> match x is
-      Ok  { val = inner } -> inner
-      Err { error = e }   -> Err { error = ConnectionFailed { url = "<spawn>", reason = "async task failed" } },
+      Ok { val = inner } -> inner
+      Err { error = e } -> Err {
+        error = ConnectionFailed { url = "<spawn>", reason = "async task failed" },
+      }
+,
   }
 
 ## Fetch multiple URLs concurrently, failing on the first error.
-pub let fetch_all_ok : { urls: [Str] } -> Result [Response] HttpError <Http, Async> = { urls } ->
+pub let fetch_all_ok: { urls: [Str] } -> Result [Response] HttpError <Http, Async> = { urls } ->
   do
     let results = fetch_all { urls = urls }
     collect_results { results = results }
 
-let collect_results : { results: [Result 'a 'e] } -> Result ['a] 'e = { results } ->
+let collect_results: { results: [Result 'a 'e] } -> Result ['a] 'e = { results } ->
   do
     let len = seq::size { xs = results }
     collect_results_loop {
@@ -589,8 +652,10 @@ let collect_results : { results: [Result 'a 'e] } -> Result ['a] 'e = { results 
       acc = [],
     }
 
-let collect_results_loop : { results: [Result 'a 'e], idx: Int, len: Int, acc: ['a] } -> Result ['a] 'e = { results, idx, len, acc } ->
-  if idx >= len then Ok { val = acc } else match seq::get { xs = results, i = idx } is
+let collect_results_loop
+  : { results: [Result 'a 'e], idx: Int, len: Int, acc: ['a] }
+  -> Result ['a] 'e
+  = { results, idx, len, acc } -> if idx >= len then Ok { val = acc } else match seq::get { xs = results, i = idx } is
     Some { val } -> match val is
       Ok { val = v } -> collect_results_loop {
         results = results,
@@ -603,7 +668,7 @@ let collect_results_loop : { results: [Result 'a 'e], idx: Int, len: Int, acc: [
 
 
 ## Format an HttpError as a human-readable string.
-pub let format_error : { err: HttpError } -> Str = { err } -> match err is
+pub let format_error: { err: HttpError } -> Str = { err } -> match err is
   ConnectionFailed { url, reason } -> str::concat {
     l = "Connection failed to ",
     r = str::concat { l = url, r = str::concat { l = ": ", r = reason } },
@@ -642,7 +707,7 @@ pub let format_error : { err: HttpError } -> Str = { err } -> match err is
 
 
 ## Check if an HTTP error is retryable (connection/timeout/5xx).
-pub let is_retryable : { err: HttpError } -> Bool = { err } -> match err is
+pub let is_retryable: { err: HttpError } -> Bool = { err } -> match err is
   ConnectionFailed { url, reason } -> True
   Timeout { url, ms } -> True
   TlsError { url, reason } -> False
@@ -654,7 +719,7 @@ pub let is_retryable : { err: HttpError } -> Bool = { err } -> match err is
 
 
 ## Check if the error is a client-side issue (4xx / bad input).
-pub let is_client_issue : { err: HttpError } -> Bool = { err } -> match err is
+pub let is_client_issue: { err: HttpError } -> Bool = { err } -> match err is
   InvalidUrl { url, reason } -> True
   EncodeError { url, message } -> True
   RequestFailed { url, status, body } -> status >= 400 && status < 500
@@ -662,22 +727,20 @@ pub let is_client_issue : { err: HttpError } -> Bool = { err } -> match err is
 
 
 ## Check if the error is a server-side issue (5xx / network).
-pub let is_server_issue : { err: HttpError } -> Bool = { err } -> match err is
+pub let is_server_issue: { err: HttpError } -> Bool = { err } -> match err is
   RequestFailed { url, status, body } -> status >= 500
   ConnectionFailed { url, reason } -> True
   Timeout { url, ms } -> True
   TlsError { url, reason } -> True
   _ -> False
+  # ─── Response builders ────────────────────────────────────────────────
 
-
-# ─── Response builders ────────────────────────────────────────────────
 #
 # Build a full Response without hand-writing the
 # `{ status, headers, body, url }` record. Used directly, and by the mock
 # builders below so a canned reply is a one-liner.
-
 ## A Response with an arbitrary status code and a plain-text body.
-pub let response_status : { code: Int, body: Str } -> Response = { code, body } ->
+pub let response_status: { code: Int, body: Str } -> Response = { code, body } ->
   {
     status = code,
     headers = map::empty {},
@@ -686,19 +749,22 @@ pub let response_status : { code: Int, body: Str } -> Response = { code, body } 
   }
 
 ## A 200 OK response with a plain-text body.
-pub let response_ok_text : { body: Str } -> Response = { body } ->
+pub let response_ok_text: { body: Str } -> Response = { body } ->
   response_status { code = 200, body = body }
 
 ## A 200 OK response whose body is the encoded JSON, with
 ## `Content-Type: application/json`.
-pub let response_json : { body: Json } -> Response = { body } ->
+pub let response_json: { body: Json } -> Response = { body } ->
   {
     status = 200,
-    headers = map::insert { m = map::empty {}, k = "Content-Type", v = "application/json" },
+    headers = map::insert {
+      m = map::empty {},
+      k = "Content-Type",
+      v = "application/json",
+    },
     body = bytes::from_str { s = to_str { json = body } },
     url = "",
   }
-
 
 # ─── Mock rule builders ───────────────────────────────────────────────
 #
@@ -709,9 +775,8 @@ pub let response_json : { body: Json } -> Response = { body } ->
 #
 # `url` is a glob (`*` matches anything). For non-2xx or custom methods
 # use `mock_status`.
-
 ## A rule: any GET matching `url` returns a 200 text `body`.
-pub let mock_get : { url: Str, body: Str } -> MockRule = { url, body } ->
+pub let mock_get: { url: Str, body: Str } -> MockRule = { url, body } ->
   {
     methods = [Get],
     url = Glob { pattern = url },
@@ -719,7 +784,7 @@ pub let mock_get : { url: Str, body: Str } -> MockRule = { url, body } ->
   }
 
 ## A rule: any POST matching `url` returns a 201 text `body`.
-pub let mock_post : { url: Str, body: Str } -> MockRule = { url, body } ->
+pub let mock_post: { url: Str, body: Str } -> MockRule = { url, body } ->
   {
     methods = [Post],
     url = Glob { pattern = url },
@@ -727,7 +792,7 @@ pub let mock_post : { url: Str, body: Str } -> MockRule = { url, body } ->
   }
 
 ## A rule: any PUT matching `url` returns a 200 text `body`.
-pub let mock_put : { url: Str, body: Str } -> MockRule = { url, body } ->
+pub let mock_put: { url: Str, body: Str } -> MockRule = { url, body } ->
   {
     methods = [Put],
     url = Glob { pattern = url },
@@ -735,7 +800,7 @@ pub let mock_put : { url: Str, body: Str } -> MockRule = { url, body } ->
   }
 
 ## A rule: any DELETE matching `url` returns a 200 text `body`.
-pub let mock_delete : { url: Str, body: Str } -> MockRule = { url, body } ->
+pub let mock_delete: { url: Str, body: Str } -> MockRule = { url, body } ->
   {
     methods = [Delete],
     url = Glob { pattern = url },
@@ -744,7 +809,7 @@ pub let mock_delete : { url: Str, body: Str } -> MockRule = { url, body } ->
 
 ## A rule: any GET matching `url` returns a 200 JSON `body`
 ## (`Content-Type: application/json`).
-pub let mock_json : { url: Str, body: Json } -> MockRule = { url, body } ->
+pub let mock_json: { url: Str, body: Json } -> MockRule = { url, body } ->
   {
     methods = [Get],
     url = Glob { pattern = url },
@@ -753,13 +818,15 @@ pub let mock_json : { url: Str, body: Json } -> MockRule = { url, body } ->
 
 ## A rule: any of `methods` matching `url` returns `code` with a text `body`.
 ## The general form — the verb helpers above are shorthands for it.
-pub let mock_status : { url: Str, methods: [Method], code: Int, body: Str } -> MockRule = { url, methods, code, body } ->
-  {
-    methods = methods,
-    url = Glob { pattern = url },
-    response = Ok { val = response_status { code = code, body = body } },
-  }
-
+pub let mock_status
+  : { url: Str, methods: [Method], code: Int, body: Str }
+  -> MockRule
+  = { url, methods, code, body } ->
+    {
+      methods = methods,
+      url = Glob { pattern = url },
+      response = Ok { val = response_status { code = code, body = body } },
+    }
 
 # ─── Result chain terminals ───────────────────────────────────────────
 #
@@ -770,41 +837,52 @@ pub let mock_status : { url: Str, methods: [Method], code: Int, body: Str } -> M
 #
 # The impl lives here (not in std::result) because these decoders are
 # Response-specific; the generic `impl Result 'a 'e` stays untouched.
-
 ## Decode the Ok Response body as UTF-8; return `def` on any Err OR a
 ## decode failure. The one-call replacement for
 ## `match resp is Ok {..} -> body_str{..}.get_or{..}  Err -> def`.
-pub let text_or : { resp: Result Response HttpError, def: Str } -> Str = { resp, def } -> match resp is
-  Ok { val } -> match body_str { resp = val } is
-    Ok { val = s } -> s
+pub let text_or: { resp: Result Response HttpError, def: Str } -> Str = { resp, def } ->
+  match resp is
+    Ok { val } -> match body_str { resp = val } is
+      Ok { val = s } -> s
+      Err { error = _ } -> def
     Err { error = _ } -> def
-  Err { error = _ } -> def
+
 
 ## Decode the Ok Response body as JSON; return `def` on any Err OR a
 ## decode failure.
-pub let json_or : { resp: Result Response HttpError, def: Json } -> Json = { resp, def } -> match resp is
-  Ok { val } -> match body_json { resp = val } is
-    Ok { val = j } -> j
+pub let json_or: { resp: Result Response HttpError, def: Json } -> Json = { resp, def } ->
+  match resp is
+    Ok { val } -> match body_json { resp = val } is
+      Ok { val = j } -> j
+      Err { error = _ } -> def
     Err { error = _ } -> def
-  Err { error = _ } -> def
+
 
 ## Run `f` on the Ok Response (for its effects); a no-op on Err.
-pub let on_ok : { resp: Result Response HttpError, f: { resp: Response } -> {} <...> } -> {} <...> = { resp, f } -> match resp is
-  Ok { val } -> f { resp = val }
-  Err { error = _ } -> {}
+pub let on_ok
+  : { resp: Result Response HttpError, f: { resp: Response } -> {} <...> }
+  -> {} <...>
+  = { resp, f } -> match resp is
+    Ok { val } -> f { resp = val }
+    Err { error = _ } -> {}
+
 
 ## Run `f` on the Err (for its effects); a no-op on Ok.
-pub let on_err : { resp: Result Response HttpError, f: { err: HttpError } -> {} <...> } -> {} <...> = { resp, f } -> match resp is
-  Ok { val } -> {}
-  Err { error } -> f { err = error }
+pub let on_err
+  : { resp: Result Response HttpError, f: { err: HttpError } -> {} <...> }
+  -> {} <...>
+  = { resp, f } -> match resp is
+    Ok { val } -> {}
+    Err { error } -> f { err = error }
+
 
 ## Chainable finishers on the `Result Response HttpError` from `.send {}`.
 ## A specialized inherent impl on the concrete Result — the generic
 ## `impl Result 'a 'e` (map/get_or/…) still applies to every other
 ## Result. Each method delegates to the free function above.
 impl Result Response HttpError where {
-  text_or = { it, def: Str }  -> text_or { resp = it, def = def },
-  json_or = { it, def: Json } -> json_or { resp = it, def = def },
-  on_ok   = { it, f }         -> on_ok   { resp = it, f = f },
-  on_err  = { it, f }         -> on_err  { resp = it, f = f },
+  text_or = { it: 'it, def: Str } -> text_or { resp = it, def = def },
+  json_or = { it: 'it, def: Json } -> json_or { resp = it, def = def },
+  on_ok = { it, f } -> on_ok { resp = it, f = f },
+  on_err = { it, f } -> on_err { resp = it, f = f },
 }

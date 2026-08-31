@@ -47,7 +47,8 @@ pub let is_empty: { b: Bytes } -> Bool = { b } -> __native_bytes_is_empty { b = 
 pub let get: { b: Bytes, i: Int } -> Option Int = { b, i } -> __native_bytes_get { b = b, i = i }
 
 ## Returns a slice from start (inclusive) to end (exclusive).
-pub let slice: { b: Bytes, start: Int, end: Int } -> Bytes = { b, start, end } -> __native_bytes_slice { b = b, start = start, end = end }
+pub let slice: { b: Bytes, start: Int, end: Int } -> Bytes = { b, start, end } ->
+  __native_bytes_slice { b = b, start = start, end = end }
 
 ## Takes the first n bytes.
 pub let take: { b: Bytes, n: Int } -> Bytes = { b, n } -> __native_bytes_take { b = b, n = n }
@@ -56,7 +57,8 @@ pub let take: { b: Bytes, n: Int } -> Bytes = { b, n } -> __native_bytes_take { 
 pub let drop: { b: Bytes, n: Int } -> Bytes = { b, n } -> __native_bytes_drop { b = b, n = n }
 
 ## Concatenates two byte sequences.
-pub let concat: { b1: Bytes, b2: Bytes } -> Bytes = { b1, b2 } -> __native_bytes_concat { b1 = b1, b2 = b2 }
+pub let concat: { b1: Bytes, b2: Bytes } -> Bytes = { b1, b2 } ->
+  __native_bytes_concat { b1 = b1, b2 = b2 }
 
 ## Concatenates multiple byte sequences efficiently.
 pub let concat_all: { bs: [Bytes] } -> Bytes = { bs } -> __native_bytes_concat_all { bs = bs }
@@ -65,25 +67,33 @@ pub let concat_all: { bs: [Bytes] } -> Bytes = { bs } -> __native_bytes_concat_a
 pub let repeat: { b: Bytes, n: Int } -> Bytes = { b, n } -> __native_bytes_repeat { b = b, n = n }
 
 ## Returns the index of the first occurrence of pattern, or None.
-pub let index_of: { b: Bytes, pattern: Bytes } -> Option Int = { b, pattern } -> __native_bytes_index_of { b = b, pattern = pattern }
+pub let index_of: { b: Bytes, pattern: Bytes } -> Option Int = { b, pattern } ->
+  __native_bytes_index_of { b = b, pattern = pattern }
 
 ## Returns True if the byte sequence contains the pattern.
-pub let contains: { b: Bytes, pattern: Bytes } -> Bool = { b, pattern } -> __native_bytes_contains { b = b, pattern = pattern }
+pub let contains: { b: Bytes, pattern: Bytes } -> Bool = { b, pattern } ->
+  __native_bytes_contains { b = b, pattern = pattern }
 
 ## Returns True if the byte sequence starts with the given prefix.
-pub let starts_with: { b: Bytes, prefix: Bytes } -> Bool = { b, prefix } -> __native_bytes_starts_with { b = b, prefix = prefix }
+pub let starts_with: { b: Bytes, prefix: Bytes } -> Bool = { b, prefix } ->
+  __native_bytes_starts_with { b = b, prefix = prefix }
 
 ## Returns True if the byte sequence ends with the given suffix.
-pub let ends_with: { b: Bytes, suffix: Bytes } -> Bool = { b, suffix } -> __native_bytes_ends_with { b = b, suffix = suffix }
+pub let ends_with: { b: Bytes, suffix: Bytes } -> Bool = { b, suffix } ->
+  __native_bytes_ends_with { b = b, suffix = suffix }
 
 ## Reverses the byte order.
 pub let reverse: { b: Bytes } -> Bytes = { b } -> __native_bytes_reverse { b = b }
 
 ## Maps a function over each byte (function receives and returns 0-255).
-pub let map: { b: Bytes, f: { x: Int } -> Int <...> } -> Bytes <...> = { b, f } -> __native_bytes_map { b = b, f = f }
+pub let map: { b: Bytes, f: { x: Int } -> Int <...> } -> Bytes <...> = { b, f } ->
+  __native_bytes_map { b = b, f = f }
 
 ## Folds over bytes from left to right.
-pub let fold: { b: Bytes, init: 'a, f: { acc: 'a, byte: Int } -> 'a <...> } -> 'a <...> = { b, init, f } -> __native_bytes_fold { b = b, init = init, f = f }
+pub let fold
+  : { b: Bytes, init: 'a, f: { acc: 'a, byte: Int } -> 'a <...> }
+  -> 'a <...>
+  = { b, init, f } -> __native_bytes_fold { b = b, init = init, f = f }
 
 ## Decodes as a UTF-8 string, returning a Result.
 pub let to_str: { b: Bytes } -> Result Str Str = { b } -> __native_bytes_to_str { b = b }

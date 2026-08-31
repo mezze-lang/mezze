@@ -110,7 +110,8 @@ impl Default for Nat where {
 }
 
 ## Subtract two Nats, returning an Int (result may be negative).
-pub let subtract_to_int: { l: Nat, r: Nat } -> Int = { l, r } -> __native_nat_subtract_to_int { l = l, r = r }
+pub let subtract_to_int: { l: Nat, r: Nat } -> Int = { l, r } ->
+  __native_nat_subtract_to_int { l = l, r = r }
 
 ## Convert an Int to a Nat. Returns None if negative.
 pub let from_int: { n: Int } -> Option Nat = { n } -> __native_nat_from_int { n = n }

@@ -14,23 +14,25 @@
 use std::int
 
 ## Creates a lazy range `[start, end)` stepped by 1.
-pub let range : { start: Int, end: Int } -> Iter Int = { start, end } ->
+pub let range: { start: Int, end: Int } -> Iter Int = { start, end } ->
   __native_iter_range { start = start, end = end }
 
 ## Creates a lazy range `[start, end)` with a custom step.
-pub let range_step : { start: Int, end: Int, step: Int } -> Iter Int = { start, end, step } ->
+pub let range_step: { start: Int, end: Int, step: Int } -> Iter Int = { start, end, step } ->
   __native_iter_range_step { start = start, end = end, step = step }
 
 ## Applies `f` lazily to each element. Deferred until a sink runs.
-pub let map : { it: Iter 'a, f: { x: 'a } -> 'b <...> } -> Iter 'b <...> = { it, f } ->
+pub let map: { it: Iter 'a, f: { x: 'a } -> 'b <...> } -> Iter 'b <...> = { it, f } ->
   __native_iter_map { it = it, f = f }
 
 ## Keeps only elements for which `p` returns True. Deferred until a sink runs.
-pub let filter : { it: Iter 'a, p: { x: 'a } -> Bool <...> } -> Iter 'a <...> = { it, p } ->
+pub let filter: { it: Iter 'a, p: { x: 'a } -> Bool <...> } -> Iter 'a <...> = { it, p } ->
   __native_iter_filter { it = it, p = p }
 
 ## Left fold — the terminal sink that walks the descriptor and produces a
 ## value. This is the fusion entry point: the BDSL sink specializes on the
 ## descriptor tree at PE time.
-pub let fold : { it: Iter 'a, init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> 'b <...> = { it, init, f } ->
-  __native_iter_fold { it = it, init = init, f = f }
+pub let fold
+  : { it: Iter 'a, init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> }
+  -> 'b <...>
+  = { it, init, f } -> __native_iter_fold { it = it, init = init, f = f }

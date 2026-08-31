@@ -21,17 +21,15 @@ use std::int
 ##
 ## Both backends bracket per-scope state via the impl-only
 ## initialize_scope / finalize_scope convention.
-
 effect Parallel where {
   ## Fork two computations. The runtime decides scheduling; the caller
   ## just declares "these two are independent."
-  join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel, ...>
+  join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel>
 }
 
 ## ==================================================================
 ## LoomParallel — one Loom virtual thread per fork. Default.
 ## ==================================================================
-
 ## Every Parallel.join spawns a fresh Loom virtual thread for the
 ## right side (left runs inline on caller). Virtual threads are cheap
 ## (~14µs spawn on Loom), scheduled M:N onto the JDK's default
@@ -40,8 +38,8 @@ effect Parallel where {
 ## Mirrors LoomAsync from std::effects::async.
 impl Parallel for LoomParallel where {
   initialize_scope = {} -> __native_loom_parallel_init { max_concurrent = 0, min_chunk = 1024 },
-  finalize_scope   = {} -> __native_loom_parallel_finalize {},
-  join             = { l, r } -> __native_loom_parallel_join { l = l, r = r },
+  finalize_scope = {} -> __native_loom_parallel_finalize {},
+  join = { l, r } -> __native_loom_parallel_join { l = l, r = r },
 }
 
 ## Backpressure cap + minimum-chunk-size hint. At most `max_concurrent`
@@ -56,12 +54,10 @@ impl Parallel for LoomParallel where {
 ##
 ## Example: `perform LoomParallelWith { max_concurrent = 8, min_chunk = 64 } in ...`
 impl Parallel for LoomParallelWith { max_concurrent: Int, min_chunk: Int } where {
-  initialize_scope = {} -> __native_loom_parallel_init {
-    max_concurrent = max_concurrent,
-    min_chunk = min_chunk,
-  },
-  finalize_scope   = {} -> __native_loom_parallel_finalize {},
-  join             = { l, r } -> __native_loom_parallel_join { l = l, r = r },
+  initialize_scope = {} ->
+    __native_loom_parallel_init { max_concurrent = max_concurrent, min_chunk = min_chunk },
+  finalize_scope = {} -> __native_loom_parallel_finalize {},
+  join = { l, r } -> __native_loom_parallel_join { l = l, r = r },
 }
 
 ## ==================================================================
@@ -76,12 +72,11 @@ impl Parallel for LoomParallelWith { max_concurrent: Int, min_chunk: Int } where
 ##
 ## Mirrors OSThreadAsync from std::effects::async.
 ## ==================================================================
-
 ## Mirrors OSThreadAsync from std::effects::async.
 impl Parallel for OSThreadParallel where {
   initialize_scope = {} -> __native_osthread_parallel_init { pool_size = 0, min_chunk = 1024 },
-  finalize_scope   = {} -> __native_osthread_parallel_finalize {},
-  join             = { l, r } -> __native_osthread_parallel_join { l = l, r = r },
+  finalize_scope = {} -> __native_osthread_parallel_finalize {},
+  join = { l, r } -> __native_osthread_parallel_join { l = l, r = r },
 }
 
 ## `pool_size`: worker count. 0 or negative → Runtime.availableProcessors.
@@ -89,12 +84,10 @@ impl Parallel for OSThreadParallel where {
 ##
 ## Example: `perform OSThreadParallelWith { pool_size = 8, min_chunk = 64 } in ...`
 impl Parallel for OSThreadParallelWith { pool_size: Int, min_chunk: Int } where {
-  initialize_scope = {} -> __native_osthread_parallel_init {
-    pool_size = pool_size,
-    min_chunk = min_chunk,
-  },
-  finalize_scope   = {} -> __native_osthread_parallel_finalize {},
-  join             = { l, r } -> __native_osthread_parallel_join { l = l, r = r },
+  initialize_scope = {} ->
+    __native_osthread_parallel_init { pool_size = pool_size, min_chunk = min_chunk },
+  finalize_scope = {} -> __native_osthread_parallel_finalize {},
+  join = { l, r } -> __native_osthread_parallel_join { l = l, r = r },
 }
 
 ## ==================================================================
@@ -104,7 +97,6 @@ impl Parallel for OSThreadParallelWith { pool_size: Int, min_chunk: Int } where 
 ## and zero nondeterminism. Useful in tests to opt out of race-flake
 ## sources without changing production code.
 ## ==================================================================
-
 ## Sequential-only impl of Parallel. Runs {l} then {r} inline.
 ## Result values are identical to the concurrent impls; only wall-clock
 ## and observed interleavings differ. Useful for tests that want to
@@ -114,7 +106,7 @@ impl Parallel for DeterministicSequential where {
   join = { l, r } -> do
     let lv = l {}
     let rv = r {}
-    { l = lv, r = rv },
+    { l = lv, r = rv }
 }
 
 ## ==================================================================
@@ -137,63 +129,52 @@ impl Parallel for DeterministicSequential where {
 ## the no-arg LoomParallel / OSThreadParallel handlers is
 ## min_chunk = 1024, matching Rayon's work-splitting floor.
 ## ==================================================================
-
 ## Read the current scope's min_chunk hint. Returns 1 when no hint
 ## is set (matches pre-#65 default behavior).
-let min_chunk : {} -> Int = {} -> __native_parallel_min_chunk_hint {}
+let min_chunk: {} -> Int = {} -> __native_parallel_min_chunk_hint {}
 
 ## Apply f to each element in parallel, results in input order.
-pub let map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } == 0 then []
-  else if seq::size { xs = xs } <= min_chunk {} then
-    seq::map { xs = xs, f = f }
-  else do
+pub let map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } == 0 then [] else if seq::size { xs = xs } <= min_chunk {} then seq::map { xs = xs, f = f } else do
     let n = seq::size { xs = xs }
     let mid = n / 2
-    let left  = seq::take { xs = xs, n = mid }
+    let left = seq::take { xs = xs, n = mid }
     let right = seq::drop { xs = xs, n = mid }
-    let both = Parallel.join {
-      l = {} -> map { xs = left,  f = f },
-      r = {} -> map { xs = right, f = f },
-    }
+    let both = Parallel.join { l = {} -> map { xs = left, f = f }, r = {} ->
+      map { xs = right, f = f } }
     seq::concat { xs = both.l, ys = both.r }
 
 ## Run f on each element in parallel, discarding results.
-pub let for_each : { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Parallel, ...> = { xs, f } -> do
-  let _ = map { xs = xs, f = { x } -> do
-    f { x = x }
-    0
-  }
-  {}
+pub let for_each: { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Parallel, ...> = { xs, f } ->
+  do
+    let _ = map { xs = xs, f = { x } -> do
+      f { x = x }
+      0 }
+    {}
 
-pub let filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } == 0 then []
-  else if seq::size { xs = xs } <= min_chunk {} then
-    seq::filter { xs = xs, p = f }
-  else do
+pub let filter: { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } == 0 then [] else if seq::size { xs = xs } <= min_chunk {} then seq::filter { xs = xs, p = f } else do
     let n = seq::size { xs = xs }
     let mid = n / 2
-    let left  = seq::take { xs = xs, n = mid }
+    let left = seq::take { xs = xs, n = mid }
     let right = seq::drop { xs = xs, n = mid }
-    let both = Parallel.join {
-      l = {} -> filter { xs = left,  f = f },
-      r = {} -> filter { xs = right, f = f },
-    }
+    let both = Parallel.join { l = {} -> filter { xs = left, f = f }, r = {} ->
+      filter { xs = right, f = f } }
     seq::concat { xs = both.l, ys = both.r }
 
-pub let partition : { xs: ['a], f: { x: 'a } -> Bool <...> } -> { pass: ['a], fail: ['a] } <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } == 0 then { pass = [], fail = [] }
-  else if seq::size { xs = xs } <= min_chunk {} then
-    seq::partition { xs = xs, p = f }
-  else do
+pub let partition
+  : { xs: ['a], f: { x: 'a } -> Bool <...> }
+  -> { pass: ['a], fail: ['a] } <Parallel, ...>
+  = { xs, f } -> if seq::size { xs = xs } == 0 then {
+    pass = [],
+    fail = [],
+  } else if seq::size { xs = xs } <= min_chunk {} then seq::partition { xs = xs, p = f } else do
     let n = seq::size { xs = xs }
     let mid = n / 2
-    let left  = seq::take { xs = xs, n = mid }
+    let left = seq::take { xs = xs, n = mid }
     let right = seq::drop { xs = xs, n = mid }
-    let both = Parallel.join {
-      l = {} -> partition { xs = left,  f = f },
-      r = {} -> partition { xs = right, f = f },
-    }
+    let both = Parallel.join { l = {} -> partition { xs = left, f = f }, r = {} ->
+      partition { xs = right, f = f } }
     {
       pass = seq::concat { xs = both.l.pass, ys = both.r.pass },
       fail = seq::concat { xs = both.l.fail, ys = both.r.fail },
@@ -203,127 +184,113 @@ pub let partition : { xs: ['a], f: { x: 'a } -> Bool <...> } -> { pass: ['a], fa
 ## halves is O(N * K) worst case which defeats the point of parallelism
 ## unless the reduction is careful. Wraps seq::group_by; parallelism
 ## for group_by can be added later with a proper hash-merge helper.
-pub let group_by : { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: ['a] }] <Parallel, ...> = { xs, f } ->
+pub let group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: ['a] }] <Parallel, ...> = { xs, f } ->
   seq::group_by { xs = xs, f = f }
 
 ## Reduce with an associative operation. Empty input → None.
-pub let reduce : { xs: ['a], f: { l: 'a, r: 'a } -> 'a <...> } -> Option 'a <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } == 0 then None
-  else if seq::size { xs = xs } <= min_chunk {} then
-    seq::reduce { xs = xs, f = { acc, x } -> f { l = acc, r = x } }
-  else do
+pub let reduce
+  : { xs: ['a], f: { l: 'a, r: 'a } -> 'a <...> }
+  -> Option 'a <Parallel, ...>
+  = { xs, f } -> if seq::size { xs = xs } == 0 then None else if seq::size { xs = xs } <= min_chunk {} then seq::reduce { xs = xs, f = { acc, x } ->
+    f { l = acc, r = x } } else do
     let n = seq::size { xs = xs }
     let mid = n / 2
-    let left  = seq::take { xs = xs, n = mid }
+    let left = seq::take { xs = xs, n = mid }
     let right = seq::drop { xs = xs, n = mid }
-    let both = Parallel.join {
-      l = {} -> reduce { xs = left,  f = f },
-      r = {} -> reduce { xs = right, f = f },
-    }
+    let both = Parallel.join { l = {} -> reduce { xs = left, f = f }, r = {} ->
+      reduce { xs = right, f = f } }
     match both.l is
       Some { val = a } -> match both.r is
         Some { val = b } -> Some { val = f { l = a, r = b } }
         None -> Some { val = a }
       None -> both.r
 
+
 ## Parallel fold: map each element then combine with associative combiner.
-pub let fold : { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b <...>, combine: { l: 'b, r: 'b } -> 'b <...> } -> 'b <Parallel, ...> = { xs, zero, map_fn, combine } ->
-  if seq::size { xs = xs } == 0 then zero
-  else if seq::size { xs = xs } <= min_chunk {} then
-    seq::fold {
-      xs = xs,
-      init = zero,
-      f = { acc, x } -> combine { l = acc, r = map_fn { x = x } },
-    }
-  else do
+pub let fold
+  : { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b <...>, combine: { l: 'b, r: 'b } -> 'b <...> }
+  -> 'b <Parallel, ...>
+  = { xs, zero, map_fn, combine } -> if seq::size { xs = xs } == 0 then zero else if seq::size { xs = xs } <= min_chunk {} then seq::fold { xs = xs, init = zero, f = { acc, x } ->
+    combine { l = acc, r = map_fn { x = x } } } else do
     let n = seq::size { xs = xs }
     let mid = n / 2
-    let left  = seq::take { xs = xs, n = mid }
+    let left = seq::take { xs = xs, n = mid }
     let right = seq::drop { xs = xs, n = mid }
-    let both = Parallel.join {
-      l = {} -> fold { xs = left,  zero = zero, map_fn = map_fn, combine = combine },
-      r = {} -> fold { xs = right, zero = zero, map_fn = map_fn, combine = combine },
-    }
+    let both = Parallel.join { l = {} ->
+      fold {
+        xs = left,
+        zero = zero,
+        map_fn = map_fn,
+        combine = combine,
+      }, r = {} -> fold {
+      xs = right,
+      zero = zero,
+      map_fn = map_fn,
+      combine = combine,
+    } }
     combine { l = both.l, r = both.r }
 
-pub let find : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Option 'a <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } == 0 then None
-  else if seq::size { xs = xs } <= min_chunk {} then
-    seq::find { xs = xs, p = f }
-  else do
+pub let find: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Option 'a <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } == 0 then None else if seq::size { xs = xs } <= min_chunk {} then seq::find { xs = xs, p = f } else do
     let n = seq::size { xs = xs }
     let mid = n / 2
-    let left  = seq::take { xs = xs, n = mid }
+    let left = seq::take { xs = xs, n = mid }
     let right = seq::drop { xs = xs, n = mid }
-    let both = Parallel.join {
-      l = {} -> find { xs = left,  f = f },
-      r = {} -> find { xs = right, f = f },
-    }
+    let both = Parallel.join { l = {} -> find { xs = left, f = f }, r = {} ->
+      find { xs = right, f = f } }
     match both.l is
       Some { val } -> Some { val = val }
       None -> both.r
 
-pub let any : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } == 0 then False
-  else if seq::size { xs = xs } <= min_chunk {} then
-    seq::any { xs = xs, p = f }
-  else do
+
+pub let any: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } == 0 then False else if seq::size { xs = xs } <= min_chunk {} then seq::any { xs = xs, p = f } else do
     let n = seq::size { xs = xs }
     let mid = n / 2
-    let left  = seq::take { xs = xs, n = mid }
+    let left = seq::take { xs = xs, n = mid }
     let right = seq::drop { xs = xs, n = mid }
-    let both = Parallel.join {
-      l = {} -> any { xs = left,  f = f },
-      r = {} -> any { xs = right, f = f },
-    }
+    let both = Parallel.join { l = {} -> any { xs = left, f = f }, r = {} ->
+      any { xs = right, f = f } }
     both.l || both.r
 
-pub let all : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } == 0 then True
-  else if seq::size { xs = xs } <= min_chunk {} then
-    seq::all { xs = xs, p = f }
-  else do
+pub let all: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } == 0 then True else if seq::size { xs = xs } <= min_chunk {} then seq::all { xs = xs, p = f } else do
     let n = seq::size { xs = xs }
     let mid = n / 2
-    let left  = seq::take { xs = xs, n = mid }
+    let left = seq::take { xs = xs, n = mid }
     let right = seq::drop { xs = xs, n = mid }
-    let both = Parallel.join {
-      l = {} -> all { xs = left,  f = f },
-      r = {} -> all { xs = right, f = f },
-    }
+    let both = Parallel.join { l = {} -> all { xs = left, f = f }, r = {} ->
+      all { xs = right, f = f } }
     both.l && both.r
 
 ## ==================================================================
 ## Derived both/both3 — direct wrappers on join.
 ## ==================================================================
-
-pub let both : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel, ...> = { l, r } ->
+pub let both: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel, ...> = { l, r } ->
   Parallel.join { l = l, r = r }
 
-pub let both3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Parallel, ...> = { a, b, c } -> do
-  let ab_and_c = Parallel.join {
-    l = {} -> Parallel.join { l = a, r = b },
-    r = c,
-  }
-  { a = ab_and_c.l.l, b = ab_and_c.l.r, c = ab_and_c.r }
+pub let both3
+  : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> }
+  -> { a: 'a, b: 'b, c: 'c } <Parallel, ...>
+  = { a, b, c } -> do
+    let ab_and_c = Parallel.join { l = {} -> Parallel.join { l = a, r = b }, r = c }
+    { a = ab_and_c.l.l, b = ab_and_c.l.r, c = ab_and_c.r }
 
 ## ==================================================================
 ## Numeric / convenience helpers.
 ## ==================================================================
-
 ## Parallel sum of a Seq of Ints. Chunks the underlying long[] across
 ## the pool's parallelism level, sums each chunk on one FJP worker via
 ## SIMD, and combines. One flat join level instead of log₂(N) — much
 ## faster than delegating to `reduce`. Falls back to a scalar loop
 ## when the seq isn't a native LongSeqStorage. #69.
-pub let sum : { xs: [Int] } -> Int <Parallel> = { xs } ->
-  __native_parallel_sum_long { xs = xs }
+pub let sum: { xs: [Int] } -> Int <Parallel> = { xs } -> __native_parallel_sum_long { xs = xs }
 
 ## Parallel product of a Seq of Ints. Same shape as `sum`. #69.
-pub let product : { xs: [Int] } -> Int <Parallel> = { xs } ->
+pub let product: { xs: [Int] } -> Int <Parallel> = { xs } ->
   __native_parallel_product_long { xs = xs }
 
-pub let count : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Int <Parallel, ...> = { xs, f } ->
+pub let count: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Int <Parallel, ...> = { xs, f } ->
   fold {
     xs = xs,
     zero = 0,
@@ -331,7 +298,7 @@ pub let count : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Int <Parallel, ...> 
     combine = { l, r } -> l + r,
   }
 
-pub let flatten : { xs: [['a]] } -> ['a] <Parallel> = { xs } ->
+pub let flatten: { xs: [['a]] } -> ['a] <Parallel> = { xs } ->
   fold {
     xs = xs,
     zero = [],
@@ -339,5 +306,7 @@ pub let flatten : { xs: [['a]] } -> ['a] <Parallel> = { xs } ->
     combine = { l, r } -> seq::concat { xs = l, ys = r },
   }
 
-pub let flat_map : { xs: ['a], f: { x: 'a } -> ['b] <...> } -> ['b] <Parallel, ...> = { xs, f } ->
-  flatten { xs = map { xs = xs, f = f } }
+pub let flat_map
+  : { xs: ['a], f: { x: 'a } -> ['b] <...> }
+  -> ['b] <Parallel, ...>
+  = { xs, f } -> flatten { xs = map { xs = xs, f = f } }

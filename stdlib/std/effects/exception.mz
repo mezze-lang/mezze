@@ -6,22 +6,22 @@ effect Exception having 'error where {
 
 ## Converts exceptions to Result values (Ok on success, Err on throw).
 impl Exception for ExceptionToResult having 'error = 'e where {
-  throw = { error } -> abort { val = Err { error } },
+  throw = { error } -> abort { val = Err { error } }
 }
 
 ## Converts exceptions to Option (Some on success, None on throw).
 impl Exception for ExceptionToOption having 'error = 'e where {
-  throw = { error } -> abort { val = None },
+  throw = { error } -> abort { val = None }
 }
 
 ## Aborts current computation on throw, returning unit.
 impl Exception for AbortException having 'error = 'e where {
-  throw = { error } -> abort { val = {} },
+  throw = { error } -> abort { val = {} }
 }
 
 ## Silently ignores all errors, returning unit on throw.
 impl Exception for IgnoreException having 'error = 'e where {
-  throw = { error } -> abort { val = {} },
+  throw = { error } -> abort { val = {} }
 }
 
 ## Terminates the program immediately on throw. Use for fatal errors only.
