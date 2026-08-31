@@ -201,86 +201,20 @@ class ConstraintGenerator(
                         is ConstraintSolver.SolveResult.Success -> {
                             val substitution = solveResult.substitution
 
-                            val authoritativeType = if (item.pattern is ParsedVariablePattern && preConvertedAnnotationType != null) {
-                                if (preConvertedAnnotationType is MezzeType.TypeApplication) {
-                                    val isUserDefinedAlias = registry.typeDeclarations.containsKey(preConvertedAnnotationType.constructor)
+                            val letResult = bindLet(
+                                item = item,
+                                result = result,
+                                patternResult = patternResult,
+                                preConvertedAnnotationType = preConvertedAnnotationType,
+                                solveResult = solveResult,
+                                substitution = substitution,
+                                currentContext = currentContext,
+                                outerContext = context,
+                                solver = solver,
+                            )
+                            val solvedBindingsWithEffects = letResult.solvedBindingsWithEffects
 
-                                    if (isUserDefinedAlias) {
-                                        WellKnownTypeApp.of(
-                                            constructor = preConvertedAnnotationType.constructor,
-                                            args = preConvertedAnnotationType.args.map { substitution.apply(it) },
-                                            typeHash = (preConvertedAnnotationType.identity as? TypeIdentity.Declared)?.hash
-                                        )
-                                    } else {
-                                        substitution.apply(preConvertedAnnotationType)
-                                    }
-                                } else {
-                                    substitution.apply(preConvertedAnnotationType)
-                                }
-                            } else {
-                                substitution.apply(result.type)
-                            }
-
-                            if (item.pattern is ParsedVariablePattern && preConvertedAnnotationType != null) {
-                                validateLetAnnotation(item, preConvertedAnnotationType, result, substitution, solveResult.resolvedAssociatedBindings, context)
-                            }
-
-                            val solvedBindings = if (item.pattern is ParsedVariablePattern && authoritativeType != substitution.apply(result.type)) {
-                                mapOf(item.variableName to authoritativeType)
-                            } else {
-                                patternResult.bindings.mapValues { (_, type) ->
-                                    substitution.apply(type)
-                                }
-                            }
-
-                            val solvedBindingsWithAbilities = solvedBindings.mapValues { (name, solvedType) ->
-                                addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution, solveResult.resolvedAssociatedBindings, solver::isAbilityConstraintFullyDischarged, dropDischargedConstraints = item.typeAnnotation == null)
-                            }
-
-                            val hasEffectsOrPerformed = result.effects.isNotEmpty() || result.effectInstances.isNotEmpty() || result.performed
-                            val solvedBindingsWithEffects = if (hasEffectsOrPerformed) {
-                                solvedBindingsWithAbilities.mapValues { (_, solvedType) ->
-                                    when (solvedType) {
-                                        is MezzeType.SuspendType -> {
-                                            if (result.performed && !solvedType.effects.performed) {
-                                                MezzeType.SuspendType(
-                                                    valueType = solvedType.valueType,
-                                                    effects = MezzeType.EffectRow(
-                                                        effects = solvedType.effects.effects,
-                                                        effectInstances = solvedType.effects.effectInstances,
-                                                        rowVar = solvedType.effects.rowVar,
-                                                        performed = true
-                                                    )
-                                                )
-                                            } else {
-                                                solvedType
-                                            }
-                                        }
-                                        is MezzeType.FunctionType -> solvedType
-                                        else -> MezzeType.SuspendType(
-                                            valueType = solvedType,
-                                            effects = MezzeType.EffectRow(
-                                                effects = result.effects,
-                                                effectInstances = result.effectInstances,
-                                                rowVar = null,
-                                                performed = result.performed
-                                            )
-                                        )
-                                    }
-                                }
-                            } else {
-                                solvedBindingsWithAbilities
-                            }
-
-                            val contextBindings = solvedBindingsWithEffects.map { (name, solvedType) ->
-                                val bindingKey = BindingKey.unqualified(name)
-                                bindingKey to buildBindingForContext(
-                                    solvedType, bindingKey, currentContext, item, result,
-                                    substitution, authoritativeType
-                                )
-                            }.toMap()
-
-                            currentContext = currentContext.extendAll(contextBindings)
+                            currentContext = currentContext.extendAll(letResult.contextBindings)
 
                             for ((bindingName, solvedType) in solvedBindingsWithEffects) {
                                 if (results.containsKey(bindingName)) {
@@ -547,6 +481,138 @@ class ConstraintGenerator(
                 varName, item.value.loc
             )
         }
+    }
+
+    /**
+     * Outcome of turning a solved `let` binding into its final context binding(s).
+     *
+     * [contextBindings] extend the typing context; [solvedBindingsWithEffects] is the
+     * per-name solved type carried forward to update the stored [ConstraintResult]s.
+     */
+    data class LetBindingResult(
+        val contextBindings: Map<BindingKey, TypingContext.Binding>,
+        val solvedBindingsWithEffects: Map<String, MezzeType>,
+    )
+
+    /**
+     * bindLet — the single primitive that turns a solved `let` binding into its final
+     * context binding(s). Extracted from the top-level `ParsedLetDecl` path so the
+     * do-block let path (S1.3) can route through the SAME code. Pure w.r.t. generator
+     * state: everything it needs is passed in and it returns a value (no field mutation).
+     *
+     * It performs, in order:
+     *  (a) authoritative-type selection — annotation wins over the structural inferred
+     *      type (aliases preserved via WellKnownTypeApp with the declared hash);
+     *  (b) let-annotation validation (side-effecting: may throw a TypeCheckError);
+     *  (c) solved-binding selection (annotated var vs pattern bindings);
+     *  (d) ability-constraint carry into the solved function type;
+     *  (e) effect -> SuspendType harvest;
+     *  (f) generalization / value-restriction + ability-constraint carry onto the scheme
+     *      (delegated to [buildBindingForContext] per binding).
+     *
+     * @param currentContext the accumulated context whose free vars gate generalization.
+     * @param outerContext   the original module context used for annotation validation
+     *                       (mirrors the historical top-level call, which passed the
+     *                       pre-loop `context`, not `currentContext`).
+     */
+    private fun bindLet(
+        item: ParsedLetDecl,
+        result: ConstraintResult,
+        patternResult: PatternConstraintResult,
+        preConvertedAnnotationType: MezzeType?,
+        solveResult: ConstraintSolver.SolveResult.Success,
+        substitution: Substitution,
+        currentContext: TypingContext,
+        outerContext: TypingContext,
+        solver: ConstraintSolver,
+    ): LetBindingResult {
+        // (a) authoritative type: annotated alias/type wins over the structural type.
+        val authoritativeType = if (item.pattern is ParsedVariablePattern && preConvertedAnnotationType != null) {
+            if (preConvertedAnnotationType is MezzeType.TypeApplication) {
+                val isUserDefinedAlias = registry.typeDeclarations.containsKey(preConvertedAnnotationType.constructor)
+
+                if (isUserDefinedAlias) {
+                    WellKnownTypeApp.of(
+                        constructor = preConvertedAnnotationType.constructor,
+                        args = preConvertedAnnotationType.args.map { substitution.apply(it) },
+                        typeHash = (preConvertedAnnotationType.identity as? TypeIdentity.Declared)?.hash
+                    )
+                } else {
+                    substitution.apply(preConvertedAnnotationType)
+                }
+            } else {
+                substitution.apply(preConvertedAnnotationType)
+            }
+        } else {
+            substitution.apply(result.type)
+        }
+
+        // (b) validate the annotation against the inferred type (may throw).
+        if (item.pattern is ParsedVariablePattern && preConvertedAnnotationType != null) {
+            validateLetAnnotation(item, preConvertedAnnotationType, result, substitution, solveResult.resolvedAssociatedBindings, outerContext)
+        }
+
+        // (c) select the solved bindings: the annotated var (authoritative) or the
+        // substitution-applied pattern bindings.
+        val solvedBindings = if (item.pattern is ParsedVariablePattern && authoritativeType != substitution.apply(result.type)) {
+            mapOf(item.variableName to authoritativeType)
+        } else {
+            patternResult.bindings.mapValues { (_, type) ->
+                substitution.apply(type)
+            }
+        }
+
+        // (d) carry ability constraints into function-typed bindings.
+        val solvedBindingsWithAbilities = solvedBindings.mapValues { (name, solvedType) ->
+            addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution, solveResult.resolvedAssociatedBindings, solver::isAbilityConstraintFullyDischarged, dropDischargedConstraints = item.typeAnnotation == null)
+        }
+
+        // (e) harvest effects into a SuspendType wrapper for non-function bindings.
+        val hasEffectsOrPerformed = result.effects.isNotEmpty() || result.effectInstances.isNotEmpty() || result.performed
+        val solvedBindingsWithEffects = if (hasEffectsOrPerformed) {
+            solvedBindingsWithAbilities.mapValues { (_, solvedType) ->
+                when (solvedType) {
+                    is MezzeType.SuspendType -> {
+                        if (result.performed && !solvedType.effects.performed) {
+                            MezzeType.SuspendType(
+                                valueType = solvedType.valueType,
+                                effects = MezzeType.EffectRow(
+                                    effects = solvedType.effects.effects,
+                                    effectInstances = solvedType.effects.effectInstances,
+                                    rowVar = solvedType.effects.rowVar,
+                                    performed = true
+                                )
+                            )
+                        } else {
+                            solvedType
+                        }
+                    }
+                    is MezzeType.FunctionType -> solvedType
+                    else -> MezzeType.SuspendType(
+                        valueType = solvedType,
+                        effects = MezzeType.EffectRow(
+                            effects = result.effects,
+                            effectInstances = result.effectInstances,
+                            rowVar = null,
+                            performed = result.performed
+                        )
+                    )
+                }
+            }
+        } else {
+            solvedBindingsWithAbilities
+        }
+
+        // (f) generalization / value-restriction + ability-constraint carry per binding.
+        val contextBindings = solvedBindingsWithEffects.map { (name, solvedType) ->
+            val bindingKey = BindingKey.unqualified(name)
+            bindingKey to buildBindingForContext(
+                solvedType, bindingKey, currentContext, item, result,
+                substitution, authoritativeType
+            )
+        }.toMap()
+
+        return LetBindingResult(contextBindings, solvedBindingsWithEffects)
     }
 
     private fun buildBindingForContext(
