@@ -25,9 +25,9 @@ internal fun buildTypeAliasesFromParsedModule(
                 MezzeType.VariantType(
                     constructors = constructors,
                     rowVar = if (def.isOpen) RowVar.fresh() else null,
-                    identity = TypeIdentity.Declared(
-                        typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl),
-                        typeDecl.name
+                    identity = TypeIdentity.declared(
+                        typeDecl.name,
+                        typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
                     )
                 )
             }
@@ -44,9 +44,9 @@ internal fun buildTypeAliasesFromParsedModule(
                     // treated it as solver-inferred and let `f.zzz` invent an unlisted
                     // field; userOpen() makes reading an absent field an error.
                     rowVar = if (def.isOpen) RowVar.userOpen() else null,
-                    identity = TypeIdentity.Declared(
-                        typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl),
-                        typeDecl.name
+                    identity = TypeIdentity.declared(
+                        typeDecl.name,
+                        typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
                     )
                 )
             }

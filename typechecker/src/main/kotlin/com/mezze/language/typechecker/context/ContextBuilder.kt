@@ -326,10 +326,10 @@ class ContextBuilder {
                         constructors = constructors, rowVar = null,
                         // A declared variant always has a content hash — it is a pure
                         // function of the decl (ParsedDeclHasher), so compute it rather
-                        // than falling back to a hashless identity.
-                        identity = TypeIdentity.Declared(
-                            typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl),
-                            typeDecl.name
+                        // than falling back to a hashless identity. S3.1: via the factory.
+                        identity = TypeIdentity.declared(
+                            typeDecl.name,
+                            typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
                         )
                     )
                 }

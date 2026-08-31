@@ -83,13 +83,13 @@ class TypedAstBuilder(
     }
 
     /**
-     * In-scope CLOSED record aliases, as (name, field-name→field-type). Built
-     * once from local decls + imported types (so `pub`/import scoping is
-     * respected — a private or un-imported alias never appears here). Used to
-     * LABEL a bare record literal whose finalized shape exactly matches one:
+     * In-scope CLOSED record aliases, as (name, content hash, field-name→field-type).
+     * Built once from local decls + imported types (so `pub`/import scoping is
+     * respected — a private or un-imported alias never appears here). Fed to THE
+     * canonical `adoptRecordAlias` rule (shared with constraint generation) to LABEL
+     * a bare record literal whose finalized shape exactly matches one:
      * `type Lang = { name: Str, released: Bool }` + `{ name = "M", released =
-     * False }` ⇒ the literal's RecordType.typeName becomes "Lang". This is a
-     * display/label only — the type stays structurally the same record, so it
+     * False }` ⇒ the literal adopts `Lang`'s Declared identity. Structural, so it
      * still passes anywhere the bare `{ name, released }` (open OR closed) is
      * accepted. Same-shape collisions are impossible (rejected at declaration).
      */
@@ -99,41 +99,21 @@ class TypedAstBuilder(
             val def = decl.definition
             if (def is ParsedRecordDef && !def.isOpen) {
                 val hash = decl.contentHash ?: ParsedDeclHasher.hashTypeDecl(decl)
+                // S3.1 identity-stability invariant: the hash emit stamps for an alias
+                // name MUST equal the registry's canonical hash for that name — no
+                // silent re-derivation drift between registry and emit. (Under
+                // -Dmezze.invariants=true only; `typeHashFor` may be null for an
+                // import-only alias the registry doesn't index by name, which is fine.)
+                if (invariantsEnabled) {
+                    val registryHash = registry.typeHashFor(decl.name)
+                    require(registryHash == null || registryHash == hash) {
+                        "Identity-stability invariant: emit hash for record alias '${decl.name}' " +
+                            "($hash) diverges from registry hash ($registryHash)"
+                    }
+                }
                 Triple(decl.name, hash, def.fields.associate { it.name to convertParsedTypeAnnotation(it.type) })
             } else null
         }
-    }
-
-    /**
-     * "If a type alias matching a record shape is in scope, we use it. ALWAYS."
-     *
-     * A CLOSED bare record whose field set and field TYPES exactly match a unique
-     * in-scope CLOSED `type X = { … }` ADOPTS `X`'s nominal identity
-     * (`TypeIdentity.Declared(hash, X)`). This is the EMIT-side half of
-     * `ExprRecordConstraints.adoptRecordAlias`: emit rebuilds a record literal's type
-     * from scratch, so without adopting here the emitted receiver is Anonymous and an
-     * ability method call `x.summarize {}` can't resolve `impl Summary for X` at
-     * runtime dispatch (`Field not found`). Transparency is preserved — the record
-     * keeps its fields, so it still passes anywhere the bare record is accepted.
-     * Fires only on a UNIQUE match (same-shape closed aliases are rejected at
-     * declaration, #187); never touches an OPEN record, an already-identified record,
-     * or one whose fields don't all render-equal a single alias's fields.
-     *
-     * This regressed when `type X = {..}` became transparent (9d03c52d2 gutted this to
-     * a no-op); restoring it under the TypeIdentity model (was `RecordType.typeName`,
-     * removed in #287) fixes ability dispatch on adopted records.
-     */
-    private fun labelRecordWithAlias(record: MezzeType.RecordType): MezzeType.RecordType {
-        if (record.rowVar != null) return record
-        if (record.identity != TypeIdentity.Anonymous) return record
-        if (record.fields.isEmpty()) return record
-        val rendered = record.fields.mapValues { (_, ty) -> prettyPrintType(ty) }
-        val matches = closedRecordAliases.filter { (_, _, aliasFields) ->
-            aliasFields.keys == record.fields.keys &&
-                aliasFields.all { (name, ty) -> rendered[name] == prettyPrintType(ty) }
-        }
-        val (aliasName, hash, _) = matches.singleOrNull() ?: return record
-        return record.copy(identity = TypeIdentity.Declared(hash, aliasName))
     }
 
     private fun precomputeContentHashes(module: ParsedModule) {
@@ -268,7 +248,8 @@ class TypedAstBuilder(
         // exactly matches an in-scope closed alias, LABEL it with that alias name
         // so `x` reads as `Lang` (hover, errors, signatures). Structural, so `x`
         // still passes anywhere the bare record — open or closed — is accepted.
-        val type = (closedType as? MezzeType.RecordType)?.let { labelRecordWithAlias(it) } ?: closedType
+        val type = (closedType as? MezzeType.RecordType)
+            ?.let { com.mezze.language.ast.adoptRecordAlias(it, closedRecordAliases) } ?: closedType
 
         val value = buildExpr(decl.value, file, type)
 
@@ -702,7 +683,8 @@ class TypedAstBuilder(
                         is TypedRecordEntry.Field -> fieldTypes[e.name] = e.value.type
                     }
                 }
-                val recordType = labelRecordWithAlias(MezzeType.RecordType(fieldTypes))
+                val recordType = com.mezze.language.ast.adoptRecordAlias(
+                    MezzeType.RecordType(fieldTypes), closedRecordAliases)
 
                 TypedRecord(entries, recordType, loc)
             }

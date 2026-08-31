@@ -663,7 +663,7 @@ internal fun ExpressionConstraintGenerator.recordMethodResolveBucket(
             ResolutionCandidate(
                 opHash = mi.implContentHash,
                 kind = ResolutionKind.Inherent,
-                targetTypeIdentity = mi.targetTypeHash?.let { TypeIdentity.Declared(it, mi.targetTypeName) },
+                targetTypeIdentity = mi.targetTypeHash?.let { TypeIdentity.declared(mi.targetTypeName, it) },
                 displayName = mi.targetTypeName,
             )
         )

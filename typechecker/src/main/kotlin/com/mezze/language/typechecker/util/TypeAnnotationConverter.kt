@@ -341,15 +341,10 @@ object TypeAnnotationConverter {
                 }
                 if (faithful) {
                     val ctorHash = resolveTypeHash(annotation.constructor)
-                    val ctorIdentity = when {
-                        ctorHash != null -> TypeIdentity.Declared(ctorHash, annotation.constructor)
-                        BuiltinTypes.isBuiltinTypeName(annotation.constructor) -> TypeIdentity.Builtin(annotation.constructor)
-                        // Name resolved to no declaration/builtin — undeclared type.
-                        // Valid code never reaches here (the unknown-type validation
-                        // pass rejects it from the parsed annotation). Anonymous =
-                        // structural, no identity.
-                        else -> TypeIdentity.Anonymous
-                    }
+                    // S3.1: identity via THE canonical factory. A name that resolves to
+                    // no declaration/builtin becomes Anonymous — valid code never reaches
+                    // that (unknown-type validation rejects it upstream).
+                    val ctorIdentity = TypeIdentity.derive(annotation.constructor, ctorHash, allowBuiltin = true)
                     MezzeType.TypeApplication(
                         annotation.constructor,
                         annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash) },
@@ -634,7 +629,7 @@ object TypeAnnotationConverter {
             val hash = aliasHash ?: (resolved as? MezzeType.VariantType)?.identity
                 ?.let { it as? TypeIdentity.Declared }?.hash
                 ?: ((resolved as? MezzeType.RecordType)?.identity as? TypeIdentity.Declared)?.hash
-            if (hash != null) TypeIdentity.Declared(hash, aliasName) else TypeIdentity.Anonymous
+            TypeIdentity.derive(aliasName, hash, allowBuiltin = false)
         }
         return when (resolved) {
             is MezzeType.VariantType -> resolved.copy(

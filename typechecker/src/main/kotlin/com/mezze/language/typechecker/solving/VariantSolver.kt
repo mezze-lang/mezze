@@ -683,9 +683,10 @@ internal class VariantSolver(
             rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
             typeArgs = typeParamMapping.values.toList(),
             // A declared variant always has a content hash (pure fn of the decl).
-            identity = TypeIdentity.Declared(
-                typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl),
-                typeDecl.name
+            // S3.1: via THE canonical factory.
+            identity = TypeIdentity.declared(
+                typeDecl.name,
+                typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
             )
         )
 

@@ -773,7 +773,7 @@ internal class ImplValidator(
     private fun stampTypeHashes(type: MezzeType): MezzeType {
         val stamped = if (type is MezzeType.TypeApplication && type.identity !is TypeIdentity.Declared) {
             registry.typeHashFor(type.constructor)?.let {
-                type.copy(identity = TypeIdentity.Declared(it, type.constructor))
+                type.copy(identity = TypeIdentity.declared(type.constructor, it))
             } ?: type
         } else type
         return stamped.transformChildren { stampTypeHashes(it) }

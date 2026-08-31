@@ -67,6 +67,35 @@ sealed interface TypeIdentity {
         is Builtin -> name
         Anonymous -> null
     }
+
+    /**
+     * THE canonical identity factory (S3.1). Every site that turns a
+     * `(name, maybe-hash)` into a [TypeIdentity] funnels through here, so the
+     * Declared/Builtin/Anonymous decision lives in exactly ONE place instead of
+     * being open-coded at each producer. Precedence, unchanged from the sites it
+     * replaces:
+     *   1. a content hash present ⇒ [Declared] (a real declaration);
+     *   2. else a reserved builtin name ⇒ [Builtin] (List/Map/Bool/… — no
+     *      content to hash), gated by [allowBuiltin];
+     *   3. else ⇒ [Anonymous] (an undeclared name — a checker error handled
+     *      upstream, or a genuinely structural type).
+     */
+    companion object {
+        fun derive(name: String, hash: com.mezze.language.typedast.Hash?, allowBuiltin: Boolean): TypeIdentity =
+            when {
+                hash != null -> Declared(hash, name)
+                allowBuiltin && BuiltinTypes.isBuiltinTypeName(name) -> Builtin(name)
+                else -> Anonymous
+            }
+
+        /**
+         * A type that always has a content hash (a real declaration whose hash is
+         * a pure function of the decl — variants, aliases). Same as `derive` with a
+         * non-null hash, but expresses at the call site that the hash is mandatory.
+         */
+        fun declared(name: String, hash: com.mezze.language.typedast.Hash): Declared =
+            Declared(hash, name)
+    }
 }
 
 @Serializable

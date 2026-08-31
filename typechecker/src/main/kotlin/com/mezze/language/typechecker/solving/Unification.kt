@@ -1248,9 +1248,9 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
         constructors = constructors,
         rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
         typeArgs = typeApp.args,   // #194: carry the application's args so the printer can render `Tree Int`
-        identity = TypeIdentity.Declared(
-            typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl),
-            typeDecl.name
+        identity = TypeIdentity.declared(
+            typeDecl.name,
+            typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
         )
     )
 }
