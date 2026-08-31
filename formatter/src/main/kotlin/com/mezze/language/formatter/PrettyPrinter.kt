@@ -20,19 +20,34 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
 
         var isFirst = true
         var lastWasUse = false
+        var prevDecl: ParsedDecl? = null
 
         for (decl in module.decls) {
             val isUse = decl is ParsedUseDecl || decl is ParsedPubUseDecl
 
             if (!isFirst) {
-                if (lastWasUse && !isUse) {
-                    newLine()
-                } else if (!lastWasUse) {
-                    newLine()
-                }
+                // Blank line BETWEEN top-level declarations, balanced (not
+                // always-on). Insert one when ANY of:
+                //   - crossing the use-block boundary (imports end);
+                //   - the author left a blank line in the source (their
+                //     grouping is preserved; multiple blanks collapse to one);
+                //   - either decl spans multiple lines (functions, type/ability/
+                //     impl decls always get breathing room).
+                // Otherwise adjacent one-liner lets stay packed. `use`s never
+                // get blanks between them.
+                val crossingUseBoundary = lastWasUse && !isUse
+                val bothUse = lastWasUse && isUse
+                val insertBlank = crossingUseBoundary ||
+                    (!bothUse && (
+                        authorLeftBlankLine(prevDecl, decl) ||
+                        isMultiLineDecl(prevDecl) ||
+                        isMultiLineDecl(decl)
+                    ))
+                if (insertBlank) newLine()
             }
             isFirst = false
             lastWasUse = isUse
+            prevDecl = decl
 
             printLeadingComments(decl)
             printDocComment(decl)
@@ -49,6 +64,26 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
         }
 
         return output.toString().trimEnd() + "\n"
+    }
+
+    /**
+     * Did the author leave at least one blank line between [prev] and [next] in
+     * the source? Measured from [prev]'s last line to the top of [next]'s block
+     * (its first leading/doc comment if any, else the decl itself), so a comment
+     * sitting directly above a decl with no blank line isn't miscounted as one.
+     * A gap of ≥ 2 lines means a blank line was present.
+     */
+    private fun authorLeftBlankLine(prev: ParsedDecl?, next: ParsedDecl): Boolean {
+        if (prev == null) return false
+        val nextTop = next.leadingComments.minOfOrNull { it.loc.startLine }
+            ?: next.loc.startLine
+        return nextTop - prev.loc.endLine >= 2
+    }
+
+    /** A declaration that occupies more than one source line. */
+    private fun isMultiLineDecl(decl: ParsedDecl?): Boolean {
+        if (decl == null) return false
+        return decl.loc.endLine > decl.loc.startLine
     }
 
     // =========================================================================

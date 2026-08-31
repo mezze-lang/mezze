@@ -1406,4 +1406,75 @@ class FormatterTest {
         assertTrue(first.contains("# first") && first.contains("## doc"),
             "both comments must survive, got:\n$first")
     }
+
+    // =========================================================================
+    // BLANK LINES BETWEEN TOP-LEVEL DECLS (balanced, not always-on)
+    // The formatter no longer forces a blank line between every decl. It keeps
+    // adjacent one-liners packed, preserves author grouping, collapses runs of
+    // blanks to one, and always breathes around multi-line decls.
+    // =========================================================================
+
+    @Test
+    fun `adjacent one-line lets stay packed`() {
+        val input = """
+            let name = "Mezze"
+            let release = 0.1
+            let ready = False
+            let versions = [1, 2, 3]
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertEquals(
+            "let name = \"Mezze\"\n" +
+            "let release = 0.1\n" +
+            "let ready = False\n" +
+            "let versions = [1, 2, 3]\n",
+            output
+        )
+        assertEquals(output, formatter.format(output), "must be idempotent")
+    }
+
+    @Test
+    fun `author-written blank line between one-liners is preserved`() {
+        val input = "let a = 1\nlet b = 2\n\nlet c = 3\n"
+        val output = formatter.format(input)
+        assertEquals("let a = 1\nlet b = 2\n\nlet c = 3\n", output)
+        assertEquals(output, formatter.format(output), "must be idempotent")
+    }
+
+    @Test
+    fun `multiple blank lines collapse to one`() {
+        val input = "let a = 1\n\n\n\nlet b = 2\n"
+        val output = formatter.format(input)
+        assertEquals("let a = 1\n\nlet b = 2\n", output)
+    }
+
+    @Test
+    fun `a comment glued to a decl does not force a blank line`() {
+        val input = "let a = 1\n# labels b\nlet b = 2\n"
+        val output = formatter.format(input)
+        assertEquals("let a = 1\n# labels b\nlet b = 2\n", output)
+        assertEquals(output, formatter.format(output), "must be idempotent")
+    }
+
+    @Test
+    fun `a multi-line decl gets a blank line on each side`() {
+        val input = """
+            let name = "Mezze"
+            let f = { a, b } -> do
+              let s = a
+              s
+            let footer = "bye"
+        """.trimIndent()
+        val output = formatter.format(input)
+        // name / f separated, f / footer separated — f is multi-line.
+        assertTrue(
+            Regex("let name = \"Mezze\"\\n\\nlet f = ").containsMatchIn(output),
+            "expected blank before multi-line f, got:\n$output"
+        )
+        assertTrue(
+            output.contains("  s\n\nlet footer"),
+            "expected blank after multi-line f, got:\n$output"
+        )
+        assertEquals(output, formatter.format(output), "must be idempotent")
+    }
 }
