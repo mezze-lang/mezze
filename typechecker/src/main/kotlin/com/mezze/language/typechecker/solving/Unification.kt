@@ -76,6 +76,33 @@ internal fun identityVerdict(id1: TypeIdentity, id2: TypeIdentity): IdentityVerd
 }
 
 /**
+ * True iff [type] is an OPAQUE nominal wall: unification must REJECT on an identity
+ * mismatch instead of falling through to structural comparison. This is the single
+ * place that decides wall-ness for the whole unifier.
+ *
+ * Wall-ness is keyed on NODE-KIND + [MezzeType.VariantType.ascriptionWall] ONLY —
+ * NEVER on `.identity` shape. A `Declared` record is still TRANSPARENT: it may unify
+ * structurally with an `Anonymous` bare-record literal (that is what makes
+ * `type Wrapper = {n:Int}; f({n=5})` type-check). Only two kinds are opaque:
+ *
+ *  - [MezzeType.NewtypeType] — nominal, module-opaque by node kind. A newtype never
+ *    unifies with its bare underlying; it rejects on any declaration mismatch.
+ *  - [MezzeType.VariantType] with `ascriptionWall == true` — an author-written /
+ *    inferred hard ascription. Everything else (records, non-walled variant aliases)
+ *    is transparent and falls through to structural unify on an UNDETERMINED verdict.
+ *
+ * `ascriptionWall` stays a SEPARATE field consulted here — it is not part of
+ * [TypeIdentity]. The name-in-scope nominal barrier (#148) is a DISTINCT mechanism
+ * layered on top by [isWalledVariant]; it is deliberately NOT folded in here, so this
+ * predicate never touches the registry.
+ */
+internal fun isOpaqueWall(type: MezzeType): Boolean = when {
+    type is MezzeType.NewtypeType -> true
+    type is MezzeType.VariantType -> type.ascriptionWall
+    else -> false
+}
+
+/**
  * True iff two identities are the SAME *concrete declaration* — both [TypeIdentity.Declared]
  * with equal hash, or both [TypeIdentity.Builtin] with equal name. Unlike [identityVerdict]'s
  * SAME verdict this does NOT include two [TypeIdentity.Anonymous] (two anonymous shapes are
@@ -195,7 +222,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         }
         type1 is MezzeType.RecordType && type2 is MezzeType.VariantType -> {
             if (type2.constructors.size == 1 && type2.rowVar == null &&
-                !type2.ascriptionWall && !isWalledVariant(type2, registry)) {
+                !isOpaqueWall(type2) && !isWalledVariant(type2, registry)) {
                 val (_, payloadType) = type2.constructors.entries.first()
                 if (payloadType != null) {
                     return unify(type1, payloadType, registry)
@@ -209,7 +236,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         }
         type1 is MezzeType.VariantType && type2 is MezzeType.RecordType -> {
             if (type1.constructors.size == 1 && type1.rowVar == null &&
-                !type1.ascriptionWall && !isWalledVariant(type1, registry)) {
+                !isOpaqueWall(type1) && !isWalledVariant(type1, registry)) {
                 val (_, payloadType) = type1.constructors.entries.first()
                 if (payloadType != null) {
                     return unify(payloadType, type2, registry)
@@ -330,7 +357,10 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
             // DECLARATION. Identity decides: two Declared newtypes are the same iff
             // their declaration hashes match (a mismatch means two modules' same-named
             // `Token`, or a version skew, and MUST fail even when the names match).
-            // A newtype is an OPAQUE wall. When BOTH sides carry a real declaration
+            // A newtype is an OPAQUE wall (isOpaqueWall(newtype) == true by node kind):
+            // it rejects on any declaration mismatch and NEVER falls through to
+            // structural, so this branch always ends in unify(wrapped) or Failure —
+            // there is no transparent path. When BOTH sides carry a real declaration
             // identity (Declared/Builtin) the identity DECIDES; otherwise (a
             // hashless/legacy newtype → Anonymous identity) we fall back to the bare
             // NAME — NOT to structural, and NOT treating two Anonymous newtypes as the
@@ -563,6 +593,8 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
     // alias meeting a bare record), we KEEP structural unification. That is what
     // makes `type Wrapper = {n:Int}; f { x = {n=5} }` type-check. Mirrors the
     // TypeApplication/variant hash-veto; contrast newtype, which is an opaque wall.
+    // (`isOpaqueWall(record) == false` by construction — records are never opaque, so
+    // an UNDETERMINED verdict here always falls through to the structural loop below.)
     if (identityVerdict(rec1.identity, rec2.identity) == IdentityVerdict.DISTINCT) {
         return UnificationResult.Failure(
             message = "Cannot unify record types: distinct declarations (content hash differs)",
@@ -644,7 +676,9 @@ private fun isWalledVariant(
     v: MezzeType.VariantType,
     registry: DeclarationRegistry
 ): Boolean {
-    if (v.ascriptionWall) return true
+    // The opaque-wall portion (ascriptionWall) comes from the shared predicate; the
+    // #148 name-in-scope barrier below is the DISTINCT, registry-driven layer on top.
+    if (isOpaqueWall(v)) return true
     val name = v.identity.displayNameOrNull() ?: return false
     val override = inScopeAliasNamesOverride.get()
     return if (override != null) override.contains(name)
@@ -733,8 +767,8 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     // A variant is "walled" if it carries a decl identity (name/hash) OR the
     // author-written / inferred ascriptionWall marker. Both are hard walls under
     // unification's disjoint-arms rule; only two walls with SAME arms unify.
-    val walled1 = var1.identity != TypeIdentity.Anonymous || var1.ascriptionWall
-    val walled2 = var2.identity != TypeIdentity.Anonymous || var2.ascriptionWall
+    val walled1 = var1.identity != TypeIdentity.Anonymous || isOpaqueWall(var1)
+    val walled2 = var2.identity != TypeIdentity.Anonymous || isOpaqueWall(var2)
     val bothWalled = walled1 && walled2
     val id1 = var1.identity
     val id2 = var2.identity

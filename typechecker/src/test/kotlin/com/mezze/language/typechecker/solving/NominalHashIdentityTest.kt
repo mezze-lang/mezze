@@ -125,4 +125,53 @@ class NominalHashIdentityTest {
         val r2 = MezzeType.RecordType(mapOf("x" to MezzeType.IntType))
         assertIs<UnificationResult.Success>(unify(r1, r2), "hashless records unify by structure")
     }
+
+    // ---- S3.2: isOpaqueWall — the single predicate that decides wall-ness ----
+    // Wall-ness is keyed on NODE-KIND + ascriptionWall ONLY, never on identity shape.
+    // A `Declared` record is TRANSPARENT; only newtype nodes and ascriptionWall
+    // variants are opaque. These lock the two behaviours the consolidation preserves:
+    // transparent-alias fall-through, and opaque-wall rejection on identity mismatch.
+
+    @Test fun `isOpaqueWall true only for newtype nodes and ascriptionWall variants`() {
+        val newtype = MezzeType.NewtypeType("Token", "Token", MezzeType.StringType, identity = TypeIdentity.Declared(hashA, "Token"))
+        val walledVariant = MezzeType.VariantType(mapOf("A" to null), ascriptionWall = true)
+        assert(isOpaqueWall(newtype)) { "a newtype node is an opaque wall" }
+        assert(isOpaqueWall(walledVariant)) { "an ascriptionWall variant is an opaque wall" }
+    }
+
+    @Test fun `isOpaqueWall false for records and non-walled variants regardless of identity shape`() {
+        // A DECLARED record is still transparent — wall-ness must NOT key on `identity is Declared`.
+        val declaredRecord = MezzeType.RecordType(mapOf("n" to MezzeType.IntType), identity = TypeIdentity.Declared(hashA, "Wrapper"))
+        val anonRecord = MezzeType.RecordType(mapOf("n" to MezzeType.IntType))
+        // A DECLARED but non-ascription variant (an alias-resolved shape) is transparent too.
+        val declaredVariant = MezzeType.VariantType(mapOf("A" to null, "B" to null), identity = TypeIdentity.Declared(hashA, "E"))
+        val anonVariant = MezzeType.VariantType(mapOf("A" to null))
+        assert(!isOpaqueWall(declaredRecord)) { "a Declared record is TRANSPARENT, not an opaque wall" }
+        assert(!isOpaqueWall(anonRecord)) { "an anonymous record is transparent" }
+        assert(!isOpaqueWall(declaredVariant)) { "a non-ascriptionWall variant is transparent" }
+        assert(!isOpaqueWall(anonVariant)) { "an anonymous non-walled variant is transparent" }
+    }
+
+    @Test fun `transparent alias — Declared record unifies structurally with a bare Anonymous record literal`() {
+        // `type Wrapper = {n:Int}` slot (Declared) meets a bare `{n=5}` literal (Anonymous):
+        // mixed Declared<->Anonymous is UNDETERMINED, and because a record is transparent
+        // (isOpaqueWall == false) it MUST fall through to structural unify and succeed.
+        val slot = MezzeType.RecordType(mapOf("n" to MezzeType.IntType), identity = TypeIdentity.Declared(hashA, "Wrapper"))
+        val literal = MezzeType.RecordType(mapOf("n" to MezzeType.IntType))
+        assertIs<UnificationResult.Success>(
+            unify(slot, literal),
+            "a transparent Declared record alias accepts a structurally-equal bare literal",
+        )
+    }
+
+    @Test fun `opaque wall — an ascriptionWall variant rejects an identity mismatch`() {
+        // Two ascription-walled variants with distinct Declared hashes are distinct
+        // declarations; the opaque wall rejects even though arms are identical.
+        val w1 = MezzeType.VariantType(mapOf("A" to null, "B" to null), identity = TypeIdentity.Declared(hashA, "E"), ascriptionWall = true)
+        val w2 = MezzeType.VariantType(mapOf("A" to null, "B" to null), identity = TypeIdentity.Declared(hashB, "E"), ascriptionWall = true)
+        assertIs<UnificationResult.Failure>(
+            unify(w1, w2),
+            "an opaque ascriptionWall variant rejects a distinct-declaration identity mismatch",
+        )
+    }
 }
