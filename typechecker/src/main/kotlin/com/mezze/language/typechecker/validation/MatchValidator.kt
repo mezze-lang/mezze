@@ -2,8 +2,6 @@ package com.mezze.language.typechecker.validation
 
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
-import com.mezze.language.typechecker.constraints.ConstraintResult
-import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
 import com.mezze.language.typechecker.solving.expandTypeApplicationToRecord
@@ -14,115 +12,41 @@ class MatchValidator(
     private val registry: DeclarationRegistry,
 ) {
 
+    // S5.1 (#364): exhaustiveness reads the DECIDED TypedMatch nodes. The caller
+    // (TypeValidator) walks the just-emitted TypedModule and hands us
+    // `decidedScrutineeTypes` — each match node's UNERASED scrutineeSourceType
+    // (#376), keyed by the match's Loc (== the ParsedMatch Loc). We look the
+    // scrutinee type up by Loc instead of re-inferring it: the validator judges
+    // DECIDED data, never re-derives it. Emit stamps scrutineeSourceType from the
+    // SAME constraint-time solved value the old re-inference used, so this is
+    // behaviour-preserving. A Bool match emits a TypedIf (no TypedMatch node) and
+    // is handled by the constructor-pattern path elsewhere; here we only touch the
+    // non-constructor-pattern matches, all of which emit a TypedMatch.
     fun validateParsedMatchesInExpr(
         expr: ParsedExpr,
-        substitution: Substitution,
-        constraintResults: Map<String, ConstraintResult>,
-        currentDeclName: String? = null,
+        decidedScrutineeTypes: Map<Loc, MezzeType>,
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
-        // Restrict scrutinee-type inference to the CURRENT declaration's constraints.
-        // Without this filter, `extractParamType` scans ALL decls' function types
-        // and grabs the first that happens to have a parameter with the matching
-        // name — silently picking up an unrelated decl's `var` param (e.g. `deref`'s
-        // `var: TVar 'a` matches `unwrap_tmvar`'s `var: TMVar 'a`), so the wrong type
-        // reaches exhaustiveness and demands wrong constructors.
-        val scopedResults: Map<String, ConstraintResult> =
-            if (currentDeclName != null && constraintResults.containsKey(currentDeclName)) {
-                mapOf(currentDeclName to constraintResults.getValue(currentDeclName))
-            } else {
-                constraintResults
-            }
         walkParsedExpr(expr) { node ->
             if (node is ParsedMatch) {
                 val hasConstructorPattern = node.cases.any { case ->
                     case.patterns.any { it is ParsedConstructorPattern }
                 }
                 if (!hasConstructorPattern) {
-                    val scrutineeType = inferParsedScrutineeType(node, substitution, scopedResults)
-                    if (scrutineeType != null) {
-                        val result = validateParsedExhaustiveness(node, scrutineeType)
-                        if (result is ValidationResult.Failure) errors.addAll(result.errors)
-                    }
+                    val decided = decidedScrutineeTypes[node.loc] ?: return@walkParsedExpr
+                    val scrutineeType = surfaceScrutineeType(decided) ?: return@walkParsedExpr
+                    val result = validateParsedExhaustiveness(node, scrutineeType)
+                    if (result is ValidationResult.Failure) errors.addAll(result.errors)
                 }
             }
         }
         return errors
     }
 
-    // S5.1 (#364) BLOCKER: this re-inference could NOT be replaced by reading the
-    // decided TypedMatch scrutinee type off the emitted TypedModule. Emit ERASES a
-    // newtype scrutinee to its underlying primitive (`match Age.(42) is Age.(x) ->`
-    // emits scrutinee type Int, not Age), so exhaustiveness reading the decided node
-    // would hit the non-enumerable-primitive path and (wrongly) demand a wildcard —
-    // the `Age.(x)` newtype pattern is not a catch-all, so it would raise a spurious
-    // V0601. It also loses the alias-expanded field type for a field-access scrutinee
-    // when the receiver's param type is an unexpanded record alias. The constraint-time
-    // matchScrutineeTypes side-table records the UNERASED scrutinee type, which is what
-    // source-level exhaustiveness needs — so it stays as the source. See report.
-    private fun inferParsedScrutineeType(
-        matchExpr: ParsedMatch,
-        substitution: Substitution,
-        constraintResults: Map<String, ConstraintResult>
-    ): MezzeType? {
-        val constructorNames = mutableSetOf<String>()
-        for (case in matchExpr.cases) {
-            for (pattern in case.patterns) {
-                if (pattern is ParsedConstructorPattern) constructorNames.add(pattern.constructor)
-            }
-        }
-
-        if (constructorNames.isNotEmpty()) {
-            for ((_, typeDecl) in typeDeclarations) {
-                val definition = typeDecl.definition
-                if (definition is ParsedVariantDef) {
-                    val variantConstructors = definition.constructors.map { it.name }.toSet()
-                    if (constructorNames.all { it in variantConstructors }) {
-                        return MezzeType.VariantType(
-                            constructors = definition.constructors.associate { ctor ->
-                                ctor.name to ctor.dataType?.let { TypeAnnotationConverter.convert(it, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } }) }
-                            },
-                            rowVar = if (definition.isOpen) RowVar.fresh() else null
-                        )
-                    }
-                }
-            }
-        }
-
-        // BUG D (#332): PRIMARY path — the scrutinee's SOLVED type, recorded at
-        // constraint generation keyed by the scrutinee's Loc. This covers EVERY
-        // scrutinee expression (local `let` binding, field access, call result,
-        // parenthesized expr), not just a bare function parameter. The parameter
-        // re-derivation below is a legacy fallback for the rare case where the
-        // loc-keyed type is still an unresolved var (e.g. a fully generic
-        // scrutinee), where surfacing nothing is correct anyway.
-        val scrutineeLoc = matchExpr.scrutinee.loc
-        for ((_, result) in constraintResults) {
-            val recorded = result.matchScrutineeTypes[scrutineeLoc] ?: continue
-            surfaceScrutineeType(substitution.apply(recorded))?.let { return it }
-        }
-
-        // Legacy fallback: recover the scrutinee type from the enclosing decl's
-        // PARAMETER shape when the scrutinee is a bare parameter identifier. Kept
-        // for the case where the loc-keyed record above is absent (defensive).
-        val scrutinee = matchExpr.scrutinee
-        if (scrutinee is ParsedIdentifier) {
-            val varName = scrutinee.localName
-            for ((_, result) in constraintResults) {
-                val resolvedType = substitution.apply(result.type)
-                val paramType = extractParamType(resolvedType, varName) ?: continue
-                surfaceScrutineeType(substitution.apply(paramType))?.let { return it }
-            }
-        }
-
-        return null
-    }
-
     /**
      * Given a scrutinee's solved type, surface the finite/enumerable shape that
      * `validateParsedExhaustiveness` knows how to check — or null when the type
      * has no exhaustiveness obligation (a fully generic var, a function, etc.).
-     * Shared by the loc-keyed primary path and the parameter fallback.
      */
     private fun surfaceScrutineeType(finalType: MezzeType): MezzeType? {
         val expanded = when (finalType) {
@@ -140,11 +64,6 @@ class MatchValidator(
         // #218: a record matched with record patterns — check its finite fields.
         if (expanded is MezzeType.RecordType) return expanded
         return null
-    }
-
-    private fun extractParamType(type: MezzeType, paramName: String): MezzeType? = when (type) {
-        is MezzeType.FunctionType -> (type.paramType as? MezzeType.RecordType)?.fields?.get(paramName)
-        else -> null
     }
 
     /** Primitive scalar types whose values can't be enumerated, so a match on

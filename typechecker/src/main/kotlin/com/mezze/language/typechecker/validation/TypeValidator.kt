@@ -17,6 +17,10 @@ import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typedast.Hash
+import com.mezze.language.typedast.TypedModule
+import com.mezze.language.typedast.TypedExpr
+import com.mezze.language.typedast.TypedMatch
+import com.mezze.language.typedast.forEachChild
 
 class TypeValidator(
     private val context: TypingContext,
@@ -37,10 +41,20 @@ class TypeValidator(
     fun validate(
         module: ParsedModule,
         constraintResults: Map<String, ConstraintResult>,
-        substitution: Substitution
+        substitution: Substitution,
+        typedModule: TypedModule? = null,
     ): ValidationResult {
         val errors = mutableListOf<ValidationError>()
         val warnings = mutableListOf<String>()
+
+        // S5.1 (#364): exhaustiveness reads the DECIDED TypedMatch nodes off the
+        // just-emitted TypedModule. Each TypedMatch carries its UNERASED
+        // scrutineeSourceType (#376), keyed here by the match node's Loc (which
+        // equals the ParsedMatch's Loc — emit stamps `loc = expr.loc`). The
+        // MatchValidator looks the decided type up by Loc instead of re-inferring
+        // it from the constraint-time side-table.
+        val decidedScrutineeTypes: Map<Loc, MezzeType> =
+            typedModule?.let { buildDecidedScrutineeTypes(it) } ?: emptyMap()
 
         errors.addAll(unknownTypeValidator.validate(module))
 
@@ -99,7 +113,7 @@ class TypeValidator(
             }
             if (expr == null) continue
             errors.addAll(performValidator.validatePerformExpressionsInExpression(expr, implDeclarations, effectDeclarations, parsedFunctionDefs))
-            errors.addAll(matchValidator.validateParsedMatchesInExpr(expr, substitution, constraintResults, currentDeclName))
+            errors.addAll(matchValidator.validateParsedMatchesInExpr(expr, decidedScrutineeTypes))
         }
 
         return if (errors.isEmpty()) {
@@ -107,6 +121,29 @@ class TypeValidator(
         } else {
             ValidationResult.Failure(errors)
         }
+    }
+
+    /**
+     * S5.1 (#364): collect every emitted TypedMatch's UNERASED scrutineeSourceType,
+     * keyed by the match node's Loc, across all decl / ability-impl / performer
+     * bodies. This is the exhaustiveness oracle the MatchValidator reads — the
+     * decided node, not a constraint-time re-inference. A Bool match emits a
+     * TypedIf (not a TypedMatch), so it's absent here; that's fine — the Bool /
+     * constructor-pattern exhaustiveness path is handled separately from the
+     * source AST.
+     */
+    private fun buildDecidedScrutineeTypes(typedModule: TypedModule): Map<Loc, MezzeType> {
+        val out = mutableMapOf<Loc, MezzeType>()
+        fun walk(expr: TypedExpr) {
+            if (expr is TypedMatch) out[expr.loc] = expr.scrutineeSourceType
+            expr.forEachChild(::walk)
+        }
+        for (decl in typedModule.decls) {
+            if (decl is com.mezze.language.typedast.TypedLetDecl) walk(decl.value)
+        }
+        for (impl in typedModule.abilityImpls) impl.operations.values.forEach(::walk)
+        for (performer in typedModule.performerDecls) performer.operations.values.forEach(::walk)
+        return out
     }
 
     fun validateConstraints(

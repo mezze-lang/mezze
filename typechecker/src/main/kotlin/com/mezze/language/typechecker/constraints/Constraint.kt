@@ -357,18 +357,14 @@ data class ConstraintResult(
     // bindings.
     val matchCaseBindings: Map<Loc, Map<String, MezzeType>> = emptyMap(),
     // BUG D (#332): the SOLVED type of each match's scrutinee expression, keyed
-    // by the scrutinee's Loc. Exhaustiveness (MatchValidator) runs on the PARSED
-    // AST and previously re-derived the scrutinee type from the enclosing
-    // function's PARAMETER shape — which only works when the scrutinee is a bare
-    // parameter identifier. For `let n = a+1; match n is …` or `match r.n is …`
-    // that re-derivation returned null and exhaustiveness was SILENTLY SKIPPED,
-    // so a non-exhaustive Int/Str/variant match type-checked and later crashed at
-    // runtime with no matching arm. Recording the inference-time scrutinee type
-    // here (resolved by the validator via the final substitution) lets
-    // exhaustiveness see EVERY scrutinee, not just direct parameters. S5.1 (#364)
-    // could NOT replace this with the emitted TypedMatch scrutinee type: emit
-    // erases a newtype scrutinee to its underlying primitive, and exhaustiveness
-    // needs the UNERASED source-level type — see MatchValidator.inferParsedScrutineeType.
+    // by the scrutinee's Loc — the UNERASED source-level scrutinee type (e.g.
+    // `Age`, not the erased `Int`). This is EMIT'S INPUT: TypedAstBuilder stamps
+    // it onto TypedMatch.scrutineeSourceType (#376). S5.1 (#364) then made
+    // exhaustiveness read the DECIDED TypedMatch node off the emitted TypedModule
+    // instead of re-inferring from this side-table — so the validator no longer
+    // reads this map directly; only the emit-population path does. (Emit erases a
+    // newtype scrutinee to its underlying primitive for runtime lowering; the
+    // decided node carries this unerased type separately for exhaustiveness.)
     val matchScrutineeTypes: Map<Loc, MezzeType> = emptyMap(),
     // BUG C (#331): callback-effect harvest for a `<...>` HOF call
     // (collectClosureArgEffects) runs at constraint-GEN time and skips any arg

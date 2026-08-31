@@ -526,7 +526,7 @@ class TypeChecker(
                 // invariant), never silent.
                 emitResult.typedModule?.let { InvariantChecker.checkEffectConservation(it) }
 
-                val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution)
+                val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution, emitResult.typedModule)
                 val v2Warnings = mutableListOf<TypeCheckWarning>()
                 collectValidationResult(v2ValidationResult, collectedErrors, v2Warnings)
 
