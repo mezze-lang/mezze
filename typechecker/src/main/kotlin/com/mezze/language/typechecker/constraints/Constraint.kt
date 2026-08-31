@@ -365,7 +365,10 @@ data class ConstraintResult(
     // so a non-exhaustive Int/Str/variant match type-checked and later crashed at
     // runtime with no matching arm. Recording the inference-time scrutinee type
     // here (resolved by the validator via the final substitution) lets
-    // exhaustiveness see EVERY scrutinee, not just direct parameters.
+    // exhaustiveness see EVERY scrutinee, not just direct parameters. S5.1 (#364)
+    // could NOT replace this with the emitted TypedMatch scrutinee type: emit
+    // erases a newtype scrutinee to its underlying primitive, and exhaustiveness
+    // needs the UNERASED source-level type — see MatchValidator.inferParsedScrutineeType.
     val matchScrutineeTypes: Map<Loc, MezzeType> = emptyMap(),
     // BUG C (#331): callback-effect harvest for a `<...>` HOF call
     // (collectClosureArgEffects) runs at constraint-GEN time and skips any arg

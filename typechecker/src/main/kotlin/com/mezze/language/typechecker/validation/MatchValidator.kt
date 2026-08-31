@@ -50,6 +50,16 @@ class MatchValidator(
         return errors
     }
 
+    // S5.1 (#364) BLOCKER: this re-inference could NOT be replaced by reading the
+    // decided TypedMatch scrutinee type off the emitted TypedModule. Emit ERASES a
+    // newtype scrutinee to its underlying primitive (`match Age.(42) is Age.(x) ->`
+    // emits scrutinee type Int, not Age), so exhaustiveness reading the decided node
+    // would hit the non-enumerable-primitive path and (wrongly) demand a wildcard —
+    // the `Age.(x)` newtype pattern is not a catch-all, so it would raise a spurious
+    // V0601. It also loses the alias-expanded field type for a field-access scrutinee
+    // when the receiver's param type is an unexpanded record alias. The constraint-time
+    // matchScrutineeTypes side-table records the UNERASED scrutinee type, which is what
+    // source-level exhaustiveness needs — so it stays as the source. See report.
     private fun inferParsedScrutineeType(
         matchExpr: ParsedMatch,
         substitution: Substitution,
