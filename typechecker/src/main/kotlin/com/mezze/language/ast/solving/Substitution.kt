@@ -364,6 +364,41 @@ data class Substitution(
         )
     }
 
+    // S0.4/#373 — make this substitution IDEMPOTENT by resolving each RHS through
+    // the substitution itself, so `apply(apply(t)) == apply(t)`.
+    //
+    // WHY IT'S NEEDED. `compose` (and the solver's step-by-step
+    // `result.compose(substitution)`) is a NON-saturating union: s1 wins, and
+    // neither side's RHS is re-applied. That keeps each NEW binding resolved
+    // against prior work (the solver pre-applies the accumulated substitution to
+    // every constraint before unifying), but it never RE-resolves an OLD RHS when
+    // a later binding pins a var that old RHS still mentions. Over a full solve the
+    // accumulated map therefore holds entries like `'d -> Fn(_ -> 'e)` alongside
+    // `'e -> Str`: `apply` still yields the fixpoint `Fn(_ -> Str)` in one pass
+    // (apply is fully recursive), but the STORED RHS is not itself a fixpoint, so
+    // `apply(apply(t)) != apply(t)` on the raw map.
+    //
+    // WHY IT'S SEMANTICALLY TRANSPARENT. `apply` already resolves var chains to the
+    // fixpoint, so `saturate` changes NO type any `apply(t)` produces — it only
+    // rewrites each stored RHS to the value `apply` would have reached anyway,
+    // collapsing the fixpoint into a single stored step. It reuses the SAME `apply`
+    // (including the OOM-guarded shallow handling of ability-constraint arg /
+    // associated-type-binding vars in `substituteConstraintArg`), so it cannot
+    // deep-re-enter a recursive effect type. One pass suffices because `apply` is
+    // recursive; a second `apply` over the rewritten RHSs is a no-op fixpoint,
+    // which is exactly the post-solve idempotence invariant.
+    fun saturate(): Substitution {
+        if (mappings.isEmpty()) return this
+        var changed = false
+        val saturated = HashMap<TypeVar, MezzeType>(mappings.size)
+        for ((tv, ty) in mappings) {
+            val applied = apply(ty)
+            if (applied !== ty && applied != ty) changed = true
+            saturated[tv] = applied
+        }
+        return if (changed) Substitution(saturated, rowVarMappings) else this
+    }
+
     val isEmpty: Boolean
         get() = mappings.isEmpty() && rowVarMappings.isEmpty()
 

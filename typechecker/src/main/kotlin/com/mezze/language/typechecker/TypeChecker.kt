@@ -413,15 +413,48 @@ class TypeChecker(
                 )
             }
             is ConstraintSolver.SolveResult.Success -> {
-                val substitution = solveResult.substitution.compose(perBindingSubstitution)
+                // S0.4/#373 — SATURATE the composed post-solve substitution so it is
+                // IDEMPOTENT (apply(apply(t)) == apply(t)). The solver's step-wise
+                // `compose` is a non-saturating union: it keeps each NEW binding
+                // resolved against prior work but never re-resolves an OLD RHS when a
+                // later binding pins a var that RHS still mentions, leaving entries
+                // like `'d -> Fn(_ -> 'e)` beside `'e -> Str`. `apply` already yields
+                // the fixpoint (it recurses), so saturating the stored RHSs changes no
+                // resolved type — it only collapses the fixpoint into one stored step,
+                // which is what makes the idempotence invariant below hold. This runs
+                // once at the boundary; downstream `substitution.apply(...)` is
+                // unchanged in result, just guaranteed idempotent.
+                val substitution = solveResult.substitution.compose(perBindingSubstitution).saturate()
                 InvariantChecker.checkSubstitution(substitution, "post-solve")
-                // NOTE: checkSubstitutionIdempotence is deliberately NOT called here.
-                // Turning it on revealed the post-solve substitution is currently
-                // non-idempotent (a FunctionType RHS still contains vars the
-                // substitution itself rewrites). Whether that is a solver bug or an
-                // accepted property of this HM solver is an open question tracked as
-                // its own ticket (S0.x). Do not enable until that is resolved, or
-                // the whole invariant gate goes red on legitimate programs.
+                // S0.4/#373 — POST-SOLVE SUBSTITUTION IDEMPOTENCE, now that
+                // saturate() above establishes it. `apply(apply(t)) == apply(t)`: no
+                // stored RHS still mentions a var the same substitution rewrites.
+                //
+                // ROOT CAUSE (traced): the non-idempotence is NOT the two-solve seam.
+                // Every offending mapping lives entirely in the GLOBAL solve
+                // (solveResult.substitution) — none straddles the per-binding/global
+                // boundary — so it is the solver's own step-wise non-saturating
+                // `compose` (result.compose(substitution) at every ConstraintSolver
+                // step), which keeps NEW bindings resolved against prior work but
+                // never re-resolves an OLD RHS when a later binding pins a var that
+                // RHS still contains. The concrete repro was `'d -> Fn({n:Float} ->
+                // 'e)` beside `'e -> Str` (a plain numeric record, NOT associated-type
+                // specific — the assoc-type family just surfaced it first via the
+                // prelude typecheck cached in a static initializer, hence the S0.1
+                // ExceptionInInitializerError cascade).
+                //
+                // saturate() is semantically transparent: `apply` already yields the
+                // fixpoint in one recursive pass, so re-storing each RHS as its own
+                // fixpoint changes no resolved type — the full tc+interp suites stay
+                // green with this invariant ON. Promoted from the disabled NOTE to a
+                // real gate: a regression that reopens the non-idempotence (a
+                // downstream result depending on how many times apply() runs) trips
+                // here under -Dmezze.invariants=true instead of surfacing as an
+                // order-dependent inference bug. This also discharges the S5.2/#365
+                // two-solve composition clause: each side is itself made idempotent by
+                // saturate() and their union is saturated too, so the two solves
+                // compose without any further pass.
+                InvariantChecker.checkSubstitutionIdempotence(substitution, "post-solve")
                 ConstraintDumper.dumpSolverResult(substitution)
 
 

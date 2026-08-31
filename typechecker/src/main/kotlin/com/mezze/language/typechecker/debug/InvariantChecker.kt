@@ -49,7 +49,10 @@ object InvariantChecker {
             if (applied != type) {
                 throw InvariantViolation(
                     "[$phase] Non-idempotent substitution: applying to RHS changed " +
-                    "${type.javaClass.simpleName} → ${applied.javaClass.simpleName}"
+                    "${type.javaClass.simpleName} → ${applied.javaClass.simpleName}. " +
+                    "A stored RHS still mentions a var the same substitution rewrites; " +
+                    "the post-solve boundary must saturate() the composed substitution " +
+                    "so apply(apply(t)) == apply(t) (S0.4/#373)."
                 )
             }
         }

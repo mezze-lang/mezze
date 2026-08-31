@@ -96,4 +96,35 @@ class InvariantCheckerIntegrationTest {
         val parsed = parser.parseParsedModule(source, "invariant_list.mz")
         typeChecker.typeCheck(parsed, Paths.get("."))
     }
+
+    /**
+     * S0.4/#373 — post-solve substitution IDEMPOTENCE on the associated-type
+     * family. This is the shape S0.1 found red: an ability with a `having`
+     * associated type whose generic use leaves the global solve holding a
+     * FunctionType RHS that still mentions a var the SAME substitution rewrites
+     * (`'d -> Fn(_ -> 'e)` beside `'e -> Str`), so `apply(apply(t)) != apply(t)`
+     * on the raw map. The post-solve boundary now `saturate()`s the composed
+     * substitution — resolving each RHS to the fixpoint `apply` already reaches —
+     * and then asserts idempotence via `checkSubstitutionIdempotence` (a real gated
+     * invariant under `mezze.invariants=true`, set in setup). This typeCheck runs
+     * that invariant and would throw InvariantViolation if saturation regressed or
+     * the non-idempotence otherwise reopened. Passing = the composed per-binding +
+     * global substitution is idempotent in one apply.
+     */
+    @Test
+    fun `post-solve substitution idempotent for ability associated types`() {
+        val source = """
+            ability Producer for 'a having 'out where {
+              produce: { it: 'a } -> 'out
+            }
+            impl Producer for Int having 'out = Str where {
+              produce = { it } -> "x"
+            }
+            pub let mk = { x } -> x.produce {}
+            let r = mk { x = 1 }
+            r
+        """.trimIndent()
+        val parsed = parser.parseParsedModule(source, "invariant_assoc_type.mz")
+        typeChecker.typeCheck(parsed, Paths.get("."), enablePrelude = true)
+    }
 }
