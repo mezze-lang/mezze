@@ -27,6 +27,17 @@ class ExpressionConstraintGenerator {
     internal val maxCacheSize = 1000
     val nestedBindingTypes = mutableMapOf<String, MezzeType>()
 
+    // S2.1 (#356): candidate-bucketing recording sink for Stage 2's single
+    // post-solve dispatch. Constraint generation appends one MethodResolveBucket
+    // per method/ability/builtin call site here (see tryGenerateMethodCall) — it
+    // RECORDS the candidate set + receiver and SELECTS NOTHING. Nothing consumes
+    // it yet: the S2.2 pass will resolve each bucket to a Resolution, and the old
+    // gen-time ladder stays the live dispatch decider until S2.3 deletes it.
+    // Instance-level (like nestedBindingTypes) rather than threaded through
+    // ConstraintResult so the foundation is purely additive — no solver worklist
+    // entry, no per-call-site plumbing, byte-for-byte-unchanged behaviour.
+    val resolutionBuckets = mutableListOf<MethodResolveBucket>()
+
     // Set by ConstraintGenerator.create so do-block let bindings can solve their
     // own constraints inline and generalize the result (#76 let-polymorphism).
     // Null in bare/test construction — generalization is then skipped and bindings

@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.constraints
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.ModulePath
 import com.mezze.language.ast.RowVar
+import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.parsedast.ParsedPerform
@@ -235,6 +236,87 @@ sealed interface Constraint {
         override fun mapTypes(f: (MezzeType) -> MezzeType) = copy(bindingType = f(bindingType), shape = f(shape))
     }
 }
+
+// ---------------------------------------------------------------------------
+// S2.1 (#356) — Stage 2 foundation: single post-solve dispatch.
+//
+// The pieces below are ADDITIVE and not yet wired into the live dispatch path.
+// Today, ability + builtin-op + inherent-method dispatch is decided by the
+// gen-time heuristic ladder in ExprMethodConstraints.kt. Stage 2 replaces that
+// scattered selection with ONE hash-keyed post-solve pass. S2.1 lays the
+// foundation ONLY:
+//
+//   * [Resolution] is the SHAPE that single post-solve pass (S2.2) will populate
+//     and that emit/mono/compile (S2.3) will read. It records the final, chosen
+//     dispatch as (op hash, receiver type identity, kind). It is a pure data
+//     structure here — nothing produces or consumes it yet.
+//
+//   * [MethodResolveBucket] generalizes the deferred-dispatch idea of
+//     [Constraint.InherentMethodResolve] to EVERY method/ability/builtin call
+//     site. It RECORDS the candidate set + the receiver, keyed on identity/hash,
+//     and SELECTS NOTHING. Constraint generation records one per method-call
+//     site (alongside the still-live ladder, via the generator's recording sink
+//     — NOT into the solved constraint list), so the S2.2 pass has a
+//     candidate bucket to resolve. The old ladder remains the thing that
+//     actually decides dispatch until it is deleted in S2.3.
+// ---------------------------------------------------------------------------
+
+/** How a call site dispatches, once resolved post-solve. */
+sealed interface ResolutionKind {
+    /** An inherent method (`impl T where { m }`). */
+    data object Inherent : ResolutionKind
+    /** A user- or prelude-declared ability op. */
+    data object Ability : ResolutionKind
+    /** A built-in operator ability (NumAdd, NumMul, …). */
+    data object Builtin : ResolutionKind
+}
+
+/**
+ * The single, post-solve dispatch decision for one call site — the SHAPE the
+ * S2.2 pass populates and S2.3's emit/mono/compile read. [opHash] identifies the
+ * chosen op (ability-method / inherent-method / builtin-op) by content hash;
+ * [receiverTypeIdentity] is the SOLVED receiver's identity (the impl-selection
+ * key — hash for `Declared`, reserved name for `Builtin`); [kind] records which
+ * dispatch family was chosen. Not yet produced or consumed — additive foundation.
+ */
+data class Resolution(
+    val opHash: Hash,
+    val receiverTypeIdentity: TypeIdentity,
+    val kind: ResolutionKind,
+)
+
+/**
+ * One candidate in a [MethodResolveBucket]: enough to re-select the impl by the
+ * SOLVED receiver's identity post-solve, and to name which dispatch family it
+ * belongs to. Keyed on identity/hash — NEVER on a bare string name for the
+ * dispatch decision. [targetTypeIdentity] is the impl target's identity (`null`
+ * for candidates whose target identity isn't known until solve, e.g. a builtin
+ * op whose receiver is still a tyvar); [displayName] is metadata for
+ * diagnostics only.
+ */
+data class ResolutionCandidate(
+    val opHash: Hash?,
+    val kind: ResolutionKind,
+    val targetTypeIdentity: TypeIdentity? = null,
+    val displayName: String? = null,
+)
+
+/**
+ * S2.1 candidate-BUCKETING record for one method/ability/builtin call site.
+ * Generalizes [Constraint.InherentMethodResolve] to cover ability + builtin ops
+ * too. It RECORDS the candidate set + the receiver and SELECTS NOTHING — the
+ * S2.2 single pass consumes it to produce a [Resolution]. Not a [Constraint]:
+ * it never enters the solver's worklist, so adding it changes no solving
+ * behaviour. Recorded by constraint generation into
+ * [ExpressionConstraintGenerator.resolutionBuckets] alongside the still-live
+ * ladder.
+ */
+data class MethodResolveBucket(
+    val loc: Loc?,
+    val methodName: String,
+    val receiverType: MezzeType,
+    val candidates: List<ResolutionCandidate>,
+)
 
 data class ConstraintResult(
     val type: MezzeType,

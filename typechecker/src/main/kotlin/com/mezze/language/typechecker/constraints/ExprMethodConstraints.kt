@@ -52,6 +52,13 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         return null
     }
 
+    // S2.1 (#356): record a candidate BUCKET for this call site — the foundation
+    // for Stage 2's single post-solve dispatch. This RECORDS the candidate set +
+    // the (best-effort syntactic) receiver and SELECTS NOTHING; the still-live
+    // ladder below is what actually decides dispatch until S2.3. Keyed on
+    // identity/hash, never on a bare name for the dispatch decision.
+    recordMethodResolveBucket(expr, memberAccess, methodName, matchingAbilities, builtInMatches, inherentMethods, context)
+
     if (matchingAbilities.isEmpty() && builtInMatches.isEmpty() && inherentMethods.isNotEmpty()) {
         // Multi-candidate dispatch by the GENERATED receiver type. The
         // syntactic `getReceiverConcreteType` walk (used by the deferral guard
@@ -627,6 +634,79 @@ internal fun ExpressionConstraintGenerator.homogeneousCandidateGroup(
         .maxByOrNull { it.size }
         ?.takeIf { it.size >= 2 }
         ?: emptyList()
+}
+
+/**
+ * S2.1 (#356): record ONE [MethodResolveBucket] for a method/ability/builtin
+ * call site into the generator's [ExpressionConstraintGenerator.resolutionBuckets]
+ * sink. Generalizes the deferred-dispatch idea of [Constraint.InherentMethodResolve]
+ * to cover ability + builtin ops too: it captures every candidate (inherent,
+ * ability, builtin) keyed on identity/hash and the best-effort syntactic receiver
+ * type, and SELECTS NOTHING. Recording-only — it emits no [Constraint], mutates no
+ * typing state, and does not perturb the still-live dispatch ladder. The S2.2
+ * single pass consumes these buckets to produce a [Resolution]; the ladder remains
+ * the live decider until S2.3.
+ */
+internal fun ExpressionConstraintGenerator.recordMethodResolveBucket(
+    expr: ParsedFunctionCall,
+    memberAccess: ParsedMemberAccess,
+    methodName: String,
+    matchingAbilities: List<Pair<String, MezzeType>>,
+    builtInMatches: List<String>,
+    inherentMethods: List<TypingContext.InherentMethodInfo>,
+    context: ConstraintContext,
+) {
+    val candidates = mutableListOf<ResolutionCandidate>()
+
+    for (mi in inherentMethods) {
+        candidates.add(
+            ResolutionCandidate(
+                opHash = mi.implContentHash,
+                kind = ResolutionKind.Inherent,
+                targetTypeIdentity = mi.targetTypeHash?.let { TypeIdentity.Declared(it, mi.targetTypeName) },
+                displayName = mi.targetTypeName,
+            )
+        )
+    }
+    for ((abilityName, _) in matchingAbilities) {
+        candidates.add(
+            ResolutionCandidate(
+                opHash = context.abilityDeclarations[abilityName]?.contentHash,
+                kind = ResolutionKind.Ability,
+                // The ability op's target identity is the SOLVED receiver's — not
+                // known at gen time. The S2.2 pass fills it from the solution.
+                targetTypeIdentity = null,
+                displayName = abilityName,
+            )
+        )
+    }
+    for (abilityName in builtInMatches) {
+        candidates.add(
+            ResolutionCandidate(
+                // Builtin operator abilities have no content hash — their reserved
+                // name is their canonical identity.
+                opHash = null,
+                kind = ResolutionKind.Builtin,
+                targetTypeIdentity = null,
+                displayName = abilityName,
+            )
+        )
+    }
+
+    // Best-effort syntactic receiver type (pure read-only lookup — allocates only
+    // fresh placeholder tyvars, emits no constraints). Null when unresolvable at
+    // gen time; the S2.2 pass reads the real receiver from the solution.
+    val receiverType = getReceiverConcreteType(memberAccess.receiver, context)
+        ?: MezzeType.VarType(TypeVar.fresh())
+
+    resolutionBuckets.add(
+        MethodResolveBucket(
+            loc = expr.loc,
+            methodName = methodName,
+            receiverType = receiverType,
+            candidates = candidates,
+        )
+    )
 }
 
 internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: ParsedExpr, context: ConstraintContext): MezzeType? {
