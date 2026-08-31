@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.validation
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.solving.UnificationResult
@@ -156,6 +157,6 @@ object AnonymousConstructorShapeValidator {
         is MezzeType.RecordType ->
             if (t.fields.isEmpty()) "no payload"
             else "{${t.fields.keys.sorted().joinToString(", ")}}"
-        else -> t.toString()
+        else -> prettyPrintType(t)
     }
 }

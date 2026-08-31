@@ -920,10 +920,11 @@ class ConstraintSolver(
                     // a var will re-fire once the var resolves to a ground type.
                     if (plainSide !is MezzeType.VarType) {
                         val effList = undischargedLeaks.joinToString(", ")
+                        val (valueStr, plainStr) = prettyPrintTypePair(suspendedSide.valueType, plainSide)
                         return ConstraintResult.Failure(
                             "Effect row leak: cannot use a value of type " +
-                            "${suspendedSide.valueType} with unhandled effects <$effList> " +
-                            "as plain $plainSide. Wrap in `perform HandlerFor<$effList> in ...` " +
+                            "$valueStr with unhandled effects <$effList> " +
+                            "as plain $plainStr. Wrap in `perform HandlerFor<$effList> in ...` " +
                             "to discharge the effect first."
                         )
                     }

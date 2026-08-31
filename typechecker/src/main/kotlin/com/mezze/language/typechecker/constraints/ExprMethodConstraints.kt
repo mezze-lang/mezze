@@ -974,7 +974,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     val candidatesArePlain = inherentMethods.all { !it.targetTypeName.contains('_') }
     if (methodInfo == null && !deferImplByReceiver &&
         recvIsPlainNominal(receiverType) && candidatesArePlain && inherentMethods.isNotEmpty()) {
-        val recvName = receiverTypeName ?: receiverType.toString()
+        val recvName = receiverTypeName ?: prettyPrintType(receiverType)
         throw TypeCheckError(
             "No inherent method '$methodName' for type '$recvName'. " +
                 "It exists for: ${inherentMethods.map { it.targetTypeName }.distinct().joinToString(", ")}.",

@@ -42,6 +42,27 @@ internal fun describeVariant(v: MezzeType.VariantType): String {
 }
 
 /**
+ * "Type mismatch: A is not compatible with B" — rendered with ONE shared
+ * type-variable naming so a variable shared by both sides prints as the same
+ * name, and two distinct variables never collide on one name (see
+ * [prettyPrintTypePair]).
+ */
+private fun incompatibleMessage(actual: MezzeType, expected: MezzeType): String {
+    val (a, e) = prettyPrintTypePair(actual, expected)
+    return "Type mismatch: $a is not compatible with $e"
+}
+
+/**
+ * "Type mismatch: expected E, but got A" — same shared-naming guarantee as
+ * [incompatibleMessage]. The two sides are printed against one variable map so
+ * "expected 'a but got 'a" always denotes the same variable.
+ */
+private fun expectedButGotMessage(expected: MezzeType, actual: MezzeType): String {
+    val (e, a) = prettyPrintTypePair(expected, actual)
+    return "Type mismatch: expected $e, but got $a"
+}
+
+/**
  * The verdict of comparing two nominal [TypeIdentity]s. Identity alone can give
  * one of three answers; what a caller does with [UNDETERMINED] depends on whether
  * the type is a TRANSPARENT alias (fall through to structural) or an OPAQUE wall
@@ -170,7 +191,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
                 unify(type1, expanded, registry)
             } else {
                 UnificationResult.Failure(
-                    message = "Type mismatch: ${prettyPrintType(type1)} is not compatible with ${prettyPrintType(type2)}",
+                    message = incompatibleMessage(type1, type2),
                     type1 = type1,
                     type2 = type2
                 )
@@ -182,7 +203,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
                 unify(expanded, type2, registry)
             } else {
                 UnificationResult.Failure(
-                    message = "Type mismatch: ${prettyPrintType(type1)} is not compatible with ${prettyPrintType(type2)}",
+                    message = incompatibleMessage(type1, type2),
                     type1 = type1,
                     type2 = type2
                 )
@@ -202,7 +223,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
                 }
             }
             return UnificationResult.Failure(
-                message = "Type mismatch: ${prettyPrintType(type1)} is not compatible with ${prettyPrintType(type2)}",
+                message = incompatibleMessage(type1, type2),
                 type1 = type1,
                 type2 = type2
             )
@@ -221,7 +242,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
                 }
             }
             return UnificationResult.Failure(
-                message = "Type mismatch: ${prettyPrintType(type1)} is not compatible with ${prettyPrintType(type2)}",
+                message = incompatibleMessage(type1, type2),
                 type1 = type1,
                 type2 = type2
             )
@@ -235,7 +256,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
                 }
             }
             return UnificationResult.Failure(
-                message = "Type mismatch: expected ${prettyPrintType(type2)}, but got ${prettyPrintType(type1)}",
+                message = expectedButGotMessage(type2, type1),
                 type1 = type1,
                 type2 = type2
             )
@@ -249,7 +270,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
                 }
             }
             return UnificationResult.Failure(
-                message = "Type mismatch: expected ${prettyPrintType(type2)}, but got ${prettyPrintType(type1)}",
+                message = expectedButGotMessage(type2, type1),
                 type1 = type1,
                 type2 = type2
             )
@@ -388,8 +409,11 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
             if (sameDeclaration) {
                 unify(type1.wrappedType, type2.wrappedType, registry)
             } else {
+                val (n1, n2) = prettyPrintTypePair(type1, type2)
                 UnificationResult.Failure(
-                    message = "Type mismatch: ${type1.name} is not the same type as ${type2.name}",
+                    message = "Type mismatch: $n1 is not the same type as $n2. " +
+                        "These are distinct newtypes even if their wrapped types match — " +
+                        "unwrap one or convert explicitly.",
                     type1 = type1,
                     type2 = type2
                 )
@@ -400,7 +424,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
 
         else -> {
             UnificationResult.Failure(
-                message = "Type mismatch: expected ${prettyPrintType(type2)}, but got ${prettyPrintType(type1)}",
+                message = expectedButGotMessage(type2, type1),
                 type1 = type1,
                 type2 = type2
             )
@@ -420,8 +444,8 @@ private fun unifyVar(typeVar: TypeVar, type: MezzeType): UnificationResult {
     }
     if (occursCheck(typeVar, type)) {
         return UnificationResult.Failure(
-            message = "Infinite type: type variable '${typeVar}' occurs inside '${prettyPrintType(type)}'. " +
-                    "This would create an infinite type.",
+            message = "Infinite type: type variable ${prettyPrintType(MezzeType.VarType(typeVar))} occurs inside ${prettyPrintType(type)}. " +
+                    "This would create an infinitely-nested type — add a type annotation to break the cycle (often a recursive let-binding).",
             type1 = MezzeType.VarType(typeVar),
             type2 = type
         )
@@ -1036,9 +1060,10 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
                         composedSubst = composedSubst.compose(result.substitution)
                     }
                     is UnificationResult.Failure -> {
+                        val (expStr, actStr) = prettyPrintTypePair(type2, type1)
                         return UnificationResult.Failure(
                             message = "Effect '$effectName' has incompatible associated type '$key': " +
-                                "expected ${prettyPrintType(type2)} but got ${prettyPrintType(type1)}",
+                                "expected $expStr but got $actStr",
                             type1 = eff1,
                             type2 = eff2
                         )
@@ -1204,8 +1229,7 @@ private fun formatFieldMismatch(
     actualFieldType: MezzeType,
     innerMessage: String
 ): String {
-    val expectedStr = prettyPrintType(expectedFieldType)
-    val actualStr = prettyPrintType(actualFieldType)
+    val (expectedStr, actualStr) = prettyPrintTypePair(expectedFieldType, actualFieldType)
     val baseMessage = "Field '$fieldName' type mismatch: expected $expectedStr, got $actualStr"
     val cleanedInner = innerMessage.removePrefix("Type mismatch: ").trim()
     val isShallow = cleanedInner.contains(expectedStr) && cleanedInner.contains(actualStr)

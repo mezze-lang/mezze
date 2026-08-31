@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.solving
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeIdentity
+import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.typechecker.constraints.ConstraintResult
@@ -288,7 +289,7 @@ object DispatchResolver {
         solvedReceiverIdentity(solvedReceiver) ?: TypeIdentity.Anonymous
 
     private fun solvedReceiverDisplay(solvedReceiver: MezzeType): String =
-        receiverTypeName(solvedReceiver) ?: solvedReceiver.toString()
+        receiverTypeName(solvedReceiver) ?: prettyPrintType(solvedReceiver)
 
     /**
      * PARITY ORACLE (invariants-only): compare the S2.2 [resolution] against the
