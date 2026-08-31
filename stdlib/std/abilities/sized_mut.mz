@@ -1,0 +1,37 @@
+# The effectful sibling of `Sized`. Reading a mutable container's size
+# performs the `Mut` effect, so it cannot satisfy the pure `Sized`
+# ability — this ability carries `<Mut>` on its ops instead. Implemented
+# by the mutable container types (`MutSeq`, `MutString`, `MutBytes`).
+#
+# The impls live here rather than in `std::effects::mutation` to avoid a
+# module cycle: this file already depends on `mutation` for `Mut` and the
+# mutable types, so the impls belong on this side of the edge.
+
+use std::abilities::compare::{ Eq }
+use std::int
+use std::effects::mutation::{ Mut, MutSeq, MutString, MutBytes, size, string_len, string_is_empty, bytes_len }
+
+## Size of a mutable container, computed under the `Mut` effect.
+ability SizedMut for 'c where {
+  ## Number of elements in the mutable container.
+  size: { it: 'c } -> Int <Mut>,
+  ## Returns True if the mutable container has no elements.
+  is_empty: { it: 'c } -> Bool <Mut>
+}
+
+## Each impl delegates to the corresponding free function in `mutation`;
+## `is_empty` derives from `size == 0` where no native emptiness check exists.
+impl SizedMut for MutSeq 'a where {
+  size = { it } -> size { seq = it },
+  is_empty = { it } -> size { seq = it } == 0,
+}
+
+impl SizedMut for MutString where {
+  size = { it } -> string_len { s = it },
+  is_empty = { it } -> string_is_empty { s = it },
+}
+
+impl SizedMut for MutBytes where {
+  size = { it } -> bytes_len { bytes = it },
+  is_empty = { it } -> bytes_len { bytes = it } == 0,
+}

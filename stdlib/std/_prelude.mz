@@ -1,5 +1,6 @@
 ## Auto-imported modules available in every Mezze file.
 use std::abilities::sized
+use std::abilities::sized_mut
 use std::abilities::numeric
 use std::abilities::compare
 use std::abilities::logic
