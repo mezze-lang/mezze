@@ -398,15 +398,6 @@ data class ConstraintContext(
     val performContext: ParsedPerform? = null,
     val abilityDeclarations: Map<String, ParsedAbilityDecl> = emptyMap(),
     val recordLiteralBindings: Set<String> = emptySet(),
-    // Source expression of each simple `let x = <expr>` binding in scope (do-block
-    // or top-level). Lets receiver-type resolution look THROUGH a let-bound name
-    // whose binding TYPE is still an unsolved VarType at generation time: a
-    // `let kept = xs.filter {…}` binds `kept` to a fresh result var (pinned to a
-    // Seq only during SOLVING), so `kept.map {…}` couldn't see the Seq and
-    // mis-dispatched — whereas the inline `xs.filter{}.map{}` resolves the Seq
-    // through the filter call's declared return type. Storing the bound expr lets
-    // the bound form resolve identically. See getReceiverConcreteType.
-    val letBoundExprs: Map<String, ParsedExpr> = emptyMap(),
     val typeDeclarations: Map<String, ParsedTypeDecl> = emptyMap(),
     val currentBindingName: String? = null,
 
@@ -439,10 +430,6 @@ data class ConstraintContext(
 
     fun withRecordLiteralBinding(name: String): ConstraintContext {
         return copy(recordLiteralBindings = recordLiteralBindings + name)
-    }
-
-    fun withLetBoundExpr(name: String, expr: ParsedExpr): ConstraintContext {
-        return copy(letBoundExprs = letBoundExprs + (name to expr))
     }
 
     fun inTailPosition(): ConstraintContext {

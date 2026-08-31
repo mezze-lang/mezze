@@ -515,7 +515,7 @@ class ConstraintGenerator(
      *                       (mirrors the historical top-level call, which passed the
      *                       pre-loop `context`, not `currentContext`).
      */
-    private fun bindLet(
+    internal fun bindLet(
         item: ParsedLetDecl,
         result: ConstraintResult,
         patternResult: PatternConstraintResult,
@@ -525,6 +525,8 @@ class ConstraintGenerator(
         currentContext: TypingContext,
         outerContext: TypingContext,
         solver: ConstraintSolver,
+        suppressGeneralization: Boolean = false,
+        harvestEffectsIntoBinding: Boolean = true,
     ): LetBindingResult {
         // (a) authoritative type: annotated alias/type wins over the structural type.
         val authoritativeType = if (item.pattern is ParsedVariablePattern && preConvertedAnnotationType != null) {
@@ -568,7 +570,18 @@ class ConstraintGenerator(
         }
 
         // (e) harvest effects into a SuspendType wrapper for non-function bindings.
-        val hasEffectsOrPerformed = result.effects.isNotEmpty() || result.effectInstances.isNotEmpty() || result.performed
+        //
+        // Only for the TOP-LEVEL path (harvestEffectsIntoBinding = true): a
+        // top-level `let x = <effectful>` binds x to the SUSPENDED computation, so
+        // x's type must carry the effect. In a DO-BLOCK the effect is instead
+        // SEQUENCED into the enclosing block's effect row (generateDo merges the
+        // statement's effects into its collector) and the binding holds the pure
+        // VALUE — wrapping it in SuspendType there double-counts the effect and
+        // leaks it into any later closure that captures x (e.g. an Async do-block's
+        // `let now = swap{…}` making a sibling pure callback read as `<Async>`), so
+        // the do-block path passes false and skips this step.
+        val hasEffectsOrPerformed = harvestEffectsIntoBinding &&
+            (result.effects.isNotEmpty() || result.effectInstances.isNotEmpty() || result.performed)
         val solvedBindingsWithEffects = if (hasEffectsOrPerformed) {
             solvedBindingsWithAbilities.mapValues { (_, solvedType) ->
                 when (solvedType) {
@@ -608,7 +621,7 @@ class ConstraintGenerator(
             val bindingKey = BindingKey.unqualified(name)
             bindingKey to buildBindingForContext(
                 solvedType, bindingKey, currentContext, item, result,
-                substitution, authoritativeType
+                substitution, authoritativeType, suppressGeneralization
             )
         }.toMap()
 
@@ -623,6 +636,7 @@ class ConstraintGenerator(
         result: ConstraintResult,
         substitution: Substitution,
         authoritativeType: MezzeType,
+        suppressGeneralization: Boolean = false,
     ): TypingContext.Binding {
         val isLambdaBinding = item.value is ParsedLambda
 
@@ -638,7 +652,14 @@ class ConstraintGenerator(
         // function (not on syntax or type names) is the uniform rule: it keeps
         // curried partial applications polymorphic AND closes the mutable-cell
         // soundness hole, since a mutable cell's type is never a function.
-        val generalizes = isLambdaBinding || solvedType is MezzeType.FunctionType
+        // S1.3: a do-block lambda that CAPTURES an outer term variable is left
+        // monomorphic — generalizing it (even over its own free params) interacts
+        // badly with monomorphization/lowering of the captured value, and can leak
+        // an outer monomorphic type var across two instantiations (see
+        // PolyAuditProbeTest "a do-block let whose body forces it equal to an outer
+        // mono param is not generalized"). The caller (do-block path) sets this; the
+        // top-level path never captures, so it always passes false.
+        val generalizes = !suppressGeneralization && (isLambdaBinding || solvedType is MezzeType.FunctionType)
         val quantifiableVars =
             if (generalizes) collectFreeTypeVars(solvedType) - getContextFreeVars(currentContext, excludeBindings = setOf(bindingKey))
             else emptySet()
@@ -1321,7 +1342,7 @@ class ConstraintGenerator(
             expressionGen.isStdlibModule = isStdlibModule
             val patternGen = PatternConstraintGenerator()
 
-            return ConstraintGenerator(
+            val generator = ConstraintGenerator(
                 expressionGen,
                 patternGen,
                 registry,
@@ -1330,6 +1351,26 @@ class ConstraintGenerator(
                 abilityNames,
                 effectNames,
             )
+            // S1.3: route the do-block `let` path through the SAME bindLet the
+            // top-level path uses. bindLet needs ConstraintGenerator's private
+            // annotation-validation state, so it stays there; we hand the do-block
+            // path a bound reference (same injection pattern as `registry`).
+            expressionGen.bindLetFn = { args ->
+                generator.bindLet(
+                    item = args.item,
+                    result = args.result,
+                    patternResult = args.patternResult,
+                    preConvertedAnnotationType = args.preConvertedAnnotationType,
+                    solveResult = args.solveResult,
+                    substitution = args.substitution,
+                    currentContext = args.currentContext,
+                    outerContext = args.outerContext,
+                    solver = args.solver,
+                    suppressGeneralization = args.suppressGeneralization,
+                    harvestEffectsIntoBinding = args.harvestEffectsIntoBinding,
+                )
+            }
+            return generator
         }
     }
 

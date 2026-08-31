@@ -11,6 +11,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.mono.unwrapSuspended
+import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.typechecker.util.StringDistance
@@ -31,6 +32,31 @@ class ExpressionConstraintGenerator {
     // Null in bare/test construction — generalization is then skipped and bindings
     // stay monomorphic (safe fallback).
     var registry: DeclarationRegistry? = null
+
+    // S1.3: the do-block `let` path routes through the SAME bindLet primitive the
+    // top-level path uses (ConstraintGenerator.bindLet). bindLet lives on
+    // ConstraintGenerator (its annotation-validation needs that class's private
+    // state), and ConstraintGenerator owns THIS generator, so the reachable
+    // direction is CG -> ECG; we inject a bound reference here at create() — the
+    // same injection pattern as `registry` above. Null in bare/test construction:
+    // the do-block let path then falls back to monomorphic bindings (safe).
+    var bindLetFn: (BindLetArgs) -> ConstraintGenerator.LetBindingResult? = { null }
+
+    /** Everything ConstraintGenerator.bindLet needs from the do-block call site,
+     *  bundled so the injected callback stays a single-arg function. */
+    class BindLetArgs(
+        val item: ParsedLetDecl,
+        val result: ConstraintResult,
+        val patternResult: PatternConstraintResult,
+        val preConvertedAnnotationType: MezzeType?,
+        val solveResult: ConstraintSolver.SolveResult.Success,
+        val substitution: com.mezze.language.ast.solving.Substitution,
+        val currentContext: TypingContext,
+        val outerContext: TypingContext,
+        val solver: ConstraintSolver,
+        val suppressGeneralization: Boolean = false,
+        val harvestEffectsIntoBinding: Boolean = true,
+    )
 
     // #109: `__native_*` intrinsic references are stdlib-only. User code that
     // writes `__native_str_eq {...}` gets treated as undefined (bypassing the

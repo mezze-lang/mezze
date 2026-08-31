@@ -271,112 +271,29 @@ private fun mergeArmFunctionEffects(armTypes: List<MezzeType>): MezzeType.Functi
 }
 
 /**
- * #76 let-polymorphism for do-block bindings. Generalizes an un-annotated
- * do-block `let` the way a top-level binding does: solve the constraints
- * accumulated so far (so the binding type is resolved), then quantify the type
- * vars that are free in the solved binding type but NOT free in the outer
- * context. Quantifying the *solved* type is what keeps this sound — a body that
- * pins a param (`{x} -> x + 1`) resolves that var to a concrete type, so it is
- * no longer free and is not quantified, leaving the binding monomorphic. Returns
- * one binding per pattern var. Falls back to monomorphic bindings when no
- * registry is wired (bare construction) or solving fails.
+ * S1.2/S1.3 local incremental solve. Runs the solver over the constraints
+ * accumulated up to a given do-block statement — mirroring how the top-level runs
+ * a per-binding solve (ConstraintGenerator ~:186) — so a do-block `let` sees a
+ * concrete binding type (e.g. `let kept = xs.filter{…}` → `[…]`) instead of a raw
+ * VarType, and so its solved substitution + result can be handed to the shared
+ * bindLet primitive (S1.3). Returns null when no registry is wired (bare/test
+ * construction) or solving fails — the global solve surfaces the real error later;
+ * without a solve the do-block let path falls back to monomorphic bindings
+ * (behaviour unchanged for that binding). Also returns the solver so bindLet can
+ * query ability-constraint discharge.
  */
-/**
- * S1.2 local incremental solve. Runs the solver over the constraints accumulated
- * up to a given do-block statement — exactly what `generalizeDoBlockBinding` does
- * to decide generalization — but exposed as a bare substitution so a NON-lambda
- * `let x = <expr>` can resolve its binding type before the next statement
- * generates. This mirrors how the top-level runs a per-binding solve
- * (ConstraintGenerator ~:186) so a do-block `let` sees a concrete binding type
- * (e.g. `let kept = xs.filter{…}` → `[…]`) instead of a raw VarType. Returns null
- * when no registry is wired (bare/test construction) or solving fails — the global
- * solve surfaces the real error later; without a substitution we keep the raw type
- * (behaviour unchanged for that binding).
- */
-private fun ExpressionConstraintGenerator.solveDoBlockBindingLocally(
-    accumulatedConstraints: List<Constraint>,
-    outerContext: ConstraintContext,
-): Substitution? {
-    val reg = this.registry ?: return null
-    return when (val r = ConstraintSolver(outerContext.typingContext, reg).solve(accumulatedConstraints.toList())) {
-        is ConstraintSolver.SolveResult.Success -> r.substitution
-        is ConstraintSolver.SolveResult.Failure -> null
-    }
-}
-
-private fun ExpressionConstraintGenerator.generalizeDoBlockBinding(
-    patternBindings: Map<String, MezzeType>,
-    accumulatedConstraints: List<Constraint>,
-    bindingAbilityConstraints: List<Constraint.AbilityRequired>,
-    outerContext: ConstraintContext,
-): Map<BindingKey, TypingContext.Binding> {
-    val reg = this.registry
-    val monomorphic = {
-        patternBindings.mapValues { (_, type) -> type }
-            .map { (name, type) -> BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type = type) as TypingContext.Binding }
-            .toMap()
-    }
-    if (reg == null) return monomorphic()
-
-    val solveResult = ConstraintSolver(outerContext.typingContext, reg).solve(accumulatedConstraints.toList())
-    // A failure here isn't ours to report — the global solve surfaces real errors
-    // later. We just can't generalize without a substitution, so stay monomorphic.
-    val substitution = when (solveResult) {
-        is ConstraintSolver.SolveResult.Success -> solveResult.substitution
-        is ConstraintSolver.SolveResult.Failure -> return monomorphic()
-    }
-
-    // Vars free in the outer context must never be quantified — they may be
-    // shared with the enclosing scope (e.g. a captured `n: 't`).
-    val contextVars = doBlockContextFreeVars(outerContext.typingContext)
-
-    return patternBindings.map { (name, rawType) ->
-        val solvedType = substitution.apply(rawType)
-        val quantifiable = collectFreeTypeVars(solvedType) - contextVars
-        val binding: TypingContext.Binding = if (quantifiable.isNotEmpty()) {
-            // Carry any ability constraint whose (resolved) type var is one we're
-            // quantifying — otherwise a generalized `{a, b} -> a + b` would lose its
-            // NumAdd requirement and unify against non-numeric args unsoundly.
-            // Mirrors ConstraintGenerator.buildBindingForContext.
-            val quantifiableIds = quantifiable.map { it.id }.toSet()
-            val carried = bindingAbilityConstraints.mapNotNull { c ->
-                val resolved = substitution.apply(MezzeType.VarType(c.typeVar))
-                val varId = if (resolved is MezzeType.VarType) resolved.variable.id else c.typeVar.id
-                val resolvedTypeArgs = c.typeArgs.map { substitution.apply(it) }
-                // Keep the constraint if the receiver OR any class-arg is
-                // quantifiable, and capture a concrete receiver — mirrors
-                // ConstraintGenerator.buildBindingForContext so a class-param
-                // obligation like `NumAdd Int 'a` (from a do-block `let f={x}->x+1`)
-                // still rejects `f {x = "s"}` instead of laundering it.
-                val classArgQuantifiable = resolvedTypeArgs.any { arg ->
-                    collectFreeTypeVars(arg).any { it.id in quantifiableIds }
-                }
-                if (varId in quantifiableIds || classArgQuantifiable) {
-                    val quantVar = quantifiable.find { it.id == varId }
-                    val concreteReceiver = (resolved as? MezzeType.VarType)?.let { null } ?: resolved
-                    AbilityConstraint(
-                        abilityName = c.abilityName,
-                        typeParam = quantVar?.name ?: c.typeVar.name,
-                        typeArgs = resolvedTypeArgs,
-                        concreteReceiver = concreteReceiver
-                    )
-                } else null
-            }
-            TypingContext.Binding.Polymorphic(
-                TypeScheme(quantifiedVars = quantifiable.toList(), constraints = carried, type = solvedType)
-            )
-        } else {
-            TypingContext.Binding.Monomorphic(type = solvedType)
-        }
-        BindingKey.unqualified(name) to binding
-    }.toMap()
-}
+private class DoBlockLocalSolve(
+    val solveResult: ConstraintSolver.SolveResult.Success,
+    val solver: ConstraintSolver,
+)
 
 /** True if [lambda] captures a term variable from the enclosing scope — i.e. it
  *  references a name (in [usedVariables]) that is not one of its own parameters
- *  but is bound in [outerContext]. Such closures are left monomorphic (#76): the
- *  captured value's monomorphization/lowering doesn't compose with generalizing
- *  the closure. */
+ *  but is bound in [outerContext]. S1.3: such closures are left MONOMORPHIC when
+ *  routed through bindLet (via suppressGeneralization) — generalizing them (even
+ *  over their own free params) interacts badly with monomorphization/lowering of
+ *  the captured value and can leak an outer monomorphic type var across two
+ *  instantiations. A non-capturing lambda generalizes normally. */
 private fun doBlockLambdaCaptures(
     lambda: ParsedLambda,
     usedVariables: Set<String>,
@@ -392,18 +309,16 @@ private fun doBlockLambdaCaptures(
     }
 }
 
-/** Type vars free in the context's bindings (unquantified vars for polymorphic
- *  schemes). Mirrors ConstraintGenerator.getContextFreeVars, which is private. */
-private fun doBlockContextFreeVars(context: TypingContext): Set<TypeVar> {
-    val freeVars = mutableSetOf<TypeVar>()
-    for ((_, binding) in context.getAllBindings()) {
-        when (binding) {
-            is TypingContext.Binding.Monomorphic -> freeVars.addAll(collectFreeTypeVars(binding.type))
-            is TypingContext.Binding.Polymorphic ->
-                freeVars.addAll(collectFreeTypeVars(binding.scheme.type) - binding.scheme.quantifiedVars.toSet())
-        }
+private fun ExpressionConstraintGenerator.solveDoBlockBindingLocally(
+    accumulatedConstraints: List<Constraint>,
+    outerContext: ConstraintContext,
+): DoBlockLocalSolve? {
+    val reg = this.registry ?: return null
+    val solver = ConstraintSolver(outerContext.typingContext, reg)
+    return when (val r = solver.solve(accumulatedConstraints.toList())) {
+        is ConstraintSolver.SolveResult.Success -> DoBlockLocalSolve(r, solver)
+        is ConstraintSolver.SolveResult.Failure -> null
     }
-    return freeVars
 }
 
 internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: ConstraintContext): ConstraintResult {
@@ -533,102 +448,70 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
 
                 val typingContext = currentContext.typingContext
 
-                val contextBindings = if (stmt.pattern is ParsedVariablePattern &&
-                    stmt.typeAnnotation is ParsedFunctionType &&
-                    (stmt.typeAnnotation as ParsedFunctionType).abilityConstraints.isNotEmpty()
-                ) {
-                    val annotation = stmt.typeAnnotation as ParsedFunctionType
-                    val annotatedType = convertParsedTypeAnnotation(annotation)
+                // S1.3: route the do-block `let` through the SAME bindLet primitive
+                // the top-level path uses. We run a LOCAL incremental solve over the
+                // constraints accumulated up to (and including) this statement — as
+                // the top-level runs a per-binding solve — then hand its solved
+                // substitution + result to bindLet, which owns the entire binding
+                // construction: annotated-over-structural type selection (with alias
+                // adoption), let-annotation validation, ability-constraint carry,
+                // effect -> SuspendType harvest, and generalization / value
+                // restriction. This subsumes the three bespoke do-block branches that
+                // used to live here (explicit ability-constrained function annotation,
+                // #76 un-annotated-lambda generalization, and the S1.2 monomorphic
+                // fallback). bindLet's generalization is the SAME rule #76 used
+                // (quantify solved-type vars free in the binding but not the outer
+                // context), so do-block let-polymorphism is preserved; a captured
+                // outer type var is free in `currentContext` and so is never
+                // quantified, which is the sound version of the old capture guard.
+                //
+                // Falls back to monomorphic bindings when no registry is wired
+                // (bare/test construction), the local solve fails (the global solve
+                // surfaces the real error later), or bindLet is not injected — so
+                // behaviour is unchanged on those paths.
+                // A do-block lambda that captures an outer term variable must NOT
+                // generalize (see doBlockLambdaCaptures). bindLet honours this via
+                // suppressGeneralization; the top-level path never captures.
+                val capturesOuter = stmt.pattern is ParsedVariablePattern &&
+                    stmt.value is ParsedLambda &&
+                    doBlockLambdaCaptures(stmt.value as ParsedLambda, exprResult.usedVariables, currentContext)
 
-                    val typeVars = collectFreeTypeVars(annotatedType)
-
-                    val abilityConstraints = annotation.abilityConstraints.mapNotNull { constraint ->
-                        val typeVarArg = constraint.typeArgs.find { arg ->
-                            arg is ParsedNamedType && arg.name.isTypeVarName()
-                        }
-                        val typeParamName = when (typeVarArg) {
-                            is ParsedNamedType -> typeVarArg.name
-                            else -> null
-                        }
-                        if (typeParamName != null) {
-                            val allTypeArgs = constraint.typeArgs.map { typeArg ->
-                                convertParsedTypeAnnotation(typeArg)
-                            }
-                            AbilityConstraint(
-                                abilityName = constraint.abilityName,
-                                typeParam = typeParamName,
-                                typeArgs = allTypeArgs
-                            )
-                        } else null
-                    }
-
-                    val scheme = TypeScheme(
-                        quantifiedVars = typeVars.toList(),
-                        constraints = abilityConstraints,
-                        type = annotatedType
+                val localSolve = solveDoBlockBindingLocally(collector.constraints, currentContext)
+                val letResult = if (localSolve != null) {
+                    bindLetFn(
+                        ExpressionConstraintGenerator.BindLetArgs(
+                            item = ParsedLetDecl(
+                                pattern = stmt.pattern,
+                                typeAnnotation = stmt.typeAnnotation,
+                                value = stmt.value,
+                                loc = stmt.loc,
+                            ),
+                            result = exprResult,
+                            patternResult = patternResult,
+                            preConvertedAnnotationType = annotatedType,
+                            solveResult = localSolve.solveResult,
+                            substitution = localSolve.solveResult.substitution,
+                            currentContext = currentContext.typingContext,
+                            outerContext = currentContext.typingContext,
+                            solver = localSolve.solver,
+                            suppressGeneralization = capturesOuter,
+                            // The do-block sequences a statement's effects into its
+                            // own effect row (collector.merge above); the binding
+                            // holds the pure value, so bindLet must NOT wrap it in a
+                            // SuspendType (that would leak the effect into later
+                            // closures capturing this name). See bindLet step (e).
+                            harvestEffectsIntoBinding = false,
+                        )
                     )
+                } else null
 
-                    patternResult.bindings.map { (name, _) ->
-                        BindingKey.unqualified(name) to TypingContext.Binding.Polymorphic(scheme)
-                    }.toMap()
-                } else if (stmt.pattern is ParsedVariablePattern && stmt.typeAnnotation == null &&
-                           stmt.value is ParsedLambda &&
-                           !doBlockLambdaCaptures(stmt.value as ParsedLambda, exprResult.usedVariables, currentContext)) {
-                    // #76: generalize an un-annotated do-block lambda the same way a
-                    // top-level binding does, so it can be used at several types
-                    // within the block. Restricted to lambda bindings that DON'T
-                    // capture an outer term variable — a closure that captures (e.g.
-                    // `{x} -> {sum = x + base}` capturing `base`) is left monomorphic
-                    // because generalizing it interacts badly with monomorphization
-                    // and lowering of the captured value. A non-lambda (`let x = 5`)
-                    // has a concrete type with nothing to quantify. We must solve
-                    // first (the binding type is still full of unsolved vars during
-                    // generation) to distinguish `{x} -> x` (quantify) from
-                    // `{x} -> x + 1` (var pinned to Int — must NOT quantify). Falls
-                    // back to monomorphic when no registry is wired or solving fails.
-                    generalizeDoBlockBinding(
-                        patternBindings = patternResult.bindings,
-                        accumulatedConstraints = collector.constraints,
-                        bindingAbilityConstraints = exprResult.abilityConstraints,
-                        outerContext = currentContext,
-                    )
-                } else {
-                    // S1.2: local incremental solve. Solve the constraints
-                    // accumulated up to (and including) this statement so the
-                    // binding type is RESOLVED before the next statement
-                    // generates — matching top-level `let`, which runs a
-                    // per-binding solve. The solved type is what dispatch on a
-                    // later `x.method {…}` reads via getReceiverConcreteType,
-                    // which already returns a concrete binding type directly
-                    // (the letBoundExprs crutch only fires when the type is still
-                    // a VarType — so a resolved binding makes it redundant here,
-                    // exactly as S1.2 intends; the crutch itself stays for the
-                    // paths still emitting a VarType). Falls back to the raw type
-                    // when solving isn't possible (no registry / solve failure),
-                    // so behaviour is unchanged there.
-                    val localSubst = solveDoBlockBindingLocally(collector.constraints, currentContext)
-                    patternResult.bindings.map { (name, type) ->
-                        // Bind to the WRITTEN annotation where there is one.
-                        //
-                        // The two are made equal by the constraint above, but
-                        // only once the solver runs — and method dispatch
-                        // happens during generation. A record literal produces
-                        // a bare structural type, so `let r: Result Str Str =
-                        // Ok { … }` bound `r` to something with no name for an
-                        // impl to match, and `r.get_or {}` failed with
-                        // "Cannot access field ... on variant type" while the
-                        // identical binding at the top level worked.
-                        //
-                        // Only the binding in the typing context changes;
-                        // bindingType still drives the equality constraint and
-                        // generalization, so the value restriction is untouched.
+                val contextBindings = letResult?.contextBindings
+                    ?: patternResult.bindings.map { (name, type) ->
                         val rawBound = if (stmt.pattern is ParsedVariablePattern) {
                             annotatedType ?: type
                         } else type
-                        val bound = localSubst?.apply(rawBound) ?: rawBound
-                        BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type = bound)
+                        BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type = rawBound)
                     }.toMap()
-                }
 
                 val extendedTypingContext = typingContext.extendAll(contextBindings)
                 currentContext = currentContext.copy(typingContext = extendedTypingContext)
@@ -636,16 +519,6 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 if (stmt.pattern is ParsedVariablePattern && stmt.value is ParsedRecordLit) {
                     val varName = (stmt.pattern as ParsedVariablePattern).name
                     currentContext = currentContext.withRecordLiteralBinding(varName)
-                }
-
-                // Remember the SOURCE expression of a simple `let x = <expr>`. When
-                // `x`'s binding type is still an unsolved VarType at a later
-                // `x.method {…}` dispatch, receiver-type resolution falls back to
-                // this expr — resolving through the value the same way the inline
-                // form (`<expr>.method {…}`) already does. See getReceiverConcreteType.
-                if (stmt.pattern is ParsedVariablePattern) {
-                    val varName = (stmt.pattern as ParsedVariablePattern).name
-                    currentContext = currentContext.withLetBoundExpr(varName, stmt.value)
                 }
 
                 // #84 linter: remember this let's bound names to check for use
