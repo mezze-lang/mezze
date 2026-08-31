@@ -296,6 +296,7 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
         newLine()
         indent {
             decl.operations.forEachIndexed { i, op ->
+                printMemberDoc(op.doc)
                 printIndent()
                 append(op.name)
                 append(": ")
@@ -344,6 +345,7 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
         newLine()
         indent {
             decl.operations.forEachIndexed { i, op ->
+                printMemberDoc(op.doc)
                 printIndent()
                 append(op.name)
                 append(": ")
@@ -407,6 +409,7 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
         newLine()
         indent {
             decl.operations.forEachIndexed { i, op ->
+                printMemberDoc(op.doc)
                 printIndent()
                 append(op.name)
                 // Print type annotation if present (the bug fix: don't drop these)
@@ -467,6 +470,7 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
         newLine()
         indent {
             decl.operations.forEachIndexed { i, op ->
+                printMemberDoc(op.doc)
                 printIndent()
                 append(op.name)
                 // Preserve type annotations if present
@@ -903,6 +907,20 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
         for (comment in leadingComments) {
             printIndent()
             append(comment.text)
+            newLine()
+        }
+    }
+
+    /**
+     * Print a member operation's `## doc` block (ability/effect/impl/performer
+     * ops), indented at the current level, one `## line` per doc line. Blank
+     * doc lines round-trip as a bare `##`.
+     */
+    private fun printMemberDoc(doc: String?) {
+        doc ?: return
+        for (line in doc.split("\n")) {
+            printIndent()
+            if (line.isEmpty()) append("##") else append("## $line")
             newLine()
         }
     }

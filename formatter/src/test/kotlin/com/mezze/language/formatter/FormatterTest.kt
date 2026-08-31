@@ -73,6 +73,96 @@ class FormatterTest {
     }
 
     @Test
+    fun `formatting preserves doc comments after an inline match decl`() {
+        // Regression: a decl whose body is an INLINE `match x is` (the `match`
+        // keyword on the SAME line as `=`, arms hanging indented below) had the
+        // match-arm loop speculatively consume the NEXT decl's leading `## doc`
+        // while probing for another arm, then discard it on the dedent break —
+        // silently deleting the following declaration's documentation. Both
+        // docs below must survive; only `map`'s (next-line match) used to.
+        val input = """
+            ## Apply f to the inner value, or return None.
+            pub let map : { opt: Option 'a, f: { val: 'a } -> 'b } -> Option 'b = { opt, f } -> match opt is
+              Some { val } -> Some { val = f { val } }
+              None -> None
+
+            ## Unwrap the value, or return def if None.
+            pub let get_or : { opt: Option 'a, def: 'a } -> 'a = { opt, def } -> match opt is
+              Some { val } -> val
+              None -> def
+
+            ## True if the option contains a value.
+            pub let is_some : { opt: Option 'a } -> Bool = { opt } -> match opt is
+              Some { val } -> true
+              None -> false
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("## Apply f to the inner value, or return None."),
+            "map's doc dropped:\n$output")
+        assertTrue(output.contains("## Unwrap the value, or return def if None."),
+            "get_or's doc dropped after inline-match decl:\n$output")
+        assertTrue(output.contains("## True if the option contains a value."),
+            "is_some's doc dropped after inline-match decl:\n$output")
+        assertEquals(output, formatter.format(output),
+            "formatting is not idempotent for docs after inline-match decls")
+    }
+
+    @Test
+    fun `formatting preserves ability effect and impl member doc comments`() {
+        // Regression: member ops in ability/effect/impl/performer blocks were
+        // parsed with a comment-discarding skip, so per-operation `## doc`
+        // comments never reached the AST and vanished on reformat.
+        val input = """
+            ## An ability with a documented op.
+            ability Default for 'a where {
+              ## Construct the default value.
+              default: {} -> 'a
+            }
+
+            ## An effect with a documented op.
+            effect Reader having 'a where {
+              ## Read the current binding.
+              ask: {} -> 'a <Reader>
+            }
+
+            ## An inherent impl with a documented op.
+            impl Request where {
+              ## Terminal — perform the request.
+              send = { it } -> do_send { req = it }
+            }
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("## Construct the default value."),
+            "ability member doc dropped:\n$output")
+        assertTrue(output.contains("## Read the current binding."),
+            "effect member doc dropped:\n$output")
+        assertTrue(output.contains("## Terminal — perform the request."),
+            "impl member doc dropped:\n$output")
+        assertEquals(output, formatter.format(output),
+            "formatting is not idempotent for member docs")
+    }
+
+    @Test
+    fun `formatting preserves a module-top doc block separated by a blank line`() {
+        // Regression: a file-top `## …` doc block separated from the first
+        // declaration by a blank line was reset-and-discarded by the annotation
+        // collector, deleting the whole module doc on reformat.
+        val input = """
+            ## Module-level documentation.
+            ## Second line of it.
+
+            use std::option
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("## Module-level documentation."),
+            "module-top doc line 1 dropped:\n$output")
+        assertTrue(output.contains("## Second line of it."),
+            "module-top doc line 2 dropped:\n$output")
+        assertEquals(output, formatter.format(output),
+            "formatting is not idempotent for module-top docs")
+    }
+
+    @Test
     fun `format let binding with type annotation`() {
         val input = "let x: Int = 42"
         val output = formatter.format(input)

@@ -31,26 +31,42 @@ internal fun MezzeParser.declNameOnNewLineFailure(
 internal fun <T> MezzeParser.parseCommaSeparatedOps(
     stream: TokenStream,
     opParser: Parser<T>,
-    missingCommaMessage: String
+    missingCommaMessage: String,
+    // Attach a leading `## doc` block (collected just above the operation) to
+    // the parsed op. Without this, member doc comments in ability/effect/impl/
+    // performer blocks were silently discarded by the comment-skipping
+    // `skipNewlines` at each op boundary — reformatting an .mz file dropped
+    // every per-operation doc. Ops that carry no doc field pass `null` through.
+    attachDoc: (T, String?) -> T = { op, _ -> op }
 ): ParseResult<Pair<List<T>, TokenStream>> {
     val operations = mutableListOf<T>()
     var currentStream = stream
 
+    // A doc comment may lead the very first op too (the caller has already
+    // skipped the `{` and its trailing newlines with plain `skipNewlines`,
+    // but a `##` right after that survives here for the first op only if the
+    // caller didn't eat it — so collect defensively before the first parse).
+    val (afterFirstAnn, firstAnn) = skipNewlinesCollectAnnotations(currentStream)
+    currentStream = afterFirstAnn
+
     when (val firstOp = opParser(currentStream)) {
         is ParseResult.Success -> {
-            operations.add(firstOp.value)
+            operations.add(attachDoc(firstOp.value, firstAnn.docComment))
             currentStream = skipNewlines(firstOp.remaining)
 
             while (true) {
                 when (val comma = tok(TokenType.COMMA)(currentStream)) {
                     is ParseResult.Success -> {
-                        currentStream = skipNewlines(comma.remaining)
+                        // Collect a leading doc block for the NEXT op instead of
+                        // discarding it. `skipNewlines` would swallow the `##`.
+                        val (afterAnn, ann) = skipNewlinesCollectAnnotations(comma.remaining)
+                        currentStream = afterAnn
                         if (currentStream.current()?.type == TokenType.RBRACE) {
                             break
                         }
                         when (val op = opParser(currentStream)) {
                             is ParseResult.Success -> {
-                                operations.add(op.value)
+                                operations.add(attachDoc(op.value, ann.docComment))
                                 currentStream = skipNewlines(op.remaining)
                             }
                             is ParseResult.Failure -> {
@@ -307,10 +323,13 @@ internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream): ParseResul
 
                                 when (lbrace) {
                                     is ParseResult.Success -> {
-                                        val stream4 = skipNewlines(lbrace.remaining)
+                                        // skipNewlinesOnly so a `## doc` leading the
+                                        // FIRST op survives to parseCommaSeparatedOps.
+                                        val stream4 = skipNewlinesOnly(lbrace.remaining)
                                         val opsResult = parseCommaSeparatedOps(
                                             stream4, effectOperationParser,
-                                            "Missing ',' between effect operations. Effect operations must be comma-separated."
+                                            "Missing ',' between effect operations. Effect operations must be comma-separated.",
+                                            attachDoc = { op, doc -> if (doc != null) op.copy(doc = doc) else op }
                                         )
                                         when (opsResult) {
                                             is ParseResult.Failure -> return opsResult
@@ -795,10 +814,12 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
 
                                                 when (lbrace) {
                                                     is ParseResult.Success -> {
-                                                        val stream7 = skipNewlines(lbrace.remaining)
+                                                        // skipNewlinesOnly so a `## doc` above the FIRST op survives.
+                                                        val stream7 = skipNewlinesOnly(lbrace.remaining)
                                                         val perfOpsResult = parseCommaSeparatedOps(
                                                             stream7, performerOperationParser,
-                                                            "Missing ',' between effect impl operations. Operations must be comma-separated."
+                                                            "Missing ',' between effect impl operations. Operations must be comma-separated.",
+                                                            attachDoc = { op, doc -> if (doc != null) op.copy(doc = doc) else op }
                                                         )
                                                         when (perfOpsResult) {
                                                             is ParseResult.Failure -> return perfOpsResult
@@ -1183,10 +1204,12 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
 
                                 when (lbrace) {
                                     is ParseResult.Success -> {
-                                        val stream5 = skipNewlines(lbrace.remaining)
+                                        // skipNewlinesOnly so a `## doc` above the FIRST op survives.
+                                        val stream5 = skipNewlinesOnly(lbrace.remaining)
                                         val abilityOpsResult = parseCommaSeparatedOps(
                                             stream5, abilityOperationParser,
-                                            "Missing ',' between ability methods. Ability methods must be comma-separated."
+                                            "Missing ',' between ability methods. Ability methods must be comma-separated.",
+                                            attachDoc = { op, doc -> if (doc != null) op.copy(doc = doc) else op }
                                         )
                                         when (abilityOpsResult) {
                                             is ParseResult.Failure -> return abilityOpsResult
@@ -1489,11 +1512,13 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
 
         return when (lbrace) {
             is ParseResult.Success -> {
-                val stream5 = skipNewlines(lbrace.remaining)
+                // skipNewlinesOnly so a `## doc` above the FIRST op survives.
+                val stream5 = skipNewlinesOnly(lbrace.remaining)
 
                 val implOpsResult = parseCommaSeparatedOps(
                     stream5, implAbilityOperationParser,
-                    "Missing ',' between ability impl methods. Methods must be comma-separated."
+                    "Missing ',' between ability impl methods. Methods must be comma-separated.",
+                    attachDoc = { op, doc -> if (doc != null) op.copy(doc = doc) else op }
                 )
                 when (implOpsResult) {
                     is ParseResult.Failure -> return implOpsResult
@@ -1633,7 +1658,7 @@ internal val MezzeParser.implAbilityOperationParser: Parser<ParsedImplOp> get() 
                                                             funcType.returnType,
                                                             impl.value,
                                                             funcType.abilityConstraints,
-                                                            loc
+                                                            loc = loc
                                                         ),
                                                         impl.remaining
                                                     )
@@ -1668,7 +1693,7 @@ internal val MezzeParser.implAbilityOperationParser: Parser<ParsedImplOp> get() 
                                                 null,  // Type will be inferred by typechecker
                                                 impl.value,
                                                 emptyList(),
-                                                loc
+                                                loc = loc
                                             ),
                                             impl.remaining
                                         )

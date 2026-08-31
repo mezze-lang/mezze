@@ -1320,10 +1320,19 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
                                         var currentStream = skipNewlinesOnly(firstCase.remaining)
 
                                         while (true) {
-                                            // Collect comments before the next arm.
+                                            // Comments before the next arm are only
+                                            // THIS match's if a case actually follows.
+                                            // Collect them on a SPECULATIVE stream and
+                                            // commit that stream only when the arm parses;
+                                            // otherwise rewind to before the comments so
+                                            // the enclosing decl loop re-collects them as
+                                            // the leading doc of the FOLLOWING declaration.
+                                            // Consuming-then-discarding here silently ate
+                                            // the next decl's `## doc` whenever an inline
+                                            // `match … is` ended a top-level let.
+                                            val preAnnStream = currentStream
                                             val (afterAnn, armAnn) = skipNewlinesCollectAnnotations(currentStream)
-                                            currentStream = afterAnn
-                                            val currentToken = currentStream.current()
+                                            val currentToken = afterAnn.current()
 
                                             // Stop if:
                                             // 1. We've reached EOF, or
@@ -1331,11 +1340,12 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
                                             if (currentToken == null ||
                                                 currentToken.type == TokenType.EOF ||
                                                 (firstCaseColumn != null && currentToken.column < firstCaseColumn)) {
+                                                currentStream = preAnnStream
                                                 break
                                             }
 
                                             // Try to parse another case
-                                            val nextCase = matchCase(currentStream)
+                                            val nextCase = matchCase(afterAnn)
                                             when (nextCase) {
                                                 is ParseResult.Success -> {
                                                     cases.add(nextCase.value.copy(
@@ -1346,7 +1356,10 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
                                                     currentStream = skipNewlinesOnly(nextCase.remaining)
                                                 }
                                                 is ParseResult.Failure -> {
-                                                    // Can't parse another case, we're done
+                                                    // Can't parse another case, we're done —
+                                                    // rewind so the comments we speculatively
+                                                    // consumed lead the next declaration.
+                                                    currentStream = preAnnStream
                                                     break
                                                 }
                                             }

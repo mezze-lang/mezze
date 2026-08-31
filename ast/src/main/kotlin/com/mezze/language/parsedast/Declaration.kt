@@ -289,6 +289,7 @@ data class ParsedImplOp(
     val returnType: ParsedTypeAnnotation? = null,
     val implementation: ParsedExpr,
     val abilityConstraints: List<ParsedFnAbilityConstraint> = emptyList(),
+    val doc: String? = null,
     val loc: Loc
 )
 
@@ -367,6 +368,7 @@ data class ParsedPerformerOp(
     val returnType: ParsedTypeAnnotation? = null,
     val implementation: ParsedExpr,
     val effects: ParsedEffectRow? = null,
+    val doc: String? = null,
     val loc: Loc
 )
 

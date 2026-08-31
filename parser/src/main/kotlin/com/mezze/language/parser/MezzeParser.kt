@@ -551,12 +551,32 @@ class MezzeParser {
 
         // Accumulators for the current contiguous annotation block
         var docLines = mutableListOf<String>()
+        // Raw `## …` tokens backing the current docLines block. When the block
+        // is RESET (a blank line or a regular `#` comment breaks the run), these
+        // are NOT the doc of the following decl — but they are still real
+        // documentation the author wrote, and dropping them silently corrupts
+        // the file. Flush them into regularComments (which the formatter prints
+        // verbatim) instead of discarding. Only the LAST, un-reset block becomes
+        // the attached docComment. (Fixes module-top doc separated from the
+        // first decl by a blank line vanishing on reformat.)
+        var docRaw = mutableListOf<ParsedComment>()
         var metadata: ParsedMetadata? = null
         var metadataLoc: Loc? = null
         var hasSeenMetadata = false
 
         // All regular comments (for formatter preservation)
         val regularComments = mutableListOf<ParsedComment>()
+
+        // Reset the current annotation block, preserving any doc lines it held
+        // as verbatim comments so they survive the round-trip.
+        fun resetBlock() {
+            regularComments.addAll(docRaw)
+            docLines = mutableListOf()
+            docRaw = mutableListOf()
+            metadata = null
+            metadataLoc = null
+            hasSeenMetadata = false
+        }
 
         var lastWasNewline = false
 
@@ -566,10 +586,7 @@ class MezzeParser {
                 TokenType.NEWLINE -> {
                     if (lastWasNewline) {
                         // Blank line (two consecutive newlines) → reset doc and metadata
-                        docLines = mutableListOf()
-                        metadata = null
-                        metadataLoc = null
-                        hasSeenMetadata = false
+                        resetBlock()
                     }
                     lastWasNewline = true
                     current = current.advance()
@@ -595,20 +612,15 @@ class MezzeParser {
                             if (hasSeenMetadata) {
                                 // Error: ## after #{} — for now, reset and start fresh
                                 // TODO: emit parse error for doc after metadata
-                                docLines = mutableListOf()
-                                metadata = null
-                                metadataLoc = null
-                                hasSeenMetadata = false
+                                resetBlock()
                             }
                             // Strip the ## prefix and optional leading space
                             val docText = text.removePrefix("##").removePrefix(" ")
                             docLines.add(docText)
+                            docRaw.add(ParsedComment(text, true, loc))
                         }
                         else -> {
-                            docLines = mutableListOf()
-                            metadata = null
-                            metadataLoc = null
-                            hasSeenMetadata = false
+                            resetBlock()
                             // Preserve for formatter
                             regularComments.add(ParsedComment(text, false, loc))
                         }
