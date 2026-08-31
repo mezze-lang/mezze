@@ -517,6 +517,14 @@ class TypeChecker(
                     currentModulePath = currentModulePath,
                 )
 
+                // S4.2 (#362): effect-conservation invariant — the emitted
+                // function-type effect row must be ⊇ the effects the body
+                // actually performs (not-discharged). Runs on the just-emitted
+                // TypedModule; gated by mezze.invariants=true, so a normal gate
+                // is unaffected. A trip = a laundering hole (or an over-strict
+                // invariant), never silent.
+                emitResult.typedModule?.let { InvariantChecker.checkEffectConservation(it) }
+
                 val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution)
                 val v2Warnings = mutableListOf<TypeCheckWarning>()
                 collectValidationResult(v2ValidationResult, collectedErrors, v2Warnings)
