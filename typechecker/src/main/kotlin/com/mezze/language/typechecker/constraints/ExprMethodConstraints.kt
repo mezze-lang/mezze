@@ -53,6 +53,34 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     }
 
     if (matchingAbilities.isEmpty() && builtInMatches.isEmpty() && inherentMethods.isNotEmpty()) {
+        // Multi-candidate dispatch by the GENERATED receiver type. The
+        // syntactic `getReceiverConcreteType` walk (used by the deferral guard
+        // below) can't see through a chained/match-bound receiver — e.g.
+        // `val.text {}.get_or {…}` where `val` is bound by `match … is Ok { val }`
+        // and its payload TyVar isn't solved yet. But the receiver's GENERATED
+        // type already carries the concrete named identity (`.text {}` promotes
+        // its result to the `Result Str Str` TypeApplication via the #334 path),
+        // so generate it and filter candidates by that identity (name for
+        // nominals/TypeApplications, structural-alias match for bare
+        // records/variants — same `candidateTypeNames` the concrete-receiver
+        // and chain-callee paths use). This resolves the call by identity
+        // instead of falling through the `isReceiverUnresolved` bail to a
+        // structural field access → T0205. Only fires when the filter lands on
+        // a UNIQUE target's methods, so it never guesses among genuine
+        // ambiguity. See project_result_option_two_representations / #334.
+        if (inherentMethods.size > 1) {
+            val genReceiverType = generate(memberAccess.receiver, context.notInTailPosition()).type
+            val effectiveReceiverType = (genReceiverType as? MezzeType.SuspendType)?.valueType ?: genReceiverType
+            if (effectiveReceiverType !is MezzeType.VarType) {
+                val names = candidateTypeNames(effectiveReceiverType, context)
+                if (names.isNotEmpty()) {
+                    val filtered = inherentMethods.filter { it.targetTypeName in names }
+                    if (filtered.isNotEmpty() && filtered.map { it.targetTypeName }.distinct().size == 1) {
+                        return generateInherentMethodCall(expr, memberAccess, filtered, context)
+                    }
+                }
+            }
+        }
         // Closed-record method-call inference (issue #216): when there are
         // multiple candidate inherent methods AND the receiver's type is
         // still a free TypeVar, DON'T speculatively pick by load order

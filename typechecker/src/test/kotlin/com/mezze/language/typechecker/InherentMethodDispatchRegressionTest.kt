@@ -139,4 +139,66 @@ class InherentMethodDispatchRegressionTest {
         )
         assertNotNull(r.getVariableType("g"))
     }
+
+    /**
+     * User-reported regression: a multi-candidate inherent method
+     * (`get_or` lives on Result + Option + Map) chained directly onto an
+     * inherent method whose result is a named `Result`, where the inner
+     * method's RECEIVER is bound by a `match … is Ok { val }` pattern:
+     *
+     *     match r is
+     *       Ok { val } -> val.decode {}.get_or { def = "?" }   // decode : … -> Result Str Str
+     *       Err { error = _ } -> "e"
+     *
+     * `val`'s payload TyVar isn't solved at generation time, so the
+     * syntactic `getReceiverConcreteType` walk reported the whole
+     * `val.decode {}` chain as "unresolved" — routing the outer `.get_or`
+     * into the multi-candidate deferral, which bailed to a STRUCTURAL
+     * field access and failed with
+     *   T0205: Cannot access field 'get_or' on variant type: | Ok {…}, Err {…} |
+     * even though `.decode {}`'s generated result type already carried the
+     * concrete `Result` identity. Fix: dispatch multi-candidate inherent
+     * calls by the GENERATED receiver type when it is concrete + resolves
+     * to a unique target. `let`-binding the intermediary always worked; the
+     * direct chain must too. See project_result_option_two_representations.
+     */
+    @Test
+    fun `multi-candidate get_or chained on inherent Result result with match-bound receiver`() {
+        val r = check(
+            """use std::result::{ get_or }
+              |type Wrap = { inner: Str }
+              |impl Wrap where {
+              |  decode = { it } -> Ok { val = it.inner }
+              |}
+              |let f = { r: Result Wrap Str } -> match r is
+              |  Ok { val } -> val.decode {}.get_or { def = "?" }
+              |  Err { error = _ } -> "e"""".trimMargin()
+        )
+        // A resolved `f : … -> Str` proves the chain dispatched by identity
+        // instead of collapsing to a structural field access (T0205).
+        assertEquals(MezzeType.StringType, (r.getVariableType("f") as? MezzeType.FunctionType)?.returnType)
+    }
+
+    /**
+     * Companion to the above: the `let`-bound intermediary form ALWAYS
+     * worked (the binding's type is solved before `.get_or` generates).
+     * Kept so a future change that "fixes" the chain by breaking the
+     * binding path is caught.
+     */
+    @Test
+    fun `multi-candidate get_or on let-bound inherent Result result`() {
+        val r = check(
+            """use std::result::{ get_or }
+              |type Wrap = { inner: Str }
+              |impl Wrap where {
+              |  decode = { it } -> Ok { val = it.inner }
+              |}
+              |let f = { r: Result Wrap Str } -> match r is
+              |  Ok { val } -> do
+              |    let d = val.decode {}
+              |    d.get_or { def = "?" }
+              |  Err { error = _ } -> "e"""".trimMargin()
+        )
+        assertEquals(MezzeType.StringType, (r.getVariableType("f") as? MezzeType.FunctionType)?.returnType)
+    }
 }
