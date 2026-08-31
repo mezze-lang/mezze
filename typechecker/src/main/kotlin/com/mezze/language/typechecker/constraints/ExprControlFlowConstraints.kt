@@ -281,6 +281,29 @@ private fun mergeArmFunctionEffects(armTypes: List<MezzeType>): MezzeType.Functi
  * one binding per pattern var. Falls back to monomorphic bindings when no
  * registry is wired (bare construction) or solving fails.
  */
+/**
+ * S1.2 local incremental solve. Runs the solver over the constraints accumulated
+ * up to a given do-block statement — exactly what `generalizeDoBlockBinding` does
+ * to decide generalization — but exposed as a bare substitution so a NON-lambda
+ * `let x = <expr>` can resolve its binding type before the next statement
+ * generates. This mirrors how the top-level runs a per-binding solve
+ * (ConstraintGenerator ~:186) so a do-block `let` sees a concrete binding type
+ * (e.g. `let kept = xs.filter{…}` → `[…]`) instead of a raw VarType. Returns null
+ * when no registry is wired (bare/test construction) or solving fails — the global
+ * solve surfaces the real error later; without a substitution we keep the raw type
+ * (behaviour unchanged for that binding).
+ */
+private fun ExpressionConstraintGenerator.solveDoBlockBindingLocally(
+    accumulatedConstraints: List<Constraint>,
+    outerContext: ConstraintContext,
+): Substitution? {
+    val reg = this.registry ?: return null
+    return when (val r = ConstraintSolver(outerContext.typingContext, reg).solve(accumulatedConstraints.toList())) {
+        is ConstraintSolver.SolveResult.Success -> r.substitution
+        is ConstraintSolver.SolveResult.Failure -> null
+    }
+}
+
 private fun ExpressionConstraintGenerator.generalizeDoBlockBinding(
     patternBindings: Map<String, MezzeType>,
     accumulatedConstraints: List<Constraint>,
@@ -570,6 +593,20 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                         outerContext = currentContext,
                     )
                 } else {
+                    // S1.2: local incremental solve. Solve the constraints
+                    // accumulated up to (and including) this statement so the
+                    // binding type is RESOLVED before the next statement
+                    // generates — matching top-level `let`, which runs a
+                    // per-binding solve. The solved type is what dispatch on a
+                    // later `x.method {…}` reads via getReceiverConcreteType,
+                    // which already returns a concrete binding type directly
+                    // (the letBoundExprs crutch only fires when the type is still
+                    // a VarType — so a resolved binding makes it redundant here,
+                    // exactly as S1.2 intends; the crutch itself stays for the
+                    // paths still emitting a VarType). Falls back to the raw type
+                    // when solving isn't possible (no registry / solve failure),
+                    // so behaviour is unchanged there.
+                    val localSubst = solveDoBlockBindingLocally(collector.constraints, currentContext)
                     patternResult.bindings.map { (name, type) ->
                         // Bind to the WRITTEN annotation where there is one.
                         //
@@ -585,9 +622,10 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                         // Only the binding in the typing context changes;
                         // bindingType still drives the equality constraint and
                         // generalization, so the value restriction is untouched.
-                        val bound = if (stmt.pattern is ParsedVariablePattern) {
+                        val rawBound = if (stmt.pattern is ParsedVariablePattern) {
                             annotatedType ?: type
                         } else type
+                        val bound = localSubst?.apply(rawBound) ?: rawBound
                         BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type = bound)
                     }.toMap()
                 }

@@ -107,6 +107,26 @@ class DoBlockCallBindingTypeTest {
     }
 
     @Test
+    fun `S1_2 do-block let of a filter result has a concrete Seq type available`() {
+        // S1.2: the local incremental solve resolves `kept`'s binding type to a
+        // concrete `[...]` BEFORE the next statement (`kept.map {…}`) generates,
+        // instead of leaving a raw VarType that only the letBoundExprs crutch
+        // could see through. The recorded binding type must be a Seq, not `'a`.
+        val src = """
+            use std::collections::seq::{ filter, map }
+            let main = {} -> do
+              let xs = [ { qty = 2, ok = True }, { qty = 1, ok = False } ]
+              let kept = xs.filter { p = { x } -> x.ok }
+              kept.map { f = { x } -> x.qty }
+        """.trimIndent()
+
+        // `kept` is on line 4, col 7.
+        val t = bindingTypeAt(src, 4, 7)
+        assertTrue(t.startsWith("["), "expected a concrete Seq type for `kept`, got: $t")
+        assertFalse(t.contains("'"), "expected no unsolved type var in `kept`'s type, got: $t")
+    }
+
+    @Test
     fun `a do-block let of an effect operation records the solved type`() {
         // `Async.spawn { f = {} -> "hello" }` binds `Promise 'a`, not
         // `Promise Str`. The same expression at the top level gets it right,
