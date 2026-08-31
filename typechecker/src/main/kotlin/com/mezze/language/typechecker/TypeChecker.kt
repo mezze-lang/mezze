@@ -453,6 +453,34 @@ class TypeChecker(
 
                 val aggregated = aggregateConstraintResults(constraintResults, substitution)
 
+                // S2.2 (#357): the SINGLE post-solve dispatch resolution pass. For
+                // each recorded MethodResolveBucket it resolves the SOLVED receiver's
+                // identity and applies ONE hash-keyed rule to pick the winning op,
+                // producing a Resolution keyed by call-site Loc. ADDITIVE: the
+                // Resolutions are populated for S2.3 to read; nothing reads them yet,
+                // the gen-time ladder stays the live decider. Under
+                // -Dmezze.invariants=true the pass cross-checks every chosen opHash
+                // against the ladder's recorded MethodCallInfo and throws on
+                // divergence — the test suite is the exhaustive parity oracle. In a
+                // normal gate a divergence/ambiguity is swallowed (Resolution just
+                // not recorded for that loc) so behaviour stays byte-identical.
+                @Suppress("UNUSED_VARIABLE")
+                val dispatchResolutions: Map<Loc, com.mezze.language.typechecker.constraints.Resolution> =
+                    try {
+                        com.mezze.language.typechecker.solving.DispatchResolver.resolveDispatch(
+                            buckets = constraintGenerator.expressionGenerator.resolutionBuckets,
+                            substitution = substitution,
+                            methodCallResolutions = aggregated.methodCallResolutions,
+                            typingContext = context,
+                        )
+                    } catch (e: com.mezze.language.typechecker.solving.DispatchResolver.DispatchParityException) {
+                        if (System.getProperty("mezze.invariants", "false") == "true") throw e
+                        emptyMap()
+                    } catch (e: com.mezze.language.typechecker.solving.DispatchResolver.DispatchAmbiguityException) {
+                        if (System.getProperty("mezze.invariants", "false") == "true") throw e
+                        emptyMap()
+                    }
+
                 // #160: inherent-method dispatch the solver left unresolved. A
                 // receiver still not concrete — checked BOTH via the flat
                 // substitution AND the per-call-site callReturnTypes (which emit
