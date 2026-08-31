@@ -453,18 +453,20 @@ class TypeChecker(
 
                 val aggregated = aggregateConstraintResults(constraintResults, substitution)
 
-                // S2.2 (#357): the SINGLE post-solve dispatch resolution pass. For
-                // each recorded MethodResolveBucket it resolves the SOLVED receiver's
-                // identity and applies ONE hash-keyed rule to pick the winning op,
-                // producing a Resolution keyed by call-site Loc. ADDITIVE: the
-                // Resolutions are populated for S2.3 to read; nothing reads them yet,
-                // the gen-time ladder stays the live decider. Under
-                // -Dmezze.invariants=true the pass cross-checks every chosen opHash
-                // against the ladder's recorded MethodCallInfo and throws on
-                // divergence — the test suite is the exhaustive parity oracle. In a
-                // normal gate a divergence/ambiguity is swallowed (Resolution just
-                // not recorded for that loc) so behaviour stays byte-identical.
-                @Suppress("UNUSED_VARIABLE")
+                // S2.2/S2.3 (#357/#358): the SINGLE post-solve dispatch resolution
+                // pass. For each recorded MethodResolveBucket it resolves the SOLVED
+                // receiver's identity and applies ONE hash-keyed rule to pick the
+                // winning op, producing a Resolution keyed by call-site Loc. S2.3:
+                // emit READS these — for an inherent call site with a Resolution,
+                // TypedAstBuilder takes `resolution.opHash` and performs NO impl
+                // selection of its own (dispatch decided once). Sites the resolver
+                // DEFERS (VarType-open receivers, ability/builtin collisions it
+                // leaves to the ability path) have no Resolution and keep emit's
+                // legacy per-site fallback — those are genuine deferrals, not a
+                // second selection heuristic. Under -Dmezze.invariants=true a
+                // Parity/Ambiguity divergence rethrows (the suite is the oracle);
+                // in a normal gate it is swallowed to emptyMap so behaviour stays
+                // byte-identical (emit falls back to legacy everywhere).
                 val dispatchResolutions: Map<Loc, com.mezze.language.typechecker.constraints.Resolution> =
                     try {
                         com.mezze.language.typechecker.solving.DispatchResolver.resolveDispatch(
@@ -508,6 +510,7 @@ class TypeChecker(
                     tailCallLocations = aggregated.tailCallLocations,
                     mustBeOpenRowVars = mustBeOpenRowVars,
                     methodCallResolutions = aggregated.methodCallResolutions,
+                    dispatchResolutions = dispatchResolutions,
                     callReturnTypes = aggregated.callReturnTypes,
                     matchCaseBindings = aggregated.matchCaseBindings,
                     isStdlibModule = isStdlibModule,

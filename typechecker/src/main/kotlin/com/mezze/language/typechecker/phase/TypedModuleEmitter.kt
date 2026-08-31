@@ -43,6 +43,7 @@ internal fun emitTypedModuleAndLower(
     tailCallLocations: Set<Loc>,
     mustBeOpenRowVars: Set<RowVar>,
     methodCallResolutions: Map<Pair<Loc, String>, ConstraintResult.MethodCallInfo>,
+    dispatchResolutions: Map<Loc, com.mezze.language.typechecker.constraints.Resolution>,
     callReturnTypes: Map<Loc, MezzeType>,
     matchCaseBindings: Map<Loc, Map<String, MezzeType>>,
     isStdlibModule: Boolean,
@@ -65,6 +66,7 @@ internal fun emitTypedModuleAndLower(
             tailCallLocations = tailCallLocations,
             mustBeOpenRowVars = mustBeOpenRowVars,
             methodCallResolutions = methodCallResolutions,
+            dispatchResolutions = dispatchResolutions,
             callReturnTypes = callReturnTypes,
             matchCaseBindings = matchCaseBindings,
         )

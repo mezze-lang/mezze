@@ -31,6 +31,15 @@ class TypedAstBuilder(
     private val tailCallLocations: Set<Loc>,
     private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
     private val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap(),
+    // S2.3 (#358): the SINGLE post-solve dispatch decision, keyed by call-site
+    // Loc, produced by DispatchResolver. For an INHERENT method call whose site
+    // has a Resolution, emit READS `resolution.opHash` (the resolved impl content
+    // hash) instead of re-running its own structural impl re-pick — dispatch is
+    // decided in exactly ONE place. Sites with no Resolution (VarType-deferred
+    // receivers, ability collisions the resolver defers, builtins) keep the
+    // legacy per-site resolution below; those are genuine deferrals, not a second
+    // impl-selection heuristic.
+    private val dispatchResolutions: Map<Loc, com.mezze.language.typechecker.constraints.Resolution> = emptyMap(),
     private val callReturnTypes: Map<Loc, MezzeType> = emptyMap(),
     // #195 mono-fix #1: per-match-case binding name → solver TyVar. The
     // constraint generator records the SAME fresh TyVars that PatternConstraints
@@ -44,6 +53,34 @@ class TypedAstBuilder(
     private val identifierContext = mutableMapOf<String, MezzeType>()
 
     private val typeVarCache = mutableMapOf<String, TypeVar>()
+
+    private val invariantsEnabled: Boolean
+        get() = System.getProperty("mezze.invariants", "false") == "true"
+
+    /**
+     * S2.3 (#358): the OLD emit-side inherent impl re-pick, retained ONLY as the
+     * fallback for call sites DispatchResolver deferred (no Resolution). It picks
+     * the candidate whose target matches the SOLVED receiver — hash-first
+     * (rename-safe, module-distinct), name only for hashless builtins — mirroring
+     * DispatchResolver.pickInherent exactly. For a site WITH a Resolution this is
+     * never the decider; under invariants it is still computed and asserted equal
+     * to the Resolution so any divergence is caught by the suite.
+     */
+    private fun legacyInherentImplHash(
+        methodInfo: MethodCallInfo,
+        receiverExpr: TypedExpr,
+    ): Hash? {
+        if (methodInfo.candidateImpls.isEmpty()) return methodInfo.implContentHash
+        val solvedReceiver = substitution.apply(receiverExpr.type)
+        val receiverHash = com.mezze.language.typechecker.util.declaredHashOf(solvedReceiver)
+        val byHash = if (receiverHash != null) {
+            methodInfo.candidateImpls.firstOrNull { it.targetTypeHash == receiverHash }?.implContentHash
+        } else null
+        return byHash ?: run {
+            val name = receiverTypeName(solvedReceiver)
+            methodInfo.candidateImpls.firstOrNull { it.targetTypeName == name }?.implContentHash
+        } ?: methodInfo.implContentHash
+    }
 
     /**
      * In-scope CLOSED record aliases, as (name, field-name→field-type). Built
@@ -866,28 +903,29 @@ class TypedAstBuilder(
         val argExpr = if (methodParamType != null) buildExpr(expr.arguments, file, methodParamType)
                       else buildExpr(expr.arguments, file)
 
-        // #160: when the inherent impl was deferred (the receiver's concrete
-        // type was only known after solving, e.g. `help {..}.to_str {}`), pick
-        // the candidate whose target matches the SOLVED receiver type. Falls
-        // back to the statically-recorded implContentHash if no candidate
-        // matches (e.g. a receiver that solved to a non-candidate type — the
-        // solver would already have errored in practice).
+        // S2.3 (#358): dispatch is decided ONCE, in DispatchResolver. When this
+        // inherent call site has a Resolution, READ its opHash (the resolved impl
+        // content hash) — emit performs NO impl selection of its own. The legacy
+        // re-pick is kept only as the FALLBACK for sites the resolver deferred
+        // (no Resolution: a receiver still open past solve, or an ability/builtin
+        // collision the resolver leaves to the downstream ability path). Under
+        // invariants we assert the two agree wherever both produce an answer, so
+        // "emit never selects an impl differing from DispatchResolver" is enforced
+        // by the suite.
+        val resolution = dispatchResolutions[expr.loc]
         val resolvedImplHash: Hash? = run {
-            if (methodInfo.candidateImpls.isEmpty()) return@run methodInfo.implContentHash
-            val solvedReceiver = substitution.apply(receiverExpr.type)
-            // #280/F1: prefer the SOLVED receiver's declaration hash — it is the
-            // rename-safe, module-distinct identity, so two same-named inherent
-            // impls from different modules pick correctly instead of by first-name-
-            // match (silent wrong-body dispatch). Name only when the receiver has
-            // no hash (builtins). Mirrors ExprMethodConstraints' resolution.
-            val receiverHash = com.mezze.language.typechecker.util.declaredHashOf(solvedReceiver)
-            val byHash = if (receiverHash != null) {
-                methodInfo.candidateImpls.firstOrNull { it.targetTypeHash == receiverHash }?.implContentHash
-            } else null
-            byHash ?: run {
-                val name = receiverTypeName(solvedReceiver)
-                methodInfo.candidateImpls.firstOrNull { it.targetTypeName == name }?.implContentHash
-            } ?: methodInfo.implContentHash
+            val fromResolver = resolution
+                ?.takeIf { it.kind == com.mezze.language.typechecker.constraints.ResolutionKind.Inherent }
+                ?.opHash
+            val legacy: Hash? = legacyInherentImplHash(methodInfo, receiverExpr)
+            if (invariantsEnabled && fromResolver != null && legacy != null && fromResolver != legacy) {
+                throw IllegalStateException(
+                    "[S2.3 emit-never-selects] inherent '${methodInfo.methodName}' at ${expr.loc}: " +
+                        "DispatchResolver chose impl ${fromResolver.hex.take(12)} but emit's legacy " +
+                        "re-pick chose ${legacy.hex.take(12)}. Dispatch must be decided once."
+                )
+            }
+            fromResolver ?: legacy
         }
 
         val receiverFieldName = methodInfo.receiverFieldName
