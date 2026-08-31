@@ -337,6 +337,14 @@ class ConstraintGenerator(
     }
 
     /**
+     * VALIDATION-ONLY re-harvest. This is NOT a second effect-row-membership
+     * setter: its result feeds ONLY `validateEffectsNotOverpromised` (the #274-B
+     * under-promise check) at the single call site below and is never written
+     * back to the emitted type. Effect-row MEMBERSHIP is owned by the gen-time
+     * harvest (`collectClosureArgEffects` in ExprFunctionConstraints) plus
+     * `unifyEffectRows`; this only recovers the poly-intermediary effect that is
+     * knowable exclusively post-solve so the over-promise check does not miss it.
+     *
      * BUG C (#331): re-run the callback-effect harvest on the SOLVED argument
      * types of this decl's `<...>` HOF calls and fold any effect names the
      * gen-time pass missed into [inferredType]'s top-level effect row. The
@@ -443,11 +451,11 @@ class ConstraintGenerator(
             // BUG C (#331): fold in effects the gen-time callback harvest missed
             // because a `<...>` HOF's callback arg was a VarType then (e.g. routed
             // through a polymorphic intermediary). Re-harvest the SOLVED arg types.
-            val effectsWithReHarvest = enrichWithReHarvestedClosureEffects(
+            val effectsForOverpromiseCheck = enrichWithReHarvestedClosureEffects(
                 inferredTypeWithAbilities, result.pendingClosureArgEffects, substitution
             )
             annotationValidator.validateEffectsNotOverpromised(
-                preConvertedAnnotationType, effectsWithReHarvest,
+                preConvertedAnnotationType, effectsForOverpromiseCheck,
                 varName, item.value.loc
             )
         }

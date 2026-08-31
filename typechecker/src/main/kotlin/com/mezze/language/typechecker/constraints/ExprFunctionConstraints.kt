@@ -1029,6 +1029,8 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                 collector.pendingClosureArgEffects.add(
                     ConstraintResult.PendingClosureHarvest(argumentResult.type, caughtByOp)
                 )
+                // THE effect-row membership setter for concrete closure-arg
+                // effects (harvested names land in collector.effects below).
                 collectClosureArgEffects(argumentResult.type) - caughtByOp
             } else emptySet()
             if (caughtByOp.isNotEmpty()) {
@@ -1121,6 +1123,8 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
         collector.pendingClosureArgEffects.add(
             ConstraintResult.PendingClosureHarvest(argumentResult.type, caughtByOp2)
         )
+        // THE effect-row membership setter for concrete closure-arg effects
+        // (sibling of the site above; harvested names land in collector.effects).
         collectClosureArgEffects(argumentResult.type) - caughtByOp2
     } else emptySet()
     if (functionResult.type is MezzeType.FunctionType) {

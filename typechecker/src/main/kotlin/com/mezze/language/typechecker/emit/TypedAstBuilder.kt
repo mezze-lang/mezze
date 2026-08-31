@@ -243,6 +243,8 @@ class TypedAstBuilder(
 
         val rawType = constraintResults[name]?.let { substitution.apply(it.type) }
             ?: MezzeType.VarType(TypeVar.freshWithName("unknown"))
+        // Closes RECORD/VARIANT row vars only; effect rows pass through untouched
+        // (effect-row membership is owned by gen-time harvest + unifyEffectRows).
         val closedType = closeGeneratedRowVars(rawType, mustBeOpenRowVars)
         // If the binding's inferred type is a bare closed record whose shape
         // exactly matches an in-scope closed alias, LABEL it with that alias name
