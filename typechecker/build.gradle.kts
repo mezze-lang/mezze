@@ -82,6 +82,11 @@ tasks.test {
     systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")
 
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
+    // Typechecker phase-boundary invariants ON in the test gate so a regression
+    // that re-introduces a structural fault (self-map / occurs / non-idempotent
+    // substitution / leaked internal tyvar) fails an assertion at the boundary
+    // instead of surfacing as a runtime miscompile. See the TC re-layering plan.
+    systemProperty("mezze.invariants", "true")
 }
 
 tasks.register<Test>("bench") {

@@ -102,6 +102,10 @@ fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
     systemProperty("junit.jupiter.execution.timeout.default", "120s")
     systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
+    // Typechecker phase-boundary invariants ON — the interpreter suite type-checks
+    // real programs (incl. the whole stdlib), so this is the broadest coverage of
+    // the invariants. See the TC re-layering plan (Stage 0).
+    systemProperty("mezze.invariants", "true")
 
     // Pass through MEZZE_DEBUG env var into the test JVM so the deferred
     // catches in TypeChecker print exception traces.

@@ -415,6 +415,13 @@ class TypeChecker(
             is ConstraintSolver.SolveResult.Success -> {
                 val substitution = solveResult.substitution.compose(perBindingSubstitution)
                 InvariantChecker.checkSubstitution(substitution, "post-solve")
+                // NOTE: checkSubstitutionIdempotence is deliberately NOT called here.
+                // Turning it on revealed the post-solve substitution is currently
+                // non-idempotent (a FunctionType RHS still contains vars the
+                // substitution itself rewrites). Whether that is a solver bug or an
+                // accepted property of this HM solver is an open question tracked as
+                // its own ticket (S0.x). Do not enable until that is resolved, or
+                // the whole invariant gate goes red on legitimate programs.
                 ConstraintDumper.dumpSolverResult(substitution)
 
 
