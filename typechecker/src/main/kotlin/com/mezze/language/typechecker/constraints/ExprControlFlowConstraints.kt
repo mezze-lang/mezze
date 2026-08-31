@@ -600,6 +600,16 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     currentContext = currentContext.withRecordLiteralBinding(varName)
                 }
 
+                // Remember the SOURCE expression of a simple `let x = <expr>`. When
+                // `x`'s binding type is still an unsolved VarType at a later
+                // `x.method {…}` dispatch, receiver-type resolution falls back to
+                // this expr — resolving through the value the same way the inline
+                // form (`<expr>.method {…}`) already does. See getReceiverConcreteType.
+                if (stmt.pattern is ParsedVariablePattern) {
+                    val varName = (stmt.pattern as ParsedVariablePattern).name
+                    currentContext = currentContext.withLetBoundExpr(varName, stmt.value)
+                }
+
                 // #84 linter: remember this let's bound names to check for use
                 // once the whole block is generated. Skip `_`-prefixed names
                 // (intentionally unused) here so they never warn.

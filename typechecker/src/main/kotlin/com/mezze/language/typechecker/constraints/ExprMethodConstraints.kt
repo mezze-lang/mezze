@@ -707,7 +707,16 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
         is TypingContext.Binding.Monomorphic -> binding.type
         is TypingContext.Binding.Polymorphic -> binding.scheme.instantiate().type
     }
-    return if (type is MezzeType.VarType) null else type
+if (type !is MezzeType.VarType) return type
+    // The binding TYPE is still an unsolved VarType at generation time — but the
+    // value it was bound to (`let x = <expr>`) may have a statically-resolvable
+    // type. Resolve THROUGH the source expr, exactly as the inline `<expr>.method`
+    // form does. This closes the gap where `let kept = xs.filter {…}; kept.map {…}`
+    // saw `kept` as unresolved (fresh result var) and mis-dispatched, while the
+    // inline chain resolved the Seq via filter's declared return type.
+    val boundExpr = context.letBoundExprs[receiver.localName] ?: return null
+    if (boundExpr is ParsedIdentifier && boundExpr.localName == receiver.localName) return null
+    return getReceiverConcreteType(boundExpr, context)
 }
 
 /**
