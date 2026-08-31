@@ -313,7 +313,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static String doOther(boolean dbgStyle, Object v) {
             if (v == null) return "null";
             if (v instanceof com.mezze.interpreter.values.MezzeUnit) return "{}";
-            return v.toString();
+            // Compound values (records, variants, lists, maps, ...) must render
+            // in Mezze surface syntax — `Err { error = "x" }`, `Some { val = 42 }`,
+            // `{ a = 1, b = "hi" }` — quoting strings and spacing braces. A raw
+            // `v.toString()` produced Java form (`Err({error = x})`, unquoted
+            // strings), which is the wrong `to_dbg` output. Route through the
+            // shared inspect formatter used by the AST path.
+            return com.mezze.interpreter.nodes.builtin.effects.InspectNatives.valueToString(v);
         }
 
         static boolean isChar(Object o) { return o instanceof Character; }

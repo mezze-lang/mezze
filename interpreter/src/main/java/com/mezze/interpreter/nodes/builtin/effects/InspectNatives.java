@@ -2,6 +2,7 @@ package com.mezze.interpreter.nodes.builtin.effects;
 
 import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.set.MezzeSet;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
@@ -95,6 +96,18 @@ public final class InspectNatives {
             for (int i = 0; i < list.size(); i++) {
                 if (i > 0) sb.append(", ");
                 sb.append(valueToString(list.get(i)));
+            }
+            sb.append("]");
+            return sb.toString();
+        }
+
+        // Seqs — the runtime value for a `[a, b, c]` literal. Render like a
+        // list (`[a, b, c]`); MezzeSeq.toString gives an opaque `<MezzeSeq>`.
+        if (value instanceof MezzeSeq<?> seq) {
+            StringBuilder sb = new StringBuilder("[");
+            for (int i = 0; i < seq.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(valueToString(seq.get(i)));
             }
             sb.append("]");
             return sb.toString();

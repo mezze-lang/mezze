@@ -295,4 +295,44 @@ class InspectAbilityTest {
             typeChecker.typeCheck(parsedModule, java.nio.file.Path.of("."))
         }
     }
+
+    // -------------------------------------------------------------------------
+    // to_dbg OUTPUT FORMAT — must be Mezze surface syntax, not Java toString.
+    // A variant/record reaching the BDSL InlineScalarInspect fallback used to
+    // render via MezzeVariant.toString (`Err({error = divide by zero})`, no
+    // quotes) instead of the shared inspect formatter. These pin the exact form.
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `to_dbg on a variant with a string payload quotes and spaces braces`() {
+        val result = eval(
+            """
+            let e = Err { error = "divide by zero" }
+            e.to_dbg {}
+            """
+        )
+        assertEquals("Err { error = \"divide by zero\" }", result)
+    }
+
+    @Test
+    fun `to_dbg on Some wraps with spaced braces`() {
+        val result = eval(
+            """
+            let s = Some { val = 42 }
+            s.to_dbg {}
+            """
+        )
+        assertEquals("Some { val = 42 }", result)
+    }
+
+    @Test
+    fun `to_dbg on a record quotes string fields and spaces braces`() {
+        val result = eval(
+            """
+            let r = { a = 1, b = "hi" }
+            r.to_dbg {}
+            """
+        )
+        assertEquals("{ a = 1, b = \"hi\" }", result)
+    }
 }
