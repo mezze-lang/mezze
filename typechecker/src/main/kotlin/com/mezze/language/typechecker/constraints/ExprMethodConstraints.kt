@@ -257,7 +257,35 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         fieldFilteredAbilities
     }
 
-    if (builtInMatches.size == 1 && filteredMatchingAbilities.isEmpty()) {
+    // Receiver-driven ability disambiguation: when two abilities share an op
+    // name (e.g. the pure `Sized.size` and the effectful `SizedMut.size`) the
+    // pick above still leaves both, and the consumer below would take
+    // `.first()` — i.e. dispatch by load order, then error because the
+    // receiver's type only implements the OTHER ability. Instead, when the
+    // receiver's concrete type name is known, keep only the abilities that
+    // actually have an impl targeting that type. Structural — keys on the
+    // impl registry's target types, never on the ability name. Only narrows
+    // when the survivor set is non-empty; if none match (receiver type has no
+    // impl for any candidate) we leave the set as-is so the downstream
+    // AbilityRequired constraint produces the normal "does not implement"
+    // error rather than silently vanishing.
+    val implFilteredAbilities = if (filteredMatchingAbilities.size > 1) {
+        val concreteReceiver = getReceiverConcreteType(memberAccess.receiver, context)
+        val receiverTypeName = concreteReceiver?.let { resolveReceiverTypeName(it) }
+        if (receiverTypeName != null) {
+            val implMatches = filteredMatchingAbilities.filter { (abilityName, _) ->
+                context.typingContext.getAbilityImpls(abilityName)
+                    .any { receiverTypeName in it.targetTypes }
+            }
+            if (implMatches.isNotEmpty()) implMatches else filteredMatchingAbilities
+        } else {
+            filteredMatchingAbilities
+        }
+    } else {
+        filteredMatchingAbilities
+    }
+
+    if (builtInMatches.size == 1 && implFilteredAbilities.isEmpty()) {
         val abilityName = builtInMatches.first()
         resolvedAbilityName = abilityName
         val freshTypeVar = MezzeType.VarType(TypeVar.fresh())
@@ -283,8 +311,8 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             context = "Method call: $methodName",
             loc = expr.loc
         ))
-    } else if (filteredMatchingAbilities.isNotEmpty()) {
-        val (abilityName, rawMethodType) = filteredMatchingAbilities.first()
+    } else if (implFilteredAbilities.isNotEmpty()) {
+        val (abilityName, rawMethodType) = implFilteredAbilities.first()
         resolvedAbilityName = abilityName
         val abilityDecl = context.abilityDeclarations[abilityName]
         val associatedTypeNames = abilityDecl?.associatedTypes ?: emptyList()
