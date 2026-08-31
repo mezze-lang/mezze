@@ -2818,9 +2818,16 @@ class TypedASTCompiler(
                 if (concreteType.constructors.keys.all { it in targetType.constructors }) return true
                 false
             }
-            // VarType: don't match — let runtime handle dispatch
-            // targetType is VarType -> true
-            // concreteType is VarType -> true
+            // A bare VarType target is an UNCONSTRAINED impl position — a blanket
+            // `impl X for 'a` where the receiver self is a type variable, so it
+            // legitimately matches ANY concrete receiver. This is the whole point
+            // of a generic wrapper like `impl Somable for 'a` / `impl Okable 'e for
+            // 'a`: `x.some {}` / `x.ok {}` must dispatch for every receiver type.
+            // Matching here only ADDS a candidate for a blanket impl; disambiguation
+            // among multiple matches is handled by the caller (co-operand match +
+            // opHash dedup in tryResolveAbilityOp). A concrete target still requires
+            // an exact structural match above, so this never widens a non-blanket impl.
+            targetType is VarType -> true
             else -> false
         }
     }
