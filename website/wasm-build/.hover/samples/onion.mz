@@ -1,21 +1,16 @@
 use std::effects::log::{ Console, println }
 
 type Status = | Queued, Shipped { days: Int }, Cancelled { why: Str } |
-type Order = { id: Str, qty: Int, status: Status }
 
-# Each arm returns a new order — the original is never touched.
-let advance : { order: Order } -> Order = { order } -> match order.status is
-  Queued -> { ...order, status = Shipped { days = 2 } }
-  Shipped { days = 0 } -> { ...order, status = Cancelled { why = "late" } }
-  Shipped { days } -> { ...order, status = Shipped { days = days - 1 } }
-  Cancelled { why = _ } -> order
-
+# One match, four arms. Miss a case and it will not compile.
 let describe = { order } -> match order.status is
   Queued -> "$(order.id) waiting"
-  Shipped { days } -> "$(order.id) arrives in $(days.to_str {})"
+  Shipped { days = 0 } -> "$(order.id) arrives today"
+  Shipped { days } -> "$(order.id) arrives in $(days.to_str {}) days"
   Cancelled { why } -> "$(order.id) cancelled: $(why)"
 
 let main = {} -> perform Console in do
   let order = { id = "A-1", qty = 3, status = Queued }
   println { msg = describe { order } }
-  println { msg = describe { order = advance { order } } }
+  println { msg = describe { order = { ...order, status = Shipped { days = 0 } } } }
+  println { msg = describe { order = { ...order, status = Cancelled { why = "stock" } } } }

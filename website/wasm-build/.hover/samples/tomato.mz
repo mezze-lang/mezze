@@ -7,14 +7,10 @@ let orders = [
 ]
 
 let main = {} -> perform Console in do
+  # One pass over the list, each step a method on the last.
   orders
-    .filter { p = { x } -> x.qty > 1 }
     .map { f = { x } -> "$(x.item): $((x.qty * x.price).to_str {})" }
     .for_each { f = { x } -> println { msg = x } }
 
   let total = orders.map { f = { x } -> x.qty * x.price }.sum {}
-  println { msg = "total $(total.to_str {})" }
-
-
-
-
+  println { msg = "total: $(total.to_str {})" }

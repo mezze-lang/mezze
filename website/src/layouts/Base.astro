@@ -4,7 +4,7 @@
  * pages never render their own chrome, so it cannot drift between them.
  *
  *   width="page"  (default) centred column, for normal content
- *   width="full"  edge-to-edge, for app-like pages such as the tour
+ *   width="full"  edge-to-edge, for app-like pages such as the taste
  */
 import '../styles/main.css'
 import SiteHeader from '../components/SiteHeader.astro'
@@ -166,7 +166,7 @@ const iconList = dishes.map((d) => d.icon)
         document.querySelectorAll('[data-mascot]').forEach((el) => el.classList.add('is-live'))
       })
 
-      // The tour sizes itself to the viewport minus the header. The header is
+      // The taste sizes itself to the viewport minus the header. The header is
       // content-driven, so measure it rather than hardcoding a guess.
       const bar = document.querySelector('.site-bar')
       if (bar) {

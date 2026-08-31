@@ -3,10 +3,10 @@ import Base from '../layouts/Base.astro'
 import { lessons } from '../data/lessons'
 import Editor from '../components/Editor.astro'
 ---
-<Base title="Tour — Mezze" width="full" description="Learn Mezze feature by feature, running every example in your browser.">
-  <div class="tour">
+<Base title="Taste — Mezze" width="full" description="Learn Mezze feature by feature, running every example in your browser.">
+  <div class="taste">
     <!-- LEFT: narrow vertical exercise rail + prose -->
-    <div class="tour-left">
+    <div class="taste-left">
       <nav class="rail">
         {lessons.map((l, i) => (
           <button class="rail-item" data-idx={i} title={l.title}>
@@ -28,7 +28,7 @@ import Editor from '../components/Editor.astro'
     </div>
 
     <!-- RIGHT: editor on top, larger output below -->
-    <div class="tour-right">
+    <div class="taste-right">
       <Editor />
     </div>
   </div>
@@ -74,7 +74,7 @@ import Editor from '../components/Editor.astro'
 </script>
 
 <style is:global>
-  .tour {
+  .taste {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 1.4rem;
@@ -86,15 +86,15 @@ import Editor from '../components/Editor.astro'
     padding-block: 0;
   }
   @media (max-width: 1000px) {
-    .tour {
+    .taste {
       grid-template-columns: 1fr;
       height: auto;
-      padding-block: var(--tour-pad);
+      padding-block: var(--taste-pad);
     }
   }
 
   /* ---- LEFT: far-left vertical rail + prose ---- */
-  .tour-left {
+  .taste-left {
     display: grid;
     grid-template-columns: 3.4rem minmax(0, 1fr);
     grid-template-rows: 100%;   /* so the rail stretches and its border reaches the bottom */
@@ -105,7 +105,7 @@ import Editor from '../components/Editor.astro'
     display: flex; flex-direction: column; gap: .3rem;
     overflow-y: auto;
     overflow-x: hidden;      /* items are sized to fit; never scroll sideways */
-    padding: var(--tour-pad) .55rem var(--tour-pad) .15rem;
+    padding: var(--taste-pad) .55rem var(--taste-pad) .15rem;
     border-right: 1px solid var(--rule);
   }
   .rail-item {
@@ -118,7 +118,7 @@ import Editor from '../components/Editor.astro'
   .rail-item.is-active { background: var(--panel); border-color: var(--primary); color: var(--primary); }
   .rail-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; }
 
-  .prose { overflow-y: auto; padding: var(--tour-pad) .75rem var(--tour-pad) 0; min-height: 0; }
+  .prose { overflow-y: auto; padding: var(--taste-pad) .75rem var(--taste-pad) 0; min-height: 0; }
   .prose h1 { margin: 0 0 .25rem; font-size: 1.6rem; }
   .t-blurb { margin: 0 0 1.25rem; color: var(--soft); font-size: .92rem; }
   .prose p { margin: 0 0 1rem; max-width: 62ch; }
@@ -133,7 +133,7 @@ import Editor from '../components/Editor.astro'
   /* min-width:0 matters: a flex item defaults to min-width:auto and refuses to
      shrink below its content, so one long line in the editor widens the whole
      column and scrolls the page sideways. */
-  .tour-right { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding-block: var(--tour-pad); }
-  @media (max-width: 1000px) { .tour-right { height: 40rem; } }
+  .taste-right { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding-block: var(--taste-pad); }
+  @media (max-width: 1000px) { .taste-right { height: 40rem; } }
 
 </style>

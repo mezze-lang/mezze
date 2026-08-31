@@ -1,20 +1,16 @@
-use std::effects::exception::{ Exception, ExceptionToResult }
 use std::effects::log::{ Console, println }
+use std::effects::exception::{ Exception, ExceptionToResult, ExceptionToOption }
 
-type Err = | Missing { key: Str } |
-
-let lookup = { key } -> match key is
-  "host" -> Ok { val = "mezze-lang.org" }
-  "port" -> Ok { val = "443" }
-  _ -> Err { error = Missing { key } }
-
-# Each .try {} unwraps, or short-circuits the whole block.
-let config = {} -> do
-  let host = lookup { key = "host" }.try {}
-  let port = lookup { key = "port" }.try {}
-  Ok { val = "$(host):$(port)" }
+# safe_div throws. It does not decide what a failure looks like,
+# so the same function works under either handler below.
+let safe_div = { a, b } ->
+  if b == 0 then Exception.throw { error = "divide by zero" } else a / b
 
 let main = {} -> perform Console in do
-  let ok = perform ExceptionToResult in config {}
-  println { msg = ok.to_dbg_str {} }
+  # This handler turns a throw into an Err, keeping the message.
+  let bad = perform ExceptionToResult in safe_div { a = 10, b = 0 }.ok {}
+  println { msg = "bad = $(bad.to_dbg {})" }
 
+  # Same throw, same function. This one gives an Option instead.
+  let good = perform ExceptionToOption in safe_div { a = 10, b = 5 }.some {}
+  println { msg = "good = $(good.to_dbg {})" }

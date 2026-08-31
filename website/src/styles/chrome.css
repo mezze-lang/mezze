@@ -115,7 +115,7 @@
 .mascot.is-live img { transition: opacity .18s; }
 .mascot img.on { opacity: 1; }
 
-/* Hover type tooltip — used by the tour editor and the landing page panel.
+/* Hover type tooltip — used by the taste editor and the landing page panel.
    Appended to <body>, so it cannot live in a component scope. */
 .hover-tip {
   position: fixed; z-index: 50; pointer-events: none;

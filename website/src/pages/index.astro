@@ -64,11 +64,11 @@ import { highlight } from '../lib/highlight'
 
     // Nothing here needs the runtime — the samples are highlighted at build
     // time and their output recorded. Fetch it during the first idle moment
-    // anyway, so the tour starts instantly for anyone who goes there next.
+    // anyway, so the taste starts instantly for anyone who goes there next.
     prewarmMezze()
 
     // The panel replays each sample's recorded output rather than compiling.
-    // Every one of these was run through the real compiler; the tour is where
+    // Every one of these was run through the real compiler; the taste is where
     // code is actually editable and executed.
     const codeEl = document.getElementById('panel-code') as HTMLElement
     // The <pre> is the visible box; <code> is only as tall as its text, so a
@@ -108,7 +108,7 @@ import { highlight } from '../lib/highlight'
 
     // ---- hover types ------------------------------------------------------
     // Types were extracted at build time by wasm-build/hovers.sh, using the
-    // same lookup the tour does — so the landing page gets real inferred types
+    // same lookup the taste does — so the landing page gets real inferred types
     // without downloading the runtime.
     // hovers.json is keyed by dish — the same key hovers.sh writes its
     // extracted samples under.
@@ -155,7 +155,7 @@ import { highlight } from '../lib/highlight'
       const t = map?.[p[0] + ':' + p[1]]
       if (!t) return hideTip()
       // hovers.json holds the compiler's own hover markdown — the same text an
-      // editor shows — so it goes through the same renderer as the tour.
+      // editor shows — so it goes through the same renderer as the taste.
       showHoverTip(renderHover(t), e.clientX, e.clientY)
     })
     paneEl.addEventListener('mouseleave', hideTip)

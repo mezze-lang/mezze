@@ -1,20 +1,16 @@
-use std::effects::log::{ Console, QuietConsole, println }
+use std::effects::log::{ Console, println }
+use std::effects::http::{ HttpClient, MockHttpClient, mock_get, request }
 
-# The same function, two destinations.
-let audit = { order } -> println { msg = "saw $(order)" }
+# weather says <Http> in its type. It never says which client answers,
+# so the caller below picks that, not weather.
+let weather = { url } -> request { url }.send {}.text_or { def = "offline" }
 
-let report = { n } -> println { msg = "$(n) orders seen" }
+let main = {} -> perform Console in do
+  let url = "https://wttr.in/Amsterdam?format=3"
 
-let main = {} -> do
-  # Console prints it...
-  perform Console in audit { order = "A-1" }
+  # The real client. This one goes over the network.
+  perform HttpClient in println { msg = weather { url } }
 
-  # ...QuietConsole drops it. Nothing in audit changed.
-  perform QuietConsole in audit { order = "A-2" }
-
-  perform Console in report { n = "2" }
-
-
-
-
-
+  # Same function, same url, no network at all.
+  let rules = [mock_get { body = "Amsterdam: Always raining", url = "*" }]
+  perform MockHttpClient { rules } in println { msg = weather { url } }

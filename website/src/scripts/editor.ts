@@ -2,7 +2,7 @@
  * Wiring for the Editor component.
  *
  * Scoped to one root element rather than the document, so a page may hold
- * several editors. Returns a handle the host can drive — the tour uses it to
+ * several editors. Returns a handle the host can drive — the taste uses it to
  * swap the source when the lesson changes.
  */
 import { esc, highlight, withError } from '../lib/highlight'
@@ -26,7 +26,7 @@ export interface EditorHandle {
 
 export function mountEditor(root: HTMLElement): EditorHandle {
   // Guard against double-mounting: a page that drives its own editor (the
-  // tour) calls this directly, and autoMountEditors() also sweeps the document.
+  // taste) calls this directly, and autoMountEditors() also sweeps the document.
   if (root.dataset.mounted === '1') {
     return (root as any).__mezzeHandle as EditorHandle
   }
@@ -364,7 +364,7 @@ export function mountEditor(root: HTMLElement): EditorHandle {
  *
  * The component is markup only, so a page that merely includes it — a blog post
  * with an embedded sample — would otherwise render dead controls and never load
- * the runtime. Pages that need a handle (the tour) call mountEditor themselves;
+ * the runtime. Pages that need a handle (the taste) call mountEditor themselves;
  * the dataset guard keeps this from mounting those a second time.
  */
 export function autoMountEditors(): void {

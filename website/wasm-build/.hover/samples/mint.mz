@@ -1,20 +1,16 @@
 use std::effects::log::{ Console, println }
 
-# One interface, implemented for two unrelated types.
-ability Priced for 'a where {
-  cents: { it: 'a } -> Int
-}
+# One method, and two unrelated types can both answer it.
+ability Summary for 'a where { summarize: { it: 'a } -> Str }
 
-type Book = { title: Str, pounds: Int }
-type Coffee = { shots: Int }
+type Post = { user: Str, body: Str }
+type Article = { headline: Str, author: Str }
 
-impl Priced for Book where { cents = { it } -> it.pounds * 100 }
-impl Priced for Coffee where { cents = { it } -> it.shots * 175 }
+impl Summary for Post where { summarize = { it } -> "@$(it.user): $(it.body)" }
+impl Summary for Article where { summarize = { it } -> "$(it.headline), by $(it.author)" }
 
 let main = {} -> perform Console in do
-  println { msg = { title = "Dune", pounds = 12 }.cents {}.to_str {} }
-  println { msg = { shots = 2 }.cents {}.to_str {} }
-
-
-
-
+  let post = { user = "dev", body = "bug fix and shipped it" }
+  println { msg = post.summarize {} }
+  let article = { headline = "Mezze 1.0", author = "the team" }
+  println { msg = article.summarize {} }

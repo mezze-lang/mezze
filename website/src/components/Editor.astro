@@ -58,7 +58,12 @@ const { code = '', placeholder = 'Waiting for the Mezze runtime…' } = Astro.pr
   .ed-bar button:disabled { opacity: .45; cursor: default; }
   .ed-status { margin-left: auto; font-size: .8rem; color: var(--soft); }
 
-  .ed-editor { position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; }
+  /* min-height holds the panel open so switching tabs does not resize it.
+     Sized to the longest sample. Without it, every sample had to be padded
+     with trailing blank lines to a common length, which put stray whitespace
+     into the code the reader sees. 21 lines at line-height 1.6 on .84rem
+     text, plus the .9rem padding above and below. */
+  .ed-editor { position: relative; flex: 1 1 auto; min-height: calc(21 * 1.6 * .84rem + 1.8rem); min-width: 0; }
 
   /* CRITICAL: both layers must agree on every metric that affects glyph
      position, or the highlight drifts from the text. No word-break — that
@@ -106,7 +111,7 @@ const { code = '', placeholder = 'Waiting for the Mezze runtime…' } = Astro.pr
 <script>
   // Ships with the component so an editor works wherever it is embedded — a
   // blog post does not have to know to wire it up. Pages that drive the editor
-  // (the tour) call mountEditor themselves; this skips anything already mounted.
+  // (the taste) call mountEditor themselves; this skips anything already mounted.
   import { autoMountEditors } from '../scripts/editor'
   autoMountEditors()
 </script>

@@ -66,93 +66,81 @@ export const topics = [
 export const playground = {
   /** Sits beside the samples, above the per-tab blurb. */
   aside:
-    'Type safety that stays out of your way. Built for concurrent and distributed programming. Swap out effects when you need to. Ship a native binary or a polyglot jar, whichever the job wants.',
+    'Type safety that stays out of your way. Swap out effects when you need to. Built for concurrent and distributed programming. Ship a native binary or a polyglot jar, whichever the job wants.',
   tabs: [
     {
       dish: "olive",
-      label: "Handlers",
-      blurb: "Swap where output goes",
-      code: `use std::effects::log::{ Console, QuietConsole, println }
+      label: "Effects",
+      blurb: "Mock it or mean it",
+      code: `use std::effects::log::{ Console, println }
+use std::effects::http::{ HttpClient, MockHttpClient, mock_get, request }
 
-# The same function, two destinations.
-let audit = { order } -> println { msg = "saw \$(order)" }
+# weather says <Http> in its type. It never says which client answers,
+# so the caller below picks that, not weather.
+let weather = { url } -> request { url }.send {}.text_or { def = "offline" }
 
-let report = { n } -> println { msg = "\$(n) orders seen" }
+let main = {} -> perform Console in do
+  let url = "https://wttr.in/Amsterdam?format=3"
 
-let main = {} -> do
-  # Console prints it...
-  perform Console in audit { order = "A-1" }
+  # The real client. This one goes over the network.
+  perform HttpClient in println { msg = weather { url } }
 
-  # ...QuietConsole drops it. Nothing in audit changed.
-  perform QuietConsole in audit { order = "A-2" }
-
-  perform Console in report { n = "2" }
-
-
-
-
-
+  # Same function, same url, no network at all.
+  let rules = [mock_get { body = "Amsterdam: Always raining", url = "*" }]
+  perform MockHttpClient { rules } in println { msg = weather { url } }
 `,
-      output: "saw A-1\n2 orders seen",
+      output: "Amsterdam: 🌦️  +16°C\nAmsterdam: Always raining",
     },
     {
       dish: "lemon",
       label: "Async",
-      blurb: "Two requests at once",
-      code: `use std::effects::http::{ Http, HttpClient, fetch_all, body_string }
-use std::effects::async::{ LoomAsync }
-use std::effects::log::{ Console, println }
+      blurb: "Cheap threads, structured concurrency",
+      code: `use std::effects::log::{ Console, println }
+use std::effects::async::{ Async, LoomAsync, sleep }
+use std::effects::time::{ SystemTime }
 
-# Both requests go out at once — fetch_all is parallel.
-let body = { resp } -> match resp is
-  Ok { val } -> body_string { resp = val }.get_or_else { def = "?" }
-  Err { error = _ } -> "failed"
+let fetch = { url, ms } -> do
+  sleep { ms }
+  "\$(url) replied"
 
-# <Http, Async> is in the type. Swap HttpClient for a mock and
-# the same code runs in a test with no network.
-let main = {} -> perform Console in perform LoomAsync in perform HttpClient in
-  fetch_all { urls = ["https://mezze-lang.org/", "https://example.com/"] }
-    .for_each { f = { x } -> println { msg = body { resp = x } } }
+let main = {} -> perform Console, LoomAsync, SystemTime in do
+  let fast = Async.spawn { f = {} -> fetch { url = "eu", ms = 10 } }
+  let slow = Async.spawn { f = {} -> fetch { url = "us", ms = 500 } }
 
-
-
-
-
-
+  # race returns the first to finish. The loser is cancelled.
+  match [fast, slow].race {} is
+    Ok { val } -> println { msg = val }
+    Err { error } -> println { msg = "both failed: \$(error.to_dbg {})" }
 `,
-      output: "<!doctype html>...\n<!doctype html>...",
+      output: "eu replied",
     },
     {
       dish: "onion",
       label: "Pattern matching",
-      blurb: "Every arm returns a new record",
+      blurb: "Miss a case, it will not compile",
       code: `use std::effects::log::{ Console, println }
 
 type Status = | Queued, Shipped { days: Int }, Cancelled { why: Str } |
-type Order = { id: Str, qty: Int, status: Status }
 
-# Each arm returns a new order — the original is never touched.
-let advance : { order: Order } -> Order = { order } -> match order.status is
-  Queued -> { ...order, status = Shipped { days = 2 } }
-  Shipped { days = 0 } -> { ...order, status = Cancelled { why = "late" } }
-  Shipped { days } -> { ...order, status = Shipped { days = days - 1 } }
-  Cancelled { why = _ } -> order
-
+# One match, four arms. Miss a case and it will not compile.
 let describe = { order } -> match order.status is
   Queued -> "\$(order.id) waiting"
-  Shipped { days } -> "\$(order.id) arrives in \$(days.to_str {})"
+  Shipped { days = 0 } -> "\$(order.id) arrives today"
+  Shipped { days } -> "\$(order.id) arrives in \$(days.to_str {}) days"
   Cancelled { why } -> "\$(order.id) cancelled: \$(why)"
 
 let main = {} -> perform Console in do
   let order = { id = "A-1", qty = 3, status = Queued }
   println { msg = describe { order } }
-  println { msg = describe { order = advance { order } } }`,
-      output: "A-1 waiting\nA-1 arrives in 2",
+  println { msg = describe { order = { ...order, status = Shipped { days = 0 } } } }
+  println { msg = describe { order = { ...order, status = Cancelled { why = "stock" } } } }
+`,
+      output: "A-1 waiting\nA-1 arrives today\nA-1 cancelled: stock",
     },
     {
       dish: "tomato",
       label: "Chaining",
-      blurb: "Pipelines read top to bottom",
+      blurb: "Chain your functions together",
       code: `use std::effects::log::{ Console, println }
 
 let orders = [
@@ -162,73 +150,61 @@ let orders = [
 ]
 
 let main = {} -> perform Console in do
+  # One pass over the list, each step a method on the last.
   orders
-    .filter { p = { x } -> x.qty > 1 }
     .map { f = { x } -> "\$(x.item): \$((x.qty * x.price).to_str {})" }
     .for_each { f = { x } -> println { msg = x } }
 
   let total = orders.map { f = { x } -> x.qty * x.price }.sum {}
-  println { msg = "total \$(total.to_str {})" }
-
-
-
-
+  println { msg = "total: \$(total.to_str {})" }
 `,
-      output: "olive oil: 2400\nza’atar: 1500\ntotal 4350",
+      output: "olive oil: 2400\nza'atar: 1500\nsumac: 450\ntotal: 4350",
     },
     {
       dish: "mint",
       label: "Abilities",
-      blurb: "One interface, any of your types",
+      blurb: "One method, any type",
       code: `use std::effects::log::{ Console, println }
 
-# One interface, implemented for two unrelated types.
-ability Priced for 'a where {
-  cents: { it: 'a } -> Int
-}
+# One method, and two unrelated types can both answer it.
+ability Summary for 'a where { summarize: { it: 'a } -> Str }
 
-type Book = { title: Str, pounds: Int }
-type Coffee = { shots: Int }
+type Post = { user: Str, body: Str }
+type Article = { headline: Str, author: Str }
 
-impl Priced for Book where { cents = { it } -> it.pounds * 100 }
-impl Priced for Coffee where { cents = { it } -> it.shots * 175 }
+impl Summary for Post where { summarize = { it } -> "@\$(it.user): \$(it.body)" }
+impl Summary for Article where { summarize = { it } -> "\$(it.headline), by \$(it.author)" }
 
 let main = {} -> perform Console in do
-  println { msg = { title = "Dune", pounds = 12 }.cents {}.to_str {} }
-  println { msg = { shots = 2 }.cents {}.to_str {} }
-
-
-
-
+  let post = { user = "dev", body = "bug fix and shipped it" }
+  println { msg = post.summarize {} }
+  let article = { headline = "Mezze 1.0", author = "the team" }
+  println { msg = article.summarize {} }
 `,
-      output: "1200\n350",
+      output: "@dev: bug fix and shipped it\nMezze 1.0, by the team",
     },
     {
       dish: "aubergine",
       label: "Exceptions",
-      blurb: "Throw once, choose the shape",
-      code: `use std::effects::exception::{ Exception, ExceptionToResult }
-use std::effects::log::{ Console, println }
+      blurb: "Throw once, the handler decides",
+      code: `use std::effects::log::{ Console, println }
+use std::effects::exception::{ Exception, ExceptionToResult, ExceptionToOption }
 
-type Err = | Missing { key: Str } |
-
-let lookup = { key } -> match key is
-  "host" -> Ok { val = "mezze-lang.org" }
-  "port" -> Ok { val = "443" }
-  _ -> Err { error = Missing { key } }
-
-# Each .try {} unwraps, or short-circuits the whole block.
-let config = {} -> do
-  let host = lookup { key = "host" }.try {}
-  let port = lookup { key = "port" }.try {}
-  Ok { val = "\$(host):\$(port)" }
+# safe_div throws. It does not decide what a failure looks like,
+# so the same function works under either handler below.
+let safe_div = { a, b } ->
+  if b == 0 then Exception.throw { error = "divide by zero" } else a / b
 
 let main = {} -> perform Console in do
-  let ok = perform ExceptionToResult in config {}
-  println { msg = ok.to_dbg {} }
+  # This handler turns a throw into an Err, keeping the message.
+  let bad = perform ExceptionToResult in safe_div { a = 10, b = 0 }.ok {}
+  println { msg = "bad = \$(bad.to_dbg {})" }
 
+  # Same throw, same function. This one gives an Option instead.
+  let good = perform ExceptionToOption in safe_div { a = 10, b = 5 }.some {}
+  println { msg = "good = \$(good.to_dbg {})" }
 `,
-      output: "Ok { val = \"mezze-lang.org:443\" }",
+      output: "bad = Err { error = \"divide by zero\" }\ngood = Some { val = 2 }",
     },
   ],
 }
@@ -251,7 +227,7 @@ export const features = [
     title: 'A few small pieces, ~onion~reused everywhere~',
     body:
       'Records at core, arguments are just ~~onion:records~~, so every call names its ' +
-      'fields. Effects are records of functions and so are Abilities. Learn record, variant, effect, and ability and you have the language covered.',
+      'fields. Effects are records of functions and so are Abilities. Learn record, variant, effect, ability, and you have the language covered.',
   },
   {
     title: 'First-class ~olive~continuations~',
