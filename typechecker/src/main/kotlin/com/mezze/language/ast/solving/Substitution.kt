@@ -389,16 +389,27 @@ data class Substitution(
 
 // Auto-generated row vars (RowVar.fresh()) are closed to null; user-specified (RowVar.userOpen())
 // and mustBeOpenRowVars remain open.
+//
+// The close DECISION is the ONE labeled-row rule that records and variants
+// genuinely share (effects do NOT participate here — their rows ride on
+// `type.effects` and are closed by their own set-row machinery, not
+// drop-and-close). Routed through this single helper so the "close a
+// generated, non-user tail unless it must stay open" policy is stated once.
+// This is NOT tail BINDING (that is the #268-Stage-2 dead end: binding record
+// /variant tails corrupts field-type resolution during solving); it is the
+// existing drop-and-close, deduped.
+private fun closeLabeledRowVar(existingRowVar: RowVar?, mustBeOpenRowVars: Set<RowVar>): RowVar? =
+    if (existingRowVar != null
+        && !existingRowVar.isUserSpecified()
+        && existingRowVar !in mustBeOpenRowVars) {
+        null
+    } else {
+        existingRowVar
+    }
+
 fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = emptySet()): MezzeType = when (type) {
     is MezzeType.RecordType -> {
-        val existingRowVar = type.rowVar
-        val closedRowVar = if (existingRowVar != null
-            && !existingRowVar.isUserSpecified()
-            && existingRowVar !in mustBeOpenRowVars) {
-            null
-        } else {
-            existingRowVar
-        }
+        val closedRowVar = closeLabeledRowVar(type.rowVar, mustBeOpenRowVars)
         MezzeType.RecordType(
             fields = type.fields.mapValues { (_, fieldType) -> closeGeneratedRowVars(fieldType, mustBeOpenRowVars) },
             rowVar = closedRowVar,
@@ -406,15 +417,7 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         )
     }
     is MezzeType.VariantType -> {
-        val existingRowVar = type.rowVar
-        val shouldStayOpen = existingRowVar != null && existingRowVar in mustBeOpenRowVars
-        val closedRowVar = if (existingRowVar != null
-            && !existingRowVar.isUserSpecified()
-            && !shouldStayOpen) {
-            null
-        } else {
-            existingRowVar
-        }
+        val closedRowVar = closeLabeledRowVar(type.rowVar, mustBeOpenRowVars)
         MezzeType.VariantType(
             constructors = type.constructors.mapValues { (_, payloadType) ->
                 payloadType?.let { closeGeneratedRowVars(it, mustBeOpenRowVars) }
