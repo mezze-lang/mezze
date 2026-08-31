@@ -513,6 +513,7 @@ class TypeChecker(
                     dispatchResolutions = dispatchResolutions,
                     callReturnTypes = aggregated.callReturnTypes,
                     matchCaseBindings = aggregated.matchCaseBindings,
+                    matchScrutineeTypes = aggregated.matchScrutineeTypes,
                     isStdlibModule = isStdlibModule,
                     currentModulePath = currentModulePath,
                 )
@@ -565,6 +566,7 @@ class TypeChecker(
         val methodCallResolutions: Map<Pair<Loc, String>, ConstraintResult.MethodCallInfo>,
         val callReturnTypes: Map<Loc, MezzeType>,
         val matchCaseBindings: Map<Loc, Map<String, MezzeType>>,
+        val matchScrutineeTypes: Map<Loc, MezzeType>,
         val expectedTypeAt: Map<Loc, MezzeType>,
     )
 
@@ -583,6 +585,9 @@ class TypeChecker(
                     bindings.mapValues { (_, ty) -> substitution.apply(ty) }
                 }
             }
+        val matchScrutineeTypes = constraintResults.values
+            .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.matchScrutineeTypes }
+            .mapValues { (_, type) -> substitution.apply(type) }
         val expectedTypeAt = constraintResults.values
             .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.expectedTypeAt }
             .mapValues { (_, type) -> substitution.apply(type) }
@@ -591,6 +596,7 @@ class TypeChecker(
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes,
             matchCaseBindings = matchCaseBindings,
+            matchScrutineeTypes = matchScrutineeTypes,
             expectedTypeAt = expectedTypeAt,
         )
     }

@@ -114,6 +114,59 @@ class NewtypeErasureIRTest {
         }
     }
 
+    /** Typecheck source and return its emitted TypedModule (pre-lowering). */
+    private fun typedModuleOf(source: String): TypedAstModule {
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+        val parsed = parser.parseParsedModule(source.trimIndent(), "scrutinee-src-test.mz")
+        val projectRoot = Paths.get(System.getProperty("mezze.project.root", "."))
+        val result = TypeChecker().checkParsedModule(parsed, projectRoot, enablePrelude = true)
+        assertTrue(result is TypeChecker.TypeCheckResult.Success, "typecheck failed: $result")
+        return (result as TypeChecker.TypeCheckResult.Success).typedModule!!
+    }
+
+    /** Depth-first collect every TypedMatch in a TypedExpr subtree. */
+    private fun collectMatches(expr: TypedExpr, out: MutableList<TypedMatch>) {
+        if (expr is TypedMatch) out.add(expr)
+        expr.forEachChild { collectMatches(it, out) }
+    }
+
+    @Test
+    fun `TypedMatch scrutineeSourceType is the UNERASED newtype, scrutinee type stays erased`() {
+        // S5.0 (#376): the decided node must carry the unerased source-level
+        // scrutinee type (Age) so #364 can key exhaustiveness off it, WHILE the
+        // erased `scrutinee.type` (Int) that drives runtime lowering is untouched.
+        val module = typedModuleOf("""
+            newtype Age = Int
+            match Age.(42) is
+              Age.(x) -> x
+        """)
+
+        val matches = mutableListOf<TypedMatch>()
+        for (decl in module.decls) {
+            if (decl is TypedLetDecl) collectMatches(decl.value, matches)
+        }
+        assertTrue(matches.isNotEmpty(), "expected at least one TypedMatch in the module")
+        val match = matches.first()
+
+        // Unerased oracle: the source-level scrutinee type carries the newtype's
+        // nominal identity `Age` (whether represented as NewtypeType(Age) or the
+        // nominal TypeApplication(Age)), NOT the bare underlying primitive.
+        val srcType = match.scrutineeSourceType
+        assertTrue(
+            srcType.toString().contains("Age"),
+            "scrutineeSourceType must be the unerased nominal Age, got: $srcType",
+        )
+
+        // Erased runtime type is UNCHANGED: the newtype is erased to its inner Int,
+        // losing the `Age` identity. This is what runtime lowering consumes, and it
+        // is precisely why the decided node alone was a weaker exhaustiveness oracle.
+        assertTrue(
+            !match.scrutinee.type.toString().contains("Age"),
+            "scrutinee.type must stay erased (no Age identity), got: ${match.scrutinee.type}",
+        )
+    }
+
     @Test
     fun `record newtype construction is erased to record literal`() {
         val plain = compileEntryBody("""

@@ -152,7 +152,19 @@ data class TypedMatch(
     val scrutinee: TypedExpr,
     val cases: List<TypedCase>,
     override val type: MezzeType,
-    override val loc: Loc
+    override val loc: Loc,
+    // S5.0 (#376): the UNERASED source-level scrutinee type, distinct from the
+    // erased `scrutinee.type` used for runtime lowering. Emit erases a newtype
+    // scrutinee to its underlying primitive (`match Age.(42) is Age.(x) ->` leaves
+    // `scrutinee.type == Int`), so the decided node alone was a LESS-resolved
+    // exhaustiveness oracle than the constraint-time matchScrutineeTypes side-table.
+    // This carries the constraint-time solved (unerased) scrutinee type so a LATER
+    // ticket (#364) can make the decided TypedModule a sufficient exhaustiveness
+    // oracle and delete the constraint-time re-inference. Runtime lowering STILL
+    // reads the erased `scrutinee.type` — this field is metadata only. Defaults to
+    // `scrutinee.type` when the constraint-time type is unavailable (so it never
+    // regresses below what the node already exposes).
+    val scrutineeSourceType: MezzeType = scrutinee.type
 ) : TypedExpr
 
 @Serializable

@@ -48,6 +48,13 @@ class TypedAstBuilder(
     // populate PatternBinding.type + identifierContext for guard/body emit
     // instead of constructing fresh disconnected placeholders.
     private val matchCaseBindings: Map<Loc, Map<String, MezzeType>> = emptyMap(),
+    // S5.0 (#376): the constraint-time solved (UNERASED) scrutinee type keyed by
+    // the scrutinee expression's Loc — the SAME value the matchScrutineeTypes
+    // side-table records and MatchValidator reads for exhaustiveness. Threaded here
+    // so emit can stamp it onto TypedMatch.scrutineeSourceType. Runtime lowering
+    // still uses the erased `scrutinee.type`; this is metadata for #364's future
+    // exhaustiveness-off-the-node.
+    private val matchScrutineeTypes: Map<Loc, MezzeType> = emptyMap(),
 ) {
 
     private val identifierContext = mutableMapOf<String, MezzeType>()
@@ -718,7 +725,15 @@ class TypedAstBuilder(
                         buildMatchCase(c, file, contextType)
                     }
                     val resultType = cases.firstOrNull()?.body?.type ?: substitution.apply(contextType)
-                    TypedMatch(scrutinee, cases, resultType, loc)
+                    // S5.0 (#376): stamp the UNERASED source-level scrutinee type
+                    // (constraint-time solved, keyed by the scrutinee's Loc) onto the
+                    // node. The erased `scrutinee.type` above is unchanged and still
+                    // drives runtime lowering; this is the exhaustiveness oracle #364
+                    // will read. Fall back to the erased type when unrecorded.
+                    val scrutineeSourceType =
+                        matchScrutineeTypes[expr.scrutinee.loc]?.let { substitution.apply(it) }
+                            ?: scrutinee.type
+                    TypedMatch(scrutinee, cases, resultType, loc, scrutineeSourceType)
                 }
             }
             is ParsedDo -> buildDoBlock(expr, file, contextType)

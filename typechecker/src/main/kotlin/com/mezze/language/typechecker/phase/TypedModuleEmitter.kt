@@ -46,6 +46,7 @@ internal fun emitTypedModuleAndLower(
     dispatchResolutions: Map<Loc, com.mezze.language.typechecker.constraints.Resolution>,
     callReturnTypes: Map<Loc, MezzeType>,
     matchCaseBindings: Map<Loc, Map<String, MezzeType>>,
+    matchScrutineeTypes: Map<Loc, MezzeType> = emptyMap(),
     isStdlibModule: Boolean,
     currentModulePath: String?,
 ): EmitResult {
@@ -69,6 +70,7 @@ internal fun emitTypedModuleAndLower(
             dispatchResolutions = dispatchResolutions,
             callReturnTypes = callReturnTypes,
             matchCaseBindings = matchCaseBindings,
+            matchScrutineeTypes = matchScrutineeTypes,
         )
         val typed = builder.build(parsedModule)
 

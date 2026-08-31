@@ -141,7 +141,10 @@ object TypeSubstitution {
             is TypedMatch -> expr.copy(
                 scrutinee = applyExpr(expr.scrutinee, sub),
                 cases = expr.cases.map { applyCase(it, sub) },
-                type = applyType(expr.type, sub)
+                type = applyType(expr.type, sub),
+                // S5.0 (#376): keep the unerased source-level scrutinee type resolved
+                // through mono specialization, mirroring `type`. Metadata only.
+                scrutineeSourceType = applyType(expr.scrutineeSourceType, sub)
             )
 
             is TypedIf -> expr.copy(
