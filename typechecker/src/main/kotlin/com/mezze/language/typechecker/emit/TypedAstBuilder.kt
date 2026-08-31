@@ -20,7 +20,13 @@ import com.mezze.language.ast.hashing.HashTags
 import com.mezze.language.ast.solving.closeGeneratedRowVars
 
 class TypedAstBuilder(
-    private val substitution: Substitution,
+    // S5.2 (#365): the SINGLE immutable solver→emit hand-off. Emit reads every
+    // decided side-table (substitution, dispatch resolutions, tail calls, open
+    // row vars, method-call info, call-return / match-case / match-scrutinee
+    // types) from this frozen snapshot — it can no longer reach into live solver
+    // state. The per-field accessors below preserve the previous names so the
+    // build body is unchanged.
+    private val solved: com.mezze.language.typechecker.phase.SolvedModule,
     private val constraintResults: Map<String, ConstraintResult>,
     private val abilityImpls: Map<Hash, TypingContext.AbilityImplInfo>,
     private val registry: DeclarationRegistry,
@@ -28,9 +34,12 @@ class TypedAstBuilder(
     private val importContext: ModuleImportContext?,
     private val identifierContentHashes: Map<BindingKey, Hash>,
     private val implDeclarations: Map<String, ParsedPerformerDecl>,
-    private val tailCallLocations: Set<Loc>,
-    private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
-    private val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap(),
+) {
+    private val substitution: Substitution get() = solved.substitution
+    private val tailCallLocations: Set<Loc> get() = solved.tailCallLocations
+    private val mustBeOpenRowVars: Set<RowVar> get() = solved.mustBeOpenRowVars
+    private val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo>
+        get() = solved.methodCallResolutions
     // S2.3 (#358): the SINGLE post-solve dispatch decision, keyed by call-site
     // Loc, produced by DispatchResolver. For an INHERENT method call whose site
     // has a Resolution, emit READS `resolution.opHash` (the resolved impl content
@@ -39,23 +48,25 @@ class TypedAstBuilder(
     // receivers, ability collisions the resolver defers, builtins) keep the
     // legacy per-site resolution below; those are genuine deferrals, not a second
     // impl-selection heuristic.
-    private val dispatchResolutions: Map<Loc, com.mezze.language.typechecker.constraints.Resolution> = emptyMap(),
-    private val callReturnTypes: Map<Loc, MezzeType> = emptyMap(),
+    private val dispatchResolutions: Map<Loc, com.mezze.language.typechecker.constraints.Resolution>
+        get() = solved.dispatchResolutions
+    private val callReturnTypes: Map<Loc, MezzeType> get() = solved.callReturnTypes
     // #195 mono-fix #1: per-match-case binding name → solver TyVar. The
     // constraint generator records the SAME fresh TyVars that PatternConstraints
     // allocated and HasField unified with concrete types; applying `substitution`
     // here gives the resolved type for each binding. Used in buildMatchCase to
     // populate PatternBinding.type + identifierContext for guard/body emit
     // instead of constructing fresh disconnected placeholders.
-    private val matchCaseBindings: Map<Loc, Map<String, MezzeType>> = emptyMap(),
+    private val matchCaseBindings: Map<Loc, Map<String, MezzeType>>
+        get() = solved.matchCaseBindings
     // S5.0 (#376): the constraint-time solved (UNERASED) scrutinee type keyed by
     // the scrutinee expression's Loc — the SAME value the matchScrutineeTypes
     // side-table records and MatchValidator reads for exhaustiveness. Threaded here
     // so emit can stamp it onto TypedMatch.scrutineeSourceType. Runtime lowering
     // still uses the erased `scrutinee.type`; this is metadata for #364's future
     // exhaustiveness-off-the-node.
-    private val matchScrutineeTypes: Map<Loc, MezzeType> = emptyMap(),
-) {
+    private val matchScrutineeTypes: Map<Loc, MezzeType> get() = solved.matchScrutineeTypes
+
 
     private val identifierContext = mutableMapOf<String, MezzeType>()
 

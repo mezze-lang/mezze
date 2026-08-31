@@ -63,8 +63,18 @@ internal fun buildPartialTypedModule(
             .flatMap { it.tailCalls }
             .filterNotNull()
             .toSet()
-        val builder = TypedAstBuilder(
+        val solved = SolvedModule(
             substitution = substitution,
+            dispatchResolutions = emptyMap(),
+            tailCallLocations = tailCallLocations,
+            mustBeOpenRowVars = emptySet(),
+            methodCallResolutions = methodCallResolutions,
+            callReturnTypes = callReturnTypes,
+            matchCaseBindings = matchCaseBindings,
+            matchScrutineeTypes = matchScrutineeTypes,
+        )
+        val builder = TypedAstBuilder(
+            solved = solved,
             constraintResults = resolvedResults,
             abilityImpls = context.getAllAbilityImpls(),
             registry = registry,
@@ -72,12 +82,6 @@ internal fun buildPartialTypedModule(
             importContext = importContext,
             identifierContentHashes = context.getContentHashes(),
             implDeclarations = buildResult.implDeclarations,
-            tailCallLocations = tailCallLocations,
-            mustBeOpenRowVars = emptySet(),
-            methodCallResolutions = methodCallResolutions,
-            callReturnTypes = callReturnTypes,
-            matchCaseBindings = matchCaseBindings,
-            matchScrutineeTypes = matchScrutineeTypes,
         )
         builder.build(parsedModule)
     } catch (e: Exception) {

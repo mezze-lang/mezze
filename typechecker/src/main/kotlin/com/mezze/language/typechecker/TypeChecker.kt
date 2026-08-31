@@ -500,20 +500,27 @@ class TypeChecker(
                 collectValidationResult(constraintValidation, collectedErrors, warnings)
 
                 val isStdlibModule = ModulePathConventions.isStdlib(currentModulePath)
+                // S5.2 (#365): freeze the solver→emit hand-off into ONE immutable
+                // value here, at the boundary where the global solve finished and
+                // the side-tables were aggregated. Emit consumes this read-only —
+                // it can no longer reach behind it into mutable solver state.
+                val solvedModule = com.mezze.language.typechecker.phase.SolvedModule(
+                    substitution = substitution,
+                    dispatchResolutions = dispatchResolutions,
+                    tailCallLocations = aggregated.tailCallLocations,
+                    mustBeOpenRowVars = mustBeOpenRowVars,
+                    methodCallResolutions = aggregated.methodCallResolutions,
+                    callReturnTypes = aggregated.callReturnTypes,
+                    matchCaseBindings = aggregated.matchCaseBindings,
+                    matchScrutineeTypes = aggregated.matchScrutineeTypes,
+                )
                 val emitResult = emitTypedModuleAndLower(
                     parsedModule = parsedModule, module = module,
-                    substitution = substitution,
+                    solved = solvedModule,
                     constraintResults = globallyResolvedConstraintResults,
                     context = context, buildResult = buildResult,
                     importContext = importContext, registry = registry,
                     solver = solver, loadedModules = loadedModules,
-                    tailCallLocations = aggregated.tailCallLocations,
-                    mustBeOpenRowVars = mustBeOpenRowVars,
-                    methodCallResolutions = aggregated.methodCallResolutions,
-                    dispatchResolutions = dispatchResolutions,
-                    callReturnTypes = aggregated.callReturnTypes,
-                    matchCaseBindings = aggregated.matchCaseBindings,
-                    matchScrutineeTypes = aggregated.matchScrutineeTypes,
                     isStdlibModule = isStdlibModule,
                     currentModulePath = currentModulePath,
                 )

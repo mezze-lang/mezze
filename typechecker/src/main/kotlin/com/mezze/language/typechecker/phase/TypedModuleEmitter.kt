@@ -32,7 +32,7 @@ internal data class EmitResult(
 internal fun emitTypedModuleAndLower(
     parsedModule: ParsedModule,
     module: ParsedModule, // original module (pre-resolution) for type decl scanning
-    substitution: Substitution,
+    solved: SolvedModule,
     constraintResults: Map<String, ConstraintResult>,
     context: TypingContext,
     buildResult: ContextBuilder.BuildResult,
@@ -40,23 +40,17 @@ internal fun emitTypedModuleAndLower(
     registry: DeclarationRegistry,
     solver: ConstraintSolver,
     loadedModules: Map<ModulePath, TypedModuleResult>,
-    tailCallLocations: Set<Loc>,
-    mustBeOpenRowVars: Set<RowVar>,
-    methodCallResolutions: Map<Pair<Loc, String>, ConstraintResult.MethodCallInfo>,
-    dispatchResolutions: Map<Loc, com.mezze.language.typechecker.constraints.Resolution>,
-    callReturnTypes: Map<Loc, MezzeType>,
-    matchCaseBindings: Map<Loc, Map<String, MezzeType>>,
-    matchScrutineeTypes: Map<Loc, MezzeType> = emptyMap(),
     isStdlibModule: Boolean,
     currentModulePath: String?,
 ): EmitResult {
+    val substitution = solved.substitution
     var emittedTypedModule: TypedModule? = null
     var loweredFns: List<FunctionIR>? = null
     var loweredPerformers: List<Array<String>> = emptyList()
 
     try {
         val builder = TypedAstBuilder(
-            substitution = substitution,
+            solved = solved,
             constraintResults = constraintResults,
             abilityImpls = context.getAllAbilityImpls(),
             registry = registry,
@@ -64,13 +58,6 @@ internal fun emitTypedModuleAndLower(
             importContext = importContext,
             identifierContentHashes = context.getContentHashes(),
             implDeclarations = buildResult.implDeclarations,
-            tailCallLocations = tailCallLocations,
-            mustBeOpenRowVars = mustBeOpenRowVars,
-            methodCallResolutions = methodCallResolutions,
-            dispatchResolutions = dispatchResolutions,
-            callReturnTypes = callReturnTypes,
-            matchCaseBindings = matchCaseBindings,
-            matchScrutineeTypes = matchScrutineeTypes,
         )
         val typed = builder.build(parsedModule)
 
