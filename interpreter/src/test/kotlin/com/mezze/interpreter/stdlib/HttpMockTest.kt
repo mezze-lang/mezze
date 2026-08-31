@@ -437,4 +437,48 @@ class HttpMockTest {
         """)
         assertEquals("no match", result)
     }
+
+    /**
+     * Guards the `Response.body -> body_str -> bytes::to_str` contract:
+     * `body_str` calls `bytes::to_str { b = resp.body }`, and the bytes natives
+     * only accept the canonical `BytesNatives.MezzeBytes` runtime type. Every
+     * existing mock test reads only `.status` (a plain Long), so a body-type
+     * mismatch went uncaught — this reads the body.
+     *
+     * NOTE ON COVERAGE: the real bug was in `IONatives.responseToMezze` (the
+     * LIVE-network builder), which stored the body as the wrong `values.MezzeBytes`
+     * wrapper and threw `Expected MezzeBytes for field 'b'`. That builder needs a
+     * Helidon `HttpClientResponse` and can only be exercised by an actual HTTP
+     * call (verified manually against api.ipify.org / github.com/zen / wttr.in).
+     * This mock test does NOT reach `responseToMezze` — the mock body comes from
+     * the user's `bytes::from_str` (already the right type). It DOES guard the
+     * mock-default-body path and the stdlib contract. See the invariant comment
+     * at the fix site in IONatives.responseToMezze.
+     */
+    @Test
+    fun `body_str on a mock response decodes the body`() {
+        val result = eval("""
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request, body_str}
+            use std::result::{ get_or }
+            use std::collections::map
+            use std::collections::bytes
+
+            let response: Response = {
+                status = 200,
+                headers = map::empty {},
+                body = bytes::from_str { s = "hello body" },
+                url = ""
+            }
+
+            let rules: [MockRule] = [
+                { methods = [], url = Glob { pattern = "**" }, response = Ok { val = response } }
+            ]
+
+            perform MockHttpClient { rules = rules } in
+                match request { url = "http://example.com/x" }.send {} is
+                    Ok { val } -> get_or { result = body_str { resp = val }, def = "?" }
+                    Err { error = _ } -> "err"
+        """)
+        assertEquals("hello body", result)
+    }
 }

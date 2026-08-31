@@ -487,7 +487,7 @@ public final class IONatives {
         }
         return createOk(MezzeRecord.fromFields(
             new String[]{"status", "headers", "body", "url"},
-            new Object[]{200L, MezzeMap.empty(), MezzeBytes.copyOf(new byte[0]), url}
+            new Object[]{200L, MezzeMap.empty(), new BytesNatives.MezzeBytes(new byte[0]), url}
         ));
     }
 
@@ -518,7 +518,7 @@ public final class IONatives {
         Object body = respRec.getField("body");
         if (status == null) status = 200L;
         if (headers == null) headers = MezzeMap.empty();
-        if (body == null) body = MezzeBytes.copyOf(new byte[0]);
+        if (body == null) body = new BytesNatives.MezzeBytes(new byte[0]);
         MezzeRecord injected = MezzeRecord.fromFields(
             new String[]{"status", "headers", "body", "url"},
             new Object[]{status, headers, body, url}
@@ -1000,7 +1000,12 @@ public final class IONatives {
             new Object[]{
                 (long) response.status().code(),
                 MezzeMap.fromJavaMap(headersOut),
-                MezzeBytes.copyOf(bodyBytes),
+                // Response body MUST be the canonical Bytes runtime type
+                // (BytesNatives.MezzeBytes) — the one every bytes native
+                // produces/consumes. Using the values.MezzeBytes wrapper made
+                // `bytes::to_str { b = resp.body }` throw
+                // "Expected MezzeBytes for field 'b'".
+                new BytesNatives.MezzeBytes(bodyBytes),
                 url
             }
         );
