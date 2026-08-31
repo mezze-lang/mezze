@@ -41,14 +41,27 @@ class LetBoundAbilityCallTest {
         typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
-    /** Asserts the program is REJECTED by the typechecker (any TypeCheckError). */
+    /**
+     * Asserts the program is REJECTED by the typechecker. Normally a
+     * [com.mezze.language.typechecker.TypeCheckError] (e.g. T0206 undispatchable
+     * inherent method). Under `-Dmezze.invariants=true` (the gate), the S0.2
+     * no-unresolved-dispatch-var invariant catches the same "receiver never
+     * pinned to a concrete/candidate type" class FIRST and throws
+     * [InvariantChecker.InvariantViolation] — an equally-valid rejection of the
+     * same unsound program, so accept either.
+     */
     private fun assertTypeError(code: String) {
         val parsedModule = parser.parseParsedModule(code, "test.mz")
         val typeChecker = TypeChecker()
-        org.junit.jupiter.api.Assertions.assertThrows(
-            com.mezze.language.typechecker.TypeCheckError::class.java
+        val ex = org.junit.jupiter.api.Assertions.assertThrows(
+            Exception::class.java
         ) {
             typeChecker.typeCheck(parsedModule, Paths.get("."))
+        }
+        val ok = ex is com.mezze.language.typechecker.TypeCheckError ||
+            ex is com.mezze.language.typechecker.debug.InvariantChecker.InvariantViolation
+        org.junit.jupiter.api.Assertions.assertTrue(ok) {
+            "expected TypeCheckError or InvariantViolation, got ${ex.javaClass.name}: ${ex.message}"
         }
     }
 

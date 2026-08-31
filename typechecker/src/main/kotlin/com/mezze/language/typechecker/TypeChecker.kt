@@ -483,6 +483,30 @@ class TypeChecker(
                         emptyMap()
                     }
 
+                // S0.2 (#351): NO-UNRESOLVED-DISPATCH-VAR invariant. The DEFERRED
+                // inherent-method resolutions (solveResult.unresolvedInherentMethods)
+                // are the dispatch positions carrying the REAL solved receiver; the
+                // emitted decl schemes' free vars are exactly the legitimately-
+                // generalized params. A receiver that solves (via subst + the
+                // per-call-site callReturnTypes, like emit) to a bare VarType which
+                // is NOT one of those quantified params is an orphan receiver leak
+                // (the "defaults to Bytes" mis-dispatch class) — throw under
+                // mezze.invariants=true. Generalized-param receivers (dispatch on a
+                // polymorphic `'a` inside `id`/`pair`/`add`) are a genuine deferral
+                // and are NOT flagged; ability/builtin ops with a computed var
+                // receiver are legitimately deferred elsewhere and never reach this
+                // inherent-only list.
+                val generalizedVarIds: Set<Int> = globallyResolvedConstraintResults.values
+                    .flatMap { com.mezze.language.ast.solving.collectFreeTypeVars(it.type) }
+                    .map { it.id }
+                    .toSet()
+                InvariantChecker.checkNoUnresolvedDispatchVar(
+                    unresolvedInherentMethods = solveResult.unresolvedInherentMethods,
+                    substitution = substitution,
+                    callReturnTypes = aggregated.callReturnTypes,
+                    generalizedVarIds = generalizedVarIds,
+                )
+
                 // #160: inherent-method dispatch the solver left unresolved. A
                 // receiver still not concrete — checked BOTH via the flat
                 // substitution AND the per-call-site callReturnTypes (which emit

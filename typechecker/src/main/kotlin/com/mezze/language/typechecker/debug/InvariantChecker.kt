@@ -4,6 +4,8 @@ import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.ast.solving.occursCheck
+import com.mezze.language.parsedast.Loc
+import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedExpr
@@ -225,6 +227,93 @@ object InvariantChecker {
                     vars.joinToString(", ") { it.name } + "  ::  ${result.type}"
                 )
             }
+        }
+    }
+
+    /**
+     * S0.2 (#351) — NO-UNRESOLVED-DISPATCH-VAR invariant. Promotes the warn-only
+     * [probeUnresolvedVars] into a hard gate, with the ONE precise distinction the
+     * post-solve single-pass dispatch (S2.1–S2.3) finally makes expressible.
+     *
+     * WHAT IS AND ISN'T A DISPATCH POSITION. The dispatch positions this invariant
+     * guards are the INHERENT-METHOD resolutions the solver DEFERRED because their
+     * receiver was only known after solving ([Constraint.InherentMethodResolve],
+     * #160) — a call like `x.abs {}` whose winning impl varies by the receiver's
+     * concrete type (Int→Int, Float→Float, …). These carry the REAL solver receiver
+     * type. This invariant deliberately does NOT read the raw S2.1
+     * `MethodResolveBucket`s: those record a best-effort SYNTACTIC receiver that
+     * falls back to a FRESH placeholder tyvar when the receiver isn't syntactically
+     * knowable (e.g. `(n % 2) == 0` — the numeric-op result), and that placeholder
+     * is never part of the constraint solution, so it would false-positive every
+     * ability/builtin op with a computed receiver. Ability/builtin ops with a
+     * still-var receiver are LEGITIMATE deferrals (the DispatchResolver itself
+     * records no Resolution for them and lets the numeric/annotation default pin
+     * them) — never a violation.
+     *
+     * THE RULE, over the deferred inherent resolutions:
+     *  - Resolve each receiver like emit does: the flat [substitution], then the
+     *    per-call-site [callReturnTypes] (which can pin a forward-ref / effect-
+     *    context receiver the flat subst alone misses).
+     *  - Concrete → dispatched; skip.
+     *  - Still a [MezzeType.VarType] whose id IS a generalized param of some emitted
+     *    decl scheme ([generalizedVarIds]) → legitimate polymorphism: the decl is
+     *    genuinely `'a`-polymorphic and dispatch resolves at each instantiation.
+     *    OK — skip. This is the `id`/`pair`/`add` case; flagging it would
+     *    false-positive every polymorphic decl.
+     *  - Still a [MezzeType.VarType] whose id is NOT such a param → an UNRESOLVED
+     *    dispatch/receiver var with no polymorphic justification: the "defaults to
+     *    Bytes" mis-dispatch class. VIOLATION.
+     *
+     * The distinction is drawn purely from data the solve already decided: the
+     * deferred inherent resolutions ([unresolvedInherentMethods]) are the dispatch
+     * positions; the legitimately-generalized vars are exactly the vars free in the
+     * emitted decl scheme types ([generalizedVarIds], keyed on stable
+     * [com.mezze.language.ast.TypeVar.id]).
+     *
+     * This is the compiler self-check counterpart of
+     * `undispatchableInherentMethodErrors` (which reports the same stuck receivers
+     * to the USER as T0206): here it asserts, under the invariant gate, that no
+     * such orphan receiver var silently reaches emit.
+     *
+     * Additive: reads the frozen deferred-resolution list + substitution +
+     * callReturnTypes + emitted-scheme free vars; changes no typechecking. Gated by
+     * `mezze.invariants=true` (the real gate flag, NOT the probe flag). On violation
+     * throws [InvariantViolation] naming the method, the unresolved receiver var,
+     * and its [Loc].
+     */
+    fun checkNoUnresolvedDispatchVar(
+        unresolvedInherentMethods: List<Constraint.InherentMethodResolve>,
+        substitution: Substitution,
+        callReturnTypes: Map<Loc, MezzeType>,
+        generalizedVarIds: Set<Int>,
+    ) {
+        if (!enabled) return
+        for (c in unresolvedInherentMethods) {
+            // Resolve the receiver exactly like emit (and the T0206 check) does:
+            // flat substitution first, then the per-call-site callReturnTypes.
+            val fromSubst = substitution.apply(c.receiverType)
+            val fromCallSite = c.receiverLoc?.let { callReturnTypes[it] }?.let { substitution.apply(it) }
+            val resolved = when {
+                fromSubst !is MezzeType.VarType -> fromSubst
+                fromCallSite != null && fromCallSite !is MezzeType.VarType -> fromCallSite
+                else -> fromSubst
+            }
+            if (resolved !is MezzeType.VarType) continue // concrete → dispatched
+            // A free var that is a generalized param of some emitted decl scheme is
+            // legitimate polymorphism (dispatch resolves at each instantiation).
+            if (resolved.variable.id in generalizedVarIds) continue
+            // Otherwise: an inherent dispatch position whose receiver never got
+            // pinned AND isn't a quantified param anywhere — an orphan leak, the
+            // "defaults to Bytes" mis-dispatch class.
+            throw InvariantViolation(
+                "[no-unresolved-dispatch-var] Inherent dispatch of '${c.methodName}' at " +
+                "${c.loc} has an UNRESOLVED receiver var '${resolved.variable.name}' " +
+                "(id=${resolved.variable.id}): after the final substitution the receiver " +
+                "is still a type variable that is NOT a generalized param of any emitted decl's " +
+                "scheme. An inherent dispatch position must resolve to a concrete receiver or to " +
+                "a legitimately-quantified polymorphic param; an orphan receiver var is the " +
+                "'defaults to Bytes' mis-dispatch class."
+            )
         }
     }
 }
