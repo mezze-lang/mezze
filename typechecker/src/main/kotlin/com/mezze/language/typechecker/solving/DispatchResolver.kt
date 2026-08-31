@@ -10,6 +10,7 @@ import com.mezze.language.typechecker.constraints.Resolution
 import com.mezze.language.typechecker.constraints.ResolutionCandidate
 import com.mezze.language.typechecker.constraints.ResolutionKind
 import com.mezze.language.typechecker.context.TypingContext
+import com.mezze.language.typechecker.util.NameFallbackProbe
 import com.mezze.language.typechecker.util.declaredHashOf
 import com.mezze.language.typechecker.util.receiverTypeName
 import com.mezze.language.typedast.Hash
@@ -250,7 +251,14 @@ object DispatchResolver {
             is ReceiverKey.ByHash -> inherent.filter {
                 (it.targetTypeIdentity as? TypeIdentity.Declared)?.hash == key.hash
             }
-            is ReceiverKey.ByName -> inherent.filter { it.displayName == key.name }
+            is ReceiverKey.ByName -> {
+                // ALLOWED: ReceiverKey.ByName is produced by receiverKey() ONLY when
+                // declaredHashOf(receiver) == null — a hashless builtin/scalar whose
+                // reserved name IS its identity. A hash-carrying receiver becomes
+                // ByHash and never reaches this arm, so the name never overrides a hash.
+                NameFallbackProbe.allowed("dispatchResolver/pickInherentByName") { key.name }
+                inherent.filter { it.displayName == key.name }
+            }
         }
         if (matches.isEmpty()) return null
         val distinctOps = matches.map { it.opHash }.distinct()
