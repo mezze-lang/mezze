@@ -9,6 +9,7 @@ import com.mezze.interpreter.nodes.continuation.HandlerChainEntry;
 import com.mezze.interpreter.nodes.continuation.SpawnSupport;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeFunction;
+import com.mezze.interpreter.values.MezzeGuestException;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -406,11 +407,12 @@ public final class ParallelNatives {
                 try { sem.acquire(); } catch (InterruptedException e) {
                     // Thread interrupted mid-join (cancellation). Re-set the
                     // interrupt flag and propagate the InterruptedException as
-                    // the cause. Kept a plain RuntimeException: routing to
-                    // CancellationException here would change which handlers
-                    // catch it. See report for the recommended follow-up.
+                    // the cause via the cause-carrying MezzeGuestException:
+                    // routing to CancellationException here would change which
+                    // handlers catch it, so we keep it a guest-fatal throw that
+                    // preserves the cause (#387 / S8.1-E).
                     Thread.currentThread().interrupt();
-                    throw new RuntimeException("Parallel.join interrupted", e);
+                    throw new MezzeGuestException("Parallel.join interrupted", e);
                 }
             }
             try {
@@ -429,7 +431,7 @@ public final class ParallelNatives {
             rightThread.join();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Parallel.join interrupted waiting for peer", e);
+            throw new MezzeGuestException("Parallel.join interrupted waiting for peer", e);
         }
 
         SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel join", callNode);

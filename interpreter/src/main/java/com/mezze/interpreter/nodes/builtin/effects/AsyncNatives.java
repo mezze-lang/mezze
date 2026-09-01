@@ -433,18 +433,17 @@ public final class AsyncNatives {
          * The live await path is `__native_promise_await_result`, which
          * returns a Mezze `Result 'a AsyncError` (see async.mz). These
          * throws are the legacy blocking accessor's failure propagation and
-         * deliberately keep the original {@link Throwable} as the cause —
-         * so they stay a plain RuntimeException (MezzeGuestException has no
-         * cause-carrying constructor). See report for the recommended
-         * cause-carrying-guest-exception follow-up.
+         * keep the original {@link Throwable} as the cause via the
+         * cause-carrying {@link MezzeGuestException} constructor, so the real
+         * error survives for debugging (see #387 / S8.1-E).
          */
         private Object getResultOrThrow(Object o) {
             if (o instanceof CompletedOutcome c) return c.value;
             if (o instanceof FailedOutcome f) {
                 if (f.error instanceof Throwable t) {
-                    throw new RuntimeException("Task failed: " + t.getMessage(), t);
+                    throw new MezzeGuestException("Task failed: " + t.getMessage(), t);
                 }
-                throw new RuntimeException("Task failed with unknown error: " + f.error);
+                throw new MezzeGuestException("Task failed with unknown error: " + f.error);
             }
             if (o instanceof CancelledOutcome) {
                 throw new CancellationException("Task was cancelled");
