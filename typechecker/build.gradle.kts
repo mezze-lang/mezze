@@ -71,12 +71,15 @@ tasks.test {
         showStandardStreams = false
     }
 
-    maxParallelForks = 1
-
-    // The suite runs in a single fork (maxParallelForks = 1) and the Truffle
-    // engine retains CallTargets across tests, so cumulative heap grows over a
-    // full 2000+ test run. Give the test JVM headroom.
-    maxHeapSize = "3g"
+    // Parallel forks (#379). Each fork is a SEPARATE JVM with an ISOLATED heap,
+    // so the Truffle-engine CallTarget retention that drives cumulative heap
+    // growth is now spread across N forks, each running only ~1/N of the suite.
+    // That lets per-fork heap DROP below the old single-fork 3g. N is capped
+    // well under ncpu (16 GB machine): 4 forks × 1.5g = 6g fits with headroom
+    // for the OS + Gradle client, and avoids oversubscribing the CPU with heavy
+    // Truffle JVMs.
+    maxParallelForks = 4
+    maxHeapSize = "1500m"
 
     systemProperty("junit.jupiter.execution.timeout.default", "60s")
     systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")

@@ -97,6 +97,13 @@ fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
         showStandardStreams = true
     }
 
+    // Single fork (#379): the interpreter suite contains wall-clock timing
+    // assertions (e.g. VirtualThreadEffectIntegrationTest "parallel faster than
+    // sequential", which asserts < 200ms) that assume exclusive CPU access.
+    // Parallel test forks oversubscribe the CPU and starve those tasks of cores,
+    // so the timing assertions flake. Parallelism was measured (4 forks: 3m33s vs
+    // 6m26s single-fork) but forced this test red — timing tests are fundamentally
+    // incompatible with fork contention, so the suite stays single-fork.
     maxParallelForks = 1
 
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
