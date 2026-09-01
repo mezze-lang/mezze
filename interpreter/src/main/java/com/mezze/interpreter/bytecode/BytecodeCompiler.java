@@ -393,6 +393,7 @@ public final class BytecodeCompiler {
         // closure values, args[captureCount..] are user parameters. We
         // treat both as LoadArgument slots at emit time.
         int argCount = ir.getCaptureSlots().size() + ir.getParamSlots().size();
+        LAST_REJECTION.remove();
         boolean ok = supportsNode(ir.getBody(), argCount);
         if (!ok && STATS_ENABLED) {
             String key = LAST_REJECTION.get();
@@ -400,7 +401,9 @@ public final class BytecodeCompiler {
             REJECTION_COUNTS.computeIfAbsent(key, k -> new java.util.concurrent.atomic.AtomicLong())
                     .incrementAndGet();
         }
-        LAST_REJECTION.remove();
+        // NB: LAST_REJECTION is intentionally left set on failure so the
+        // caller (MezzeLanguage.bdslCompileError) can name the rejected
+        // node. It is cleared at the head of the next supports() call.
         return ok;
     }
 
@@ -484,15 +487,27 @@ public final class BytecodeCompiler {
     }
 
     private static void markReject(NodeIR node, String extra) {
-        if (!STATS_ENABLED) return;
-        // Only capture the FIRST (deepest) rejection so we know the actual
-        // blocking node type — outer wrappers set it too but we don't
-        // overwrite.
+        // Always record (cheap ThreadLocal set) so supports()==false can
+        // name the exact blocking node in the surfaced error, not just a
+        // terse "reason=unsupported". Only capture the FIRST (deepest)
+        // rejection so we know the actual blocking node type — outer
+        // wrappers set it too but we don't overwrite.
         if (LAST_REJECTION.get() == null) {
             String label = (node == null) ? "<null>" : node.getClass().getSimpleName();
             if (extra != null) label += ":" + extra;
             LAST_REJECTION.set(label);
         }
+    }
+
+    /**
+     * The node label recorded by the most recent {@link #supports} call
+     * that returned false, or {@code null} if it succeeded. Set as a
+     * side effect of {@link #supports}; read immediately after a false
+     * result to surface WHICH IR node shape was rejected. Not thread-safe
+     * across interleaved supports() calls beyond the single ThreadLocal.
+     */
+    public String lastRejectionReason() {
+        return LAST_REJECTION.get();
     }
 
     private boolean supportsNode(NodeIR node, int argCount) {

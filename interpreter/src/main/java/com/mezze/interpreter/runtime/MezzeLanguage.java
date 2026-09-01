@@ -257,7 +257,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         if (!bdsl.supports(ir)) {
             bdslMisses.incrementAndGet();
             if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSUPPORTED.incrementAndGet();
-            throw bdslCompileError(ir, "unsupported", null);
+            String rejected = bdsl.lastRejectionReason();
+            String reason = "unsupported"
+                    + (rejected == null ? "" : " (node=" + rejected + ")");
+            throw bdslCompileError(ir, reason, null);
         }
         try {
             var root = bdsl.compile(ir);

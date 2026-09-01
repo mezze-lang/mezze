@@ -603,4 +603,100 @@ class AtomTest {
         val result = eval(code)
         assertEquals(6L, result)
     }
+
+    // =============================================================================
+    // #390 — ValidatedAtom mutations that invoke a guest callback AND build a
+    // Result variant inside the native must compile through the BDSL/bytecode
+    // path (MezzeTestHelper.run == context.eval == the production PipelineRunner:
+    // BDSL entry + eager + lazy compileOne, which THROWS on any unsupported IR
+    // node — there is no AST fallback). A green run therefore proves every
+    // touched function (the ValidatedAtom.swap/swap_with/get_and_swap dispatch
+    // wrappers, swap_*_validated, and the Ok/Err-returning natives) lowered to
+    // BDSL. Locks the divergence that let validated atoms run only in the AST
+    // test harness.
+    // =============================================================================
+
+    @Test
+    fun `swap_with_validated Ok path runs through bytecode pipeline`() {
+        val code = """
+            $atomSetup
+
+            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
+            let outcome = a.swap_with {f = {current, arg} -> current + arg, arg = 5}
+            match outcome is
+              Ok { val } -> val
+              Err { error = _ } -> 0-1
+        """
+        assertEquals(15L, eval(code))
+    }
+
+    @Test
+    fun `swap_with_validated Err path runs through bytecode pipeline`() {
+        val code = """
+            $atomSetup
+
+            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
+            let outcome = a.swap_with {f = {current, arg} -> current - arg, arg = 100}
+            match outcome is
+              Ok { val = _ } -> 999
+              Err { error = ValidatorRejected { val } } -> val
+        """
+        // 10 - 100 = -90, rejected; the rejected value is carried in the Err.
+        assertEquals(-90L, eval(code))
+    }
+
+    @Test
+    fun `get_and_swap_validated Ok path runs through bytecode pipeline`() {
+        val code = """
+            $atomSetup
+
+            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
+            let outcome = a.get_and_swap {f = {current} -> current + 5}
+            match outcome is
+              Ok { val } -> val.new
+              Err { error = _ } -> 0-1
+        """
+        assertEquals(15L, eval(code))
+    }
+
+    @Test
+    fun `get_and_swap_validated Err path runs through bytecode pipeline`() {
+        val code = """
+            $atomSetup
+
+            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
+            let outcome = a.get_and_swap {f = {current} -> current - 100}
+            match outcome is
+              Ok { val = _ } -> 999
+              Err { error = ValidatorRejected { val } } -> val
+        """
+        assertEquals(-90L, eval(code))
+    }
+
+    @Test
+    fun `390 repro swap_validated Ok and Err through bytecode pipeline`() {
+        // The exact #390 program shape: create validated atom, swap via the
+        // ValidatedAtom.swap dispatch wrapper, match on the returned Result.
+        val ok = """
+            $atomSetup
+
+            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
+            let r = a.swap {f = {current} -> current + 5}
+            match r is
+              Ok { val } -> val
+              Err { error = _ } -> 0-1
+        """
+        assertEquals(15L, eval(ok))
+
+        val err = """
+            $atomSetup
+
+            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
+            let r = a.swap {f = {current} -> current - 100}
+            match r is
+              Ok { val = _ } -> 999
+              Err { error = ValidatorRejected { val } } -> val
+        """
+        assertEquals(-90L, eval(err))
+    }
 }
