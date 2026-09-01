@@ -517,4 +517,54 @@ class NewtypeImplRuntimeTest {
             assertEquals(false, result);
         }
     }
+
+    // ========================================================================
+    // #401 — newtype absolute opacity: the CORRECT match-unwrap ability impls
+    // must run end-to-end (the buggy `it.val` transparency is now a type error
+    // — covered in the typechecker suite; here we pin the runtime of the fixed
+    // impls). Bug-1: `coffee + cake` = Money.(825), `coffee * 3` = Money.(1050).
+    // ========================================================================
+
+    @Nested
+    class MoneyOpacityRuntime {
+
+        @Test
+        void moneyAddViaMatchUnwrap() {
+            Object result = MezzeTestHelper.run("""
+                use std::abilities::numeric::{ NumAdd, NumMul }
+
+                newtype Money = Int
+                impl NumAdd Money for Money having 'out = Money where {
+                  add = { it, r } -> match it is Money.(a) -> match r is Money.(b) -> Money.(a + b)
+                }
+                impl NumMul Int for Money having 'out = Money where {
+                  mul = { it, r } -> match it is Money.(a) -> Money.(a * r)
+                }
+
+                let coffee = Money.(350)
+                let cake = Money.(475)
+                match coffee + cake is Money.(v) -> v
+                """);
+            assertEquals(825L, result);
+        }
+
+        @Test
+        void moneyMulViaMatchUnwrap() {
+            Object result = MezzeTestHelper.run("""
+                use std::abilities::numeric::{ NumAdd, NumMul }
+
+                newtype Money = Int
+                impl NumAdd Money for Money having 'out = Money where {
+                  add = { it, r } -> match it is Money.(a) -> match r is Money.(b) -> Money.(a + b)
+                }
+                impl NumMul Int for Money having 'out = Money where {
+                  mul = { it, r } -> match it is Money.(a) -> Money.(a * r)
+                }
+
+                let coffee = Money.(350)
+                match coffee * 3 is Money.(v) -> v
+                """);
+            assertEquals(1050L, result);
+        }
+    }
 }

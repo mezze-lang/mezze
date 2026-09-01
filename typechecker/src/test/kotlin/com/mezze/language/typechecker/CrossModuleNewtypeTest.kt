@@ -244,9 +244,8 @@ class CrossModuleNewtypeTest {
     // field lookup. The mechanism is module-agnostic — this is a general newtype
     // opacity hole, not merely cross-module. Contrast the constructor path, which
     // DOES enforce M0803 privacy (case3). The assertion is left UNWEAKENED.
-    @Disabled("REAL BUG #397: newtype-over-record .field access is transparent — " +
-        "solveHasField unwraps the wrapper with no opacity guard (ConstraintSolver.kt:1039-1092). " +
-        "Assertion is the intended opaque rule; do NOT weaken.")
+    // #401 FIXED: solveHasField now REJECTS `.field` on any newtype (absolute
+    // opacity, no shape/module special-casing). Enabled.
     @Test
     fun `case4b — B cannot field-access through the opaque Money wrapper`() {
         writeModule("money_lib2", """
@@ -464,5 +463,173 @@ class CrossModuleNewtypeTest {
             "Box Int must unify with Box Int; got: ${r.exceptionOrNull()?.message}"
         }
         assertEquals("Int", r.getOrThrow().getVariableType("ok")?.let { prettyPrintType(it) })
+    }
+
+    // =====================================================================
+    // #401 — ABSOLUTE OPACITY. A newtype wraps ANYTHING opaquely: the ONLY
+    // door to the underlying is `match Name.(v)` — `.field` / raw-underlying
+    // access NEVER punches through, in ANY module (even the defining one),
+    // regardless of inner shape (record / variant / primitive / type-var).
+    // These tests pin every shape SAME-MODULE and CROSS-MODULE, plus the
+    // CONTRAST that plain records and transparent aliases stay transparent.
+    // =====================================================================
+
+    // ---- newtype-over-record ----
+
+    @Test
+    fun `opacity — same-module newtype-over-record field rejected`() {
+        val main = """
+            newtype Money = { currency: Str, amount: Int }
+            let m : Money = Money.({ currency = "USD", amount = 500 })
+            ## .amount must NOT punch through the opaque wrapper, even here.
+            let leaked : Int = m.amount
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) {
+            "Field access through a newtype-over-record must be rejected in the defining module too."
+        }
+    }
+
+    @Test
+    fun `opacity — same-module newtype-over-record unwrap via match works`() {
+        val main = """
+            newtype Money = { currency: Str, amount: Int }
+            let m : Money = Money.({ currency = "USD", amount = 500 })
+            let amount : Int = match m is Money.({ amount = a, currency = _ }) -> a
+        """
+        val r = checkMain(main)
+        assertTrue(r.isSuccess) {
+            "Unwrapping a newtype-over-record via match must work; got: ${r.exceptionOrNull()?.message}"
+        }
+        assertEquals("Int", r.getOrThrow().getVariableType("amount")?.let { prettyPrintType(it) })
+    }
+
+    // ---- newtype-over-primitive (the Bug-1 case) ----
+
+    @Test
+    fun `opacity — same-module newtype-over-primitive dot-val rejected`() {
+        val main = """
+            newtype Money = Int
+            ## `.val` is meaningless on a newtype over Int — must be a type error,
+            ## not a runtime crash (Bug 1).
+            let leaked : Int = Money.(350).val
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) {
+            "`.val` on a newtype-over-primitive must be a TYPE error (Bug 1), got success."
+        }
+    }
+
+    @Test
+    fun `opacity — same-module newtype-over-primitive unwrap via match works`() {
+        val main = """
+            newtype Money = Int
+            let n : Int = match Money.(350) is Money.(v) -> v + 1
+        """
+        val r = checkMain(main)
+        assertTrue(r.isSuccess) {
+            "Unwrapping a newtype-over-primitive via match must work; got: ${r.exceptionOrNull()?.message}"
+        }
+        assertEquals("Int", r.getOrThrow().getVariableType("n")?.let { prettyPrintType(it) })
+    }
+
+    // ---- newtype-over-variant ----
+
+    @Test
+    fun `opacity — same-module newtype-over-variant field rejected`() {
+        val main = """
+            type Inner = A { x: Int } | B { y: Int }
+            newtype Wrapped = Inner
+            let w : Wrapped = Wrapped.(A { x = 1 })
+            ## Cannot reach the inner variant's field without unwrapping first.
+            let leaked : Int = w.x
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) {
+            "Field access through a newtype-over-variant must be rejected."
+        }
+    }
+
+    // ---- newtype-over-typevar ----
+
+    @Test
+    fun `opacity — same-module newtype-over-typevar underlying access rejected`() {
+        val main = """
+            newtype Box 'a = 'a
+            newtype Rec = { a: Int }
+            let b : Box Rec = Box.(Rec.({ a = 1 }))
+            ## Cannot reach into the wrapped 'a through the Box wrapper.
+            let leaked : Int = b.a
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) {
+            "Underlying access through a newtype-over-typevar must be rejected."
+        }
+    }
+
+    // ---- CONTRAST: plain record + transparent alias STAY transparent ----
+
+    @Test
+    fun `contrast — plain record field still works`() {
+        val main = """
+            let r : { a: Int, b: Str } = { a = 1, b = "x" }
+            let got : Int = r.a
+        """
+        val r = checkMain(main)
+        assertTrue(r.isSuccess) {
+            "Plain record .field must stay transparent; got: ${r.exceptionOrNull()?.message}"
+        }
+        assertEquals("Int", r.getOrThrow().getVariableType("got")?.let { prettyPrintType(it) })
+    }
+
+    @Test
+    fun `contrast — transparent alias field still works`() {
+        val main = """
+            type Point = { x: Int, y: Int }
+            let p : Point = { x = 3, y = 4 }
+            let got : Int = p.x
+        """
+        val r = checkMain(main)
+        assertTrue(r.isSuccess) {
+            "Transparent alias .field must stay transparent; got: ${r.exceptionOrNull()?.message}"
+        }
+        assertEquals("Int", r.getOrThrow().getVariableType("got")?.let { prettyPrintType(it) })
+    }
+
+    // ---- CROSS-MODULE opacity for primitive + variant + typevar shapes ----
+
+    @Test
+    fun `opacity — cross-module newtype-over-primitive dot-val rejected`() {
+        writeModule("money_prim", """
+            pub newtype Money = Int
+            pub let of : { n: Int } -> Money = { n } -> Money.(n)
+        """)
+        val main = """
+            use money_prim::{ Money, of }
+            let m : Money = of { n = 350 }
+            let leaked : Int = m.val
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) {
+            "`.val` on a cross-module newtype-over-primitive must be a type error."
+        }
+    }
+
+    @Test
+    fun `opacity — cross-module newtype-over-typevar underlying access rejected`() {
+        writeModule("box_lib", """
+            pub newtype Box 'a = 'a
+            pub newtype Rec = { a: Int }
+            pub let boxed : {} -> Box Rec = {} -> Box.(Rec.({ a = 1 }))
+        """)
+        val main = """
+            use box_lib::{ Box, Rec, boxed }
+            let b : Box Rec = boxed {}
+            let leaked : Int = b.a
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) {
+            "Underlying access through a cross-module newtype-over-typevar must be rejected."
+        }
     }
 }

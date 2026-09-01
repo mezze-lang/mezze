@@ -1051,9 +1051,16 @@ class ConstraintSolver(
                     )
                 }
                 is TypeExpansionResult.Newtype -> {
-                    return solveHasField(
-                        constraint.copy(recordType = expansion.variantType),
-                        currentSubst
+                    // ABSOLUTE OPACITY (#401): a newtype is opaque. Field access
+                    // must NEVER punch through the wrapper — regardless of the
+                    // inner shape (record / variant / primitive / type-var) and
+                    // regardless of module (even the defining one). The ONLY way
+                    // to the underlying value is an unwrap `match x is Name.(v)`.
+                    // Do NOT recurse into the wrapped payload here.
+                    return ConstraintResult.Failure(
+                        "Field access '.$fieldName' on an opaque newtype '${recordType.constructor}': " +
+                        "a newtype hides its underlying value. Unwrap it first with " +
+                        "`match x is ${recordType.constructor}.(v) -> ...`, then access the field on `v`."
                     )
                 }
                 is TypeExpansionResult.NotFound -> {
