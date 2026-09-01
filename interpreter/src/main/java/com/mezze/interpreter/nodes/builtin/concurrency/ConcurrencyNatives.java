@@ -1667,6 +1667,21 @@ public final class ConcurrencyNatives {
         private StmRetryException() { super(); }
     }
 
+    /**
+     * Control-flow sentinel thrown by {@link #stmSeqRetry} and caught BY TYPE
+     * in {@link #stmSeqOrElse} to route to the fallback branch. Stays a
+     * {@code RuntimeException} (not an AbstractTruffleException) so no other
+     * catch behaviour changes — this exception is only ever caught, by type,
+     * inside stmSeqOrElse. Cheap no-stack construction: it is pure control flow.
+     */
+    public static final class StmRetrySignal extends RuntimeException {
+        public static final StmRetrySignal INSTANCE = new StmRetrySignal();
+        private StmRetrySignal() {
+            super("SequentialSTM.retry: no scheduler available to block on",
+                  null, false, false);
+        }
+    }
+
     /** {@code STM.check { cond: Bool }} — retry if cond is false. */
     @TruffleBoundary
     public static MezzeRecord stmCheck(MezzeRecord args) {
@@ -1793,13 +1808,10 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static Object stmSeqRetry(MezzeRecord args) {
         // NOT a fatal error: this is a control-flow SENTINEL. stmSeqOrElse
-        // (below) catches RuntimeException and routes to its fallback branch
-        // when the message contains "SequentialSTM.retry". It must therefore
-        // stay a RuntimeException with that exact substring — converting it to
-        // a MezzeGuestException (AbstractTruffleException) would bypass that
-        // catch and break SequentialSTM.or_else. See report for the
-        // recommended dedicated-sentinel-type follow-up.
-        throw new RuntimeException("SequentialSTM.retry: no scheduler available to block on");
+        // (below) catches StmRetrySignal BY TYPE and routes to its fallback
+        // branch. It stays a RuntimeException (not an AbstractTruffleException)
+        // so no other catch behaviour changes.
+        throw StmRetrySignal.INSTANCE;
     }
 
     /**
@@ -1835,22 +1847,16 @@ public final class ConcurrencyNatives {
         }
     }
 
-    /** SequentialSTM.or_else — try primary; if it throws StmRetryException (or the
-     *  SequentialSTM.retry sentinel), try fallback. */
+    /** SequentialSTM.or_else — try primary; if it throws StmRetryException or the
+     *  StmRetrySignal sentinel, try fallback. */
     @TruffleBoundary
     public static Object stmSeqOrElse(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeFunction primary = getFunction(args, "primary");
         MezzeFunction fallback = getFunction(args, "fallback");
         try {
             return callNode.call(primary.getCallTarget(), primary.getClosureValues());
-        } catch (StmRetryException ignored) {
+        } catch (StmRetryException | StmRetrySignal ignored) {
             return callNode.call(fallback.getCallTarget(), fallback.getClosureValues());
-        } catch (RuntimeException e) {
-            String msg = e.getMessage();
-            if (msg != null && msg.contains("SequentialSTM.retry")) {
-                return callNode.call(fallback.getCallTarget(), fallback.getClosureValues());
-            }
-            throw e;
         }
     }
 
