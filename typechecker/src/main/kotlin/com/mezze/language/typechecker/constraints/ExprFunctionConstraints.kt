@@ -117,6 +117,9 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
         name = expr.typeName,
         constructor = newtypeDef.constructor,
         wrappedType = valueResult.type,
+        // #400: stamp the decl's Declared identity so this newtype is nominally
+        // distinct from a same-named newtype in another module (no name-fallback).
+        identity = com.mezze.language.typechecker.phase.newtypeIdentity(typeDecl!!),
     )
     return ConstraintResult(
         type = newtypeType,

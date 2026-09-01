@@ -96,11 +96,19 @@ class PatternConstraintGenerator {
                     )
                 )
             } else {
-                newtypeType = MezzeType.NewtypeType(pattern.typeName, newtypeDef.constructor, wrappedType)
+                newtypeType = MezzeType.NewtypeType(
+                    pattern.typeName, newtypeDef.constructor, wrappedType,
+                    // #400: nominal Declared identity from the decl (module-distinct).
+                    identity = com.mezze.language.typechecker.phase.newtypeIdentity(typeDecl!!),
+                )
                 paramConstraints = emptyList()
             }
         } else {
-            newtypeType = MezzeType.NewtypeType(pattern.typeName, newtypeDef.constructor, wrappedType)
+            newtypeType = MezzeType.NewtypeType(
+                pattern.typeName, newtypeDef.constructor, wrappedType,
+                // #400: nominal Declared identity from the decl (module-distinct).
+                identity = com.mezze.language.typechecker.phase.newtypeIdentity(typeDecl),
+            )
             paramConstraints = emptyList()
         }
 

@@ -459,6 +459,23 @@ object ParsedDeclHasher {
             is ParsedNewtypeDef -> {
                 b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x02))
                 appendTypeAnnotation(b, def.wrappedType)
+                // #400: a newtype is a NOMINAL, module-opaque type — two modules each
+                // declaring `newtype Id = Str` must be DISTINCT types, not the same one.
+                // Records/variants may collide structurally (they unify by shape), but a
+                // newtype's whole purpose is a nominal wall, so its identity hash MUST
+                // fold in the decl-site. We salt with the source file (the module the
+                // newtype was declared in) — stable across edits elsewhere in the module,
+                // yet different for a same-named newtype in another file. Without this the
+                // content hash omits module context and cross-module newtypes collide,
+                // laundering one module's Id where another's is required (a soundness hole).
+                //
+                // We salt with the FILE BASENAME, not the full path: the build-time
+                // WellKnownHashGenerator parses stdlib with absolute paths while the
+                // runtime parses with module-relative paths, so a full-path salt would make
+                // a stdlib newtype's baked well-known hash disagree with its runtime hash
+                // (breaking `MutSeq`/`Instant`/… identity resolution). The basename is
+                // stable across both and across machines, and still distinguishes modules.
+                b.append(def.loc.file.substringAfterLast('/').substringAfterLast('\\'))
             }
             is ParsedTypeAliasDef -> {
                 b.append(byteArrayOf(HashTags.TYPE_ALIAS, 0x01))

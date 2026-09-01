@@ -587,15 +587,23 @@ class ModuleResolver(
      * embeds a fresh random suffix into the IR every compile, which
      * blocks any content-addressed caching downstream (#224).
      *
-     * Layout: `<tmpdir>/mezze-stdlib-cache/<flattened-resource-path>`.
-     * Same resource → same path on every compile, every JVM, every host.
-     * Idempotent: skip write if file already exists with matching bytes.
+     * Layout: `<tmpdir>/mezze-stdlib-cache/<resource-path>` (directory structure
+     * PRESERVED, not flattened). Same resource → same path on every compile, every
+     * JVM, every host. Idempotent: skip write if file already exists with matching bytes.
+     *
+     * #400: the subdirectory structure is preserved (was flattened `/`→`-`) so a
+     * stdlib file's BASENAME stays its true leaf name (`datetime.mz`, not
+     * `std-datetime.mz`). The newtype identity hash is decl-site-salted by that
+     * basename (ParsedDeclHasher), and the build-time WellKnownHashGenerator parses
+     * from the original resource paths whose basenames are the true leaf names — so
+     * flattening here would make a stdlib newtype's runtime hash disagree with its
+     * baked well-known hash, breaking `Duration`/`MutSeq`/… identity resolution.
      */
     private fun materializeStdlibTempFile(relativeFilePath: String, content: String): Path {
-        val flat = relativeFilePath.replace('/', '-').replace('\\', '-')
+        val normalized = relativeFilePath.replace('\\', '/')
         val cacheDir = Paths.get(System.getProperty("java.io.tmpdir"), "mezze-stdlib-cache")
-        Files.createDirectories(cacheDir)
-        val target = cacheDir.resolve(flat)
+        val target = cacheDir.resolve(normalized).normalize()
+        Files.createDirectories(target.parent)
         // Only write if missing or stale. Avoids racing concurrent JVMs
         // and keeps the file mtime stable across runs.
         val bytes = content.toByteArray(Charsets.UTF_8)

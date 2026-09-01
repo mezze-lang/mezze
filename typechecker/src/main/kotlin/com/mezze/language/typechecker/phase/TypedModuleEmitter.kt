@@ -263,7 +263,12 @@ private fun compileModule(
             if (d is com.mezze.language.typedast.TypedTypeDecl) {
                 val resolved: com.mezze.language.ast.MezzeType? = when (val def = d.definition) {
                     is com.mezze.language.typedast.TypedNewtypeDef ->
-                        com.mezze.language.ast.MezzeType.NewtypeType(d.name, def.constructor, def.wrappedType)
+                        com.mezze.language.ast.MezzeType.NewtypeType(
+                            d.name, def.constructor, def.wrappedType,
+                            // #400: nominal Declared identity (module-distinct), mirroring
+                            // the record/variant siblings below — never Anonymous.
+                            identity = com.mezze.language.ast.TypeIdentity.declared(d.name, d.hash)
+                        )
                     is com.mezze.language.typedast.TypedRecordDef ->
                         com.mezze.language.ast.MezzeType.RecordType(
                             def.fields,

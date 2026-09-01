@@ -60,7 +60,12 @@ class NominalHashIdentityTest {
         assertIs<UnificationResult.Success>(result, "equal typeHash on differing names is a rename-safe alias")
     }
 
-    // ---- F0: NewtypeType (defensive — currently near-unreachable, but hardened) ----
+    // ---- F0/#400: NewtypeType — the pipeline NOW stamps Declared (was Anonymous) ----
+    // These unit cases lock the unify() primitive; the PIPELINE cases below prove the
+    // real parse→check path actually PRODUCES the Declared, module-salted identities the
+    // unit cases assume — closing the false-confidence gap #397 flagged (the unit tests
+    // hand-built Declared identities the pipeline never produced, so a newtype could
+    // silently collide cross-module while these stayed green).
 
     @Test fun `same-named newtypes with DIFFERENT hashes do not unify`() {
         val n1 = MezzeType.NewtypeType("Token", "Token", MezzeType.StringType, identity = TypeIdentity.Declared(hashA, "Token"))
@@ -84,6 +89,55 @@ class NominalHashIdentityTest {
         val n2 = MezzeType.NewtypeType("Meters", "Meters", MezzeType.IntType, identity = TypeIdentity.Declared(hashA, "Meters"))
         val result = unify(n1, n2)
         assertIs<UnificationResult.Success>(result, "same newtype declaration unifies with itself")
+    }
+
+    // ---- #400: PIPELINE-produced newtype identities (not hand-built) ----
+    // Parse REAL newtype decls and read the identity the pipeline actually stamps.
+    // This is what #397 was missing: the unit unify() tests above hand-build Declared
+    // identities, but the pipeline used to build newtypes with Anonymous — so those
+    // tests gave FALSE confidence. These assert on the genuine pipeline output.
+
+    private fun newtypeDecl(src: String, file: String): com.mezze.language.parsedast.ParsedTypeDecl {
+        val parsed = com.mezze.language.parser.MezzeParser().parseParsedModule(src.trimIndent(), file)
+        return parsed.decls.filterIsInstance<com.mezze.language.parsedast.ParsedTypeDecl>()
+            .first { it.definition is com.mezze.language.parsedast.ParsedNewtypeDef }
+    }
+
+    @Test fun `pipeline — same-named newtypes in different modules get DIFFERENT content hashes`() {
+        // Two files each `newtype Id = Str`. Module-salted decl hash ⇒ distinct.
+        val a = newtypeDecl("pub newtype Id = Str", "mod_a.mz")
+        val b = newtypeDecl("pub newtype Id = Str", "mod_b.mz")
+        val ha = com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(a)
+        val hb = com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(b)
+        kotlin.test.assertNotEquals(
+            ha, hb,
+            "mod_a::Id and mod_b::Id are distinct nominal types — their decl-site-salted " +
+                "content hashes must differ (else they collide cross-module, the #400 soundness hole)",
+        )
+    }
+
+    @Test fun `pipeline — the same newtype decl hashes identically (stable within a module)`() {
+        // Same file, same decl ⇒ same hash. The salt is decl-site (file), NOT line/col,
+        // so a newtype's identity is stable across edits elsewhere in its module.
+        val a1 = newtypeDecl("pub newtype Id = Str\npub let x : Int = 1", "mod_a.mz")
+        val a2 = newtypeDecl("pub newtype Id = Str", "mod_a.mz")
+        kotlin.test.assertEquals(
+            com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(a1),
+            com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(a2),
+            "the same newtype decl in the same module must hash identically regardless of siblings",
+        )
+    }
+
+    @Test fun `pipeline — same-module newtypes over the same underlying get DIFFERENT hashes`() {
+        // `newtype Length = Float` and `newtype Age = Float` — same underlying, distinct
+        // names ⇒ distinct decls ⇒ distinct hashes (name is folded into the hash).
+        val len = newtypeDecl("newtype Length = Float", "m.mz")
+        val age = newtypeDecl("newtype Age = Float", "m.mz")
+        kotlin.test.assertNotEquals(
+            com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(len),
+            com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(age),
+            "Length and Age both wrap Float but are distinct newtypes — hashes must differ",
+        )
     }
 
     // ---- Variants: hash-veto (distinct declarations don't unify) ----

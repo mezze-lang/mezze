@@ -379,29 +379,34 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
 
         type1 is MezzeType.NewtypeType && type2 is MezzeType.NewtypeType -> {
             // #278/F0: newtypes are NOMINAL, module-opaque — same type only if same
-            // DECLARATION. Identity decides: two Declared newtypes are the same iff
-            // their declaration hashes match (a mismatch means two modules' same-named
-            // `Token`, or a version skew, and MUST fail even when the names match).
-            // A newtype is an OPAQUE wall (isOpaqueWall(newtype) == true by node kind):
-            // it rejects on any declaration mismatch and NEVER falls through to
-            // structural, so this branch always ends in unify(wrapped) or Failure —
-            // there is no transparent path. When BOTH sides carry a real declaration
-            // identity (Declared/Builtin) the identity DECIDES; otherwise (a
-            // hashless/legacy newtype → Anonymous identity) we fall back to the bare
-            // NAME — NOT to structural, and NOT treating two Anonymous newtypes as the
-            // same (distinct-named hashless `A` and `B` must still reject). Mirrors the
-            // TypeApplication hash-first fix (F8).
-            val sameDeclaration = when {
-                type1.identity is TypeIdentity.Declared && type2.identity is TypeIdentity.Declared ->
-                    sameDeclaredIdentity(type1.identity, type2.identity)
-                else -> {
-                    // ALLOWED: reached only when NOT both sides carry a Declared hash
-                    // (a hashless / legacy Anonymous newtype). The name is the ONLY
-                    // identity available — there is no hash on both sides to key on.
-                    // This never overrides an available both-hash decision (the first
-                    // arm handles that authoritatively).
-                    type1.name == type2.name
-                }
+            // DECLARATION. A newtype is an OPAQUE wall (isOpaqueWall(newtype) == true by
+            // node kind): it rejects on any declaration mismatch and NEVER falls through
+            // to structural, so this branch always ends in unify(wrapped) or Failure —
+            // there is no transparent path.
+            // #400: identity is AUTHORITATIVE. The verdict mirrors the
+            // TypeApplication/VariantType hash-veto (identityVerdict):
+            //  - DISTINCT (both Declared, hashes differ) → two modules' same-named
+            //    newtypes, MUST reject even when the names match. This is the
+            //    soundness fix — previously the code fell to bare `name ==` here and
+            //    laundered one module's `Id` where another's was required.
+            //  - SAME (equal Declared hash, or a rename-safe equal-hash alias) → the
+            //    same declaration, unify the wrapped types.
+            //  - UNDETERMINED (a hashless/legacy Anonymous side — builtins, pre-hash
+            //    construction) → the name is the ONLY identity available, so fall back
+            //    to bare name. This is NOT a name-fallback over an available hash
+            //    decision (the DISTINCT/SAME arms already decided those); it only ever
+            //    fires when at least one side has no declaration hash to key on.
+            val verdict = identityVerdict(type1.identity, type2.identity)
+            val sameDeclaration = when (verdict) {
+                IdentityVerdict.DISTINCT -> false
+                // SAME/UNDETERMINED never OVERRIDE a DISTINCT veto (handled above).
+                // A NAME match unifies; the SAME concrete declaration (equal Declared
+                // hash / Builtin name) ALSO unifies even on differing names (rename-safe
+                // alias). Using sameDeclaredIdentity — NOT the bare SAME verdict — keeps
+                // two Anonymous newtypes with DIFFERENT names distinct (name== is false),
+                // exactly as before. Mirrors unifyTypeApplications' nameMatched||declMatched.
+                IdentityVerdict.SAME, IdentityVerdict.UNDETERMINED ->
+                    type1.name == type2.name || sameDeclaredIdentity(type1.identity, type2.identity)
             }
             if (sameDeclaration) {
                 unify(type1.wrappedType, type2.wrappedType, registry)

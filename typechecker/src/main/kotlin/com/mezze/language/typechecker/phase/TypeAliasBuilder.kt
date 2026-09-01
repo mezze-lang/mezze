@@ -8,6 +8,21 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.module.ModuleImportContext
 
+/**
+ * #400: the nominal identity of a `newtype` declaration. A newtype is a NOMINAL,
+ * module-opaque type — two modules each declaring `newtype Id = Str` are DISTINCT
+ * types, so every NewtypeType we construct must carry a `Declared(hash, name)`
+ * stamped from the decl (exactly as records/variants do), not `Anonymous`. When it
+ * was Anonymous, unification fell to bare-name matching and same-named cross-module
+ * newtypes silently unified — a soundness hole. The hash is module-salted (see
+ * ParsedDeclHasher.appendTypeDef / ParsedNewtypeDef) so the two `Id`s differ.
+ */
+internal fun newtypeIdentity(typeDecl: ParsedTypeDecl): TypeIdentity =
+    TypeIdentity.declared(
+        typeDecl.name,
+        typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+    )
+
 internal fun buildTypeAliasesFromParsedModule(
     module: ParsedModule,
     contextBuilder: ContextBuilder,

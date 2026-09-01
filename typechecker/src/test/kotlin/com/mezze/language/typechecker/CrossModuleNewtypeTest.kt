@@ -319,10 +319,9 @@ class CrossModuleNewtypeTest {
     // decl-site salt, so even a stamped `Declared` hash would collide. The
     // assertion is left UNWEAKENED. (case6b confirms each module's own Id round-
     // trips, so the collision is genuinely the cross-module mismatch.)
-    @Disabled("REAL BUG #397: same-named cross-module newtypes collide — newtypes are " +
-        "never stamped TypeIdentity.Declared, so unification falls to bare-name matching " +
-        "(Unification.kt NewtypeType branch); and the newtype content hash omits module/decl-site. " +
-        "Assertion is the intended distinctness rule; do NOT weaken.")
+    // #400 FIXED: newtypes now carry a module-salted TypeIdentity.Declared, and the
+    // Unification NewtypeType branch keys on that (name-fallback only when a side is
+    // hashless). Two modules' `Id` get different decl-site-salted hashes ⇒ DISTINCT.
     @Test
     fun `case6 — same-named newtypes in different modules stay distinct`() {
         writeModule("mod_a", """
@@ -366,6 +365,103 @@ class CrossModuleNewtypeTest {
         val r = checkMain(main)
         assertTrue(r.isSuccess) {
             "A module's own Id must round-trip; got: ${r.exceptionOrNull()?.message}"
+        }
+        assertEquals("Int", r.getOrThrow().getVariableType("ok")?.let { prettyPrintType(it) })
+    }
+
+    // =====================================================================
+    // #400 — SAME-MODULE nominal distinctness. Two newtypes over the SAME
+    // underlying type in ONE module are DISTINCT nominal types: same underlying
+    // ≠ same type. Assigning one where the other is expected must be rejected.
+    // =====================================================================
+    @Test
+    fun `same-module newtypes over the same underlying are distinct`() {
+        val main = """
+            newtype Length = Float
+            newtype Age = Float
+
+            let take_len : { l: Length } -> Int = { l } -> 1
+
+            let a : Age = Age.(3.0)
+            ## Passing an Age where a Length is expected must be rejected —
+            ## Length and Age are distinct nominal types despite both wrapping Float.
+            let bad : Int = take_len { l = a }
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) {
+            "Length and Age both wrap Float but are DISTINCT newtypes — an Age must not " +
+            "be accepted where a Length is required. If it typechecks, same-underlying newtypes collide."
+        }
+    }
+
+    // Companion: a Length round-trips as a Length within the same module (a
+    // legitimate same-declaration unification must still succeed).
+    @Test
+    fun `same-module newtype round-trips as itself`() {
+        val main = """
+            newtype Length = Float
+            let take_len : { l: Length } -> Int = { l } -> 1
+            let x : Length = Length.(3.0)
+            let ok : Int = take_len { l = x }
+        """
+        val r = checkMain(main)
+        assertTrue(r.isSuccess) {
+            "A Length must unify with a Length from the same declaration; got: ${r.exceptionOrNull()?.message}"
+        }
+        assertEquals("Int", r.getOrThrow().getVariableType("ok")?.let { prettyPrintType(it) })
+    }
+
+    // =====================================================================
+    // #400 — GENERIC newtypes. `newtype Box 'a = 'a` and `newtype Other 'a = 'a`
+    // are distinct nominal type constructors (Box Int ≠ Other Int), and a single
+    // constructor is distinct across its own arg (Box Int ≠ Box Str). The generic
+    // construction path must ALSO stamp a proper Declared identity, not Anonymous.
+    // =====================================================================
+    @Test
+    fun `generic newtypes with the same shape are distinct constructors`() {
+        val main = """
+            newtype Box 'a = 'a
+            newtype Other 'a = 'a
+
+            let take_box : { b: Box Int } -> Int = { b } -> 1
+
+            let o : Other Int = Other.(5)
+            ## Other Int must not satisfy a Box Int parameter — distinct constructors.
+            let bad : Int = take_box { b = o }
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) {
+            "Box 'a and Other 'a are distinct newtype constructors — Other Int must not be accepted " +
+            "where Box Int is required. If it typechecks, generic newtypes collide (Anonymous identity leak)."
+        }
+    }
+
+    @Test
+    fun `generic newtype rejects a different type argument`() {
+        val main = """
+            newtype Box 'a = 'a
+            let take_box_int : { b: Box Int } -> Int = { b } -> 1
+            let s : Box Str = Box.("hi")
+            ## Box Str must not satisfy Box Int — the wrapped arg differs.
+            let bad : Int = take_box_int { b = s }
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) {
+            "Box Str must not be accepted where Box Int is required — the wrapped type argument differs."
+        }
+    }
+
+    @Test
+    fun `generic newtype round-trips at matching argument`() {
+        val main = """
+            newtype Box 'a = 'a
+            let take_box_int : { b: Box Int } -> Int = { b } -> 1
+            let b : Box Int = Box.(5)
+            let ok : Int = take_box_int { b = b }
+        """
+        val r = checkMain(main)
+        assertTrue(r.isSuccess) {
+            "Box Int must unify with Box Int; got: ${r.exceptionOrNull()?.message}"
         }
         assertEquals("Int", r.getOrThrow().getVariableType("ok")?.let { prettyPrintType(it) })
     }
