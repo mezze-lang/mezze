@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes.builtin;
 import com.mezze.datastructures.list.MezzeList;
 
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.NodeChild;
@@ -45,7 +46,7 @@ public abstract class BuiltinUnaryNodes {
             if (n instanceof Double) {
                 return -((Double) n);
             }
-            throw new RuntimeException("Cannot negate " + n);
+            throw new NativeTypeMismatchException("[internal] operand shape not handled by builtin negate node — cannot negate " + n);
         }
 
         protected static boolean isLongRecord(MezzeRecord args) {

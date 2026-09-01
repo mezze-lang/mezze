@@ -78,7 +78,11 @@ public final class NonEmptyListNatives {
     @TruffleBoundary
     public static MezzeNonEmptyList fromList(MezzeList list) {
         if (list.isEmpty()) {
-            throw new RuntimeException("Cannot create NonEmptyList from empty list");
+            // User-reachable: `nel::from_list`/`from_seq` on an empty list.
+            // Guest-visible fatal (stdlib signature returns a bare
+            // NonEmptyList 'a, not a Result — see report for the
+            // recommended Result-returning follow-up).
+            throw new MezzeGuestException("NonEmptyList.from_list: cannot create a NonEmptyList from an empty list");
         }
         Object[] elements = new Object[list.size()];
         for (int i = 0; i < list.size(); i++) {
@@ -90,7 +94,7 @@ public final class NonEmptyListNatives {
     @TruffleBoundary
     public static MezzeNonEmptyList fromArray(Object[] arr) {
         if (arr.length == 0) {
-            throw new RuntimeException("Cannot create NonEmptyList from empty array");
+            throw new MezzeGuestException("NonEmptyList.from_seq: cannot create a NonEmptyList from an empty seq");
         }
         return new MezzeNonEmptyList(arr.clone());
     }
@@ -116,7 +120,9 @@ public final class NonEmptyListNatives {
     public static Object get(MezzeNonEmptyList list, long index) {
         int idx = (int) index;
         if (idx < 0 || idx >= list.size()) {
-            throw new RuntimeException("Index out of bounds: " + idx + " for NonEmptyList of size " + list.size());
+            // User-reachable: `nel::get { index }` out of range. Guest-visible
+            // fatal (stdlib `get` returns a bare 'a, not Option/Result).
+            throw new MezzeGuestException("NonEmptyList.get: index " + idx + " out of bounds for NonEmptyList of size " + list.size());
         }
         return list.get(idx);
     }
@@ -200,8 +206,10 @@ public final class NonEmptyListNatives {
             }
         }
         if (result.isEmpty()) {
-            // This shouldn't happen with flatMap on NEL, but handle gracefully
-            throw new RuntimeException("flatMap on NonEmptyList produced empty result");
+            // Internal invariant: flatMap's f returns a NonEmptyList (non-empty
+            // by construction), so the flattened result is always non-empty.
+            // Reaching here means a runtime bug, not a valid program input.
+            throw new IllegalStateException("[internal] flatMap on NonEmptyList produced an empty result — invariant violated");
         }
         return new MezzeNonEmptyList(result.toArray());
     }

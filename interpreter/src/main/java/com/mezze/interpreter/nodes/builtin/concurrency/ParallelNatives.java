@@ -404,6 +404,11 @@ public final class ParallelNatives {
         } else {
             if (sem != null) {
                 try { sem.acquire(); } catch (InterruptedException e) {
+                    // Thread interrupted mid-join (cancellation). Re-set the
+                    // interrupt flag and propagate the InterruptedException as
+                    // the cause. Kept a plain RuntimeException: routing to
+                    // CancellationException here would change which handlers
+                    // catch it. See report for the recommended follow-up.
                     Thread.currentThread().interrupt();
                     throw new RuntimeException("Parallel.join interrupted", e);
                 }

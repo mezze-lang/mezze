@@ -297,7 +297,10 @@ public final class NativeDispatch extends MezzeNode {
     private static void registerCrashHandler() {
         HANDLERS.put("crash", (r, c) -> {
             String msg = getString(r, "msg");
-            throw new RuntimeException("crash: " + msg);
+            // Deliberate guest-level panic primitive (std `crash`/unhandled
+            // exception, "impossible" branches). Guest-visible fatal —
+            // renders as a clean guest error, never a Java stack trace.
+            throw new MezzeGuestException("crash: " + msg);
         });
     }
 
@@ -3417,7 +3420,7 @@ public final class NativeDispatch extends MezzeNode {
             // Char type is represented as a single-character String
             String charStr = getString(r, "c");
             if (charStr.isEmpty()) {
-                throw new RuntimeException("__native_mut_string_set_char_at: empty string for char");
+                throw new NativeTypeMismatchException("[internal] __native_mut_string_set_char_at: Char value must be a single-character String, got empty");
             }
             mutStr.setCharAt(index, charStr.charAt(0));
             return MezzeRecord.empty();
@@ -3428,7 +3431,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_char_to_mut", (r, c) -> {
             String charStr = getString(r, "c");
             if (charStr.isEmpty()) {
-                throw new RuntimeException("__native_char_to_mut: empty string");
+                throw new NativeTypeMismatchException("[internal] __native_char_to_mut: Char value must be a single-character String, got empty");
             }
             return new MutableChar(charStr.charAt(0));
         });
@@ -3456,7 +3459,7 @@ public final class NativeDispatch extends MezzeNode {
             }
             String vStr = getString(r, "v");
             if (vStr.isEmpty()) {
-                throw new RuntimeException("__native_mut_char_write: empty string");
+                throw new NativeTypeMismatchException("[internal] __native_mut_char_write: Char value must be a single-character String, got empty");
             }
             mutChar.set(vStr.charAt(0));
             return MezzeRecord.empty();

@@ -464,7 +464,11 @@ public final class ConcurrencyNatives {
 
             Object result = callNode.call(v.getCallTarget(), closuresWithArg);
             if (result instanceof Boolean b && !b) {
-                throw new RuntimeException("Atom validator rejected value");
+                // User-reachable: a validator returns False for a swap/reset.
+                // Guest-visible fatal — the Atom API (reset/swap) returns a
+                // bare value, not a Result (see report for the Result-returning
+                // recommendation).
+                throw new MezzeGuestException("Atom: validator rejected the new value");
             }
         }
 
@@ -518,7 +522,7 @@ public final class ConcurrencyNatives {
 
         Object result = callNode.call(validator.getCallTarget(), closuresWithArg);
         if (result instanceof Boolean b && !b) {
-            throw new RuntimeException("Atom validator rejected initial value");
+            throw new MezzeGuestException("Atom: validator rejected the initial value");
         }
 
         return atom;
@@ -846,7 +850,12 @@ public final class ConcurrencyNatives {
         }
 
         public void send(Object value) throws InterruptedException {
-            if (closed) throw new RuntimeException("send on closed channel");
+            // NOTE: this blocking send()/receive() pair is dead — the live
+            // channel path is park-aware (channel.mz → __native_channel_try_send
+            // / __native_channel_try_recv, which return False/None on a closed
+            // channel rather than throwing). Kept as a labeled guest error in
+            // case a future native re-wires the blocking path.
+            if (closed) throw new MezzeGuestException("Channel: send on a closed channel");
             queue.put(value);
         }
 
@@ -959,7 +968,7 @@ public final class ConcurrencyNatives {
             Object inner = rec.getField(i);
             if (inner instanceof MezzeChannel ch) return ch;
         }
-        throw new RuntimeException("No channel found in record");
+        throw new NativeTypeMismatchException("[internal] expected a record containing a channel, found none");
     }
 
     private static MezzeChannel getChannel(MezzeRecord args, String fieldName) {
@@ -1095,7 +1104,11 @@ public final class ConcurrencyNatives {
         public void send(MezzeFunction func, com.oracle.truffle.api.TruffleLanguage.Env env) {
             // Check if agent is in error state
             if (error.get() != null) {
-                throw new RuntimeException("Agent is in error state: " + error.get());
+                // User-reachable: sending to an agent that failed a prior
+                // action. The Agent API exposes has_error/agent_error for
+                // callers to check first; sending to an errored agent is a
+                // documented guest-visible fatal (send returns bare {} <Async>).
+                throw new MezzeGuestException("Agent: cannot send to an agent in error state: " + error.get());
             }
 
             actionQueue.add(new AgentAction(func, env, HandlerChainRegistry.snapshotHandlerChainEntries()));
@@ -1278,7 +1291,7 @@ public final class ConcurrencyNatives {
                 }
             }
         }
-        throw new RuntimeException("STM transaction failed after max retries");
+        throw new MezzeGuestException("STM: transaction failed after max retries (persistent contention)");
     }
 
     /**
@@ -1292,7 +1305,7 @@ public final class ConcurrencyNatives {
      */
     private static void blockUntilReadSetChanged(Transaction txn) {
         if (txn.readSet.isEmpty()) {
-            throw new RuntimeException("STM.retry called with empty read set — would deadlock");
+            throw new MezzeGuestException("STM.retry: called with an empty read set — retry would deadlock (read at least one TVar before retrying)");
         }
 
         Thread self = Thread.currentThread();
@@ -1671,7 +1684,9 @@ public final class ConcurrencyNatives {
         Object cond = getField(args, "cond");
         if (cond instanceof Boolean b && b) return MezzeRecord.empty();
         // Sequential STM has no scheduler to park on — fail loudly.
-        throw new RuntimeException("SequentialSTM.check failed: cond was False (would require blocking)");
+        // Intentionally fatal: SequentialSTM has no scheduler to block on, so
+        // a failed check cannot park-and-retry. Guest-visible fatal.
+        throw new MezzeGuestException("SequentialSTM.check: condition was False and there is no scheduler to block on");
     }
 
     /**
@@ -1725,7 +1740,7 @@ public final class ConcurrencyNatives {
         List<Transaction.ReadEntry> readSet = stmRetryReadSet.get();
         if (readSet == null || readSet.isEmpty()) {
             stmRetryReadSet.remove();
-            throw new RuntimeException("STM.retry called with empty read set — would deadlock");
+            throw new MezzeGuestException("STM.retry: called with an empty read set — retry would deadlock (read at least one TVar before retrying)");
         }
         Thread self = Thread.currentThread();
         for (Transaction.ReadEntry entry : readSet) {
@@ -1777,6 +1792,13 @@ public final class ConcurrencyNatives {
     /** SequentialSTM.retry — no scheduler to park on, always fails. */
     @TruffleBoundary
     public static Object stmSeqRetry(MezzeRecord args) {
+        // NOT a fatal error: this is a control-flow SENTINEL. stmSeqOrElse
+        // (below) catches RuntimeException and routes to its fallback branch
+        // when the message contains "SequentialSTM.retry". It must therefore
+        // stay a RuntimeException with that exact substring — converting it to
+        // a MezzeGuestException (AbstractTruffleException) would bypass that
+        // catch and break SequentialSTM.or_else. See report for the
+        // recommended dedicated-sentinel-type follow-up.
         throw new RuntimeException("SequentialSTM.retry: no scheduler available to block on");
     }
 

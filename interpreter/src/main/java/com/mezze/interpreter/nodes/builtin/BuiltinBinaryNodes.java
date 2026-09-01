@@ -1,6 +1,7 @@
 package com.mezze.interpreter.nodes.builtin;
 
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Fallback;
@@ -131,7 +132,7 @@ public abstract class BuiltinBinaryNodes {
                 long rd = getDenominator(rFrac);
                 return makeFraction(ln * rd + rn * ld, ld * rd);
             }
-            throw new RuntimeException("Cannot add " + l + " and " + r);
+            throw new NativeTypeMismatchException("[internal] operand shape not handled by builtin numeric node — cannot add " + l + " and " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -191,7 +192,7 @@ public abstract class BuiltinBinaryNodes {
                 long rd = getDenominator(rFrac);
                 return makeFraction(ln * rd - rn * ld, ld * rd);
             }
-            throw new RuntimeException("Cannot subtract " + l + " and " + r);
+            throw new NativeTypeMismatchException("[internal] operand shape not handled by builtin numeric node — cannot subtract " + l + " and " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -251,7 +252,7 @@ public abstract class BuiltinBinaryNodes {
                 long rd = getDenominator(rFrac);
                 return makeFraction(ln * rn, ld * rd);
             }
-            throw new RuntimeException("Cannot multiply " + l + " and " + r);
+            throw new NativeTypeMismatchException("[internal] operand shape not handled by builtin numeric node — cannot multiply " + l + " and " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -311,7 +312,7 @@ public abstract class BuiltinBinaryNodes {
                 long rd = getDenominator(rFrac);
                 return makeFraction(ln * rd, ld * rn);
             }
-            throw new RuntimeException("Cannot divide " + l + " and " + r);
+            throw new NativeTypeMismatchException("[internal] operand shape not handled by builtin numeric node — cannot divide " + l + " and " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -361,7 +362,7 @@ public abstract class BuiltinBinaryNodes {
             if (l instanceof Long && r instanceof Double) {
                 return ((Long) l).doubleValue() % (Double) r;
             }
-            throw new RuntimeException("Cannot modulo " + l + " and " + r);
+            throw new NativeTypeMismatchException("[internal] operand shape not handled by builtin numeric node — cannot modulo " + l + " and " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -506,7 +507,7 @@ public abstract class BuiltinBinaryNodes {
             if (l instanceof Double && r instanceof Double) {
                 return (Double) l < (Double) r;
             }
-            throw new RuntimeException("Cannot compare " + l + " < " + r);
+            throw new NativeTypeMismatchException("[internal] operand shape not handled by builtin numeric node — cannot compare " + l + " < " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -549,7 +550,7 @@ public abstract class BuiltinBinaryNodes {
             if (l instanceof Double && r instanceof Double) {
                 return (Double) l > (Double) r;
             }
-            throw new RuntimeException("Cannot compare " + l + " > " + r);
+            throw new NativeTypeMismatchException("[internal] operand shape not handled by builtin numeric node — cannot compare " + l + " > " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -592,7 +593,7 @@ public abstract class BuiltinBinaryNodes {
             if (l instanceof Double && r instanceof Double) {
                 return (Double) l <= (Double) r;
             }
-            throw new RuntimeException("Cannot compare " + l + " <= " + r);
+            throw new NativeTypeMismatchException("[internal] operand shape not handled by builtin numeric node — cannot compare " + l + " <= " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -635,7 +636,7 @@ public abstract class BuiltinBinaryNodes {
             if (l instanceof Double && r instanceof Double) {
                 return (Double) l >= (Double) r;
             }
-            throw new RuntimeException("Cannot compare " + l + " and " + r);
+            throw new NativeTypeMismatchException("[internal] operand shape not handled by builtin numeric node — cannot compare " + l + " and " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {

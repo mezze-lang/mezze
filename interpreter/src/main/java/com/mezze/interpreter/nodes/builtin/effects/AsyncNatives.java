@@ -427,7 +427,17 @@ public final class AsyncNatives {
             return getResultOrThrow(o);
         }
 
-        /** Legacy throwing accessor. `o` must be a non-pending Outcome. */
+        /**
+         * Legacy throwing accessor. `o` must be a non-pending Outcome.
+         *
+         * The live await path is `__native_promise_await_result`, which
+         * returns a Mezze `Result 'a AsyncError` (see async.mz). These
+         * throws are the legacy blocking accessor's failure propagation and
+         * deliberately keep the original {@link Throwable} as the cause —
+         * so they stay a plain RuntimeException (MezzeGuestException has no
+         * cause-carrying constructor). See report for the recommended
+         * cause-carrying-guest-exception follow-up.
+         */
         private Object getResultOrThrow(Object o) {
             if (o instanceof CompletedOutcome c) return c.value;
             if (o instanceof FailedOutcome f) {
@@ -1147,7 +1157,9 @@ public final class AsyncNatives {
             case MezzePromise.COMPLETED -> promiseStateCompleted(p.snapshotResult());
             case MezzePromise.FAILED    -> promiseStateFailed(asyncErrorFromResult(p.snapshotResult()));
             case MezzePromise.CANCELLED -> promiseStateFailed(createAsyncCancelled(p.getCancelReason()));
-            default -> throw new RuntimeException("MezzePromise: unknown state " + state);
+            // Internal invariant: `state` is one of exactly four snapshot
+            // constants; any other value is a runtime bug, not a program input.
+            default -> throw new IllegalStateException("[internal] MezzePromise: unknown snapshot state " + state);
         };
     }
 
@@ -1359,7 +1371,11 @@ public final class AsyncNatives {
                 }
                 throw new EffectHandlerDriver.TaskUnhandledOpException(pending);
             }
-            throw new RuntimeException(
+            // User-reachable: a spawned task performed an effect operation
+            // that no handler at the await site can discharge. Guest-visible
+            // fatal — an unhandled effect, consistent with the language's
+            // unhandled-effect semantics.
+            throw new MezzeGuestException(
                 "Spawned task raised effect operation '" + pending.opName()
                 + "' with no handler available at await site.");
         }
