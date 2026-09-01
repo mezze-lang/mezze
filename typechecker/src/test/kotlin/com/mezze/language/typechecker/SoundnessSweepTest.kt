@@ -319,13 +319,59 @@ class SoundnessSweepTest {
      * from the typechecker unit is out of scope; the fix (reject a concrete
      * residual effect on the entry decl's function-type row) is a separate ticket.
      */
-    @Disabled("S7.3 FINDING #1: unhandled entry-point effect type-checks but crashes at runtime — fix in a follow-up ticket")
+    // #377 FIX: the entry point's residual return effect row is now validated for
+    // a concrete undischarged USER effect. Oracle is user-declared with no
+    // handler, so `main`'s residual `<Oracle, *>` is rejected at type-check
+    // instead of crashing at runtime.
     @Test fun entryUnhandledEffectHole_S7_3_FINDING() = rejects(
         """
         effect Oracle where { ask: {} -> Int <Oracle> }
         let main = {} -> do
             let n = Oracle.ask {}
             n + 1
+        """.trimIndent(),
+        contains = "Oracle"
+    )
+
+    // #377: an effectful entry that HANDLES its effect (perform Performer in ...)
+    // leaves NO concrete undischarged effect on the residual row → ACCEPTED.
+    @Test fun `entry that handles its user effect is accepted (hash-377)`() = accepts(
+        """
+        effect Oracle where { ask: {} -> Int <Oracle> }
+        impl Oracle for MyOracle where {
+          ask : {} -> Int = {} -> resume {val = 42}
+        }
+        let main = {} -> perform MyOracle in do
+            let n = Oracle.ask {}
+            n + 1
+        """.trimIndent()
+    )
+
+    // #377: wrong-handler variant — main handles Beta but performs Oracle; the
+    // residual row still carries the undischarged Oracle → REJECTED.
+    @Test fun `entry with wrong handler leaves undischarged user effect rejected (hash-377)`() = rejects(
+        """
+        effect Oracle where { ask: {} -> Int <Oracle> }
+        effect Beta where { poke: {} -> Int <Beta> }
+        impl Beta for MyBeta where {
+          poke : {} -> Int = {} -> resume {val = 7}
+        }
+        let main = {} -> perform MyBeta in do
+            let n = Oracle.ask {}
+            n + 1
+        """.trimIndent(),
+        contains = "Oracle"
+    )
+
+    // #377 GUARD (no over-rejection): a non-entry library fn may mention a user
+    // effect in its signature — its caller discharges it. Only `main` is gated.
+    @Test fun `non-entry fn mentioning a user effect is accepted (hash-377)`() = accepts(
+        """
+        effect Oracle where { ask: {} -> Int <Oracle> }
+        let ask_twice = {} -> do
+            let a = Oracle.ask {}
+            let b = Oracle.ask {}
+            a + b
         """.trimIndent()
     )
 }
