@@ -14,20 +14,27 @@ interface Props {
   code?: string
   /** Shown in the output pane before the runtime is up. */
   placeholder?: string
+  /**
+   * Lock the source. The snippet still runs and checks, but the reader cannot
+   * change it — for places where the text around it describes the exact code
+   * on screen and an edit would make the prose wrong. Format is hidden too,
+   * since there is nothing to reformat.
+   */
+  readonly?: boolean
 }
-const { code = '', placeholder = 'Waiting for the Mezze runtime…' } = Astro.props
+const { code = '', placeholder = 'Waiting for the Mezze runtime…', readonly = false } = Astro.props
 ---
-<div class="ed" data-editor>
+<div class:list={["ed", readonly && "ed-readonly"]} data-editor>
   <div class="ed-bar">
     <button data-act="run" disabled>Run</button>
     <button data-act="check" disabled>Check</button>
-    <button data-act="fmt" disabled>Format</button>
+    {!readonly && <button data-act="fmt" disabled>Format</button>}
     <span class="ed-status">loading runtime…</span>
   </div>
   <div class="ed-editor">
     <pre class="ed-hl" aria-hidden="true"><code class="ed-code"></code></pre>
     <textarea class="ed-src" spellcheck="false" autocomplete="off"
-              autocorrect="off" autocapitalize="off">{code}</textarea>
+              autocorrect="off" autocapitalize="off" readonly={readonly}>{code}</textarea>
   </div>
   <pre class="ed-out">{placeholder}</pre>
 </div>
@@ -50,13 +57,37 @@ const { code = '', placeholder = 'Waiting for the Mezze runtime…' } = Astro.pr
   .ed:hover .ed-src, .ed:hover .ed-hl, .ed:hover .ed-out { scrollbar-color: color-mix(in srgb, var(--soft) 45%, transparent) transparent; }
 
   .ed { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--panel); }
-  .ed-bar { display: flex; align-items: center; gap: .5rem; padding: .55rem .75rem; border-bottom: 1px solid var(--rule); flex: none; }
+  /* Wraps: three buttons plus the status text do not fit a phone's width, and
+     an unwrapped row pushed "loading runtime…" off the edge — exactly the
+     message that explains why the buttons are not usable yet. */
+  .ed-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .55rem .75rem; border-bottom: 1px solid var(--rule); flex: none; }
   .ed-bar button { font: inherit; font-size: .88rem; padding: .25rem .85rem; border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--rule)); border-radius: 5px; background: var(--ground); color: var(--primary); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
   .ed-bar button:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 10%, var(--ground)); border-color: var(--primary); }
   .ed-bar button[data-act="run"] { background: var(--primary); border-color: var(--primary); color: var(--on-primary); font-weight: 600; }
   .ed-bar button[data-act="run"]:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 86%, #000); }
-  .ed-bar button:disabled { opacity: .45; cursor: default; }
+  /* Not just faded: pointer-events off so a tap cannot land on a control that
+     does nothing yet. On a phone there is no hover to reinforce the state and
+     .45 alpha reads as "dim", not "off", so the greying is stronger too and
+     the button loses its accent colour while the runtime is still arriving. */
+  .ed-bar button:disabled {
+    opacity: .38;
+    cursor: default;
+    pointer-events: none;
+    background: var(--ground);
+    border-color: var(--rule);
+    color: var(--soft);
+  }
+  .ed-bar button[data-act="run"]:disabled {
+    background: var(--ground);
+    border-color: var(--rule);
+    color: var(--soft);
+  }
   .ed-status { margin-left: auto; font-size: .8rem; color: var(--soft); }
+  /* Once the bar wraps, margin-left:auto would strand the status on its own
+     line hard right. Let it sit under the buttons instead. */
+  @media (max-width: 460px) {
+    .ed-status { margin-left: 0; width: 100%; }
+  }
 
   /* min-height holds the panel open so switching tabs does not resize it.
      Sized to the longest sample. Without it, every sample had to be padded

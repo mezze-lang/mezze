@@ -27,7 +27,7 @@
 }
 .post .back:hover { color: var(--c); }
 .post-head { padding: 0 0 1.6rem; border-bottom: 1px solid var(--rule); margin-bottom: 1.8rem; }
-.post-body { max-width: 40rem; padding-bottom: 3rem; line-height: 1.75; }
+.post-body { max-width: 46rem; padding-bottom: 3rem; line-height: 1.75; }
 .post-body h2 { margin: 2.2rem 0 .7rem; font-size: 1.22rem; font-weight: 700; }
 .post-body h3 { margin: 1.8rem 0 .6rem; font-size: 1.02rem; font-weight: 700; }
 .post-body p { margin: 0 0 1.05rem; }
@@ -49,16 +49,55 @@
   border-left: 3px solid var(--c); color: var(--soft);
 }
 
-/* A live editor embedded in a post. Fixed height: it sits in prose, so it
-   should not grow with the code the reader types into it. */
-/* Sized like the Taste page rather than a thumbnail: the output pane is a
-   fixed 9.5rem, so a 22rem box left only ~10rem for code and every sample
-   scrolled from the first line. Break out of the prose column too — a full
-   editor needs more width than a measure tuned for reading. */
+/* A live editor embedded in a post, sharing the prose measure so the left and
+   right edges line up with the paragraphs around it. Code does not wrap the
+   way text does, but the widest line in a post snippet is around 55 characters
+   and 46rem holds about 85, so nothing here needs to break out of the column. */
 .post-editor {
-  height: 34rem; margin: 0 0 1.8rem; display: flex;
-  width: min(100%, 62rem);
+  margin: 0 0 1.8rem; display: flex;
+  width: min(100%, 46rem);
 }
-@media (max-width: 760px) {
-  .post-editor { height: 30rem; }
+
+/* A post snippet is short and known at build time, so the code pane is sized
+   to exactly the lines it holds rather than to a fixed box. The 21-line floor
+   Editor.astro sets for the landing page (where tabs must not resize as you
+   switch) would strand a 6-line snippet in a mostly empty panel.
+
+   --h is a starting height rendered from the source's line count, then
+   replaced with an exact measurement once the editor mounts and can see how
+   the text actually wraps. */
+.post-editor .ed-editor {
+  min-height: 0;
+  height: var(--h, 20rem);
 }
+
+/* The output pane keeps its own room. Squeezing it to fit the code was the
+   wrong trade: the code is fixed and known, the output is what the reader
+   pressed Run to see. */
+.post-editor .ed-out { height: auto; min-height: 5.5rem; max-height: 16rem; }
+
+/* Static Mezze snippets. Shiki has no Mezze grammar and relabels unknown
+   languages as plaintext, so these come through a marker comment and are
+   highlighted with the same tokenizer the live editor uses. Styled to match
+   the editor's code pane so a snippet you can run and one you cannot look
+   like the same language. */
+.mezze-static {
+  /* Same measure as .post-editor and the prose, so every block on the page
+     shares one left and right edge. */
+  width: min(100%, 46rem);
+  margin: 0 0 1.6rem;
+  padding: .9rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: .84rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: var(--ink);
+}
+
+/* A locked snippet has no caret and no Format button, so it should not look
+   like a field waiting for input. */
+.ed-readonly .ed-src { cursor: default; }

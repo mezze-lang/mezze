@@ -1,0 +1,77 @@
+---
+/** One post. Renders the Markdown body inside the shared prose styles. */
+import { posts } from '../../lib/posts'
+import Base from '../../layouts/Base.astro'
+import { applyMarkup } from '../../lib/markup'
+import { highlight } from '../../lib/highlight'
+import Editor from '../../components/Editor.astro'
+
+export async function getStaticPaths() {
+  return (await posts()).map((post) => ({ params: { id: post.id }, props: { post } }))
+}
+
+const { post } = Astro.props
+// The collection keeps the rendered HTML, so the site inline syntax can be
+// applied to it before it goes onto the page.
+const withMezzeStatic = (html: string) =>
+  // Static Mezze snippets use a marker comment, not a ```mezze fence.
+  // Shiki claims every fence and relabels an unknown language as plaintext,
+  // so by the time the HTML exists a Mezze fence is indistinguishable from a
+  // genuine plaintext one. A comment passes through Markdown untouched, which
+  // is the same reason mezze-editor uses one.
+  html.replace(/<!--mezze-code\s*([\s\S]*?)-->/g, (_m, body) =>
+    `<pre class="mezze-static"><code>${highlight(body.trim())}</code></pre>`)
+
+const rendered = withMezzeStatic(applyMarkup(post.rendered?.html ?? ''))
+
+/**
+ * A post can ask for a running editor by tagging a fence `mezze-live`. The
+ * body is raw HTML, so a component cannot go inside it — the marker is split
+ * out here and the Editor rendered between the halves.
+ */
+// A post asks for a live editor with an HTML comment holding the source:
+//
+//   <!--mezze-editor
+//   let main = {} -> 1
+//   -->
+//
+// A comment rather than a fenced block because Markdown passes comments through
+// untouched, while Shiki claims every fence — it rewrote a `mezze-live` fence
+// into styled spans and relabelled it `plaintext`, discarding the marker, so
+// there was nothing left to key on.
+const MARKER = /<!--mezze-editor\s*([\s\S]*?)-->/g
+
+// A post may hold ANY number of editors, so the body is split into an
+// alternating list of prose and code rather than a single before/after pair.
+// The previous version used a non-global match and only ever rendered the
+// first one; later markers were left in the page as raw text.
+type Part = { kind: 'html'; value: string } | { kind: 'editor'; value: string }
+const parts: Part[] = []
+let cursor = 0
+for (const m of rendered.matchAll(MARKER)) {
+  if (m.index! > cursor) parts.push({ kind: 'html', value: rendered.slice(cursor, m.index) })
+  parts.push({ kind: 'editor', value: m[1].trim() })
+  cursor = m.index! + m[0].length
+}
+if (cursor < rendered.length) parts.push({ kind: 'html', value: rendered.slice(cursor) })
+
+const fmt = (d: Date) =>
+  d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+---
+<Base title={`${post.data.title} — Mezze`} description={post.data.blurb}>
+  <article class="page post" style={post.data.colour ? `--c: var(--${post.data.colour})` : undefined}>
+    <a class="back" href="/blog">← Blog</a>
+    <header class="post-head">
+      <time datetime={post.data.date.toISOString()}>{fmt(post.data.date)}</time>
+      <h1>{post.data.title}</h1>
+      <p class="lede">{post.data.blurb}</p>
+    </header>
+    {parts.map((part) =>
+      part.kind === 'html'
+        ? <div class="post-body" set:html={part.value} />
+        : <div class="post-editor" style={`--h: calc(${part.value.split('\n').length} * 1.6 * .84rem + 1.8rem)`}>
+            <Editor code={part.value} />
+          </div>
+    )}
+  </article>
+</Base>

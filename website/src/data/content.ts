@@ -23,7 +23,7 @@ export const site = {
   tagline: 'A functional language with first class effects running on GraalVM.',
   nav: [
     { label: 'Taste', href: '/taste' },
-    { label: 'Dev Blog', href: '/dev-blog' },
+    { label: 'Blog', href: '/blog' },
   ],
 }
 

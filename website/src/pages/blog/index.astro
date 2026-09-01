@@ -8,10 +8,10 @@ const entries = await posts()
 const fmt = (d: Date) =>
   d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 ---
-<Base title="Dev Blog — Mezze" description="Notes on building Mezze.">
+<Base title="Blog — Mezze" description="Notes on building Mezze.">
   <div class="page blog-index">
     <header class="blog-head">
-      <h1>Dev Blog</h1>
+      <h1>Blog</h1>
       <p class="lede">Notes on building the language.</p>
     </header>
 
@@ -20,7 +20,7 @@ const fmt = (d: Date) =>
     <ul class="post-list">
       {entries.map((p) => (
         <li class="post-card" style={p.data.colour ? `--c: var(--${p.data.colour})` : undefined}>
-          <a href={`/dev-blog/${p.id}`}>
+          <a href={`/blog/${p.id}`}>
             <time datetime={p.data.date.toISOString()}>{fmt(p.data.date)}</time>
             <h2>{p.data.title}</h2>
             <p>{p.data.blurb}</p>
@@ -37,5 +37,5 @@ const fmt = (d: Date) =>
   import { prewarmMezze } from '../../scripts/mezze-runtime'
   // A post may embed an editor, so aiming at one is a signal of intent — as is
   // aiming at the taste from the nav.
-  prewarmMezze('a[href^="/taste"], a[href^="/dev-blog/"]')
+  prewarmMezze('a[href^="/taste"], a[href^="/blog/"]')
 </script>

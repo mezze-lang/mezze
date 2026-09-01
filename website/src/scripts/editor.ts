@@ -69,12 +69,61 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     }
   }
 
+
+  // .ed-hl/.ed-src carry .9rem of padding top and bottom; codeEl measures the
+  // text alone, so the padding is added back here.
+  const BASE_PX = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+  const PANE_PAD_PX = 1.8 * BASE_PX
+  const LEADING_PX = 2
+
+  /**
+   * Keep --lines in step with the source.
+   *
+   * Where a host sizes the code pane from its line count (posts do; the
+   * landing page does not, since its tabs must not resize as you switch),
+   * typing past the original last line would otherwise start scrolling a
+   * pane the reader can see the bottom of. Growing the box instead keeps
+   * the whole snippet visible, which is the point of an editor sitting in
+   * the middle of prose.
+   */
+  const sizeToContent = () => {
+    const host = root.closest<HTMLElement>('[style*="--h"]')
+    if (!host) return
+    // Measure the rendered text rather than counting source lines. The panes
+    // wrap (white-space: pre-wrap), so on a narrow screen a 56-char line takes
+    // two rows or more; counting "\n" undercounts the height and the pane
+    // scrolls even though it was sized to fit.
+    //
+    // Measure codeEl, NOT preEl or srcEl: both of those are absolutely
+    // positioned at inset 0, so their scrollHeight is capped by the very box
+    // this is computing. Reading them lets the height shrink but never grow,
+    // which left the pane scrolling after Format made the source taller.
+    //
+    // Set the pixel height straight from the measurement. Converting to a row
+    // count and letting CSS multiply it back rounded twice, and a pane a
+    // fraction of a line short still shows a scrollbar with nothing to scroll.
+    // ceil covers the sub-pixel remainder, and LEADING_PX covers the half-leading
+    // the browser puts below the final line box. codeEl's rect stops at the
+    // text; the pane's scroll height does not, so without this every editor
+    // ends up about two pixels short and shows a scrollbar with nothing in it.
+    const h = Math.ceil(codeEl.getBoundingClientRect().height + PANE_PAD_PX + LEADING_PX)
+    host.style.setProperty('--h', h + 'px')
+  }
+
   srcEl.addEventListener('input', () => {
     paint()
+    sizeToContent()
     clearTimeout(liveTimer)
     liveTimer = window.setTimeout(liveCheck, LIVE_CHECK_MS)
   })
   srcEl.addEventListener('scroll', syncScroll)
+
+  // Wrapping depends on the pane's width, so a rotation or a window drag
+  // changes how many rows the same source needs. Without this the pane keeps
+  // the height it was given at the old width.
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => sizeToContent()).observe(root)
+  }
   // Leaving the editor is a natural point to validate: the reader has stopped
   // typing, and it costs a typecheck rather than a run.
   // Leaving the editor is the moment to say what is wrong. While typing,
@@ -293,6 +342,15 @@ export function mountEditor(root: HTMLElement): EditorHandle {
 
   /** Disables the controls for the duration, since the call is synchronous. */
   const act = (fn: () => void) => () => {
+    // The disabled attribute is not the only gate. A tap can still reach a
+    // button that was enabled a frame earlier, or that moved under the finger
+    // while the pane resized during load, and every action calls straight into
+    // window.runMezze/checkMezze/formatMezze. Before the runtime lands those
+    // are undefined, so the click surfaced as "Internal error: TypeError".
+    if (!ready) {
+      show('The Mezze runtime is still loading.')
+      return
+    }
     btns.forEach((b) => (b.disabled = true))
     show('working…')
     // Yield first so the DOM repaints before the wasm call blocks.
@@ -318,6 +376,11 @@ export function mountEditor(root: HTMLElement): EditorHandle {
       hideTip()
       srcEl.value = String(window.formatMezze!(srcEl.value, editorCols()))
       paint()
+      // Formatting rewrites the source, so the row count changes — it wraps to
+      // the pane width, which on a narrow screen is a very different shape from
+      // what the author wrote. Without this the pane keeps its old height and
+      // starts scrolling.
+      sizeToContent()
       show('Formatted.', 'ok')
     },
   }
@@ -325,6 +388,10 @@ export function mountEditor(root: HTMLElement): EditorHandle {
 
   // ---- runtime ----------------------------------------------------------
   paint()
+  // Size from the first paint, so a snippet whose lines wrap on a narrow
+  // screen opens at the height it actually needs instead of scrolling until
+  // the reader types or rotates.
+  sizeToContent()
   loadMezze()
     .then((rt) => {
       ready = true
@@ -350,6 +417,7 @@ export function mountEditor(root: HTMLElement): EditorHandle {
       hideTip()
       srcEl.value = code
       paint()
+      sizeToContent()
       show(ready ? 'Ready. Press Run.' : 'Loading the compiler…')
     },
     show,
