@@ -8,7 +8,6 @@ import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
-import com.mezze.language.typechecker.util.NameFallbackProbe
 import com.mezze.language.typechecker.util.StringDistance
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import com.mezze.language.parsedast.*
@@ -94,7 +93,6 @@ internal fun identityVerdict(id1: TypeIdentity, id2: TypeIdentity): IdentityVerd
         // ALLOWED: a Builtin's reserved name IS its identity (List/Map/Bool have no
         // content hash). Comparing the reserved kind name is the identity decision,
         // not a name-fallback. See project no_name_string_dispatch_ever.
-        NameFallbackProbe.allowed("identityVerdict/Builtin") { "${id1.name} vs ${id2.name}" }
         if (id1.name == id2.name) IdentityVerdict.SAME else IdentityVerdict.DISTINCT
     }
     id1 is TypeIdentity.Anonymous && id2 is TypeIdentity.Anonymous ->
@@ -402,7 +400,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
                     // identity available — there is no hash on both sides to key on.
                     // This never overrides an available both-hash decision (the first
                     // arm handles that authoritatively).
-                    NameFallbackProbe.allowed("unifyNewtype/hashlessName") { "${type1.name} vs ${type2.name}" }
                     type1.name == type2.name
                 }
             }
@@ -926,17 +923,6 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
     // sameDeclaredIdentity clause carries it and the name is redundant.
     val nameMatched = app1.constructor == app2.constructor
     val declMatched = sameDeclaredIdentity(app1.identity, app2.identity)
-    if (nameMatched && !declMatched) {
-        val bothDeclared = app1.identity is TypeIdentity.Declared && app2.identity is TypeIdentity.Declared
-        // If both were Declared, either the hashes were equal (declMatched would be
-        // true) or unequal (DISTINCT veto returned already). So reaching here with a
-        // name-only match means at least one side is hashless — ALLOWED.
-        if (bothDeclared) {
-            NameFallbackProbe.forbidden("unifyTypeApp/nameDecidesOverHash") { "${app1.constructor} vs ${app2.constructor}" }
-        } else {
-            NameFallbackProbe.allowed("unifyTypeApp/hashlessNameMatch") { "${app1.constructor} vs ${app2.constructor}" }
-        }
-    }
     val constructorsMatch = nameMatched || declMatched
     if (!constructorsMatch) {
         val expanded1 = expandTypeApplicationToVariant(app1, registry)

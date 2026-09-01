@@ -8,7 +8,6 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.util.receiverTypeName as resolveReceiverTypeName
-import com.mezze.language.typechecker.util.NameFallbackProbe
 
 internal fun ExpressionConstraintGenerator.stripReceiverFromMethodType(methodType: MezzeType, receiverTypeVar: MezzeType.VarType): MezzeType {
     if (methodType !is MezzeType.FunctionType) return methodType
@@ -313,7 +312,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             // impl registry's name-labeled targetTypes, and only when the survivor
             // set is non-empty — a downstream AbilityRequired constraint then
             // validates. Not a terminal identity/dispatch decision by name.
-            NameFallbackProbe.allowed("abilityNarrow/implTargetName") { receiverTypeName }
             val implMatches = filteredMatchingAbilities.filter { (abilityName, _) ->
                 context.typingContext.getAbilityImpls(abilityName)
                     .any { receiverTypeName in it.targetTypes }
@@ -941,11 +939,6 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             // candidate is hashless — a builtin/scalar target). If the receiver DID
             // carry a hash but the candidate didn't (or vice versa), that is a
             // hashless-side fallback, not a name overriding an available hash match.
-            if (receiverTypeHash != null && cand.targetTypeHash != null) {
-                NameFallbackProbe.forbidden("candidateMatchesReceiver/nameDecidesOverHash") { "$receiverTypeName vs ${cand.targetTypeName}" }
-            } else {
-                NameFallbackProbe.allowed("candidateMatchesReceiver/hashlessName") { "$receiverTypeName vs ${cand.targetTypeName}" }
-            }
             return cand.targetTypeName == receiverTypeName
         }
         return true
@@ -972,7 +965,6 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         // have, so a name match is the correct fallback here. This arm is guarded by
         // `receiverTypeHash == null` above — a hash-carrying receiver NEVER reaches
         // here (it resolves by hash and stops), so the name never overrides a hash.
-        NameFallbackProbe.allowed("multiCandidateDispatch/hashlessName") { "$receiverTypeName" }
         inherentMethods.firstOrNull { it.targetTypeName == receiverTypeName }
     } else {
         // No receiver identity at all — neither a hash nor a name. Picking the

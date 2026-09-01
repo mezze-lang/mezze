@@ -460,11 +460,10 @@ class ModuleResolver(
         )
         
         deprecatedModules[modulePath]?.let { suggestion ->
-            // For now, just print a warning. In strict mode, we could throw an error.
-            if (System.getProperty("mezze.migration.warnings", "true") == "true") {
-            }
-            
-            // In strict migration mode, throw an error
+            // Reviewed in #380 and intentionally retained: `mezze.migration.strict`
+            // still gates a live behaviour — turning an import of a now-built-in core
+            // module into a hard DeprecatedCoreModule error (off by default; warn-only
+            // otherwise). The dead empty `mezze.migration.warnings` branch was removed.
             if (System.getProperty("mezze.migration.strict", "false") == "true") {
                 throw ModuleError.DeprecatedCoreModule(modulePath, suggestion)
             }

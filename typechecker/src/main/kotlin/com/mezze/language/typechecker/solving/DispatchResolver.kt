@@ -11,7 +11,6 @@ import com.mezze.language.typechecker.constraints.Resolution
 import com.mezze.language.typechecker.constraints.ResolutionCandidate
 import com.mezze.language.typechecker.constraints.ResolutionKind
 import com.mezze.language.typechecker.context.TypingContext
-import com.mezze.language.typechecker.util.NameFallbackProbe
 import com.mezze.language.typechecker.util.declaredHashOf
 import com.mezze.language.typechecker.util.receiverTypeName
 import com.mezze.language.typedast.Hash
@@ -272,7 +271,6 @@ object DispatchResolver {
                 // declaredHashOf(receiver) == null — a hashless builtin/scalar whose
                 // reserved name IS its identity. A hash-carrying receiver becomes
                 // ByHash and never reaches this arm, so the name never overrides a hash.
-                NameFallbackProbe.allowed("dispatchResolver/pickInherentByName") { key.name }
                 inherent.filter { it.displayName == key.name }
             }
         }

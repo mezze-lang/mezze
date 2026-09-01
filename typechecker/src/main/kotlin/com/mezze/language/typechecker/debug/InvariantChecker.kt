@@ -97,15 +97,6 @@ object InvariantChecker {
     }
 
     /**
-     * S0.2 probe (warn-only, measurement phase). Reports emitted constraint-result
-     * types that still contain a bare VarType, so we can distinguish LEGITIMATE
-     * polymorphism (`let id = {x} -> x` : `'a -> 'a`, a fine generalized type) from
-     * a genuinely UNRESOLVED receiver that will mis-dispatch downstream (the
-     * "defaults to Bytes" class). This does NOT throw — enabling it as a hard
-     * invariant requires first characterising which VarTypes are expected. Gated
-     * behind `mezze.invariants.probe=true` so it never affects the normal gate.
-     */
-    /**
      * S4.2 (#362) — EFFECT-CONSERVATION invariant.
      *
      * "A decl's emitted function-type effect set ⊇ the set of effects actually
@@ -237,25 +228,9 @@ object InvariantChecker {
         return out
     }
 
-    fun probeUnresolvedVars(
-        constraintResults: Map<String, ConstraintResult>,
-        phase: String,
-    ) {
-        if (System.getProperty("mezze.invariants.probe", "false") != "true") return
-        for ((key, result) in constraintResults) {
-            val vars = collectFreeTypeVars(result.type)
-            if (vars.isNotEmpty()) {
-                System.err.println(
-                    "[invariant-probe $phase] '$key' emitted type has ${vars.size} free var(s): " +
-                    vars.joinToString(", ") { it.name } + "  ::  ${result.type}"
-                )
-            }
-        }
-    }
-
     /**
-     * S0.2 (#351) — NO-UNRESOLVED-DISPATCH-VAR invariant. Promotes the warn-only
-     * [probeUnresolvedVars] into a hard gate, with the ONE precise distinction the
+     * S0.2 (#351) — NO-UNRESOLVED-DISPATCH-VAR invariant. A hard gate, with the ONE
+     * precise distinction the
      * post-solve single-pass dispatch (S2.1–S2.3) finally makes expressible.
      *
      * WHAT IS AND ISN'T A DISPATCH POSITION. The dispatch positions this invariant
