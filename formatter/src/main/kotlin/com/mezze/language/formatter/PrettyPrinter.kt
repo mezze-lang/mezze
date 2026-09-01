@@ -865,16 +865,44 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
         append("do")
         newLine()
         indent {
+            var prevEndLine: Int? = null
             for (stmt in expr.statements) {
+                // Preserve the author's blank lines between statements. Measured
+                // to the top of this statement's comment block, so a comment
+                // sitting directly above a statement is not miscounted as a gap.
+                if (prevEndLine != null && authorLeftBlankLineBefore(prevEndLine, stmt.leadingComments, stmt.loc)) newLine()
                 printStatementComments(stmt)
                 printIndent()
                 printStatement(stmt)
                 stmt.trailingComment?.let { append("  "); append(it.text) }
                 newLine()
+                prevEndLine = stmt.loc.endLine
             }
+            if (prevEndLine != null &&
+                authorLeftBlankLineBefore(prevEndLine, expr.resultLeadingComments, expr.result.loc)) newLine()
+            // Comments written above the block's final expression. The result
+            // is not a ParsedStatement, so it does not go through
+            // printStatementComments — without this they are dropped.
+            printInBlockComments(expr.resultLeadingComments, null, null)
             printIndent()
             printExpr(expr.result)
         }
+    }
+
+    /**
+     * Did the author leave a blank line before this in-block node? Measured
+     * from [prevEndLine] to the top of the node's block — its first leading
+     * comment if it has one, else the node itself — so a comment directly
+     * above a statement is not mistaken for a gap. Mirrors
+     * [authorLeftBlankLine] for top-level decls.
+     */
+    private fun authorLeftBlankLineBefore(
+        prevEndLine: Int,
+        leadingComments: List<ParsedComment>,
+        loc: Loc,
+    ): Boolean {
+        val top = leadingComments.minOfOrNull { it.loc.startLine } ?: loc.startLine
+        return top - prevEndLine >= 2
     }
 
     private fun printStatementComments(stmt: ParsedStatement) =

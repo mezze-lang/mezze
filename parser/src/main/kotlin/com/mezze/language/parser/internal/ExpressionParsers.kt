@@ -967,6 +967,7 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                 val statements = mutableListOf<ParsedStatement>()
                 var currentStream = stream1
                 var finalResult: Pair<ParsedExpr, TokenStream>? = null
+                var finalResultComments: List<ParsedComment> = emptyList()
                 var lastStatementWasLet = false
                 var lastLetName: String? = null
                 // Position of the `let` keyword of the last statement, so the
@@ -1161,6 +1162,11 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                     // here bled the decl loc onto the next line's comment, which
                                     // the trailing-comment heuristic then mis-stole.
                                     finalResult = Pair(expr.value, expr.remaining)
+                                    // The comments collected for THIS iteration belong to the
+                                    // result expression. ParsedDo.result is a bare ParsedExpr
+                                    // with no comment fields, so without carrying them here the
+                                    // formatter has nothing to print and silently drops them.
+                                    finalResultComments = stmtAnnotations.regularComments
                                 }
                             }
                             is ParseResult.Failure -> {
@@ -1187,7 +1193,8 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                         endLine = resultLoc.endLine, endCol = resultLoc.endCol,
                     )
                     ParseResult.Success(
-                        ParsedDo(statements, finalResult.first, loc = doLoc),
+                        ParsedDo(statements, finalResult.first, loc = doLoc,
+                            resultLeadingComments = finalResultComments),
                         finalResult.second
                     )
                 } else if (fatalFailure != null) {

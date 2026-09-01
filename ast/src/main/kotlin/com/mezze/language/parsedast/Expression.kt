@@ -254,7 +254,15 @@ data class ParsedIfLetGuard(
 data class ParsedDo(
     val statements: List<ParsedStatement>,
     val result: ParsedExpr,
-    override val loc: Loc
+    override val loc: Loc,
+    /**
+     * Comments written above the block's final expression. The result is a
+     * bare [ParsedExpr] with no comment fields of its own, so without this
+     * they had nowhere to live and the formatter silently deleted them.
+     * Not hashed — comments never affect a decl's content hash, matching
+     * how [ParsedStatement] comments are treated.
+     */
+    val resultLeadingComments: List<ParsedComment> = emptyList(),
 ) : ParsedExpr
 
 @Serializable
