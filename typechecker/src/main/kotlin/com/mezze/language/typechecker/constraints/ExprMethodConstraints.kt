@@ -533,6 +533,31 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     // mono runs, it walks `TypedCall.instantiation.typeArgs` and
     // substitutes each TyVar via the specialization's substitution map —
     // the body must thread the same TyVar identity through.
+    // S9 (#374) — INTENTIONAL BOUNDARY, analyzed not overlooked. Unlike inherent
+    // dispatch (unified post-solve into DispatchResolver in S2), ability dispatch
+    // is DELIBERATELY generated here at gen-time. Two facts make relocating it
+    // pointless AND unsafe:
+    //   1. This branch does NOT pick a concrete impl. It emits the AbilityRequired
+    //      + AssociatedTypeResolution constraints above; the actual ability→impl
+    //      resolution is ALREADY post-solve — ConstraintSolver/AbilityChecker
+    //      resolve them keyed by (abilityName, primaryTypeVar.id), and the
+    //      interpreter dispatches the op by hash on the class-arg tuple at runtime.
+    //      So the "decide dispatch once, post-solve" property S7.1 proves for
+    //      inherent ALREADY holds for abilities — via a different, equally
+    //      post-solve mechanism, not via MethodCallInfo.
+    //   2. This MethodCallInfo carries NO dispatch decision for emit to consume:
+    //      methodHash=null and isInherentMethod=false, so TypedAstBuilder's ability
+    //      arm takes neither the ByHash nor the inherent-impl path — it builds an
+    //      ordinary field access (buildExpr(expr.function)). Emit reads only
+    //      receiverFieldName (always `it`) and typeArgs (the mono TyVar thread,
+    //      #218). abilityName is never read by emit. There is no MethodCallInfo to
+    //      "rebuild post-solve" — moving the PICK gains no deletion (the #358
+    //      finding), and the fresh-tyvar / constraint-graph context that produces
+    //      the AbilityRequired constraints exists ONLY at gen time.
+    // Same-op ability collisions (e.g. Sized.size vs SizedMut.size) are decided by
+    // the call's EFFECT signature / annotation, NOT by receiver type identity —
+    // DispatchResolver.resolveBucket explicitly DEFERS them (records no Resolution)
+    // for exactly this reason. Keep this boundary.
     val methodCallTypeArgs: List<MezzeType> = listOf(receiverConstraintType)
     val methodCallInfo = ConstraintResult.MethodCallInfo(
         abilityName = resolvedAbilityName,

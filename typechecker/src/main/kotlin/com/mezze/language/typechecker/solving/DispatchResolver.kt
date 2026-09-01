@@ -45,6 +45,21 @@ import com.mezze.language.typedast.Hash
  *      hash is its declaration content hash (null for builtin operator abilities,
  *      whose reserved name is their canonical identity).
  *   4. ≥2 genuinely same-priority winners → [DispatchAmbiguityException].
+ *
+ * S9 (#374) — INTENTIONAL BOUNDARY: this pass fully OWNS inherent dispatch, but
+ * ability dispatch stays generated at gen-time (ExprMethodConstraints's ability
+ * ladder) BY DESIGN, analyzed not overlooked. The ability ladder emits
+ * AbilityRequired + AssociatedTypeResolution constraints that the solver
+ * (ConstraintSolver/AbilityChecker) resolves post-solve and the interpreter
+ * dispatches by hash at runtime — so ability dispatch is ALSO decided once,
+ * post-solve, just through a different mechanism than a [Resolution]. There is no
+ * ability MethodCallInfo dispatch decision for this pass to take over: the ability
+ * MethodCallInfo carries methodHash=null / isInherentMethod=false and emit reads
+ * no dispatch field off it. Moving the ability PICK here would delete nothing and
+ * would require relocating the fresh-tyvar constraint-generation context that only
+ * exists at gen time. See the boundary note at the ability ladder's MethodCallInfo
+ * construction. Same-op ability collisions are DEFERRED below (recorded no
+ * Resolution) because they are decided by effect-context, not receiver identity.
  */
 object DispatchResolver {
 
