@@ -163,6 +163,56 @@ class AgentModuleTest {
     }
 
     // =============================================================================
+    // Error-recovery round-trip (S8.1-C / #385): a FAILED agent is recoverable.
+    // This locks in the Clojure model we settled on: send is strict (a failed
+    // agent stops accepting sends), the failure is observable (has_error), and
+    // restart_agent clears the error so the agent accepts sends again. Distinct
+    // from the "restart sets a value" tests: here the agent genuinely FAILS first
+    // (an action raises a guest error), then is recovered.
+    // =============================================================================
+
+    @Test
+    fun `test a failed agent reports has_error then recovers via restart`() {
+        val result = eval("""
+            use std::effects::async::agent::{
+                agent, send, deref_agent, await_agent, has_error, restart_agent
+            }
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
+
+            let counter = agent { val = 10 }
+            # An action that fails: divide by zero is a clean guest error, so the
+            # agent's action throws and the agent enters the error state.
+            send { agent = counter, f = { current } -> current / 0 }
+            await_agent { agent = counter }
+
+            let failed = has_error { agent = counter }
+
+            # Recover: restart clears the error and installs a fresh value.
+            restart_agent { agent = counter, val = 100 }
+            let recovered = has_error { agent = counter }
+
+            # A send after restart is accepted again (agent is live).
+            send { agent = counter, f = { current } -> current + 1 }
+            await_agent { agent = counter }
+            let final_val = deref_agent { agent = counter }
+
+            { failed = failed, recovered = recovered, final_val = final_val }
+        """)
+        // failed=true (agent entered error state), recovered=false (restart
+        // cleared it), final_val=101 (100 from restart + 1 from the post-restart
+        // send that was accepted). Booleans render lowercase.
+        val record = result.toString()
+        assertTrue(record.contains("failed = true"),
+            "agent should have entered error state; got: $record")
+        assertTrue(record.contains("recovered = false"),
+            "restart should have cleared the error state; got: $record")
+        assertTrue(record.contains("101"),
+            "post-restart send should apply (100+1); got: $record")
+    }
+
+    // =============================================================================
     // Await with Timeout
     // =============================================================================
 
