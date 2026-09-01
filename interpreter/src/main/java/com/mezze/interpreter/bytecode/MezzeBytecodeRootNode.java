@@ -311,8 +311,6 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Fallback
         @TruffleBoundary
         public static String doOther(boolean dbgStyle, Object v) {
-            if (v == null) return "null";
-            if (v instanceof com.mezze.interpreter.values.MezzeUnit) return "{}";
             // Compound values (records, variants, lists, maps, ...) must render
             // in Mezze surface syntax — `Err { error = "x" }`, `Some { val = 42 }`,
             // `{ a = 1, b = "hi" }` — quoting strings and spacing braces. A raw
@@ -324,6 +322,30 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         static boolean isChar(Object o) { return o instanceof Character; }
         static boolean isString(Object o) { return o instanceof String; }
+    }
+
+    /**
+     * #394 — type-driven Inspect. Emitted for {@code x.to_dbg {}} /
+     * {@code x.to_str {}} from {@link com.mezze.language.truffleir.InspectIR},
+     * carrying the receiver's static shape as a constant {@code PrintType}. The
+     * printer walks (value, printType) in lockstep, which is the only way to
+     * render Nat vs Int, Frac, Newtype (erased), and single-char Str-as-Char —
+     * shapes indistinguishable from the runtime value alone.
+     *
+     * Constant operands: [printType, dbgStyle]. Cold path (a `to_dbg` call is
+     * never hot), so a single @TruffleBoundary through the shared renderer is
+     * free and keeps PE off the JDK string-formatting blocklist chain (#402).
+     */
+    @Operation
+    @ConstantOperand(type = Object.class)
+    @ConstantOperand(type = boolean.class)
+    public static final class TypedInspect {
+        @Specialization
+        @TruffleBoundary
+        public static String doInspect(Object printType, boolean dbgStyle, Object v) {
+            return com.mezze.interpreter.nodes.builtin.effects.InspectNatives.render(
+                v, (com.mezze.language.truffleir.PrintType) printType, dbgStyle);
+        }
     }
 
     /**

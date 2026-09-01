@@ -735,6 +735,7 @@ object StorePopulator {
                 collectEdgesFromNode(node.function, report)
                 collectEdgesFromNode(node.arg, report)
             }
+            is com.mezze.language.truffleir.InspectIR -> collectEdgesFromNode(node.value, report)
             is com.mezze.language.truffleir.CallIndirectScalarIR -> {
                 collectEdgesFromNode(node.function, report)
                 node.args.forEach { collectEdgesFromNode(it, report) }

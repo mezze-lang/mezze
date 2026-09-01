@@ -172,6 +172,8 @@ class MezzeExecutor(
                 collectDirectCallTargets(node.function, ownHashes, visited, resolves, out)
                 collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
             }
+            is com.mezze.language.truffleir.InspectIR ->
+                collectDirectCallTargets(node.value, ownHashes, visited, resolves, out)
             is com.mezze.language.truffleir.CallIndirectScalarIR -> {
                 collectDirectCallTargets(node.function, ownHashes, visited, resolves, out)
                 node.args.forEach { collectDirectCallTargets(it, ownHashes, visited, resolves, out) }
@@ -313,6 +315,7 @@ class MezzeExecutor(
                 collectReferencedHashes(node.function, queue)
                 collectReferencedHashes(node.arg, queue)
             }
+            is com.mezze.language.truffleir.InspectIR -> collectReferencedHashes(node.value, queue)
             is com.mezze.language.truffleir.CallIndirectScalarIR -> {
                 collectReferencedHashes(node.function, queue)
                 node.args.forEach { collectReferencedHashes(it, queue) }

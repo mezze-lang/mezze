@@ -253,6 +253,37 @@ private fun compileModule(
     )
     compiler.setDeclIndex(declIndex)
 
+    // #394: declared type NAME → resolved underlying MezzeType, so the
+    // PrintType builder can render a nominal `TypeApplication(name)` receiver
+    // (newtypes/records/variants/aliases). Collected from the un-wrapped
+    // modules (wrapTopLevel strips TypedTypeDecls from `wrapped`).
+    val printTypeDefs = HashMap<String, com.mezze.language.ast.MezzeType>()
+    for (m in (listOf(typedModule) + importedModules + stdlibModulesForMono)) {
+        for (d in m.decls) {
+            if (d is com.mezze.language.typedast.TypedTypeDecl) {
+                val resolved: com.mezze.language.ast.MezzeType? = when (val def = d.definition) {
+                    is com.mezze.language.typedast.TypedNewtypeDef ->
+                        com.mezze.language.ast.MezzeType.NewtypeType(d.name, def.constructor, def.wrappedType)
+                    is com.mezze.language.typedast.TypedRecordDef ->
+                        com.mezze.language.ast.MezzeType.RecordType(
+                            def.fields,
+                            rowVar = if (def.isOpen) com.mezze.language.ast.RowVar.fresh() else null,
+                            identity = com.mezze.language.ast.TypeIdentity.declared(d.name, d.hash)
+                        )
+                    is com.mezze.language.typedast.TypedVariantDef ->
+                        com.mezze.language.ast.MezzeType.VariantType(
+                            def.constructors,
+                            rowVar = if (def.isOpen) com.mezze.language.ast.RowVar.fresh() else null,
+                            identity = com.mezze.language.ast.TypeIdentity.declared(d.name, d.hash)
+                        )
+                    is com.mezze.language.typedast.TypedAliasDef -> def.aliasedType
+                }
+                if (resolved != null) printTypeDefs.putIfAbsent(d.name, resolved)
+            }
+        }
+    }
+    compiler.setPrintTypeDefs(printTypeDefs)
+
     val result = compiler.compile(
         module = wrapped,
         additionalModules = importedModules,

@@ -141,6 +141,16 @@ sealed interface StringPartIR {
 }
 /** Indirect call — evaluate function expression, then invoke */
 @Serializable data class CallIndirectIR(val function: NodeIR, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
+/**
+ * Type-driven Inspect (`x.to_dbg {}` / `x.to_str {}`), #394. The auto-derived
+ * Inspect ability has no impl body, so the typechecker lowers a call directly
+ * to this node, baking the receiver's static shape ([printType]) as a
+ * compile-time constant. The interpreter's printer walks (value, printType) in
+ * lockstep — the only way to render Nat vs Int, Frac, Newtype (erased), and
+ * single-char Str-as-Char, which are indistinguishable from the runtime value
+ * alone. [dbgStyle] true = to_dbg (quotes strings/chars), false = to_str.
+ */
+@Serializable data class InspectIR(val value: NodeIR, val dbgStyle: Boolean, val printType: PrintType, override val src: SourceInfo) : NodeIR
 /** Indirect call with positional scalar args — eliminates per-call MezzeRecord
  *  allocation for HOF callback invocations (e.g. `f {x = n}` inside `map`).
  *

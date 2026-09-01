@@ -256,6 +256,7 @@ object Keywords {
     // Right operand field for binary op desugaring; consumed by TruffleCompiler's DirectAddNode etc.
     const val R = "r"
     const val TO_DBG = "to_dbg"
+    const val TO_STR = "to_str"
 }
 
 // Reverse-lookup constructor-set → builtin type name for ability-impl matching

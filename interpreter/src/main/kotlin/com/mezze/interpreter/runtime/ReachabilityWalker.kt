@@ -94,6 +94,7 @@ object ReachabilityWalker {
                 node.args.forEach { collectHashRefs(it, refs) }
             }
             is CallIndirectIR -> { collectHashRefs(node.function, refs); collectHashRefs(node.arg, refs) }
+            is com.mezze.language.truffleir.InspectIR -> collectHashRefs(node.value, refs)
             is CallIndirectScalarIR -> { collectHashRefs(node.function, refs); node.args.forEach { collectHashRefs(it, refs) } }
             is MakeRecordIR -> node.fields.forEach { collectHashRefs(it.value, refs) }
             is ReadFieldIR -> collectHashRefs(node.record, refs)

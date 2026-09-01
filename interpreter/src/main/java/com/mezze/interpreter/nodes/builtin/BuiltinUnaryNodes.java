@@ -1,11 +1,8 @@
 package com.mezze.interpreter.nodes.builtin;
 
-import com.mezze.datastructures.list.MezzeList;
-
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 import com.mezze.interpreter.values.*;
-import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
@@ -80,119 +77,6 @@ public abstract class BuiltinUnaryNodes {
         }
     }
 
-    /**
-     * Builtin Inspect.to_str: {val} -> String representation of val
-     *
-     * Converts any Mezze value to its string representation.
-     * This is similar to toString() but works with all Mezze types.
-     */
-    @NodeChild(value = "args", type = MezzeNode.class)
-    @NodeInfo(shortName = "builtin-inspect-to-str")
-    public static abstract class BuiltinInspectToStrNode extends MezzeNode {
-
-        @Specialization
-        @TruffleBoundary
-        protected String inspectToStr(MezzeRecord args) {
-            Object val = args.getObjectField(VAL_INDEX);
-            return valueToString(val);
-        }
-
-        @TruffleBoundary
-        private static String valueToString(Object value) {
-            if (value == null) {
-                return "null";
-            }
-
-            // Primitive types
-            if (value instanceof Long) {
-                return value.toString();
-            }
-            if (value instanceof Double) {
-                return value.toString();
-            }
-            if (value instanceof Boolean) {
-                return ((Boolean) value) ? "True" : "False";
-            }
-            if (value instanceof String) {
-                return "\"" + value + "\"";
-            }
-
-            // Unit
-            if (value == MezzeUnit.INSTANCE) {
-                return "{}";
-            }
-
-            // Record
-            if (value instanceof MezzeRecord record) {
-                int fieldCount = record.getFieldCount();
-                if (fieldCount == 0) {
-                    return "{}";
-                }
-                StringBuilder sb = new StringBuilder("{ ");
-                boolean first = true;
-                MezzeRecord.Shape shape = record.getShape();
-                for (int i = 0; i < fieldCount; i++) {
-                    if (!first) sb.append(", ");
-                    first = false;
-                    sb.append(shape.getFieldName(i)).append(" = ").append(valueToString(record.getField(i)));
-                }
-                sb.append(" }");
-                return sb.toString();
-            }
-
-            // Variant
-            if (value instanceof MezzeVariant variant) {
-                if (!variant.hasPayload()) {
-                    return variant.getConstructorName();
-                }
-                return variant.getConstructorName() + " " + valueToString(variant.getPayloadValue());
-            }
-
-            // List
-            if (value instanceof MezzeList list) {
-                int size = list.size();
-                if (size == 0) {
-                    return "[]";
-                }
-                StringBuilder sb = new StringBuilder("[");
-                boolean first = true;
-                for (int i = 0; i < size; i++) {
-                    if (!first) sb.append(", ");
-                    first = false;
-                    sb.append(valueToString(list.get(i)));
-                }
-                sb.append("]");
-                return sb.toString();
-            }
-
-            // Raw Object[] array (used for some list literals)
-            if (value instanceof Object[] array) {
-                if (array.length == 0) {
-                    return "[]";
-                }
-                StringBuilder sb = new StringBuilder("[");
-                boolean first = true;
-                for (Object elem : array) {
-                    if (!first) sb.append(", ");
-                    first = false;
-                    sb.append(valueToString(elem));
-                }
-                sb.append("]");
-                return sb.toString();
-            }
-
-            // Function
-            if (value instanceof MezzeFunction func) {
-                String name = func.getName();
-                return name != null ? "<function:" + name + ">" : "<function>";
-            }
-
-            // Fallback
-            return value.toString();
-        }
-
-        public static BuiltinInspectToStrNode create(MezzeNode argsNode) {
-            return BuiltinUnaryNodesFactory.BuiltinInspectToStrNodeGen.create(argsNode);
-        }
-    }
+    // BuiltinInspectToStrNode was removed (#394): it was dead (no wired
+    // caller) and duplicated the sole renderer InspectNatives.valueToString.
 }

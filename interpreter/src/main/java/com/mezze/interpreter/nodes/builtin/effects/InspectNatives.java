@@ -13,6 +13,7 @@ import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.interpreter.nodes.builtin.collections.*;
 import com.mezze.interpreter.nodes.builtin.io.BytesNatives;
 import com.mezze.interpreter.values.*;
+import com.mezze.language.truffleir.PrintType;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 /**
@@ -39,14 +40,239 @@ public final class InspectNatives {
     }
 
     /**
+     * Type-driven render (#394): walk (value, printType) in lockstep. This is
+     * the sole entry for `x.to_dbg {}` / `x.to_str {}` — the static PrintType
+     * carries the information the runtime value alone cannot: Nat vs Int, Frac,
+     * Newtype (erased to its underlying value), and single-char Str-as-Char.
+     *
+     * `dbgStyle` distinguishes to_dbg (quote strings/chars) from to_str; it is
+     * threaded to the string/char leaves only.
+     */
+    @TruffleBoundary
+    public static String render(Object value, PrintType printType, boolean dbgStyle) {
+        if (printType instanceof PrintType.Scalar sc) {
+            return renderScalar(value, sc.getKind(), dbgStyle);
+        }
+        if (printType instanceof PrintType.Frac) {
+            return renderFrac(value);
+        }
+        if (printType instanceof PrintType.Newtype nt) {
+            // Newtype is erased at runtime — `value` IS the underlying value.
+            return nt.getName() + ".(" + render(value, nt.getInner(), dbgStyle) + ")";
+        }
+        if (printType instanceof PrintType.Record rec) {
+            return renderRecord(value, rec, dbgStyle);
+        }
+        if (printType instanceof PrintType.Variant var) {
+            return renderVariant(value, var, dbgStyle);
+        }
+        if (printType instanceof PrintType.MzList l) {
+            return renderElements(iterableOf(value), l.getInner(), dbgStyle, "[", "]");
+        }
+        if (printType instanceof PrintType.MzSeq s) {
+            return renderElements(iterableOf(value), s.getInner(), dbgStyle, "[", "]");
+        }
+        if (printType instanceof PrintType.MzSet s) {
+            return renderElements(iterableOf(value), s.getInner(), dbgStyle, "Set{", "}");
+        }
+        if (printType instanceof PrintType.MzSortedSet s) {
+            return renderElements(iterableOf(value), s.getInner(), dbgStyle, "SortedSet{", "}");
+        }
+        if (printType instanceof PrintType.MzDeque d) {
+            return renderElements(iterableOf(value), d.getInner(), dbgStyle, "Deque[", "]");
+        }
+        if (printType instanceof PrintType.MzNonEmptyList nel) {
+            return renderElements(iterableOf(value), nel.getInner(), dbgStyle, "NonEmptyList(", ")");
+        }
+        if (printType instanceof PrintType.MzMap m) {
+            return renderMap(value, m.getKey(), m.getValue(), dbgStyle, "Map");
+        }
+        if (printType instanceof PrintType.MzSortedMap m) {
+            return renderMap(value, m.getKey(), m.getValue(), dbgStyle, "SortedMap");
+        }
+        if (printType instanceof PrintType.Function) {
+            return renderFunction(value);
+        }
+        if (printType instanceof PrintType.Dynamic) {
+            // No static type at this position (an unconstrained ADT type
+            // parameter). The runtime value-only path renders every
+            // runtime-distinguishable type correctly. `to_str` on a bare Str
+            // still wants unquoted output; valueToString always quotes, so
+            // strip for the to_str-on-String case.
+            if (!dbgStyle && value instanceof String s) return s;
+            return valueToString(value);
+        }
+        // PrintType is a sealed hierarchy fully covered above. A gap here is a
+        // renderer bug, not a printable value.
+        throw new NativeTypeMismatchException(
+            "Inspect: unhandled PrintType " + printType);
+    }
+
+    private static String renderScalar(Object value, PrintType.ScalarKind kind, boolean dbgStyle) {
+        switch (kind) {
+            case Int:
+                return ((Long) value).toString();
+            case Nat:
+                // Nat is a Long at runtime; the `n` suffix distinguishes it.
+                return value + "n";
+            case Float:
+                return ((Double) value).toString();
+            case Bool:
+                return ((Boolean) value) ? "True" : "False";
+            case Bytes:
+                return BytesNatives.toHex((BytesNatives.MezzeBytes) value);
+            case Char: {
+                // Char has two runtime reps: a boxed Character (from a literal)
+                // and a single-char String (from char::from_int/from_str).
+                // Both render single-quoted, uniformly.
+                char c = (value instanceof Character)
+                    ? (Character) value
+                    : ((String) value).charAt(0);
+                return "'" + c + "'";
+            }
+            case Str: {
+                String s = (String) value;
+                return dbgStyle ? "\"" + s + "\"" : s;
+            }
+        }
+        throw new NativeTypeMismatchException("Inspect: unhandled scalar kind " + kind);
+    }
+
+    private static String renderFrac(Object value) {
+        MezzeRecord rec = (MezzeRecord) value;
+        Object num = rec.getField(rec.getFieldIndex("numerator"));
+        Object den = rec.getField(rec.getFieldIndex("denominator"));
+        return num + "//" + den;
+    }
+
+    private static String renderRecord(Object value, PrintType.Record rec, boolean dbgStyle) {
+        java.util.List<PrintType.Field> fields = rec.getFields();
+        if (fields.isEmpty()) {
+            return "{}";
+        }
+        MezzeRecord record = (MezzeRecord) value;
+        StringBuilder sb = new StringBuilder("{ ");
+        boolean first = true;
+        for (PrintType.Field f : fields) {
+            if (!first) sb.append(", ");
+            first = false;
+            Object fv = record.getField(record.getFieldIndex(f.getName()));
+            sb.append(f.getName()).append(" = ").append(render(fv, f.getType(), dbgStyle));
+        }
+        sb.append(" }");
+        return sb.toString();
+    }
+
+    private static String renderVariant(Object value, PrintType.Variant var, boolean dbgStyle) {
+        MezzeVariant variant = (MezzeVariant) value;
+        String ctor = variant.getConstructorName();
+        for (PrintType.Arm arm : var.getArms()) {
+            if (arm.getConstructor().equals(ctor)) {
+                if (arm.getPayload() == null || !variant.hasPayload()) {
+                    return ctor;
+                }
+                return ctor + " " + render(variant.getPayloadValue(), arm.getPayload(), dbgStyle);
+            }
+        }
+        throw new NativeTypeMismatchException(
+            "Inspect: variant constructor '" + ctor + "' not in its PrintType");
+    }
+
+    private static String renderElements(Iterable<?> elems, PrintType inner, boolean dbgStyle,
+                                         String open, String close) {
+        StringBuilder sb = new StringBuilder(open);
+        boolean first = true;
+        for (Object e : elems) {
+            if (!first) sb.append(", ");
+            first = false;
+            sb.append(render(e, inner, dbgStyle));
+        }
+        sb.append(close);
+        return sb.toString();
+    }
+
+    private static String renderMap(Object value, PrintType keyType, PrintType valType,
+                                    boolean dbgStyle, String tag) {
+        if (value instanceof MezzeMap map) {
+            if (map.isEmpty()) return tag + "{}";
+            StringBuilder sb = new StringBuilder(tag).append("{ ");
+            boolean first = true;
+            for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append(render(entry.key(), keyType, dbgStyle))
+                  .append(" = ")
+                  .append(render(entry.value(), valType, dbgStyle));
+            }
+            sb.append(" }");
+            return sb.toString();
+        }
+        if (value instanceof MezzeSortedMap<?, ?> map) {
+            if (map.isEmpty()) return tag + "{}";
+            StringBuilder sb = new StringBuilder(tag).append("{ ");
+            boolean first = true;
+            for (MezzeSortedMap.RawEntry entry : map.rawEntries()) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append(render(entry.key(), keyType, dbgStyle))
+                  .append(" = ")
+                  .append(render(entry.value(), valType, dbgStyle));
+            }
+            sb.append(" }");
+            return sb.toString();
+        }
+        throw new NativeTypeMismatchException(
+            "Inspect: expected a map runtime value, got "
+                + (value == null ? "null" : value.getClass().getName()));
+    }
+
+    private static String renderFunction(Object value) {
+        if (value instanceof MezzeFunction func) {
+            String name = func.getName();
+            return name != null ? "<function:" + name + ">" : "<function>";
+        }
+        throw new NativeTypeMismatchException(
+            "Inspect: expected a function runtime value, got "
+                + (value == null ? "null" : value.getClass().getName()));
+    }
+
+    /** Element view for the ordered collection runtime types. */
+    private static Iterable<?> iterableOf(Object value) {
+        if (value instanceof MezzeList list) {
+            java.util.ArrayList<Object> out = new java.util.ArrayList<>(list.size());
+            for (int i = 0; i < list.size(); i++) out.add(list.get(i));
+            return out;
+        }
+        if (value instanceof MezzeSeq<?> seq) {
+            java.util.ArrayList<Object> out = new java.util.ArrayList<>(seq.size());
+            for (int i = 0; i < seq.size(); i++) out.add(seq.get(i));
+            return out;
+        }
+        if (value instanceof NonEmptyListNatives.MezzeNonEmptyList nel) {
+            MezzeList list = NonEmptyListNatives.toList(nel);
+            java.util.ArrayList<Object> out = new java.util.ArrayList<>(list.size());
+            for (int i = 0; i < list.size(); i++) out.add(list.get(i));
+            return out;
+        }
+        if (value instanceof MezzeSet set) {
+            return set;
+        }
+        if (value instanceof MezzeSortedSet set) {
+            return set;
+        }
+        if (value instanceof MezzeDeque deque) {
+            return deque;
+        }
+        throw new NativeTypeMismatchException(
+            "Inspect: expected an ordered collection runtime value, got "
+                + (value == null ? "null" : value.getClass().getName()));
+    }
+
+    /**
      * Convert a value to a human-readable string representation.
      */
     @TruffleBoundary
     public static String valueToString(Object value) {
-        if (value == null) {
-            return "null";
-        }
-
         // Primitive types
         if (value instanceof Long l) {
             return l.toString();
@@ -54,16 +280,19 @@ public final class InspectNatives {
         if (value instanceof Double d) {
             return d.toString();
         }
+        if (value instanceof Character c) {
+            return "'" + c + "'";  // Char renders single-quoted
+        }
         if (value instanceof String s) {
             return "\"" + s + "\"";  // Include quotes for strings
         }
         if (value instanceof Boolean b) {
-            return b.toString();
+            return b ? "True" : "False";
         }
 
-        // Unit
+        // Unit — renders as the empty record `{}` (unit is a 0-field record).
         if (value instanceof MezzeUnit) {
-            return "()";
+            return "{}";
         }
 
         // Records - show field names and values
@@ -127,12 +356,12 @@ public final class InspectNatives {
             return sb.toString();
         }
 
-        // Maps
+        // Maps — always `Map{ .. }` / `Map{}` (keep `=` between key and value).
         if (value instanceof MezzeMap map) {
             if (map.isEmpty()) {
-                return "{}";
+                return "Map{}";
             }
-            StringBuilder sb = new StringBuilder("{ ");
+            StringBuilder sb = new StringBuilder("Map{ ");
             boolean first = true;
             for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
                 if (!first) sb.append(", ");
@@ -145,12 +374,12 @@ public final class InspectNatives {
             return sb.toString();
         }
 
-        // Sets
+        // Sets — always `Set{ .. }` / `Set{}`.
         if (value instanceof MezzeSet set) {
             if (set.isEmpty()) {
-                return "{}";
+                return "Set{}";
             }
-            StringBuilder sb = new StringBuilder("{");
+            StringBuilder sb = new StringBuilder("Set{");
             boolean first = true;
             for (Object elem : set) {
                 if (!first) sb.append(", ");
@@ -158,17 +387,6 @@ public final class InspectNatives {
                 sb.append(valueToString(elem));
             }
             sb.append("}");
-            return sb.toString();
-        }
-
-        // Arrays (ArrayList)
-        if (value instanceof Object[] arr) {
-            StringBuilder sb = new StringBuilder("[|");
-            for (int i = 0; i < arr.length; i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(valueToString(arr[i]));
-            }
-            sb.append("|]");
             return sb.toString();
         }
 
@@ -230,7 +448,11 @@ public final class InspectNatives {
             return name != null ? "<function:" + name + ">" : "<function>";
         }
 
-        // Fallback
-        return "<" + value.getClass().getSimpleName() + ">";
+        // No fallback: every real Mezze value type has a branch above. An
+        // unknown runtime object is a compiler/native bug, not a printable
+        // value — surface it rather than laundering it into `<Class>`.
+        throw new NativeTypeMismatchException(
+            "Inspect: no rendering for runtime value of type "
+                + (value == null ? "null" : value.getClass().getName()));
     }
 }

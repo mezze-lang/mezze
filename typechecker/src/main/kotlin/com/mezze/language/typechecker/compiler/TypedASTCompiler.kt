@@ -1294,6 +1294,24 @@ class TypedASTCompiler(
                     if (candidates != null && candidates.size == 1) candidates.first().opHash
                     else tryResolveAbilityOpByArgs(methodName, expr.arg)
                 } else null
+
+            // #394: `x.to_dbg {}` / `x.to_str {}` on a concrete receiver, with
+            // NO resolvable user impl (opHash == null) — the auto-derived
+            // Inspect. Lower directly to InspectIR with the receiver's static
+            // shape baked in as a compile-time PrintType. Gated on opHash ==
+            // null so a user-declared ability method NAMED to_str/to_dbg (e.g.
+            // `ability Stringify where { to_str: ... }`) still dispatches to the
+            // user's impl. A VarType/SuspendType receiver has no printable shape
+            // yet and falls through to the normal (mono/dict) path.
+            if (opHash == null
+                && (methodName == Keywords.TO_DBG || methodName == Keywords.TO_STR)
+                && receiverType !is VarType && receiverType !is SuspendType) {
+                val printType = PrintTypeBuilder(printTypeDefs).build(receiverType)
+                val receiverIR = compileReceiverExpr(fn.record)
+                return com.mezze.language.truffleir.InspectIR(
+                    receiverIR, methodName == Keywords.TO_DBG, printType, src)
+            }
+
             if (opHash != null) {
                 if (opHashConcrete != null) census.methodConcrete++ else census.methodSingleVar++
                 val receiverIR = compileReceiverExpr(fn.record)
@@ -2891,6 +2909,13 @@ class TypedASTCompiler(
      *  call-site lookup paths that need to find a referenced decl. */
     private var declIndex: Map<Hash, TypedLetDecl>? = null
     fun setDeclIndex(decls: Map<Hash, TypedLetDecl>) { declIndex = decls }
+
+    /** #394: declared type NAME → resolved underlying MezzeType (newtype
+     *  underlying, record body, variant body, alias target). Lets the
+     *  PrintType builder resolve a nominal `TypeApplication(name)` receiver
+     *  (all a use site carries) to a printable shape. */
+    private var printTypeDefs: Map<String, MezzeType> = emptyMap()
+    fun setPrintTypeDefs(defs: Map<String, MezzeType>) { printTypeDefs = defs }
 
     /** Look up param names for a known callee hash. Returns null if unknown.
      *  Covers: self-recursive calls (currentFunctionHash, freshly available),

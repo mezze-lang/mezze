@@ -780,6 +780,10 @@ public final class BytecodeCompiler {
             return supportsNode(ci.getFunction(), argCount)
                 && supportsNode(ci.getArg(), argCount);
         }
+        if (node instanceof com.mezze.language.truffleir.InspectIR ins) {
+            // #394: type-driven Inspect — supported iff its receiver is.
+            return supportsNode(ins.getValue(), argCount);
+        }
         if (node instanceof CallIndirectScalarIR ci) {
             // Synthesized as CallIndirect(function, MakeRecord(...)) —
             // we lose the InvokeScalarNNode typed-payload fast path but
@@ -1313,6 +1317,14 @@ public final class BytecodeCompiler {
         }
         if (node instanceof UnitLitIR) {
             b.emitLoadObjectConstant(com.mezze.interpreter.values.MezzeUnit.INSTANCE);
+            return;
+        }
+        if (node instanceof com.mezze.language.truffleir.InspectIR ins) {
+            // #394: type-driven Inspect — bake the static PrintType as a
+            // constant operand and evaluate the receiver as the dynamic operand.
+            b.beginTypedInspect(ins.getPrintType(), ins.getDbgStyle());
+            emitNode(ins.getValue(), b, argCount, localMap);
+            b.endTypedInspect();
             return;
         }
         if (node instanceof ReadLocalIR r) {

@@ -567,6 +567,11 @@ object TrivialWrapperInliner {
                     node.copy(function = nf, arg = na) else node
             }
 
+            is InspectIR -> {
+                val nv = f(node.value)
+                if (nv !== node.value) node.copy(value = nv) else node
+            }
+
             is CallIndirectScalarIR -> {
                 val nf = f(node.function)
                 val newArgs = mapIfChanged(node.args, f)
