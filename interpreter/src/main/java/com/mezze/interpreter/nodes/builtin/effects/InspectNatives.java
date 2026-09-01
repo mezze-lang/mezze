@@ -292,12 +292,8 @@ public final class InspectNatives {
             return b ? "True" : "False";
         }
 
-        // Unit — renders as the empty record `{}` (unit is a 0-field record).
-        if (value instanceof MezzeUnit) {
-            return "{}";
-        }
-
         // Records - show field names and values
+        // (unit is a 0-field record and renders as `{}` via this branch)
         if (value instanceof MezzeRecord rec) {
             int fieldCount = rec.getShape().getFieldCount();
             if (fieldCount == 0) {

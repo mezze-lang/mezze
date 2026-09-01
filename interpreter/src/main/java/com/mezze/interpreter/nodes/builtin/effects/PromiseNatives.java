@@ -6,7 +6,6 @@ import com.mezze.interpreter.nodes.builtin.effects.AsyncNatives.MezzePromise;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.frame.FrameDescriptor;
@@ -105,7 +104,7 @@ public final class PromiseNatives {
                 } else {
                     promise.fail(payload);
                 }
-                return MezzeUnit.INSTANCE;
+                return MezzeRecord.empty();
             }
         };
         return new MezzeRootNode(
@@ -150,7 +149,7 @@ public final class PromiseNatives {
                 // Fast slot-0 read on SHAPE_HOOK — the hook MezzeFunction.
                 MezzeFunction hookFn = (MezzeFunction) rec.getField(0);
                 promise.setCancelHook(reason -> invokeHook(hookFn, reason));
-                return MezzeUnit.INSTANCE;
+                return MezzeRecord.empty();
             }
         };
         return new MezzeRootNode(

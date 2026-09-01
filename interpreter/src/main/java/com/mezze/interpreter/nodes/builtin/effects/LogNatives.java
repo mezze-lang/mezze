@@ -3,7 +3,6 @@ package com.mezze.interpreter.nodes.builtin.effects;
 import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 /**
@@ -26,49 +25,49 @@ public final class LogNatives {
     public static Object consolePrint(MezzeRecord args) {
         String msg = getString(args, "msg");
         System.out.print(msg);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
     public static Object consolePrintln(MezzeRecord args) {
         String msg = getString(args, "msg");
         System.out.println(msg);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
     public static Object logInfo(MezzeRecord args) {
         String msg = getString(args, "msg");
         System.out.println("[INFO] " + msg);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
     public static Object logWarn(MezzeRecord args) {
         String msg = getString(args, "msg");
         System.out.println("[WARN] " + msg);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
     public static Object logError(MezzeRecord args) {
         String msg = getString(args, "msg");
         System.err.println("[ERROR] " + msg);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
     public static Object logDebug(MezzeRecord args) {
         String msg = getString(args, "msg");
         System.out.println("[DEBUG] " + msg);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
     public static Object logTrace(MezzeRecord args) {
         String msg = getString(args, "msg");
         System.out.println("[TRACE] " + msg);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     private static String getString(MezzeRecord r, String name) {

@@ -194,13 +194,10 @@ public final class MezzeTestHelper {
     }
 
     /**
-     * Check if result is Unit.
-     * Unit can be either MezzeUnit.INSTANCE or an empty MezzeRecord {}.
+     * Check if result is Unit — an empty MezzeRecord {} (unit is a 0-field record).
      */
     public static boolean isUnit(Object result) {
-        if (result == MezzeUnit.INSTANCE) return true;
-        if (result instanceof MezzeRecord r && r.getFieldCount() == 0) return true;
-        return false;
+        return result instanceof MezzeRecord r && r.getFieldCount() == 0;
     }
 
     // ========================

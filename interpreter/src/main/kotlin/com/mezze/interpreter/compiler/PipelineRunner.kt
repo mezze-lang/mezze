@@ -174,7 +174,7 @@ object PipelineRunner {
             // HashModuleLoaderNode.constructPerformerRecord can resolve them
             // on subsequent contexts. Without this, a fresh context after the
             // first eval has an empty per-context user-IR registry, op funcs
-            // resolve to null, and the handler record becomes all-MezzeUnit
+            // resolve to null, and the handler record becomes all-unit (empty-record)
             // (or constructPerformerRecord skips publishing entirely under
             // our "write-once" rule).
             if (fn.hash in performerOpHashes) {

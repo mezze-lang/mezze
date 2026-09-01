@@ -2775,7 +2775,7 @@ public final class NativeDispatch extends MezzeNode {
         // Test isolation
         HANDLERS.put("__native_memfs_clear", (r, c) -> {
             MemoryFilesystemNatives.clear();
-            return MezzeUnit.INSTANCE;
+            return MezzeRecord.empty();
         });
     }
 

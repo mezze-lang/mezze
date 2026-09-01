@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import com.mezze.interpreter.values.MezzeRecord
-import com.mezze.interpreter.values.MezzeUnit
 
 /**
  * Comprehensive tests for effect interpreter.

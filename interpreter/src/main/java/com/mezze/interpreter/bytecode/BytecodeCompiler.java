@@ -1316,7 +1316,7 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof UnitLitIR) {
-            b.emitLoadObjectConstant(com.mezze.interpreter.values.MezzeUnit.INSTANCE);
+            b.emitLoadObjectConstant(com.mezze.interpreter.values.MezzeRecord.empty());
             return;
         }
         if (node instanceof com.mezze.language.truffleir.InspectIR ins) {

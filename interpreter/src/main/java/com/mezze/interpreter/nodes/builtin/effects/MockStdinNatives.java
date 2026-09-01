@@ -115,13 +115,13 @@ public final class MockStdinNatives {
 
     /** Mock terminals have no termios state — set/unset are no-ops. */
     @TruffleBoundary
-    public static com.mezze.interpreter.values.MezzeUnit setRawMode(MezzeRecord args) {
-        return com.mezze.interpreter.values.MezzeUnit.INSTANCE;
+    public static MezzeRecord setRawMode(MezzeRecord args) {
+        return com.mezze.interpreter.values.MezzeRecord.empty();
     }
 
     @TruffleBoundary
-    public static com.mezze.interpreter.values.MezzeUnit unsetRawMode(MezzeRecord args) {
-        return com.mezze.interpreter.values.MezzeUnit.INSTANCE;
+    public static MezzeRecord unsetRawMode(MezzeRecord args) {
+        return com.mezze.interpreter.values.MezzeRecord.empty();
     }
 
     /** UTF-8 byte-length from the leading byte. -1 on invalid. */

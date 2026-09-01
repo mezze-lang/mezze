@@ -215,26 +215,26 @@ public final class StdinNatives {
      * we just keep going.
      */
     @TruffleBoundary
-    public static com.mezze.interpreter.values.MezzeUnit setRawMode(MezzeRecord args) {
+    public static MezzeRecord setRawMode(MezzeRecord args) {
         Runnable wire = wireRawModeSetter;
         if (wire != null) {
             try { wire.run(); } catch (Throwable ignored) {}
         } else {
             runStty("raw", "-echo");
         }
-        return com.mezze.interpreter.values.MezzeUnit.INSTANCE;
+        return com.mezze.interpreter.values.MezzeRecord.empty();
     }
 
     /** Restore the terminal to cooked mode. Idempotent. */
     @TruffleBoundary
-    public static com.mezze.interpreter.values.MezzeUnit unsetRawMode(MezzeRecord args) {
+    public static MezzeRecord unsetRawMode(MezzeRecord args) {
         Runnable wire = wireRawModeUnsetter;
         if (wire != null) {
             try { wire.run(); } catch (Throwable ignored) {}
         } else {
             runStty("-raw", "echo");
         }
-        return com.mezze.interpreter.values.MezzeUnit.INSTANCE;
+        return com.mezze.interpreter.values.MezzeRecord.empty();
     }
 
     /**

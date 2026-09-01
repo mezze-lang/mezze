@@ -592,12 +592,12 @@ public final class AsyncNatives {
      * If user wants to wait for all tasks, they should use await/all/race.
      */
     @TruffleBoundary
-    public static MezzeUnit finalizeScopeNative(MezzeRecord args) {
+    public static MezzeRecord finalizeScopeNative(MezzeRecord args) {
         Object trackerObj = getFieldValue(args, "tracker");
         if (trackerObj instanceof PromiseTracker tracker) {
             tracker.clear();
         }
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     /**
@@ -666,12 +666,12 @@ public final class AsyncNatives {
      * Same semantics as finalizeScopeNative - unawaited tasks continue running.
      */
     @TruffleBoundary
-    public static MezzeUnit osFinalizeScope(MezzeRecord args) {
+    public static MezzeRecord osFinalizeScope(MezzeRecord args) {
         Object trackerObj = getFieldValue(args, "tracker");
         if (trackerObj instanceof PromiseTracker tracker) {
             tracker.clear();
         }
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
@@ -828,11 +828,11 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeUnit sleep(MezzeRecord args) {
+    public static MezzeRecord sleep(MezzeRecord args) {
         long ms = getLong(args, "ms");
         try {
             Thread.sleep(ms);
-            return MezzeUnit.INSTANCE;
+            return MezzeRecord.empty();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new CancellationException("Sleep cancelled");
@@ -847,9 +847,9 @@ public final class AsyncNatives {
      * single-threaded scheduler and want to give cancel-delivery a
      * chance to land under Loom.
      */
-    public static MezzeUnit yieldNow(MezzeRecord args) {
+    public static MezzeRecord yieldNow(MezzeRecord args) {
         Thread.yield();
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     /**
@@ -860,13 +860,13 @@ public final class AsyncNatives {
      * rarely; can land later if profile demands.
      */
     @TruffleBoundary
-    public static MezzeUnit parkUntil(MezzeRecord args, IndirectCallNode callNode) {
+    public static MezzeRecord parkUntil(MezzeRecord args, IndirectCallNode callNode) {
         MezzeFunction predicate = getFunction(args, "predicate");
         long backoffNanos = 1_000L; // 1µs to start
         final long maxBackoffNanos = 1_000_000L; // 1ms cap
         while (true) {
             Object result = callThunkFunction(predicate, callNode);
-            if (result instanceof Boolean b && b) return MezzeUnit.INSTANCE;
+            if (result instanceof Boolean b && b) return MezzeRecord.empty();
             LockSupport.parkNanos(backoffNanos);
             if (Thread.interrupted()) {
                 Thread.currentThread().interrupt();
@@ -1002,9 +1002,9 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeUnit scopeCancelAll(MezzeRecord args) {
+    public static MezzeRecord scopeCancelAll(MezzeRecord args) {
         getScope(args, "sc").cancelAll();
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary

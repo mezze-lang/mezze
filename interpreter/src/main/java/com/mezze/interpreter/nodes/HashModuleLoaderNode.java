@@ -240,7 +240,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
                 // (with the missing function pre-registered) will see the
                 // entry still empty and try again. Better an explicit
                 // "Handler not found" at perform time than a silent dispatch
-                // to MezzeUnit fields.
+                // to empty-record (unit) fields.
                 return;
             }
             opValues[i] = opFunc;

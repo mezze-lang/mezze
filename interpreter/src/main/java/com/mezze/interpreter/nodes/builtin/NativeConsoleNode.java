@@ -4,7 +4,6 @@ import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -20,7 +19,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
  * 1. Shape-cached field access for O(1) msg extraction
  * 2. @TruffleBoundary only on the actual I/O operation (unavoidable)
  * 3. Pre-computed field index after first call
- * 4. Returns MezzeUnit.INSTANCE (singleton, no allocation)
+ * 4. Returns MezzeRecord.empty() (singleton, no allocation)
  */
 @NodeInfo(shortName = "native-console-print")
 public final class NativeConsoleNode extends MezzeNode {
@@ -51,7 +50,7 @@ public final class NativeConsoleNode extends MezzeNode {
         String msg = extractMessage(record);
         doPrint(msg);
 
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     private String extractMessage(MezzeRecord record) {

@@ -5,7 +5,6 @@ import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -98,7 +97,7 @@ public final class FilesystemNatives {
         MezzeBytes bytes = getBytes(args, "bytes");
         try {
             Files.write(Paths.get(path), bytes.getData());
-            return ok(MezzeUnit.INSTANCE);
+            return ok(MezzeRecord.empty());
         } catch (NoSuchFileException e) {
             return errNotFound(path);
         } catch (AccessDeniedException e) {
@@ -195,7 +194,7 @@ public final class FilesystemNatives {
         String path = getString(args, "path");
         try {
             Files.delete(Paths.get(path));
-            return ok(MezzeUnit.INSTANCE);
+            return ok(MezzeRecord.empty());
         } catch (NoSuchFileException e) {
             return errNotFound(path);
         } catch (java.nio.file.DirectoryNotEmptyException e) {
@@ -212,7 +211,7 @@ public final class FilesystemNatives {
         String path = getString(args, "path");
         try {
             Files.createDirectory(Paths.get(path));
-            return ok(MezzeUnit.INSTANCE);
+            return ok(MezzeRecord.empty());
         } catch (FileAlreadyExistsException e) {
             return errAlreadyExists(path);
         } catch (NoSuchFileException e) {
@@ -236,7 +235,7 @@ public final class FilesystemNatives {
         String dest = getString(args, "dest");
         try {
             Files.copy(Paths.get(src), Paths.get(dest));
-            return ok(MezzeUnit.INSTANCE);
+            return ok(MezzeRecord.empty());
         } catch (NoSuchFileException e) {
             return errNotFound(src);
         } catch (FileAlreadyExistsException e) {
@@ -259,12 +258,12 @@ public final class FilesystemNatives {
         String dest = getString(args, "dest");
         try {
             Files.move(Paths.get(src), Paths.get(dest), StandardCopyOption.ATOMIC_MOVE);
-            return ok(MezzeUnit.INSTANCE);
+            return ok(MezzeRecord.empty());
         } catch (java.nio.file.AtomicMoveNotSupportedException e) {
             // Cross-filesystem move — fall back to non-atomic.
             try {
                 Files.move(Paths.get(src), Paths.get(dest));
-                return ok(MezzeUnit.INSTANCE);
+                return ok(MezzeRecord.empty());
             } catch (IOException retry) {
                 return errIO(src, retry.getMessage());
             }
@@ -351,7 +350,7 @@ public final class FilesystemNatives {
         }
         try {
             h.channel.write(ByteBuffer.wrap(bytes.getData()));
-            return ok(MezzeUnit.INSTANCE);
+            return ok(MezzeRecord.empty());
         } catch (ClosedChannelException e) {
             return errClosedHandle(h.path);
         } catch (IOException e) {
@@ -365,13 +364,13 @@ public final class FilesystemNatives {
         if (h.closed.compareAndSet(false, true)) {
             try {
                 h.channel.close();
-                return ok(MezzeUnit.INSTANCE);
+                return ok(MezzeRecord.empty());
             } catch (IOException e) {
                 return errIO(h.path, e.getMessage());
             }
         }
         // Already closed — idempotent, no-op success.
-        return ok(MezzeUnit.INSTANCE);
+        return ok(MezzeRecord.empty());
     }
 
     // ==================== Record helpers ====================

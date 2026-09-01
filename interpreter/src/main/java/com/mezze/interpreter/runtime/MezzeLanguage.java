@@ -2,7 +2,7 @@ package com.mezze.interpreter.runtime;
 
 import com.mezze.interpreter.instrumentation.FrameSlotResolver;
 import com.mezze.interpreter.nodes.MezzeNode;
-import com.mezze.interpreter.values.MezzeUnit;
+import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.language.truffleir.FunctionIR;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
@@ -1269,7 +1269,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             }
             lastResultStore.set(result);
             captureGlobalContext();
-            return MezzeUnit.INSTANCE;
+            return MezzeRecord.empty();
         }
 
         @CompilerDirectives.TruffleBoundary

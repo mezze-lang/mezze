@@ -4,7 +4,6 @@ import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.mezze.interpreter.values.MezzeNull;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.dsl.ImplicitCast;
 import com.oracle.truffle.api.dsl.TypeSystem;
 
@@ -25,7 +24,6 @@ import com.oracle.truffle.api.dsl.TypeSystem;
     MezzeRecord.class,    // Records
     MezzeVariant.class,   // Variants (Option, Result, etc.)
     MezzeFunction.class,  // Functions
-    MezzeUnit.class,      // Unit type ({})
     MezzeNull.class       // Null (for uninitialized)
 
     // Note: Object.class is NOT included - Truffle doesn't allow it
@@ -47,12 +45,5 @@ public abstract class MezzeTypes {
      */
     public static boolean isNull(Object value) {
         return value == null || value instanceof MezzeNull;
-    }
-
-    /**
-     * Check if a value is Mezze unit ({}).
-     */
-    public static boolean isUnit(Object value) {
-        return value instanceof MezzeUnit;
     }
 }

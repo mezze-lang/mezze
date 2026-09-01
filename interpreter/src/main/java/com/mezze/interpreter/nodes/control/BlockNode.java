@@ -1,7 +1,7 @@
 package com.mezze.interpreter.nodes.control;
 
 import com.mezze.interpreter.nodes.MezzeNode;
-import com.mezze.interpreter.values.MezzeUnit;
+import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
@@ -37,7 +37,7 @@ public final class BlockNode extends MezzeNode {
     @ExplodeLoop
     public Object execute(VirtualFrame frame) {
         if (statements.length == 0) {
-            return MezzeUnit.INSTANCE;
+            return MezzeRecord.empty();
         }
         for (int i = 0; i < statements.length - 1; i++) {
             statements[i].execute(frame);

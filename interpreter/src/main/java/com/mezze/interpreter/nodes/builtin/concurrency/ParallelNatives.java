@@ -11,7 +11,6 @@ import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeGuestException;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.TruffleLanguage.Env;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
@@ -100,7 +99,7 @@ public final class ParallelNatives {
      * virtual thread.
      */
     @TruffleBoundary
-    public static MezzeUnit loomParallelInit(MezzeRecord args, MezzeNode node) {
+    public static MezzeRecord loomParallelInit(MezzeRecord args, MezzeNode node) {
         // Accept both `max_concurrent` (LoomParallelWith) and `pool_size`
         // (OSThreadParallelWith) as the concurrency hint — during phase 1
         // they're the same knob. Phase 2 splits them.
@@ -118,7 +117,7 @@ public final class ParallelNatives {
 
         long minChunk = getLongOrZero(args, "min_chunk");
         MIN_CHUNK_HINT.set(minChunk > 0 ? minChunk : 1L);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     /**
@@ -127,11 +126,11 @@ public final class ParallelNatives {
      * context close-lock.
      */
     @TruffleBoundary
-    public static MezzeUnit loomParallelFinalize(MezzeRecord args) {
+    public static MezzeRecord loomParallelFinalize(MezzeRecord args) {
         PARALLELISM_HINT.remove();
         LOOM_SEMAPHORE.remove();
         MIN_CHUNK_HINT.remove();
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     /** Read the current scope's min_chunk hint. Returns 1 when no scope
@@ -169,13 +168,13 @@ public final class ParallelNatives {
      * thread.
      */
     @TruffleBoundary
-    public static MezzeUnit osthreadParallelInit(MezzeRecord args, MezzeNode node) {
+    public static MezzeRecord osthreadParallelInit(MezzeRecord args, MezzeNode node) {
         return loomParallelInit(args, node);
     }
 
     /** Exit an OSThreadParallel scope. Clears the hint ThreadLocals. */
     @TruffleBoundary
-    public static MezzeUnit osthreadParallelFinalize(MezzeRecord args) {
+    public static MezzeRecord osthreadParallelFinalize(MezzeRecord args) {
         return loomParallelFinalize(args);
     }
 

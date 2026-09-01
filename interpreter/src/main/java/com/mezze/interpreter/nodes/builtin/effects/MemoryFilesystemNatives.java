@@ -5,7 +5,6 @@ import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -127,7 +126,7 @@ public final class MemoryFilesystemNatives {
         if (isDir(path)) return errIO(path, "Is a directory");
         files.put(path, new Entry(bytes.getData()));
         directories.get(parent).add(basenameOf(path));
-        return ok(MezzeUnit.INSTANCE);
+        return ok(MezzeRecord.empty());
     }
 
     // ==================== Metadata ====================
@@ -198,7 +197,7 @@ public final class MemoryFilesystemNatives {
         if (parentChildren != null) {
             parentChildren.remove(basenameOf(path));
         }
-        return ok(MezzeUnit.INSTANCE);
+        return ok(MezzeRecord.empty());
     }
 
     @TruffleBoundary
@@ -209,7 +208,7 @@ public final class MemoryFilesystemNatives {
         if (!isDir(parent)) return errNotFound(parent);
         directories.put(path, ConcurrentHashMap.newKeySet());
         directories.get(parent).add(basenameOf(path));
-        return ok(MezzeUnit.INSTANCE);
+        return ok(MezzeRecord.empty());
     }
 
     @TruffleBoundary
@@ -228,7 +227,7 @@ public final class MemoryFilesystemNatives {
         // intermediate MezzeBytes allocation.
         files.put(dest, new Entry(srcEntry.bytes.clone()));
         directories.get(destParent).add(basenameOf(dest));
-        return ok(MezzeUnit.INSTANCE);
+        return ok(MezzeRecord.empty());
     }
 
     @TruffleBoundary
@@ -247,7 +246,7 @@ public final class MemoryFilesystemNatives {
         String srcParent = parentOf(src);
         directories.get(srcParent).remove(basenameOf(src));
         directories.get(destParent).add(basenameOf(dest));
-        return ok(MezzeUnit.INSTANCE);
+        return ok(MezzeRecord.empty());
     }
 
     // ==================== Streaming ====================
@@ -311,7 +310,7 @@ public final class MemoryFilesystemNatives {
         if (h.writeBuf == null) return errIO(h.path, "Handle not opened for writing");
         try {
             h.writeBuf.write(bytes.getData());
-            return ok(MezzeUnit.INSTANCE);
+            return ok(MezzeRecord.empty());
         } catch (Exception e) {
             return errIO(h.path, e.getMessage());
         }
@@ -321,7 +320,7 @@ public final class MemoryFilesystemNatives {
     public static Object close(MezzeRecord args) {
         MemFileHandle h = getMemHandle(args, "handle");
         if (!h.closed.compareAndSet(false, true)) {
-            return ok(MezzeUnit.INSTANCE);  // idempotent
+            return ok(MezzeRecord.empty());  // idempotent
         }
         if (h.writeBuf != null) {
             byte[] finalBytes = h.writeBuf.toByteArray();
@@ -331,7 +330,7 @@ public final class MemoryFilesystemNatives {
                 directories.get(parent).add(basenameOf(h.path));
             }
         }
-        return ok(MezzeUnit.INSTANCE);
+        return ok(MezzeRecord.empty());
     }
 
     // ==================== Record helpers ====================

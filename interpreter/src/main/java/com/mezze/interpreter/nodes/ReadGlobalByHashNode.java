@@ -145,7 +145,7 @@ public final class ReadGlobalByHashNode extends MezzeNode {
             Object existing = context.lookupGlobal(hash);
             if (existing != null) return existing;
             try {
-                Object result = ct.call(com.mezze.interpreter.values.MezzeUnit.INSTANCE);
+                Object result = ct.call(com.mezze.interpreter.values.MezzeRecord.empty());
                 // Cache the evaluated value so we don't re-evaluate on every access
                 context.defineGlobal(hash, result);
                 return result;

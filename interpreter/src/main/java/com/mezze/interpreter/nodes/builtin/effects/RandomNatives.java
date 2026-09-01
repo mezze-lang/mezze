@@ -3,7 +3,6 @@ package com.mezze.interpreter.nodes.builtin.effects;
 import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 import java.util.Random;
@@ -57,7 +56,7 @@ public final class RandomNatives {
     public static Object randomSeed(MezzeRecord args) {
         long seed = getLong(args, "seed");
         THREAD_LOCAL_RANDOM.set(new Random(seed));
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     // ============== Seeded Random Operations ==============
@@ -71,7 +70,7 @@ public final class RandomNatives {
     public static Object resetSeededRandom(MezzeRecord args) {
         long seed = getLong(args, "seed");
         SEEDED_RANDOMS.put(seed, new Random(seed));
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
@@ -104,7 +103,7 @@ public final class RandomNatives {
         long oldSeed = getLong(args, "old_seed");
         long newSeed = getLong(args, "new_seed");
         SEEDED_RANDOMS.put(oldSeed, new Random(newSeed));
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     // ============== Helpers ==============

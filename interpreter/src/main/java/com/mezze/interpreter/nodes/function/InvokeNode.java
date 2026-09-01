@@ -3,7 +3,6 @@ package com.mezze.interpreter.nodes.function;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -306,7 +305,7 @@ public abstract class InvokeNode extends MezzeNode {
      * Handle MezzeRecord as a callable (effect handler operations).
      */
     @Specialization(
-        guards = {"record == cachedRecord"},
+        guards = {"record == cachedRecord", "!isEmptyRecord(record)"},
         limit = "6"
     )
     @ExplodeLoop
@@ -335,7 +334,7 @@ public abstract class InvokeNode extends MezzeNode {
     /**
      * Handle MezzeRecord as callable - uncached fallback.
      */
-    @Specialization(replaces = "callRecordCached")
+    @Specialization(guards = "!isEmptyRecord(record)", replaces = "callRecordCached")
     @ExplodeLoop
     protected Object callRecord(
             VirtualFrame frame,
@@ -359,14 +358,20 @@ public abstract class InvokeNode extends MezzeNode {
     }
 
     /**
-     * Handle MezzeUnit - this is the empty record {}.
+     * Handle the empty record {} (unit). Invoking unit returns unit itself —
+     * this preserves the historical MezzeUnit invoke-returns-itself behavior
+     * now that unit is unified onto the empty-record singleton.
      */
-    @Specialization
-    protected Object callUnit(
+    @Specialization(guards = "isEmptyRecord(record)")
+    protected Object callEmptyRecord(
             VirtualFrame frame,
-            MezzeUnit unit
+            MezzeRecord record
     ) {
-        return unit;
+        return record;
+    }
+
+    protected static boolean isEmptyRecord(MezzeRecord record) {
+        return record.getFieldCount() == 0;
     }
 
     /**

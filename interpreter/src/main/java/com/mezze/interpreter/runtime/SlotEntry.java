@@ -1,6 +1,6 @@
 package com.mezze.interpreter.runtime;
 
-import com.mezze.interpreter.values.MezzeUnit;
+import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -101,7 +101,7 @@ public final class SlotEntry {
         if (thunkEvaluated) {
             return cachedThunkValue;
         }
-        Object result = caller.call(ct, MezzeUnit.INSTANCE);
+        Object result = caller.call(ct, MezzeRecord.empty());
         cachedThunkValue = result;
         thunkEvaluated = true;
         thunkStableAssumption.invalidate();

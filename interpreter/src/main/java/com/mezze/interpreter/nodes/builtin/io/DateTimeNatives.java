@@ -1,7 +1,6 @@
 package com.mezze.interpreter.nodes.builtin.io;
 
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -538,15 +537,15 @@ public final class DateTimeNatives {
     }
 
     @TruffleBoundary
-    public static MezzeUnit testClockSet(MezzeTestClock c, MezzeInstant i) {
+    public static MezzeRecord testClockSet(MezzeTestClock c, MezzeInstant i) {
         c.set(i.instant);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
-    public static MezzeUnit testClockAdvance(MezzeTestClock c, MezzeDuration d) {
+    public static MezzeRecord testClockAdvance(MezzeTestClock c, MezzeDuration d) {
         c.advance(d.duration);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     /**
@@ -575,14 +574,14 @@ public final class DateTimeNatives {
      * make SIGINT/SIGTERM invisible to user code.
      */
     @TruffleBoundary
-    public static MezzeUnit sleep(MezzeDuration d) {
+    public static MezzeRecord sleep(MezzeDuration d) {
         long nanos = d.duration.toNanos();
-        if (nanos <= 0) return MezzeUnit.INSTANCE;
+        if (nanos <= 0) return MezzeRecord.empty();
         long millis = nanos / 1_000_000L;
         int subNanos = (int) (nanos % 1_000_000L);
         try {
             Thread.sleep(millis, subNanos);
-            return MezzeUnit.INSTANCE;
+            return MezzeRecord.empty();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new java.util.concurrent.CancellationException("Sleep cancelled");

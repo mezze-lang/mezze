@@ -6,7 +6,6 @@ import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.runtime.MezzeExitException;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.datastructures.seq.MezzeSeq;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -49,7 +48,7 @@ public final class EnvironmentNatives {
         // Note: Java doesn't allow setting environment variables at runtime
         // This uses System.setProperty as a workaround
         System.setProperty(name, value);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     /**
@@ -107,7 +106,7 @@ public final class EnvironmentNatives {
         // Note: Java doesn't allow changing working directory at runtime
         // This uses System.setProperty as a workaround for testing
         System.setProperty("user.dir", path);
-        return MezzeUnit.INSTANCE;
+        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
