@@ -70,6 +70,17 @@ class TypedAstBuilder(
 
     private val identifierContext = mutableMapOf<String, MezzeType>()
 
+    // #378: the CONCRETE (named) effects on the enclosing lambda's arrow row —
+    // i.e. the effects a performed value LEAVES UNHANDLED at the function
+    // boundary. A do-block `let` whose RHS performs effect E carries E on its
+    // stored type only if E is unhandled here (E in the top of this stack); an
+    // effect an enclosing `perform` discharges never reaches the arrow, so it is
+    // absent from this set and correctly does NOT ride on the binding. One frame
+    // per lambda; the top frame is the innermost enclosing function. The frame
+    // holds the whole row (not just names) so a rider can copy the arrow's
+    // associated-type binding (`Exception having 'error = Str`) verbatim.
+    private val enclosingArrowEffects = ArrayDeque<MezzeType.EffectRow?>()
+
     private val typeVarCache = mutableMapOf<String, TypeVar>()
 
     private val invariantsEnabled: Boolean
@@ -598,12 +609,24 @@ class TypedAstBuilder(
 
                 pushScope(params.map { it.name }.toMutableList(), isLambdaBoundary = true)
 
-                val returnType = when (val ct = substitution.apply(contextType)) {
-                    is MezzeType.FunctionType -> substitution.apply(ct.returnType)
+                val appliedCtx = substitution.apply(contextType)
+                val returnType = when (appliedCtx) {
+                    is MezzeType.FunctionType -> substitution.apply(appliedCtx.returnType)
                     else -> MezzeType.VarType(TypeVar.freshWithName("ret"))
                 }
 
-                val body = buildExpr(expr.body, file, returnType)
+                // #378: the arrow's concrete (named) effect set is what a performed
+                // value leaves unhandled at THIS function boundary. Push it so a
+                // do-block `let` in the body can decide which performed effects ride
+                // on its stored type. Non-function contextType -> empty (nothing
+                // proven to escape).
+                val arrowRow = (appliedCtx as? MezzeType.FunctionType)?.effects
+                enclosingArrowEffects.addLast(arrowRow)
+                val body = try {
+                    buildExpr(expr.body, file, returnType)
+                } finally {
+                    enclosingArrowEffects.removeLast()
+                }
 
                 popScope()
                 for ((name, prevType) in savedContext) {
@@ -1165,7 +1188,23 @@ class TypedAstBuilder(
 
                         val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
                         val contentHash = v1LetHash ?: ParsedDeclHasher.hashExpr(stmt.value)
-                        stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive))
+                        // #378: a do-block `let` whose RHS PERFORMS an unhandled
+                        // effect carries that effect row on the BINDING's stored
+                        // type — effects ride on value types, not only on arrows.
+                        // `let var = if b == 0 then Exception.throw {..} else b`
+                        // gives `var : Int <Exception ..>`, not bare `Int`. The row
+                        // is provenance on the STORED type only; `identifierContext`
+                        // (what later `var` uses read) stays the bare value type, so
+                        // downstream `var`-as-Int unification is unaffected and the
+                        // effect is not double-counted onto the enclosing arrow (that
+                        // row is harvested separately at the function boundary).
+                        val bindingStoredType =
+                            if (resolvedType !is MezzeType.SuspendType && resolvedType !is MezzeType.FunctionType) {
+                                performedRowForBindingRhs(value)?.let { row ->
+                                    MezzeType.SuspendType(resolvedType, row)
+                                } ?: resolvedType
+                            } else resolvedType
+                        stmts.add(TypedStatement.Let(name, contentHash, bindingStoredType, value, stmt.loc, isRecursive))
                     }
                 }
                 is ParsedStatement.Expr -> {
@@ -1775,6 +1814,73 @@ class TypedAstBuilder(
             ?: importContext?.importedEffects?.get(effectName)
             ?: error("Effect '$effectName' not found in declarations or imports")
         return decl.contentHash ?: ParsedDeclHasher.hashEffectDecl(decl)
+    }
+
+    /**
+     * #378: build the effect row a do-block `let` binding's RHS PERFORMS, if any.
+     *
+     * The emitted RHS value carries no effect row on its own type (a
+     * TypedPerformOp emits the bare VALUE type; the row is harvested onto the
+     * enclosing arrow separately). To surface the performed effect on the
+     * binding's stored type we recover it structurally: every unhandled
+     * TypedPerformOp reachable from the RHS contributes its effect name. A
+     * perform is "handled" here only when wrapped by a TypedPerform whose
+     * handlers cover that effect hash — those are discharged and must NOT ride on
+     * the binding. Returns null when the RHS performs nothing (pure binding stays
+     * bare, no spurious `<*>` row).
+     */
+    private fun performedRowForBindingRhs(rhs: TypedExpr): MezzeType.EffectRow? {
+        val hashToName = mutableMapOf<Hash, String>()
+        fun registerName(name: String) {
+            val h = try { resolveEffectHash(name) } catch (e: IllegalStateException) { return }
+            hashToName[h] = name
+        }
+        registry.effectDeclarations.keys.forEach { registerName(it) }
+        importContext?.importedEffects?.keys?.forEach { registerName(it) }
+
+        val performed = linkedSetOf<String>()
+        fun walk(e: TypedExpr, handled: Set<Hash>) {
+            when (e) {
+                is TypedPerformOp -> {
+                    if (e.effectHash !in handled) {
+                        hashToName[e.effectHash]?.let { performed.add(it) }
+                    }
+                    walk(e.arg, handled)
+                }
+                is TypedPerform -> {
+                    val nowHandled = handled + e.handlers.map { it.effectHash }
+                    e.handlers.forEach { it.params?.let { p -> walk(p, handled) } }
+                    walk(e.body, nowHandled)
+                }
+                else -> e.forEachChild { walk(it, handled) }
+            }
+        }
+        walk(rhs, emptySet())
+        if (performed.isEmpty()) return null
+
+        // Keep only effects still UNHANDLED at the enclosing function boundary.
+        // An effect an enclosing `perform` discharges never reaches the arrow, so
+        // it is absent from this set and must NOT ride on the binding (e.g. a
+        // `let a = Async.spawn {..}` under `perform LoomAsync` stays bare — the
+        // #362 conservation counterpart: the binding advertises only what the
+        // function actually re-emits). No enclosing frame -> attach nothing.
+        val arrowRow = enclosingArrowEffects.lastOrNull() ?: return null
+        val unhandled = arrowRow.allEffectNames
+        val riders = performed.filter { it in unhandled }
+        if (riders.isEmpty()) return null
+
+        // Carry the arrow's associated-type bindings for these effects so the
+        // binding reads `Int <Exception having 'error = Str>`, matching the row
+        // the function boundary harvested rather than a bare `<Exception>`.
+        val arrowInstances = arrowRow.effectInstances.associateBy { it.name }
+        val instances = riders.mapNotNull { arrowInstances[it] }.toSet()
+        val simpleNames = riders.filter { it !in arrowInstances.keys }.toSet()
+        return MezzeType.EffectRow(
+            effects = simpleNames,
+            effectInstances = instances,
+            rowVar = null,
+            performed = true,
+        )
     }
 
 }
