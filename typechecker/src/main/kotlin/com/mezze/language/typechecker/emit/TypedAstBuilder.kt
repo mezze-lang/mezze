@@ -565,8 +565,21 @@ class TypedAstBuilder(
                 TypedStringLit(parts, MezzeType.StringType, loc)
             }
             is ParsedNewtypeConstruct -> {
-                // Runtime erasure: newtype construction is identity.
-                buildExpr(expr.value, file, contextType)
+                // Runtime erasure: newtype construction is identity — the emitted
+                // node IS the underlying value's node, so lowering unwraps for free.
+                // #395: but its STATIC type must stay the `NewtypeType` wrapper, not
+                // the erased underlying. A top-level binding keeps the wrapper because
+                // it reads the constraint generator's authoritative type; a do-block /
+                // record-field / list-element binding reads THIS node's `.type`, so we
+                // stamp the solver's per-loc construction result (recorded in
+                // callReturnTypes by generateNewtypeConstruction) back onto it. The
+                // node's shape is unchanged, so runtime lowering is unaffected.
+                val inner = buildExpr(expr.value, file, contextType)
+                // The construction result type is the newtype identity — represented
+                // as `TypeApplication(name)` (or a `NewtypeType`), never the bare
+                // underlying. Stamp it so the wrapper survives on the erased node.
+                val solvedNewtype = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+                if (solvedNewtype != null) inner.withType(solvedNewtype) else inner
             }
             is ParsedVariantConstruct -> {
                 if (expr.constructor == BuiltinTypes.TRUE && expr.value == null) {

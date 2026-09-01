@@ -1,5 +1,42 @@
 package com.mezze.language.typedast
 
+import com.mezze.language.ast.MezzeType
+
+/**
+ * Return a copy of this node with its static [TypedExpr.type] replaced by
+ * [newType], leaving every other field (and all children) untouched.
+ *
+ * Used where a static-type refinement must be stamped onto a node whose
+ * structure stays byte-for-byte identical — e.g. newtype construction, whose
+ * emitted value node is the runtime-erased underlying value but whose STATIC
+ * type must remain the `NewtypeType` wrapper (see #395). Runtime lowering reads
+ * the node's shape, not this field, so overriding the type is a pure static
+ * refinement with no runtime effect.
+ */
+fun TypedExpr.withType(newType: MezzeType): TypedExpr = when (this) {
+    is TypedIntLit -> copy(type = newType)
+    is TypedNatLit -> copy(type = newType)
+    is TypedFloatLit -> copy(type = newType)
+    is TypedFracLit -> copy(type = newType)
+    is TypedBoolLit -> copy(type = newType)
+    is TypedCharLit -> copy(type = newType)
+    is TypedStringLit -> copy(type = newType)
+    is TypedVar -> copy(type = newType)
+    is TypedLambda -> copy(type = newType)
+    is TypedCall -> copy(type = newType)
+    is TypedRecord -> copy(type = newType)
+    is TypedFieldAccess -> copy(type = newType)
+    is TypedRecordUpdate -> copy(type = newType)
+    is TypedVariantConstruct -> copy(type = newType)
+    is TypedMatch -> copy(type = newType)
+    is TypedIf -> copy(type = newType)
+    is TypedBlock -> copy(type = newType)
+    is TypedSeq -> copy(type = newType)
+    is TypedPerform -> copy(type = newType)
+    is TypedPerformOp -> copy(type = newType)
+    is TypedPipe -> copy(type = newType)
+}
+
 /**
  * Visits every direct child [TypedExpr] of `this`, in source order.
  *

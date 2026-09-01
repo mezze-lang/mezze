@@ -158,12 +158,18 @@ class NewtypeErasureIRTest {
             "scrutineeSourceType must be the unerased nominal Age, got: $srcType",
         )
 
-        // Erased runtime type is UNCHANGED: the newtype is erased to its inner Int,
-        // losing the `Age` identity. This is what runtime lowering consumes, and it
-        // is precisely why the decided node alone was a weaker exhaustiveness oracle.
+        // #395: the scrutinee node's STATIC `.type` now also carries the `Age`
+        // identity — newtype construction preserves its wrapper on the static type
+        // everywhere a value flows (hover/inferred type parity with top-level). This
+        // does NOT re-introduce runtime wrapping: RUNTIME erasure is proven by the
+        // sibling IR tests (`scalar newtype construction is erased to inner value`,
+        // `scalar newtype destructure emits no wrap or unwrap IR nodes`), which
+        // assert the lowered IR is byte-identical to the un-wrapped inner value.
+        // The static label and the runtime IR are independent: `withType` changes
+        // only the label, never the node shape the compiler lowers.
         assertTrue(
-            !match.scrutinee.type.toString().contains("Age"),
-            "scrutinee.type must stay erased (no Age identity), got: ${match.scrutinee.type}",
+            match.scrutinee.type.toString().contains("Age"),
+            "scrutinee.type should now carry the Age wrapper statically (#395), got: ${match.scrutinee.type}",
         )
     }
 

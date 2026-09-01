@@ -209,6 +209,91 @@ class InspectAbilityTest {
     // and requires explicit Inspect implementation in current type system
 
     // ============================================================================
+    // #395 — do-block newtype to_dbg renders the WRAPPER (was erased to underlying)
+    // A do-block `let len = Length.(4.0)` used to infer `Float`, so `len.to_dbg {}`
+    // built its PrintType from the erased type and printed `4.0`. Preserving the
+    // static newtype wrapper makes it print `Length.(4.0)`, unblocking #394.
+    // ============================================================================
+
+    @Test
+    fun `do-block newtype scalar to_dbg renders wrapper`() {
+        assertEquals("Length.(4.0)", eval("""
+            newtype Length = Float
+            let f = {} -> do
+              let len = Length.(4.0)
+              len.to_dbg {}
+            f {}
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `do-block newtype over record to_dbg renders wrapper`() {
+        assertEquals("Money.({ currency = \"USD\", amount = 42 })", eval("""
+            newtype Money = { currency: Str, amount: Int }
+            let f = {} -> do
+              let m = Money.({ currency = "USD", amount = 42 })
+              m.to_dbg {}
+            f {}
+        """.trimIndent()))
+    }
+
+    // ============================================================================
+    // LIST vs SEQ RENDERING — must be DISTINGUISHABLE
+    // A List is NOT a Seq; it must not borrow Seq's `[...]` syntax. Seq keeps
+    // `[...]`; List renders `List(...)` (matching the NonEmptyList(...) form).
+    // ============================================================================
+
+    @Test
+    fun `Seq renders with square brackets`() {
+        assertEquals("[1, 2, 3]", eval("""
+            let s = [1, 2, 3]
+            s.to_dbg {}
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `empty Seq renders as empty brackets`() {
+        assertEquals("[]", eval("""
+            let s = []
+            s.to_dbg {}
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `List renders with List parens`() {
+        assertEquals("List(1, 2, 3)", eval("""
+            use std::collections::list
+            let l = list::from_seq { xs = [1, 2, 3] }
+            l.to_dbg {}
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `empty List renders as List parens`() {
+        assertEquals("List()", eval("""
+            use std::collections::list
+            let l = list::empty {}
+            l.to_dbg {}
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `List and Seq of same elements render DIFFERENTLY`() {
+        val seqStr = eval("""
+            let s = [1, 2, 3]
+            s.to_dbg {}
+        """.trimIndent())
+        val listStr = eval("""
+            use std::collections::list
+            let l = list::from_seq { xs = [1, 2, 3] }
+            l.to_dbg {}
+        """.trimIndent())
+        assertNotEquals(seqStr, listStr, "List and Seq must not render identically")
+        assertEquals("[1, 2, 3]", seqStr)
+        assertEquals("List(1, 2, 3)", listStr)
+    }
+
+    // ============================================================================
     // EDGE CASES
     // ============================================================================
 

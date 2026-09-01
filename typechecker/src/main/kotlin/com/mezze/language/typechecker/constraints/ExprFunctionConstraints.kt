@@ -103,7 +103,12 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
                 usedVariables = valueResult.usedVariables,
                 referencedBindings = valueResult.referencedBindings,
                 methodCallResolutions = valueResult.methodCallResolutions,
-                callReturnTypes = valueResult.callReturnTypes,
+                // #395: record the construction's result type (the NewtypeType
+                // wrapper, or a fnType return that resolves to one) at this loc so
+                // the emitter can stamp the runtime-erased value node's STATIC type
+                // back to the wrapper. Without this, a do-block/record/list binding
+                // that reads the emitted node's `.type` sees the erased underlying.
+                callReturnTypes = valueResult.callReturnTypes + (expr.loc to fnType.returnType),
             )
         }
     }
@@ -125,7 +130,9 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
         usedVariables = valueResult.usedVariables,
         referencedBindings = valueResult.referencedBindings,
         methodCallResolutions = valueResult.methodCallResolutions,
-        callReturnTypes = valueResult.callReturnTypes,
+        // #395: see the fnType branch above — record the NewtypeType so emit can
+        // preserve the wrapper on the erased value node's static type.
+        callReturnTypes = valueResult.callReturnTypes + (expr.loc to newtypeType),
     )
 }
 

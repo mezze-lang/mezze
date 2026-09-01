@@ -67,7 +67,9 @@ public final class InspectNatives {
             return renderVariant(value, var, dbgStyle);
         }
         if (printType instanceof PrintType.MzList l) {
-            return renderElements(iterableOf(value), l.getInner(), dbgStyle, "[", "]");
+            // List renders `List(1, 2, 3)` / `List()` — distinct from Seq, whose
+            // `[...]` syntax is Seq's alone (matches the NonEmptyList(...) form).
+            return renderElements(iterableOf(value), l.getInner(), dbgStyle, "List(", ")");
         }
         if (printType instanceof PrintType.MzSeq s) {
             return renderElements(iterableOf(value), s.getInner(), dbgStyle, "[", "]");
@@ -321,19 +323,19 @@ public final class InspectNatives {
             return constructor + " " + valueToString(variant.getPayloadValue());
         }
 
-        // Lists
+        // Lists — `List(1, 2, 3)` / `List()`, distinct from Seq's `[...]`.
         if (value instanceof MezzeList list) {
-            StringBuilder sb = new StringBuilder("[");
+            StringBuilder sb = new StringBuilder("List(");
             for (int i = 0; i < list.size(); i++) {
                 if (i > 0) sb.append(", ");
                 sb.append(valueToString(list.get(i)));
             }
-            sb.append("]");
+            sb.append(")");
             return sb.toString();
         }
 
-        // Seqs — the runtime value for a `[a, b, c]` literal. Render like a
-        // list (`[a, b, c]`); MezzeSeq.toString gives an opaque `<MezzeSeq>`.
+        // Seqs — the runtime value for a `[a, b, c]` literal. `[...]` is Seq's
+        // own syntax; MezzeSeq.toString gives an opaque `<MezzeSeq>`.
         if (value instanceof MezzeSeq<?> seq) {
             StringBuilder sb = new StringBuilder("[");
             for (int i = 0; i < seq.size(); i++) {
