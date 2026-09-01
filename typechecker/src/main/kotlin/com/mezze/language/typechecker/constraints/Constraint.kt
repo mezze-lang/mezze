@@ -496,9 +496,21 @@ data class ConstraintContext(
     // separate from typingContext, which is flat and can't tell a param from an
     // outer-scope name.
     val currentScopeBindings: Set<String> = emptySet(),
+    // #392: solved types for the current arm's match-pattern bindings, recorded by
+    // generateMatch after a local incremental solve. Consulted ONLY by
+    // getReceiverConcreteType for method dispatch — NOT by unification (the
+    // extended binding var stays a var so cross-arm unification, e.g. Nat vs an Int
+    // literal, remains flexible). Keyed by binding name; a binding whose type is
+    // still a VarType is absent (genuinely unresolved).
+    val matchBindingConcreteTypes: Map<String, MezzeType> = emptyMap(),
 ) {
     fun extend(name: String, type: MezzeType): ConstraintContext {
         return copy(typingContext = typingContext.extendMono(name, type))
+    }
+
+    /** #392: merge solved match-arm binding types into the dispatch side table. */
+    fun withMatchBindingConcreteTypes(types: Map<String, MezzeType>): ConstraintContext {
+        return copy(matchBindingConcreteTypes = matchBindingConcreteTypes + types)
     }
 
     fun withExpectedType(type: MezzeType): ConstraintContext {

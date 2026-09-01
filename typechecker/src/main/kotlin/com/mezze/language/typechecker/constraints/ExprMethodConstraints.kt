@@ -810,6 +810,12 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
     }
     if (receiver !is ParsedIdentifier) return null
     if (receiver.qualifier != null) return null
+    // #392: a match-arm pattern binding is registered with its raw fresh pattern
+    // VarType (kept a var for cross-arm unification), so the name-keyed lookup below
+    // can't see its concrete type. generateMatch stashes the SOLVED binding type in
+    // this dispatch-only side table; prefer it so a match-bound receiver dispatches
+    // like a `let`/param one. Absent ⇒ genuinely unresolved (falls through).
+    context.matchBindingConcreteTypes[receiver.localName]?.let { return it }
     val lookup = context.typingContext.lookup(receiver.localName)
     if (lookup !is TypingContext.LookupResult.Found) return null
     val type = when (val binding = lookup.binding) {

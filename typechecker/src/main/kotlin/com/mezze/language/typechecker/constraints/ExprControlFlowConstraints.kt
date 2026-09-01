@@ -121,9 +121,35 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
             }
         }
 
+        // #392: a receiver bound by a match-arm pattern must dispatch its
+        // inherent/ability methods like a `let`- or param-bound one. The do-block
+        // `let` path runs a local incremental solve (solveDoBlockBindingLocally +
+        // bindLet, below) so the binding's registered type is already CONCRETE when
+        // getReceiverConcreteType reads it. A match-arm binding is extended with the
+        // raw fresh pattern VarType (unification-critical — see below), so its
+        // solved type was unavailable at method-resolve time and the call fell
+        // through to a structural field access ("record fields don't match").
+        //
+        // We do NOT pin the extended binding to its solved type: the binding var is
+        // load-bearing for cross-arm unification (e.g. a Nat payload that must stay
+        // flexible against an `Int` literal in a sibling arm), and freezing it early
+        // regresses that. Instead we run the local solve purely to record each
+        // binding's SOLVED type in a side table (matchBindingConcreteTypes) that
+        // ONLY getReceiverConcreteType consults for dispatch — never unification. A
+        // binding whose type still solves to a VarType is left out (unresolved), the
+        // same "still-var ⇒ unresolved" contract getReceiverConcreteType relies on.
+        val armSolve = solveDoBlockBindingLocally(collector.constraints, context)
         var caseContext = context
+        val armConcreteBindings = mutableMapOf<String, MezzeType>()
         for ((varName, varType) in patternResult.bindings) {
             caseContext = caseContext.extend(varName, varType)
+            val resolved = armSolve?.solveResult?.substitution?.apply(varType)
+            if (resolved != null && resolved !is MezzeType.VarType) {
+                armConcreteBindings[varName] = resolved
+            }
+        }
+        if (armConcreteBindings.isNotEmpty()) {
+            caseContext = caseContext.withMatchBindingConcreteTypes(armConcreteBindings)
         }
         // #195 mono-fix #1: stash this case's bindings keyed by the case
         // Loc so TypedAstBuilder can recover the solver's TyVars (not
