@@ -37,7 +37,7 @@ class SmartEffectSchedulerTest {
     private val loomSetup = """
         use std::effects::async::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
-            add_watch, remove_watch, atom_validated, set_validator
+            add_watch, remove_watch, atom_validated
         }
         use std::effects::async::{ Async, LoomAsync, await, sleep }
         use std::effects::time::{ Time, SystemTime }

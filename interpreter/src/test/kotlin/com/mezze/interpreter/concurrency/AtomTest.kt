@@ -31,7 +31,7 @@ class AtomTest {
     private val atomSetup = """
         use std::effects::async::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
-            add_watch, remove_watch, atom_validated, set_validator
+            add_watch, remove_watch, atom_validated
         }
         use std::effects::async::{ Async, LoomAsync, await }
 
@@ -456,7 +456,7 @@ class AtomTest {
             $atomSetup
 
             let positive = atom_validated {val = 10, validator = {val} -> val >= 0}
-            deref {atom = positive}
+            positive.deref {}
         """
         val result = eval(code)
         assertEquals(10L, result)
@@ -468,7 +468,7 @@ class AtomTest {
             $atomSetup
 
             let positive = atom_validated {val = -5, validator = {val} -> val >= 0}
-            deref {atom = positive}
+            positive.deref {}
         """
         val exception = assertThrows(Exception::class.java) {
             eval(code)
@@ -478,76 +478,103 @@ class AtomTest {
 
     @Test
     fun `test validator allows valid swap`() {
+        // ValidatedAtom.swap returns Result; on success Ok { val = new }.
         val code = """
             $atomSetup
 
             let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            let _ = swap {atom = positive, f = {current} -> current + 10}
-            deref {atom = positive}
+            let _ = positive.swap {f = {current} -> current + 10}
+            positive.deref {}
         """
         val result = eval(code)
         assertEquals(15L, result)
     }
 
     @Test
-    fun `test validator rejects invalid swap`() {
+    fun `test validator rejects invalid swap returns Err and leaves atom unchanged`() {
+        // ValidatedAtom.swap returns Err { error = ValidatorRejected { val } } on reject.
         val code = """
             $atomSetup
 
             let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            swap {atom = positive, f = {current} -> current - 100}
+            let outcome = positive.swap {f = {current} -> current - 100}
+            match outcome is
+              Ok { val = _ } -> 999
+              Err { error = ValidatorRejected { val } } -> val
         """
-        val exception = assertThrows(Exception::class.java) {
-            eval(code)
-        }
-        assertTrue(exception.message?.contains("validator rejected") == true)
+        // The rejected value (5 - 100 = -95) is carried in the Err.
+        assertEquals(-95L, eval(code))
     }
 
     @Test
-    fun `test validator rejects invalid reset`() {
+    fun `test validator rejected swap leaves value unchanged`() {
         val code = """
             $atomSetup
 
             let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            reset {atom = positive, val = -10}
+            let _ = positive.swap {f = {current} -> current - 100}
+            positive.deref {}
         """
-        val exception = assertThrows(Exception::class.java) {
-            eval(code)
-        }
-        assertTrue(exception.message?.contains("validator rejected") == true)
+        assertEquals(5L, eval(code))
     }
 
     @Test
-    fun `test set_validator on existing atom`() {
+    fun `test validator rejects invalid reset returns Err`() {
         val code = """
             $atomSetup
 
-            let counter = atom {val = 10}
-            let _ = set_validator {atom = counter, validator = {val} -> val < 100}
-
-            # This should be allowed
-            let _ = swap {atom = counter, f = {current} -> current + 50}
-            deref {atom = counter}
+            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
+            let outcome = positive.reset {val = -10}
+            match outcome is
+              Ok { val = _ } -> 999
+              Err { error = ValidatorRejected { val } } -> val
         """
-        val result = eval(code)
-        assertEquals(60L, result)
+        assertEquals(-10L, eval(code))
     }
 
     @Test
-    fun `test set_validator rejects future invalid updates`() {
+    fun `test validated reset success returns Ok and updates`() {
         val code = """
             $atomSetup
 
-            let counter = atom {val = 10}
-            let _ = set_validator {atom = counter, validator = {val} -> val < 100}
-
-            # This should fail because 10 + 100 = 110 >= 100
-            swap {atom = counter, f = {current} -> current + 100}
+            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
+            let outcome = positive.reset {val = 42}
+            match outcome is
+              Ok { val } -> val
+              Err { error = _ } -> 0-1
         """
-        val exception = assertThrows(Exception::class.java) {
-            eval(code)
-        }
-        assertTrue(exception.message?.contains("validator rejected") == true)
+        assertEquals(42L, eval(code))
+    }
+
+    @Test
+    fun `test validated atom future invalid updates rejected via Result`() {
+        // Was: set_validator on a plain atom. Now: build a ValidatedAtom up front.
+        val code = """
+            $atomSetup
+
+            let counter = atom_validated {val = 10, validator = {val} -> val < 100}
+
+            # Allowed: 10 + 50 = 60 < 100
+            let _ = counter.swap {f = {current} -> current + 50}
+            counter.deref {}
+        """
+        assertEquals(60L, eval(code))
+    }
+
+    @Test
+    fun `test validated atom rejects out-of-bounds update via Result`() {
+        val code = """
+            $atomSetup
+
+            let counter = atom_validated {val = 10, validator = {val} -> val < 100}
+
+            # 10 + 100 = 110 >= 100 -> rejected
+            let outcome = counter.swap {f = {current} -> current + 100}
+            match outcome is
+              Ok { val = _ } -> 999
+              Err { error = ValidatorRejected { val } } -> val
+        """
+        assertEquals(110L, eval(code))
     }
 
     @Test
@@ -565,20 +592,13 @@ class AtomTest {
 
     @Test
     fun `test validator preserves value on failure`() {
-        // After a failed swap, the atom should still have its old value
+        // After a valid swap on a ValidatedAtom, the new value is visible.
         val code = """
             $atomSetup
 
             let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            let result = atom {val = 0}
-
-            # Try an invalid swap inside a function that catches the error
-            # Since Mezze doesn't have try/catch, we'll just verify the atom value is preserved
-            # by doing a valid swap after the test
-
-            # First, do a valid swap
-            let _ = swap {atom = positive, f = {current} -> current + 1}
-            deref {atom = positive}
+            let _ = positive.swap {f = {current} -> current + 1}
+            positive.deref {}
         """
         val result = eval(code)
         assertEquals(6L, result)

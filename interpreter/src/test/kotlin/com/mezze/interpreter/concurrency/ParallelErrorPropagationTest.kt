@@ -44,7 +44,7 @@ class ParallelErrorPropagationTest {
     private val loomSetup = """
         use std::effects::async::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
-            add_watch, remove_watch, atom_validated, set_validator
+            add_watch, remove_watch, atom_validated
         }
         use std::effects::async::{ Async, LoomAsync, all, await, cancel, inspect, is_cancelled, is_done, is_failed, is_pending, join, join3, race, settle, sleep, try_any, try_join, try_join3, with_timeout }
         use std::effects::exception::{ Exception, CrashException, unwrap }

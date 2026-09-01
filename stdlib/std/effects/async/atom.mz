@@ -1,10 +1,32 @@
 use std::abilities::compare::{ Eq }
 use std::effects::async::{ Async }
 
+## Error returned by a `ValidatedAtom` mutation when the validator rejects
+## the proposed new value. Carries the rejected value so callers can inspect
+## what was refused. The atom is left unchanged on rejection.
+pub type AtomError 'a = |
+  ValidatorRejected { val: 'a },
+|
+
 ## Lock-free atomic reference for shared mutable state.
+##
+## `Atom` is UNVALIDATED and TOTAL: its mutations (`swap`, `reset`,
+## `swap_with`, `get_and_swap`) return values directly and never fail.
 pub newtype Atom 'a = __NativeAtomicRef
 
+## Lock-free atomic reference guarded by a validator.
+##
+## `ValidatedAtom` mutations run the validator on the proposed value and
+## return a `Result`: `Ok` with the installed value on success, or
+## `Err { error = ValidatorRejected { val } }` when rejected (atom unchanged).
+pub newtype ValidatedAtom 'a = __NativeAtomicRef
+
 impl Eq for Atom 'a where {
+  eq = { it, r } -> __native_ref_eq { l = it, r = r },
+  neq = { it, r } -> __native_ref_neq { l = it, r = r },
+}
+
+impl Eq for ValidatedAtom 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
@@ -19,7 +41,18 @@ impl Atom 'a where {
   get_and_swap = { it, f } -> get_and_swap { atom = it, f = f },
   add_watch = { it, key, f } -> add_watch { atom = it, key = key, f = f },
   remove_watch = { it, key } -> remove_watch { atom = it, key = key },
-  set_validator = { it, validator } -> set_validator { atom = it, validator = validator },
+}
+
+impl ValidatedAtom 'a where {
+  deref = { it } -> deref_validated { atom = it },
+  reset = { it, val } -> reset_validated { atom = it, val = val },
+  swap = { it, f } -> swap_validated { atom = it, f = f },
+  compare_and_set = { it, expected, new } ->
+    compare_and_set_validated { atom = it, expected = expected, new = new },
+  swap_with = { it, f, arg } -> swap_with_validated { atom = it, f = f, arg = arg },
+  get_and_swap = { it, f } -> get_and_swap_validated { atom = it, f = f },
+  add_watch = { it, key, f } -> add_watch_validated { atom = it, key = key, f = f },
+  remove_watch = { it, key } -> remove_watch_validated { atom = it, key = key },
 }
 
 ## Create a new atom with an initial value.
@@ -62,14 +95,55 @@ pub let add_watch
 pub let remove_watch: { atom: Atom 'a, key: Str } -> {} <Async> = { atom, key } ->
   __native_atom_remove_watch { atom = atom, key = key }
 
-## Create an atom with a validator that rejects invalid updates.
+## Create a validated atom whose mutations must pass `validator`.
+## The initial value must pass too. Mutations return a `Result`.
 pub let atom_validated
   : { val: 'a, validator: { val: 'a } -> Bool }
-  -> Atom 'a <Async>
+  -> ValidatedAtom 'a <Async>
   = { val, validator } -> __native_atom_new_validated { val = val, validator = validator }
 
-## Set a validator on an existing atom. Future updates must pass it.
-pub let set_validator
-  : { atom: Atom 'a, validator: { val: 'a } -> Bool }
-  -> {} <Async>
-  = { atom, validator } -> __native_atom_set_validator { atom = atom, validator = validator }
+## Read the current value of a validated atom (non-blocking, total).
+pub let deref_validated: { atom: ValidatedAtom 'a } -> 'a <Async> = { atom } ->
+  __native_atom_deref { atom = atom }
+
+## Set a validated atom directly. Returns `Ok { val }` on success or
+## `Err { error = ValidatorRejected { val } }` if the validator rejects.
+pub let reset_validated
+  : { atom: ValidatedAtom 'a, val: 'a }
+  -> Result 'a (AtomError 'a) <Async>
+  = { atom, val } -> __native_atom_reset_validated { atom = atom, val = val }
+
+## Atomically apply f to a validated atom, returning a `Result`.
+pub let swap_validated
+  : { atom: ValidatedAtom 'a, f: { current: 'a } -> 'a }
+  -> Result 'a (AtomError 'a) <Async>
+  = { atom, f } -> __native_atom_swap_validated { atom = atom, f = f }
+
+## Compare-and-set on a validated atom (validator still applies).
+pub let compare_and_set_validated
+  : { atom: ValidatedAtom 'a, expected: 'a, new: 'a }
+  -> Bool <Async>
+  = { atom, expected, new } ->
+    __native_atom_cas { atom = atom, expected = expected, new = new }
+
+## Atomically apply f with an extra argument on a validated atom.
+pub let swap_with_validated
+  : { atom: ValidatedAtom 'a, f: { current: 'a, arg: 'b } -> 'a, arg: 'b }
+  -> Result 'a (AtomError 'a) <Async>
+  = { atom, f, arg } -> __native_atom_swap_with_validated { atom = atom, f = f, arg = arg }
+
+## Atomically apply f on a validated atom, returning old and new on success.
+pub let get_and_swap_validated
+  : { atom: ValidatedAtom 'a, f: { current: 'a } -> 'a }
+  -> Result { old: 'a, new: 'a } (AtomError 'a) <Async>
+  = { atom, f } -> __native_atom_get_and_swap_validated { atom = atom, f = f }
+
+## Register a watch callback on a validated atom.
+pub let add_watch_validated
+  : { atom: ValidatedAtom 'a, key: Str, f: { key: Str, old: 'a, new: 'a } -> {} <...> }
+  -> {} <Async, ...>
+  = { atom, key, f } -> __native_atom_add_watch { atom = atom, key = key, f = f }
+
+## Remove a watch by its key from a validated atom.
+pub let remove_watch_validated: { atom: ValidatedAtom 'a, key: Str } -> {} <Async> = { atom, key } ->
+  __native_atom_remove_watch { atom = atom, key = key }

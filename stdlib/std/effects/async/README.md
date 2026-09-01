@@ -32,8 +32,7 @@ Test file: `concurrency/AtomTest.kt`
 | `get_and_swap` | :white_check_mark: | Via swap tests |
 | `add_watch` | :white_check_mark: | Watch callback tests |
 | `remove_watch` | :white_check_mark: | Stops notifications |
-| `atom_validated` | :white_check_mark: | Validator tests |
-| `set_validator` | :white_check_mark: | Dynamic validator tests |
+| `atom_validated` | :white_check_mark: | Returns a `ValidatedAtom`; mutations return `Result` |
 
 ---
 

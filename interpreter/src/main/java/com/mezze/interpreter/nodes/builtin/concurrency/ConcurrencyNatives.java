@@ -426,9 +426,7 @@ public final class ConcurrencyNatives {
             this.watches = new java.util.concurrent.ConcurrentHashMap<>();
         }
 
-        public void setValidator(MezzeFunction newValidator) {
-            this.validator = newValidator;
-        }
+        public boolean hasValidator() { return validator != null; }
 
         public Object deref() { return value.get(); }
 
@@ -443,6 +441,22 @@ public final class ConcurrencyNatives {
             Object oldValue = value.getAndSet(newValue);
             notifyWatches(oldValue, newValue, callNode);
             return oldValue;
+        }
+
+        /**
+         * Run the validator (if any) against a proposed value WITHOUT throwing.
+         * Returns true if the value is acceptable (or there is no validator).
+         * Used by the ValidatedAtom Result-returning ops.
+         */
+        public boolean validatePasses(Object newValue, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+            MezzeFunction v = validator;  // volatile read
+            if (v == null) return true;
+            MezzeRecord argRecord = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{newValue});
+            Object[] closuresWithArg = new Object[v.getClosureValues().length + 1];
+            System.arraycopy(v.getClosureValues(), 0, closuresWithArg, 0, v.getClosureValues().length);
+            closuresWithArg[v.getClosureValues().length] = argRecord;
+            Object result = callNode.call(v.getCallTarget(), closuresWithArg);
+            return !(result instanceof Boolean b && !b);
         }
 
         // Legacy method for simple cases without watches
@@ -537,9 +551,30 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static Object atomReset(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeAtom atom = getAtom(args, "atom");
+        assertNoValidator(atom, "reset");
         Object value = getField(args, "val");
         atom.reset(value, callNode);
         return value;  // Return the new value
+    }
+
+    /**
+     * Belt-and-suspenders: a plain {@code Atom} must never carry a validator.
+     * The type system prevents a validated ref from reaching a plain op, so
+     * this only fires on an internal invariant violation.
+     */
+    private static void assertNoValidator(MezzeAtom atom, String op) {
+        if (atom.hasValidator()) {
+            throw new NativeTypeMismatchException(
+                "Atom." + op + ": plain (unvalidated) op received a validator-carrying atom");
+        }
+    }
+
+    /** Build {@code Err { error = ValidatorRejected { val = <rejected> } }}. */
+    private static MezzeVariant validatorRejectedErr(Object rejectedValue) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("ValidatorRejected");
+        MezzeRecord payload = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{rejectedValue});
+        MezzeVariant rejected = MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
+        return MezzeVariant.err(rejected);
     }
 
     @TruffleBoundary
@@ -554,8 +589,9 @@ public final class ConcurrencyNatives {
 
     @TruffleBoundary
     public static Object atomSwapFunc(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        // swap takes a function {current} -> new value
+        // Plain swap: total, returns the new value directly. Must not be validated.
         MezzeAtom atom = getAtom(args, "atom");
+        assertNoValidator(atom, "swap");
         MezzeFunction f = getFunction(args, "f");
         Object oldVal;
         Object newVal;
@@ -567,14 +603,92 @@ public final class ConcurrencyNatives {
             System.arraycopy(f.getClosureValues(), 0, closuresWithArg, 0, f.getClosureValues().length);
             closuresWithArg[f.getClosureValues().length] = argRecord;
             newVal = callNode.call(f.getCallTarget(), closuresWithArg);
-            // Validate before CAS - throws if invalid
-            atom.validate(newVal, callNode);
         } while (!atom.compareAndSet(oldVal, newVal));
 
         // Notify watches after successful swap
         atom.notifyWatches(oldVal, newVal, callNode);
 
         return newVal;
+    }
+
+    // ==================== Validated Atom ops (return Result) ====================
+
+    @TruffleBoundary
+    public static Object atomResetValidated(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        MezzeAtom atom = getAtom(args, "atom");
+        Object value = getField(args, "val");
+        if (!atom.validatePasses(value, callNode)) {
+            return validatorRejectedErr(value);  // atom unchanged
+        }
+        Object oldValue = atom.deref();
+        atom.value.set(value);
+        atom.notifyWatches(oldValue, value, callNode);
+        return MezzeVariant.ok(value);
+    }
+
+    @TruffleBoundary
+    public static Object atomSwapValidated(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        MezzeAtom atom = getAtom(args, "atom");
+        MezzeFunction f = getFunction(args, "f");
+        Object oldVal;
+        Object newVal;
+        do {
+            oldVal = atom.deref();
+            MezzeRecord argRecord = MezzeRecord.fromFields(CURRENT_FIELD, new Object[]{oldVal});
+            Object[] closuresWithArg = new Object[f.getClosureValues().length + 1];
+            System.arraycopy(f.getClosureValues(), 0, closuresWithArg, 0, f.getClosureValues().length);
+            closuresWithArg[f.getClosureValues().length] = argRecord;
+            newVal = callNode.call(f.getCallTarget(), closuresWithArg);
+            if (!atom.validatePasses(newVal, callNode)) {
+                return validatorRejectedErr(newVal);  // atom unchanged
+            }
+        } while (!atom.compareAndSet(oldVal, newVal));
+        atom.notifyWatches(oldVal, newVal, callNode);
+        return MezzeVariant.ok(newVal);
+    }
+
+    @TruffleBoundary
+    public static Object atomSwapWithValidated(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        MezzeAtom atom = getAtom(args, "atom");
+        MezzeFunction f = getFunction(args, "f");
+        Object arg = getField(args, "arg");
+        Object oldVal;
+        Object newVal;
+        do {
+            oldVal = atom.deref();
+            MezzeRecord funcArg = MezzeRecord.fromFields(CURRENT_ARG_FIELDS, new Object[]{oldVal, arg});
+            Object[] closures = f.getClosureValues();
+            Object[] callArgs = new Object[closures.length + 1];
+            System.arraycopy(closures, 0, callArgs, 0, closures.length);
+            callArgs[closures.length] = funcArg;
+            newVal = callNode.call(f.getCallTarget(), callArgs);
+            if (!atom.validatePasses(newVal, callNode)) {
+                return validatorRejectedErr(newVal);  // atom unchanged
+            }
+        } while (!atom.compareAndSet(oldVal, newVal));
+        atom.notifyWatches(oldVal, newVal, callNode);
+        return MezzeVariant.ok(newVal);
+    }
+
+    @TruffleBoundary
+    public static Object atomGetAndSwapValidated(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        MezzeAtom atom = getAtom(args, "atom");
+        MezzeFunction f = getFunction(args, "f");
+        Object oldVal;
+        Object newVal;
+        do {
+            oldVal = atom.deref();
+            MezzeRecord argRecord = MezzeRecord.fromFields(CURRENT_FIELD, new Object[]{oldVal});
+            Object[] closuresWithArg = new Object[f.getClosureValues().length + 1];
+            System.arraycopy(f.getClosureValues(), 0, closuresWithArg, 0, f.getClosureValues().length);
+            closuresWithArg[f.getClosureValues().length] = argRecord;
+            newVal = callNode.call(f.getCallTarget(), closuresWithArg);
+            if (!atom.validatePasses(newVal, callNode)) {
+                return validatorRejectedErr(newVal);  // atom unchanged
+            }
+        } while (!atom.compareAndSet(oldVal, newVal));
+        atom.notifyWatches(oldVal, newVal, callNode);
+        return MezzeVariant.ok(MezzeRecord.fromFields(OLD_NEW_FIELDS, new Object[]{oldVal, newVal}));
     }
 
     @TruffleBoundary
@@ -1872,6 +1986,7 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static Object atomSwapWith(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeAtom atom = getAtom(args, "atom");
+        assertNoValidator(atom, "swap_with");
         MezzeFunction f = getFunction(args, "f");
         Object arg = getField(args, "arg");
         Object oldVal;
@@ -1896,6 +2011,7 @@ public final class ConcurrencyNatives {
     public static MezzeRecord atomGetAndSwap(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         // get_and_swap takes a function {current} -> new and returns {old, new}
         MezzeAtom atom = getAtom(args, "atom");
+        assertNoValidator(atom, "get_and_swap");
         MezzeFunction f = getFunction(args, "f");
         Object oldVal;
         Object newVal;
@@ -1909,14 +2025,6 @@ public final class ConcurrencyNatives {
             newVal = callNode.call(f.getCallTarget(), closuresWithArg);
         } while (!atom.compareAndSet(oldVal, newVal));
         return MezzeRecord.fromFields(OLD_NEW_FIELDS, new Object[]{oldVal, newVal});
-    }
-
-    @TruffleBoundary
-    public static MezzeRecord atomSetValidator(MezzeRecord args) {
-        MezzeAtom atom = getAtom(args, "atom");
-        MezzeFunction validator = getFunction(args, "validator");
-        atom.setValidator(validator);
-        return MezzeRecord.empty();
     }
 
     // ==================== Additional Semaphore Operations ====================

@@ -3017,7 +3017,11 @@ public final class NativeDispatch extends MezzeNode {
         // === Additional Atom ===
         HANDLERS.put("__native_atom_swap_with", (r, c) -> ConcurrencyNatives.atomSwapWith(r, c));
         HANDLERS.put("__native_atom_get_and_swap", (r, c) -> ConcurrencyNatives.atomGetAndSwap(r, c));
-        HANDLERS.put("__native_atom_set_validator", (r, c) -> ConcurrencyNatives.atomSetValidator(r));
+        // Validated-atom Result-returning ops
+        HANDLERS.put("__native_atom_reset_validated", (r, c) -> ConcurrencyNatives.atomResetValidated(r, c));
+        HANDLERS.put("__native_atom_swap_validated", (r, c) -> ConcurrencyNatives.atomSwapValidated(r, c));
+        HANDLERS.put("__native_atom_swap_with_validated", (r, c) -> ConcurrencyNatives.atomSwapWithValidated(r, c));
+        HANDLERS.put("__native_atom_get_and_swap_validated", (r, c) -> ConcurrencyNatives.atomGetAndSwapValidated(r, c));
 
         // === Additional Semaphore ===
         HANDLERS.put("__native_semaphore_try_acquire_n", (r, c) -> ConcurrencyNatives.semaphoreTryAcquireN(r));

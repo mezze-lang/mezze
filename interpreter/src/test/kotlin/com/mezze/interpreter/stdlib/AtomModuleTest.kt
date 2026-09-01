@@ -224,23 +224,22 @@ class AtomModuleTest {
     @Test
     fun `test atom_validated creates validated atom`() {
         val result = eval("""
-            use std::effects::async::atom::{atom_validated, deref}
+            use std::effects::async::atom::{atom_validated, deref_validated}
 
             let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            deref {atom = positive}
+            positive.deref {}
         """)
         assertEquals(5L, result)
     }
 
     @Test
-    fun `test set_validator adds validator`() {
+    fun `test validated atom allows valid swap via Result`() {
         val result = eval("""
-            use std::effects::async::atom::{atom, deref, swap, set_validator}
+            use std::effects::async::atom::{atom_validated, deref_validated, swap_validated}
 
-            let counter = atom {val = 10}
-            let _ = set_validator {atom = counter, validator = {val} -> val >= 0}
-            let _ = swap {atom = counter, f = {current} -> current + 5}
-            deref {atom = counter}
+            let counter = atom_validated {val = 10, validator = {val} -> val >= 0}
+            let _ = counter.swap {f = {current} -> current + 5}
+            counter.deref {}
         """)
         assertEquals(15L, result)
     }
