@@ -76,27 +76,27 @@ public final class NonEmptyListNatives {
     }
 
     @TruffleBoundary
-    public static MezzeNonEmptyList fromList(MezzeList list) {
+    public static MezzeVariant fromList(MezzeList list) {
         if (list.isEmpty()) {
-            // User-reachable: `nel::from_list`/`from_seq` on an empty list.
-            // Guest-visible fatal (stdlib signature returns a bare
-            // NonEmptyList 'a, not a Result — see report for the
-            // recommended Result-returning follow-up).
-            throw new MezzeGuestException("NonEmptyList.from_list: cannot create a NonEmptyList from an empty list");
+            // No-fatal: empty source is a normal, recoverable case.
+            // `nel::from_list` returns Option (NonEmptyList 'a).
+            return MezzeVariant.none();
         }
         Object[] elements = new Object[list.size()];
         for (int i = 0; i < list.size(); i++) {
             elements[i] = list.get(i);
         }
-        return new MezzeNonEmptyList(elements);
+        return MezzeVariant.some(new MezzeNonEmptyList(elements));
     }
 
     @TruffleBoundary
-    public static MezzeNonEmptyList fromArray(Object[] arr) {
+    public static MezzeVariant fromArray(Object[] arr) {
         if (arr.length == 0) {
-            throw new MezzeGuestException("NonEmptyList.from_seq: cannot create a NonEmptyList from an empty seq");
+            // No-fatal: empty seq is a normal case; `nel::from_seq`
+            // returns Option (NonEmptyList 'a).
+            return MezzeVariant.none();
         }
-        return new MezzeNonEmptyList(arr.clone());
+        return MezzeVariant.some(new MezzeNonEmptyList(arr.clone()));
     }
 
     // ==================== Basic Operations ====================
@@ -117,14 +117,14 @@ public final class NonEmptyListNatives {
         return list.last();
     }
 
-    public static Object get(MezzeNonEmptyList list, long index) {
+    public static MezzeVariant get(MezzeNonEmptyList list, long index) {
         int idx = (int) index;
         if (idx < 0 || idx >= list.size()) {
-            // User-reachable: `nel::get { index }` out of range. Guest-visible
-            // fatal (stdlib `get` returns a bare 'a, not Option/Result).
-            throw new MezzeGuestException("NonEmptyList.get: index " + idx + " out of bounds for NonEmptyList of size " + list.size());
+            // No-fatal: out-of-range index is a normal case; `nel::get`
+            // returns Option 'a.
+            return MezzeVariant.none();
         }
-        return list.get(idx);
+        return MezzeVariant.some(list.get(idx));
     }
 
     // ==================== Construct Operations ====================

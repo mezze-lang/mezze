@@ -56,8 +56,8 @@ pub let append_list
   -> NonEmptyList 'a
   = { xs, ys } -> __native_nel_append_list { xs = xs, ys = ys }
 
-## Returns the element at the given index.
-pub let get: { xs: NonEmptyList 'a, index: Int } -> 'a = { xs, index } ->
+## Returns the element at the given index, or None if out of range.
+pub let get: { xs: NonEmptyList 'a, index: Int } -> Option 'a = { xs, index } ->
   __native_nel_get { xs = xs, index = index }
 
 ## Returns the last element (always succeeds).
@@ -122,15 +122,15 @@ pub let intersperse: { xs: NonEmptyList 'a, sep: 'a } -> NonEmptyList 'a = { xs,
 ## Converts to a List.
 pub let to_list: { xs: NonEmptyList 'a } -> List 'a = { xs } -> __native_nel_to_list { xs = xs }
 
-## Creates a NonEmptyList from a List. Fails if the list is empty.
-pub let from_list: { xs: List 'a } -> NonEmptyList 'a = { xs } ->
+## Creates a NonEmptyList from a List. Returns None if the list is empty.
+pub let from_list: { xs: List 'a } -> Option (NonEmptyList 'a) = { xs } ->
   __native_nel_from_list { xs = xs }
 
 ## Converts to a Seq.
 pub let to_seq: { xs: NonEmptyList 'a } -> ['a] = { xs } -> __native_nel_to_seq { xs = xs }
 
-## Creates a NonEmptyList from a Seq. Fails if the seq is empty.
-pub let from_seq: { xs: ['a] } -> NonEmptyList 'a = { xs } -> __native_nel_from_seq { xs = xs }
+## Creates a NonEmptyList from a Seq. Returns None if the seq is empty.
+pub let from_seq: { xs: ['a] } -> Option (NonEmptyList 'a) = { xs } -> __native_nel_from_seq { xs = xs }
 
 ## Sorts elements in ascending order.
 pub let sort: { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } -> __native_nel_sort { xs = xs }

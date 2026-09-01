@@ -161,24 +161,52 @@ class NonEmptyListModuleTest {
     // ===== Access =====
 
     @Test
-    fun `test nel get`() {
+    fun `test nel get returns Some for in-range index`() {
         val result = eval("""
             use std::collections::nonemptylist
             let tail = Cons { head = 2, tail = Cons { head = 3, tail = Nil } }
             let xs = nonemptylist::from_head_tail { head = 1, tail = tail }
-            nonemptylist::get { xs = xs, index = 1 }
+            match nonemptylist::get { xs = xs, index = 1 } is
+              Some { val } -> val
+              None -> 0 - 1
         """)
         assertEquals(2L, result)
     }
 
     @Test
-    fun `test nel get first element`() {
+    fun `test nel get first element returns Some`() {
         val result = eval("""
             use std::collections::nonemptylist
             let xs = nonemptylist::singleton { x = 42 }
-            nonemptylist::get { xs = xs, index = 0 }
+            match nonemptylist::get { xs = xs, index = 0 } is
+              Some { val } -> val
+              None -> 0 - 1
         """)
         assertEquals(42L, result)
+    }
+
+    @Test
+    fun `test nel get out of range returns None`() {
+        val result = eval("""
+            use std::collections::nonemptylist
+            let xs = nonemptylist::singleton { x = 42 }
+            match nonemptylist::get { xs = xs, index = 5 } is
+              Some { val } -> False
+              None -> True
+        """)
+        assertEquals(true, result)
+    }
+
+    @Test
+    fun `test nel get negative index returns None`() {
+        val result = eval("""
+            use std::collections::nonemptylist
+            let xs = nonemptylist::singleton { x = 42 }
+            match nonemptylist::get { xs = xs, index = 0 - 1 } is
+              Some { val } -> False
+              None -> True
+        """)
+        assertEquals(true, result)
     }
 
     @Test
@@ -405,14 +433,28 @@ class NonEmptyListModuleTest {
     }
 
     @Test
-    fun `test nel from_list`() {
+    fun `test nel from_list returns Some for non-empty`() {
         val result = eval("""
             use std::collections::nonemptylist
             let list = Cons { head = 1, tail = Cons { head = 2, tail = Nil } }
-            let xs = nonemptylist::from_list { xs = list }
-            nonemptylist::size { xs = xs }
+            match nonemptylist::from_list { xs = list } is
+              Some { val } -> nonemptylist::size { xs = val }
+              None -> 0 - 1
         """)
         assertEquals(2L, result)
+    }
+
+    @Test
+    fun `test nel from_list on empty returns None`() {
+        val result = eval("""
+            use std::collections::nonemptylist
+            use std::collections::list
+            let empty = list::empty {}
+            match nonemptylist::from_list { xs = empty } is
+              Some { val } -> False
+              None -> True
+        """)
+        assertEquals(true, result)
     }
 
     @Test
@@ -428,13 +470,25 @@ class NonEmptyListModuleTest {
     }
 
     @Test
-    fun `test nel from_seq`() {
+    fun `test nel from_seq returns Some for non-empty`() {
         val result = eval("""
             use std::collections::nonemptylist
-            let xs = nonemptylist::from_seq { xs = [1, 2, 3] }
-            nonemptylist::size { xs = xs }
+            match nonemptylist::from_seq { xs = [1, 2, 3] } is
+              Some { val } -> nonemptylist::size { xs = val }
+              None -> 0 - 1
         """)
         assertEquals(3L, result)
+    }
+
+    @Test
+    fun `test nel from_seq on empty returns None`() {
+        val result = eval("""
+            use std::collections::nonemptylist
+            match nonemptylist::from_seq { xs = [] } is
+              Some { val } -> False
+              None -> True
+        """)
+        assertEquals(true, result)
     }
 
     @Test
@@ -443,10 +497,21 @@ class NonEmptyListModuleTest {
             use std::collections::nonemptylist
             let xs = nonemptylist::cons { x = 1, xs = nonemptylist::cons { x = 2, xs = nonemptylist::singleton { x = 3 } } }
             let list = nonemptylist::to_list { xs = xs }
-            let ys = nonemptylist::from_list { xs = list }
-            nonemptylist::head { xs = ys }
+            match nonemptylist::from_list { xs = list } is
+              Some { val } -> nonemptylist::head { xs = val }
+              None -> 0 - 1
         """)
         assertEquals(1L, result)
+    }
+
+    @Test
+    fun `test nel head is total on singleton`() {
+        val result = eval("""
+            use std::collections::nonemptylist
+            let xs = nonemptylist::singleton { x = 7 }
+            nonemptylist::head { xs = xs }
+        """)
+        assertEquals(7L, result)
     }
 
     // ===== Sorting =====

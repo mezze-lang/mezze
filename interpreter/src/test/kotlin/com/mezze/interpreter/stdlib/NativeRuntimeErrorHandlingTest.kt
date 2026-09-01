@@ -14,12 +14,15 @@ import org.junit.jupiter.api.Test
  * conditions and classified each as user-reachable / internal-invariant /
  * intentionally-fatal.
  *
- * The user-reachable conditions whose stdlib wrapper returns a BARE value
- * (NonEmptyList get/from_list, Atom validator, ...) cannot become a Mezze
- * `Err` without a stdlib signature change (reported as a follow-up). They
- * were instead relabeled as `MezzeGuestException` — a clean, guest-visible
- * fatal that renders like div-by-zero, NOT a raw Java stack trace / silent
- * corruption.
+ * Some user-reachable conditions whose stdlib wrapper returns a BARE value
+ * (Atom validator, ...) cannot become a Mezze `Err`/`Option` without a
+ * stdlib signature change. They were relabeled as `MezzeGuestException` — a
+ * clean, guest-visible fatal that renders like div-by-zero, NOT a raw Java
+ * stack trace / silent corruption.
+ *
+ * [S8.1-A/#388] NonEmptyList get/from_list/from_seq took the signature-change
+ * route instead: they now return Option and the partial case is the
+ * recoverable None value, not a fatal (see the migrated tests below).
  *
  * These tests pin that behaviour: each feeds a deliberately-invalid input
  * to such a native and asserts the program fails with a recognizable
@@ -48,36 +51,36 @@ class NativeRuntimeErrorHandlingTest {
     }
 
     // ==================== NonEmptyList: from_list on empty ====================
+    //
+    // [S8.1-A/#388] `from_list`/`from_seq`/`get` no longer guest-fatal on the
+    // partial case — they return Option (None). These formerly asserted a
+    // clean guest error; migrated to assert the recoverable None value.
 
     @Test
-    fun `nel from_list on an empty list fails with a clean guest error, not silent corruption`() {
+    fun `nel from_list on an empty list returns None, not a fatal`() {
         val code = """
             use std::collections::nonemptylist::{ from_list }
             use std::collections::list
             let empty = list::empty {}
-            from_list { xs = empty }
+            match from_list { xs = empty } is
+              Some { val } -> False
+              None -> True
         """.trimIndent()
-        val msg = expectGuestError(code)
-        assertTrue(
-            msg.contains("NonEmptyList", ignoreCase = true) && msg.contains("empty", ignoreCase = true),
-            "Expected a NonEmptyList empty-list guest error, got: $msg"
-        )
+        assertEquals(true, MezzeTestHelper.run(code))
     }
 
     // ==================== NonEmptyList: get out of bounds ====================
 
     @Test
-    fun `nel get with an out-of-range index fails with a clean guest error`() {
+    fun `nel get with an out-of-range index returns None, not a fatal`() {
         val code = """
             use std::collections::nonemptylist::{ singleton, get }
             let one = singleton { x = 42 }
-            get { xs = one, index = 999 }
+            match get { xs = one, index = 999 } is
+              Some { val } -> False
+              None -> True
         """.trimIndent()
-        val msg = expectGuestError(code)
-        assertTrue(
-            msg.contains("out of bounds", ignoreCase = true),
-            "Expected a NonEmptyList index-out-of-bounds guest error, got: $msg"
-        )
+        assertEquals(true, MezzeTestHelper.run(code))
     }
 
     // ==================== Arithmetic: div / mod by zero ====================
