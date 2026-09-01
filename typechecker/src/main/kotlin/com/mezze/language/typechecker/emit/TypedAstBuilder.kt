@@ -66,6 +66,15 @@ class TypedAstBuilder(
     // still uses the erased `scrutinee.type`; this is metadata for #364's future
     // exhaustiveness-off-the-node.
     private val matchScrutineeTypes: Map<Loc, MezzeType> get() = solved.matchScrutineeTypes
+    // #396 (do-block let convergence): the solver's AUTHORITATIVE value type for
+    // each do-block `let` RHS, keyed by the RHS expression's Loc — the SAME type
+    // the top-level path reads from `constraintResults[name]`. buildDoBlock stamps
+    // the binding's stored VALUE type from this instead of re-deriving it from the
+    // erased RHS emit node (`substitution.apply(value.type)`), so do-block and
+    // top-level lets converge on ONE type source and no per-facet leak (unsolved
+    // var #354, effect row #378, newtype wrapper #395) can recur. Effect-row
+    // ownership stays with the separate #378 rider below.
+    private val doBindingSolvedTypes: Map<Loc, MezzeType> get() = solved.doBindingSolvedTypes
 
 
     private val identifierContext = mutableMapOf<String, MezzeType>()
@@ -1180,12 +1189,27 @@ class TypedAstBuilder(
                         // Guard: only when the annotation resolves to a concrete shape
                         // (not a bare type var, e.g. `let x : 'a = 5`), so we never trade
                         // the value's known type for an unsolved annotation var.
+                        // #396 (convergence): the do-block binding's VALUE type comes
+                        // from the SAME authoritative source the top-level path uses —
+                        // the solver's per-binding solved type (bindLet's
+                        // `solvedBindingsWithEffects`), recorded per-RHS-loc in
+                        // `doBindingSolvedTypes`. That value already encodes bindLet's
+                        // annotation-over-structural selection AND every facet the
+                        // erased emit node dropped (unsolved var #354, newtype wrapper
+                        // #395), so reading it here retires the per-facet re-derivation.
+                        // The prior annotation/structural logic remains ONLY as the
+                        // fallback for paths that produced no authoritative entry (no
+                        // registry wired, a failed local solve, a non-variable pattern),
+                        // so behaviour is unchanged where the map is absent.
                         val structuralType = substitution.apply(value.type)
-                        val resolvedType = if (stmt.typeAnnotation != null && valueType !is MezzeType.VarType) {
-                            valueType
-                        } else {
-                            structuralType
-                        }
+                        val authoritativeType = doBindingSolvedTypes[stmt.value.loc]
+                            ?.let { substitution.apply(it) }
+                        val resolvedType = authoritativeType
+                            ?: if (stmt.typeAnnotation != null && valueType !is MezzeType.VarType) {
+                                valueType
+                            } else {
+                                structuralType
+                            }
 
                         val isRecursive = isLambdaValue && value is TypedLambda &&
                                            refsName(value.body, name)

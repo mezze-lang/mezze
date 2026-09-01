@@ -59,6 +59,10 @@ internal fun buildPartialTypedModule(
             .fold(emptyMap<Loc, MezzeType>()) { acc, r ->
                 acc + r.matchScrutineeTypes.mapValues { (_, ty) -> substitution.apply(ty) }
             }
+        val doBindingSolvedTypes = constraintResults.values
+            .fold(emptyMap<Loc, MezzeType>()) { acc, r ->
+                acc + r.doBindingSolvedTypes.mapValues { (_, ty) -> substitution.apply(ty) }
+            }
         val tailCallLocations = constraintResults.values
             .flatMap { it.tailCalls }
             .filterNotNull()
@@ -72,6 +76,7 @@ internal fun buildPartialTypedModule(
             callReturnTypes = callReturnTypes,
             matchCaseBindings = matchCaseBindings,
             matchScrutineeTypes = matchScrutineeTypes,
+            doBindingSolvedTypes = doBindingSolvedTypes,
         )
         val builder = TypedAstBuilder(
             solved = solved,

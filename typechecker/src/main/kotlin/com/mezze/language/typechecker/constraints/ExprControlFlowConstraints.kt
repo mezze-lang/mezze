@@ -531,6 +531,25 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     )
                 } else null
 
+                // #396 (do-block let convergence): record the SOLVED value type
+                // this binding got from bindLet — the SAME authoritative type the
+                // top-level path threads into `results[name]` — keyed by the RHS
+                // expression's Loc. Emit's buildDoBlock reads THIS instead of
+                // re-deriving from the erased RHS node type. For a simple variable
+                // binding there is exactly one solved binding; a destructure pattern
+                // binds several names and has no single RHS value type to stamp on
+                // the (synthetic-temp) binding, so it is left to the existing path.
+                // The map holds the PURE value type (bindLet ran with
+                // harvestEffectsIntoBinding = false); emit's #378 effect-row rider
+                // wraps the SuspendType provenance separately, so the value facet
+                // and the effect facet stay owned by exactly one place each.
+                if (letResult != null && stmt.pattern is ParsedVariablePattern) {
+                    val varName = (stmt.pattern as ParsedVariablePattern).name
+                    letResult.solvedBindingsWithEffects[varName]?.let { solvedValueType ->
+                        collector.doBindingSolvedTypes[stmt.value.loc] = solvedValueType
+                    }
+                }
+
                 val contextBindings = letResult?.contextBindings
                     ?: patternResult.bindings.map { (name, type) ->
                         val rawBound = if (stmt.pattern is ParsedVariablePattern) {

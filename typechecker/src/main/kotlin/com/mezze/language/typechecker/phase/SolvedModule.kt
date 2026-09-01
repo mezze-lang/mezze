@@ -46,4 +46,13 @@ data class SolvedModule(
     val matchCaseBindings: Map<Loc, Map<String, MezzeType>>,
     /** Solved (unerased) scrutinee type per Loc; emit stamps scrutineeSourceType. */
     val matchScrutineeTypes: Map<Loc, MezzeType>,
+    /**
+     * #396: solved VALUE type of each do-block `let` RHS, keyed by the RHS
+     * expression's Loc — the SAME authoritative type the top-level path threads
+     * into `constraintResults[name]`. Emit's buildDoBlock stamps the binding's
+     * stored type from this instead of re-deriving from the erased RHS node, so
+     * do-block and top-level lets converge on ONE type source. The pure value
+     * type (no SuspendType wrap); emit's #378 effect-row rider is separate.
+     */
+    val doBindingSolvedTypes: Map<Loc, MezzeType> = emptyMap(),
 )

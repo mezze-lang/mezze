@@ -150,6 +150,11 @@ class ExpressionConstraintGenerator {
         // associated type). Deliberately NOT merged in merge() — set only by
         // generateDo for its OWN direct bindings so it never crosses a block boundary.
         val doBindingEffects = mutableListOf<ConstraintResult.DoBindingEffect>()
+        // #396: per-loc solved value type of each do-block `let` RHS. Keyed by the
+        // globally-unique RHS Loc, so — unlike doBindingEffects — it IS merged up
+        // (like callReturnTypes) and carries every nested block's binding types to
+        // the top-level decl's ConstraintResult for emit to read.
+        val doBindingSolvedTypes = mutableMapOf<Loc, MezzeType>()
 
         fun merge(result: ConstraintResult) {
             constraints.addAll(result.constraints)
@@ -169,6 +174,7 @@ class ExpressionConstraintGenerator {
             duplicateBindings.addAll(result.duplicateBindings)
             tailCalls.addAll(result.tailCalls)
             unusedVars.addAll(result.unusedVariables)
+            doBindingSolvedTypes.putAll(result.doBindingSolvedTypes)
         }
 
         fun toResult(type: MezzeType): ConstraintResult = ConstraintResult(
@@ -191,6 +197,7 @@ class ExpressionConstraintGenerator {
             tailCalls = tailCalls,
             unusedVariables = unusedVars,
             doBindingEffects = doBindingEffects,
+            doBindingSolvedTypes = doBindingSolvedTypes,
         )
     }
 

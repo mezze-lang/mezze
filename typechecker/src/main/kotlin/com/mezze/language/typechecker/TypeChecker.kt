@@ -569,6 +569,7 @@ class TypeChecker(
                     callReturnTypes = aggregated.callReturnTypes,
                     matchCaseBindings = aggregated.matchCaseBindings,
                     matchScrutineeTypes = aggregated.matchScrutineeTypes,
+                    doBindingSolvedTypes = aggregated.doBindingSolvedTypes,
                 )
                 val emitResult = emitTypedModuleAndLower(
                     parsedModule = parsedModule, module = module,
@@ -631,6 +632,7 @@ class TypeChecker(
         val matchCaseBindings: Map<Loc, Map<String, MezzeType>>,
         val matchScrutineeTypes: Map<Loc, MezzeType>,
         val expectedTypeAt: Map<Loc, MezzeType>,
+        val doBindingSolvedTypes: Map<Loc, MezzeType>,
     )
 
     private fun aggregateConstraintResults(
@@ -654,6 +656,12 @@ class TypeChecker(
         val expectedTypeAt = constraintResults.values
             .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.expectedTypeAt }
             .mapValues { (_, type) -> substitution.apply(type) }
+        // #396: solved do-block let RHS value types, keyed by loc. bindLet already
+        // substitution-applied these; re-applying the final module substitution is
+        // idempotent and pins any var the local incremental solve left open.
+        val doBindingSolvedTypes = constraintResults.values
+            .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.doBindingSolvedTypes }
+            .mapValues { (_, type) -> substitution.apply(type) }
         return AggregatedConstraintResults(
             tailCallLocations = tailCallLocations,
             methodCallResolutions = methodCallResolutions,
@@ -661,6 +669,7 @@ class TypeChecker(
             matchCaseBindings = matchCaseBindings,
             matchScrutineeTypes = matchScrutineeTypes,
             expectedTypeAt = expectedTypeAt,
+            doBindingSolvedTypes = doBindingSolvedTypes,
         )
     }
 

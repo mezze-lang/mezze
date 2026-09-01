@@ -386,6 +386,19 @@ data class ConstraintResult(
     // generateDo for its OWN direct bindings — NOT bubbled up through merge(), so
     // it never crosses a nested-block boundary.
     val doBindingEffects: List<DoBindingEffect> = emptyList(),
+    // #396 (do-block let convergence): the SOLVED value type of each do-block
+    // `let` binding's RHS, keyed by the RHS expression's Loc. This is the SAME
+    // authoritative type the top-level path threads back into `results[name]`
+    // (via bindLet's `solvedBindingsWithEffects`) — recorded here per-loc so the
+    // do-block emit can stamp the binding's stored type through the SAME source
+    // top-level uses, instead of re-deriving from the emit/erasure view of the
+    // RHS node (`substitution.apply(value.type)`). It is the PURE value type: the
+    // do-block sequences the statement's effects into the enclosing block row and
+    // binds the pure value, so this map never SuspendType-wraps (bindLet runs with
+    // harvestEffectsIntoBinding = false). Emit's #378 effect-row rider stays a
+    // separate step. Keyed by (globally unique) Loc, so it merges up through
+    // nested blocks without collision.
+    val doBindingSolvedTypes: Map<Loc, MezzeType> = emptyMap(),
 ) {
     /** A deferred callback-effect harvest for BUG C (#331). [argType] is the
      *  `<...>` HOF call's argument type as seen at gen-time (may contain VarType
