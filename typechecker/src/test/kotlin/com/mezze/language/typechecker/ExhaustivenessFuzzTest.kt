@@ -169,10 +169,11 @@ ${arms.toString().trimEnd()}
         }
     }
 
-    // Fixed seeds so any failure reproduces exactly.
-    @Test fun `fuzz seed 1`() = runSweep(1L, 60)
-    @Test fun `fuzz seed 42`() = runSweep(42L, 60)
-    @Test fun `fuzz seed 1337`() = runSweep(1337L, 60)
-    @Test fun `fuzz seed 2718281828`() = runSweep(2718281828L, 60)
-    @Test fun `fuzz seed 161803`() = runSweep(161803L, 60)
+    // Fixed seeds so any failure reproduces exactly. Iteration count bumped to 300
+    // per seed for the S7.3 capstone soundness sweep (larger corpus, 0 violations).
+    @Test fun `fuzz seed 1`() = runSweep(1L, 300)
+    @Test fun `fuzz seed 42`() = runSweep(42L, 300)
+    @Test fun `fuzz seed 1337`() = runSweep(1337L, 300)
+    @Test fun `fuzz seed 2718281828`() = runSweep(2718281828L, 300)
+    @Test fun `fuzz seed 161803`() = runSweep(161803L, 300)
 }

@@ -35,8 +35,10 @@ class TypeCheckerMetaPropertyTest {
         parser = MezzeParser()
     }
 
-    /** Fixed seeds → reproducible corpus. Widen freely; failures print the seed. */
-    private val seeds = (1L..60L).toList()
+    /** Fixed seeds → reproducible corpus. Widen freely; failures print the seed.
+     *  Bumped to 500 for the S7.3 capstone adversarial soundness sweep — a large
+     *  corpus with 0 crashes is the "bug surface → 0 by construction" evidence. */
+    private val seeds = (1L..500L).toList()
 
     @Test
     fun `inference is deterministic across independent runs`() {

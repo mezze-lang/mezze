@@ -18,6 +18,26 @@ import com.mezze.language.typedast.forEachChild
 
 object InvariantChecker {
 
+    /**
+     * ON-BY-DEFAULT DECISION (S7.3/#371 capstone lock-in).
+     *
+     * The phase-boundary invariants default to OFF and are turned ON via
+     * `-Dmezze.invariants=true`. That flag is set in BOTH test gates
+     * (typechecker/build.gradle.kts and interpreter/build.gradle.kts), so CI runs
+     * every invariant against the whole suite — including the entire stdlib the
+     * interpreter suite type-checks — which is the broadest coverage available.
+     *
+     * They are deliberately NOT forced ON in the production compile path (the CLI
+     * never sets `mezze.invariants`; `mez check/build/run` respect the default OFF
+     * and honour an explicit opt-in). Rationale: the invariants add per-boundary
+     * traversal overhead and THROW on violation. Forcing them on in a user's
+     * `mez build` would trade a soft, recoverable situation for a hard crash and
+     * regress compile perf for zero user-facing benefit — a violation is a
+     * COMPILER bug, which CI already catches. The right lock-in is therefore:
+     * ON in the gate (already the case) + honour any `mezze.invariants` opt-in,
+     * OFF in prod. This is a documentation-only confirmation of the existing state;
+     * no behaviour change.
+     */
     private val enabled: Boolean
         get() = System.getProperty("mezze.invariants", "false") == "true"
 
