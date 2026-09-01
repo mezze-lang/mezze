@@ -574,7 +574,20 @@ class ConstraintGenerator(
 
         // (d) carry ability constraints into function-typed bindings.
         val solvedBindingsWithAbilities = solvedBindings.mapValues { (name, solvedType) ->
-            addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution, solveResult.resolvedAssociatedBindings, solver::isAbilityConstraintFullyDischarged, dropDischargedConstraints = item.typeAnnotation == null)
+            val withAbilities = addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution, solveResult.resolvedAssociatedBindings, solver::isAbilityConstraintFullyDischarged, dropDischargedConstraints = item.typeAnnotation == null)
+            // S9b (#375): fold the poly-intermediary effect that the gen-time
+            // harvest missed into the EMITTED row for an UN-ANNOTATED binding, so
+            // the inferred type is honest (`go: {} -> {} <Log>`, not bare) when the
+            // callback reaches an effectful `<...>` HOF through a polymorphic
+            // intermediary. Same post-solve re-harvest the over-promise validator
+            // uses; only ADDS effect NAMES to the top-level arrow row (never type
+            // vars), so generalization and downstream unification are unaffected,
+            // and adding names only tightens the #362 conservation check. Skipped
+            // when annotated (the annotation already supplies the authoritative
+            // row, and the validator compares annotation-vs-inferred separately).
+            if (item.typeAnnotation == null) {
+                enrichWithReHarvestedClosureEffects(withAbilities, result.pendingClosureArgEffects, substitution)
+            } else withAbilities
         }
 
         // (e) harvest effects into a SuspendType wrapper for non-function bindings.

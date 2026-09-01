@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.ast.MezzeType
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -64,6 +65,52 @@ class EffectLaunderPolyIntermediaryTest {
         """)
         assertNotNull(msg, "go is pure but leaky's Log flows through `id` into apply_eff — must be rejected")
         assertTrue(msg!!.contains("Log"), "rejection should name the laundered Log effect; got: $msg")
+    }
+
+    private fun emittedRow(name: String, src: String): MezzeType.EffectRow? {
+        val result = tc.typeCheck(
+            parser.parseParsedModule(src.trimIndent(), "t.mz"),
+            Paths.get("."), enablePrelude = true
+        )
+        return (result.getVariableType(name) as MezzeType.FunctionType).effects
+    }
+
+    @Test @Timeout(60, unit = TimeUnit.SECONDS)
+    fun `S9b poly-intermediary effect appears in the emitted row of an un-annotated fn`() {
+        // #375: an UN-ANNOTATED `go` whose callback reaches an effectful `<...>` HOF
+        // through the polymorphic intermediary `id` must carry `<Log>` in its
+        // EMITTED/inferred row — not just have the validator know about it. Before
+        // the S9b fix the gen-time harvest skipped the still-VarType callback field
+        // and the emitted row came out EMPTY (type-dishonest, though still sound).
+        val viaId = emittedRow("go", """
+            $prelude
+            let leaky: {} -> {} <Log> = {} -> println { msg = "x" }
+            let apply_eff: { f: {} -> {} <...> } -> {} <...> = { f } -> f {}
+            let id: { g: 'a } -> 'a = { g } -> g
+            let go = {} -> apply_eff { f = id { g = leaky } }
+        """)
+        assertNotNull(viaId, "un-annotated go must carry an effect row")
+        assertTrue(
+            viaId!!.effects.contains("Log"),
+            "emitted row must carry the poly-intermediary Log effect; got: $viaId"
+        )
+    }
+
+    @Test @Timeout(60, unit = TimeUnit.SECONDS)
+    fun `S9b a genuinely pure un-annotated fn through the intermediary stays pure`() {
+        // Guard against over-attribution: a PURE callback through `id` must leave
+        // go's emitted row empty (no spurious effect added).
+        val row = emittedRow("go", """
+            $prelude
+            let pure_cb: {} -> {} = {} -> {}
+            let apply_eff: { f: {} -> {} <...> } -> {} <...> = { f } -> f {}
+            let id: { g: 'a } -> 'a = { g } -> g
+            let go = {} -> apply_eff { f = id { g = pure_cb } }
+        """)
+        assertTrue(
+            row == null || row.effects.isEmpty(),
+            "pure callback must not add a spurious effect; got: $row"
+        )
     }
 
     @Test @Timeout(60, unit = TimeUnit.SECONDS)
