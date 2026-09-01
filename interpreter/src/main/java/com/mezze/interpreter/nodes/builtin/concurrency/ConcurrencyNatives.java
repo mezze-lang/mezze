@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.concurrency;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.builtin.BuiltinFieldNames;
@@ -185,7 +187,7 @@ public final class ConcurrencyNatives {
                 }
             }
         }
-        throw new RuntimeException("Expected TVar for field '" + fieldName + "', got: " +
+        throw new NativeTypeMismatchException("Expected TVar for field '" + fieldName + "', got: " +
             (value == null ? "null" : value.getClass().getSimpleName()));
     }
 
@@ -588,7 +590,7 @@ public final class ConcurrencyNatives {
                 if (inner instanceof MezzeAtom atom) return atom;
             }
         }
-        throw new RuntimeException("Expected Atom for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected Atom for field '" + fieldName + "'");
     }
 
     // ==================== Mutex ====================
@@ -643,7 +645,7 @@ public final class ConcurrencyNatives {
                 if (inner instanceof MezzeMutex m) return m;
             }
         }
-        throw new RuntimeException("Expected Mutex for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected Mutex for field '" + fieldName + "'");
     }
 
     // ==================== Semaphore ====================
@@ -704,7 +706,7 @@ public final class ConcurrencyNatives {
                 if (inner instanceof MezzeSemaphore s) return s;
             }
         }
-        throw new RuntimeException("Expected Semaphore for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected Semaphore for field '" + fieldName + "'");
     }
 
     // ==================== Latch ====================
@@ -758,7 +760,7 @@ public final class ConcurrencyNatives {
                 if (inner instanceof MezzeLatch l) return l;
             }
         }
-        throw new RuntimeException("Expected Latch for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected Latch for field '" + fieldName + "'");
     }
 
     // ==================== WaitGroup ====================
@@ -826,7 +828,7 @@ public final class ConcurrencyNatives {
                 if (inner instanceof MezzeWaitGroup wg) return wg;
             }
         }
-        throw new RuntimeException("Expected WaitGroup for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected WaitGroup for field '" + fieldName + "'");
     }
 
     // ==================== Channel ====================
@@ -969,7 +971,7 @@ public final class ConcurrencyNatives {
                 if (inner instanceof MezzeChannel ch) return ch;
             }
         }
-        throw new RuntimeException("Expected Channel for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected Channel for field '" + fieldName + "'");
     }
 
     // ==================== CancellationToken ====================
@@ -1043,7 +1045,7 @@ public final class ConcurrencyNatives {
                 if (inner instanceof MezzeCancellationToken t) return t;
             }
         }
-        throw new RuntimeException("Expected CancellationToken for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected CancellationToken for field '" + fieldName + "'");
     }
 
     // ==================== Agent ====================
@@ -1206,7 +1208,7 @@ public final class ConcurrencyNatives {
         MezzeAgent agent = getAgent(args, "agent");
         Object f = getField(args, "f");
         if (!(f instanceof MezzeFunction func)) {
-            throw new RuntimeException("Agent send expects a function, got: " +
+            throw new NativeTypeMismatchException("Agent send expects a function, got: " +
                 (f != null ? f.getClass().getSimpleName() : "null"));
         }
         com.oracle.truffle.api.TruffleLanguage.Env env =
@@ -1224,7 +1226,7 @@ public final class ConcurrencyNatives {
                 if (inner instanceof MezzeAgent a) return a;
             }
         }
-        throw new RuntimeException("Expected Agent for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected Agent for field '" + fieldName + "'");
     }
 
     // ==================== Additional STM Functions ====================
@@ -1428,7 +1430,7 @@ public final class ConcurrencyNatives {
                 if (inner instanceof MezzeTVar tvar) return tvar;
             }
         }
-        throw new RuntimeException("Expected TVar");
+        throw new NativeTypeMismatchException("Expected TVar");
     }
 
     // ==================== Additional Atom Functions ====================
@@ -1980,7 +1982,7 @@ public final class ConcurrencyNatives {
             sb.append(fv == null ? "null" : fv.getClass().getSimpleName());
         }
         sb.append("]");
-        throw new RuntimeException("Expected Function for field '" + fieldName + "', " + sb);
+        throw new NativeTypeMismatchException("Expected Function for field '" + fieldName + "', " + sb);
     }
 
     private static MezzeList getList(MezzeRecord args, String fieldName) {
@@ -1994,7 +1996,7 @@ public final class ConcurrencyNatives {
         if (value instanceof Object[] arr) {
             return MezzeList.of(arr);
         }
-        throw new RuntimeException("Expected List for field '" + fieldName + "', got: " +
+        throw new NativeTypeMismatchException("Expected List for field '" + fieldName + "', got: " +
             (value == null ? "null" : value.getClass().getSimpleName()));
     }
 
@@ -2008,14 +2010,14 @@ public final class ConcurrencyNatives {
         Object value = getField(args, fieldName);
         if (value instanceof Long l) return l;
         if (value instanceof Integer i) return i.longValue();
-        throw new RuntimeException("Expected Long for field '" + fieldName + "', got: " +
+        throw new NativeTypeMismatchException("Expected Long for field '" + fieldName + "', got: " +
             (value == null ? "null" : value.getClass().getSimpleName()));
     }
 
     private static String getString(MezzeRecord args, String fieldName) {
         Object value = getField(args, fieldName);
         if (value instanceof String s) return s;
-        throw new RuntimeException("Expected String for field '" + fieldName + "', got: " +
+        throw new NativeTypeMismatchException("Expected String for field '" + fieldName + "', got: " +
             (value == null ? "null" : value.getClass().getSimpleName()));
     }
 
@@ -2038,7 +2040,7 @@ public final class ConcurrencyNatives {
             }
             return result;
         }
-        throw new RuntimeException("Expected Array for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected Array for field '" + fieldName + "'");
     }
 
 }

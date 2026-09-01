@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.effects;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes;
 import com.mezze.interpreter.values.MezzeRecord;
@@ -389,42 +391,42 @@ public final class MemoryFilesystemNatives {
 
     private static String getString(MezzeRecord r, String name) {
         int i = r.getFieldIndex(name);
-        if (i < 0) throw new RuntimeException("Missing field '" + name + "'");
+        if (i < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object v = r.getField(i);
         if (v instanceof String s) return s;
-        throw new RuntimeException("Expected String for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected String for field '" + name + "'");
     }
 
     private static long getLong(MezzeRecord r, String name) {
         int i = r.getFieldIndex(name);
-        if (i < 0) throw new RuntimeException("Missing field '" + name + "'");
+        if (i < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object v = r.getField(i);
         if (v instanceof Long l) return l;
         if (v instanceof Integer x) return x;
-        throw new RuntimeException("Expected Int for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected Int for field '" + name + "'");
     }
 
     private static MezzeBytes getBytes(MezzeRecord r, String name) {
         int i = r.getFieldIndex(name);
-        if (i < 0) throw new RuntimeException("Missing field '" + name + "'");
+        if (i < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object v = r.getField(i);
         if (v instanceof MezzeBytes b) return b;
-        throw new RuntimeException("Expected Bytes for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected Bytes for field '" + name + "'");
     }
 
     private static MemFileHandle getMemHandle(MezzeRecord r, String name) {
         int i = r.getFieldIndex(name);
-        if (i < 0) throw new RuntimeException("Missing field '" + name + "'");
+        if (i < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object v = r.getField(i);
         if (v instanceof MemFileHandle h) return h;
-        throw new RuntimeException("Expected MemFileHandle for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MemFileHandle for field '" + name + "'");
     }
 
     private static String getVariantTag(MezzeRecord r, String name) {
         int i = r.getFieldIndex(name);
-        if (i < 0) throw new RuntimeException("Missing field '" + name + "'");
+        if (i < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object v = r.getField(i);
         if (v instanceof MezzeVariant vv) return vv.getConstructorName();
-        throw new RuntimeException("Expected variant for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected variant for field '" + name + "'");
     }
 }

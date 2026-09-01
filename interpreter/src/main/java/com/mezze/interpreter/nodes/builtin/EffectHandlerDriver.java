@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.MezzeRootNode;
 import com.mezze.interpreter.nodes.continuation.OpCall;
@@ -155,7 +157,7 @@ public final class EffectHandlerDriver {
                 Object[] frameArgs = frame.getArguments();
                 int recordIdx = frameArgs.length - 1;
                 if (recordIdx < 0 || !(frameArgs[recordIdx] instanceof MezzeRecord rec)) {
-                    throw new RuntimeException(
+                    throw new NativeTypeMismatchException(
                         "abort expects record argument {val = ...}");
                 }
                 Object val = rec.getField(ScopedEffectConstants.VAL_FIELD);

@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.io;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.seq.MezzeSeq;
@@ -271,7 +273,7 @@ public final class IONatives {
             }
             buf.writeBytes(data);
         } else {
-            throw new RuntimeException("Expected MezzeBytes or List for field 'bytes', got: " +
+            throw new NativeTypeMismatchException("Expected MezzeBytes or List for field 'bytes', got: " +
                 (bytesValue == null ? "null" : bytesValue.getClass().getSimpleName()));
         }
 
@@ -299,7 +301,7 @@ public final class IONatives {
                 if (inner instanceof MezzeBuffer b) return b;
             }
         }
-        throw new RuntimeException("Expected Buffer for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected Buffer for field '" + fieldName + "'");
     }
 
     // ==================== JSON (using DSL-JSON) ====================
@@ -319,7 +321,7 @@ public final class IONatives {
 
         try {
             if (!(jsonValue instanceof MezzeVariant json)) {
-                throw new RuntimeException("Expected Json variant");
+                throw new NativeTypeMismatchException("Expected Json variant");
             }
             String result = DslJsonCodec.serializeToString(json, pretty);
             return MezzeVariant.ok(result);
@@ -347,7 +349,7 @@ public final class IONatives {
 
         try {
             if (!(jsonValue instanceof MezzeVariant json)) {
-                throw new RuntimeException("Expected Json variant");
+                throw new NativeTypeMismatchException("Expected Json variant");
             }
             byte[] result = DslJsonCodec.serializeToBytes(json, pretty);
             return MezzeVariant.ok(new BytesNatives.MezzeBytes(result));
@@ -426,7 +428,7 @@ public final class IONatives {
             if (method != null && url != null) {
                 return httpMockRequestByMethodUrl(method, url);
             }
-            throw new RuntimeException("Expected 'req' field to be a record");
+            throw new NativeTypeMismatchException("Expected 'req' field to be a record");
         }
 
         // Extract method and url from the request record
@@ -735,13 +737,13 @@ public final class IONatives {
         Object value = getField(args, fieldName);
         if (value instanceof Long l) return l;
         if (value instanceof Integer i) return i.longValue();
-        throw new RuntimeException("Expected Long for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected Long for field '" + fieldName + "'");
     }
 
     private static String getString(MezzeRecord args, String fieldName) {
         Object value = getField(args, fieldName);
         if (value instanceof String s) return s;
-        throw new RuntimeException("Expected String for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected String for field '" + fieldName + "'");
     }
 
     private static MezzeList getList(MezzeRecord args, String fieldName) {
@@ -755,7 +757,7 @@ public final class IONatives {
         if (value instanceof Object[] arr) {
             return MezzeList.of(arr);
         }
-        throw new RuntimeException("Expected List for field '" + fieldName + "', got: " +
+        throw new NativeTypeMismatchException("Expected List for field '" + fieldName + "', got: " +
             (value == null ? "null" : value.getClass().getSimpleName()));
     }
 
@@ -827,10 +829,10 @@ public final class IONatives {
         Object clientObj = getField(args, "client");
 
         if (!(reqObj instanceof MezzeRecord req)) {
-            throw new RuntimeException("Expected 'req' to be a record");
+            throw new NativeTypeMismatchException("Expected 'req' to be a record");
         }
         if (!(clientObj instanceof HttpClient httpClient)) {
-            throw new RuntimeException("Expected 'client' to be an HttpClient");
+            throw new NativeTypeMismatchException("Expected 'client' to be an HttpClient");
         }
 
         String urlString = getString(req, "url");

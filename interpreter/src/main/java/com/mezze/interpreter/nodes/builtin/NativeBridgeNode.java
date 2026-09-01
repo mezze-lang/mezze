@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.frame.VirtualFrame;
@@ -168,7 +170,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
                 return handler.apply(arg.executeLong(frame));
             } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                throw new RuntimeException(
+                throw new NativeTypeMismatchException(
                     "long native bridge got non-long arg: " + ure.getResult());
             }
         }
@@ -202,7 +204,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
                 return handler.apply(arg.executeDouble(frame));
             } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                throw new RuntimeException(
+                throw new NativeTypeMismatchException(
                     "double native bridge got non-double arg: " + ure.getResult());
             }
         }
@@ -272,7 +274,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
                 return handler.apply(arg0.executeLong(frame), arg1.executeLong(frame));
             } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                throw new RuntimeException("long bridge2 got non-long arg: " + ure.getResult());
+                throw new NativeTypeMismatchException("long bridge2 got non-long arg: " + ure.getResult());
             }
         }
 
@@ -307,7 +309,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
                 return handler.apply(arg0.executeDouble(frame), arg1.executeDouble(frame));
             } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                throw new RuntimeException("double bridge2 got non-double arg: " + ure.getResult());
+                throw new NativeTypeMismatchException("double bridge2 got non-double arg: " + ure.getResult());
             }
         }
 
@@ -336,7 +338,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
                 return handler.apply(arg.executeDouble(frame));
             } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                throw new RuntimeException("d→l bridge got non-double arg: " + ure.getResult());
+                throw new NativeTypeMismatchException("d→l bridge got non-double arg: " + ure.getResult());
             }
         }
 
@@ -365,7 +367,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
                 return handler.apply(arg.executeLong(frame));
             } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                throw new RuntimeException("l→d bridge got non-long arg: " + ure.getResult());
+                throw new NativeTypeMismatchException("l→d bridge got non-long arg: " + ure.getResult());
             }
         }
 

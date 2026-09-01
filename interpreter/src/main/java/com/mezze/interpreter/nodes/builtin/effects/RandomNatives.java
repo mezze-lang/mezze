@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.effects;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -110,13 +112,13 @@ public final class RandomNatives {
     private static long getLong(MezzeRecord r, String name) {
         int index = r.getFieldIndex(name);
         if (index < 0) {
-            throw new RuntimeException("Missing field '" + name + "'");
+            throw new NativeTypeMismatchException("Missing field '" + name + "'");
         }
         Object val = r.getField(index);
         if (val instanceof Long l) return l;
         if (val instanceof Integer i) return i.longValue();
         if (val instanceof Double d) return d.longValue();
-        throw new RuntimeException("Expected Long for field '" + name + "', got: " +
+        throw new NativeTypeMismatchException("Expected Long for field '" + name + "', got: " +
             (val == null ? "null" : val.getClass().getSimpleName()));
     }
 }

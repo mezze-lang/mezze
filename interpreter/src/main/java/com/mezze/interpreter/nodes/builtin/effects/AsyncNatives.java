@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.effects;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.datastructures.list.MezzeList;
 
 import com.mezze.interpreter.nodes.MezzeNode;
@@ -1386,41 +1388,41 @@ public final class AsyncNatives {
 
     private static Object getFieldValue(MezzeRecord r, String name) {
         int idx = r.getFieldIndex(name);
-        if (idx < 0) throw new RuntimeException("Missing field '" + name + "' in record: " + r);
+        if (idx < 0) throw new NativeTypeMismatchException("Missing field '" + name + "' in record: " + r);
         return r.getField(idx);
     }
 
     private static MezzeFunction getFunction(MezzeRecord r, String name) {
         int idx = r.getFieldIndex(name);
-        if (idx < 0) throw new RuntimeException("Missing field '" + name + "' in record: " + r);
+        if (idx < 0) throw new NativeTypeMismatchException("Missing field '" + name + "' in record: " + r);
         Object val = r.getField(idx);
         if (val instanceof MezzeFunction f) return f;
-        throw new RuntimeException("Expected function for '" + name + "', got: " +
+        throw new NativeTypeMismatchException("Expected function for '" + name + "', got: " +
             (val == null ? "null" : val.getClass().getName() + " = " + val) +
             ". Full record: " + r);
     }
 
     private static long getLong(MezzeRecord r, String name) {
         int idx = r.getFieldIndex(name);
-        if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
+        if (idx < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object val = r.getField(idx);
         if (val instanceof Long l) return l;
-        throw new RuntimeException("Expected Long for '" + name + "'");
+        throw new NativeTypeMismatchException("Expected Long for '" + name + "'");
     }
 
     private static Object[] getArray(MezzeRecord r, String name) {
         int idx = r.getFieldIndex(name);
-        if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
+        if (idx < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object val = r.getField(idx);
         if (val instanceof Object[] arr) return arr;
         if (val instanceof MezzeSeq seq) return seq.toArray();
         if (val instanceof MezzeList list) return list.toArray();
-        throw new RuntimeException("Expected array for '" + name + "'");
+        throw new NativeTypeMismatchException("Expected array for '" + name + "'");
     }
 
     private static MezzeList getList(MezzeRecord r, String name) {
         int idx = r.getFieldIndex(name);
-        if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
+        if (idx < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object val = r.getField(idx);
         if (val instanceof MezzeList list) return list;
         if (val instanceof MezzeSeq seq) {
@@ -1431,12 +1433,12 @@ public final class AsyncNatives {
             return result;
         }
         if (val instanceof Object[] arr) return MezzeList.of(arr);
-        throw new RuntimeException("Expected list for '" + name + "'");
+        throw new NativeTypeMismatchException("Expected list for '" + name + "'");
     }
 
     private static MezzePromise getPromise(MezzeRecord r, String name) {
         int idx = r.getFieldIndex(name);
-        if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
+        if (idx < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object val = r.getField(idx);
         // Unwrap Promise newtype — variants from CoopAsync are
         // `Promise { val = nativePromise }`, where the payload is a
@@ -1451,18 +1453,18 @@ public final class AsyncNatives {
             }
         }
         if (val instanceof MezzePromise p) return p;
-        throw new RuntimeException("Expected Promise for '" + name + "'");
+        throw new NativeTypeMismatchException("Expected Promise for '" + name + "'");
     }
 
     private static MezzeScope getScope(MezzeRecord r, String name) {
         int idx = r.getFieldIndex(name);
-        if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
+        if (idx < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object val = r.getField(idx);
         if (val instanceof MezzeVariant v) {
             val = v.getPayloadValue();
         }
         if (val instanceof MezzeScope s) return s;
-        throw new RuntimeException("Expected Scope for '" + name + "'");
+        throw new NativeTypeMismatchException("Expected Scope for '" + name + "'");
     }
 
     // ========================================================================

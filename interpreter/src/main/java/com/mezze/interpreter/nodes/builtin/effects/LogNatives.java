@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.effects;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -72,10 +74,10 @@ public final class LogNatives {
     private static String getString(MezzeRecord r, String name) {
         int index = r.getFieldIndex(name);
         if (index < 0) {
-            throw new RuntimeException("Missing field '" + name + "'");
+            throw new NativeTypeMismatchException("Missing field '" + name + "'");
         }
         Object val = r.getField(index);
         if (val instanceof String s) return s;
-        throw new RuntimeException("Expected String for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected String for field '" + name + "'");
     }
 }

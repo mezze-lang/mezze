@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.datastructures.bytes.MezzeBytes;
 import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.list.MezzeList;
@@ -112,7 +114,7 @@ public final class NativeDispatch extends MezzeNode {
 
         if (!(arg instanceof MezzeRecord record)) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            throw new RuntimeException(functionName + " expects record argument, got: " +
+            throw new NativeTypeMismatchException(functionName + " expects record argument, got: " +
                 (arg == null ? "null" : arg.getClass().getName()));
         }
 
@@ -131,7 +133,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Slow path: unknown function
         CompilerDirectives.transferToInterpreterAndInvalidate();
-        throw new RuntimeException("Unknown native function: " + functionName);
+        throw new NativeTypeMismatchException("Unknown native function: " + functionName);
     }
 
     public static NativeDispatch create(String functionName, MezzeNode argumentNode) {
@@ -175,7 +177,7 @@ public final class NativeDispatch extends MezzeNode {
         NativeHandler h = HANDLERS.get(name);
         if (h != null) return h.handle(record, callNode);
         CompilerDirectives.transferToInterpreterAndInvalidate();
-        throw new RuntimeException("Unknown native function: " + name);
+        throw new NativeTypeMismatchException("Unknown native function: " + name);
     }
 
     /**
@@ -970,7 +972,7 @@ public final class NativeDispatch extends MezzeNode {
     private static com.mezze.datastructures.iter.MezzeIter getIter(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof com.mezze.datastructures.iter.MezzeIter it) return it;
-        throw new RuntimeException("Expected MezzeIter for field '" + name + "', got: " +
+        throw new NativeTypeMismatchException("Expected MezzeIter for field '" + name + "', got: " +
             (val == null ? "null" : val.getClass().getSimpleName()));
     }
 
@@ -2249,28 +2251,28 @@ public final class NativeDispatch extends MezzeNode {
     private static DateTimeNatives.MezzeInstant asInstant(MezzeRecord r, String field) {
         Object v = getField(r, field);
         if (v instanceof DateTimeNatives.MezzeInstant i) return i;
-        throw new RuntimeException("Expected Instant for field '" + field + "', got: " +
+        throw new NativeTypeMismatchException("Expected Instant for field '" + field + "', got: " +
             (v == null ? "null" : v.getClass().getName()));
     }
 
     private static DateTimeNatives.MezzeDuration asDuration(MezzeRecord r, String field) {
         Object v = getField(r, field);
         if (v instanceof DateTimeNatives.MezzeDuration d) return d;
-        throw new RuntimeException("Expected Duration for field '" + field + "', got: " +
+        throw new NativeTypeMismatchException("Expected Duration for field '" + field + "', got: " +
             (v == null ? "null" : v.getClass().getName()));
     }
 
     private static DateTimeNatives.MezzeZone asZone(MezzeRecord r, String field) {
         Object v = getField(r, field);
         if (v instanceof DateTimeNatives.MezzeZone z) return z;
-        throw new RuntimeException("Expected Zone for field '" + field + "', got: " +
+        throw new NativeTypeMismatchException("Expected Zone for field '" + field + "', got: " +
             (v == null ? "null" : v.getClass().getName()));
     }
 
     private static DateTimeNatives.MezzeTestClock asTestClock(MezzeRecord r, String field) {
         Object v = getField(r, field);
         if (v instanceof DateTimeNatives.MezzeTestClock tc) return tc;
-        throw new RuntimeException("Expected TestClock for field '" + field + "', got: " +
+        throw new NativeTypeMismatchException("Expected TestClock for field '" + field + "', got: " +
             (v == null ? "null" : v.getClass().getName()));
     }
 
@@ -2347,7 +2349,7 @@ public final class NativeDispatch extends MezzeNode {
         int index = r.getFieldIndex(name);
         if (index < 0) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            throw new RuntimeException("Missing field '" + name + "'");
+            throw new NativeTypeMismatchException("Missing field '" + name + "'");
         }
         return r.getField(index);
     }
@@ -2360,7 +2362,7 @@ public final class NativeDispatch extends MezzeNode {
         if (val instanceof Double d && d == Math.floor(d) && !Double.isInfinite(d)) {
             return (long) d.doubleValue();
         }
-        throw new RuntimeException("Expected Long for field '" + name + "', got: " +
+        throw new NativeTypeMismatchException("Expected Long for field '" + name + "', got: " +
             (val == null ? "null" : val.getClass().getName() + "=" + val));
     }
 
@@ -2368,19 +2370,19 @@ public final class NativeDispatch extends MezzeNode {
         Object val = getField(r, name);
         if (val instanceof Double d) return d;
         if (val instanceof Long l) return l.doubleValue();
-        throw new RuntimeException("Expected Double for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected Double for field '" + name + "'");
     }
 
     private static String getString(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof String s) return s;
-        throw new RuntimeException("Expected String for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected String for field '" + name + "'");
     }
 
     private static boolean getBool(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof Boolean b) return b;
-        throw new RuntimeException("Expected Boolean for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected Boolean for field '" + name + "'");
     }
 
     private static Object[] getArray(MezzeRecord r, String name) {
@@ -2390,7 +2392,7 @@ public final class NativeDispatch extends MezzeNode {
         if (val instanceof MezzeSeq seq) return seq.toArray();
         // Also handle MezzeList - properly convert to Object[] using toArray
         if (val instanceof MezzeList list) return ListNatives.toArray(list);
-        throw new RuntimeException("Expected Object[] for field '" + name + "', got: " +
+        throw new NativeTypeMismatchException("Expected Object[] for field '" + name + "', got: " +
             (val == null ? "null" : val.getClass().getSimpleName()));
     }
 
@@ -2405,7 +2407,7 @@ public final class NativeDispatch extends MezzeNode {
         if (val instanceof MezzeVariant variant) {
             return convertLinkedListToMezzeList(variant);
         }
-        throw new RuntimeException("Expected MezzeList for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MezzeList for field '" + name + "'");
     }
 
     /**
@@ -2447,37 +2449,37 @@ public final class NativeDispatch extends MezzeNode {
     private static MezzeFunction getFunction(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof MezzeFunction fn) return fn;
-        throw new RuntimeException("Expected MezzeFunction for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MezzeFunction for field '" + name + "'");
     }
 
     private static MezzeRecord getRecord(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof MezzeRecord rec) return rec;
-        throw new RuntimeException("Expected MezzeRecord for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MezzeRecord for field '" + name + "'");
     }
 
     private static MezzeSet getSet(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof MezzeSet set) return set;
-        throw new RuntimeException("Expected MezzeSet for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MezzeSet for field '" + name + "'");
     }
 
     private static MezzeSortedSet getSortedSet(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof MezzeSortedSet set) return set;
-        throw new RuntimeException("Expected MezzeSortedSet for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MezzeSortedSet for field '" + name + "'");
     }
 
     private static MezzeMap getMap(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof MezzeMap map) return map;
-        throw new RuntimeException("Expected MezzeMap for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MezzeMap for field '" + name + "'");
     }
 
     private static MezzeSortedMap getSortedMap(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof MezzeSortedMap map) return map;
-        throw new RuntimeException("Expected MezzeSortedMap for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MezzeSortedMap for field '" + name + "'");
     }
 
     private static MezzeSeq getSeq(MezzeRecord r, String name) {
@@ -2485,26 +2487,26 @@ public final class NativeDispatch extends MezzeNode {
         if (val instanceof MezzeSeq seq) return seq;
         // Also handle Object[] - convert to MezzeSeq
         if (val instanceof Object[] arr) return MezzeSeq.fromArray(arr);
-        throw new RuntimeException("Expected MezzeSeq for field '" + name + "', got: " +
+        throw new NativeTypeMismatchException("Expected MezzeSeq for field '" + name + "', got: " +
             (val == null ? "null" : val.getClass().getSimpleName()));
     }
 
     private static MezzeDeque getDeque(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof MezzeDeque deque) return deque;
-        throw new RuntimeException("Expected MezzeDeque for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MezzeDeque for field '" + name + "'");
     }
 
     private static NonEmptyListNatives.MezzeNonEmptyList getNonEmptyList(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof NonEmptyListNatives.MezzeNonEmptyList nel) return nel;
-        throw new RuntimeException("Expected MezzeNonEmptyList for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MezzeNonEmptyList for field '" + name + "'");
     }
 
     private static BytesNatives.MezzeBytes getBytes(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof BytesNatives.MezzeBytes bytes) return bytes;
-        throw new RuntimeException("Expected MezzeBytes for field '" + name + "'");
+        throw new NativeTypeMismatchException("Expected MezzeBytes for field '" + name + "'");
     }
 
     // ==================== String Helper Methods ====================
@@ -3121,7 +3123,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_to_immut", (r, c) -> {
             Object seqObj = getField(r, "seq");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_seq_to_immut expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_seq_to_immut expects MutableSeq");
             }
             return mutSeq.toImmutable();
         });
@@ -3140,7 +3142,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_map_to_immut", (r, c) -> {
             Object mapObj = getField(r, "map");
             if (!(mapObj instanceof MutableMap mutMap)) {
-                throw new RuntimeException("__native_map_to_immut expects MutableMap");
+                throw new NativeTypeMismatchException("__native_map_to_immut expects MutableMap");
             }
             return mutMap.toImmutable();
         });
@@ -3159,7 +3161,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_set_to_immut", (r, c) -> {
             Object setObj = getField(r, "set");
             if (!(setObj instanceof MutableSet mutSet)) {
-                throw new RuntimeException("__native_set_to_immut expects MutableSet");
+                throw new NativeTypeMismatchException("__native_set_to_immut expects MutableSet");
             }
             return mutSet.toImmutable();
         });
@@ -3180,7 +3182,7 @@ public final class NativeDispatch extends MezzeNode {
             } else if (bytesObj instanceof BytesNatives.MezzeBytes bnb) {
                 bytes = bnb.getData();
             } else {
-                throw new RuntimeException("__native_bytes_to_mut expects Bytes, got: " +
+                throw new NativeTypeMismatchException("__native_bytes_to_mut expects Bytes, got: " +
                     (bytesObj == null ? "null" : bytesObj.getClass().getName()));
             }
             return MutableBytes.fromImmutable(bytes);
@@ -3189,7 +3191,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_bytes_to_immut", (r, c) -> {
             Object bytesObj = getField(r, "bytes");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_bytes_to_immut expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_bytes_to_immut expects MutableBytes");
             }
             return mutBytes.toImmutable();
         });
@@ -3203,7 +3205,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_int_to_immut", (r, c) -> {
             Object nObj = getField(r, "n");
             if (!(nObj instanceof MutableInt mutInt)) {
-                throw new RuntimeException("__native_int_to_immut expects MutableInt");
+                throw new NativeTypeMismatchException("__native_int_to_immut expects MutableInt");
             }
             return mutInt.get();
         });
@@ -3216,7 +3218,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_float_to_immut", (r, c) -> {
             Object nObj = getField(r, "n");
             if (!(nObj instanceof MutableFloat mutFloat)) {
-                throw new RuntimeException("__native_float_to_immut expects MutableFloat");
+                throw new NativeTypeMismatchException("__native_float_to_immut expects MutableFloat");
             }
             return mutFloat.get();
         });
@@ -3229,7 +3231,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_bool_to_immut", (r, c) -> {
             Object bObj = getField(r, "b");
             if (!(bObj instanceof MutableBool mutBool)) {
-                throw new RuntimeException("__native_bool_to_immut expects MutableBool");
+                throw new NativeTypeMismatchException("__native_bool_to_immut expects MutableBool");
             }
             return mutBool.get();
         });
@@ -3237,7 +3239,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_bool_read", (r, c) -> {
             Object bObj = getField(r, "b");
             if (!(bObj instanceof MutableBool mutBool)) {
-                throw new RuntimeException("__native_mut_bool_read expects MutableBool");
+                throw new NativeTypeMismatchException("__native_mut_bool_read expects MutableBool");
             }
             return mutBool.get();
         });
@@ -3245,7 +3247,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_bool_write", (r, c) -> {
             Object bObj = getField(r, "b");
             if (!(bObj instanceof MutableBool mutBool)) {
-                throw new RuntimeException("__native_mut_bool_write expects MutableBool");
+                throw new NativeTypeMismatchException("__native_mut_bool_write expects MutableBool");
             }
             boolean v = getBool(r, "v");
             mutBool.set(v);
@@ -3255,7 +3257,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_bool_toggle", (r, c) -> {
             Object bObj = getField(r, "b");
             if (!(bObj instanceof MutableBool mutBool)) {
-                throw new RuntimeException("__native_mut_bool_toggle expects MutableBool");
+                throw new NativeTypeMismatchException("__native_mut_bool_toggle expects MutableBool");
             }
             mutBool.toggle();
             return MezzeRecord.empty();
@@ -3264,7 +3266,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_bool_set_true", (r, c) -> {
             Object bObj = getField(r, "b");
             if (!(bObj instanceof MutableBool mutBool)) {
-                throw new RuntimeException("__native_mut_bool_set_true expects MutableBool");
+                throw new NativeTypeMismatchException("__native_mut_bool_set_true expects MutableBool");
             }
             mutBool.set(true);
             return MezzeRecord.empty();
@@ -3273,7 +3275,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_bool_set_false", (r, c) -> {
             Object bObj = getField(r, "b");
             if (!(bObj instanceof MutableBool mutBool)) {
-                throw new RuntimeException("__native_mut_bool_set_false expects MutableBool");
+                throw new NativeTypeMismatchException("__native_mut_bool_set_false expects MutableBool");
             }
             mutBool.set(false);
             return MezzeRecord.empty();
@@ -3293,7 +3295,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_string_to_immut", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_string_to_immut expects MutableString");
+                throw new NativeTypeMismatchException("__native_string_to_immut expects MutableString");
             }
             return mutStr.get();
         });
@@ -3301,7 +3303,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_read", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_read expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_read expects MutableString");
             }
             return mutStr.get();
         });
@@ -3309,7 +3311,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_write", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_write expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_write expects MutableString");
             }
             String v = getString(r, "v");
             mutStr.set(v);
@@ -3319,7 +3321,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_len", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_len expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_len expects MutableString");
             }
             return (long) mutStr.length();
         });
@@ -3327,7 +3329,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_is_empty", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_is_empty expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_is_empty expects MutableString");
             }
             return mutStr.isEmpty();
         });
@@ -3335,7 +3337,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_append", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_append expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_append expects MutableString");
             }
             String suffix = getString(r, "suffix");
             mutStr.append(suffix);
@@ -3345,7 +3347,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_prepend", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_prepend expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_prepend expects MutableString");
             }
             String prefix = getString(r, "prefix");
             mutStr.prepend(prefix);
@@ -3355,7 +3357,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_clear", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_clear expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_clear expects MutableString");
             }
             mutStr.clear();
             return MezzeRecord.empty();
@@ -3364,7 +3366,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_reverse", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_reverse expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_reverse expects MutableString");
             }
             mutStr.reverse();
             return MezzeRecord.empty();
@@ -3373,7 +3375,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_insert", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_insert expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_insert expects MutableString");
             }
             int index = (int) getLong(r, "i");
             String text = getString(r, "text");
@@ -3384,7 +3386,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_delete", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_delete expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_delete expects MutableString");
             }
             int start = (int) getLong(r, "start");
             int end = (int) getLong(r, "end");
@@ -3395,7 +3397,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_char_at", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_char_at expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_char_at expects MutableString");
             }
             int index = (int) getLong(r, "i");
             char ch = mutStr.charAt(index);
@@ -3409,7 +3411,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_string_set_char_at", (r, c) -> {
             Object sObj = getField(r, "s");
             if (!(sObj instanceof MutableString mutStr)) {
-                throw new RuntimeException("__native_mut_string_set_char_at expects MutableString");
+                throw new NativeTypeMismatchException("__native_mut_string_set_char_at expects MutableString");
             }
             int index = (int) getLong(r, "i");
             // Char type is represented as a single-character String
@@ -3434,7 +3436,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_char_to_immut", (r, c) -> {
             Object cObj = getField(r, "c");
             if (!(cObj instanceof MutableChar mutChar)) {
-                throw new RuntimeException("__native_char_to_immut expects MutableChar");
+                throw new NativeTypeMismatchException("__native_char_to_immut expects MutableChar");
             }
             return String.valueOf(mutChar.get());
         });
@@ -3442,7 +3444,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_char_read", (r, c) -> {
             Object cObj = getField(r, "c");
             if (!(cObj instanceof MutableChar mutChar)) {
-                throw new RuntimeException("__native_mut_char_read expects MutableChar");
+                throw new NativeTypeMismatchException("__native_mut_char_read expects MutableChar");
             }
             return String.valueOf(mutChar.get());
         });
@@ -3450,7 +3452,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_char_write", (r, c) -> {
             Object cObj = getField(r, "c");
             if (!(cObj instanceof MutableChar mutChar)) {
-                throw new RuntimeException("__native_mut_char_write expects MutableChar");
+                throw new NativeTypeMismatchException("__native_mut_char_write expects MutableChar");
             }
             String vStr = getString(r, "v");
             if (vStr.isEmpty()) {
@@ -3463,7 +3465,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_char_to_upper", (r, c) -> {
             Object cObj = getField(r, "c");
             if (!(cObj instanceof MutableChar mutChar)) {
-                throw new RuntimeException("__native_mut_char_to_upper expects MutableChar");
+                throw new NativeTypeMismatchException("__native_mut_char_to_upper expects MutableChar");
             }
             mutChar.toUpper();
             return MezzeRecord.empty();
@@ -3472,7 +3474,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_char_to_lower", (r, c) -> {
             Object cObj = getField(r, "c");
             if (!(cObj instanceof MutableChar mutChar)) {
-                throw new RuntimeException("__native_mut_char_to_lower expects MutableChar");
+                throw new NativeTypeMismatchException("__native_mut_char_to_lower expects MutableChar");
             }
             mutChar.toLower();
             return MezzeRecord.empty();
@@ -3481,7 +3483,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_char_is_digit", (r, c) -> {
             Object cObj = getField(r, "c");
             if (!(cObj instanceof MutableChar mutChar)) {
-                throw new RuntimeException("__native_mut_char_is_digit expects MutableChar");
+                throw new NativeTypeMismatchException("__native_mut_char_is_digit expects MutableChar");
             }
             return mutChar.isDigit();
         });
@@ -3489,7 +3491,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_char_is_letter", (r, c) -> {
             Object cObj = getField(r, "c");
             if (!(cObj instanceof MutableChar mutChar)) {
-                throw new RuntimeException("__native_mut_char_is_letter expects MutableChar");
+                throw new NativeTypeMismatchException("__native_mut_char_is_letter expects MutableChar");
             }
             return mutChar.isLetter();
         });
@@ -3497,7 +3499,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_char_is_whitespace", (r, c) -> {
             Object cObj = getField(r, "c");
             if (!(cObj instanceof MutableChar mutChar)) {
-                throw new RuntimeException("__native_mut_char_is_whitespace expects MutableChar");
+                throw new NativeTypeMismatchException("__native_mut_char_is_whitespace expects MutableChar");
             }
             return mutChar.isWhitespace();
         });
@@ -3506,7 +3508,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_seq_sort", (r, c) -> {
             Object seqObj = getField(r, "seq");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_sort expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_sort expects MutableSeq");
             }
             mutSeq.sort();
             return MezzeRecord.empty();
@@ -3516,10 +3518,10 @@ public final class NativeDispatch extends MezzeNode {
             Object seqObj = getField(r, "seq");
             Object cmpObj = getField(r, "cmp");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_sort_by expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_sort_by expects MutableSeq");
             }
             if (!(cmpObj instanceof MezzeFunction cmp)) {
-                throw new RuntimeException("__native_mut_seq_sort_by expects comparator function");
+                throw new NativeTypeMismatchException("__native_mut_seq_sort_by expects comparator function");
             }
             mutSeq.sortBy(cmp, c);
             return MezzeRecord.empty();
@@ -3528,7 +3530,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_seq_reverse", (r, c) -> {
             Object seqObj = getField(r, "seq");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_reverse expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_reverse expects MutableSeq");
             }
             mutSeq.reverse();
             return MezzeRecord.empty();
@@ -3538,7 +3540,7 @@ public final class NativeDispatch extends MezzeNode {
             Object seqObj = getField(r, "seq");
             Object value = getField(r, "v");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_fill expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_fill expects MutableSeq");
             }
             mutSeq.fill(value);
             return MezzeRecord.empty();
@@ -3550,7 +3552,7 @@ public final class NativeDispatch extends MezzeNode {
             long end = getLong(r, "end");
             Object value = getField(r, "v");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_fill_range expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_fill_range expects MutableSeq");
             }
             mutSeq.fillRange((int) start, (int) end, value);
             return MezzeRecord.empty();
@@ -3560,7 +3562,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_int_read", (r, c) -> {
             Object nObj = getField(r, "n");
             if (!(nObj instanceof MutableInt mutInt)) {
-                throw new RuntimeException("__native_mut_int_read expects MutableInt");
+                throw new NativeTypeMismatchException("__native_mut_int_read expects MutableInt");
             }
             return mutInt.get();
         });
@@ -3569,7 +3571,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             long v = getLong(r, "v");
             if (!(nObj instanceof MutableInt mutInt)) {
-                throw new RuntimeException("__native_mut_int_write expects MutableInt");
+                throw new NativeTypeMismatchException("__native_mut_int_write expects MutableInt");
             }
             mutInt.set(v);
             return MezzeRecord.empty();
@@ -3579,7 +3581,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             long delta = getLong(r, "delta");
             if (!(nObj instanceof MutableInt mutInt)) {
-                throw new RuntimeException("__native_mut_int_incr expects MutableInt");
+                throw new NativeTypeMismatchException("__native_mut_int_incr expects MutableInt");
             }
             mutInt.add(delta);
             return MezzeRecord.empty();
@@ -3589,7 +3591,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             long delta = getLong(r, "delta");
             if (!(nObj instanceof MutableInt mutInt)) {
-                throw new RuntimeException("__native_mut_int_decr expects MutableInt");
+                throw new NativeTypeMismatchException("__native_mut_int_decr expects MutableInt");
             }
             mutInt.subtract(delta);
             return MezzeRecord.empty();
@@ -3599,7 +3601,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             long factor = getLong(r, "factor");
             if (!(nObj instanceof MutableInt mutInt)) {
-                throw new RuntimeException("__native_mut_int_mul expects MutableInt");
+                throw new NativeTypeMismatchException("__native_mut_int_mul expects MutableInt");
             }
             mutInt.multiply(factor);
             return MezzeRecord.empty();
@@ -3609,7 +3611,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             long divisor = getLong(r, "divisor");
             if (!(nObj instanceof MutableInt mutInt)) {
-                throw new RuntimeException("__native_mut_int_div expects MutableInt");
+                throw new NativeTypeMismatchException("__native_mut_int_div expects MutableInt");
             }
             mutInt.divide(divisor);
             return MezzeRecord.empty();
@@ -3619,7 +3621,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             long divisor = getLong(r, "divisor");
             if (!(nObj instanceof MutableInt mutInt)) {
-                throw new RuntimeException("__native_mut_int_mod expects MutableInt");
+                throw new NativeTypeMismatchException("__native_mut_int_mod expects MutableInt");
             }
             mutInt.mod(divisor);
             return MezzeRecord.empty();
@@ -3630,7 +3632,7 @@ public final class NativeDispatch extends MezzeNode {
             long expected = getLong(r, "expected");
             long newValue = getLong(r, "new_val");
             if (!(nObj instanceof MutableInt mutInt)) {
-                throw new RuntimeException("__native_mut_int_cas expects MutableInt");
+                throw new NativeTypeMismatchException("__native_mut_int_cas expects MutableInt");
             }
             return mutInt.compareAndSwap(expected, newValue);
         });
@@ -3639,7 +3641,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_float_read", (r, c) -> {
             Object nObj = getField(r, "n");
             if (!(nObj instanceof MutableFloat mutFloat)) {
-                throw new RuntimeException("__native_mut_float_read expects MutableFloat");
+                throw new NativeTypeMismatchException("__native_mut_float_read expects MutableFloat");
             }
             return mutFloat.get();
         });
@@ -3648,7 +3650,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             double v = getDouble(r, "v");
             if (!(nObj instanceof MutableFloat mutFloat)) {
-                throw new RuntimeException("__native_mut_float_write expects MutableFloat");
+                throw new NativeTypeMismatchException("__native_mut_float_write expects MutableFloat");
             }
             mutFloat.set(v);
             return MezzeRecord.empty();
@@ -3658,7 +3660,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             double delta = getDouble(r, "delta");
             if (!(nObj instanceof MutableFloat mutFloat)) {
-                throw new RuntimeException("__native_mut_float_add expects MutableFloat");
+                throw new NativeTypeMismatchException("__native_mut_float_add expects MutableFloat");
             }
             mutFloat.add(delta);
             return MezzeRecord.empty();
@@ -3668,7 +3670,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             double delta = getDouble(r, "delta");
             if (!(nObj instanceof MutableFloat mutFloat)) {
-                throw new RuntimeException("__native_mut_float_sub expects MutableFloat");
+                throw new NativeTypeMismatchException("__native_mut_float_sub expects MutableFloat");
             }
             mutFloat.subtract(delta);
             return MezzeRecord.empty();
@@ -3678,7 +3680,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             double factor = getDouble(r, "factor");
             if (!(nObj instanceof MutableFloat mutFloat)) {
-                throw new RuntimeException("__native_mut_float_mul expects MutableFloat");
+                throw new NativeTypeMismatchException("__native_mut_float_mul expects MutableFloat");
             }
             mutFloat.multiply(factor);
             return MezzeRecord.empty();
@@ -3688,7 +3690,7 @@ public final class NativeDispatch extends MezzeNode {
             Object nObj = getField(r, "n");
             double divisor = getDouble(r, "divisor");
             if (!(nObj instanceof MutableFloat mutFloat)) {
-                throw new RuntimeException("__native_mut_float_div expects MutableFloat");
+                throw new NativeTypeMismatchException("__native_mut_float_div expects MutableFloat");
             }
             mutFloat.divide(divisor);
             return MezzeRecord.empty();
@@ -3699,7 +3701,7 @@ public final class NativeDispatch extends MezzeNode {
             Object seqObj = getField(r, "seq");
             Object value = getField(r, "v");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_push expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_push expects MutableSeq");
             }
             mutSeq.push(value);
             return MezzeRecord.empty();
@@ -3708,7 +3710,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_seq_pop", (r, c) -> {
             Object seqObj = getField(r, "seq");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_pop expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_pop expects MutableSeq");
             }
             Object value = mutSeq.pop();
             // Return Option: Some {val} or None
@@ -3723,7 +3725,7 @@ public final class NativeDispatch extends MezzeNode {
             Object seqObj = getField(r, "seq");
             long index = getLong(r, "i");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_get expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_get expects MutableSeq");
             }
             Object value = mutSeq.getSafe((int) index);
             // Return Option: Some {val} or None
@@ -3739,7 +3741,7 @@ public final class NativeDispatch extends MezzeNode {
             long index = getLong(r, "i");
             Object value = getField(r, "v");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_set expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_set expects MutableSeq");
             }
             boolean success = mutSeq.setSafe((int) index, value);
             return success;
@@ -3748,7 +3750,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_seq_len", (r, c) -> {
             Object seqObj = getField(r, "seq");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_len expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_len expects MutableSeq");
             }
             return (long) mutSeq.size();
         });
@@ -3756,7 +3758,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_seq_clear", (r, c) -> {
             Object seqObj = getField(r, "seq");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_clear expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_clear expects MutableSeq");
             }
             mutSeq.clear();
             return MezzeRecord.empty();
@@ -3767,7 +3769,7 @@ public final class NativeDispatch extends MezzeNode {
             long index = getLong(r, "i");
             Object value = getField(r, "v");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_insert expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_insert expects MutableSeq");
             }
             return mutSeq.insert((int) index, value);
         });
@@ -3776,7 +3778,7 @@ public final class NativeDispatch extends MezzeNode {
             Object seqObj = getField(r, "seq");
             long index = getLong(r, "i");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_remove expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_remove expects MutableSeq");
             }
             Object value = mutSeq.remove((int) index);
             // Return Option: Some {val} or None
@@ -3792,7 +3794,7 @@ public final class NativeDispatch extends MezzeNode {
             long i = getLong(r, "i");
             long j = getLong(r, "j");
             if (!(seqObj instanceof MutableSeq mutSeq)) {
-                throw new RuntimeException("__native_mut_seq_swap expects MutableSeq");
+                throw new NativeTypeMismatchException("__native_mut_seq_swap expects MutableSeq");
             }
             try {
                 mutSeq.swap((int) i, (int) j);
@@ -3807,7 +3809,7 @@ public final class NativeDispatch extends MezzeNode {
             Object mapObj = getField(r, "map");
             Object key = getField(r, "key");
             if (!(mapObj instanceof MutableMap mutMap)) {
-                throw new RuntimeException("__native_mut_map_get expects MutableMap");
+                throw new NativeTypeMismatchException("__native_mut_map_get expects MutableMap");
             }
             Object value = mutMap.get(key);
             if (value == null) {
@@ -3822,7 +3824,7 @@ public final class NativeDispatch extends MezzeNode {
             Object key = getField(r, "key");
             Object value = getField(r, "value");
             if (!(mapObj instanceof MutableMap mutMap)) {
-                throw new RuntimeException("__native_mut_map_put expects MutableMap");
+                throw new NativeTypeMismatchException("__native_mut_map_put expects MutableMap");
             }
             mutMap.put(key, value);
             return MezzeRecord.empty();
@@ -3832,7 +3834,7 @@ public final class NativeDispatch extends MezzeNode {
             Object mapObj = getField(r, "map");
             Object key = getField(r, "key");
             if (!(mapObj instanceof MutableMap mutMap)) {
-                throw new RuntimeException("__native_mut_map_remove expects MutableMap");
+                throw new NativeTypeMismatchException("__native_mut_map_remove expects MutableMap");
             }
             mutMap.remove(key);
             return MezzeRecord.empty();
@@ -3842,7 +3844,7 @@ public final class NativeDispatch extends MezzeNode {
             Object mapObj = getField(r, "map");
             Object key = getField(r, "key");
             if (!(mapObj instanceof MutableMap mutMap)) {
-                throw new RuntimeException("__native_mut_map_contains expects MutableMap");
+                throw new NativeTypeMismatchException("__native_mut_map_contains expects MutableMap");
             }
             return mutMap.containsKey(key);
         });
@@ -3850,7 +3852,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_map_size", (r, c) -> {
             Object mapObj = getField(r, "map");
             if (!(mapObj instanceof MutableMap mutMap)) {
-                throw new RuntimeException("__native_mut_map_size expects MutableMap");
+                throw new NativeTypeMismatchException("__native_mut_map_size expects MutableMap");
             }
             return (long) mutMap.size();
         });
@@ -3858,7 +3860,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_map_clear", (r, c) -> {
             Object mapObj = getField(r, "map");
             if (!(mapObj instanceof MutableMap mutMap)) {
-                throw new RuntimeException("__native_mut_map_clear expects MutableMap");
+                throw new NativeTypeMismatchException("__native_mut_map_clear expects MutableMap");
             }
             mutMap.clear();
             return MezzeRecord.empty();
@@ -3867,7 +3869,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_map_keys", (r, c) -> {
             Object mapObj = getField(r, "map");
             if (!(mapObj instanceof MutableMap mutMap)) {
-                throw new RuntimeException("__native_mut_map_keys expects MutableMap");
+                throw new NativeTypeMismatchException("__native_mut_map_keys expects MutableMap");
             }
             return MezzeSeq.fromArray(mutMap.keys());
         });
@@ -3875,7 +3877,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_map_values", (r, c) -> {
             Object mapObj = getField(r, "map");
             if (!(mapObj instanceof MutableMap mutMap)) {
-                throw new RuntimeException("__native_mut_map_values expects MutableMap");
+                throw new NativeTypeMismatchException("__native_mut_map_values expects MutableMap");
             }
             return MezzeSeq.fromArray(mutMap.values());
         });
@@ -3883,7 +3885,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_map_entries", (r, c) -> {
             Object mapObj = getField(r, "map");
             if (!(mapObj instanceof MutableMap mutMap)) {
-                throw new RuntimeException("__native_mut_map_entries expects MutableMap");
+                throw new NativeTypeMismatchException("__native_mut_map_entries expects MutableMap");
             }
             return MezzeSeq.fromArray(mutMap.entries());
         });
@@ -3893,7 +3895,7 @@ public final class NativeDispatch extends MezzeNode {
             Object setObj = getField(r, "set");
             Object elem = getField(r, "elem");
             if (!(setObj instanceof MutableSet mutSet)) {
-                throw new RuntimeException("__native_mut_set_add expects MutableSet");
+                throw new NativeTypeMismatchException("__native_mut_set_add expects MutableSet");
             }
             mutSet.add(elem);
             return MezzeRecord.empty();
@@ -3903,7 +3905,7 @@ public final class NativeDispatch extends MezzeNode {
             Object setObj = getField(r, "set");
             Object elem = getField(r, "elem");
             if (!(setObj instanceof MutableSet mutSet)) {
-                throw new RuntimeException("__native_mut_set_remove expects MutableSet");
+                throw new NativeTypeMismatchException("__native_mut_set_remove expects MutableSet");
             }
             mutSet.remove(elem);
             return MezzeRecord.empty();
@@ -3913,7 +3915,7 @@ public final class NativeDispatch extends MezzeNode {
             Object setObj = getField(r, "set");
             Object elem = getField(r, "elem");
             if (!(setObj instanceof MutableSet mutSet)) {
-                throw new RuntimeException("__native_mut_set_contains expects MutableSet");
+                throw new NativeTypeMismatchException("__native_mut_set_contains expects MutableSet");
             }
             return mutSet.contains(elem);
         });
@@ -3921,7 +3923,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_set_size", (r, c) -> {
             Object setObj = getField(r, "set");
             if (!(setObj instanceof MutableSet mutSet)) {
-                throw new RuntimeException("__native_mut_set_size expects MutableSet");
+                throw new NativeTypeMismatchException("__native_mut_set_size expects MutableSet");
             }
             return (long) mutSet.size();
         });
@@ -3929,7 +3931,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_set_clear", (r, c) -> {
             Object setObj = getField(r, "set");
             if (!(setObj instanceof MutableSet mutSet)) {
-                throw new RuntimeException("__native_mut_set_clear expects MutableSet");
+                throw new NativeTypeMismatchException("__native_mut_set_clear expects MutableSet");
             }
             mutSet.clear();
             return MezzeRecord.empty();
@@ -3938,7 +3940,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_set_elements", (r, c) -> {
             Object setObj = getField(r, "set");
             if (!(setObj instanceof MutableSet mutSet)) {
-                throw new RuntimeException("__native_mut_set_elements expects MutableSet");
+                throw new NativeTypeMismatchException("__native_mut_set_elements expects MutableSet");
             }
             return MezzeSeq.fromArray(mutSet.elements());
         });
@@ -3947,7 +3949,7 @@ public final class NativeDispatch extends MezzeNode {
             Object setObj = getField(r, "set");
             Object elem = getField(r, "elem");
             if (!(setObj instanceof MutableSet mutSet)) {
-                throw new RuntimeException("__native_mut_set_toggle expects MutableSet");
+                throw new NativeTypeMismatchException("__native_mut_set_toggle expects MutableSet");
             }
             return mutSet.toggle(elem);
         });
@@ -3957,7 +3959,7 @@ public final class NativeDispatch extends MezzeNode {
             Object bytesObj = getField(r, "bytes");
             long index = getLong(r, "i");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_mut_bytes_get expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_mut_bytes_get expects MutableBytes");
             }
             int value = mutBytes.getSafe((int) index);
             if (value == -1) {
@@ -3972,7 +3974,7 @@ public final class NativeDispatch extends MezzeNode {
             long index = getLong(r, "i");
             long value = getLong(r, "v");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_mut_bytes_set expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_mut_bytes_set expects MutableBytes");
             }
             return mutBytes.setSafe((int) index, (int) value);
         });
@@ -3980,7 +3982,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_bytes_len", (r, c) -> {
             Object bytesObj = getField(r, "bytes");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_mut_bytes_len expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_mut_bytes_len expects MutableBytes");
             }
             return (long) mutBytes.length();
         });
@@ -3989,7 +3991,7 @@ public final class NativeDispatch extends MezzeNode {
             Object bytesObj = getField(r, "bytes");
             long value = getLong(r, "v");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_mut_bytes_fill expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_mut_bytes_fill expects MutableBytes");
             }
             mutBytes.fill((byte) value);
             return MezzeRecord.empty();
@@ -4001,7 +4003,7 @@ public final class NativeDispatch extends MezzeNode {
             long end = getLong(r, "end");
             long value = getLong(r, "v");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_mut_bytes_fill_range expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_mut_bytes_fill_range expects MutableBytes");
             }
             mutBytes.fillRange((int) start, (int) end, (byte) value);
             return MezzeRecord.empty();
@@ -4012,7 +4014,7 @@ public final class NativeDispatch extends MezzeNode {
             long start = getLong(r, "start");
             long end = getLong(r, "end");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_mut_bytes_slice expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_mut_bytes_slice expects MutableBytes");
             }
             return mutBytes.slice((int) start, (int) end);
         });
@@ -4021,7 +4023,7 @@ public final class NativeDispatch extends MezzeNode {
             Object bytesObj = getField(r, "bytes");
             long newSize = getLong(r, "size");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_mut_bytes_resize expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_mut_bytes_resize expects MutableBytes");
             }
             mutBytes.resize((int) newSize);
             return MezzeRecord.empty();
@@ -4032,7 +4034,7 @@ public final class NativeDispatch extends MezzeNode {
             long i = getLong(r, "i");
             long j = getLong(r, "j");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_mut_bytes_swap expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_mut_bytes_swap expects MutableBytes");
             }
             return mutBytes.swap((int) i, (int) j);
         });
@@ -4040,7 +4042,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_bytes_reverse", (r, c) -> {
             Object bytesObj = getField(r, "bytes");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_mut_bytes_reverse expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_mut_bytes_reverse expects MutableBytes");
             }
             mutBytes.reverse();
             return MezzeRecord.empty();
@@ -4049,7 +4051,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_bytes_clear", (r, c) -> {
             Object bytesObj = getField(r, "bytes");
             if (!(bytesObj instanceof MutableBytes mutBytes)) {
-                throw new RuntimeException("__native_mut_bytes_clear expects MutableBytes");
+                throw new NativeTypeMismatchException("__native_mut_bytes_clear expects MutableBytes");
             }
             mutBytes.clear();
             return MezzeRecord.empty();
@@ -4062,10 +4064,10 @@ public final class NativeDispatch extends MezzeNode {
             long destOffset = getLong(r, "dest_offset");
             long length = getLong(r, "length");
             if (!(destObj instanceof MutableBytes destBytes)) {
-                throw new RuntimeException("__native_mut_bytes_copy expects MutableBytes for dest");
+                throw new NativeTypeMismatchException("__native_mut_bytes_copy expects MutableBytes for dest");
             }
             if (!(srcObj instanceof MutableBytes srcBytes)) {
-                throw new RuntimeException("__native_mut_bytes_copy expects MutableBytes for src");
+                throw new NativeTypeMismatchException("__native_mut_bytes_copy expects MutableBytes for src");
             }
             destBytes.copyFromMutable(srcBytes, (int) srcOffset, (int) destOffset, (int) length);
             return MezzeRecord.empty();
@@ -4075,7 +4077,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_deque_to_mut", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MezzeDeque deque)) {
-                throw new RuntimeException("__native_deque_to_mut expects MezzeDeque");
+                throw new NativeTypeMismatchException("__native_deque_to_mut expects MezzeDeque");
             }
             return MutableDeque.fromImmutable(deque);
         });
@@ -4083,7 +4085,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_deque_to_immut", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_deque_to_immut expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_deque_to_immut expects MutableDeque");
             }
             return mutDeque.toImmutable();
         });
@@ -4097,7 +4099,7 @@ public final class NativeDispatch extends MezzeNode {
             Object dequeObj = getField(r, "deque");
             Object elem = getField(r, "elem");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_push_front expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_push_front expects MutableDeque");
             }
             mutDeque.pushFront(elem);
             return MezzeRecord.empty();
@@ -4107,7 +4109,7 @@ public final class NativeDispatch extends MezzeNode {
             Object dequeObj = getField(r, "deque");
             Object elem = getField(r, "elem");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_push_back expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_push_back expects MutableDeque");
             }
             mutDeque.pushBack(elem);
             return MezzeRecord.empty();
@@ -4116,7 +4118,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_deque_pop_front", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_pop_front expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_pop_front expects MutableDeque");
             }
             Object value = mutDeque.popFront();
             if (value == null) {
@@ -4129,7 +4131,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_deque_pop_back", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_pop_back expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_pop_back expects MutableDeque");
             }
             Object value = mutDeque.popBack();
             if (value == null) {
@@ -4142,7 +4144,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_deque_peek_front", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_peek_front expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_peek_front expects MutableDeque");
             }
             Object value = mutDeque.peekFront();
             if (value == null) {
@@ -4155,7 +4157,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_deque_peek_back", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_peek_back expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_peek_back expects MutableDeque");
             }
             Object value = mutDeque.peekBack();
             if (value == null) {
@@ -4168,7 +4170,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_deque_size", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_size expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_size expects MutableDeque");
             }
             return (long) mutDeque.size();
         });
@@ -4176,7 +4178,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_deque_is_empty", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_is_empty expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_is_empty expects MutableDeque");
             }
             return mutDeque.isEmpty();
         });
@@ -4184,7 +4186,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_deque_clear", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_clear expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_clear expects MutableDeque");
             }
             mutDeque.clear();
             return MezzeRecord.empty();
@@ -4193,7 +4195,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_deque_reverse", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_reverse expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_reverse expects MutableDeque");
             }
             mutDeque.reverse();
             return MezzeRecord.empty();
@@ -4202,7 +4204,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_mut_deque_to_seq", (r, c) -> {
             Object dequeObj = getField(r, "deque");
             if (!(dequeObj instanceof MutableDeque mutDeque)) {
-                throw new RuntimeException("__native_mut_deque_to_seq expects MutableDeque");
+                throw new NativeTypeMismatchException("__native_mut_deque_to_seq expects MutableDeque");
             }
             return MezzeSeq.fromArray(mutDeque.toArray());
         });

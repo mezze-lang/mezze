@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.effects;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.MezzeSeq;
@@ -30,7 +32,7 @@ public final class InspectNatives {
     public static String toStr(MezzeRecord args) {
         int index = args.getFieldIndex("val");
         if (index < 0) {
-            throw new RuntimeException("__native_inspect_to_str expects 'val' field");
+            throw new NativeTypeMismatchException("__native_inspect_to_str expects 'val' field");
         }
         Object value = args.getField(index);
         return valueToString(value);

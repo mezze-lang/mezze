@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeUnit;
@@ -43,7 +45,7 @@ public final class NativeConsoleNode extends MezzeNode {
 
         if (!(arg instanceof MezzeRecord record)) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            throw new RuntimeException("__native_console_print expects record argument");
+            throw new NativeTypeMismatchException("__native_console_print expects record argument");
         }
 
         String msg = extractMessage(record);
@@ -73,7 +75,7 @@ public final class NativeConsoleNode extends MezzeNode {
         cachedShape = shape;
 
         if (fieldIndex < 0) {
-            throw new RuntimeException("__native_console_print expects 'msg' field");
+            throw new NativeTypeMismatchException("__native_console_print expects 'msg' field");
         }
 
         Object msgValue = record.getField(fieldIndex);
@@ -81,7 +83,7 @@ public final class NativeConsoleNode extends MezzeNode {
             return s;
         }
 
-        throw new RuntimeException("__native_console_print expects 'msg' to be String, got: " +
+        throw new NativeTypeMismatchException("__native_console_print expects 'msg' to be String, got: " +
             (msgValue == null ? "null" : msgValue.getClass().getName()));
     }
 

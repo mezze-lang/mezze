@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.concurrency;
 
+import com.mezze.interpreter.runtime.NativeTypeMismatchException;
+
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
 import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry;
@@ -452,7 +454,7 @@ public final class ParallelNatives {
     private static MezzeFunction getFunction(MezzeRecord args, String fieldName) {
         Object value = args.getField(fieldName);
         if (value instanceof MezzeFunction f) return f;
-        throw new RuntimeException("Expected function for field '" + fieldName + "'");
+        throw new NativeTypeMismatchException("Expected function for field '" + fieldName + "'");
     }
 
     private static long getLongOrZero(MezzeRecord args, String fieldName) {
