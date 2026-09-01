@@ -226,8 +226,9 @@ class AtomModuleTest {
         val result = eval("""
             use std::effects::async::atom::{atom_validated, deref_validated}
 
-            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            positive.deref {}
+            match atom_validated {val = 5, validator = {val} -> val >= 0} is
+              Ok { val = positive } -> deref_validated {atom = positive}
+              Err { error = _ } -> 0-1
         """)
         assertEquals(5L, result)
     }
@@ -237,9 +238,11 @@ class AtomModuleTest {
         val result = eval("""
             use std::effects::async::atom::{atom_validated, deref_validated, swap_validated}
 
-            let counter = atom_validated {val = 10, validator = {val} -> val >= 0}
-            let _ = counter.swap {f = {current} -> current + 5}
-            counter.deref {}
+            match atom_validated {val = 10, validator = {val} -> val >= 0} is
+              Ok { val = counter } -> do
+                let _ = swap_validated {atom = counter, f = {current} -> current + 5}
+                deref_validated {atom = counter}
+              Err { error = _ } -> 0-1
         """)
         assertEquals(15L, result)
     }

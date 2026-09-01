@@ -521,7 +521,7 @@ public final class ConcurrencyNatives {
     }
 
     @TruffleBoundary
-    public static MezzeAtom atomNewValidated(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static Object atomNewValidated(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object value = getField(args, "val");
         MezzeFunction validator = getFunction(args, "validator");
 
@@ -536,10 +536,10 @@ public final class ConcurrencyNatives {
 
         Object result = callNode.call(validator.getCallTarget(), closuresWithArg);
         if (result instanceof Boolean b && !b) {
-            throw new MezzeGuestException("Atom: validator rejected the initial value");
+            return validatorRejectedErr(value);  // initial value rejected; return Err, no crash
         }
 
-        return atom;
+        return MezzeVariant.ok(atom);
     }
 
     @TruffleBoundary

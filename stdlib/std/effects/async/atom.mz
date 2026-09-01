@@ -96,10 +96,13 @@ pub let remove_watch: { atom: Atom 'a, key: Str } -> {} <Async> = { atom, key } 
   __native_atom_remove_watch { atom = atom, key = key }
 
 ## Create a validated atom whose mutations must pass `validator`.
-## The initial value must pass too. Mutations return a `Result`.
+## The initial value must pass too, so construction returns a `Result`:
+## `Ok { val }` with the atom when the initial value passes, or
+## `Err { error = ValidatorRejected { val } }` when the initial value is
+## rejected (no atom is created). Mutations also return a `Result`.
 pub let atom_validated
   : { val: 'a, validator: { val: 'a } -> Bool }
-  -> ValidatedAtom 'a <Async>
+  -> Result (ValidatedAtom 'a) (AtomError 'a) <Async>
   = { val, validator } -> __native_atom_new_validated { val = val, validator = validator }
 
 ## Read the current value of a validated atom (non-blocking, total).

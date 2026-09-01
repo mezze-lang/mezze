@@ -31,7 +31,9 @@ class AtomTest {
     private val atomSetup = """
         use std::effects::async::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
-            add_watch, remove_watch, atom_validated
+            add_watch, remove_watch, atom_validated,
+            deref_validated, reset_validated, swap_validated, swap_with_validated,
+            get_and_swap_validated
         }
         use std::effects::async::{ Async, LoomAsync, await }
 
@@ -452,28 +454,59 @@ class AtomTest {
 
     @Test
     fun `test atom_validated with valid initial value`() {
+        // atom_validated returns Result; Ok carries the atom, which we can deref.
         val code = """
             $atomSetup
 
-            let positive = atom_validated {val = 10, validator = {val} -> val >= 0}
-            positive.deref {}
+            match atom_validated {val = 10, validator = {val} -> val >= 0} is
+              Ok { val = positive } -> deref_validated {atom = positive}
+              Err { error = _ } -> 0-1
         """
         val result = eval(code)
         assertEquals(10L, result)
     }
 
     @Test
-    fun `test atom_validated rejects invalid initial value`() {
+    fun `test atom_validated rejects invalid initial value returns Err`() {
+        // Rejecting the initial value no longer crashes: it returns
+        // Err { error = ValidatorRejected { val } } carrying the rejected value.
         val code = """
             $atomSetup
 
-            let positive = atom_validated {val = -5, validator = {val} -> val >= 0}
-            positive.deref {}
+            match atom_validated {val = -5, validator = {val} -> val >= 0} is
+              Ok { val = _ } -> 999
+              Err { error = ValidatorRejected { val } } -> val
         """
-        val exception = assertThrows(Exception::class.java) {
-            eval(code)
-        }
-        assertTrue(exception.message?.contains("validator rejected") == true)
+        assertEquals(-5L, eval(code))
+    }
+
+    @Test
+    fun `391 repro atom_validated rejecting initial value returns Err not crash`() {
+        // The exact #391 repro: initial value 10 fails validator val < 0.
+        // Must return Err { error = ValidatorRejected { val = 10 } }, not crash.
+        val code = """
+            $atomSetup
+
+            match atom_validated {val = 10, validator = {val} -> val < 0} is
+              Ok { val = _ } -> 999
+              Err { error = ValidatorRejected { val } } -> val
+        """
+        assertEquals(10L, eval(code))
+    }
+
+    @Test
+    fun `391 atom_validated Ok initial value then swap succeeds`() {
+        // Passing initial value yields Ok carrying the atom; a subsequent swap works.
+        val code = """
+            $atomSetup
+
+            match atom_validated {val = 10, validator = {val} -> val >= 0} is
+              Ok { val = a } -> do
+                let _ = swap_validated {atom = a, f = {current} -> current + 7}
+                deref_validated {atom = a}
+              Err { error = _ } -> 0-1
+        """
+        assertEquals(17L, eval(code))
     }
 
     @Test
@@ -482,9 +515,11 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            let _ = positive.swap {f = {current} -> current + 10}
-            positive.deref {}
+            match atom_validated {val = 5, validator = {val} -> val >= 0} is
+              Ok { val = positive } -> do
+                let _ = swap_validated {atom = positive, f = {current} -> current + 10}
+                deref_validated {atom = positive}
+              Err { error = _ } -> 0-1
         """
         val result = eval(code)
         assertEquals(15L, result)
@@ -496,11 +531,13 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            let outcome = positive.swap {f = {current} -> current - 100}
-            match outcome is
-              Ok { val = _ } -> 999
-              Err { error = ValidatorRejected { val } } -> val
+            match atom_validated {val = 5, validator = {val} -> val >= 0} is
+              Ok { val = positive } -> do
+                let outcome = swap_validated {atom = positive, f = {current} -> current - 100}
+                match outcome is
+                  Ok { val = _ } -> 999
+                  Err { error = ValidatorRejected { val } } -> val
+              Err { error = _ } -> 0-1
         """
         // The rejected value (5 - 100 = -95) is carried in the Err.
         assertEquals(-95L, eval(code))
@@ -511,9 +548,11 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            let _ = positive.swap {f = {current} -> current - 100}
-            positive.deref {}
+            match atom_validated {val = 5, validator = {val} -> val >= 0} is
+              Ok { val = positive } -> do
+                let _ = swap_validated {atom = positive, f = {current} -> current - 100}
+                deref_validated {atom = positive}
+              Err { error = _ } -> 0-1
         """
         assertEquals(5L, eval(code))
     }
@@ -523,11 +562,13 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            let outcome = positive.reset {val = -10}
-            match outcome is
-              Ok { val = _ } -> 999
-              Err { error = ValidatorRejected { val } } -> val
+            match atom_validated {val = 5, validator = {val} -> val >= 0} is
+              Ok { val = positive } -> do
+                let outcome = reset_validated {atom = positive, val = -10}
+                match outcome is
+                  Ok { val = _ } -> 999
+                  Err { error = ValidatorRejected { val } } -> val
+              Err { error = _ } -> 0-1
         """
         assertEquals(-10L, eval(code))
     }
@@ -537,10 +578,12 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            let outcome = positive.reset {val = 42}
-            match outcome is
-              Ok { val } -> val
+            match atom_validated {val = 5, validator = {val} -> val >= 0} is
+              Ok { val = positive } -> do
+                let outcome = reset_validated {atom = positive, val = 42}
+                match outcome is
+                  Ok { val } -> val
+                  Err { error = _ } -> 0-1
               Err { error = _ } -> 0-1
         """
         assertEquals(42L, eval(code))
@@ -552,11 +595,12 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom_validated {val = 10, validator = {val} -> val < 100}
-
-            # Allowed: 10 + 50 = 60 < 100
-            let _ = counter.swap {f = {current} -> current + 50}
-            counter.deref {}
+            match atom_validated {val = 10, validator = {val} -> val < 100} is
+              Ok { val = counter } -> do
+                # Allowed: 10 + 50 = 60 < 100
+                let _ = swap_validated {atom = counter, f = {current} -> current + 50}
+                deref_validated {atom = counter}
+              Err { error = _ } -> 0-1
         """
         assertEquals(60L, eval(code))
     }
@@ -566,13 +610,14 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom_validated {val = 10, validator = {val} -> val < 100}
-
-            # 10 + 100 = 110 >= 100 -> rejected
-            let outcome = counter.swap {f = {current} -> current + 100}
-            match outcome is
-              Ok { val = _ } -> 999
-              Err { error = ValidatorRejected { val } } -> val
+            match atom_validated {val = 10, validator = {val} -> val < 100} is
+              Ok { val = counter } -> do
+                # 10 + 100 = 110 >= 100 -> rejected
+                let outcome = swap_validated {atom = counter, f = {current} -> current + 100}
+                match outcome is
+                  Ok { val = _ } -> 999
+                  Err { error = ValidatorRejected { val } } -> val
+              Err { error = _ } -> 0-1
         """
         assertEquals(110L, eval(code))
     }
@@ -596,9 +641,11 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
-            let _ = positive.swap {f = {current} -> current + 1}
-            positive.deref {}
+            match atom_validated {val = 5, validator = {val} -> val >= 0} is
+              Ok { val = positive } -> do
+                let _ = swap_validated {atom = positive, f = {current} -> current + 1}
+                deref_validated {atom = positive}
+              Err { error = _ } -> 0-1
         """
         val result = eval(code)
         assertEquals(6L, result)
@@ -621,10 +668,12 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
-            let outcome = a.swap_with {f = {current, arg} -> current + arg, arg = 5}
-            match outcome is
-              Ok { val } -> val
+            match atom_validated {val = 10, validator = {val} -> val >= 0} is
+              Ok { val = a } -> do
+                let outcome = swap_with_validated {atom = a, f = {current, arg} -> current + arg, arg = 5}
+                match outcome is
+                  Ok { val } -> val
+                  Err { error = _ } -> 0-1
               Err { error = _ } -> 0-1
         """
         assertEquals(15L, eval(code))
@@ -635,11 +684,13 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
-            let outcome = a.swap_with {f = {current, arg} -> current - arg, arg = 100}
-            match outcome is
-              Ok { val = _ } -> 999
-              Err { error = ValidatorRejected { val } } -> val
+            match atom_validated {val = 10, validator = {val} -> val >= 0} is
+              Ok { val = a } -> do
+                let outcome = swap_with_validated {atom = a, f = {current, arg} -> current - arg, arg = 100}
+                match outcome is
+                  Ok { val = _ } -> 999
+                  Err { error = ValidatorRejected { val } } -> val
+              Err { error = _ } -> 0-1
         """
         // 10 - 100 = -90, rejected; the rejected value is carried in the Err.
         assertEquals(-90L, eval(code))
@@ -650,10 +701,12 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
-            let outcome = a.get_and_swap {f = {current} -> current + 5}
-            match outcome is
-              Ok { val } -> val.new
+            match atom_validated {val = 10, validator = {val} -> val >= 0} is
+              Ok { val = a } -> do
+                let outcome = get_and_swap_validated {atom = a, f = {current} -> current + 5}
+                match outcome is
+                  Ok { val } -> val.new
+                  Err { error = _ } -> 0-1
               Err { error = _ } -> 0-1
         """
         assertEquals(15L, eval(code))
@@ -664,11 +717,13 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
-            let outcome = a.get_and_swap {f = {current} -> current - 100}
-            match outcome is
-              Ok { val = _ } -> 999
-              Err { error = ValidatorRejected { val } } -> val
+            match atom_validated {val = 10, validator = {val} -> val >= 0} is
+              Ok { val = a } -> do
+                let outcome = get_and_swap_validated {atom = a, f = {current} -> current - 100}
+                match outcome is
+                  Ok { val = _ } -> 999
+                  Err { error = ValidatorRejected { val } } -> val
+              Err { error = _ } -> 0-1
         """
         assertEquals(-90L, eval(code))
     }
@@ -680,10 +735,12 @@ class AtomTest {
         val ok = """
             $atomSetup
 
-            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
-            let r = a.swap {f = {current} -> current + 5}
-            match r is
-              Ok { val } -> val
+            match atom_validated {val = 10, validator = {val} -> val >= 0} is
+              Ok { val = a } -> do
+                let r = swap_validated {atom = a, f = {current} -> current + 5}
+                match r is
+                  Ok { val } -> val
+                  Err { error = _ } -> 0-1
               Err { error = _ } -> 0-1
         """
         assertEquals(15L, eval(ok))
@@ -691,11 +748,13 @@ class AtomTest {
         val err = """
             $atomSetup
 
-            let a = atom_validated {val = 10, validator = {val} -> val >= 0}
-            let r = a.swap {f = {current} -> current - 100}
-            match r is
-              Ok { val = _ } -> 999
-              Err { error = ValidatorRejected { val } } -> val
+            match atom_validated {val = 10, validator = {val} -> val >= 0} is
+              Ok { val = a } -> do
+                let r = swap_validated {atom = a, f = {current} -> current - 100}
+                match r is
+                  Ok { val = _ } -> 999
+                  Err { error = ValidatorRejected { val } } -> val
+              Err { error = _ } -> 0-1
         """
         assertEquals(-90L, eval(err))
     }
