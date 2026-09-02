@@ -387,16 +387,10 @@ internal fun ExpressionConstraintGenerator.wrapCallResultWithEffects(
     effectRow: MezzeType.EffectRow?,
 ): Triple<MezzeType, Set<String>, Set<MezzeType.EffectInstance>> {
     if (effectRow == null) return Triple(valueType, emptySet(), emptySet())
-    val hasUnhandled = effectRow.effects.isNotEmpty() ||
-        effectRow.effectInstances.isNotEmpty() ||
-        effectRow.rowVar != null
-    val callType: MezzeType = if (hasUnhandled || effectRow.performed) {
-        // #404: flatten nested SuspendType — see ExpressionConstraints copy.
-        MezzeType.SuspendType.of(valueType = valueType, effects = effectRow)
-    } else {
-        valueType
-    }
-    return Triple(callType, effectRow.effects, effectRow.effectInstances)
+    // Effect-model migration (S2): return the BARE value type; effects ride on the
+    // enclosing arrow via the caller's collector. No SuspendType wrap. (Duplicate of
+    // the ExpressionConstraints copy.)
+    return Triple(valueType, effectRow.effects, effectRow.effectInstances)
 }
 
 internal fun ExpressionConstraintGenerator.removeEffectsFromType(

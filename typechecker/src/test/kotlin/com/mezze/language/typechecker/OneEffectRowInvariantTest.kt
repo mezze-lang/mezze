@@ -146,13 +146,15 @@ let main = {} -> perform Console, LoomAsync, SystemTime in do
 """.trimIndent()
 
     @Test
-    fun `race-result binding carries exactly one effect row`() {
+    fun `race-result binding carries NO effect row -- effects ride the arrow`() {
+        // Effect-model migration: value bindings are BARE. The doubled-row bug (#404)
+        // this class was built for is gone by construction — there is no effect row on
+        // a value to double. `r` is a plain `Result Str AsyncError`; race's Async rides
+        // the enclosing arrow, not the binding.
         val tm = typedModuleOf(raceProgram, "race.mz")
         val rType = bindingTypeAt(tm, 10, 7) // `let r =`
-        assertFalse(rType.contains("> <")) { "race binding has a doubled effect row: $rType" }
-        assertEquals(1, rType.count { it == '<' }) { "race binding must carry ONE row, got: $rType" }
-        assertTrue(rType.startsWith("Result Str AsyncError")) { "unexpected race result value type: $rType" }
-        assertTrue(rType.contains("Async")) { "race result should retain its Async row: $rType" }
+        assertEquals("Result Str AsyncError", rType) { "race binding must be bare; got: $rType" }
+        assertEquals(0, rType.count { it == '<' }) { "no effect row on a value binding: $rType" }
     }
 
     @Test

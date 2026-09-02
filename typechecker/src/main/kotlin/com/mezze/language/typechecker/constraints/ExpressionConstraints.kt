@@ -509,18 +509,12 @@ class ExpressionConstraintGenerator {
         effectRow: MezzeType.EffectRow?,
     ): Triple<MezzeType, Set<String>, Set<MezzeType.EffectInstance>> {
         if (effectRow == null) return Triple(valueType, emptySet(), emptySet())
-        val hasUnhandled = effectRow.effects.isNotEmpty() ||
-            effectRow.effectInstances.isNotEmpty() ||
-            effectRow.rowVar != null
-        val callType: MezzeType = if (hasUnhandled || effectRow.performed) {
-            // #404: flatten — a callee whose return is already suspended (e.g.
-            // `race : ... Result 'a AsyncError <Async, ...>`) must not gain a
-            // SECOND row from the call-site wrap; the rows merge into one.
-            MezzeType.SuspendType.of(valueType = valueType, effects = effectRow)
-        } else {
-            valueType
-        }
-        return Triple(callType, effectRow.effects, effectRow.effectInstances)
+        // Effect-model migration (S2, docs/effect-model.md): effects ride on ARROWS,
+        // not values. Return the BARE value type; the caller threads
+        // effectRow.effects/effectInstances into its collector, which hoists them onto
+        // the enclosing function's arrow. No SuspendType wrap — that value-carried
+        // effect row was the source of the whole laundering/doubled-row bug class.
+        return Triple(valueType, effectRow.effects, effectRow.effectInstances)
     }
 
     internal fun removeEffectsFromType(

@@ -1262,13 +1262,11 @@ class TypedAstBuilder(
                         // downstream `var`-as-Int unification is unaffected and the
                         // effect is not double-counted onto the enclosing arrow (that
                         // row is harvested separately at the function boundary).
-                        val bindingStoredType =
-                            if (resolvedType !is MezzeType.SuspendType && resolvedType !is MezzeType.FunctionType) {
-                                performedRowForBindingRhs(value)?.let { row ->
-                                    MezzeType.SuspendType(resolvedType, row)
-                                } ?: resolvedType
-                            } else resolvedType
-                        stmts.add(TypedStatement.Let(name, contentHash, bindingStoredType, value, stmt.loc, isRecursive))
+                        // Effect-model migration (S2): the binding's stored type is
+                        // BARE. Any effect the RHS performs rides on the enclosing
+                        // function's arrow (harvested at the function boundary), never
+                        // on the binding — so hover shows `x : Int`, not `Int <E>`.
+                        stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive))
                     }
                 }
                 is ParsedStatement.Expr -> {

@@ -72,15 +72,18 @@ let main = {} -> perform Console, LoomAsync, SystemTime in do
     Err { error } -> println { msg = "both failed" }
 """.trimIndent()
 
-    // Case 1: at a concrete call site the tail is GROUNDED (closed).
+    // Case 1: effect-model migration — at a concrete call site the binding is BARE.
+    // The whole #405 "ground the value's open tail" concern dissolves: effects ride
+    // the enclosing ARROW, never the value, so `r` carries no row at all (neither the
+    // leaked `<Async, ...>` nor a grounded `<Async>`).
     @Test
-    fun `race-result binding is grounded to a closed effect row`() {
+    fun `race-result binding is bare -- no effect row rides the value`() {
         val tm = typedModuleOf(raceProgram, "race.mz")
         val rType = bindingTypeAt(tm, 10, 7) // `let r =`
-        assertEquals("Result Str AsyncError <Async>", rType) {
-            "race result at a concrete call site must ground its open tail; got: $rType"
+        assertEquals("Result Str AsyncError", rType) {
+            "a value binding must be bare — effects ride the arrow, not the value; got: $rType"
         }
-        assertFalse(rType.contains("...")) { "grounded tail must not print `...`: $rType" }
+        assertFalse(rType.contains("<")) { "no effect row on a value binding: $rType" }
     }
 
     // Case 2 + 4 (guard): a user fn ANNOTATED to return the open tail keeps

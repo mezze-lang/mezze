@@ -257,7 +257,7 @@ class ParallelErrorPropagationTest {
 
             match results is
                 [result] -> is_err {r = result}
-                [] -> 0
+                _ -> 0
         """
         val result = eval(code)
         assertEquals(1L, result)

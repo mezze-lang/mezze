@@ -44,7 +44,7 @@ class EffectRowOnPerformedBindingTest {
     }
 
     @Test
-    fun `performed do-block binding carries the effect row on its type`() {
+    fun `performed do-block binding is bare -- the effect rides the enclosing arrow`() {
         val src = """
             use std::effects::exception::{ Exception }
 
@@ -52,10 +52,14 @@ class EffectRowOnPerformedBindingTest {
               let var = if b == 0 then Exception.throw { error = "x" } else b
               var
         """.trimIndent()
-        // `var` binding at line 4, col 7.
-        val ty = bindingType(src, 4, 7)
-        assertTrue(ty.contains("Exception")) {
-            "expected `var` to carry <Exception ...> on its type, got: $ty"
+        // Effect-model migration: the binding is BARE (`var : Int`) — the performed
+        // Exception no longer rides on the value; it rides on `f`'s ARROW.
+        val varTy = bindingType(src, 4, 7) // `var` binding
+        assertTrue(varTy == "Int") { "expected bare `var : Int`, got: $varTy" }
+        // The enclosing function `f` carries <Exception ...> on its arrow.
+        val fTy = bindingType(src, 3, 5) // `f` decl name
+        assertTrue(fTy.contains("Exception")) {
+            "expected `f`'s arrow to carry <Exception ...>, got: $fTy"
         }
     }
 

@@ -590,19 +590,13 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
     val resultResult = generate(expr.result, resultContext)
     collector.merge(resultResult)
 
-    val resultType = if (collector.effects.isNotEmpty() || collector.performed) {
-        when (val innerType = resultResult.type) {
-            is MezzeType.SuspendType -> {
-                val mergedEffects = innerType.effects.effects + collector.effects
-                val mergedPerformed = innerType.effects.performed || collector.performed
-                MezzeType.SuspendType(innerType.valueType, MezzeType.EffectRow.simple(mergedEffects, innerType.effects.rowVar, mergedPerformed))
-            }
-            else -> {
-                MezzeType.SuspendType(resultResult.type, MezzeType.EffectRow.simple(collector.effects, null, collector.performed))
-            }
-        }
-    } else {
-        resultResult.type
+    // Effect-model migration (S2): the do-block's result type is BARE. The block's
+    // effects are already sequenced into the enclosing arrow via `collector`
+    // (returned on this ConstraintResult's `effects`/`performed`), so they need not —
+    // and must not — be re-stamped onto the result VALUE type.
+    val resultType = when (val innerType = resultResult.type) {
+        is MezzeType.SuspendType -> innerType.valueType
+        else -> innerType
     }
 
     // #84 linter: a do-block `let` whose name is never referenced by any later
