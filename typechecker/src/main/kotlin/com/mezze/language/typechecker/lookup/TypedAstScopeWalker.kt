@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.lookup
 
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.typedast.*
@@ -50,6 +51,109 @@ object TypedAstScopeWalker {
             }
         }
         return emptyList()
+    }
+
+    /**
+     * The match- or if-let PATTERN binding whose OWN name-loc contains
+     * (line, col), or null. Unlike [bindingsAtPosition] — which reports the
+     * bindings in scope for a body — this answers "is the cursor sitting on the
+     * binder itself?", so hover on the `val` in `Ok { val } -> …` can show
+     * `val`'s type instead of the enclosing match's result type (which
+     * [TypedAstLookup.findAtPosition] returns for a cursor on the pattern).
+     */
+    fun patternBindingAt(module: TypedModule, line: Int, col: Int): ScopeBinding? {
+        for (decl in module.decls) {
+            if (decl is TypedLetDecl && containsPosition(decl.loc, line, col)) {
+                return findPatternBinding(decl.value, line, col)
+            }
+        }
+        return null
+    }
+
+    private fun findPatternBinding(expr: TypedExpr, line: Int, col: Int): ScopeBinding? {
+        if (!containsPosition(expr.loc, line, col)) return null
+        when (expr) {
+            is TypedMatch -> {
+                findPatternBinding(expr.scrutinee, line, col)?.let { return it }
+                for (case in expr.cases) {
+                    for (b in case.bindings) {
+                        if (containsPosition(b.loc, line, col)) {
+                            val ty = bindingType(expr.scrutineeSourceType, case.patterns, b)
+                            return ScopeBinding(b.name, ty, b.loc, ScopeBinding.Kind.MATCH_BINDING)
+                        }
+                    }
+                    for (ilb in case.ifLetBindings) {
+                        val typed = collectPatternBindings(ilb.pattern)
+                        for ((name, tl) in typed) {
+                            if (containsPosition(tl.second, line, col)) {
+                                return ScopeBinding(name, tl.first, tl.second, ScopeBinding.Kind.IF_LET_BINDING)
+                            }
+                        }
+                        findPatternBinding(ilb.expr, line, col)?.let { return it }
+                    }
+                    case.guard?.let { g -> findPatternBinding(g, line, col)?.let { return it } }
+                    findPatternBinding(case.body, line, col)?.let { return it }
+                }
+            }
+            is TypedLambda -> return findPatternBinding(expr.body, line, col)
+            is TypedBlock -> {
+                for (stmt in expr.statements) {
+                    val r = when (stmt) {
+                        is TypedStatement.Let -> findPatternBinding(stmt.value, line, col)
+                        is TypedStatement.Expr -> findPatternBinding(stmt.expr, line, col)
+                    }
+                    if (r != null) return r
+                }
+                return findPatternBinding(expr.result, line, col)
+            }
+            is TypedCall -> {
+                findPatternBinding(expr.function, line, col)?.let { return it }
+                return findPatternBinding(expr.arg, line, col)
+            }
+            is TypedRecord -> for (e in expr.entries) {
+                val r = when (e) {
+                    is TypedRecordEntry.Field -> findPatternBinding(e.value, line, col)
+                    is TypedRecordEntry.Spread -> findPatternBinding(e.expr, line, col)
+                }
+                if (r != null) return r
+            }
+            is TypedFieldAccess -> return findPatternBinding(expr.record, line, col)
+            is TypedIf -> {
+                findPatternBinding(expr.condition, line, col)?.let { return it }
+                findPatternBinding(expr.thenBranch, line, col)?.let { return it }
+                return findPatternBinding(expr.elseBranch, line, col)
+            }
+            is TypedPerform -> return findPatternBinding(expr.body, line, col)
+            is TypedPipe -> {
+                findPatternBinding(expr.left, line, col)?.let { return it }
+                return findPatternBinding(expr.right, line, col)
+            }
+            is TypedSeq -> for (el in expr.elements) {
+                val r = when (el) {
+                    is TypedSeqElement.Regular -> findPatternBinding(el.expr, line, col)
+                    is TypedSeqElement.Spread -> findPatternBinding(el.expr, line, col)
+                }
+                if (r != null) return r
+            }
+            is TypedRecordUpdate -> {
+                findPatternBinding(expr.record, line, col)?.let { return it }
+                for (e in expr.updates) {
+                    val r = when (e) {
+                        is TypedRecordEntry.Field -> findPatternBinding(e.value, line, col)
+                        is TypedRecordEntry.Spread -> findPatternBinding(e.expr, line, col)
+                    }
+                    if (r != null) return r
+                }
+            }
+            is TypedVariantConstruct -> expr.payload?.let { return findPatternBinding(it, line, col) }
+            is TypedStringLit -> for (part in expr.parts) {
+                if (part is TypedStringPart.Interpolation) {
+                    findPatternBinding(part.expr, line, col)?.let { return it }
+                }
+            }
+            else -> {}
+        }
+        return null
     }
 
     /**
@@ -114,7 +218,8 @@ object TypedAstScopeWalker {
                     // the bindings so siblings don't see them.
                     val before = out.size
                     for (b in case.bindings) {
-                        out.add(ScopeBinding(b.name, b.type, b.loc, ScopeBinding.Kind.MATCH_BINDING))
+                        val ty = bindingType(expr.scrutineeSourceType, case.patterns, b)
+                        out.add(ScopeBinding(b.name, ty, b.loc, ScopeBinding.Kind.MATCH_BINDING))
                     }
                     // if-let bindings layer on top of pattern bindings. Each
                     // `TypedIfLetBinding` carries the destructuring `pattern`
@@ -249,6 +354,82 @@ object TypedAstScopeWalker {
         go(pattern)
         return out
     }
+
+    /**
+     * A match binding's type for display. The solver occasionally leaves a
+     * pattern binder's stored type an unsolved var even when the SCRUTINEE is
+     * fully resolved (the binder tyvar was never unified with the scrutinee's
+     * payload — a constraint-gen gap). When that happens, recover the type
+     * structurally from the resolved scrutinee type + the case patterns.
+     * Fallback-only: a binder whose stored type is already solved is kept as-is,
+     * and an unhandled shape keeps the var (no regression).
+     */
+    private fun bindingType(scrutinee: MezzeType, patterns: List<TypedPattern>, b: PatternBinding): MezzeType =
+        if (b.type is MezzeType.VarType) deriveBindingType(scrutinee, patterns, b.name) ?: b.type else b.type
+
+    private fun deriveBindingType(scrutinee: MezzeType, patterns: List<TypedPattern>, name: String): MezzeType? {
+        val out = HashMap<String, MezzeType>()
+        for (p in patterns) derivePatternTypes(scrutinee, p, out)
+        return out[name]
+    }
+
+    /** Bind each variable in [pattern] to its type given the [scrutinee] type. */
+    private fun derivePatternTypes(scrutinee: MezzeType, pattern: TypedPattern, out: MutableMap<String, MezzeType>) {
+        when (pattern) {
+            is TypedVarPattern -> out[pattern.name] = scrutinee
+            is TypedVariantPattern -> {
+                val payload = pattern.payload ?: return
+                val payloadFields: Map<String, MezzeType>? = when (scrutinee) {
+                    is MezzeType.VariantType ->
+                        (scrutinee.constructors[pattern.tag] as? MezzeType.RecordType)?.fields
+                    is MezzeType.TypeApplication -> resultOptionPayloadFields(scrutinee, pattern.tag)
+                    else -> null
+                }
+                if (payload is TypedRecordPattern && payloadFields != null) {
+                    for (f in payload.fields) {
+                        val ft = payloadFields[f.name] ?: continue
+                        val inner = f.pattern
+                        if (inner != null) derivePatternTypes(ft, inner, out) else out[f.name] = ft
+                    }
+                } else if (scrutinee is MezzeType.VariantType) {
+                    scrutinee.constructors[pattern.tag]?.let { derivePatternTypes(it, payload, out) }
+                }
+            }
+            is TypedRecordPattern -> {
+                val fields = (scrutinee as? MezzeType.RecordType)?.fields
+                for (f in pattern.fields) {
+                    val ft = fields?.get(f.name)
+                    val inner = f.pattern
+                    if (inner != null) { if (ft != null) derivePatternTypes(ft, inner, out) } else if (ft != null) out[f.name] = ft
+                }
+            }
+            is TypedSeqPattern -> {
+                val elem = (scrutinee as? MezzeType.SeqType)?.elementType
+                if (elem != null) for (e in pattern.elements) derivePatternTypes(elem, e, out)
+                pattern.rest?.let { out[it] = scrutinee }
+            }
+            is TypedStringInterpPattern ->
+                for (part in pattern.parts) {
+                    if (part is TypedStringPatternPart.Capture) out[part.variableName] = MezzeType.StringType
+                }
+            is TypedWildcardPattern, is TypedLiteralPattern -> {}
+        }
+    }
+
+    /** Ok/Err/Some payload fields for a resolved `Result`/`Option` application. */
+    private fun resultOptionPayloadFields(app: MezzeType.TypeApplication, tag: String): Map<String, MezzeType>? =
+        when (app.constructor) {
+            BuiltinTypes.RESULT -> when (tag) {
+                BuiltinTypes.OK -> app.args.getOrNull(0)?.let { mapOf(BuiltinTypes.VAL_FIELD to it) }
+                BuiltinTypes.ERR -> app.args.getOrNull(1)?.let { mapOf(BuiltinTypes.ERROR_FIELD to it) }
+                else -> null
+            }
+            BuiltinTypes.OPTION -> when (tag) {
+                BuiltinTypes.SOME -> app.args.getOrNull(0)?.let { mapOf(BuiltinTypes.VAL_FIELD to it) }
+                else -> null
+            }
+            else -> null
+        }
 
     private fun containsPosition(loc: Loc, line: Int, col: Int): Boolean {
         if (line < loc.startLine || line > loc.endLine) return false

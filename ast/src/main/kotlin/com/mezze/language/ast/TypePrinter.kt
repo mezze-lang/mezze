@@ -53,20 +53,24 @@ private fun printVariantType(
     if (resultTypes != null) {
         val (valueType, errorType) = resultTypes
         val valueTypeStr = prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping)
-        val errorTypeStr = when (errorType) {
-            is MezzeType.VariantType -> {
-                val errorConstructors = errorType.constructors.entries.map { (name, dataType) ->
-                    if (dataType != null) {
-                        "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping)}"
-                    } else {
-                        name
-                    }
-                }
-                "| ${errorConstructors.joinToString(", ")} |"
-            }
-            else -> prettyPrintWithAliasCheck(errorType, typeAliases, showExpansion, typeVarMapping)
-        }
+        // Render the error slot through the alias-aware path so a NAMED error
+        // variant (e.g. `AsyncError`) prints as its name, not its whole
+        // constructor union. Anonymous error variants still expand (below).
+        val errorTypeStr = prettyPrintWithAliasCheck(errorType, typeAliases, showExpansion, typeVarMapping)
         return "Result $valueTypeStr $errorTypeStr"
+    }
+
+    // A variant carrying its declared name (`AsyncError`, `Tree`, …) prints as
+    // that name + its type-arg vector — the SAME rule the plain printer uses
+    // (prettyPrintTypeWithMapping, "declared name" branch). Without it a named
+    // variant reached here (notably the error slot of a `Result`) expands to
+    // its full constructor union on every hover. Kept in sync so the two
+    // printers agree. Anonymous inline variants (no name) still expand below.
+    type.identity.displayNameOrNull()?.let { declaredName ->
+        val argsStr = if (type.typeArgs.isEmpty()) "" else " " + type.typeArgs.joinToString(" ") {
+            prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
+        }
+        return "$declaredName$argsStr"
     }
 
     val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->

@@ -219,6 +219,21 @@ object HoverInfo {
         if (typedModule != null) {
             val line = line0 + 1  // LSP is 0-indexed, Loc is 1-indexed
             val col = char0 + 1
+
+            // Cursor ON a match / if-let pattern binder (`val` in `Ok { val }`):
+            // findAtPosition returns the enclosing match, so this resolves the
+            // binder's OWN type from the scope walker. Only used in the `else`
+            // branch below (cursor landed on the container) — a USE of the same
+            // name lands on its TypedVar and keeps its precise use-site type.
+            fun patternBinderHover(): String? =
+                TypedAstScopeWalker.patternBindingAt(typedModule, line, col)
+                    ?.takeIf { it.name == word }
+                    ?.let { b ->
+                        val kindLabel =
+                            if (b.kind == TypedAstScopeWalker.ScopeBinding.Kind.IF_LET_BINDING) "if let" else "match"
+                        codeBlock("$kindLabel ${b.name} : ${formatType(b.type)}")
+                    }
+
             when (val lookup = TypedAstLookup.findAtPosition(typedModule, line, col)) {
                 is TypedAstLookup.LookupResult.Expr -> {
                     val expr = lookup.expr
@@ -242,7 +257,10 @@ object HoverInfo {
                             abilityHover ?: codeBlock(".${expr.field} : $typeStr")
                         }
                         is com.mezze.language.typedast.TypedCall -> codeBlock("$typeStr")
-                        else -> codeBlock(typeStr)
+                        // A cursor on a match / if-let pattern binder lands here
+                        // (findAtPosition returns the enclosing match). Prefer the
+                        // binder's own type over the match's result type (`{}`).
+                        else -> patternBinderHover() ?: codeBlock(typeStr)
                     }
                 }
                 is TypedAstLookup.LookupResult.Binding -> {
