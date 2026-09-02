@@ -55,4 +55,8 @@ data class SolvedModule(
      * type (no SuspendType wrap); emit's #378 effect-row rider is separate.
      */
     val doBindingSolvedTypes: Map<Loc, MezzeType> = emptyMap(),
+    /** Effect-model migration (S2): per `perform` Loc, whether it fully discharges
+     *  its body's row → emit sets TypedPerform.fullyDischarges from this instead of
+     *  inspecting the value-carried effect row. */
+    val performFullyDischarged: Map<Loc, Boolean> = emptyMap(),
 )

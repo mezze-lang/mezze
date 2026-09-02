@@ -155,6 +155,10 @@ class ExpressionConstraintGenerator {
         // (like callReturnTypes) and carries every nested block's binding types to
         // the top-level decl's ConstraintResult for emit to read.
         val doBindingSolvedTypes = mutableMapOf<Loc, MezzeType>()
+        // Effect-model migration (S2): per-`perform` fully-discharged flags, merged
+        // up (like doBindingSolvedTypes/callReturnTypes) so every nested perform's
+        // entry reaches the top-level decl's ConstraintResult for emit to read.
+        val performFullyDischarged = mutableMapOf<Loc, Boolean>()
 
         fun merge(result: ConstraintResult) {
             constraints.addAll(result.constraints)
@@ -175,6 +179,7 @@ class ExpressionConstraintGenerator {
             tailCalls.addAll(result.tailCalls)
             unusedVars.addAll(result.unusedVariables)
             doBindingSolvedTypes.putAll(result.doBindingSolvedTypes)
+            performFullyDischarged.putAll(result.performFullyDischarged)
         }
 
         fun toResult(type: MezzeType): ConstraintResult = ConstraintResult(
@@ -198,6 +203,7 @@ class ExpressionConstraintGenerator {
             unusedVariables = unusedVars,
             doBindingEffects = doBindingEffects,
             doBindingSolvedTypes = doBindingSolvedTypes,
+            performFullyDischarged = performFullyDischarged,
         )
     }
 

@@ -399,6 +399,12 @@ data class ConstraintResult(
     // separate step. Keyed by (globally unique) Loc, so it merges up through
     // nested blocks without collision.
     val doBindingSolvedTypes: Map<Loc, MezzeType> = emptyMap(),
+    // Effect-model migration (S2, docs/effect-model.md): per `perform` expr Loc,
+    // true iff it discharges every effect in its body's row (residual empty) so the
+    // runtime runs the body eagerly. Threaded to emit like doBindingSolvedTypes so
+    // TypedPerform.fullyDischarges is sourced from the residual-effect set, not the
+    // value-carried SuspendType that S2 removes.
+    val performFullyDischarged: Map<Loc, Boolean> = emptyMap(),
 ) {
     /** A deferred callback-effect harvest for BUG C (#331). [argType] is the
      *  `<...>` HOF call's argument type as seen at gen-time (may contain VarType

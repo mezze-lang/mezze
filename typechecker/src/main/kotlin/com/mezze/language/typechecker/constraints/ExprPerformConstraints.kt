@@ -271,6 +271,16 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     }
 
     val remainingEffectInstances = exprResult.effectInstances.filter { it.name !in handledEffects }.toSet()
+    // Effect-model migration (S2): the runtime's "fully discharges body's row"
+    // signal is about the RESULT VALUE's residual effects, not the body's performed
+    // effects. removeEffectsFromType (which produced `resultType`) returns a bare
+    // value type when nothing remains on the value and a SuspendType otherwise, so
+    // `resultType !is SuspendType` is EXACTLY the old check on the perform's result
+    // type (and SuspendType-ness is substitution-invariant — a SuspendType built here
+    // always carries non-empty named effects). Threaded to emit so the compiler no
+    // longer inspects the value-carried effect row. (A `.effects`-based residual is
+    // the wrong question — it over-reports side-effects that never rode the value.)
+    val fullyDischargedHere = resultType !is MezzeType.SuspendType
 
     return ConstraintResult(
         type = resultType,
@@ -291,6 +301,10 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         referencedBindings = exprResult.referencedBindings,
         methodCallResolutions = exprResult.methodCallResolutions,
         callReturnTypes = exprResult.callReturnTypes + (expr.loc to resultType),
+        // Carry the body's nested-perform entries and add this perform's. Mirrors
+        // callReturnTypes: generatePerform encapsulates body generation, so body
+        // side-tables must be threaded through its return or they are lost.
+        performFullyDischarged = exprResult.performFullyDischarged + (expr.loc to fullyDischargedHere),
     )
 }
 

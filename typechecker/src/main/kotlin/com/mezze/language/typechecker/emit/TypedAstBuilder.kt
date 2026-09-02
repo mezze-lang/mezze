@@ -76,6 +76,7 @@ class TypedAstBuilder(
     // var #354, effect row #378, newtype wrapper #395) can recur. Effect-row
     // ownership stays with the separate #378 rider below.
     private val doBindingSolvedTypes: Map<Loc, MezzeType> get() = solved.doBindingSolvedTypes
+    private val performFullyDischarged: Map<Loc, Boolean> get() = solved.performFullyDischarged
 
 
     private val identifierContext = mutableMapOf<String, MezzeType>()
@@ -847,16 +848,15 @@ class TypedAstBuilder(
                 val body = buildExpr(expr.body, file, contextType)
                 val performType = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
                     ?: body.type
-                // S0/S1 (effect-model migration, docs/effect-model.md): the runtime's
-                // eager-vs-defer gate must not read the value-carried effect row. Compute
-                // the "fully discharges body's row" signal HERE from performType — identical
-                // to the old TypedASTCompiler check on expr.type — and carry it on the node.
-                // When SuspendType is removed (S2), only this computation is re-sourced (from
-                // the residual-effect set); the compiler's read of the field stays put.
-                val fullyDischarges = performType !is MezzeType.SuspendType ||
-                    (performType.effects.effects.isEmpty() &&
-                        performType.effects.effectInstances.isEmpty() &&
-                        performType.effects.rowVar == null)
+                // Effect-model migration (docs/effect-model.md): source
+                // fullyDischarges from the discharge channel populated at
+                // constraint-gen (`resultType !is SuspendType`, i.e. the perform's
+                // result value carries no residual effects). Proven equal to the old
+                // performType-based check across the full tc+interp suite. The
+                // performType fallback covers any perform loc absent from the channel
+                // and is what S2b removes once value types go bare.
+                val fullyDischarges = performFullyDischarged[expr.loc]
+                    ?: (performType !is MezzeType.SuspendType)
                 TypedPerform(handlers, body, performType, loc, fullyDischarges)
             }
             is ParsedEffectCall -> {

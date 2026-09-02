@@ -570,6 +570,7 @@ class TypeChecker(
                     matchCaseBindings = aggregated.matchCaseBindings,
                     matchScrutineeTypes = aggregated.matchScrutineeTypes,
                     doBindingSolvedTypes = aggregated.doBindingSolvedTypes,
+                    performFullyDischarged = aggregated.performFullyDischarged,
                 )
                 val emitResult = emitTypedModuleAndLower(
                     parsedModule = parsedModule, module = module,
@@ -633,6 +634,7 @@ class TypeChecker(
         val matchScrutineeTypes: Map<Loc, MezzeType>,
         val expectedTypeAt: Map<Loc, MezzeType>,
         val doBindingSolvedTypes: Map<Loc, MezzeType>,
+        val performFullyDischarged: Map<Loc, Boolean>,
     )
 
     private fun aggregateConstraintResults(
@@ -662,6 +664,10 @@ class TypeChecker(
         val doBindingSolvedTypes = constraintResults.values
             .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.doBindingSolvedTypes }
             .mapValues { (_, type) -> substitution.apply(type) }
+        // Effect-model migration (S2): per-perform fully-discharged flags (Boolean,
+        // no substitution needed).
+        val performFullyDischarged = constraintResults.values
+            .fold(emptyMap<Loc, Boolean>()) { acc, r -> acc + r.performFullyDischarged }
         return AggregatedConstraintResults(
             tailCallLocations = tailCallLocations,
             methodCallResolutions = methodCallResolutions,
@@ -670,6 +676,7 @@ class TypeChecker(
             matchScrutineeTypes = matchScrutineeTypes,
             expectedTypeAt = expectedTypeAt,
             doBindingSolvedTypes = doBindingSolvedTypes,
+            performFullyDischarged = performFullyDischarged,
         )
     }
 

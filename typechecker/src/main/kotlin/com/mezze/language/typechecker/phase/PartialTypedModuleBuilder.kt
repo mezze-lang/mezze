@@ -63,6 +63,9 @@ internal fun buildPartialTypedModule(
             .fold(emptyMap<Loc, MezzeType>()) { acc, r ->
                 acc + r.doBindingSolvedTypes.mapValues { (_, ty) -> substitution.apply(ty) }
             }
+        // Effect-model migration (S2): per-perform fully-discharged flags.
+        val performFullyDischarged = constraintResults.values
+            .fold(emptyMap<Loc, Boolean>()) { acc, r -> acc + r.performFullyDischarged }
         val tailCallLocations = constraintResults.values
             .flatMap { it.tailCalls }
             .filterNotNull()
@@ -77,6 +80,7 @@ internal fun buildPartialTypedModule(
             matchCaseBindings = matchCaseBindings,
             matchScrutineeTypes = matchScrutineeTypes,
             doBindingSolvedTypes = doBindingSolvedTypes,
+            performFullyDischarged = performFullyDischarged,
         )
         val builder = TypedAstBuilder(
             solved = solved,
