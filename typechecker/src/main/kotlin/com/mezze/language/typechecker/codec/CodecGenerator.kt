@@ -48,7 +48,6 @@ class CodecGenerator {
             is MezzeType.CharType -> true
             is MezzeType.BytesType -> true
             is MezzeType.FunctionType -> false
-            is MezzeType.SuspendType -> false
             is MezzeType.EffectRow -> false
             is MezzeType.RecordType -> type.fields.values.all { isSerializable(it) }
             is MezzeType.VariantType -> type.constructors.values.all { payload ->

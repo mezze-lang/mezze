@@ -639,7 +639,6 @@ object MonoDriver {
             is MezzeType.SortedSetType -> "SortedSet[${detailed(t.elementType)}]"
             is MezzeType.MapType -> "Map[${detailed(t.keyType)}, ${detailed(t.valueType)}]"
             is MezzeType.SortedMapType -> "SortedMap[${detailed(t.keyType)}, ${detailed(t.valueType)}]"
-            is MezzeType.SuspendType -> "Susp[${detailed(t.valueType)}]"
             is MezzeType.NewtypeType -> "New(${t.name})[${detailed(t.wrappedType)}]"
             is MezzeType.TypeApplication -> "App(${t.constructor})[${t.args.joinToString { detailed(it) }}]"
             is MezzeType.IntType -> "Int"
@@ -672,7 +671,6 @@ object MonoDriver {
                 is MezzeType.SortedSetType -> go(t.elementType)
                 is MezzeType.MapType -> { go(t.keyType); go(t.valueType) }
                 is MezzeType.SortedMapType -> { go(t.keyType); go(t.valueType) }
-                is MezzeType.SuspendType -> go(t.valueType)
                 is MezzeType.NewtypeType -> go(t.wrappedType)
                 is MezzeType.TypeApplication -> t.args.forEach(::go)
                 is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
@@ -705,7 +703,6 @@ object MonoDriver {
                 typeParamAppearsIn(typeParamName, type.valueType)
             is MezzeType.SortedMapType -> typeParamAppearsIn(typeParamName, type.keyType) ||
                 typeParamAppearsIn(typeParamName, type.valueType)
-            is MezzeType.SuspendType -> typeParamAppearsIn(typeParamName, type.valueType)
             is MezzeType.NewtypeType -> typeParamAppearsIn(typeParamName, type.wrappedType)
             is MezzeType.TypeApplication -> type.args.any { typeParamAppearsIn(typeParamName, it) }
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,

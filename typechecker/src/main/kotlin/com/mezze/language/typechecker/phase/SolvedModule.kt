@@ -52,7 +52,8 @@ data class SolvedModule(
      * into `constraintResults[name]`. Emit's buildDoBlock stamps the binding's
      * stored type from this instead of re-deriving from the erased RHS node, so
      * do-block and top-level lets converge on ONE type source. The pure value
-     * type (no SuspendType wrap); emit's #378 effect-row rider is separate.
+     * type (bare, no value-carried effect row); emit's #378 effect-row rider is
+     * separate.
      */
     val doBindingSolvedTypes: Map<Loc, MezzeType> = emptyMap(),
     /** Effect-model migration (S2): per `perform` Loc, whether it fully discharges

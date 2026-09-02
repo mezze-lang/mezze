@@ -10,7 +10,6 @@ import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.hashing.ContentHashComputer
-import com.mezze.language.typechecker.mono.unwrapSuspended
 import com.mezze.language.typechecker.util.StringDistance
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import com.mezze.language.typechecker.util.TypeAnnotationMatcher
@@ -221,10 +220,7 @@ class TypeValidator(
         val errors = mutableListOf<ValidationError>()
 
         for (constraint in constraints) {
-            val concreteType = when (val applied = substitution.apply(MezzeType.VarType(constraint.typeVar))) {
-                is MezzeType.SuspendType -> applied.valueType
-                else -> applied
-            }
+            val concreteType = substitution.apply(MezzeType.VarType(constraint.typeVar))
             if (concreteType is MezzeType.VarType) continue
 
             val typeName = getTypeNameForAbility(concreteType)
@@ -341,7 +337,7 @@ class TypeValidator(
         }
 
     private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
-        var unwrappedType = unwrapSuspended(type)
+        var unwrappedType = type
         (unwrappedType as? MezzeType.TypeApplication)?.let { expandTypeApplicationToVariant(it, registry)?.let { e -> unwrappedType = e } }
 
         return when {
@@ -393,7 +389,6 @@ class TypeValidator(
                 else -> ContentHashComputer.mezzeTypeToString(type)
             }
             is MezzeType.RecordType -> type.identity.displayNameOrNull() ?: ContentHashComputer.mezzeTypeToString(type)
-            is MezzeType.SuspendType -> getTypeNameForAbility(type.valueType)
             else -> ContentHashComputer.mezzeTypeToString(type)
         }
         typeNameCache[key] = result
@@ -439,14 +434,14 @@ class TypeValidator(
         val result = constraintResults[decl.variableName] ?: return emptyList()
         val finalType = substitution.apply(result.type)
         // Effect-model migration (S4): value types are bare now — read the INCURRED
-        // effects off the ConstraintResult, not a value-carried SuspendType. A FUNCTION
-        // binding's effects are LATENT on its arrow (it performs nothing until called),
-        // so it is never a stranded top-level effect; only non-function bindings are.
+        // effects off the ConstraintResult. A FUNCTION binding's effects are LATENT on
+        // its arrow (it performs nothing until called), so it is never a stranded
+        // top-level effect; only non-function bindings are.
         if (finalType is MezzeType.FunctionType) return emptyList()
 
         // A top-level non-function `let` whose RHS incurs an effect is suspect: the RHS
         // is an effectful computation and the module top level runs no handler. Whether
-        // to reject depends on mode (mirrors the old SuspendType-based logic exactly):
+        // to reject depends on mode:
         //  - strict (mez build / mez run — real entry paths): reject ANY incurred effect.
         //  - permissive (mez test, REPL): reject only the "would execute at module load"
         //    case — performed with no residual named effect — so tests/REPL can still
@@ -550,7 +545,6 @@ class TypeValidator(
         val finalType = substitution.apply(constraintResults[decl.variableName]?.type ?: return emptyList())
         val row = when (finalType) {
             is MezzeType.FunctionType -> finalType.effects
-            is MezzeType.SuspendType -> finalType.effects
             else -> null
         } ?: return emptyList()
 

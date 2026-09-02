@@ -4,7 +4,6 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
-import com.mezze.language.typechecker.mono.unwrapSuspended
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashConstants
@@ -349,8 +348,7 @@ internal class ImplValidator(
             }
             is ConstraintSolver.SolveResult.Success -> {
                 val substitution = solveResult.substitution
-                val rawBodyType = substitution.apply(bodyResult.type)
-                val actualBodyType = unwrapSuspended(rawBodyType)
+                val actualBodyType = substitution.apply(bodyResult.type)
 
                 val unificationSolver = ConstraintSolver(bodyContext, registry)
                 val unificationResult = unificationSolver.solve(

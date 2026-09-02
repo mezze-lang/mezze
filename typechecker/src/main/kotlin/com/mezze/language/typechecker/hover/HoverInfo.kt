@@ -419,7 +419,7 @@ object HoverInfo {
         // solved type is a fully-resolved FunctionType (no leftover tyvars) — a
         // still-polymorphic type means dispatch wasn't pinned yet, so fall back
         // to the generic decl signature below.
-        val specialized = (solvedType?.let { if (it is MezzeType.SuspendType) it.valueType else it })
+        val specialized = solvedType
             ?.takeIf { it is MezzeType.FunctionType && !typeHasVar(it) }
             ?.let { prettyPrintTypeWithAliases(it, state.typeAliases) }
 
@@ -427,7 +427,7 @@ object HoverInfo {
         // chain, accessed before the call pins dispatch), we can still specialize
         // via the RECEIVER if it's concrete — substitute the ability's receiver
         // type param with the receiver in the generic op annotation.
-        val concreteReceiver = (receiverType?.let { if (it is MezzeType.SuspendType) it.valueType else it })
+        val concreteReceiver = receiverType
             ?.takeIf { it !is MezzeType.VarType && !typeHasVar(it) }
 
         // 1. User-defined / file-level abilities

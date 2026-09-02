@@ -481,7 +481,7 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 // substitution + result to bindLet, which owns the entire binding
                 // construction: annotated-over-structural type selection (with alias
                 // adoption), let-annotation validation, ability-constraint carry,
-                // effect -> SuspendType harvest, and generalization / value
+                // effect harvest into the arrow, and generalization / value
                 // restriction. This subsumes the three bespoke do-block branches that
                 // used to live here (explicit ability-constrained function annotation,
                 // #76 un-annotated-lambda generalization, and the S1.2 monomorphic
@@ -523,8 +523,8 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                             suppressGeneralization = capturesOuter,
                             // The do-block sequences a statement's effects into its
                             // own effect row (collector.merge above); the binding
-                            // holds the pure value, so bindLet must NOT wrap it in a
-                            // SuspendType (that would leak the effect into later
+                            // holds the pure value, so bindLet must NOT harvest the
+                            // effect onto it (that would leak the effect into later
                             // closures capturing this name). See bindLet step (e).
                             harvestEffectsIntoBinding = false,
                         )
@@ -541,7 +541,7 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 // the (synthetic-temp) binding, so it is left to the existing path.
                 // The map holds the PURE value type (bindLet ran with
                 // harvestEffectsIntoBinding = false); emit's #378 effect-row rider
-                // wraps the SuspendType provenance separately, so the value facet
+                // carries the effect provenance separately, so the value facet
                 // and the effect facet stay owned by exactly one place each.
                 if (letResult != null && stmt.pattern is ParsedVariablePattern) {
                     val varName = (stmt.pattern as ParsedVariablePattern).name
@@ -594,10 +594,7 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
     // effects are already sequenced into the enclosing arrow via `collector`
     // (returned on this ConstraintResult's `effects`/`performed`), so they need not —
     // and must not — be re-stamped onto the result VALUE type.
-    val resultType = when (val innerType = resultResult.type) {
-        is MezzeType.SuspendType -> innerType.valueType
-        else -> innerType
-    }
+    val resultType = resultResult.type
 
     // #84 linter: a do-block `let` whose name is never referenced by any later
     // statement, the block result, or its own value is unused. `collector.usedVars`

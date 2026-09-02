@@ -7,7 +7,6 @@ import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
-import com.mezze.language.typechecker.mono.unwrapSuspended
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.printing.ErrorMessageBuilder
@@ -17,22 +16,6 @@ import com.mezze.language.typechecker.util.receiverTypeName
 class ConstraintSolver(
     private val context: TypingContext,
     private val registry: DeclarationRegistry = DeclarationRegistry.EMPTY,
-    /**
-     * Option B (#341/#370). When true, {@link solveEquality} refuses to
-     * silently strip a {@link MezzeType.SuspendType} wrapper on either
-     * side of an equality when the wrapped effect row is non-empty.
-     *
-     * <p>The default keeps the pre-Option-B behavior (silent strip) so
-     * existing callers are unaffected while we ratchet toward strictness.
-     * BuildCommand/RunCommand can flip this to true incrementally as
-     * stdlib + tests are cleaned up (Phase 2 of the Option B plan).
-     *
-     * <p>Env override: MEZZE_STRICT_EFFECT_ROWS=1 forces true, =0 forces
-     * false. Used by the test harness to run the whole suite under
-     * strict mode and enumerate the failure surface.
-     */
-    private val strictEffectRows: Boolean =
-        System.getenv("MEZZE_STRICT_EFFECT_ROWS") == "1",
     /**
      * Impl-body validation mode. When an operator body (`+`, `<`, …) is solved
      * in isolation to resolve its associated-type `'out` before the return-type
@@ -890,56 +873,12 @@ class ConstraintSolver(
     }
 
     private fun solveEquality(constraint: Constraint.Equality): ConstraintResult {
-        // SuspendType wrappers are stripped because effects are tracked separately
-        // in ConstraintResult, not in the Equality constraint itself. The constraint
-        // generation may wrap types in SuspendType to carry effect info, but by the
-        // time we unify, effect tracking has already been handled upstream.
-        //
-        // Option B / #341 / #370: under {@link #strictEffectRows}, refuse to
-        // silently strip a non-empty effect row. If one side is
-        // Suspended&lt;T, r&gt; with r non-empty and the other side is not the
-        // same Suspended shape (either plain T, or Suspended with a
-        // different row), reject the equality. This is the single
-        // fundamental leak (audit #370) that lets `Suspend&lt;T, effects&gt;`
-        // decay to `T`. The default (false) keeps pre-Option-B behavior
-        // so existing callers are unaffected while the fix is ratcheted in.
-        val rawLeft = constraint.left
-        val rawRight = constraint.right
-        if (strictEffectRows) {
-            val leftIsSusp = rawLeft is MezzeType.SuspendType && rawLeft.effects.effects.isNotEmpty()
-            val rightIsSusp = rawRight is MezzeType.SuspendType && rawRight.effects.effects.isNotEmpty()
-            if (leftIsSusp != rightIsSusp) {
-                val plainSide = if (leftIsSusp) rawRight else rawLeft
-                val suspendedSide = if (leftIsSusp) rawLeft as MezzeType.SuspendType else rawRight as MezzeType.SuspendType
-                val leakedEffects = suspendedSide.effects.effects
-                // Skip when an enclosing `perform` will discharge every leaked
-                // effect. ExprPerformConstraints.generatePerform stamps
-                // handledEffects onto every body Equality (via
-                // activeDischargedEffects) so we can distinguish an in-flight
-                // unification that WILL discharge (safe) from a real leak
-                // (fail). See #376.
-                val discharged = constraint.activeDischargedEffects
-                val undischargedLeaks = leakedEffects - discharged
-                if (undischargedLeaks.isNotEmpty()) {
-                    // Additional safety net: also skip in-flight unifications
-                    // against unresolved type vars — these fire before the
-                    // outer solve strips the wrapper, but any real leak against
-                    // a var will re-fire once the var resolves to a ground type.
-                    if (plainSide !is MezzeType.VarType) {
-                        val effList = undischargedLeaks.joinToString(", ")
-                        val (valueStr, plainStr) = prettyPrintTypePair(suspendedSide.valueType, plainSide)
-                        return ConstraintResult.Failure(
-                            "Effect row leak: cannot use a value of type " +
-                            "$valueStr with unhandled effects <$effList> " +
-                            "as plain $plainStr. Wrap in `perform HandlerFor<$effList> in ...` " +
-                            "to discharge the effect first."
-                        )
-                    }
-                }
-            }
-        }
-        val left = unwrapSuspended(rawLeft)
-        val right = unwrapSuspended(rawRight)
+        // Effects are tracked separately (on arrows, threaded through the
+        // ConstraintResult collector), never on the value types an Equality
+        // relates — so unification here concerns only the value shapes. Effect
+        // -> pure laundering is caught by arrow unification (#215).
+        val left = constraint.left
+        val right = constraint.right
 
         DebugLogger.debug(Category.ConstraintSolver) {
             "solveEquality: $left = $right (${constraint.context})"
@@ -1042,13 +981,6 @@ class ConstraintSolver(
         val recordType = constraint.recordType
         val fieldName = constraint.fieldName
         val expectedFieldType = constraint.fieldType
-
-        if (recordType is MezzeType.SuspendType) {
-            return solveHasField(
-                constraint.copy(recordType = recordType.valueType),
-                currentSubst
-            )
-        }
 
         if (recordType is MezzeType.TypeApplication) {
             when (val expansion = expandTypeApplication(recordType, registry)) {

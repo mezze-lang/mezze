@@ -515,7 +515,7 @@ class ConstraintGenerator(
      *  (b) let-annotation validation (side-effecting: may throw a TypeCheckError);
      *  (c) solved-binding selection (annotated var vs pattern bindings);
      *  (d) ability-constraint carry into the solved function type;
-     *  (e) effect -> SuspendType harvest;
+     *  (e) effect harvest onto the enclosing arrow;
      *  (f) generalization / value-restriction + ability-constraint carry onto the scheme
      *      (delegated to [buildBindingForContext] per binding).
      *
@@ -616,14 +616,13 @@ class ConstraintGenerator(
             } else withAbilities
         }
 
-        // (e) Effect-model migration (S4, docs/effect-model.md): do NOT wrap top-level
-        // bindings in SuspendType. Value types are bare — effects ride the arrow. A
-        // top-level effectful NON-function binding is a stranded effect and is rejected
-        // by TypeValidator.validateParsedTopLevelEffects (which reads the incurred
-        // effects off the ConstraintResult, no longer off a value-carried row); a
-        // function binding carries its effects latently on its arrow. This removes the
-        // last live SuspendType producer, so S3 can delete the type. (`harvestEffectsIntoBinding`
-        // is now vestigial — kept until the bindLet signature is cleaned in S3.)
+        // (e) Effect-model migration (S4, docs/effect-model.md): value types are bare —
+        // effects ride the arrow, never the binding value. A top-level effectful
+        // NON-function binding is a stranded effect and is rejected by
+        // TypeValidator.validateParsedTopLevelEffects (which reads the incurred effects
+        // off the ConstraintResult, not off a value-carried row); a function binding
+        // carries its effects latently on its arrow. (`harvestEffectsIntoBinding` is now
+        // vestigial — kept until the bindLet signature is cleaned up.)
         val solvedBindingsWithEffects = solvedBindingsWithAbilities
 
         // (f) generalization / value-restriction + ability-constraint carry per binding.
@@ -980,10 +979,7 @@ class ConstraintGenerator(
             constraintContext
         )
 
-        val bindingType = when (val t = exprResult.type) {
-            is MezzeType.SuspendType -> t.valueType
-            else -> t
-        }
+        val bindingType = exprResult.type
 
         val patternResult = patternGenerator.generate(
             binding.pattern,

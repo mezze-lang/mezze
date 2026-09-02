@@ -62,14 +62,7 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
                 val fieldValue = entry.value ?: ParsedIdentifier(localName = entry.name, loc = entry.loc)
                 val fieldResult = generateWithExpected(fieldValue, expectedFields?.get(entry.name), fieldContext)
 
-                val fieldType = when (val t = fieldResult.type) {
-                    is MezzeType.SuspendType -> {
-                        collector.effects.addAll(t.effects.effects)
-                        collector.effectInstances.addAll(t.effects.effectInstances)
-                        t.valueType
-                    }
-                    else -> t
-                }
+                val fieldType = fieldResult.type
 
                 explicitFieldTypes[entry.name] = fieldType
                 collector.merge(fieldResult)
@@ -427,10 +420,7 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
     val receiverResult = generate(expr.receiver, context)
     val fieldType = MezzeType.VarType(TypeVar.fresh())
 
-    val receiverValueType = when (val t = receiverResult.type) {
-        is MezzeType.SuspendType -> t.valueType
-        else -> t
-    }
+    val receiverValueType = receiverResult.type
 
     // #277: validate a field access whenever the receiver's type is ALREADY a
     // concrete record (a RecordType, or a TypeApplication of a declared record) —

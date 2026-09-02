@@ -63,16 +63,12 @@ sealed interface Constraint {
         val isMatchCaseContext: Boolean = false,
         val errorContext: ErrorContext? = null,
         /**
-         * Option B / #341 / #376: effect names discharged by enclosing
-         * `perform` blocks at the point this constraint was generated.
-         * Under strictEffectRows, a `SuspendType(T, r)` vs plain-T
-         * equality is allowed silently iff `r ⊆ activeDischargedEffects`
-         * — the enclosing perform's `removeEffectsFromType` will strip
-         * r at its boundary. Populated by
-         * `ExprPerformConstraints.generatePerform` via
-         * `stampActiveDischarge` after body generation returns.
-         * Default empty: outermost / non-body constraints have no
-         * enclosing perform.
+         * #376: effect names discharged by enclosing `perform` blocks at the
+         * point this constraint was generated. Populated by
+         * `ExprPerformConstraints.generatePerform` after body generation
+         * returns; default empty for outermost / non-body constraints. Its
+         * former reader — the value-carried effect-row leak guard — was removed
+         * with the effect-model migration (effects now ride the arrow).
          */
         val activeDischargedEffects: Set<String> = emptySet(),
     ) : Constraint {
@@ -394,7 +390,7 @@ data class ConstraintResult(
     // top-level uses, instead of re-deriving from the emit/erasure view of the
     // RHS node (`substitution.apply(value.type)`). It is the PURE value type: the
     // do-block sequences the statement's effects into the enclosing block row and
-    // binds the pure value, so this map never SuspendType-wraps (bindLet runs with
+    // binds the pure value, so this map holds only the bare value (bindLet runs with
     // harvestEffectsIntoBinding = false). Emit's #378 effect-row rider stays a
     // separate step. Keyed by (globally unique) Loc, so it merges up through
     // nested blocks without collision.
@@ -402,8 +398,8 @@ data class ConstraintResult(
     // Effect-model migration (S2, docs/effect-model.md): per `perform` expr Loc,
     // true iff it discharges every effect in its body's row (residual empty) so the
     // runtime runs the body eagerly. Threaded to emit like doBindingSolvedTypes so
-    // TypedPerform.fullyDischarges is sourced from the residual-effect set, not the
-    // value-carried SuspendType that S2 removes.
+    // TypedPerform.fullyDischarges is sourced from the residual-effect set, not any
+    // value-carried effect row (removed in the effect-model migration).
     val performFullyDischarged: Map<Loc, Boolean> = emptyMap(),
 ) {
     /** A deferred callback-effect harvest for BUG C (#331). [argType] is the

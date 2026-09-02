@@ -181,11 +181,7 @@ object InvariantChecker {
                     scanType(t.paramType)
                     scanType(t.returnType)
                 }
-                is MezzeType.SuspendType -> {
-                    t.effects.effectHashes.forEach { (name, h) -> into.putIfAbsent(h, name) }
-                    scanType(t.valueType)
-                }
-                else -> { /* only function/suspend types carry effect rows */ }
+                else -> { /* only function types carry effect rows */ }
             }
         }
         for (decl in module.decls) {

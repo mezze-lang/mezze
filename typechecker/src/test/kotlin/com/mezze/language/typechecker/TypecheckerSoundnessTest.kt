@@ -95,7 +95,7 @@ class TypecheckerSoundnessTest {
             // If the typechecker allows this but propagates the effect,
             // the function must have <Log> — it should NOT be pure.
             assertTrue(
-                effects.contains("Log") || fnType.returnType is MezzeType.SuspendType,
+                effects.contains("Log"),
                 "An effectful body must not silently become pure. " +
                     "Effects=$effects, returnType=${fnType.returnType}"
             )
@@ -103,9 +103,8 @@ class TypecheckerSoundnessTest {
         // If it failed with TypeCheckError, that's the correct rejection.
     }
 
-    // C16: generate() never returns SuspendType — test indirectly
-    // via effect propagation: if an effect call appears inside a let binding
-    // in a do block, the outer function must surface the effect.
+    // C16: effect propagation — if an effect call appears inside a let binding
+    // in a do block, the outer function must surface the effect on its arrow.
     @Test
     fun `effects from sub-expressions propagate correctly`() {
         val source = """
@@ -129,9 +128,8 @@ class TypecheckerSoundnessTest {
         assertNotNull(fnType, "example should be a function type")
 
         val effects = fnType!!.effects?.effects ?: emptySet()
-        val returnIsSuspended = fnType.returnType is MezzeType.SuspendType
         assertTrue(
-            effects.contains("Counter") || returnIsSuspended,
+            effects.contains("Counter"),
             "Counter effect must propagate. Effects=$effects, return=${fnType.returnType}"
         )
     }
@@ -162,9 +160,8 @@ class TypecheckerSoundnessTest {
         assertNotNull(fnType, "outer should be a function type")
 
         val effects = fnType!!.effects?.effects ?: emptySet()
-        val returnIsSuspended = fnType.returnType is MezzeType.SuspendType
         assertTrue(
-            effects.contains("Logging") || returnIsSuspended,
+            effects.contains("Logging"),
             "Logging effect from helper must propagate to outer. " +
                 "Effects=$effects, return=${fnType.returnType}"
         )
@@ -444,9 +441,8 @@ class TypecheckerSoundnessTest {
         assertNotNull(fnType, "increment should be a function type")
 
         val effects = fnType!!.effects?.effects ?: emptySet()
-        val returnIsSuspended = fnType.returnType is MezzeType.SuspendType
         assertTrue(
-            effects.contains("State") || returnIsSuspended,
+            effects.contains("State"),
             "State effect should propagate. Effects=$effects"
         )
     }
@@ -477,9 +473,8 @@ class TypecheckerSoundnessTest {
 
         // The partially applied function must still carry the Logger effect
         val effects = fnType!!.effects?.effects ?: emptySet()
-        val returnIsSuspended = fnType.returnType is MezzeType.SuspendType
         assertTrue(
-            effects.contains("Logger") || returnIsSuspended,
+            effects.contains("Logger"),
             "Logger effect must survive partial application. " +
                 "Effects=$effects, return=${fnType.returnType}"
         )

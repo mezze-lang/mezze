@@ -237,11 +237,11 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     }
 
     val rawConstraints = exprResult.constraints + continuationConstraints
-    // Option B / #376: stamp handledEffects onto every body Equality so
-    // strictEffectRows can distinguish "in-flight unification inside a
-    // perform body that discharges this effect at its boundary" from
-    // "real leak with no discharger in scope". Accumulate onto any
-    // effects already stamped by an enclosing perform (nested case).
+    // #376: record handledEffects on every body Equality (accumulating onto any
+    // effects already stamped by an enclosing perform, for the nested case).
+    // This discharge-tracking is retained on the constraint; its former reader,
+    // the value-carried effect-row leak guard, was removed with the effect-model
+    // migration.
     val allConstraints = if (handledEffects.isEmpty()) {
         rawConstraints
     } else {
@@ -277,16 +277,11 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     }
 
     val remainingEffectInstances = exprResult.effectInstances.filter { it.name !in handledEffects }.toSet()
-    // Effect-model migration (S2): the runtime's "fully discharges body's row"
-    // signal is about the RESULT VALUE's residual effects, not the body's performed
-    // effects. removeEffectsFromType (which produced `resultType`) returns a bare
-    // value type when nothing remains on the value and a SuspendType otherwise, so
-    // `resultType !is SuspendType` is EXACTLY the old check on the perform's result
-    // type (and SuspendType-ness is substitution-invariant — a SuspendType built here
-    // always carries non-empty named effects). Threaded to emit so the compiler no
-    // longer inspects the value-carried effect row. (A `.effects`-based residual is
-    // the wrong question — it over-reports side-effects that never rode the value.)
-    val fullyDischargedHere = resultType !is MezzeType.SuspendType
+    // Effect-model migration: value types are bare — the result value never carries
+    // a residual effect row of its own (effects ride the arrow), so a perform's
+    // result is always fully discharged at this site. Threaded to emit so the
+    // compiler no longer inspects any value-carried effect row.
+    val fullyDischargedHere = true
 
     return ConstraintResult(
         type = resultType,
@@ -335,9 +330,6 @@ internal fun ExpressionConstraintGenerator.extractEffectsFromType(type: MezzeTyp
                 ExtractedEffects(emptySet(), false)
             }
         }
-        is MezzeType.SuspendType -> {
-            ExtractedEffects(type.effects.allEffectNames, type.effects.rowVar != null)
-        }
         is MezzeType.VarType,
         is MezzeType.RecordType,
         is MezzeType.VariantType,
@@ -364,7 +356,6 @@ internal fun ExpressionConstraintGenerator.extractEffectsFromType(type: MezzeTyp
 internal fun ExpressionConstraintGenerator.hasPerformedMarkerInType(type: MezzeType): Boolean {
     return when (type) {
         is MezzeType.FunctionType -> type.effects?.performed == true
-        is MezzeType.SuspendType -> type.effects.performed
         is MezzeType.VarType,
         is MezzeType.RecordType,
         is MezzeType.VariantType,
@@ -394,8 +385,8 @@ internal fun ExpressionConstraintGenerator.wrapCallResultWithEffects(
 ): Triple<MezzeType, Set<String>, Set<MezzeType.EffectInstance>> {
     if (effectRow == null) return Triple(valueType, emptySet(), emptySet())
     // Effect-model migration (S2): return the BARE value type; effects ride on the
-    // enclosing arrow via the caller's collector. No SuspendType wrap. (Duplicate of
-    // the ExpressionConstraints copy.)
+    // enclosing arrow via the caller's collector. The value carries no effect row.
+    // (Duplicate of the ExpressionConstraints copy.)
     return Triple(valueType, effectRow.effects, effectRow.effectInstances)
 }
 
@@ -420,23 +411,6 @@ internal fun ExpressionConstraintGenerator.removeEffectsFromType(
                     returnType = type.returnType,
                     effects = MezzeType.EffectRow.simple(remainingEffects, effects.rowVar, performed = true),
                     abilityConstraints = type.abilityConstraints
-                )
-            }
-        }
-        is MezzeType.SuspendType -> {
-            val remainingEffects = type.effects.effects - effectsToRemove
-            val remainingInstances = type.effects.effectInstances.filter { it.name !in effectsToRemove }.toSet()
-            if (remainingEffects.isEmpty() && remainingInstances.isEmpty()) {
-                type.valueType
-            } else {
-                MezzeType.SuspendType(
-                    valueType = type.valueType,
-                    effects = MezzeType.EffectRow(
-                        effects = remainingEffects,
-                        effectInstances = remainingInstances,
-                        rowVar = type.effects.rowVar,
-                        performed = true
-                    )
                 )
             }
         }

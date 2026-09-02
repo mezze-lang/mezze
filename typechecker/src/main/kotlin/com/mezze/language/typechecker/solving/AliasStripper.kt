@@ -87,10 +87,6 @@ object AliasStripper {
         )
         is MezzeType.ListType -> MezzeType.ListType(stripImpl(type.elementType, inScope, registry, recursionGuard))
         is MezzeType.SetType -> MezzeType.SetType(stripImpl(type.elementType, inScope, registry, recursionGuard))
-        is MezzeType.SuspendType -> MezzeType.SuspendType(
-            valueType = stripImpl(type.valueType, inScope, registry, recursionGuard),
-            effects = stripEffectRow(type.effects, inScope, registry, recursionGuard)
-        )
         is MezzeType.NewtypeType -> type.copy(
             wrappedType = stripImpl(type.wrappedType, inScope, registry, recursionGuard)
         )

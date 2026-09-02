@@ -41,7 +41,6 @@ object ContentHashComputer {
             is MezzeType.MapType -> "Map_${mezzeTypeToString(type.keyType)}_${mezzeTypeToString(type.valueType)}"
             is MezzeType.SortedMapType -> "SortedMap_${mezzeTypeToString(type.keyType)}_${mezzeTypeToString(type.valueType)}"
             is MezzeType.SortedSetType -> "SortedSet_${mezzeTypeToString(type.elementType)}"
-            is MezzeType.SuspendType -> mezzeTypeToString(type.valueType)
             else -> type.toString()
         }
 

@@ -74,36 +74,6 @@ class AliasStripperSoundnessTest {
     }
 
     @Test
-    fun `effect associated types inside SuspendType are stripped`() {
-        val colorType = VariantType(
-            constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),
-            identity = TypeIdentity.Declared(colorHash, "Color")
-        )
-        val effectInstance = EffectInstance(
-            name = "State",
-            associatedTypes = mapOf("'state" to colorType)
-        )
-        val effectRow = EffectRow(
-            effects = emptySet(),
-            effectInstances = setOf(effectInstance)
-        )
-        val suspType = SuspendType(
-            valueType = IntType,
-            effects = effectRow
-        )
-
-        val stripped = AliasStripper.strip(suspType, inScope, DeclarationRegistry.from(typeDecls, emptyMap(), emptyMap()))
-
-        assertTrue(stripped is SuspendType)
-        val strippedSusp = stripped as SuspendType
-        val strippedInstance = strippedSusp.effects.effectInstances.first()
-        val strippedState = strippedInstance.associatedTypes["'state"]
-        assertTrue(strippedState is VariantType)
-        assertEquals(null, (strippedState as VariantType).identity.displayNameOrNull(),
-            "Color alias should be stripped from suspended effect associated type when not in scope")
-    }
-
-    @Test
     fun `ability constraint typeArgs inside FunctionType are stripped`() {
         val colorType = VariantType(
             constructors = mapOf("Red" to null, "Green" to null, "Blue" to null),

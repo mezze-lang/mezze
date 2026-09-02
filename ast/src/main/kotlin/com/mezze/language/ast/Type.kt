@@ -148,7 +148,6 @@ sealed interface MezzeType {
         is SortedMapType -> predicate(keyType) || predicate(valueType)
         is SortedSetType -> predicate(elementType)
         is SeqType -> predicate(elementType)
-        is SuspendType -> predicate(valueType)
         is NewtypeType -> predicate(wrappedType)
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
         is NatType, is FracType, is BytesType,
@@ -167,7 +166,6 @@ sealed interface MezzeType {
         is SortedMapType -> copy(keyType = f(keyType), valueType = f(valueType))
         is SortedSetType -> copy(elementType = f(elementType))
         is SeqType -> copy(elementType = f(elementType))
-        is SuspendType -> copy(valueType = f(valueType))
         is NewtypeType -> copy(wrappedType = f(wrappedType))
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
         is NatType, is FracType, is BytesType,
@@ -368,73 +366,6 @@ sealed interface MezzeType {
                 "${if (effects != null) "effectful" else "pure"}$effectsStr"
             }
         )
-    }
-
-    // Suspended computation types (values with unhandled effects)
-    // This represents a value of type valueType that has unhandled effects
-    // Unlike FunctionType, this is not a function - it's an already-computed value
-    // that cannot be used until its effects are handled
-    @Serializable
-    data class SuspendType(
-        val valueType: MezzeType,
-        val effects: EffectRow
-    ) : MezzeType {
-        companion object {
-            /**
-             * #404: the ONE-effect-row invariant. A value type carries exactly one
-             * effect row. Naively `SuspendType(valueType, r)` where `valueType` is
-             * ITSELF a `SuspendType` produces a doubly-suspended type that prints as
-             * `T <r2> <r1>` — two rows on one value, which is malformed (seen when a
-             * call whose callee return is already effectful, e.g. `race : ... Result
-             * 'a AsyncError <Async, ...>`, is wrapped AGAIN with the call-site row, or
-             * when a var inside a SuspendType is substituted with another SuspendType).
-             *
-             * This factory is the sole well-formed way to build a SuspendType: if the
-             * inner value is already suspended, the two rows are MERGED into one and
-             * the nesting is collapsed, so a SuspendType's `valueType` is never itself
-             * a SuspendType. Every producer (call-result wrapping, substitution) funnels
-             * through here so the malformation cannot be constructed.
-             */
-            fun of(valueType: MezzeType, effects: EffectRow): SuspendType =
-                if (valueType is SuspendType) {
-                    SuspendType(valueType.valueType, mergeRows(valueType.effects, effects))
-                } else {
-                    SuspendType(valueType, effects)
-                }
-
-            /** Union two effect rows into one. Open (row-var) wins; performed/caught OR/union. */
-            fun mergeRows(a: EffectRow, b: EffectRow): EffectRow = EffectRow(
-                effects = a.effects + b.effects,
-                effectInstances = run {
-                    // Dedup by effect name, preferring an instance that carries
-                    // associated-type bindings over a bare one.
-                    val byName = LinkedHashMap<String, EffectInstance>()
-                    for (inst in a.effectInstances + b.effectInstances) {
-                        val existing = byName[inst.name]
-                        if (existing == null || existing.associatedTypes.isEmpty()) {
-                            byName[inst.name] = inst
-                        }
-                    }
-                    byName.values.toSet()
-                },
-                effectHashes = a.effectHashes + b.effectHashes,
-                // If EITHER side is open, the merged row is open (an open tail
-                // subsumes a closed one). Prefer a's row var when both are open.
-                rowVar = a.rowVar ?: b.rowVar,
-                performed = a.performed || b.performed,
-                caughtByAncestor = a.caughtByAncestor + b.caughtByAncestor,
-            )
-        }
-
-        override fun toString(): String {
-            val effectList = effects.effects.take(3).joinToString(", ")
-            val suffix = if (effects.effects.size > 3) ", ..." else ""
-            return safeToString(
-                "SuspendType",
-                truncatedContent = { "${effects.effects.size} effects" },
-                fullContent = { "$effectList$suffix" }
-            )
-        }
     }
 
     /**

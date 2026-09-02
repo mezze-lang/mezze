@@ -211,13 +211,6 @@ internal class VariantSolver(
         val constructorName = constraint.constructorName
         val expectedPayloadType = constraint.payloadType
 
-        if (variantType is MezzeType.SuspendType) {
-            return solveHasConstructor(
-                constraint.copy(variantType = variantType.valueType),
-                currentSubst, originalConstraint ?: constraint
-            )
-        }
-
         if (variantType is MezzeType.TypeApplication) {
             val expanded = expandTypeApplicationToVariant(variantType, registry)
             if (expanded != null) {
@@ -633,12 +626,6 @@ internal class VariantSolver(
                     constructor = type.constructor,
                     args = type.args.map { closeRowVarsInType(it, rowVarsToClose) },
                     typeHash = (type.identity as? TypeIdentity.Declared)?.hash
-                )
-            }
-            is MezzeType.SuspendType -> {
-                MezzeType.SuspendType(
-                    valueType = closeRowVarsInType(type.valueType, rowVarsToClose),
-                    effects = type.effects
                 )
             }
             is MezzeType.NewtypeType -> type.copy(

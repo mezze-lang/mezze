@@ -203,24 +203,14 @@ class SuspendTypeConstraintTest {
 
         val fnType = typedProgram.getVariableType("maybeThrow") as MezzeType.FunctionType
 
-        // Return type should be SuspendType wrapping a variant (due to effectful throw)
-        // or variant-like if effects are tracked differently
+        // Return type is a bare variant-like value; the effectful throw's effect
+        // is tracked on the function's arrow, not wrapped around the value.
         val returnType = fnType.returnType
-        if (returnType is MezzeType.SuspendType) {
-            // SuspendType wrapping variant - this is valid
-            val innerType = returnType.valueType
-            assertTrue(
-                innerType is MezzeType.VariantType || innerType is MezzeType.TypeApplication,
-                "Expected SuspendType wrapping variant but inner type is ${innerType::class.simpleName}"
-            )
-        } else {
-            // Direct variant type or function type with effects tracked in FunctionType.effects
-            assertTrue(
-                returnType is MezzeType.VariantType || returnType is MezzeType.TypeApplication
-                    || returnType is MezzeType.FunctionType,
-                "Expected variant-like return type but got ${returnType::class.simpleName}"
-            )
-        }
+        assertTrue(
+            returnType is MezzeType.VariantType || returnType is MezzeType.TypeApplication
+                || returnType is MezzeType.FunctionType,
+            "Expected variant-like return type but got ${returnType::class.simpleName}"
+        )
     }
 
     @Test

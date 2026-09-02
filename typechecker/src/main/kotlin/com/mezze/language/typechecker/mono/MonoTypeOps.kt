@@ -21,14 +21,11 @@ import com.mezze.language.typechecker.solving.sameDeclaredIdentity
  * - Mono's [unify] operates on *substituted* types where the only
  *   "variables" are quoted type-param names (the `'a` of a generic
  *   decl's signature). It records name → concrete bindings into a plain
- *   map and silently unwraps [MezzeType.SuspendType] (Mezze wraps
- *   record field values for lazy evaluation; the wrap is a runtime
- *   artifact, not a structural difference).
+ *   map.
  *
- * Sharing a single `unify` would mean either teaching the solver about
- * SuspendType-unwrapping (wrong — solver predates the runtime laziness
- * decision) or teaching mono about substitutions (overkill — mono never
- * has unsolved type variables in scope).
+ * Sharing a single `unify` would mean teaching the solver about mono's
+ * name-keyed bindings or teaching mono about substitutions (overkill —
+ * mono never has unsolved type variables in scope).
  *
  * Visibility: file-private (no `internal`) — only [MonoDriver] uses
  * these. If a future caller needs them, lift to `internal` then.
@@ -56,7 +53,6 @@ internal fun isConcrete(t: MezzeType): Boolean = when (t) {
     is MezzeType.SortedSetType -> isConcrete(t.elementType)
     is MezzeType.MapType -> isConcrete(t.keyType) && isConcrete(t.valueType)
     is MezzeType.SortedMapType -> isConcrete(t.keyType) && isConcrete(t.valueType)
-    is MezzeType.SuspendType -> isConcrete(t.valueType)
     is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
     is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
     is MezzeType.BytesType,
@@ -129,11 +125,10 @@ internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean 
 
 /** Structural unification: match `pattern` (with TypeVars) against
  *  `value` (concrete). Records bindings as it goes. Returns false on
- *  shape mismatch or conflicting binding. Silently unwraps
- *  [MezzeType.SuspendType] (see file-level note). */
+ *  shape mismatch or conflicting binding. */
 internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean {
     if (pattern is MezzeType.VarType) {
-        val unwrapped = unwrapSuspended(value)
+        val unwrapped = value
         val name = pattern.variable.name
         val existing = bindings[name]
         return when {
@@ -160,8 +155,7 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
             else -> false
         }
     }
-    // Unwrap SuspendType on either side when the other is not.
-    val v = if (pattern !is MezzeType.SuspendType) unwrapSuspended(value) else value
+    val v = value
     // Symmetric fallback: value side is a free TyVar. Recorded bindings
     // from `pattern`'s prior TyVar sites already carry the needed
     // information; a free TyVar on the value side can't disagree with
@@ -194,8 +188,6 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
         is MezzeType.SortedSetType -> unifySortedSet(pattern.elementType, v, bindings)
         is MezzeType.MapType -> unifyMap(pattern.keyType, pattern.valueType, v, bindings)
         is MezzeType.SortedMapType -> unifySortedMap(pattern.keyType, pattern.valueType, v, bindings)
-        is MezzeType.SuspendType -> v is MezzeType.SuspendType &&
-            unify(pattern.valueType, v.valueType, bindings)
         is MezzeType.NewtypeType -> v is MezzeType.NewtypeType &&
             pattern.name == v.name && unify(pattern.wrappedType, v.wrappedType, bindings)
         is MezzeType.TypeApplication -> when {
@@ -292,7 +284,3 @@ private fun unifySortedMap(patternKey: MezzeType, patternVal: MezzeType, v: Mezz
         unify(patternKey, v.args[0], bindings) && unify(patternVal, v.args[1], bindings)
     else -> false
 }
-
-/** Strip the outermost [MezzeType.SuspendType] wrapper if present. */
-internal fun unwrapSuspended(t: MezzeType): MezzeType =
-    if (t is MezzeType.SuspendType) t.valueType else t

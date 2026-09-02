@@ -108,7 +108,10 @@ class SQLiteMezzeStore private constructor(
         // rebuilt by `mez build`).
         // 9: TypedPerform gains `fullyDischarges` (effect-model migration S0/S1) —
         //    force fresh typedast blobs so the field is populated, not defaulted.
-        const val SCHEMA_VERSION = 9
+        // 10: MezzeType.SuspendType removed (effect-model migration S3) — the
+        //    @Serializable variant is gone, changing the serialized type shape; drop
+        //    stale blobs that may still encode a SuspendType.
+        const val SCHEMA_VERSION = 10
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of

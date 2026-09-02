@@ -43,20 +43,6 @@ import com.mezze.language.typechecker.TypeCheckWarning as OutputTypeCheckWarning
 class TypeChecker(
     internal val parentContext: TypingContext = createInitialContext(),
     internal val strictTopLevel: Boolean = false,
-    /**
-     * Option B (#341/#376/#377). When true, ConstraintSolver refuses to
-     * silently strip a non-empty effect row on unification, catching
-     * "SuspendType decays to plain T" leaks at compile time. See
-     * ConstraintSolver.strictEffectRows for the full contract.
-     *
-     * Independent of strictTopLevel — that flag only enforces
-     * top-level-decl effect rows, while this covers every unification.
-     *
-     * CLI paths (Check/Build/Run/Wire) opt in via this flag to catch
-     * effect leaks in user code before they reach the runtime.
-     */
-    internal val strictEffectRows: Boolean =
-        System.getenv("MEZZE_STRICT_EFFECT_ROWS") == "1",
 ) {
     internal fun loadPreludeModulesPublic(importResolver: ImportResolver): ModuleImportContext {
         return loadPreludeModulesInternal(importResolver, ModuleImportContext.empty())
@@ -384,7 +370,7 @@ class TypeChecker(
             solveContext = solveContext.withUpdatedImplConstraints(implHash, extra)
         }
 
-        val solver = ConstraintSolver(solveContext, registry, strictEffectRows = strictEffectRows)
+        val solver = ConstraintSolver(solveContext, registry)
         val solveResult = withInScopeAliasNames(inScopeAliasNames) {
             solver.solve(allConstraints)
         }

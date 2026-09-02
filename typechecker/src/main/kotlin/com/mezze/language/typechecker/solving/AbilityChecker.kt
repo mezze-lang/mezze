@@ -13,7 +13,6 @@ import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
-import com.mezze.language.typechecker.mono.unwrapSuspended
 import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.typedast.Hash
@@ -589,7 +588,7 @@ internal class AbilityChecker(
             context.getAbilityImpls(abilityName)
         }
 
-        val unwrappedTypeArgs = typeArgs.map(::unwrapSuspended)
+        val unwrappedTypeArgs = typeArgs
 
         val hasImpl = impls.any { implInfo ->
             val annotations = implInfo.targetTypeAnnotations ?: return@any false
@@ -741,13 +740,6 @@ internal class AbilityChecker(
                     abilityConstraints = type.abilityConstraints
                 )
             }
-            is MezzeType.SuspendType -> {
-                if (!needsRowClosing(type.valueType)) return type
-                MezzeType.SuspendType(
-                    valueType = closeOpenRecords(type.valueType),
-                    effects = type.effects
-                )
-            }
             is MezzeType.VarType -> type
             is MezzeType.EffectRow -> type
             is MezzeType.IntType,
@@ -772,7 +764,7 @@ internal class AbilityChecker(
 
     private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
         val resolvedHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
-        var unwrappedType = unwrapSuspended(type)
+        var unwrappedType = type
 
         var isNewtype = unwrappedType is MezzeType.NewtypeType
 

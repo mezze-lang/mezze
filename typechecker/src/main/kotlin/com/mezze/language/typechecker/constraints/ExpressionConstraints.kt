@@ -10,7 +10,6 @@ import com.mezze.language.typechecker.dependencies.DefinitionRef
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
-import com.mezze.language.typechecker.mono.unwrapSuspended
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.ErrorType
@@ -76,18 +75,8 @@ class ExpressionConstraintGenerator {
     // (user code can't touch natives in bare/test construction either).
     var isStdlibModule: Boolean = false
 
-    fun generate(expr: ParsedExpr, context: ConstraintContext): ConstraintResult {
-        val raw = generateImpl(expr, context)
-        return when (val t = raw.type) {
-            is MezzeType.SuspendType -> raw.copy(
-                type = t.valueType,
-                effects = raw.effects + t.effects.effects,
-                effectInstances = raw.effectInstances + t.effects.effectInstances,
-                performed = raw.performed || t.effects.performed
-            )
-            else -> raw
-        }
-    }
+    fun generate(expr: ParsedExpr, context: ConstraintContext): ConstraintResult =
+        generateImpl(expr, context)
 
     private fun generateImpl(expr: ParsedExpr, context: ConstraintContext): ConstraintResult = when (expr) {
         is ParsedIntLit -> generateIntLiteral(expr, context)
@@ -257,7 +246,6 @@ class ExpressionConstraintGenerator {
         is MezzeType.MapType -> anyRowVarIn(type.keyType) || anyRowVarIn(type.valueType)
         is MezzeType.SortedMapType -> anyRowVarIn(type.keyType) || anyRowVarIn(type.valueType)
         is MezzeType.NewtypeType -> anyRowVarIn(type.wrappedType)
-        is MezzeType.SuspendType -> type.effects.rowVar != null || anyRowVarIn(type.valueType)
         else -> false
     }
 
@@ -298,7 +286,6 @@ class ExpressionConstraintGenerator {
                 valueType = refreshRowVarsIn(type.valueType, mapping)
             )
             is MezzeType.NewtypeType -> type.copy(wrappedType = refreshRowVarsIn(type.wrappedType, mapping))
-            is MezzeType.SuspendType -> type.copy(effects = type.effects.copy(rowVar = freshFor(type.effects.rowVar)))
             else -> type
         }
     }
@@ -388,7 +375,6 @@ class ExpressionConstraintGenerator {
             is MezzeType.SortedMapType -> getFreeTypeVariables(type.keyType) + getFreeTypeVariables(type.valueType)
             is MezzeType.SortedSetType -> getFreeTypeVariables(type.elementType)
             is MezzeType.MapType -> getFreeTypeVariables(type.keyType) + getFreeTypeVariables(type.valueType)
-            is MezzeType.SuspendType -> getFreeTypeVariables(type.valueType)
             is MezzeType.TypeApplication -> type.args.flatMap { getFreeTypeVariables(it) }.toSet()
             is MezzeType.NewtypeType -> getFreeTypeVariables(type.wrappedType)
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
@@ -460,10 +446,6 @@ class ExpressionConstraintGenerator {
                 keyType = applyTypeVarSubstitution(type.keyType, substitution),
                 valueType = applyTypeVarSubstitution(type.valueType, substitution)
             )
-            is MezzeType.SuspendType -> MezzeType.SuspendType(
-                valueType = applyTypeVarSubstitution(type.valueType, substitution),
-                effects = type.effects
-            )
             is MezzeType.TypeApplication -> WellKnownTypeApp.of(
                 constructor = type.constructor,
                 args = type.args.map { applyTypeVarSubstitution(it, substitution) },
@@ -498,7 +480,6 @@ class ExpressionConstraintGenerator {
             is MezzeType.SortedMapType -> extractTypeVariables(type.keyType) + extractTypeVariables(type.valueType)
             is MezzeType.SortedSetType -> extractTypeVariables(type.elementType)
             is MezzeType.MapType -> extractTypeVariables(type.keyType) + extractTypeVariables(type.valueType)
-            is MezzeType.SuspendType -> extractTypeVariables(type.valueType)
             is MezzeType.TypeApplication -> type.args.flatMap { extractTypeVariables(it) }
             else -> emptyList()
         }
@@ -512,8 +493,9 @@ class ExpressionConstraintGenerator {
         // Effect-model migration (S2, docs/effect-model.md): effects ride on ARROWS,
         // not values. Return the BARE value type; the caller threads
         // effectRow.effects/effectInstances into its collector, which hoists them onto
-        // the enclosing function's arrow. No SuspendType wrap — that value-carried
-        // effect row was the source of the whole laundering/doubled-row bug class.
+        // the enclosing function's arrow. The value carries no effect row — that
+        // value-carried effect row was the source of the whole laundering/doubled-row
+        // bug class.
         return Triple(valueType, effectRow.effects, effectRow.effectInstances)
     }
 
@@ -541,23 +523,6 @@ class ExpressionConstraintGenerator {
                     )
                 }
             }
-            is MezzeType.SuspendType -> {
-                val remainingEffects = type.effects.effects - effectsToRemove
-                val remainingInstances = type.effects.effectInstances.filter { it.name !in effectsToRemove }.toSet()
-                if (remainingEffects.isEmpty() && remainingInstances.isEmpty()) {
-                    type.valueType
-                } else {
-                    MezzeType.SuspendType(
-                        valueType = type.valueType,
-                        effects = MezzeType.EffectRow(
-                            effects = remainingEffects,
-                            effectInstances = remainingInstances,
-                            rowVar = type.effects.rowVar,
-                            performed = true
-                        )
-                    )
-                }
-            }
             else -> type
         }
     }
@@ -566,30 +531,17 @@ class ExpressionConstraintGenerator {
         convertParsedTypeAnnotation(annotation)
 
     /**
-     * Peel a [MezzeType.SuspendType] wrapper (which carries effects) off an
-     * expected type so bidirectional helpers see the underlying value type. An
-     * effectful function type is represented as `SuspendType(FunctionType, …)`;
-     * without this, an `as? FunctionType` / record-field lookup on the expected
-     * type would silently miss and drop the push (falling back to post-hoc
-     * unification). Effects on an *expected* type don't affect what we push down,
-     * so discarding the wrapper here is safe.
-     */
-    internal fun unwrapExpected(type: MezzeType?): MezzeType? =
-        type?.let(::unwrapSuspended)
-
-    /**
      * Bidirectional helper: resolve an expected type to its record field→type
      * map, or null if it isn't (or doesn't name) a record. Handles a direct
      * [MezzeType.RecordType] and a [MezzeType.TypeApplication] that names a
-     * record type declaration, seeing through a [MezzeType.SuspendType]
-     * wrapper. Shared by every site that wants to push expected field types down
-     * into subexpressions (record literals, call arguments), so the "what fields
-     * does this expected type have" logic lives in one place.
+     * record type declaration. Shared by every site that wants to push expected
+     * field types down into subexpressions (record literals, call arguments), so
+     * the "what fields does this expected type have" logic lives in one place.
      */
     internal fun expectedRecordFields(
         expectedType: MezzeType?,
         context: ConstraintContext
-    ): Map<String, MezzeType>? = when (val t = unwrapExpected(expectedType)) {
+    ): Map<String, MezzeType>? = when (val t = expectedType) {
         is MezzeType.RecordType -> t.fields
         is MezzeType.TypeApplication -> {
             val typeDecl = context.typeDeclarations[t.constructor]
@@ -710,7 +662,6 @@ class ExpressionConstraintGenerator {
             is MezzeType.MapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
             is MezzeType.SortedMapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
             is MezzeType.NewtypeType -> collectCaughtByAncestorInto(type.wrappedType, into)
-            is MezzeType.SuspendType -> collectCaughtByAncestorInto(type.valueType, into)
             is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
             is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,

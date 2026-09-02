@@ -320,11 +320,9 @@ class EffectPropagationTest {
 
         val resultType = typedProgram.getVariableType("result")
         assertNotNull(resultType)
-        // result should be Int, or SuspendType<Int, empty effects> when using polymorphic effects
-        val isIntOrSuspendedInt = resultType is MezzeType.IntType ||
-            (resultType is MezzeType.SuspendType && resultType.valueType is MezzeType.IntType)
-        assertTrue(isIntOrSuspendedInt,
-            "Expected IntType or SuspendType<Int> but got $resultType")
+        // result is a bare Int — effects ride the arrow, not the value
+        assertTrue(resultType is MezzeType.IntType,
+            "Expected IntType but got $resultType")
     }
 
     @Test
@@ -356,10 +354,8 @@ class EffectPropagationTest {
 
         val resultType = typedProgram.getVariableType("result")
         assertNotNull(resultType)
-        // result should be Int - but might need to handle Log effect
-        // depending on how effect propagation works
-        assertTrue(resultType is MezzeType.IntType ||
-                  resultType is MezzeType.SuspendType)
+        // result is a bare Int — effects ride the arrow, not the value
+        assertTrue(resultType is MezzeType.IntType)
     }
 
     @Test
@@ -404,11 +400,9 @@ class EffectPropagationTest {
 
         val resultType = typedProgram.getVariableType("result")
         assertNotNull(resultType)
-        // result should be Int, or SuspendType<Int, effects> when using polymorphic effects
-        val isIntOrSuspendedInt = resultType is MezzeType.IntType ||
-            (resultType is MezzeType.SuspendType && resultType.valueType is MezzeType.IntType)
-        assertTrue(isIntOrSuspendedInt,
-            "Expected IntType or SuspendType<Int> but got $resultType")
+        // result is a bare Int — effects ride the arrow, not the value
+        assertTrue(resultType is MezzeType.IntType,
+            "Expected IntType but got $resultType")
     }
 
     @Test
@@ -430,10 +424,8 @@ class EffectPropagationTest {
 
         val resultType = typedProgram.getVariableType("result")
         assertNotNull(resultType)
-        // result should be Int, or SuspendType<Int, effects> when using polymorphic effects
-        val isIntOrSuspendedInt = resultType is MezzeType.IntType ||
-            (resultType is MezzeType.SuspendType && resultType.valueType is MezzeType.IntType)
-        assertTrue(isIntOrSuspendedInt,
-            "Expected IntType or SuspendType<Int> but got $resultType")
+        // result is a bare Int — effects ride the arrow, not the value
+        assertTrue(resultType is MezzeType.IntType,
+            "Expected IntType but got $resultType")
     }
 }

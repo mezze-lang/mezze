@@ -1,31 +1,22 @@
 package com.mezze.language.typechecker
 
-import com.mezze.language.ast.MezzeType
-import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.prettyPrintType
-import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.lookup.TypedAstLookup
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.nio.file.Paths
 
 /**
- * #404: THE INVARIANT — a value type carries exactly ONE effect row.
+ * #404 (effect-model migration): a value binding carries NO effect row — effects
+ * ride the enclosing arrow. The "doubled effect row" bug this class was built for
+ * is gone by construction, because there is no effect row on a value to double.
  *
- * A `SuspendType` whose `valueType` is itself a `SuspendType` is malformed: it
- * prints as `T <row2> <row1>` (two rows on one value). It arose when a call whose
- * callee return is already effectful (e.g. `race : ... Result 'a AsyncError
- * <Async, ...>`) was wrapped AGAIN with the call-site effect row, or when a type
- * var inside a SuspendType was substituted with another SuspendType.
- *
- * The fix: `SuspendType.of` is the sole well-formed constructor — it merges the
- * two rows into one and never nests; substitution and call-result wrapping funnel
- * through it; and the printer defends with `flattenSuspend` so it can never emit
- * `<row> <row>` even for a legacy/cached nested type.
+ * These end-to-end tests assert the surviving invariant on real programs: a
+ * `let`-bound value (e.g. a `race` result, a discharged exception) prints as a
+ * bare type with zero effect rows, and effects surface on the function arrow.
  */
 class OneEffectRowInvariantTest {
 
@@ -38,78 +29,6 @@ class OneEffectRowInvariantTest {
         TypeChecker.clearCache()
         parser = MezzeParser()
         typeChecker = TypeChecker()
-    }
-
-    // ---- Unit: the smart constructor never nests ----
-
-    private fun row(vararg effects: String, open: Boolean = false, performed: Boolean = false) =
-        MezzeType.EffectRow(
-            effects = effects.toSet(),
-            rowVar = if (open) com.mezze.language.ast.RowVar("r") else null,
-            performed = performed,
-        )
-
-    @Test
-    fun `SuspendType of flattens a nested SuspendType into one row`() {
-        val inner = MezzeType.SuspendType(MezzeType.StringType, row("Async", open = true))
-        val outer = MezzeType.SuspendType.of(inner, row("Async"))
-        // The value is NOT itself a SuspendType — the invariant.
-        assertFalse(outer.valueType is MezzeType.SuspendType) {
-            "SuspendType.of must not nest; got value ${outer.valueType}"
-        }
-        assertEquals(MezzeType.StringType, outer.valueType)
-        // Rows merged: still Async, still open (open subsumes closed).
-        assertTrue(outer.effects.effects.contains("Async"))
-        assertTrue(outer.effects.isOpen) { "open tail must survive the merge" }
-    }
-
-    @Test
-    fun `SuspendType of merges distinct effects from both rows`() {
-        val inner = MezzeType.SuspendType(MezzeType.IntType, row("Log"))
-        val outer = MezzeType.SuspendType.of(inner, row("Async", performed = true))
-        assertEquals(MezzeType.IntType, outer.valueType)
-        assertEquals(setOf("Async", "Log"), outer.effects.effects)
-        assertTrue(outer.effects.performed) { "performed must OR across rows" }
-    }
-
-    @Test
-    fun `SuspendType of leaves a non-suspended value alone`() {
-        val s = MezzeType.SuspendType.of(MezzeType.IntType, row("Async"))
-        assertEquals(MezzeType.IntType, s.valueType)
-        assertEquals(setOf("Async"), s.effects.effects)
-    }
-
-    @Test
-    fun `mergeRows prefers the instance carrying associated types`() {
-        val bare = MezzeType.EffectInstance("Exception", emptyMap())
-        val rich = MezzeType.EffectInstance("Exception", mapOf("error" to MezzeType.StringType))
-        val merged = MezzeType.SuspendType.mergeRows(
-            MezzeType.EffectRow(effects = emptySet(), effectInstances = setOf(bare)),
-            MezzeType.EffectRow(effects = emptySet(), effectInstances = setOf(rich)),
-        )
-        assertEquals(1, merged.effectInstances.size)
-        assertEquals(rich, merged.effectInstances.single()) {
-            "the richer instance (with 'error binding) must win the dedup"
-        }
-    }
-
-    // ---- Printer: never emits a doubled row ----
-
-    @Test
-    fun `printer collapses a nested SuspendType to a single row`() {
-        // Build the malformed nesting DIRECTLY (bypassing the smart ctor) to prove
-        // the printer defends against legacy/cached values.
-        val nested = MezzeType.SuspendType(
-            valueType = MezzeType.SuspendType(MezzeType.StringType, row("Async", open = true)),
-            effects = row("Async"),
-        )
-        val printed = prettyPrintType(nested)
-        // Exactly one `<...>` group — no `> <` sequence anywhere.
-        assertFalse(printed.contains("> <")) { "printer emitted a doubled effect row: $printed" }
-        assertEquals(1, printed.count { it == '<' }) { "expected exactly one effect row, got: $printed" }
-        // Same guarantee on the alias-aware printer.
-        val printedAlias = prettyPrintTypeWithAliases(nested)
-        assertFalse(printedAlias.contains("> <")) { "alias printer emitted a doubled row: $printedAlias" }
     }
 
     // ---- End to end: the race scenario ----

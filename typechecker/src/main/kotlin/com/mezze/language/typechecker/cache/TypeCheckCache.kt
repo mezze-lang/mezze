@@ -89,11 +89,6 @@ object TypeCheckCache {
                 val args = type.args.joinToString(", ") { typeToString(it) }
                 "${type.constructor}<$args>"
             }
-            is MezzeType.SuspendType -> {
-                val inner = typeToString(type.valueType)
-                val effects = type.effects.effects.sorted().joinToString(", ")
-                "Suspended<$inner, {$effects}>"
-            }
             is MezzeType.EffectRow -> {
                 val effects = type.effects.sorted().joinToString(", ")
                 "EffectRow<{$effects}>"

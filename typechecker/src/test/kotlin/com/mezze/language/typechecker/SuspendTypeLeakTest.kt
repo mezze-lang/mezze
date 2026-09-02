@@ -10,14 +10,14 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
- * Regression tests for SuspendType leakage at variant-payload and
+ * Regression tests for effect leakage into data types at variant-payload and
  * member-access sites.
  *
  * The intended semantics:
- *   Effects propagate at the call boundary, not inside data types.
- *   `Ok { val = effectfulCall {} }` is `Ok Int 'a <Foo>` — the outer
- *   variant wrapped in a SuspendType for the unhandled effect, NOT
- *   `Ok (Int <Foo>) 'a` where the payload is itself effectful.
+ *   Effects propagate at the call boundary (on the arrow), not inside data
+ *   types. `Ok { val = effectfulCall {} }` has a BARE `Ok Int 'a` payload and
+ *   the unhandled effect <Foo> rides the enclosing function's arrow, NOT a
+ *   payload that is itself effectful.
  *
  * Two sites in ExpressionConstraints.kt:
  * - Variant construction with payload (~line 2790)
@@ -47,7 +47,7 @@ class SuspendTypeLeakTest {
     }
 
     @Test
-    fun `variant payload from effect-op result wraps outer variant in SuspendType`() {
+    fun `variant payload from effect-op result stays bare -- effect rides the arrow`() {
         val source = """
             effect Foo where {
               gimme : {} -> Int <Foo>,
@@ -72,41 +72,37 @@ class SuspendTypeLeakTest {
         assertNotNull(fnType, "wrapped should be a function type: $printed")
         val returnType = fnType!!.returnType
 
-        // Effects must surface — function effects OR a SuspendType
-        // wrapping the variant result. Either form documents that <Foo>
-        // is unhandled.
+        // The unhandled <Foo> must surface on the function's arrow.
         val effectsOnFn = fnType.effects?.effects ?: emptySet()
-        val wrappingSuspension = returnType is MezzeType.SuspendType
-
         assertTrue(
-            "Foo" in effectsOnFn || wrappingSuspension,
+            "Foo" in effectsOnFn,
             "wrapped's return must surface <Foo>. Got effects=$effectsOnFn, returnType=$returnType, printed=$printed"
         )
 
-        // The variant's payload (val) should NOT itself be a SuspendType.
-        val valueLayer = if (returnType is MezzeType.SuspendType) returnType.valueType else returnType
+        // The variant's payload (val) must be a bare value, never effect-wrapped.
+        val valueLayer = returnType
         when (valueLayer) {
             is MezzeType.VariantType -> {
                 val okPayload = valueLayer.constructors["Ok"]
                 assertNotNull(okPayload, "expected an Ok constructor in $printed")
                 // Ok's payload is a record { val: ... }; that record field
-                // should be Int, not Int <Foo>.
+                // should be a bare Int, not Int <Foo>.
                 val payloadType = okPayload
                 if (payloadType is MezzeType.RecordType) {
                     val valField = payloadType.fields["val"]
                     assertNotNull(valField, "expected val field on Ok payload")
                     assertTrue(
-                        valField !is MezzeType.SuspendType,
-                        "Ok.val should be Int, not SuspendType. Got val=$valField, printed=$printed"
+                        valField is MezzeType.IntType || valField is MezzeType.VarType,
+                        "Ok.val should be a bare Int. Got val=$valField, printed=$printed"
                     )
                 }
             }
-            else -> {} // Different variant inference shapes are OK as long as the SuspendType is at the outer layer.
+            else -> {} // Different variant inference shapes are OK.
         }
     }
 
     @Test
-    fun `member access on effect-op record result wraps field in SuspendType`() {
+    fun `member access on effect-op record result stays bare -- effect rides the arrow`() {
         val source = """
             effect Foo where {
               run : {} -> { a: Int, b: Int } <Foo>,
@@ -129,19 +125,18 @@ class SuspendTypeLeakTest {
         assertNotNull(fnType, "f should be a function: $printed")
         val returnType = fnType!!.returnType
 
-        // Effects must surface — same shape as the variant test.
+        // The unhandled <Foo> must surface on the function's arrow.
         val effectsOnFn = fnType.effects?.effects ?: emptySet()
-        val wrappingSuspension = returnType is MezzeType.SuspendType
         assertTrue(
-            "Foo" in effectsOnFn || wrappingSuspension,
+            "Foo" in effectsOnFn,
             "f's return must surface <Foo>. Got effects=$effectsOnFn, returnType=$returnType, printed=$printed"
         )
 
-        // The underlying value (after unwrapping any SuspendType) should be Int.
-        val valueLayer = if (returnType is MezzeType.SuspendType) returnType.valueType else returnType
+        // The underlying value should be a bare Int.
+        val valueLayer = returnType
         assertTrue(
             valueLayer is MezzeType.IntType,
-            ".a should type as Int (after unwrapping SuspendType). Got valueLayer=$valueLayer, printed=$printed"
+            ".a should type as Int. Got valueLayer=$valueLayer, printed=$printed"
         )
     }
 }

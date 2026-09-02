@@ -84,22 +84,6 @@ private fun printVariantType(
 }
 
 
-/**
- * #404: collapse a (possibly) nested SuspendType to a single one whose value is
- * not itself suspended, merging every effect row along the chain into one. A
- * well-formed type never nests, but cached / pre-fix types might; the printer
- * must be structurally unable to emit `T <row> <row>`.
- */
-private fun flattenSuspend(type: MezzeType.SuspendType): MezzeType.SuspendType {
-    var inner = type.valueType
-    var row = type.effects
-    while (inner is MezzeType.SuspendType) {
-        row = MezzeType.SuspendType.mergeRows(inner.effects, row)
-        inner = inner.valueType
-    }
-    return MezzeType.SuspendType(inner, row)
-}
-
 private fun prettyPrintEffectRow(effectRow: MezzeType.EffectRow, typeVarMapping: Map<TypeVar, String>): String {
     val parts = mutableListOf<String>()
 
@@ -237,14 +221,6 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     is MezzeType.SetType -> "Set ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is MezzeType.SortedMapType -> "SortedMap ${prettyPrintTypeWithMapping(type.keyType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
     is MezzeType.SortedSetType -> "SortedSet ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
-    is MezzeType.SuspendType -> {
-        // #404: a well-formed SuspendType carries exactly ONE effect row. Defend
-        // the printer against any residual nesting (from cached/legacy types) by
-        // collapsing to a single merged row here — never emit `T <row> <row>`.
-        val flat = flattenSuspend(type)
-        val valueTypeStr = prettyPrintTypeWithMapping(flat.valueType, typeVarMapping)
-        "$valueTypeStr ${prettyPrintEffectRow(flat.effects, typeVarMapping)}"
-    }
     is MezzeType.FunctionType -> {
         val paramTypeStr = if (type.paramType is MezzeType.FunctionType) {
             "(${prettyPrintTypeWithMapping(type.paramType, typeVarMapping)})"
@@ -509,13 +485,6 @@ private fun prettyPrintTypeWithAliasesRecursive(
         }
 
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
-    }
-    is MezzeType.SuspendType -> {
-        // #404: collapse any residual SuspendType nesting to one row — see the
-        // non-alias printer for the invariant.
-        val flat = flattenSuspend(type)
-        val valueTypeStr = prettyPrintWithAliasCheck(flat.valueType, typeAliases, showExpansion, typeVarMapping)
-        "$valueTypeStr ${prettyPrintEffectRow(flat.effects, typeVarMapping)}"
     }
     is MezzeType.NewtypeType -> "${type.name} (wraps ${prettyPrintWithAliasCheck(type.wrappedType, typeAliases, showExpansion, typeVarMapping)})"
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)

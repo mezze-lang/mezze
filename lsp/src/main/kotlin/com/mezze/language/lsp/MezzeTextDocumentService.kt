@@ -2576,7 +2576,7 @@ class MezzeTextDocumentService(
             is MezzeType.NewtypeType, is MezzeType.ListType,
             is MezzeType.SeqType, is MezzeType.MapType, is MezzeType.SetType,
             is MezzeType.SortedMapType, is MezzeType.SortedSetType,
-            is MezzeType.SuspendType, is MezzeType.EffectRow -> {}
+            is MezzeType.EffectRow -> {}
         }
         return out
     }
@@ -3215,7 +3215,6 @@ class MezzeTextDocumentService(
             is MezzeType.VarType,
             is MezzeType.FunctionType,
             is MezzeType.RecordType,
-            is MezzeType.SuspendType,
             is MezzeType.EffectRow -> null
         }
     }
@@ -3420,11 +3419,7 @@ class MezzeTextDocumentService(
             server.logInfo("[dot-completion] receiver type lookup returned null — returning empty")
             return emptyList()
         }
-        // Unwrap SuspendType
-        val baseType = when (receiverType) {
-            is MezzeType.SuspendType -> receiverType.valueType
-            else -> receiverType
-        }
+        val baseType = receiverType
         server.logInfo("[dot-completion] receiverType=$baseType (typeName=${getTypeName(baseType) ?: "<none>"})")
 
         val items = mutableListOf<CompletionItem>()
@@ -4034,7 +4029,6 @@ class MezzeTextDocumentService(
             val useCol = dotIdx  // 1-based col of the receiver's last char (`x` ends just before the dot)
             (TypedAstLookup.findAtPosition(typed, useLine, useCol) as? TypedAstLookup.LookupResult.Expr)
                 ?.expr?.type
-                ?.let { if (it is MezzeType.SuspendType) it.valueType else it }
                 ?.takeIf { it !is MezzeType.VarType }
                 ?.let { return it }
 
@@ -4101,7 +4095,6 @@ class MezzeTextDocumentService(
             val endCol = closerIdx + 1
             TypedAstLookup.findExprEndingAt(typed, endLine, endCol)
                 ?.type
-                ?.let { if (it is MezzeType.SuspendType) it.valueType else it }
                 ?.takeIf { it !is MezzeType.VarType }
         } catch (_: Exception) {
             null
@@ -4718,13 +4711,13 @@ class MezzeTextDocumentService(
 
         if (typedBinding != null) {
             val bindingType = typedBinding.scheme.type
-            if (bindingType !is MezzeType.VarType) return unwrapType(bindingType)
+            if (bindingType !is MezzeType.VarType) return bindingType
         }
 
         // Check imports
         val import = result.resolvedImports.find { it.localName == cleanName }
         if (import != null) {
-            return unwrapType(import.type)
+            return import.type
         }
 
         // Search for the variable in function parameters via TypedModule
@@ -4734,7 +4727,7 @@ class MezzeTextDocumentService(
             ?.forEach { decl ->
                 val paramType = findParameterTypeInTypedBinding(cleanName, decl)
                 if (paramType != null) {
-                    return unwrapType(paramType)
+                    return paramType
                 }
             }
 
@@ -4753,16 +4746,6 @@ class MezzeTextDocumentService(
             }
         }
         return null
-    }
-
-    /**
-     * Unwrap wrapper types (like SuspendType) to get the underlying type.
-     */
-    private fun unwrapType(type: MezzeType): MezzeType {
-        return when (type) {
-            is MezzeType.SuspendType -> unwrapType(type.valueType)
-            else -> type
-        }
     }
 
     /**
@@ -7957,10 +7940,9 @@ class MezzeTextDocumentService(
 
     /**
      * Emit a `<Io, Exception>` effect-row inlay hint for an effectful top-level
-     * function. The effect row lives on the function type (FunctionType.effects)
-     * — or on a SuspendType-wrapped body. Pure functions (empty/closed row)
-     * get nothing. Anchored at the end of the decl's signature line, before the
-     * body begins.
+     * function. The effect row lives on the function type (FunctionType.effects).
+     * Pure functions (empty/closed row) get nothing. Anchored at the end of the
+     * decl's signature line, before the body begins.
      */
     private fun emitEffectRowHint(
         decl: com.mezze.language.typedast.TypedLetDecl,

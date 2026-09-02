@@ -123,22 +123,12 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
                 is TypingContext.Binding.Monomorphic -> {
                     val type = binding.type
                     val referencedBinding = DefinitionRef.ByName(binding.sourceModule, lookupKeyString)
-                    when (type) {
-                        is MezzeType.SuspendType -> ConstraintResult(
-                            type = type,
-                            constraints = emptyList(),
-                            effects = type.effects.effects,
-                            effectInstances = type.effects.effectInstances,
-                            usedVariables = setOf(lookupKeyString),
-                            referencedBindings = setOf(referencedBinding)
-                        )
-                        else -> ConstraintResult(
-                            type = type,
-                            constraints = emptyList(),
-                            usedVariables = setOf(lookupKeyString),
-                            referencedBindings = setOf(referencedBinding)
-                        )
-                    }
+                    ConstraintResult(
+                        type = type,
+                        constraints = emptyList(),
+                        usedVariables = setOf(lookupKeyString),
+                        referencedBindings = setOf(referencedBinding)
+                    )
                 }
                 is TypingContext.Binding.Polymorphic -> {
                     val instantiation = binding.scheme.instantiate()
@@ -197,22 +187,11 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
                     }
 
                     val type = instantiation.type
-                    val effects = when (type) {
-                        is MezzeType.SuspendType -> type.effects.effects
-                        else -> emptySet()
-                    }
-                    val effectInstances = when (type) {
-                        is MezzeType.SuspendType -> type.effects.effectInstances
-                        else -> emptySet()
-                    }
-
                     val referencedBinding = DefinitionRef.ByName(binding.sourceModule, lookupKeyString)
 
                     ConstraintResult(
                         type = type,
                         constraints = concreteReceiverEqualities,
-                        effects = effects,
-                        effectInstances = effectInstances,
                         abilityConstraints = abilityConstraints,
                         associatedTypeConstraints = associatedTypeResolutions,
                         usedVariables = setOf(lookupKeyString),

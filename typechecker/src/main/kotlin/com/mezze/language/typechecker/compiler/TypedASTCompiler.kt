@@ -1293,11 +1293,11 @@ class TypedASTCompiler(
             // shape baked in as a compile-time PrintType. Gated on opHash ==
             // null so a user-declared ability method NAMED to_str/to_dbg (e.g.
             // `ability Stringify where { to_str: ... }`) still dispatches to the
-            // user's impl. A VarType/SuspendType receiver has no printable shape
-            // yet and falls through to the normal (mono/dict) path.
+            // user's impl. A VarType receiver has no printable shape yet and falls
+            // through to the normal (mono/dict) path.
             if (opHash == null
                 && (methodName == Keywords.TO_DBG || methodName == Keywords.TO_STR)
-                && receiverType !is VarType && receiverType !is SuspendType) {
+                && receiverType !is VarType) {
                 val printType = PrintTypeBuilder(printTypeDefs).build(receiverType)
                 val receiverIR = compileReceiverExpr(fn.record)
                 return com.mezze.language.truffleir.InspectIR(
@@ -2651,33 +2651,12 @@ class TypedASTCompiler(
         }
     }
 
-    /**
-     * Strip a SuspendType wrapper from the receiver for ability dispatch.
-     *
-     * Effectful expressions like `effectful {}` have type `SuspendType<T,
-     * effects>`. For method dispatch we want the underlying value type.
-     *
-     * Exception: inlineable primitive ops (`add`, `sub`, ...) must keep the
-     * SuspendType so resolution fails here and the indirect-call path
-     * pattern-matches into DirectAddNode etc. — those nodes have
-     * MezzeSuspend specializations that propagate suspension at runtime.
-     * Without this guard, `result + 1` for `result : Int <Log>` resolves to
-     * a direct call to Int.add and crashes when fed a MezzeSuspend `it`
-     * (see RuntimeEffectValidationTest.testNestedEffectfulFunctionValidation).
-     */
-    private fun receiverTypeForDispatch(methodName: String, receiverType: MezzeType): MezzeType =
-        if (receiverType is SuspendType && methodName !in inlineableOps) {
-            receiverType.valueType
-        } else {
-            receiverType
-        }
-
     private fun tryResolveAbilityOp(
         methodName: String,
         receiverType: MezzeType,
         argRecord: TypedExpr? = null,
     ): Hash? {
-        val effectiveType = receiverTypeForDispatch(methodName, receiverType)
+        val effectiveType = receiverType
         val candidates = abilityOpIndex[methodName] ?: return null
         // `AbilityOp.targetTypes` is the impl's full class-arg tuple, positional to the
         // ability's type params with the receiver ("self") LAST (extra class params
@@ -2758,7 +2737,7 @@ class TypedASTCompiler(
     }
 
     private fun findAbilityOpBody(methodName: String, receiverType: MezzeType): TypedExpr? {
-        val effectiveType = receiverTypeForDispatch(methodName, receiverType)
+        val effectiveType = receiverType
         for (impl in abilityImpls) {
             // Match the receiver POSITION (self is last in the class-arg tuple), not
             // any element — a class-param co-operand of the same type must not select

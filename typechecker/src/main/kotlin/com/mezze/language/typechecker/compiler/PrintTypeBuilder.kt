@@ -20,9 +20,9 @@ import com.mezze.language.truffleir.PrintType
  * variant→VariantType, alias→aliasedType) so those applications resolve to a
  * printable shape.
  *
- * VarType / SuspendType / EffectRow are not concrete printed values. Reaching
- * one means the receiver's type was never resolved (a solver/lowering bug), so
- * we surface it as an internal error rather than inventing a rendering.
+ * VarType / EffectRow are not concrete printed values. Reaching one means the
+ * receiver's type was never resolved (a solver/lowering bug), so we surface it
+ * as an internal error rather than inventing a rendering.
  */
 class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
 
@@ -89,7 +89,6 @@ class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
         // can actually stand in for at runtime.
         is MezzeType.VarType -> PrintType.Dynamic
 
-        is MezzeType.SuspendType,
         is MezzeType.EffectRow -> throw NotAConcreteValueType(type)
     }
 

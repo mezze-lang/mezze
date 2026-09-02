@@ -64,12 +64,8 @@ class SuspendTypeEffectMergeTest {
 
         val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
-        // The return type may be SuspendType wrapping Int if effects are propagated via SuspendType
-        // OR plain Int with effects tracked in the function's effect row
-        val valueType = when (val rt = fnType.returnType) {
-            is MezzeType.SuspendType -> rt.valueType
-            else -> rt
-        }
+        // The return type is a bare Int; effects are tracked on the function's arrow.
+        val valueType = fnType.returnType
         assertTrue(valueType is MezzeType.IntType, "Expected IntType value but got ${valueType::class.simpleName}")
 
         // Should have BOTH Log and State effects (union of branches)

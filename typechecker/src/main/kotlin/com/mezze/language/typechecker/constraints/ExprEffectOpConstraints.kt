@@ -327,10 +327,6 @@ internal fun ExpressionConstraintGenerator.substituteAssociatedTypesInType(
             keyType = substituteAssociatedTypesInType(type.keyType, associatedTypeBindings),
             valueType = substituteAssociatedTypesInType(type.valueType, associatedTypeBindings)
         )
-        is MezzeType.SuspendType -> MezzeType.SuspendType(
-            valueType = substituteAssociatedTypesInType(type.valueType, associatedTypeBindings),
-            effects = type.effects
-        )
         is MezzeType.NewtypeType -> type.copy(
             wrappedType = substituteAssociatedTypesInType(type.wrappedType, associatedTypeBindings)
         )

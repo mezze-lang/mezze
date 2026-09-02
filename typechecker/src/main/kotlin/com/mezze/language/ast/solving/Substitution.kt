@@ -84,7 +84,7 @@ data class Substitution(
         is MezzeType.VarType, is MezzeType.FunctionType, is MezzeType.RecordType,
         is MezzeType.VariantType, is MezzeType.TypeApplication, is MezzeType.ListType,
         is MezzeType.MapType, is MezzeType.SetType, is MezzeType.SortedMapType,
-        is MezzeType.SortedSetType, is MezzeType.SeqType, is MezzeType.SuspendType,
+        is MezzeType.SortedSetType, is MezzeType.SeqType,
         is MezzeType.NewtypeType, is MezzeType.EffectRow -> false
     }
 
@@ -114,7 +114,6 @@ data class Substitution(
             is MezzeType.SortedSetType -> needsSubstitution(type.elementType)
             is MezzeType.SortedMapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
             is MezzeType.MapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
-            is MezzeType.SuspendType -> needsSubstitution(type.valueType) || needsSubstitutionInEffectRow(type.effects)
 
             is MezzeType.NewtypeType -> needsSubstitution(type.wrappedType)
 
@@ -277,15 +276,6 @@ data class Substitution(
                 valueType = applyWithVisited(type.valueType, visitedVars, chainCache)
             )
 
-            // #404: use the flattening factory. If `valueType` substitutes to a
-            // SuspendType (a var that resolved to an already-effectful callee return,
-            // e.g. `race`'s `Result 'a AsyncError <Async, ...>`), the two effect rows
-            // MERGE into one instead of nesting — a value type carries exactly one row.
-            is MezzeType.SuspendType -> MezzeType.SuspendType.of(
-                valueType = applyWithVisited(type.valueType, visitedVars, chainCache),
-                effects = applyToEffectRowWithVisited(type.effects, visitedVars, chainCache)
-            )
-
             is MezzeType.NewtypeType -> type.copy(
                 wrappedType = applyWithVisited(type.wrappedType, visitedVars, chainCache)
             )
@@ -446,46 +436,6 @@ private fun closeLabeledRowVar(existingRowVar: RowVar?, mustBeOpenRowVars: Set<R
         existingRowVar
     }
 
-// #405: ground a call-instantiated effect-row TAIL that ended the solve
-// unconstrained, on a BINDING's stored VALUE type.
-//
-// `race : ... Result 'a AsyncError <Async, ...>` has an intentionally open tail
-// so it composes in any effect context; a concrete call site instantiates that
-// tail as its own row var. When the binding's value is a `SuspendType` (a value
-// carrying effects) whose tail ended the solve UNCONSTRAINED — nothing threaded
-// a caller effect in, no composition unified another open row into it — that
-// open `...` is meaningless (`r :: Result Str AsyncError <Async, ...>`), so we
-// DEFAULT it to CLOSED (`<Async>`), exactly as an unconstrained ordinary type
-// var is defaulted post-solve.
-//
-// SCOPE — deliberately narrow, so it never touches genuine polymorphism:
-//   * Only the OUTERMOST `SuspendType.effects` tail of a binding VALUE is
-//     grounded. A `FunctionType` binding (a declaration like `my_race` /
-//     `and_then`, whose open return tail lives on the arrow) is returned
-//     untouched, and we do NOT recurse into arrows — so a composing return tail
-//     inside a fn body stays open.
-//   * A tail the solver pinned open (`mustBeOpenRowVars`) survives.
-// Unlike records/variants, a `userOpen` value tail here IS grounded: at a
-// concrete call site the callee's declared `...` is a per-call instantiation,
-// not a tail the binding's own author wrote — nothing further can thread into a
-// let-binding's own solved value. Only the row var is dropped; the concrete
-// `effects` set (e.g. `Async`) is untouched, so a genuinely-unhandled effect
-// still rides on the binding.
-fun groundUnconstrainedValueTail(
-    type: MezzeType,
-    mustBeOpenRowVars: Set<RowVar> = emptySet()
-): MezzeType = when (type) {
-    is MezzeType.SuspendType -> {
-        val tail = type.effects.rowVar
-        if (tail != null && tail !in mustBeOpenRowVars) {
-            MezzeType.SuspendType(type.valueType, type.effects.copy(rowVar = null))
-        } else {
-            type
-        }
-    }
-    else -> type
-}
-
 fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = emptySet()): MezzeType = when (type) {
     is MezzeType.RecordType -> {
         val closedRowVar = closeLabeledRowVar(type.rowVar, mustBeOpenRowVars)
@@ -529,10 +479,6 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         constructor = type.constructor,
         args = type.args.map { closeGeneratedRowVars(it, mustBeOpenRowVars) },
         identity = type.identity
-    )
-    is MezzeType.SuspendType -> MezzeType.SuspendType(
-        valueType = closeGeneratedRowVars(type.valueType, mustBeOpenRowVars),
-        effects = type.effects
     )
     is MezzeType.NewtypeType -> type.copy(
         wrappedType = closeGeneratedRowVars(type.wrappedType, mustBeOpenRowVars)
@@ -588,16 +534,6 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
             occursCheck(typeVar, type.keyType) ||
             occursCheck(typeVar, type.valueType)
 
-        is MezzeType.SuspendType ->
-            // #264: also recurse into the effect row — a var that lives only in a
-            // suspend's effect-instance associated types (e.g. `<Exception having
-            // 'error='a>`) must still trip the occurs-check, exactly as the
-            // FunctionType branch does. The substitution engine substitutes into
-            // these rows, so an occurs-check that ignored them could bind a var to a
-            // type that still contains it (an ill-formed cyclic type).
-            occursCheck(typeVar, type.valueType) ||
-            occursCheckEffectRow(typeVar, type.effects)
-
         is MezzeType.NewtypeType -> occursCheck(typeVar, type.wrappedType)
 
         is MezzeType.EffectRow -> occursCheckEffectRow(typeVar, type)
@@ -620,8 +556,8 @@ private fun occursCheckEffectRow(typeVar: TypeVar, effectRow: MezzeType.EffectRo
 }
 
 /** #264: free vars living in an effect row's effect-instance associated types
- *  (mirrors [occursCheckEffectRow]). Used by collectFreeTypeVars for SuspendType
- *  and standalone EffectRow so generalization accounts for them. */
+ *  (mirrors [occursCheckEffectRow]). Used by collectFreeTypeVars for a
+ *  standalone EffectRow so generalization accounts for them. */
 private fun collectFreeTypeVarsInEffectRow(effectRow: MezzeType.EffectRow): Set<TypeVar> =
     effectRow.effectInstances
         .flatMap { instance -> instance.associatedTypes.values.flatMap { collectFreeTypeVars(it) } }
@@ -661,12 +597,6 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
 
         is MezzeType.MapType ->
             collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
-
-        // #264: include vars living in the suspend's effect-instance associated
-        // types (mirrors occursCheckEffectRow), so generalization counts them and
-        // can't quantify a var that's actually free in a suspended effect row.
-        is MezzeType.SuspendType ->
-            collectFreeTypeVars(type.valueType) + collectFreeTypeVarsInEffectRow(type.effects)
 
         is MezzeType.NewtypeType -> collectFreeTypeVars(type.wrappedType)
 

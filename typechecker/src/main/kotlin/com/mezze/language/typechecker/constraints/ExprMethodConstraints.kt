@@ -77,7 +77,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         // ambiguity. See project_result_option_two_representations / #334.
         if (inherentMethods.size > 1) {
             val genReceiverType = generate(memberAccess.receiver, context.notInTailPosition()).type
-            val effectiveReceiverType = (genReceiverType as? MezzeType.SuspendType)?.valueType ?: genReceiverType
+            val effectiveReceiverType = genReceiverType
             if (effectiveReceiverType !is MezzeType.VarType) {
                 val names = candidateTypeNames(effectiveReceiverType, context)
                 if (names.isNotEmpty()) {
@@ -467,21 +467,9 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     constraints.addAll(receiverResult.constraints)
     constraints.addAll(argumentResult.constraints)
 
-    val receiverType: MezzeType
-    val extraEffects: Set<String>
-    val extraEffectInstances: Set<MezzeType.EffectInstance>
-    when (val rt = receiverResult.type) {
-        is MezzeType.SuspendType -> {
-            receiverType = rt.valueType
-            extraEffects = rt.effects.effects
-            extraEffectInstances = rt.effects.effectInstances
-        }
-        else -> {
-            receiverType = rt
-            extraEffects = emptySet()
-            extraEffectInstances = emptySet()
-        }
-    }
+    val receiverType: MezzeType = receiverResult.type
+    val extraEffects: Set<String> = emptySet()
+    val extraEffectInstances: Set<MezzeType.EffectInstance> = emptySet()
 
     constraints.add(Constraint.Equality(
         left = receiverType,
@@ -761,7 +749,7 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
             // Direct callee `f{...}` — look up f's declared return type.
             val ret = calleeReturnType(receiver, context)
             if (ret != null && ret !is MezzeType.VarType) {
-                return if (ret is MezzeType.SuspendType) ret.valueType else ret
+                return ret
             }
             // #448: Method-chain callee `x.m{...}` — the direct-callee lookup
             // above fails because the callee is a ParsedMemberAccess, not a
@@ -790,9 +778,7 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
                     else allCandidates.filter { it.targetTypeName in innerNames }
                 val method = candidates.singleOrNull() ?: return null
                 val ret2 = (method.methodType as? MezzeType.FunctionType)?.returnType ?: return null
-                // Peel SuspendType — the effect wrapper is transparent for
-                // "what nominal type does this value have?".
-                return if (ret2 is MezzeType.SuspendType) ret2.valueType else ret2
+                return ret2
             }
             return null
         }
@@ -873,21 +859,9 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     // down once the inherent method is picked (bidirectional, lambda args only).
     var argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
 
-    val receiverType: MezzeType
-    val extraEffects: Set<String>
-    val extraEffectInstances: Set<MezzeType.EffectInstance>
-    when (val rt = receiverResult.type) {
-        is MezzeType.SuspendType -> {
-            receiverType = rt.valueType
-            extraEffects = rt.effects.effects
-            extraEffectInstances = rt.effects.effectInstances
-        }
-        else -> {
-            receiverType = rt
-            extraEffects = emptySet()
-            extraEffectInstances = emptySet()
-        }
-    }
+    val receiverType: MezzeType = receiverResult.type
+    val extraEffects: Set<String> = emptySet()
+    val extraEffectInstances: Set<MezzeType.EffectInstance> = emptySet()
 
     // #334: default to a fresh var; reassigned below to the method's INSTANTIATED
     // named return type when that is a TypeApplication, so the call result keeps
@@ -1052,19 +1026,17 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             ))
 
             // #334: when the method's return type is a NAMED TypeApplication
-            // (`Result 'a 'e`, `Option 'a`, …) — possibly wrapped in a SuspendType
-            // when the method performs an effect (`await : … -> Result 'a AsyncError
-            // <Async>`) — make the call result BE that named type (a fresh
-            // instantiation preserving the constructor + Declared identity, the
-            // effect wrapper, and freshening the type args) rather than a bare var
-            // pinned to it only during solving. This keeps the name visible at
-            // generation time so a downstream multi-candidate inherent method on the
-            // result (e.g. `.get_or`, which lives on both Result and Option)
-            // dispatches by identity instead of falling through to a structural
-            // field access ("Cannot access field … on variant type …"). Other return
-            // shapes keep the fresh var — there is no name to preserve.
+            // (`Result 'a 'e`, `Option 'a`, …) — make the call result BE that named
+            // type (a fresh instantiation preserving the constructor + Declared
+            // identity, and freshening the type args) rather than a bare var pinned to
+            // it only during solving. This keeps the name visible at generation time so
+            // a downstream multi-candidate inherent method on the result (e.g.
+            // `.get_or`, which lives on both Result and Option) dispatches by identity
+            // instead of falling through to a structural field access ("Cannot access
+            // field … on variant type …"). Other return shapes keep the fresh var —
+            // there is no name to preserve.
             val methodReturn = freshMethodType.returnType
-            val namedReturn = (methodReturn as? MezzeType.SuspendType)?.valueType ?: methodReturn
+            val namedReturn = methodReturn
             if (namedReturn is MezzeType.TypeApplication) {
                 resultType = instantiateTypeWithFreshVars(methodReturn)
             }
@@ -1178,21 +1150,9 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
     val receiverResult = generate(memberAccess.receiver, context.notInTailPosition())
     val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
 
-    val receiverType: MezzeType
-    val extraEffects: Set<String>
-    val extraEffectInstances: Set<MezzeType.EffectInstance>
-    when (val rt = receiverResult.type) {
-        is MezzeType.SuspendType -> {
-            receiverType = rt.valueType
-            extraEffects = rt.effects.effects
-            extraEffectInstances = rt.effects.effectInstances
-        }
-        else -> {
-            receiverType = rt
-            extraEffects = emptySet()
-            extraEffectInstances = emptySet()
-        }
-    }
+    val receiverType: MezzeType = receiverResult.type
+    val extraEffects: Set<String> = emptySet()
+    val extraEffectInstances: Set<MezzeType.EffectInstance> = emptySet()
 
     // Fresh-instantiate imported method types so their type params don't clash
     // across candidates; local ones are used as-is (mirrors generateInherentMethodCall).
@@ -1338,17 +1298,7 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
             .filter { it.targetTypeName == innerTypeName }
         val method = candidates.singleOrNull() ?: return null
         val ret = (method.methodType as? MezzeType.FunctionType)?.returnType ?: return null
-        // #448: Peel SuspendType before nominal dispatch. Inherent methods
-        // whose callback carries an effect row (e.g. Seq.map's `f: <...>`)
-        // have declared return type `SuspendType(SeqType('b), effects)`;
-        // resolveReceiverTypeName has no SuspendType case and returns null,
-        // which falls the outer heuristic through to picking Bytes.fold as
-        // the sole concrete candidate — silently misdispatching every chain
-        // like `xs.map{f}.fold{...}` on [Int] to a Bytes signature. The
-        // wrapper is transparent for the "what nominal type is this value"
-        // question; peel it before naming.
-        val peeled = if (ret is MezzeType.SuspendType) ret.valueType else ret
-        return resolveReceiverTypeName(peeled)
+        return resolveReceiverTypeName(ret)
     }
     val fnExpr: ParsedExpr? = when (receiver) {
         is ParsedFunctionCall -> receiver.function

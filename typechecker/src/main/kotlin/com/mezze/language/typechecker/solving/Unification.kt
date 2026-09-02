@@ -279,31 +279,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         type1 is MezzeType.VarType -> unifyVar(type1.variable, type2)
         type2 is MezzeType.VarType -> unifyVar(type2.variable, type1)
 
-        type1 is MezzeType.SuspendType && type2 !is MezzeType.SuspendType -> {
-            val hasConcreteEffects = type1.effects.effects.isNotEmpty() || type1.effects.effectInstances.isNotEmpty()
-            if (hasConcreteEffects) {
-                return UnificationResult.Failure(
-                    message = "Cannot unify effectful type ${prettyPrintType(type1)} with pure type ${prettyPrintType(type2)}. " +
-                            "Effects <${type1.effects.allEffectNames.joinToString(", ")}> must be handled first.",
-                    type1 = type1,
-                    type2 = type2
-                )
-            }
-            unify(type1.valueType, type2, registry)
-        }
-        type1 !is MezzeType.SuspendType && type2 is MezzeType.SuspendType -> {
-            val hasConcreteEffects = type2.effects.effects.isNotEmpty() || type2.effects.effectInstances.isNotEmpty()
-            if (hasConcreteEffects) {
-                return UnificationResult.Failure(
-                    message = "Cannot unify pure type ${prettyPrintType(type1)} with effectful type ${prettyPrintType(type2)}. " +
-                            "Effects <${type2.effects.allEffectNames.joinToString(", ")}> must be handled first.",
-                    type1 = type1,
-                    type2 = type2
-                )
-            }
-            unify(type1, type2.valueType, registry)
-        }
-
         type1 is MezzeType.FunctionType && type2 is MezzeType.FunctionType ->
             unifyFunctions(type1, type2, registry)
 
@@ -363,9 +338,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
             unifyKeyValue(type1.keyType, type1.valueType, type2.args[0], type2.args[1], registry)
         type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.MAP) && type1.args.size == 2 && type2 is MezzeType.MapType ->
             unifyKeyValue(type1.args[0], type1.args[1], type2.keyType, type2.valueType, registry)
-
-        type1 is MezzeType.SuspendType && type2 is MezzeType.SuspendType ->
-            unifySuspended(type1, type2, registry)
 
         type1 is MezzeType.EffectRow && type2 is MezzeType.EffectRow ->
             unifyEffectRows(type1, type2, registry)
@@ -437,12 +409,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
 private fun unifyVar(typeVar: TypeVar, type: MezzeType): UnificationResult {
     if (type is MezzeType.VarType && type.variable == typeVar) {
         return UnificationResult.Success(Substitution.empty)
-    }
-    if (type is MezzeType.SuspendType) {
-        val valueType = type.valueType
-        if (valueType is MezzeType.VarType && valueType.variable == typeVar) {
-            return UnificationResult.Success(Substitution.empty)
-        }
     }
     if (occursCheck(typeVar, type)) {
         return UnificationResult.Failure(
@@ -993,12 +959,6 @@ private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, registry
 
 private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.SortedMapType, registry: DeclarationRegistry): UnificationResult =
     unifyKeyValue(map1.keyType, map1.valueType, map2.keyType, map2.valueType, registry)
-
-private fun unifySuspended(susp1: MezzeType.SuspendType, susp2: MezzeType.SuspendType, registry: DeclarationRegistry): UnificationResult {
-    val valueSubst = unify(susp1.valueType, susp2.valueType, registry).getOrElse { return it }
-    val effectSubst = unifyEffectRows(susp1.effects, susp2.effects, registry).getOrElse { return it }
-    return UnificationResult.Success(valueSubst.compose(effectSubst))
-}
 
 private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow, registry: DeclarationRegistry): UnificationResult {
     val allEffects1 = eff1.allEffectNames

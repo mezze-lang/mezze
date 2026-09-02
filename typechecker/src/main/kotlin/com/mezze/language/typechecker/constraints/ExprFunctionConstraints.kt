@@ -369,10 +369,7 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
 
 internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, context: ConstraintContext): ConstraintResult {
 
-    // unwrapExpected peels a SuspendType wrapper so an effectful expected
-    // function type still drives the param/return push (otherwise the cast below
-    // would miss and silently fall back to bottom-up inference).
-    val expectedFunctionType = unwrapExpected(context.expectedType) as? MezzeType.FunctionType
+    val expectedFunctionType = context.expectedType as? MezzeType.FunctionType
     val expectedParamType = expectedFunctionType?.paramType as? MezzeType.RecordType
 
     val paramNames: List<String>
@@ -509,10 +506,7 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         }
     }
 
-    val returnType = when (val bodyType = bodyResult.type) {
-        is MezzeType.SuspendType -> bodyType.valueType
-        else -> bodyType
-    }
+    val returnType = bodyResult.type
 
     //    (#218) can resolve them at the call site. Without this, an unannotated
     //    lambda whose body uses an ability method (e.g. `w == h` desugaring
@@ -623,14 +617,14 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         ConstraintResult.UnusedVariable(name = name, loc = expr.loc)
     }
 
-    // Option B / #377: when the lambda's expected type declares an effect
-    // row, the body is allowed to bind values-carrying-that-effect
-    // internally — the row promises those effects propagate up. Stamp the
-    // row onto body constraints so ConstraintSolver.solveEquality's
-    // strictEffectRows check can distinguish these legitimate in-body uses
-    // from real leaks. Mirrors ExprPerformConstraints.generatePerform's
-    // stamping; composes with it (each accumulator unions into the set).
-    // Effects seed for stamping body constraints (Option B / #377).
+    // #377: when the lambda's expected type declares an effect row, the body is
+    // allowed to bind values-carrying-that-effect internally — the row promises
+    // those effects propagate up. Stamp the row onto body constraints (mirrors
+    // ExprPerformConstraints.generatePerform's stamping; composes with it, each
+    // accumulator unions into the set). The stamping's former reader — the
+    // value-carried effect-row leak guard — was removed with the effect-model
+    // migration.
+    // Effects seed for stamping body constraints (#377).
     // Prefer the ambient expected row (annotated or ability-signature-derived).
     // Fall back to what the body itself uses — since Mezze row-polymorphic
     // inference will propagate the body's effects out to the enclosing
@@ -895,7 +889,7 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     // push when the callee is a concrete FunctionType with a RecordType parameter;
     // otherwise (polymorphic/unresolved callee) we fall back to pure inference and
     // let the post-hoc Equality constraints below reconcile types as before.
-    val calleeParamType = (unwrapExpected(functionResult.type) as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType
+    val calleeParamType = (functionResult.type as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType
     val argContext = context.notInTailPosition()
     val argumentResult = generateWithExpected(expr.arguments, calleeParamType, argContext)
 

@@ -79,8 +79,6 @@ class AbilityResolver(
                 implSource = "Type variable (deferred)"
             )
 
-            is MezzeType.SuspendType -> checkAbility(type.valueType, abilityName, typeArgs, abilityHash)
-
             is MezzeType.FunctionType -> AbilityCheckResult.Unsatisfied(
                 reason = "Function types do not support abilities"
             )
@@ -320,7 +318,6 @@ class AbilityResolver(
                     ContentHashComputer.mezzeTypeToString(type)
                 }
             }
-            is MezzeType.SuspendType -> getTypeName(type.valueType)
             else -> ContentHashComputer.mezzeTypeToString(type)
         }
 
