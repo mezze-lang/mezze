@@ -7914,20 +7914,12 @@ class MezzeTextDocumentService(
                 }
             }
 
-            // 1c. Effect inlay hints — the uniquely-Mezze one. When a top-level
-            //     function's inferred type carries an effect row (it's
-            //     effectful), show `<Io, Exception>` as a ghost hint after its
-            //     signature line. This surfaces effects the user never wrote —
-            //     no generic LSP can do this; it needs Mezze's effect inference.
-            for (decl in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
-                val parsedDecl = state.parsedModule?.decls
-                    ?.filterIsInstance<com.mezze.language.parsedast.ParsedLetDecl>()
-                    ?.find { it.isSimpleBinding && it.variableName == decl.name }
-                // Skip when the signature is written out — the effects are then
-                // already visible in source.
-                if (parsedDecl?.typeAnnotation != null) continue
-                emitEffectRowHint(decl, sourceLines, hints)
-            }
+            // 1c. Effects are NOT a separate hint layer. Effects live on the
+            //     function ARROW, so the un-annotated `let` type hint above
+            //     (`emitLetNameHint`) already renders them as part of the type —
+            //     e.g. `greet : {name: Str} -> {} <Logger>`. A separate effect
+            //     ghost-hint would just double that. One source of truth: the
+            //     type hint. (See docs/effect-model.md — effects on arrows.)
 
             // 2. Per-segment chain hints + nested-let hints inside do/blocks.
             for (decl in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
@@ -7938,39 +7930,6 @@ class MezzeTextDocumentService(
         }
     }
 
-    /**
-     * Emit a `<Io, Exception>` effect-row inlay hint for an effectful top-level
-     * function. The effect row lives on the function type (FunctionType.effects).
-     * Pure functions (empty/closed row) get nothing. Anchored at the end of the
-     * decl's signature line, before the body begins.
-     */
-    private fun emitEffectRowHint(
-        decl: com.mezze.language.typedast.TypedLetDecl,
-        sourceLines: List<String>,
-        hints: MutableList<InlayHint>,
-    ) {
-        val fnType = decl.scheme.type as? MezzeType.FunctionType ?: return
-        val row = fnType.effects ?: return
-        if (row.isPure) return
-        val names = row.allEffectNames.filter { it.isNotBlank() }.sorted()
-        if (names.isEmpty()) return
-        val label = "<${names.joinToString(", ")}>"
-
-        // Anchor at end of the signature line: the line holding `->` on the
-        // decl's first line, or the decl's start line as a fallback.
-        val startIdx = decl.loc.startLine - 1
-        val sigLineIdx = (startIdx until minOf(sourceLines.size, startIdx + 3))
-            .firstOrNull { sourceLines.getOrNull(it)?.contains("->") == true } ?: startIdx
-        val lineText = sourceLines.getOrNull(sigLineIdx) ?: return
-        val col = lineText.length
-
-        hints.add(InlayHint().apply {
-            position = Position(sigLineIdx, col)
-            setLabel(" $label")
-            kind = InlayHintKind.Type
-            paddingLeft = true
-        })
-    }
 
     /**
      * Emit a `: T` inlay hint anchored right after the binding name on the
