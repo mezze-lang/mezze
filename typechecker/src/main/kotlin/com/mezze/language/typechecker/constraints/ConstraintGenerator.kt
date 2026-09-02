@@ -11,6 +11,7 @@ import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.ast.solving.collectFreeTypeVars
+import com.mezze.language.ast.solving.closeGeneratedRowVars
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashConstants
@@ -564,12 +565,37 @@ class ConstraintGenerator(
 
         // (c) select the solved bindings: the annotated var (authoritative) or the
         // substitution-applied pattern bindings.
-        val solvedBindings = if (item.pattern is ParsedVariablePattern && authoritativeType != substitution.apply(result.type)) {
+        val rawSolvedBindings = if (item.pattern is ParsedVariablePattern && authoritativeType != substitution.apply(result.type)) {
             mapOf(item.variableName to authoritativeType)
         } else {
             patternResult.bindings.mapValues { (_, type) ->
                 substitution.apply(type)
             }
+        }
+
+        // (c') #403: CLOSE field-access-inferred record/variant rows in this
+        // binding's finalized type BEFORE it enters the typing context that later
+        // top-level bindings consult. Accessing `.f` on an un-annotated param opens
+        // a fresh generated RowVar tail on the receiver (solveHasField grows the row
+        // as more fields are discovered). That open tail is an INFERENCE artifact,
+        // not a promise of row-polymorphism: the language rule is that a record
+        // param REJECTS extra fields unless the author explicitly wrote `{ f, ... }`.
+        // The emit phase already runs this exact close (closeGeneratedRowVars) so
+        // the PRINTED signature reads closed — but emit runs AFTER the whole-module
+        // solve, so a later binding's CALL SITE (e.g. `describe { order = {..,qty} }`)
+        // was still unifying against the open row and wrongly absorbing the extra
+        // `qty`. Closing here, one phase earlier, makes call-site checking see the
+        // same closed row the signature advertises.
+        //
+        // The carve-out lives entirely inside closeGeneratedRowVars: a tail stays
+        // OPEN when it is user-specified (`userOpen_`, the explicit `{ f, ... }`
+        // escape hatch) OR listed in mustBeOpenRowVars (a row unified with a
+        // genuinely open/forwarded param — e.g. `g = { r } -> openf { rec = r }`
+        // where openf's param is `{ x, ... }`). Only a purely field-access-derived
+        // generated tail is dropped, so genuine row-polymorphism is preserved.
+        val closeOpenRowVars = solver.getMustBeOpenRowVars()
+        val solvedBindings = rawSolvedBindings.mapValues { (_, type) ->
+            closeGeneratedRowVars(type, closeOpenRowVars)
         }
 
         // (d) carry ability constraints into function-typed bindings.

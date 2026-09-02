@@ -410,6 +410,13 @@ class ConstraintSolver(
                 resolved.rowVar?.let { mustBeOpenRowVars.add(it) }
                 DebugLogger.debug(Category.ConstraintSolver) { "Added rowVar=${resolved.rowVar} to mustBeOpenRowVars" }
             }
+            // #403: mirror the record case (open `{ f, ... }` pattern) at the
+            // final post-solve pass, so the resolved tail is captured even when the
+            // row var was only pinned by later substitution.
+            if (resolved is MezzeType.RecordType) {
+                resolved.rowVar?.let { mustBeOpenRowVars.add(it) }
+                DebugLogger.debug(Category.ConstraintSolver) { "Added record rowVar=${resolved.rowVar} to mustBeOpenRowVars" }
+            }
         }
     }
 
@@ -974,6 +981,13 @@ class ConstraintSolver(
 
             val resolved = currentSubst.apply(type)
             if (resolved is MezzeType.VariantType) {
+                resolved.rowVar?.let { mustBeOpenRowVars.add(it) }
+            }
+            // #403: an OPEN record pattern (`{ f, ... }`) is the user's explicit
+            // request to keep the destructured record's row open, so its
+            // field-access-derived tail must NOT be closed. Same treatment as an
+            // open variant scrutinee above.
+            if (resolved is MezzeType.RecordType) {
                 resolved.rowVar?.let { mustBeOpenRowVars.add(it) }
             }
         }

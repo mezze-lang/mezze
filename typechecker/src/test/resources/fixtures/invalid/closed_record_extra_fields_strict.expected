@@ -1,2 +1,2 @@
-NO_ERROR
-Type checking succeeded (expected failure)
+T0201_TYPE_MISMATCH
+Type mismatch for argument 'user' in call to 'processUser': expected { user: { name: 'a } } -> 'a but got { user: { name: Str, age: Int, city: Str } } -> 'b — unexpected 'age', 'city'

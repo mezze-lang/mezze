@@ -275,19 +275,22 @@ class TypeCheckerComprehensiveTest {
         val result = parseAndTypeCheck(openRecordSource)
         assertNotNull(result)
 
-        // Test that inferred records are OPEN by default (field access only requires that field)
-        // When you write `{user} -> user.name`, the inferred type is `{user: {name: Str, ...}}`
-        // This allows extra fields to be passed.
-        val inferredOpenRecordSource = """
+        // #403: a record row INFERRED PURELY FROM FIELD ACCESS is CLOSED — it
+        // rejects extra fields exactly like a declared closed record. When you
+        // write `{user} -> user.name`, the inferred inner type is `{name: Str}`
+        // (NOT `{name: Str, ...}`), so passing a wider record with extra `age, city`
+        // is REJECTED. Openness requires the explicit `{ name, ... }` escape hatch.
+        val inferredClosedRecordSource = """
             let processUser = {user} -> user.name
             let user = {name = "Alice", age = 30, city = "NYC"}
             let result = processUser {user = user}
             result
         """.trimIndent()
 
-        // Should NOT fail - inferred records are open
-        val result2 = parseAndTypeCheck(inferredOpenRecordSource)
-        assertNotNull(result2)
+        // Should FAIL - inferred field-access rows are closed (#403)
+        assertThrows<TypeCheckError> {
+            parseAndTypeCheck(inferredClosedRecordSource)
+        }
 
         // Test that EXPLICITLY closed record incompatibility DOES fail with extra fields
         val closedRecordSource = """

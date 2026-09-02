@@ -199,6 +199,21 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
                 loc = expr.loc
             )
         )
+        // #403: a spread source (`{ ...r, x = 1 }`) FORWARDS its whole row into the
+        // result — `r`'s unmentioned fields flow through. That is genuine
+        // row-polymorphism (carve-out #2), so the source's pass-through tail must
+        // stay OPEN and survive the field-access-inferred-row close. Without this,
+        // closing `r`'s tail would reject a caller passing a record wider than the
+        // explicit override fields (FnReturnSpreadFieldTest). MustBeOpen pins the
+        // resolved tail into mustBeOpenRowVars, exempting it from
+        // closeGeneratedRowVars.
+        collector.constraints.add(
+            Constraint.MustBeOpen(
+                type = source,
+                context = "Spread source forwards its row; keep it open (#403)",
+                loc = expr.loc
+            )
+        )
     }
 
     for ((fieldName, fieldType) in explicitFieldTypes) {

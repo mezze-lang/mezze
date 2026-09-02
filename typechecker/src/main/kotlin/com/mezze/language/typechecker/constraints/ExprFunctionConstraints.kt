@@ -418,7 +418,14 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
 
     val rowVar = when {
         expectedParamType?.rowVar != null -> expectedParamType.rowVar
-        isOpenPattern -> RowVar.fresh()
+        // #403: an EXPLICIT open lambda pattern (`{ x, ... } -> ...`) is the user's
+        // escape hatch to accept extra fields, so its tail must survive the
+        // field-access-inferred-row close (closeGeneratedRowVars, applied both at
+        // bindLet and emit). A userOpen_ tail is exempt there by construction,
+        // exactly as a written `{ x: Int, ... }` annotation is. A plain generated
+        // RowVar.fresh() here would be indistinguishable from a field-access tail
+        // and get closed, wrongly rejecting the extra fields the `...` invites.
+        isOpenPattern -> RowVar.userOpen()
         else -> null
     }
     val paramType = MezzeType.RecordType(

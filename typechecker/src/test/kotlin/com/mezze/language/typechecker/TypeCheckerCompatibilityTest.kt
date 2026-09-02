@@ -99,9 +99,14 @@ class TypeCheckerCompatibilityTest {
 
     @Test
     fun `test record types`() {
+        // #403: a field-access-inferred param row is CLOSED, so a getter that must
+        // accept a record WIDER than the fields it reads declares the inner row open
+        // with the explicit `{ x: Int, ... }` escape hatch. `point` carries both x
+        // and y; getX reads only x, so without `...` passing point would (correctly)
+        // be rejected as an extra 'y'.
         val source = """
             let point = {x = 10, y = 20}
-            let getX = {p} -> p.x
+            let getX: { p: { x: Int, ... } } -> Int = {p} -> p.x
             let xValue = getX {p = point}
         """.trimIndent()
 

@@ -10,15 +10,20 @@ import java.nio.file.Paths
 /**
  * Accessing a field on an un-annotated (polymorphic) parameter ROW-REFINES that
  * parameter: `let getA = { r } -> r.a` is inferred as
- * `{ r: { a: 'b } } -> 'b`, NOT `{ r: 'a } -> ?`. The `.a` access adds a row
- * constraint "the argument is a record that has field `a`" — structural row
- * polymorphism (cf. OCaml object rows / PureScript row types).
+ * `{ r: { a: 'b } } -> 'b`, NOT `{ r: 'a } -> ?`. The `.a` access adds a
+ * constraint "the argument is a record that has field `a`".
  *
  * This is the safety net behind field access on generic params: it must accept a
  * record that HAS the field, reject one that lacks it, reject a non-record, and
  * flow the field's type to the result. Without the row constraint you could read
  * a field off a value that doesn't have it — a soundness hole. These tests pin
  * that the refinement fires and is sound.
+ *
+ * #403: a row INFERRED PURELY FROM FIELD ACCESS is CLOSED — it rejects extra
+ * fields, exactly like a declared closed record. The `...` escape hatch (an
+ * explicit `{ r, ... }` pattern or a written `{ a: T, ... }` annotation) is the
+ * ONLY way to admit extra fields. So `getA { r = { a, b, c } }` is now correctly
+ * rejected: the field-access refinement carries no promise of row-polymorphism.
  */
 class FieldAccessRowRefinementTest {
     private lateinit var parser: MezzeParser
@@ -86,11 +91,26 @@ class FieldAccessRowRefinementTest {
     }
 
     @Test
-    fun `an extra field beyond the accessed one is allowed (open refinement)`() {
-        assertNull(err("""
+    fun `an extra field beyond the accessed one is REJECTED (closed refinement, #403)`() {
+        // #403: a field-access-inferred param row is CLOSED. `getA` only accesses
+        // `r.a`, so its param is `{ r: { a: 'b } }` — a caller passing extra `b, c`
+        // is rejected, exactly like a declared closed record. Openness requires the
+        // explicit `{ r, ... }` / `{ a: T, ... }` escape hatch.
+        val e = err("""
             let getA = { r } -> r.a
             let n = getA { r = { a = 1, b = 2, c = 3 } }
-        """), "the refined record is open — extra fields are fine")
+        """)
+        assertNotNull(e, "field-access-inferred row is closed: extra fields must be rejected")
+        assertTrue(e!!.contains("b") || e.contains("c") || e.contains("unexpected"),
+            "error should flag the extra fields: $e")
+    }
+
+    @Test
+    fun `an explicit open pattern admits extra fields beyond the accessed one (#403 escape hatch)`() {
+        assertNull(err("""
+            let getA = { r, ... } -> r.a
+            let n = getA { r = { a = 1 }, b = 2, c = 3 }
+        """), "an explicit `{ r, ... }` pattern is the escape hatch that admits extra fields")
     }
 
     @Test

@@ -365,6 +365,30 @@ class PatternConstraintGenerator {
         val bindingLocations = mutableMapOf<String, Loc>()
         val constraints = mutableListOf<Constraint>()
 
+        // #403: a record PATTERN (match case / destructuring `let`) is a partial
+        // VIEW of its scrutinee, not a declaration of the scrutinee's full shape.
+        // Whether the pattern is open (`{ f, ... }`) or closed (`{ f }`), the
+        // scrutinee's inferred row must stay OPEN so a value carrying MORE fields
+        // than the pattern names can still be destructured — e.g. matching a variant
+        // payload `AppError { message }` against a value that is really
+        // `AppError { code, message }` (ClosedVariantInExpressionTest). Closedness of
+        // a CLOSED pattern is enforced SEPARATELY by the exhaustiveness machinery
+        // (the RecordPatternExhaustive constraint / V0602 uncovered-field check
+        // below), NOT by the row var. Without this marker the #403 close in bindLet
+        // would drop this pattern-derived tail and wrongly reject the wider value.
+        //
+        // This is distinct from the #403 target: the bug is a FUNCTION PARAM row
+        // grown by `.field` ACCESS (`{ order } -> order.status`), which leaks open
+        // into call-site checking. A destructuring record pattern is a different
+        // mechanism and must remain open here.
+        constraints.add(
+            Constraint.MustBeOpen(
+                type = scrutineeType,
+                context = "Record pattern is a partial view; keep the scrutinee row open (#403)",
+                loc = sourceLoc
+            )
+        )
+
         if (!pattern.isOpen) {
             val patternFieldNames = pattern.entries.map { it.name }.toSet()
 
