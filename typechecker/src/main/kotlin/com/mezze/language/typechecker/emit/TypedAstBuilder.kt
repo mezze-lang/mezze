@@ -18,6 +18,7 @@ import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.typechecker.util.receiverTypeName
 import com.mezze.language.ast.hashing.HashTags
 import com.mezze.language.ast.solving.closeGeneratedRowVars
+import com.mezze.language.ast.solving.groundUnconstrainedValueTail
 
 class TypedAstBuilder(
     // S5.2 (#365): the SINGLE immutable solver→emit hand-off. Emit reads every
@@ -283,7 +284,13 @@ class TypedAstBuilder(
             ?: MezzeType.VarType(TypeVar.freshWithName("unknown"))
         // Closes RECORD/VARIANT row vars only; effect rows pass through untouched
         // (effect-row membership is owned by gen-time harvest + unifyEffectRows).
-        val closedType = closeGeneratedRowVars(rawType, mustBeOpenRowVars)
+        // #405: additionally ground an unconstrained effect tail on the binding's
+        // outermost SuspendType value (a top-level `let r = [..].race {}` grounds
+        // the same way the do-block path does).
+        val closedType = groundUnconstrainedValueTail(
+            closeGeneratedRowVars(rawType, mustBeOpenRowVars),
+            mustBeOpenRowVars
+        )
         // If the binding's inferred type is a bare closed record whose shape
         // exactly matches an in-scope closed alias, LABEL it with that alias name
         // so `x` reads as `Lang` (hover, errors, signatures). Structural, so `x`
@@ -1204,12 +1211,22 @@ class TypedAstBuilder(
                         val structuralType = substitution.apply(value.type)
                         val authoritativeType = doBindingSolvedTypes[stmt.value.loc]
                             ?.let { substitution.apply(it) }
-                        val resolvedType = authoritativeType
-                            ?: if (stmt.typeAnnotation != null && valueType !is MezzeType.VarType) {
-                                valueType
-                            } else {
-                                structuralType
-                            }
+                        // #405: ground a call-instantiated, unconstrained effect
+                        // tail on the do-block binding's stored VALUE type. A
+                        // concrete `[..].race {}` leaked `<Async, ...>`; nothing
+                        // can thread into a let-binding's own solved value, so a
+                        // still-open tail there is meaningless — default it to
+                        // closed. Narrow: only the outermost SuspendType tail, and
+                        // only when not pinned open (mustBeOpenRowVars).
+                        val resolvedType = groundUnconstrainedValueTail(
+                            authoritativeType
+                                ?: if (stmt.typeAnnotation != null && valueType !is MezzeType.VarType) {
+                                    valueType
+                                } else {
+                                    structuralType
+                                },
+                            mustBeOpenRowVars
+                        )
 
                         val isRecursive = isLambdaValue && value is TypedLambda &&
                                            refsName(value.body, name)

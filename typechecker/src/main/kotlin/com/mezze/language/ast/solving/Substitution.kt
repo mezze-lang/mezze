@@ -446,6 +446,46 @@ private fun closeLabeledRowVar(existingRowVar: RowVar?, mustBeOpenRowVars: Set<R
         existingRowVar
     }
 
+// #405: ground a call-instantiated effect-row TAIL that ended the solve
+// unconstrained, on a BINDING's stored VALUE type.
+//
+// `race : ... Result 'a AsyncError <Async, ...>` has an intentionally open tail
+// so it composes in any effect context; a concrete call site instantiates that
+// tail as its own row var. When the binding's value is a `SuspendType` (a value
+// carrying effects) whose tail ended the solve UNCONSTRAINED — nothing threaded
+// a caller effect in, no composition unified another open row into it — that
+// open `...` is meaningless (`r :: Result Str AsyncError <Async, ...>`), so we
+// DEFAULT it to CLOSED (`<Async>`), exactly as an unconstrained ordinary type
+// var is defaulted post-solve.
+//
+// SCOPE — deliberately narrow, so it never touches genuine polymorphism:
+//   * Only the OUTERMOST `SuspendType.effects` tail of a binding VALUE is
+//     grounded. A `FunctionType` binding (a declaration like `my_race` /
+//     `and_then`, whose open return tail lives on the arrow) is returned
+//     untouched, and we do NOT recurse into arrows — so a composing return tail
+//     inside a fn body stays open.
+//   * A tail the solver pinned open (`mustBeOpenRowVars`) survives.
+// Unlike records/variants, a `userOpen` value tail here IS grounded: at a
+// concrete call site the callee's declared `...` is a per-call instantiation,
+// not a tail the binding's own author wrote — nothing further can thread into a
+// let-binding's own solved value. Only the row var is dropped; the concrete
+// `effects` set (e.g. `Async`) is untouched, so a genuinely-unhandled effect
+// still rides on the binding.
+fun groundUnconstrainedValueTail(
+    type: MezzeType,
+    mustBeOpenRowVars: Set<RowVar> = emptySet()
+): MezzeType = when (type) {
+    is MezzeType.SuspendType -> {
+        val tail = type.effects.rowVar
+        if (tail != null && tail !in mustBeOpenRowVars) {
+            MezzeType.SuspendType(type.valueType, type.effects.copy(rowVar = null))
+        } else {
+            type
+        }
+    }
+    else -> type
+}
+
 fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = emptySet()): MezzeType = when (type) {
     is MezzeType.RecordType -> {
         val closedRowVar = closeLabeledRowVar(type.rowVar, mustBeOpenRowVars)
