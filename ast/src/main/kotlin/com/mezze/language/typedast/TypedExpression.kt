@@ -251,6 +251,15 @@ data class TypedPerform(
     val body: TypedExpr,
     override val type: MezzeType,
     override val loc: Loc,
+    /**
+     * True iff this perform discharges every effect in `body`'s row (the
+     * row-after-this-handler is empty), so the runtime can run the body
+     * eagerly rather than build a MezzeSuspend. Computed at EMIT
+     * (TypedAstBuilder) from the perform's result type; the BDSL compiler reads
+     * THIS field instead of re-inspecting `type`, decoupling the discharge gate
+     * from the value-carried effect row. See docs/effect-model.md (S0/S1).
+     */
+    val fullyDischarges: Boolean = true,
 ) : TypedExpr
 
 @Serializable

@@ -1048,28 +1048,20 @@ class TypedASTCompiler(
 
             // Effects
             is TypedPerform -> {
-                // Path E (#336): "fully discharged" iff perform's result type
-                // is NOT a SuspendType carrying any pending effect. If the
-                // typechecker gave us Foo directly (or SuspendType with
-                // effects.effects empty AND effectInstances empty AND
-                // rowVar null), body's row after this handler is empty and
-                // the runtime can execute the body eagerly. If pending
-                // effects remain, the runtime must build a MezzeSuspend
-                // holding the body continuation.
-                val fullyDischarged = when (val t = expr.type) {
-                    is MezzeType.SuspendType ->
-                        t.effects.effects.isEmpty() &&
-                        t.effects.effectInstances.isEmpty() &&
-                        t.effects.rowVar == null
-                    else -> true
-                }
+                // Path E (#336): "fully discharged" iff this perform discharges
+                // every effect in body's row (row-after-handler empty) → the
+                // runtime runs the body eagerly; otherwise it builds a
+                // MezzeSuspend holding the body continuation. S0/S1 (effect-model
+                // migration, docs/effect-model.md): this signal is now computed
+                // at EMIT (TypedAstBuilder) and carried on the node, so the
+                // compiler no longer inspects the value-carried effect row.
                 HandleIR(
                     compileExpr(expr.body),
                     expr.handlers.map { h ->
                         HandlerBindIR(h.performerHash, h.effectHash, h.performerName, h.params?.let { compileExpr(it) })
                     },
                     src,
-                    staticallyFullyDischarges = fullyDischarged
+                    staticallyFullyDischarges = expr.fullyDischarges
                 )
             }
             is TypedPerformOp -> PerformOpIR(expr.effectHash, expr.operationName, compileExpr(expr.arg), src)

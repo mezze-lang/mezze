@@ -106,7 +106,9 @@ class SQLiteMezzeStore private constructor(
         // name. `entry_name` demoted to nullable display metadata. A version
         // mismatch drops/rebuilds the cache (harmless; embedded apps are
         // rebuilt by `mez build`).
-        const val SCHEMA_VERSION = 8
+        // 9: TypedPerform gains `fullyDischarges` (effect-model migration S0/S1) —
+        //    force fresh typedast blobs so the field is populated, not defaulted.
+        const val SCHEMA_VERSION = 9
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of

@@ -847,7 +847,17 @@ class TypedAstBuilder(
                 val body = buildExpr(expr.body, file, contextType)
                 val performType = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
                     ?: body.type
-                TypedPerform(handlers, body, performType, loc)
+                // S0/S1 (effect-model migration, docs/effect-model.md): the runtime's
+                // eager-vs-defer gate must not read the value-carried effect row. Compute
+                // the "fully discharges body's row" signal HERE from performType — identical
+                // to the old TypedASTCompiler check on expr.type — and carry it on the node.
+                // When SuspendType is removed (S2), only this computation is re-sourced (from
+                // the residual-effect set); the compiler's read of the field stays put.
+                val fullyDischarges = performType !is MezzeType.SuspendType ||
+                    (performType.effects.effects.isEmpty() &&
+                        performType.effects.effectInstances.isEmpty() &&
+                        performType.effects.rowVar == null)
+                TypedPerform(handlers, body, performType, loc, fullyDischarges)
             }
             is ParsedEffectCall -> {
                 val opName = expr.operation.localName
