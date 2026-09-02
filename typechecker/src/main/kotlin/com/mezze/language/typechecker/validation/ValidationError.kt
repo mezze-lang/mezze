@@ -337,9 +337,11 @@ sealed interface ValidationError {
         override val code: ErrorCode = ErrorCode.V0502_TOP_LEVEL_PERFORM
 
         override fun message(): String = buildString {
-            append("Top-level value '$bindingName' cannot have performed effects <*>. ")
-            append("Effects can only be performed inside 'main' or inside functions. ")
-            append("Consider wrapping this in a function: let $bindingName = {} -> ...")
+            val effs = effectRow.allEffectNames.sorted().joinToString(", ")
+            val what = if (effs.isNotEmpty()) "performs $effs" else "performs an effect"
+            append("Top-level `$bindingName` $what at module-load time. ")
+            append("The top level is for definitions — effectful code must run inside a function. ")
+            append("Move it into a function (e.g. your entry): `let $bindingName = {} -> …`")
         }
 
         override fun location() = loc
@@ -363,11 +365,11 @@ sealed interface ValidationError {
         override val code: ErrorCode = ErrorCode.V0501_EFFECT_NOT_HANDLED
 
         override fun message(): String = buildString {
-            val list = unhandledEffects.joinToString(", ") { "<$it>" }
-            append("Entry point '$entryName' performs effect(s) $list that nothing discharges. ")
-            append("The program will crash at runtime when the un-handled effect leaks. ")
-            append("Handle it inside '$entryName' with a handler (perform <Performer> in ...), ")
-            append("or it will crash at runtime.")
+            val list = unhandledEffects.joinToString(", ")
+            append("Entry `$entryName` leaves $list unhandled. ")
+            append("The runtime discharges the ambient effects (Console, FileSystem, …) but not these — ")
+            append("with no handler, the program would fault at runtime. ")
+            append("Handle it in `$entryName`: `perform <a handler> in …`")
         }
 
         override fun location() = loc

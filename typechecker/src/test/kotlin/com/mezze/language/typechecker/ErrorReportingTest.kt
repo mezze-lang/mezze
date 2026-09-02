@@ -152,7 +152,7 @@ class ErrorReportingTest {
               log: {message: Str} -> {} <Log>
             }
 
-            let test = do
+            let test = {} -> do
               Log.log {message = "hello"}
         """.trimIndent()
 
@@ -163,11 +163,12 @@ class ErrorReportingTest {
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
 
-        // The test variable should have the Log effect in its type
+        // NEW MODEL: effects live on function arrows. The Log effect rides `test`'s
+        // arrow, so its function type carries Log in its effect row.
         val testType = result.getVariableType("test")
         assertNotNull(testType)
-        // The type should indicate it has the Log effect
-        assertTrue(testType.toString().contains("Log"))
+        assertTrue(testType is MezzeType.FunctionType)
+        assertTrue((testType as MezzeType.FunctionType).effects?.effects?.contains("Log") == true)
     }
 
     @Test

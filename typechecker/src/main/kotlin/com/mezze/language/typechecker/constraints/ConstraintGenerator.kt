@@ -616,52 +616,15 @@ class ConstraintGenerator(
             } else withAbilities
         }
 
-        // (e) harvest effects into a SuspendType wrapper for non-function bindings.
-        //
-        // Only for the TOP-LEVEL path (harvestEffectsIntoBinding = true): a
-        // top-level `let x = <effectful>` binds x to the SUSPENDED computation, so
-        // x's type must carry the effect. In a DO-BLOCK the effect is instead
-        // SEQUENCED into the enclosing block's effect row (generateDo merges the
-        // statement's effects into its collector) and the binding holds the pure
-        // VALUE — wrapping it in SuspendType there double-counts the effect and
-        // leaks it into any later closure that captures x (e.g. an Async do-block's
-        // `let now = swap{…}` making a sibling pure callback read as `<Async>`), so
-        // the do-block path passes false and skips this step.
-        val hasEffectsOrPerformed = harvestEffectsIntoBinding &&
-            (result.effects.isNotEmpty() || result.effectInstances.isNotEmpty() || result.performed)
-        val solvedBindingsWithEffects = if (hasEffectsOrPerformed) {
-            solvedBindingsWithAbilities.mapValues { (_, solvedType) ->
-                when (solvedType) {
-                    is MezzeType.SuspendType -> {
-                        if (result.performed && !solvedType.effects.performed) {
-                            MezzeType.SuspendType(
-                                valueType = solvedType.valueType,
-                                effects = MezzeType.EffectRow(
-                                    effects = solvedType.effects.effects,
-                                    effectInstances = solvedType.effects.effectInstances,
-                                    rowVar = solvedType.effects.rowVar,
-                                    performed = true
-                                )
-                            )
-                        } else {
-                            solvedType
-                        }
-                    }
-                    is MezzeType.FunctionType -> solvedType
-                    else -> MezzeType.SuspendType(
-                        valueType = solvedType,
-                        effects = MezzeType.EffectRow(
-                            effects = result.effects,
-                            effectInstances = result.effectInstances,
-                            rowVar = null,
-                            performed = result.performed
-                        )
-                    )
-                }
-            }
-        } else {
-            solvedBindingsWithAbilities
-        }
+        // (e) Effect-model migration (S4, docs/effect-model.md): do NOT wrap top-level
+        // bindings in SuspendType. Value types are bare — effects ride the arrow. A
+        // top-level effectful NON-function binding is a stranded effect and is rejected
+        // by TypeValidator.validateParsedTopLevelEffects (which reads the incurred
+        // effects off the ConstraintResult, no longer off a value-carried row); a
+        // function binding carries its effects latently on its arrow. This removes the
+        // last live SuspendType producer, so S3 can delete the type. (`harvestEffectsIntoBinding`
+        // is now vestigial — kept until the bindLet signature is cleaned in S3.)
+        val solvedBindingsWithEffects = solvedBindingsWithAbilities
 
         // (f) generalization / value-restriction + ability-constraint carry per binding.
         val contextBindings = solvedBindingsWithEffects.map { (name, solvedType) ->

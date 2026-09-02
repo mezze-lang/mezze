@@ -106,11 +106,11 @@ class EffectPolymorphicSignaturesTest {
                     else
                         a / b
 
-                let calc = thrower {a = 10, b = 2}
-
+                # NEW MODEL: call thrower inside the perform body so Exception is
+                # performed there; a bare `calc` binding would perform nothing.
                 let result = {} ->
                     perform ExceptionToResult in
-                        Ok { val = calc }
+                        Ok { val = thrower {a = 10, b = 2} }
             """.trimIndent())
         }
 
@@ -125,11 +125,11 @@ class EffectPolymorphicSignaturesTest {
                     else
                         a / b
 
-                let calc = thrower {a = 10, b = 2}
-
+                # NEW MODEL: call thrower inside the perform body so Exception is
+                # performed there; a bare `calc` binding would perform nothing.
                 let result = {} ->
                     perform ExceptionToResult in
-                        Ok { val = calc }
+                        Ok { val = thrower {a = 10, b = 2} }
             """.trimIndent())
         }
 
@@ -144,11 +144,11 @@ class EffectPolymorphicSignaturesTest {
                     else
                         a / b
 
-                let calc = thrower {a = 10, b = 2}
-
+                # NEW MODEL: call thrower inside the perform body so Exception is
+                # performed there; a bare `calc` binding would perform nothing.
                 let result = {} ->
                     perform ExceptionToResult in
-                        Ok { val = calc }
+                        Ok { val = thrower {a = 10, b = 2} }
             """.trimIndent())
         }
     }
@@ -209,11 +209,11 @@ class EffectPolymorphicSignaturesTest {
                     else
                         a / b
 
-                let calc = thrower {a = 10, b = 2}
-
+                # NEW MODEL: call thrower inside the perform body so Exception is
+                # performed there; a bare `calc` binding would perform nothing.
                 let result = {} ->
                     perform ExceptionToOption in
-                        Some { val = calc }
+                        Some { val = thrower {a = 10, b = 2} }
             """.trimIndent())
         }
     }

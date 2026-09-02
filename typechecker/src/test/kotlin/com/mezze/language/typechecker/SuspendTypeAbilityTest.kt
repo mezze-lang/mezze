@@ -9,13 +9,16 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 /**
- * Tests for ability checking on SuspendType values.
+ * Tests for ability checking on the results of effectful calls.
  *
- * CRITICAL: SuspendType (e.g., Int <Log>) should have the same abilities as its value type.
- * Effects don't affect what operations can be performed on a value - they only track
- * which effects need to be handled before the value can be fully computed.
+ * CRITICAL: effects live on function ARROWS, not on value types. Calling an
+ * effectful function (e.g. `getNumber {} : Int`) yields a BARE value; the effect
+ * rides the enclosing function's arrow rather than the value. Abilities are
+ * unaffected: the bare result supports NumAdd, NumMul, Eq, etc. exactly like any Int.
  *
- * Example: Int <Log> should support NumAdd, NumMul, Eq, etc. just like Int
+ * These tests verify the arithmetic/ability RESULT type of such calls (bare, e.g.
+ * `Int` / `Bool` / `Str`). Where a function wraps the effectful call, its arrow
+ * still carries the effect (e.g. `{} -> Int <Log>`).
  */
 class SuspendTypeAbilityTest {
 
@@ -69,7 +72,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Int <Log>"
+            "Int"
         )
     }
 
@@ -93,7 +96,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Int <Log>"
+            "Int"
         )
     }
 
@@ -117,7 +120,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Int <Log>"
+            "Int"
         )
     }
 
@@ -141,7 +144,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Int <Log>"
+            "Int"
         )
     }
 
@@ -169,7 +172,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Int <Log>"
+            "Int"
         )
     }
 
@@ -225,7 +228,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Str <Log>"  // Effect propagates through string interpolation
+            "Str"  // Bare value; the effect rides the enclosing arrow, not the value
         )
     }
 
@@ -249,7 +252,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool <Log>"  // Effect propagates from getText {}
+            "Bool"  // Bare value; the effect rides the enclosing arrow, not the value
         )
     }
 
@@ -275,7 +278,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool <Log>"  // Effect propagates from getBool {}
+            "Bool"  // Bare value; the effect rides the enclosing arrow, not the value
         )
     }
 
@@ -299,7 +302,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool <Log>"  // Effect propagates from getBool {}
+            "Bool"  // Bare value; the effect rides the enclosing arrow, not the value
         )
     }
 
@@ -325,7 +328,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool <Log>"  // Effect propagates from getNumber {}
+            "Bool"  // Bare value; the effect rides the enclosing arrow, not the value
         )
     }
 
@@ -353,7 +356,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool <Log>"  // Effect propagates from both getX {} and getY {}
+            "Bool"  // Bare value; the effect rides the enclosing arrow, not the value
         )
     }
 
@@ -379,7 +382,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool <Log>"  // Effect propagates from getNumber {}
+            "Bool"  // Bare value; the effect rides the enclosing arrow, not the value
         )
     }
 
@@ -402,7 +405,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Int <FileSystem, Log>"
+            "Int"
         )
     }
 
@@ -478,7 +481,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Int <Log>"
+            "Int"
         )
     }
 
@@ -502,7 +505,7 @@ class SuspendTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Int <Log>"  // Condition effects propagate to result type
+            "Int"  // Bare value; the condition's effect rides the enclosing arrow
         )
     }
 }

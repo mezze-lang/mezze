@@ -101,7 +101,7 @@ class HandlerValidationTest {
         val error = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
-        assertContains(error.message, "performs nothing")
+        assertContains(error.message, "performs no effect")
     }
 
     // ========== RULE 4: No matching handler ==========
@@ -349,8 +349,8 @@ class HandlerValidationTest {
         val error = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
-        assertContains(error.message, "Top-level value")
-        assertContains(error.message, "performed effects")
+        assertContains(error.message, "performs an effect at module-load time")
+        assertContains(error.message, "Move it into a function")
     }
 
     @Test

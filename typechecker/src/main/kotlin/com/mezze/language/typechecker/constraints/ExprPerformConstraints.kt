@@ -93,14 +93,20 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         for ((handlerName, effectName) in handlerEffects) {
             if (effectName !in effectivelyPerformed) {
                 throw TypeCheckError(
-                    message = "Handler '$handlerName' handles effect '$effectName', but the body " +
-                        "performs nothing. Remove the handler, or add an op of '$effectName' " +
-                        "inside the `perform` body.",
+                    message = "Handler '$handlerName' handles '$effectName', but the `perform` " +
+                        "body performs no effect — so the handler can never fire.",
                     loc = expr.loc,
                     errorType = ErrorType.CONSTRAINT_VIOLATION,
                     code = ErrorCode.V0510_HANDLER_UNNECESSARY,
                     hints = listOf(
-                        "if you meant to handle a different effect, change the handler",
+                        "`perform` only handles effects performed INSIDE its body — wrap the call " +
+                            "that performs '$effectName' in it: `perform $handlerName in <that call>`.",
+                        "if you bound the call to a variable first (`let x = <call>`), its effect " +
+                            "already rose to the enclosing function; move the call into the `perform` " +
+                            "body, or wrap the enclosing block: `perform $handlerName in do …`.",
+                        "to defer handling, make it a thunk and force it in the perform: " +
+                            "`let x = {} -> <call>` then `perform $handlerName in x {}`.",
+                        "if you meant to handle a different effect, change the handler.",
                     ),
                 )
             }

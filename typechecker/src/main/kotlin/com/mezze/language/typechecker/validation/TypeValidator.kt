@@ -436,30 +436,35 @@ class TypeValidator(
         constraintResults: Map<String, ConstraintResult>
     ): List<ValidationError> {
         if (!decl.isSimpleBinding) return emptyList()
-        val finalType = substitution.apply(constraintResults[decl.variableName]?.type ?: return emptyList())
-        if (finalType !is MezzeType.SuspendType) return emptyList()
+        val result = constraintResults[decl.variableName] ?: return emptyList()
+        val finalType = substitution.apply(result.type)
+        // Effect-model migration (S4): value types are bare now — read the INCURRED
+        // effects off the ConstraintResult, not a value-carried SuspendType. A FUNCTION
+        // binding's effects are LATENT on its arrow (it performs nothing until called),
+        // so it is never a stranded top-level effect; only non-function bindings are.
+        if (finalType is MezzeType.FunctionType) return emptyList()
 
-        // A top-level `let` bound to a SuspendType is always suspect: the RHS
-        // is a lazy computation with pending effects. The question is whether we
-        // allow it as an inspectable declarative value or reject it as a program-
-        // level mistake (an effectful call that will never fire without a handler).
-        //
-        // Under strict mode (mez build / mez run — real program entry paths), any
-        // top-level SuspendType is rejected. Fully-discharged (performed + empty
-        // row) would execute at module load. Partially-discharged (residual row)
-        // is a stranded effectful expression the entry point can't use.
-        //
-        // Under permissive mode (mez test, REPL), we keep only the historical
-        // "would execute at module load" guard so tests and REPL sessions can
-        // introspect intermediate suspended values.
-        val rowIsEmpty = finalType.effects.effects.isEmpty() &&
-            finalType.effects.effectInstances.isEmpty() &&
-            finalType.effects.rowVar == null
-        val performedAndEmpty = finalType.effects.performed && rowIsEmpty
+        // A top-level non-function `let` whose RHS incurs an effect is suspect: the RHS
+        // is an effectful computation and the module top level runs no handler. Whether
+        // to reject depends on mode (mirrors the old SuspendType-based logic exactly):
+        //  - strict (mez build / mez run — real entry paths): reject ANY incurred effect.
+        //  - permissive (mez test, REPL): reject only the "would execute at module load"
+        //    case — performed with no residual named effect — so tests/REPL can still
+        //    introspect an intermediate suspended value with a residual row.
+        val hasNamedEffect = result.effects.isNotEmpty() || result.effectInstances.isNotEmpty()
+        val incursEffect = hasNamedEffect || result.performed
+        if (!incursEffect) return emptyList()
+        val performedAndEmpty = result.performed && !hasNamedEffect
         val shouldReject = if (strictTopLevel) true else performedAndEmpty
         if (shouldReject) {
+            val row = MezzeType.EffectRow(
+                effects = result.effects,
+                effectInstances = result.effectInstances,
+                rowVar = null,
+                performed = result.performed
+            )
             return listOf(ValidationError.TopLevelPerformedEffects(
-                bindingName = decl.variableName, effectRow = finalType.effects, loc = decl.loc
+                bindingName = decl.variableName, effectRow = row, loc = decl.loc
             ))
         }
         return emptyList()

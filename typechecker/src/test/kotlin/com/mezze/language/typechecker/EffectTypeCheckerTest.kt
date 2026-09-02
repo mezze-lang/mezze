@@ -107,7 +107,7 @@ class EffectTypeCheckerTest {
               randInt : {min: Int, max: Int} -> Int = {min, max} -> 42
             }
 
-            let myProgram = Random.randInt {min = 1, max = 10}
+            let myProgram = {} -> Random.randInt {min = 1, max = 10}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -115,11 +115,12 @@ class EffectTypeCheckerTest {
 
         val myProgramType = result.getVariableType("myProgram")
         assertNotNull(myProgramType)
-        // Effect call returns SuspendType (value with unhandled effects): Int <Random>
-        assertTrue(myProgramType is MezzeType.SuspendType)
-        val suspendedType = myProgramType as MezzeType.SuspendType
-        assertEquals(MezzeType.IntType, suspendedType.valueType)
-        assertEquals(setOf("Random"), suspendedType.effects.effects)
+        // NEW MODEL: the effect call's Random effect rides the enclosing function
+        // arrow; the return value is bare Int.
+        assertTrue(myProgramType is MezzeType.FunctionType)
+        val fnType = myProgramType as MezzeType.FunctionType
+        assertEquals(MezzeType.IntType, fnType.returnType)
+        assertEquals(setOf("Random"), fnType.effects!!.effects)
     }
 
     @Test
@@ -133,12 +134,13 @@ class EffectTypeCheckerTest {
               log : {msg: Str} -> {} = {msg} -> {}
             }
 
-            let myProgram = do
+            let myProgram = {} -> do
               Log.log {msg = "Hello"}
               42
 
-            # Wrap in function to avoid top-level <*> restriction
-            let getResult = {} -> perform Console in myProgram
+            # NEW MODEL: program is a function; perform on the call so the body
+            # performs the Log effect (a bare bound value performs nothing).
+            let getResult = {} -> perform Console in (myProgram {})
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

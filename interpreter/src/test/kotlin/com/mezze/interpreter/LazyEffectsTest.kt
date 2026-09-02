@@ -6,27 +6,37 @@ import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Assertions.*
 import com.mezze.interpreter.values.MezzeVariant
 import com.mezze.interpreter.values.MezzeRecord
-import com.mezze.interpreter.values.MezzeSuspend
 
 /**
- * Exhaustive tests for the lazy effects feature.
+ * Tests for effectful calls handled by `perform`, under Mezze's eager effect model.
  *
- * When effectful code is called OUTSIDE of a `perform` block, the computation
- * is suspended (lazy) rather than evaluated eagerly. The suspended value is
- * then forced (evaluated) when it is read inside a `perform` block that has
- * the appropriate handlers.
+ * Effects are eager and attach to arrows. An effectful call's effect is raised to
+ * the enclosing function's arrow, and the call itself evaluates to a plain bare
+ * value (e.g. `Int`, not a suspended `Int <Exception>`). There is no first-class
+ * "suspended computation" that you bind outside a handler and force later.
  *
- * Key semantics:
- * 1. Effect calls outside handlers create MezzeSuspend values
- * 2. MezzeSuspend values are stored in variables without being evaluated
- * 3. When read inside a perform block, MezzeSuspend values are forced
- * 4. If forcing throws → the exception is caught by the handler
- * 5. If forcing succeeds → the result is used normally
+ * `perform H in <body>` handles the effects performed *inside its body*. It does
+ * NOT reach back and force a value that was already computed elsewhere. So the
+ * effectful call must appear textually within the perform body: the body then
+ * statically performs the handled effect. If it does not, the type checker rejects
+ * the program with "the `perform` body performs no effect — so the handler can
+ * never fire." This is why the old lazy pattern no longer works:
  *
- * This enables patterns like:
- *   let res = safe_div { a = 4, b = 0 }  // Suspended, not evaluated
- *   let handle = {} -> perform ExceptionToResult in Ok { val = res }  // Forced here
- *   handle {}  // Returns Err { error = "Div by zero" }
+ *   // REJECTED — `res` is a plain value; the perform body performs nothing:
+ *   let res = safe_div {a = 4, b = 0}
+ *   let handle = {} -> perform ExceptionToResult in Ok {val = res}
+ *
+ *   // CORRECT — the throw happens inside the handler:
+ *   let handle = {} -> perform ExceptionToResult in Ok {val = safe_div {a = 4, b = 0}}
+ *   handle {}   // Err {error = "Div by zero"}
+ *
+ * The `ExceptionToResult` / `ExceptionToOption` handlers do not auto-wrap: the body
+ * itself produces `Ok {...}` / `Some {...}` on the success path, and on `throw` the
+ * handler aborts the perform, yielding `Err {error}` / `None`. Migrating a test by
+ * moving the effectful call into the perform body preserves its runtime result.
+ *
+ * A few tests keep "suspended"/"lazy" in their names for historical continuity; the
+ * behavior they now exercise is the eager model described above.
  */
 class LazyEffectsTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
@@ -38,19 +48,16 @@ class LazyEffectsTest {
 
     @Test
     fun `test effectful call outside handler creates suspended value`() {
-        // When an effectful function is called outside any handler,
-        // the result should be a suspended computation (lazy)
+        // Eager model: the effectful call must sit inside the perform body so the
+        // body performs the Exception effect the handler catches.
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
 
             let safe_div = {a, b} ->
                 if b == 0 then Exception.throw {error = "Div by zero"} else a / b
 
-            # Called OUTSIDE handler - should be suspended
-            let res = safe_div {a = 4, b = 0}
-
-            # Inside handler, res is forced and exception is caught
-            let handle = {} -> perform ExceptionToResult in Ok {val = res}
+            # Effectful call INSIDE the handler — the throw is caught here.
+            let handle = {} -> perform ExceptionToResult in Ok {val = safe_div {a = 4, b = 0}}
             handle {}
         """.trimIndent()
 
@@ -63,16 +70,14 @@ class LazyEffectsTest {
 
     @Test
     fun `test suspended value forced when used inside perform`() {
-        // The suspended computation should be forced when accessed in a handler
+        // The effectful call is performed inside the handler; success path yields Ok.
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
 
             let safe_div = {a, b} ->
                 if b == 0 then Exception.throw {error = "Div by zero"} else a / b
 
-            let res = safe_div {a = 10, b = 2}  # Suspended but will succeed
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = res}
+            let handle = {} -> perform ExceptionToResult in Ok {val = safe_div {a = 10, b = 2}}
             handle {}
         """.trimIndent()
 
@@ -91,14 +96,10 @@ class LazyEffectsTest {
             let safe_div = {a, b} ->
                 if b == 0 then Exception.throw {error = "Div by zero"} else a / b
 
-            let r1 = safe_div {a = 10, b = 2}  # Will succeed
-            let r2 = safe_div {a = 10, b = 0}  # Will fail
-            let r3 = safe_div {a = 20, b = 4}  # Will succeed
-
             let compute = {} -> do
-                let h1 = perform ExceptionToResult in Ok {val = r1}
-                let h2 = perform ExceptionToResult in Ok {val = r2}
-                let h3 = perform ExceptionToResult in Ok {val = r3}
+                let h1 = perform ExceptionToResult in Ok {val = safe_div {a = 10, b = 2}}  # succeeds
+                let h2 = perform ExceptionToResult in Ok {val = safe_div {a = 10, b = 0}}  # fails
+                let h3 = perform ExceptionToResult in Ok {val = safe_div {a = 20, b = 4}}  # succeeds
                 {first = h1, second = h2, third = h3}
             compute {}
         """.trimIndent()
@@ -130,12 +131,10 @@ class LazyEffectsTest {
 
             let will_throw = {} -> Exception.throw {error = "test"}
 
-            let suspended = will_throw {}
-
-            # Inner handler should catch the exception
+            # Inner handler should catch the exception performed in its body
             let handle = {} -> do
                 let inner_result = perform ExceptionToOption in do
-                    let _ = suspended
+                    will_throw {}
                     Some {val = 0}
                 inner_result
             handle {}
@@ -157,9 +156,7 @@ class LazyEffectsTest {
 
             let use_value = {x} -> x * 2
 
-            let div_result = safe_div {a = 6, b = 2}
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = use_value {x = div_result}}
+            let handle = {} -> perform ExceptionToResult in Ok {val = use_value {x = safe_div {a = 6, b = 2}}}
             handle {}
         """.trimIndent()
 
@@ -178,9 +175,7 @@ class LazyEffectsTest {
             let safe_div = {a, b} ->
                 if b == 0 then Exception.throw {error = "Div by zero"} else a / b
 
-            let div_result = safe_div {a = 10, b = 0}
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = {computed = div_result}}
+            let handle = {} -> perform ExceptionToResult in Ok {val = {computed = safe_div {a = 10, b = 0}}}
             handle {}
         """.trimIndent()
 
@@ -196,12 +191,10 @@ class LazyEffectsTest {
 
             let will_throw = {} -> Exception.throw {error = "nested fail"}
 
-            let suspended = will_throw {}
-
             let handle = {} -> perform ExceptionToResult in Ok {val = {
                 outer = {
                     inner = {
-                        value = suspended
+                        value = will_throw {}
                     }
                 }
             }}
@@ -225,9 +218,7 @@ class LazyEffectsTest {
             let safe_div = {a, b} ->
                 if b == 0 then Exception.throw {error = "Div by zero"} else a / b
 
-            let div_result = safe_div {a = 4, b = 0}
-
-            let handle = {} -> perform ExceptionToOption in Some {val = div_result}
+            let handle = {} -> perform ExceptionToOption in Some {val = safe_div {a = 4, b = 0}}
             handle {}
         """.trimIndent()
 
@@ -261,9 +252,7 @@ class LazyEffectsTest {
             let validate = {x} ->
                 if x < 0 then Exception.throw {error = "negative"} else x * 2
 
-            let validated = validate {x = 5}  # Will succeed
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = validated}
+            let handle = {} -> perform ExceptionToResult in Ok {val = validate {x = 5}}
             handle {}
         """.trimIndent()
 
@@ -286,11 +275,8 @@ class LazyEffectsTest {
             let safe_div = {a, b} ->
                 if b == 0 then Exception.throw {error = "Div by zero"} else a / b
 
-            let div_by_zero = safe_div {a = 4, b = 0}
-            let div_ok = safe_div {a = 10, b = 2}
-
             let use_condition = {flag} -> perform ExceptionToResult in
-                if flag then Ok {val = div_by_zero} else Ok {val = div_ok}
+                if flag then Ok {val = safe_div {a = 4, b = 0}} else Ok {val = safe_div {a = 10, b = 2}}
 
             let compute = {} -> do
                 let r1 = use_condition {flag = True}
@@ -319,10 +305,8 @@ class LazyEffectsTest {
             let may_fail = {x} ->
                 if x == 0 then Exception.throw {error = "zero"} else x
 
-            let suspended = may_fail {x = 0}
-
             let process = {opt} -> perform ExceptionToResult in match opt is
-                Some {val} -> Ok {val = val + suspended}
+                Some {val} -> Ok {val = val + may_fail {x = 0}}
                 None -> Ok {val = 0}
 
             process {opt = Some {val = 10}}
@@ -341,12 +325,9 @@ class LazyEffectsTest {
             let step1 = {x} -> if x < 0 then Exception.throw {error = "step1"} else x + 1
             let step2 = {x} -> if x > 100 then Exception.throw {error = "step2"} else x * 2
 
-            let s1 = step1 {x = 5}
-            let s2 = step2 {x = 50}
-
             let compute = {} -> perform ExceptionToResult in do
-                let a = s1
-                let b = s2
+                let a = step1 {x = 5}
+                let b = step2 {x = 50}
                 Ok {val = a + b}
             compute {}
         """.trimIndent()
@@ -363,12 +344,9 @@ class LazyEffectsTest {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
 
-            let s1 = Exception.throw {error = "first"}
-            let s2 = Exception.throw {error = "second"}
-
             let handle = {} -> perform ExceptionToResult in do
-                let a = s1
-                let b = s2
+                let a = Exception.throw {error = "first"}
+                let b = Exception.throw {error = "second"}
                 Ok {val = {a = a, b = b}}
             handle {}
         """.trimIndent()
@@ -392,9 +370,7 @@ class LazyEffectsTest {
             let will_fail = {} -> Exception.throw {error = "failed"}
             let use_value = {x} -> x + 1
 
-            let suspended = will_fail {}
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = use_value {x = suspended}}
+            let handle = {} -> perform ExceptionToResult in Ok {val = use_value {x = will_fail {}}}
             handle {}
         """.trimIndent()
 
@@ -412,9 +388,7 @@ class LazyEffectsTest {
 
             let get_suspended = {} -> create_suspended {}
 
-            let suspended = get_suspended {}
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = suspended}
+            let handle = {} -> perform ExceptionToResult in Ok {val = get_suspended {}}
             handle {}
         """.trimIndent()
 
@@ -430,9 +404,7 @@ class LazyEffectsTest {
 
             let will_fail = {} -> Exception.throw {error = "closure fail"}
 
-            let suspended = will_fail {}
-
-            let make_closure = {} -> {unused} -> suspended
+            let make_closure = {} -> {unused} -> will_fail {}
 
             let closure = make_closure {}
 
@@ -456,11 +428,9 @@ class LazyEffectsTest {
 
             let will_fail = {} -> Exception.throw {error = "test"}
 
-            let suspended = will_fail {}
-
             let compute = {} -> do
-                let with_result = perform ExceptionToResult in Ok {val = suspended}
-                let with_option = perform ExceptionToOption in Some {val = suspended}
+                let with_result = perform ExceptionToResult in Ok {val = will_fail {}}
+                let with_option = perform ExceptionToOption in Some {val = will_fail {}}
                 {as_result = with_result, as_option = with_option}
             compute {}
         """.trimIndent()
@@ -477,18 +447,20 @@ class LazyEffectsTest {
     }
 
     @Test
-    fun `test same suspended value forced multiple times`() {
-        // Each time a suspended value is read inside a handler, it's forced again
+    fun `test a deferred computation (thunk) forced under multiple handlers`() {
+        // New model: to share ONE deferred computation across handlers, make it a
+        // THUNK (a function). Each handler forces it with `ok_div {}` — the eager
+        // analogue of "the same suspended value forced multiple times".
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
 
             let safe_div = {a, b} ->
                 if b == 0 then Exception.throw {error = "Div by zero"} else a / b
 
-            let ok_div = safe_div {a = 10, b = 2}
+            let ok_div = {} -> safe_div {a = 10, b = 2}
 
-            let handle1 = {} -> perform ExceptionToResult in Ok {val = ok_div}
-            let handle2 = {} -> perform ExceptionToResult in Ok {val = ok_div}
+            let handle1 = {} -> perform ExceptionToResult in Ok {val = ok_div {}}
+            let handle2 = {} -> perform ExceptionToResult in Ok {val = ok_div {}}
 
             {first = handle1 {}, second = handle2 {}}
         """.trimIndent()
@@ -515,29 +487,31 @@ class LazyEffectsTest {
         val source = """
             use std::effects::log::{Log, Console, info}
 
-            let log_msg = Log.log {level = Info, msg = "suspended log"}
-
             let main = {} -> perform Console in do
                 info {msg = "before"}
-                let _ = log_msg
+                Log.log {level = Info, msg = "suspended log"}
                 info {msg = "after"}
                 {}
             main {}
         """.trimIndent()
 
         val result = evalWithOutput(source)
-        // The suspended log should be forced and printed
+        // The log performed inside the Console handler is printed, in order.
         assertTrue(result.output().contains("[INFO] before"))
         assertTrue(result.output().contains("[INFO] suspended log"))
         assertTrue(result.output().contains("[INFO] after"))
     }
 
     @Test
-    fun `test log effect not executed if not used`() {
+    fun `test an unused thunk's effect is not executed`() {
+        // New model: a deferred effect is a THUNK (a function). A thunk that is never
+        // called never runs its body — the eager analogue of "a suspended value that's
+        // never forced isn't executed". `unused_log` is defined but never called, so its
+        // Log never fires.
         val source = """
             use std::effects::log::{Log, Console, info}
 
-            let log_msg = Log.log {level = Info, msg = "should not appear"}
+            let unused_log = {} -> Log.log {level = Info, msg = "should not appear"}
 
             let main = {} -> perform Console in do
                 info {msg = "only this"}
@@ -561,15 +535,13 @@ class LazyEffectsTest {
 
             let will_fail = {} -> Exception.throw {error = "recursion fail"}
 
-            let suspended = will_fail {}
-
             let sum_to = {n, acc} ->
                 if n <= 0 then acc
                 else sum_to {n = n - 1, acc = acc + n}
 
             let handle = {} -> perform ExceptionToResult in do
                 let sum = sum_to {n = 5, acc = 0}
-                Ok {val = sum + suspended}
+                Ok {val = sum + will_fail {}}
             handle {}
         """.trimIndent()
 
@@ -591,12 +563,9 @@ class LazyEffectsTest {
                 else
                     name
 
-            let result1 = validate_name {name = ""}
-            let result2 = validate_name {name = "Alice"}
-
             let compute = {} -> do
-                let h1 = perform ExceptionToResult in Ok {val = result1}
-                let h2 = perform ExceptionToResult in Ok {val = result2}
+                let h1 = perform ExceptionToResult in Ok {val = validate_name {name = ""}}
+                let h2 = perform ExceptionToResult in Ok {val = validate_name {name = "Alice"}}
                 {r1 = h1, r2 = h2}
             compute {}
         """.trimIndent()
@@ -651,9 +620,7 @@ class LazyEffectsTest {
             let safe_div = {a, b} ->
                 if b == 0 then Exception.throw {error = "Div by zero"} else a / b
 
-            let res = safe_div {a = 10, b = 2}
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = res}
+            let handle = {} -> perform ExceptionToResult in Ok {val = safe_div {a = 10, b = 2}}
 
             let main = {} -> perform Console in
                 info {msg = "Result: $((handle {}).to_dbg {})"}
@@ -677,10 +644,8 @@ class LazyEffectsTest {
             let may_fail = {x} ->
                 if x == 0 then Exception.throw {error = "zero"} else {}
 
-            let suspended = may_fail {x = 5}  # Returns unit
-
             let handle = {} -> perform ExceptionToResult in do
-                let _ = suspended
+                may_fail {x = 5}   # returns unit, performs Exception (does not throw here)
                 Ok {val = "done"}
             handle {}
         """.trimIndent()
@@ -700,11 +665,7 @@ class LazyEffectsTest {
             let make_item = {x} ->
                 if x == 3 then Exception.throw {error = "bad item"} else x
 
-            let item1 = make_item {x = 1}
-            let item2 = make_item {x = 2}
-            let item3 = make_item {x = 3}
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = [item1, item2, item3]}
+            let handle = {} -> perform ExceptionToResult in Ok {val = [make_item {x = 1}, make_item {x = 2}, make_item {x = 3}]}
             handle {}
         """.trimIndent()
 
@@ -722,11 +683,8 @@ class LazyEffectsTest {
             let step1 = {} -> if False then Exception.throw {error = "no"} else 10
             let step2 = {} -> if False then Exception.throw {error = "no"} else 42
 
-            let s1 = step1 {}
-            let s2 = step2 {}
-
-            let handle1 = {} -> perform ExceptionToResult in Ok {val = s1}
-            let handle2 = {} -> perform ExceptionToResult in Ok {val = s2}
+            let handle1 = {} -> perform ExceptionToResult in Ok {val = step1 {}}
+            let handle2 = {} -> perform ExceptionToResult in Ok {val = step2 {}}
 
             {first = handle1 {}, second = handle2 {}}
         """.trimIndent()
@@ -752,11 +710,8 @@ class LazyEffectsTest {
             let step1 = {} -> Exception.throw {error = "step1 failed"}
             let step2 = {} -> if False then Exception.throw {error = "no"} else 42
 
-            let s1 = step1 {}
-            let s2 = step2 {}
-
-            let handle1 = {} -> perform ExceptionToResult in Ok {val = s1}
-            let handle2 = {} -> perform ExceptionToResult in Ok {val = s2}
+            let handle1 = {} -> perform ExceptionToResult in Ok {val = step1 {}}
+            let handle2 = {} -> perform ExceptionToResult in Ok {val = step2 {}}
 
             {first = handle1 {}, second = handle2 {}}
         """.trimIndent()
@@ -784,9 +739,7 @@ class LazyEffectsTest {
 
             let will_fail = {} -> Exception.throw {error = "propagated"}
 
-            let suspended = will_fail {}
-
-            let inner_fn = {} -> suspended
+            let inner_fn = {} -> will_fail {}
 
             let handle = {} -> perform ExceptionToResult in Ok {val = inner_fn {}}
             handle {}
@@ -804,9 +757,7 @@ class LazyEffectsTest {
 
             let will_fail = {} -> Exception.throw {error = "deep"}
 
-            let suspended = will_fail {}
-
-            let level3 = {} -> suspended
+            let level3 = {} -> will_fail {}
             let level2 = {} -> level3 {}
             let level1 = {} -> level2 {}
 
@@ -831,11 +782,9 @@ class LazyEffectsTest {
 
             let will_fail = {} -> Exception.throw {error = "failed"}
 
-            let suspended = will_fail {}
-
             let main = {} -> perform Console in do
                 info {msg = "before handle"}
-                let result = perform ExceptionToResult in Ok {val = suspended}
+                let result = perform ExceptionToResult in Ok {val = will_fail {}}
                 info {msg = "got result"}
                 result
             main {}
@@ -911,9 +860,7 @@ class LazyEffectsTest {
                 if age < 0 then Exception.throw {error = "invalid age"}
                 else {name = name, age = age}
 
-            let person = create_person {name = "Alice", age = 30}
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = person}
+            let handle = {} -> perform ExceptionToResult in Ok {val = create_person {name = "Alice", age = 30}}
             handle {}
         """.trimIndent()
 
@@ -939,9 +886,7 @@ class LazyEffectsTest {
                 else if code == 1 then Inactive
                 else Pending {reason = "unknown code"}
 
-            let status = get_status {code = 2}
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = status}
+            let handle = {} -> perform ExceptionToResult in Ok {val = get_status {code = 2}}
             handle {}
         """.trimIndent()
 
@@ -958,18 +903,21 @@ class LazyEffectsTest {
     // ========================================================================
 
     @Test
-    fun `test suspended value assigned to multiple variables`() {
+    fun `test a deferred computation (thunk) aliased across variables`() {
+        // New model: a deferred computation is a THUNK. Aliasing it across variables
+        // and forcing each (`alias1 {}` / `alias2 {}`) under a handler is the eager
+        // analogue of "one suspended value assigned to multiple variables".
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
 
             let will_fail = {} -> Exception.throw {error = "shared"}
 
-            let suspended = will_fail {}
-            let alias1 = suspended
-            let alias2 = suspended
+            let deferred = {} -> will_fail {}
+            let alias1 = deferred
+            let alias2 = deferred
 
-            let h1 = {} -> perform ExceptionToResult in Ok {val = alias1}
-            let h2 = {} -> perform ExceptionToResult in Ok {val = alias2}
+            let h1 = {} -> perform ExceptionToResult in Ok {val = alias1 {}}
+            let h2 = {} -> perform ExceptionToResult in Ok {val = alias2 {}}
 
             {r1 = h1 {}, r2 = h2 {}}
         """.trimIndent()
@@ -993,10 +941,7 @@ class LazyEffectsTest {
             let safe_div = {a, b} ->
                 if b == 0 then Exception.throw {error = "Div by zero"} else a / b
 
-            let d1 = safe_div {a = 10, b = 2}  # 5
-            let d2 = safe_div {a = 20, b = 4}  # 5
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = d1 + d2}
+            let handle = {} -> perform ExceptionToResult in Ok {val = safe_div {a = 10, b = 2} + safe_div {a = 20, b = 4}}
             handle {}
         """.trimIndent()
 
@@ -1016,9 +961,7 @@ class LazyEffectsTest {
             let get_name = {id} ->
                 if id == 0 then Exception.throw {error = "invalid id"} else "User$(id.to_dbg {})"
 
-            let name = get_name {id = 42}
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = "Hello, $(name)!"}
+            let handle = {} -> perform ExceptionToResult in Ok {val = "Hello, $(get_name {id = 42})!"}
 
             let main = {} -> perform Console in
                 info {msg = (handle {}).to_dbg {}}
@@ -1038,10 +981,10 @@ class LazyEffectsTest {
             let step1 = {x} -> if x < 0 then Exception.throw {error = "neg"} else x + 1
             let step2 = {x} -> if x > 10 then Exception.throw {error = "big"} else x * 2
 
-            let s1 = step1 {x = 3}  # 4
-            let s2 = step2 {x = s1}  # 8
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = s2}
+            let handle = {} -> perform ExceptionToResult in do
+                let s1 = step1 {x = 3}  # 4
+                let s2 = step2 {x = s1}  # 8
+                Ok {val = s2}
             handle {}
         """.trimIndent()
 
@@ -1060,10 +1003,10 @@ class LazyEffectsTest {
             let step1 = {x} -> if x < 0 then Exception.throw {error = "neg"} else x + 1
             let step2 = {x} -> if x > 3 then Exception.throw {error = "big"} else x * 2
 
-            let s1 = step1 {x = 5}  # 6 - will fail in step2
-            let s2 = step2 {x = s1}  # Should throw "big"
-
-            let handle = {} -> perform ExceptionToResult in Ok {val = s2}
+            let handle = {} -> perform ExceptionToResult in do
+                let s1 = step1 {x = 5}  # 6 - will fail in step2
+                let s2 = step2 {x = s1}  # Should throw "big"
+                Ok {val = s2}
             handle {}
         """.trimIndent()
 

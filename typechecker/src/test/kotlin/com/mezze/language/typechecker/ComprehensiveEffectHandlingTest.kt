@@ -269,9 +269,10 @@ class ComprehensiveEffectHandlingTest {
     // then performing handlers on the suspended value
 
     @Test
-    fun `test 3a - call effectful function creates suspended type`() {
-        // CRITICAL: This verifies function calls with effects produce SuspendType
-        assertTypeChecks(
+    fun `test 3a - call effectful function yields bare value, effect rides enclosing arrow`() {
+        // NEW MODEL: calling an effectful function yields a BARE value; the
+        // <FileSystem, Log> effect rides the enclosing function's arrow, not the value.
+        val result = parseAndTypeCheck(
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
@@ -283,11 +284,14 @@ class ComprehensiveEffectHandlingTest {
                 "Done"
 
             let called = myFunc {}
+            let getCalled = {} -> myFunc {}
             called
-            """.trimIndent(),
-            "called",
-            "Str <FileSystem, Log>"
+            """.trimIndent()
         )
+        // The bound value is bare Str — the effect is stripped off the value.
+        assertEquals("Str", prettyPrintType(getVariableType(result, "called")!!))
+        // Wrapping the same call in a function puts the effect on the arrow.
+        assertEquals("{} -> Str <FileSystem, Log>", prettyPrintType(getVariableType(result, "getCalled")!!))
     }
 
     @Test
@@ -327,8 +331,9 @@ class ComprehensiveEffectHandlingTest {
                 FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
                 "Done"
 
-            let called = myFunc {}
-            let partiallyHandled = perform Console in called
+            # NEW MODEL: the perform body must lexically perform the effect; a bare
+            # bound value performs nothing. Inline the call into the perform body.
+            let partiallyHandled = perform Console in (myFunc {})
             partiallyHandled
             """.trimIndent()
         )
@@ -488,8 +493,9 @@ class ComprehensiveEffectHandlingTest {
                 FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
                 "Done"
 
-            let called = myFunc {}
-            let step1 = perform Console in called
+            # NEW MODEL: inline the call so the perform body performs the effect
+            # (a bare bound value performs nothing).
+            let step1 = perform Console in (myFunc {})
             step1
             """.trimIndent()
         )
@@ -542,9 +548,10 @@ class ComprehensiveEffectHandlingTest {
     // ===== Category 5: Edge cases and expected behaviors =====
 
     @Test
-    fun `test 5a - calling effectful function without handling produces suspended type`() {
-        // This should typecheck - suspended values are valid
-        assertTypeChecks(
+    fun `test 5a - calling effectful function without handling yields bare value, effect on arrow`() {
+        // This should typecheck. NEW MODEL: the call yields a BARE value; the Log
+        // effect rides the enclosing arrow (see getResult), not the bound value.
+        val result = parseAndTypeCheck(
             """
             use std::effects::log::{Console, println}
 
@@ -553,16 +560,20 @@ class ComprehensiveEffectHandlingTest {
                 "Done"
 
             let result = myFunc {}
+            let getResult = {} -> myFunc {}
             result
-            """.trimIndent(),
-            "result",
-            "Str <Log>"
+            """.trimIndent()
         )
+        assertEquals("Str", prettyPrintType(getVariableType(result, "result")!!))
+        assertEquals("{} -> Str <Log>", prettyPrintType(getVariableType(result, "getResult")!!))
     }
 
     @Test
-    fun `test 5b - suspended value can be bound and returned`() {
-        assertTypeChecks(
+    fun `test 5b - effectful value can be bound and passed through then returned`() {
+        // The value can be bound to a var, passed through a function, and returned.
+        // NEW MODEL: the bound/returned value is BARE Str; the Log effect rides the
+        // enclosing arrow (getResult) when the call happens inside a function.
+        val result = parseAndTypeCheck(
             """
             use std::effects::log::{Console, println}
 
@@ -574,16 +585,21 @@ class ComprehensiveEffectHandlingTest {
 
             let suspended = myFunc {}
             let result = wrapSuspended { val = suspended }
+
+            let getResult = {} -> wrapSuspended { val = myFunc {} }
             result
-            """.trimIndent(),
-            "result",
-            "Str <Log>"
+            """.trimIndent()
         )
+        assertEquals("Str", prettyPrintType(getVariableType(result, "result")!!))
+        assertEquals("{} -> Str <Log>", prettyPrintType(getVariableType(result, "getResult")!!))
     }
 
     @Test
     fun `test 5c - bind effectful computation to variable preserves effects`() {
-        assertTypeChecks(
+        // NEW MODEL: binding the result through a chain of vars keeps the VALUE bare
+        // (Str); the Log effect is preserved on the enclosing arrow (getResult), which
+        // is where the effect lives once the call is inside a function body.
+        val result = parseAndTypeCheck(
             """
             use std::effects::log::{Console, println}
 
@@ -593,10 +609,15 @@ class ComprehensiveEffectHandlingTest {
 
             let suspended1 = myFunc {}
             let suspended2 = suspended1
+
+            let getResult = {} -> do
+                let s1 = myFunc {}
+                let s2 = s1
+                s2
             suspended2
-            """.trimIndent(),
-            "suspended2",
-            "Str <Log>"
+            """.trimIndent()
         )
+        assertEquals("Str", prettyPrintType(getVariableType(result, "suspended2")!!))
+        assertEquals("{} -> Str <Log>", prettyPrintType(getVariableType(result, "getResult")!!))
     }
 }

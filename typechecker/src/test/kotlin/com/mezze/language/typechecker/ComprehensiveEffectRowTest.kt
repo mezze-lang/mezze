@@ -21,13 +21,13 @@ class ComprehensiveEffectRowTest {
     }
 
     @Test
-    fun `test single effect call returns effectful computation type`() {
+    fun `test single effect call puts effect on the enclosing function arrow`() {
         val source = """
             effect Log where {
               info : {msg: Str} -> {} <Log>
             }
 
-            let program = Log.info {msg = "Hello"}
+            let program = {} -> Log.info {msg = "Hello"}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -36,11 +36,12 @@ class ComprehensiveEffectRowTest {
         val inferredType = result.getVariableType("program")
 
         assertNotNull(inferredType)
-        // Effect calls return SuspendType (value with unhandled effects), not FunctionType
-        assertTrue(inferredType is MezzeType.SuspendType)
-        val suspendedType = inferredType as MezzeType.SuspendType
-        assertEquals(setOf("Log"), suspendedType.effects.effects)
-        assertEquals(MezzeType.RecordType(emptyMap()), suspendedType.valueType) // {} return type
+        // NEW MODEL: effects live on function arrows. Wrapping the effect call in a
+        // function makes the Log effect ride the arrow; the return value is bare {}.
+        assertTrue(inferredType is MezzeType.FunctionType)
+        val fnType = inferredType as MezzeType.FunctionType
+        assertEquals(setOf("Log"), fnType.effects!!.effects)
+        assertEquals(MezzeType.RecordType(emptyMap()), fnType.returnType) // {} return type
     }
 
     @Test
@@ -50,7 +51,7 @@ class ComprehensiveEffectRowTest {
               info : {msg: Str} -> {} <Log>
             }
 
-            let program = do
+            let program = {} -> do
               Log.info {msg = "Hello"}
               42
         """.trimIndent()
@@ -61,11 +62,12 @@ class ComprehensiveEffectRowTest {
         val inferredType = result.getVariableType("program")
 
         assertNotNull(inferredType)
-        // Do blocks with effects return SuspendType (value with unhandled effects)
-        assertTrue(inferredType is MezzeType.SuspendType)
-        val suspendedType = inferredType as MezzeType.SuspendType
-        assertEquals(setOf("Log"), suspendedType.effects.effects)
-        assertEquals(MezzeType.IntType, suspendedType.valueType) // Int return type from 42
+        // NEW MODEL: the do block's Log effect propagates to the enclosing function
+        // arrow; the return value is bare Int.
+        assertTrue(inferredType is MezzeType.FunctionType)
+        val fnType = inferredType as MezzeType.FunctionType
+        assertEquals(setOf("Log"), fnType.effects!!.effects)
+        assertEquals(MezzeType.IntType, fnType.returnType) // Int return type from 42
     }
 
     @Test
@@ -79,7 +81,7 @@ class ComprehensiveEffectRowTest {
               print : {msg: Str} -> {} <Console>
             }
 
-            let program = do
+            let program = {} -> do
               Log.info {msg = "Starting"}
               Console.print {msg = "Processing"}
               Log.info {msg = "Done"}
@@ -92,11 +94,11 @@ class ComprehensiveEffectRowTest {
         val inferredType = result.getVariableType("program")
 
         assertNotNull(inferredType)
-        // Do blocks with effects return SuspendType
-        assertTrue(inferredType is MezzeType.SuspendType)
-        val suspendedType = inferredType as MezzeType.SuspendType
-        assertEquals(setOf("Log", "Console"), suspendedType.effects.effects)
-        assertEquals(MezzeType.StringType, suspendedType.valueType) // String return type from "completed"
+        // NEW MODEL: the do block's effects accumulate on the enclosing function arrow.
+        assertTrue(inferredType is MezzeType.FunctionType)
+        val fnType = inferredType as MezzeType.FunctionType
+        assertEquals(setOf("Log", "Console"), fnType.effects!!.effects)
+        assertEquals(MezzeType.StringType, fnType.returnType) // String return type from "completed"
     }
 
     @Test
@@ -110,7 +112,7 @@ class ComprehensiveEffectRowTest {
               throw : {msg: Str} -> 'a <Error>
             }
 
-            let nestedProgram = do
+            let nestedProgram = {} -> do
               let innerResult = do
                 Log.info {msg = "Inner"}
                 "inner result"
@@ -124,11 +126,11 @@ class ComprehensiveEffectRowTest {
         // Check nested program - should accumulate both Log and Error effects
         val nestedType = result.getVariableType("nestedProgram")
         assertNotNull(nestedType)
-        // Do blocks with effects return SuspendType
-        assertTrue(nestedType is MezzeType.SuspendType)
-        val suspendedType = nestedType as MezzeType.SuspendType
-        // The outer do block should accumulate effects from both the inner do block (Log) and its own effect call (Error)
-        assertEquals(setOf("Log", "Error"), suspendedType.effects.effects)
+        // NEW MODEL: nested do blocks' effects accumulate on the enclosing function arrow.
+        assertTrue(nestedType is MezzeType.FunctionType)
+        val fnType = nestedType as MezzeType.FunctionType
+        // The arrow should accumulate effects from both the inner do block (Log) and the outer effect call (Error)
+        assertEquals(setOf("Log", "Error"), fnType.effects!!.effects)
     }
 
     @Test
@@ -143,21 +145,21 @@ class ComprehensiveEffectRowTest {
               info : {msg: Str} -> {} = {msg} -> {}
             }
 
-            let program = do
+            let program = {} -> do
               Log.info {msg = "Hello"}
               42
 
-            let getResult = {} -> perform Logger in program
+            let getResult = {} -> perform Logger in (program {})
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check program has effectful type (SuspendType)
+        // NEW MODEL: program is a function whose arrow carries the Log effect.
         val programType = result.getVariableType("program")
-        assertTrue(programType is MezzeType.SuspendType)
-        val programSuspended = programType as MezzeType.SuspendType
-        assertEquals(setOf("Log"), programSuspended.effects.effects)
+        assertTrue(programType is MezzeType.FunctionType)
+        val programFn = programType as MezzeType.FunctionType
+        assertEquals(setOf("Log"), programFn.effects!!.effects)
 
         // Check getResult - after perform, all effects are handled
         // The function returns Int with <*> marker
@@ -284,20 +286,20 @@ class ComprehensiveEffectRowTest {
               info : {msg: Str} -> {} = {msg} -> {}
             }
 
-            let program = Log.info {msg = "Hello"}
+            let program = {} -> Log.info {msg = "Hello"}
 
-            let getResult1 = {} -> perform BasicLogger in program
-            let getResult2 = {} -> perform FileLogger in program
+            let getResult1 = {} -> perform BasicLogger in (program {})
+            let getResult2 = {} -> perform FileLogger in (program {})
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check program has Log effect (SuspendType)
+        // NEW MODEL: program is a function whose arrow carries the Log effect.
         val programType = result.getVariableType("program")
-        assertTrue(programType is MezzeType.SuspendType)
-        val programSuspended = programType as MezzeType.SuspendType
-        assertEquals(setOf("Log"), programSuspended.effects.effects)
+        assertTrue(programType is MezzeType.FunctionType)
+        val programFn = programType as MezzeType.FunctionType
+        assertEquals(setOf("Log"), programFn.effects!!.effects)
 
         // Both results should be functions returning {} with <*> marker
         // getResult1 should be {} -> {} <*>
@@ -386,7 +388,7 @@ class ComprehensiveEffectRowTest {
               info : {msg: Str} -> {} <Log>
             }
 
-            let mixedProgram = do
+            let mixedProgram = {} -> do
               let x = 5
               Log.info {msg = "x is 5"}
               let y = x * 2
@@ -398,10 +400,11 @@ class ComprehensiveEffectRowTest {
 
         val inferredType = result.getVariableType("mixedProgram")
 
-        // Do blocks with effects return SuspendType
-        assertTrue(inferredType is MezzeType.SuspendType)
-        val suspendedType = inferredType as MezzeType.SuspendType
-        assertEquals(setOf("Log"), suspendedType.effects.effects)
-        assertEquals(MezzeType.IntType, suspendedType.valueType)
+        // NEW MODEL: the mixed do block's Log effect rides the enclosing function arrow;
+        // the return value is bare Int.
+        assertTrue(inferredType is MezzeType.FunctionType)
+        val fnType = inferredType as MezzeType.FunctionType
+        assertEquals(setOf("Log"), fnType.effects!!.effects)
+        assertEquals(MezzeType.IntType, fnType.returnType)
     }
 }
