@@ -20,7 +20,7 @@ import kotlin.test.assertNotNull
  * `Int` / `Bool` / `Str`). Where a function wraps the effectful call, its arrow
  * still carries the effect (e.g. `{} -> Int <Log>`).
  */
-class SuspendTypeAbilityTest {
+class EffectfulCallAbilityTest {
 
     private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val parser = MezzeParser()
@@ -50,7 +50,7 @@ class SuspendTypeAbilityTest {
         }
     }
 
-    // ===== Numeric Abilities on SuspendType =====
+    // ===== Numeric Abilities on an effectful-call result =====
 
     @Test
     fun `test Int suspended type supports NumAdd`() {
@@ -204,7 +204,7 @@ class SuspendTypeAbilityTest {
         )
     }
 
-    // ===== String Abilities on SuspendType =====
+    // ===== String Abilities on an effectful-call result =====
 
     @Test
     fun `test String suspended type supports string interpolation`() {
@@ -256,7 +256,7 @@ class SuspendTypeAbilityTest {
         )
     }
 
-    // ===== Boolean Abilities on SuspendType =====
+    // ===== Boolean Abilities on an effectful-call result =====
 
     @Test
     fun `test Bool suspended type supports LogicalAnd`() {
@@ -306,7 +306,7 @@ class SuspendTypeAbilityTest {
         )
     }
 
-    // ===== Eq Ability on Various SuspendTypes =====
+    // ===== Eq Ability on various effectful-call results =====
 
     @Test
     fun `test Int suspended type supports Eq`() {
@@ -360,7 +360,7 @@ class SuspendTypeAbilityTest {
         )
     }
 
-    // ===== Ord Ability on SuspendTypes =====
+    // ===== Ord Ability on effectful-call results =====
 
     @Test
     fun `test Int suspended type supports Ord`() {

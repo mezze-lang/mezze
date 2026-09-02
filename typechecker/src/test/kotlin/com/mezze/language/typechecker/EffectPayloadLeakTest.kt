@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test
  * - Variant construction with payload (~line 2790)
  * - Member access on effectful receiver (~line 1029)
  */
-class SuspendTypeLeakTest {
+class EffectPayloadLeakTest {
     private lateinit var parser: MezzeParser
     private lateinit var typeChecker: TypeChecker
 

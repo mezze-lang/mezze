@@ -11,17 +11,18 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 /**
- * Tests for SuspendType handling in constraint solving.
+ * Tests for field/constructor access on the RESULT of an effectful call.
  *
- * SuspendType wraps a value type with unhandled effects. Constraint solving
- * operations (HasConstructor, HasField) need to properly unwrap SuspendType
- * to access the inner value type for validation.
+ * Effects live on function arrows, so an effectful call yields a BARE value —
+ * `getState {}` returns `{value: Int}`, with `<State>` on the enclosing arrow.
+ * Field access (HasField) and pattern matching (HasConstructor) therefore work
+ * directly on the bare record/variant — no unwrapping needed.
  *
  * These tests verify that:
- * 1. HasField correctly unwraps SuspendType to access record fields
- * 2. HasConstructor correctly unwraps SuspendType to access variant constructors
+ * 1. HasField reads a field of an effectful-call result (a bare record)
+ * 2. HasConstructor matches a constructor of an effectful-call result (a bare variant)
  */
-class SuspendTypeConstraintTest {
+class EffectfulReceiverConstraintTest {
     private lateinit var parser: MezzeParser
     private lateinit var typeChecker: TypeChecker
 
@@ -34,15 +35,15 @@ class SuspendTypeConstraintTest {
     }
 
     // =========================================================================
-    // HasField with SuspendType tests
+    // HasField on an effectful-call result (bare)
     // =========================================================================
 
     @Test
     fun `field access on effectful function result should work`() {
-        // This tests that HasField constraint properly unwraps SuspendType
+        // This tests that HasField constraint reads the bare effectful-call result
         // When we call an effectful function that returns a record, the result
-        // is SuspendType(RecordType, effects). Accessing a field should unwrap
-        // the SuspendType and check the field on the inner RecordType.
+        // is a bare record (the State effect rode the arrow). A field access reads
+        // the record directly.
         val source = """
             effect State where {
                 get: {} -> {value: Int} <State>
@@ -55,8 +56,8 @@ class SuspendTypeConstraintTest {
             let getState = {} -> State.get {}
 
             # Field access on effectful result
-            # getState {} returns Suspended<{value: Int}, <State>>
-            # Accessing .value should unwrap and return Suspended<Int, <State>>
+            # getState {} returns a bare {value: Int} (State on the arrow)
+            # Accessing .value returns a bare Int (State on the arrow)
             let getValue = {} -> do
                 let result = getState {}
                 result.value
@@ -81,7 +82,7 @@ class SuspendTypeConstraintTest {
     @Test
     fun `field access on conditional with effectful branch should work`() {
         // This tests the if-then-else case where one branch is effectful
-        // The result unifies to SuspendType, and field access should still work
+        // The result is a bare record; field access works directly
         val source = """
             effect State where {
                 get: {} -> {name: Str, age: Int} <State>
@@ -178,7 +179,7 @@ class SuspendTypeConstraintTest {
     }
 
     // =========================================================================
-    // HasConstructor with SuspendType tests (verifying existing fix)
+    // HasConstructor on an effectful-call result (bare)
     // =========================================================================
 
     @Test
@@ -215,7 +216,7 @@ class SuspendTypeConstraintTest {
 
     @Test
     fun `match on variant returned from effectful function should work`() {
-        // Pattern matching on an effectful result should properly unwrap SuspendType
+        // Pattern matching on an effectful-call result works on the bare value
         val source = """
             type Status = | Loading, Ready { data: Str }, Failed { error: Str } |
 
@@ -244,7 +245,7 @@ class SuspendTypeConstraintTest {
     }
 
     // =========================================================================
-    // Combined HasField and HasConstructor with SuspendType
+    // Combined HasField and HasConstructor on effectful-call results
     // =========================================================================
 
     @Test

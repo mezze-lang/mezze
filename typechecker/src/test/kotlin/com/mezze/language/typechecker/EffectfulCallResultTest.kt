@@ -10,12 +10,12 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * Tests for SuspendType - values with unhandled effects
+ * Tests for the RESULT of an effectful call.
  *
- * SuspendType represents a computed value that has unhandled effects,
- * distinct from FunctionType which represents a function that needs to be called.
+ * Effects live on function arrows: calling an effectful function yields a BARE
+ * value, and the effect rides the enclosing function's arrow (not the value).
  */
-class SuspendTypeTest {
+class EffectfulCallResultTest {
     private lateinit var parser: MezzeParser
     private lateinit var typeChecker: TypeChecker
 
@@ -99,7 +99,7 @@ class SuspendTypeTest {
         val getResultType = result.getVariableType("getResult")
 
         // Should be a FunctionType with performed marker (<*>)
-        // Note: Lambda unwraps SuspendType into the function's effect row
+        // Note: Lambda hoists the effect onto the function arrow
         assertTrue(getResultType is MezzeType.FunctionType, "Expected FunctionType but got ${getResultType!!::class.simpleName}")
         val fnType = getResultType as MezzeType.FunctionType
 
@@ -108,7 +108,7 @@ class SuspendTypeTest {
         assertTrue(fnType.effects!!.performed, "Should have performed marker")
         assertTrue(fnType.effects!!.effects.isEmpty(), "Should have no concrete effects")
 
-        // The return type should be Int (unwrapped from SuspendType)
+        // The return type should be Int (bare; the effect rode the arrow)
         assertTrue(fnType.returnType is MezzeType.IntType, "Expected IntType return but got ${fnType.returnType::class.simpleName}")
     }
 

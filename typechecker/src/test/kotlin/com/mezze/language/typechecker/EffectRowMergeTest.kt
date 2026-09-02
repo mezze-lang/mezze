@@ -11,12 +11,13 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 /**
- * Tests for effect merging when unifying SuspendType.
+ * Tests for effect merging across match/if branches — all branch effects union
+ * onto the enclosing function's arrow.
  *
  * When different branches of a match/if have different effects,
  * the overall type should include ALL effects from all branches.
  */
-class SuspendTypeEffectMergeTest {
+class EffectRowMergeTest {
     private lateinit var parser: MezzeParser
     private lateinit var typeChecker: TypeChecker
 
