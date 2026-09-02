@@ -304,13 +304,19 @@ internal fun ExpressionConstraintGenerator.extractEffectsFromType(type: MezzeTyp
         is MezzeType.FunctionType -> {
             val effectRow = type.effects
             if (effectRow != null) {
-                ExtractedEffects(effectRow.effects, effectRow.rowVar != null)
+                // #404: an effect carried purely as an INSTANCE (e.g. `Exception
+                // having 'error = Str` when the simple-name slot has been normalized
+                // away by `withEffectInstance`) lives in `effectInstances`, not
+                // `effects`. Reading only `effects` would launder such an effect out
+                // of the perform-body check. `allEffectNames` unions simple + instance
+                // names so an instanced effect is never invisible.
+                ExtractedEffects(effectRow.allEffectNames, effectRow.rowVar != null)
             } else {
                 ExtractedEffects(emptySet(), false)
             }
         }
         is MezzeType.SuspendType -> {
-            ExtractedEffects(type.effects.effects, type.effects.rowVar != null)
+            ExtractedEffects(type.effects.allEffectNames, type.effects.rowVar != null)
         }
         is MezzeType.VarType,
         is MezzeType.RecordType,
@@ -371,7 +377,8 @@ internal fun ExpressionConstraintGenerator.wrapCallResultWithEffects(
         effectRow.effectInstances.isNotEmpty() ||
         effectRow.rowVar != null
     val callType: MezzeType = if (hasUnhandled || effectRow.performed) {
-        MezzeType.SuspendType(valueType = valueType, effects = effectRow)
+        // #404: flatten nested SuspendType — see ExpressionConstraints copy.
+        MezzeType.SuspendType.of(valueType = valueType, effects = effectRow)
     } else {
         valueType
     }

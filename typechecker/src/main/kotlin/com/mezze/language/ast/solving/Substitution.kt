@@ -277,7 +277,11 @@ data class Substitution(
                 valueType = applyWithVisited(type.valueType, visitedVars, chainCache)
             )
 
-            is MezzeType.SuspendType -> MezzeType.SuspendType(
+            // #404: use the flattening factory. If `valueType` substitutes to a
+            // SuspendType (a var that resolved to an already-effectful callee return,
+            // e.g. `race`'s `Result 'a AsyncError <Async, ...>`), the two effect rows
+            // MERGE into one instead of nesting — a value type carries exactly one row.
+            is MezzeType.SuspendType -> MezzeType.SuspendType.of(
                 valueType = applyWithVisited(type.valueType, visitedVars, chainCache),
                 effects = applyToEffectRowWithVisited(type.effects, visitedVars, chainCache)
             )

@@ -507,7 +507,10 @@ class ExpressionConstraintGenerator {
             effectRow.effectInstances.isNotEmpty() ||
             effectRow.rowVar != null
         val callType: MezzeType = if (hasUnhandled || effectRow.performed) {
-            MezzeType.SuspendType(valueType = valueType, effects = effectRow)
+            // #404: flatten — a callee whose return is already suspended (e.g.
+            // `race : ... Result 'a AsyncError <Async, ...>`) must not gain a
+            // SECOND row from the call-site wrap; the rows merge into one.
+            MezzeType.SuspendType.of(valueType = valueType, effects = effectRow)
         } else {
             valueType
         }
