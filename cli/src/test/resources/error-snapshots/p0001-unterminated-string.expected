@@ -7,7 +7,7 @@ error[P0001]: Unterminated string
   = hint: add a closing `"` to terminate the string literal
 
 error: Expected an expression, but got end of file
-  --> p0001-unterminated-string.mz:3:1
+  --> p0001-unterminated-string.mz:2:1
   |
 1 | let main = {} -> "bye
   |                      ^ unexpected end of file
