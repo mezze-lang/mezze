@@ -146,74 +146,28 @@ object ChainCanonicalizer {
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
 
-    // ── Phase 3: effect-row safety gate ─────────────────────────────
+    // ── Phase 3/5: effect-row safety gate ─────────────────────────────
+    //
+    // Phase 3 (original): reject any chain whose lambdas contain unhandled
+    // PerformOpIR nodes. Conservative — prevents fusion of effectful chains.
+    //
+    // Phase 5 (current): allow effectful chains. The PerformD cached
+    // specialization (handler-chain-stable Assumption + DirectCallNode)
+    // makes effectful performs inside fused loops fast: handler resolved
+    // once and cached for the loop's duration. Performs dispatch through
+    // the existing handler chain unchanged during the loop.
+    //
+    // Still rejects: nothing — all FusedChainIR candidates pass. The
+    // correctness argument: fused loops call lambda bodies as separate
+    // functions (emitCallOneArg). PerformD inside those bodies dispatches
+    // via the per-thread handler chain, which is stable during the loop
+    // (no PushHandlerChain/PopHandlerChain in the fused loop driver).
+    // HandleIR inside a lambda is balanced (push+pop within one iteration).
+    // AbortPerformException propagates out identically to the unfused case.
 
+    @Suppress("UNUSED_PARAMETER")
     private fun isEffectSafe(chain: FusedChainIR, allFunctions: Map<Hash, FunctionIR>): Boolean {
-        for (stage in chain.stages) {
-            val lambda = when (stage) {
-                is StageIR.Map -> stage.f
-                is StageIR.Filter -> stage.p
-            }
-            if (lambdaPerformsEffect(lambda, allFunctions)) return false
-        }
-        when (val sink = chain.sink) {
-            is SinkIR.Fold -> if (lambdaPerformsEffect(sink.f, allFunctions)) return false
-            is SinkIR.ForEach -> if (lambdaPerformsEffect(sink.f, allFunctions)) return false
-            SinkIR.Sum -> { /* no lambda */ }
-        }
         return true
-    }
-
-    private fun lambdaPerformsEffect(lambda: MakeLambdaIR, allFunctions: Map<Hash, FunctionIR>): Boolean {
-        val fn = allFunctions[lambda.functionHash] ?: return true
-        return nodeContainsPerformOp(fn.body)
-    }
-
-    private fun nodeContainsPerformOp(node: NodeIR): Boolean = when (node) {
-        is PerformOpIR -> true
-        // HandleIR fully discharges its body's effects — don't recurse
-        // into handled bodies. Unhandled performs outside a HandleIR
-        // are caught by the PerformOpIR case above.
-        is HandleIR -> false
-        is CallDirectIR -> node.args.any { nodeContainsPerformOp(it) }
-        is CallNativeIR -> nodeContainsPerformOp(node.arg) || node.args.any { nodeContainsPerformOp(it) }
-        is CallIndirectIR -> nodeContainsPerformOp(node.function) || nodeContainsPerformOp(node.arg)
-        is CallIndirectScalarIR -> nodeContainsPerformOp(node.function) || node.args.any { nodeContainsPerformOp(it) }
-        is CallLocalIR -> nodeContainsPerformOp(node.arg)
-        is MakeRecordIR -> node.fields.any { nodeContainsPerformOp(it.value) }
-        is ReadFieldIR -> nodeContainsPerformOp(node.record)
-        is RecordUpdateIR -> nodeContainsPerformOp(node.record) || node.updates.any { nodeContainsPerformOp(it.value) }
-        is MakeVariantIR -> node.payload?.let { nodeContainsPerformOp(it) } ?: false
-        is MatchIR -> nodeContainsPerformOp(node.scrutinee) || node.cases.any {
-            nodeContainsPerformOp(it.body) || (it.guard?.let { g -> nodeContainsPerformOp(g) } ?: false)
-        }
-        is IfIR -> nodeContainsPerformOp(node.cond) || nodeContainsPerformOp(node.thenBr) || nodeContainsPerformOp(node.elseBr)
-        is BlockIR -> node.stmts.any { s ->
-            when (s) {
-                is StmtIR.Let -> nodeContainsPerformOp(s.value)
-                is StmtIR.Expr -> nodeContainsPerformOp(s.node)
-            }
-        } || nodeContainsPerformOp(node.result)
-        is WriteLocalIR -> nodeContainsPerformOp(node.value)
-        is InlineBinaryOpIR -> nodeContainsPerformOp(node.left) || nodeContainsPerformOp(node.right)
-        is InspectIR -> nodeContainsPerformOp(node.value)
-        is InterpolatedStringIR -> node.parts.any { p ->
-            when (p) {
-                is StringPartIR.Lit -> false
-                is StringPartIR.Expr -> nodeContainsPerformOp(p.node)
-            }
-        }
-        is MakeSeqIR -> node.elements.any { el ->
-            when (el) {
-                is SeqElementIR.Regular -> nodeContainsPerformOp(el.node)
-                is SeqElementIR.Spread -> nodeContainsPerformOp(el.node)
-            }
-        }
-        is SeqGetIR -> nodeContainsPerformOp(node.seq) || nodeContainsPerformOp(node.index)
-        is PartialApplyDirectIR -> node.partialFields.any { nodeContainsPerformOp(it.value) }
-        is DictMethodCallIR -> nodeContainsPerformOp(node.arg)
-        is SpecializedCallIR -> node.args.any { nodeContainsPerformOp(it) }
-        else -> false
     }
 
     /**

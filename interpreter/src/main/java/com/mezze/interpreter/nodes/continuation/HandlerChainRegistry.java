@@ -1,8 +1,10 @@
 package com.mezze.interpreter.nodes.continuation;
 
 import com.mezze.interpreter.values.MezzeRecord;
+import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.utilities.CyclicAssumption;
 
 import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicLong;
@@ -116,6 +118,19 @@ public final class HandlerChainRegistry {
     private static final ThreadLocal<java.util.ArrayDeque<HandlerChainEntry>>
         HANDLER_CHAIN = ThreadLocal.withInitial(java.util.ArrayDeque::new);
 
+    // Phase 5 — handler-chain-stable assumption.
+    // Invalidated on every push/pop so PerformD's cached specialization
+    // can detect when the handler set changes. CyclicAssumption supports
+    // multiple invalidation/re-acquire cycles across the compilation
+    // lifetime.
+    private static final CyclicAssumption HANDLER_CHAIN_STABLE =
+        new CyclicAssumption("handler-chain-stable");
+
+    @TruffleBoundary
+    public static Assumption getHandlerChainStableAssumption() {
+        return HANDLER_CHAIN_STABLE.getAssumption();
+    }
+
     /**
      * Push a handler with the content hash of the effect it implements.
      * The effect hash is required for correct dispatch when two effects in
@@ -125,10 +140,12 @@ public final class HandlerChainRegistry {
             com.mezze.interpreter.values.MezzeRecord handler,
             com.mezze.language.typedast.Hash effectHash) {
         HANDLER_CHAIN.get().push(new HandlerChainEntry(handler, effectHash));
+        HANDLER_CHAIN_STABLE.invalidate();
     }
 
     public static void popHandlerOffChain() {
         HANDLER_CHAIN.get().pop();
+        HANDLER_CHAIN_STABLE.invalidate();
     }
 
     /** Current depth of the per-thread handler chain. */

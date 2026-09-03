@@ -1801,25 +1801,101 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = Hash.class)
     @ConstantOperand(type = String.class)
     public static final class PerformD {
-        // #347 — per-site inline cache of the handler's fieldIndex for opName.
-        // Warm path: skip the HashMap probe in MezzeRecord.getField(String)
-        // and index directly. Shape-validated inside YieldDispatch by
-        // comparing the cached name at that slot to the incoming opName.
-        // Uncached path passes -1 which forces the string lookup.
+        // Phase 5 — cached fast-path: resolve handler + op field index
+        // ONCE, cache with a handler-chain-stable Assumption. When the
+        // assumption holds (no push/pop between calls — i.e. inside a
+        // fused loop whose lambdas don't install handlers), the JIT
+        // inlines through the op dispatch with zero ThreadLocal probes.
+        //
+        // On assumption invalidation (handler pushed/popped), this
+        // specialization deactivates. The DSL re-instantiates it on the
+        // next call with a fresh assumption from the CyclicAssumption,
+        // re-resolving the handler.
+        @Specialization(assumptions = "handlerStable",
+                        guards = {"cachedHandler != null", "cachedTarget != null"},
+                        excludeForUncached = true)
+        public static Object doCached(Hash effectHash, String opName, Object arg,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("resolveFieldIndex(cachedHandler, opName)") int cachedFieldIndex,
+                @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
+                @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
+                @Cached("getHandlerStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
+                @Cached("create(cachedTarget)") DirectCallNode callNode,
+                @Cached("getResumeFn()") MezzeFunction resumeFn,
+                @Cached("getAbortFn()") MezzeFunction abortFn) {
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry dispatchFiber =
+                com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.acquireDispatchOnly();
+            dispatchFiber.pushEffectHandles(resumeFn, abortFn);
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry prevDispatch =
+                dispatchFiber.enterDispatch();
+            try {
+                Object[] opArgs = new Object[cachedCV.length + 1];
+                System.arraycopy(cachedCV, 0, opArgs, 0, cachedCV.length);
+                opArgs[cachedCV.length] = arg;
+                return callNode.call(opArgs);
+            } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
+                if (com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.insideBdslHandle()) {
+                    throw abort;
+                }
+                throw new com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException(
+                    new com.mezze.interpreter.nodes.continuation.OpCall(opName, arg, effectHash));
+            } finally {
+                com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.exitDispatch(prevDispatch);
+                dispatchFiber.popEffectHandles();
+                com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.releaseDispatchOnly(dispatchFiber);
+            }
+        }
+
+        // Fallback — full chain dispatch through YieldDispatch (with
+        // @TruffleBoundary). Handles: no handler in scope, assumption
+        // invalidated, handler-shape mismatch.
         @Specialization
-        public static Object doPerformD(Hash effectHash, String opName, Object arg,
-                                        @Cached(value = "initFieldIndex()", allowUncached = true, dimensions = 1)
-                                        int[] fieldIndexBox) {
+        public static Object doGeneric(Hash effectHash, String opName, Object arg,
+                                       @Cached(value = "initFieldIndex()", allowUncached = true, dimensions = 1)
+                                       int[] fieldIndexBox) {
             return YieldDispatch.dispatch(effectHash, opName, arg, fieldIndexBox);
         }
 
-        // A 1-element mutable box so YieldDispatch can update the cached
-        // index after a successful uncached lookup (poor man's per-site cache
-        // — Truffle's @Cached wants a value, not a reference to write, so we
-        // use a heap-allocated box). Alloc cost is amortized: one per emit
-        // site, held for the lifetime of the bytecode root.
         static int[] initFieldIndex() {
             return new int[] { -1 };
+        }
+
+        @TruffleBoundary
+        static MezzeRecord resolveHandler(Hash effectHash) {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .peekHandlerForEffect(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getHandlerStableAssumption() {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getHandlerChainStableAssumption();
+        }
+
+        static int resolveFieldIndex(MezzeRecord handler, String opName) {
+            return handler.getFieldIndex(opName);
+        }
+
+        static CallTarget resolveCallTarget(MezzeRecord handler, int fieldIndex) {
+            if (fieldIndex < 0) return null;
+            Object val = handler.getField(fieldIndex);
+            if (val instanceof MezzeFunction fn) return fn.getCallTarget();
+            return null;
+        }
+
+        static Object[] resolveClosureValues(MezzeRecord handler, int fieldIndex) {
+            if (fieldIndex < 0) return new Object[0];
+            Object val = handler.getField(fieldIndex);
+            if (val instanceof MezzeFunction fn) return fn.getClosureValues();
+            return new Object[0];
+        }
+
+        static MezzeFunction getResumeFn() {
+            return YieldDispatch.fallThroughResumeFnPublic();
+        }
+
+        static MezzeFunction getAbortFn() {
+            return com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.makeAbortFunction();
         }
     }
 
