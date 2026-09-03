@@ -48,6 +48,10 @@ public final class MezzeIter implements TruffleObject {
         return new MezzeIter(new RangeIterNode(start, end, step));
     }
 
+    public static MezzeIter fromSeq(com.mezze.datastructures.seq.MezzeSeq<?> seq) {
+        return new MezzeIter(new SeqIterNode(seq));
+    }
+
     // ===== TRANSFORM (return new descriptors — no work done) =====
 
     /** Java-side map: wraps the fn as opaque; the runtime fold layer casts. */
@@ -58,6 +62,14 @@ public final class MezzeIter implements TruffleObject {
     /** Java-side filter: wraps the predicate as opaque. */
     public MezzeIter filter(Object p) {
         return new MezzeIter(new UnaryOpIterNode(UnaryOpIterNode.KIND_FILTER, descriptor, p));
+    }
+
+    public MezzeIter take(long n) {
+        return new MezzeIter(new TakeIterNode(descriptor, n));
+    }
+
+    public MezzeIter drop(long n) {
+        return new MezzeIter(new DropIterNode(descriptor, n));
     }
 
     // ===== JAVA-SIDE FOLD (fallback, not the hot path) =====
@@ -96,6 +108,27 @@ public final class MezzeIter implements TruffleObject {
                 }
             }
             return acc;
+        }
+        if (node instanceof SeqIterNode seqNode) {
+            B acc = init;
+            for (int idx = 0; idx < seqNode.size(); idx++) {
+                acc = fn.apply(acc, seqNode.get(idx));
+            }
+            return acc;
+        }
+        if (node instanceof TakeIterNode take) {
+            java.util.ArrayList<Object> buf = new java.util.ArrayList<>();
+            foldGeneric(take.src, buf, (b, x) -> { if (b.size() < take.n) b.add(x); return b; });
+            B acc = init;
+            for (Object x : buf) acc = fn.apply(acc, x);
+            return acc;
+        }
+        if (node instanceof DropIterNode drop) {
+            long[] counter = {0};
+            return foldGeneric(drop.src, init, (accB, x) -> {
+                if (counter[0] < drop.n) { counter[0]++; return accB; }
+                return fn.apply(accB, x);
+            });
         }
         if (node instanceof UnaryOpIterNode unary) {
             if (unary.isMap()) {
