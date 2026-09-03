@@ -1601,7 +1601,6 @@ public final class BytecodeCompiler {
         }
         if (node instanceof FusedChainIR chain) {
             // #446 Phase 4b — canonicalized iter chain from ChainCanonicalizer.
-            // Drive emitRangeFusedLoop directly from the structural form.
             // See emitCanonicalIterChain for the full policy.
             if (emitCanonicalIterChain(chain, b, argCount, localMap)) return;
             // Fail loud if the canonicalizer produced a shape the emitter
@@ -2509,9 +2508,8 @@ public final class BytecodeCompiler {
      * #446 Phase 4b — emit a canonicalized {@link FusedChainIR} directly.
      * The canonicalizer has already resolved (source × stages × sink) into
      * a structural form, so this bypasses the pattern-matching peel and
-     * drives {@link #emitRangeFusedLoop} (for range sources) or the
-     * general seq-fused indexed loop (for RawSeq sources) from the
-     * classified stages/sink.
+     * drives {@link #emitMultiStageFusedLoop} from the classified
+     * stages/sink.
      *
      * <p>Returns {@code true} when emission fired; {@code false} to fall
      * through to the throwing intercept, which surfaces canon/emit skew.
@@ -2795,108 +2793,6 @@ public final class BytecodeCompiler {
     }
 
     /**
-     * #437 — emit the shared range-fused Block/While loop body. Both
-     * {@link #tryEmitFusedFold} and the sum-sink path
-     * ({@link #tryEmitBuiltinSeqReducer}) delegate here so map/filter
-     * peel + range fusion share one code path.
-     *
-     * <p>Layout (semantics identical to the folder inline shape):
-     * <pre>
-     *   Block {
-     *     i    = Estart
-     *     end  = Eend
-     *     acc  = Einit
-     *     While (i < end) {
-     *       x = i
-     *       if (predOp(x, predRhsLit)) {              // if pred peeled
-     *         x = x <mapperOp> mapperRhsLit           // if map peeled
-     *         acc = acc <op> x
-     *       }
-     *       i = i + 1
-     *     }
-     *     acc
-     *   }
-     * </pre>
-     * Peel data-flow order: predicate always sees the raw range element;
-     * map runs after filter; fold step runs last on the mapped element.
-     *
-     * <p>Callers own the outer {@code beginBlock}/{@code endBlock} — this
-     * helper emits only the interior (stores, while, final load).
-     * @param initEmit — call it to emit the init value expression; use
-     *                   a lambda to invoke {@link #emitNode} on any NodeIR,
-     *                   or a direct {@code b.emitLoadLongConstant(0L)} for
-     *                   the sum case.
-     */
-    private void emitRangeFusedLoop(MezzeBytecodeRootNodeGen.Builder b,
-                                    int argCount,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal accSlot,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal iSlot,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
-                                    NodeIR rangeStart, NodeIR rangeEnd,
-                                    Runnable initEmit,
-                                    InlineOp op,
-                                    InlineOp mapperOp, long mapperRhsLit, NodeIR mapperRhsNode,
-                                    Hash mapperCallHash,
-                                    boolean mapperCallScalarABI,
-                                    String mapperCallFieldName,
-                                    FilterPeel filter) {
-        var endSlot = b.createLocal();
-        b.beginStoreLocal(iSlot);
-        emitNode(rangeStart, b, argCount, localMap);
-        b.endStoreLocal();
-        b.beginStoreLocal(endSlot);
-        emitNode(rangeEnd, b, argCount, localMap);
-        b.endStoreLocal();
-        b.beginStoreLocal(accSlot);
-        initEmit.run();
-        b.endStoreLocal();
-        b.beginWhile();
-          b.beginDirectLessThan();
-          b.emitLoadLocal(iSlot);
-          b.emitLoadLocal(endSlot);
-          b.endDirectLessThan();
-          b.beginBlock();
-            b.beginStoreLocal(xSlot);
-            b.emitLoadLocal(iSlot);
-            b.endStoreLocal();
-            if (filter != null) {
-                b.beginIfThen();
-                  emitPredicateCheck(b, xSlot, filter, argCount, localMap);
-                  b.beginBlock();
-                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
-                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                        argCount, localMap);
-                    b.beginStoreLocal(accSlot);
-                    emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                    b.endStoreLocal();
-                  b.endBlock();
-                b.endIfThen();
-            } else {
-                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
-                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                    argCount, localMap);
-                b.beginStoreLocal(accSlot);
-                emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                b.endStoreLocal();
-            }
-            b.beginStoreLocal(iSlot);
-            b.beginDirectAdd();
-            b.emitLoadLocal(iSlot);
-            b.emitLoadLongConstant(1L);
-            b.endDirectAdd();
-            b.endStoreLocal();
-          b.endBlock();
-        b.endWhile();
-        b.emitLoadLocal(accSlot);
-        if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
-            System.err.println("[fold-fuse] emitted range-fused loop for op=" + op
-                + " mapper=" + (mapperCallHash != null ? "CALL " + mapperCallHash.getHex().substring(0, 8) : mapperOp)
-                + " pred=" + describeFilter(filter));
-        }
-    }
-
-    /**
      * #442 Day 9 — emit the map step inside the range-fused loop body.
      * Three cases:
      *   - No mapper: emit nothing (fold step reads xSlot directly).
@@ -3103,30 +2999,6 @@ public final class BytecodeCompiler {
             case GE  -> { b.beginDirectGreaterThanOrEqual(); emitPreOp.run(); emitCmpRhs.run(); b.endDirectGreaterThanOrEqual(); }
             default -> throw new IllegalStateException("emitCompareInnerRhs: unsupported cmp " + cmpOp);
         }
-    }
-
-    /**
-     * Overload for the folder path — init is an arbitrary NodeIR.
-     */
-    private void emitRangeFusedLoop(MezzeBytecodeRootNodeGen.Builder b,
-                                    int argCount,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal accSlot,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal iSlot,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
-                                    NodeIR rangeStart, NodeIR rangeEnd, NodeIR initExpr,
-                                    InlineOp op,
-                                    InlineOp mapperOp, long mapperRhsLit, NodeIR mapperRhsNode,
-                                    Hash mapperCallHash,
-                                    boolean mapperCallScalarABI,
-                                    String mapperCallFieldName,
-                                    FilterPeel filter) {
-        emitRangeFusedLoop(b, argCount, localMap, accSlot, iSlot, xSlot,
-                rangeStart, rangeEnd,
-                () -> emitNode(initExpr, b, argCount, localMap),
-                op, mapperOp, mapperRhsLit, mapperRhsNode,
-                mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                filter);
     }
 
     /**
