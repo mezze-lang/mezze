@@ -55,8 +55,8 @@ pub let sum: { it: Iter Int } -> Int = { it } ->
 
 ## Execute `f` for each element, discarding results.
 pub let for_each
-  : { it: Iter 'a, f: { x: 'a } -> Unit <...> }
-  -> Unit <...>
+  : { it: Iter 'a, f: { x: 'a } -> {} <...> }
+  -> {} <...>
   = { it, f } -> __native_iter_for_each { it = it, f = f }
 
 ## Count elements satisfying `p`.
@@ -96,3 +96,25 @@ pub let to_seq: { it: Iter 'a } -> ['a] = { it } ->
 ## Materialize the iterator into a List.
 pub let to_list: { it: Iter 'a } -> List 'a = { it } ->
   __native_iter_to_list { it = it }
+
+## Inherent methods for dot-chain syntax on Iter values.
+impl Iter 'a where {
+  map = { it, f } -> map { it = it, f = f },
+  filter = { it, p } -> filter { it = it, p = p },
+  take = { it, n } -> take { it = it, n = n },
+  drop = { it, n } -> drop { it = it, n = n },
+  fold = { it, init, f } -> fold { it = it, init = init, f = f },
+  for_each = { it, f } -> for_each { it = it, f = f },
+  count = { it, p } -> count { it = it, p = p },
+  any = { it, p } -> any { it = it, p = p },
+  all = { it, p } -> all { it = it, p = p },
+  find = { it, p } -> find { it = it, p = p },
+  reduce = { it, f } -> reduce { it = it, f = f },
+  to_seq = { it } -> to_seq { it = it },
+  to_list = { it } -> to_list { it = it },
+}
+
+## Inherent methods on Iter Int only.
+impl Iter Int where {
+  sum = { it } -> sum { it = it },
+}

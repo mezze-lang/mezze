@@ -404,8 +404,8 @@ object MutEraser {
 
             is FusedChainIR -> {
                 // #446 — mirror of TrivialWrapperInliner.recurseChildren
-                // FusedChainIR case. Descend into source expression and
-                // sink init; stage/sink MakeLambdas are leaves.
+                // FusedChainIR case. Descend into source expression,
+                // sink init, and take/drop count exprs; stage/sink MakeLambdas are leaves.
                 val newSource: SourceIR = when (val s = node.source) {
                     is SourceIR.RangeSeq -> {
                         val nStart = f(s.start); val nEnd = f(s.end)
@@ -421,6 +421,14 @@ object MutEraser {
                         if (nE !== s.expr) SourceIR.Opaque(nE) else s
                     }
                 }
+                var stagesChanged = false
+                val newStages = node.stages.map { stage ->
+                    when (stage) {
+                        is StageIR.Map, is StageIR.Filter -> stage
+                        is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
+                        is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
+                    }
+                }
                 val newSink: SinkIR = when (val sk = node.sink) {
                     SinkIR.Sum -> sk
                     is SinkIR.Fold -> {
@@ -429,8 +437,8 @@ object MutEraser {
                     }
                     is SinkIR.ForEach -> sk
                 }
-                if (newSource !== node.source || newSink !== node.sink)
-                    node.copy(source = newSource, sink = newSink) else node
+                if (newSource !== node.source || newSink !== node.sink || stagesChanged)
+                    node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink) else node
             }
         }
 

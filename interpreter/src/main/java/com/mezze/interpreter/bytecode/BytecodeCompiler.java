@@ -2629,6 +2629,10 @@ public final class BytecodeCompiler {
                     predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
                     predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
                     /*innerXs=*/ null)));
+            } else if (stage instanceof StageIR.Take takeStage) {
+                classifiedStages.add(new ClassifiedStage.TakeStep(takeStage.getN()));
+            } else if (stage instanceof StageIR.Drop dropStage) {
+                classifiedStages.add(new ClassifiedStage.DropStep(dropStage.getN()));
             }
         }
         java.util.Collections.reverse(classifiedStages);
@@ -3093,6 +3097,8 @@ public final class BytecodeCompiler {
         record MapInline(InlineOp op, long rhsLit, NodeIR rhsNode) implements ClassifiedStage {}
         record MapCall(Hash callHash, boolean scalarABI, String fieldName) implements ClassifiedStage {}
         record FilterStep(FilterPeel peel) implements ClassifiedStage {}
+        record TakeStep(NodeIR n) implements ClassifiedStage {}
+        record DropStep(NodeIR n) implements ClassifiedStage {}
     }
 
     /**
@@ -3175,8 +3181,10 @@ public final class BytecodeCompiler {
             b.endStoreLocal();
 
             // Emit pipeline stages (source-to-sink order). Track how
-            // many filter IfThen blocks we opened so we can close them.
+            // many filter/take/drop IfThen blocks we opened so we can close them.
             int filterDepth = 0;
+            // Collect take counter slots that need post-sink increment.
+            var takeCounterPostIncrement = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
             for (var stage : stages) {
                 switch (stage) {
                     case ClassifiedStage.FilterStep fs -> {
@@ -3193,6 +3201,56 @@ public final class BytecodeCompiler {
                         emitMapperStep(b, xSlot, null, 0L, null,
                             mc.callHash(), mc.scalarABI(), mc.fieldName(),
                             argCount, localMap);
+                    }
+                    case ClassifiedStage.DropStep ds -> {
+                        // Drop: skip first n elements. Uses a counter that
+                        // increments every iteration. Guard: counter >= n.
+                        var ctr = b.createLocal();
+                        // Counter is initialized before the while loop — but we're
+                        // inside the loop body here. Use a pattern: load counter,
+                        // increment unconditionally, then guard on old value >= n.
+                        // Actually: we can't initialize here. Move init outside.
+                        // Simpler: use iSlot-based offset for range sources, or
+                        // for general case, treat Drop like Filter with a counter.
+                        //
+                        // Emit: counter++; if (counter > n) { <rest> }
+                        // But counter needs init to 0 before loop. We'll use a
+                        // local that starts at 0 (created before the while loop).
+                        // Problem: b.createLocal() is valid here but init must be
+                        // before the while. BDSL locals are zero-initialized by
+                        // default (long 0). So just increment and guard.
+
+                        // Increment: counter = counter + 1
+                        b.beginStoreLocal(ctr);
+                          b.beginDirectAdd();
+                            b.emitLoadLocal(ctr);
+                            b.emitLoadLongConstant(1L);
+                          b.endDirectAdd();
+                        b.endStoreLocal();
+                        // Guard: counter > n (i.e. counter - 1 >= n, means we've
+                        // seen more than n elements). Since we incremented first,
+                        // counter starts at 1 for the first element.
+                        b.beginIfThen();
+                          b.beginDirectLessThan();
+                            emitNode(ds.n(), b, argCount, localMap);
+                            b.emitLoadLocal(ctr);
+                          b.endDirectLessThan();
+                          b.beginBlock();
+                        filterDepth++;
+                    }
+                    case ClassifiedStage.TakeStep ts -> {
+                        // Take: pass only first n elements. Counter incremented
+                        // inside the guard (only counts passed elements).
+                        var ctr = b.createLocal();
+                        // Guard: counter < n
+                        b.beginIfThen();
+                          b.beginDirectLessThan();
+                            b.emitLoadLocal(ctr);
+                            emitNode(ts.n(), b, argCount, localMap);
+                          b.endDirectLessThan();
+                          b.beginBlock();
+                        filterDepth++;
+                        takeCounterPostIncrement.add(ctr);
                     }
                 }
             }
@@ -3216,7 +3274,17 @@ public final class BytecodeCompiler {
                 b.endStoreLocal();
             }
 
-            // Close filter IfThen blocks (innermost first).
+            // Increment take counters (inside their guard blocks).
+            for (var ctr : takeCounterPostIncrement) {
+                b.beginStoreLocal(ctr);
+                  b.beginDirectAdd();
+                    b.emitLoadLocal(ctr);
+                    b.emitLoadLongConstant(1L);
+                  b.endDirectAdd();
+                b.endStoreLocal();
+            }
+
+            // Close filter/take/drop IfThen blocks (innermost first).
             for (int j = 0; j < filterDepth; j++) {
                   b.endBlock();
                 b.endIfThen();

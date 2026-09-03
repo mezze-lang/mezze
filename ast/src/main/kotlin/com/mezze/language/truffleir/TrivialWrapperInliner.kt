@@ -701,11 +701,8 @@ object TrivialWrapperInliner {
 
             is FusedChainIR -> {
                 // #446 — descend into source expression, sink init, and
-                // each stage/sink MakeLambda placeholder. MakeLambdaIR
-                // itself is a leaf (its body lives in a separate
-                // FunctionIR the outer pass walks), so map/filter/fold's
-                // `f`/`p` lambdas don't need recursion here — same as
-                // the plain MakeLambdaIR case above.
+                // take/drop count exprs. MakeLambdaIR is a leaf (its body
+                // lives in a separate FunctionIR the outer pass walks).
                 val newSource: SourceIR = when (val s = node.source) {
                     is SourceIR.RangeSeq -> {
                         val nStart = f(s.start); val nEnd = f(s.end)
@@ -721,6 +718,14 @@ object TrivialWrapperInliner {
                         if (nE !== s.expr) SourceIR.Opaque(nE) else s
                     }
                 }
+                var stagesChanged = false
+                val newStages = node.stages.map { stage ->
+                    when (stage) {
+                        is StageIR.Map, is StageIR.Filter -> stage
+                        is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
+                        is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
+                    }
+                }
                 val newSink: SinkIR = when (val sk = node.sink) {
                     is SinkIR.Fold -> {
                         val nInit = f(sk.init)
@@ -729,8 +734,8 @@ object TrivialWrapperInliner {
                     is SinkIR.ForEach -> sk
                     SinkIR.Sum -> sk
                 }
-                if (newSource !== node.source || newSink !== node.sink)
-                    node.copy(source = newSource, sink = newSink) else node
+                if (newSource !== node.source || newSink !== node.sink || stagesChanged)
+                    node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink) else node
             }
         }
 

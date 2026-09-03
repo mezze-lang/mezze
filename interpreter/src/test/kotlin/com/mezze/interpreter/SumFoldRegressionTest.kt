@@ -118,4 +118,66 @@ class SumFoldRegressionTest {
         // 10 + 30 = 40 (25 filtered out)
         assertEquals(40L, eval(src))
     }
+
+    @Test
+    fun `iter take then fold — take first 5 from range`() {
+        val src = """
+            use std::collections::iter
+
+            let main = {} -> do
+              iter::range { start = 0, end = 100 }
+                .take {n = 5}
+                .fold {init = 0, f = {acc, x} -> acc + x}
+            main {}
+        """.trimIndent()
+        // take 5 from 0..99 → 0,1,2,3,4 → sum = 10
+        assertEquals(10L, eval(src))
+    }
+
+    @Test
+    fun `iter drop then fold — drop first 95 from range`() {
+        val src = """
+            use std::collections::iter
+
+            let main = {} -> do
+              iter::range { start = 0, end = 100 }
+                .drop {n = 95}
+                .fold {init = 0, f = {acc, x} -> acc + x}
+            main {}
+        """.trimIndent()
+        // drop 95 from 0..99 → 95,96,97,98,99 → sum = 485
+        assertEquals(485L, eval(src))
+    }
+
+    @Test
+    fun `iter take after map — take first 3 doubled values`() {
+        val src = """
+            use std::collections::iter
+
+            let main = {} -> do
+              iter::range { start = 1, end = 100 }
+                .map {f = {x} -> x * 2}
+                .take {n = 3}
+                .fold {init = 0, f = {acc, x} -> acc + x}
+            main {}
+        """.trimIndent()
+        // map: 2,4,6,8,... → take 3: 2,4,6 → sum = 12
+        assertEquals(12L, eval(src))
+    }
+
+    @Test
+    fun `iter drop after filter — drop first 2 even numbers`() {
+        val src = """
+            use std::collections::iter
+
+            let main = {} -> do
+              iter::range { start = 0, end = 20 }
+                .filter {p = {x} -> x % 2 == 0}
+                .drop {n = 2}
+                .fold {init = 0, f = {acc, x} -> acc + x}
+            main {}
+        """.trimIndent()
+        // evens: 0,2,4,6,8,10,12,14,16,18 → drop 2: 4,6,8,10,12,14,16,18 → sum = 88
+        assertEquals(88L, eval(src))
+    }
 }

@@ -232,6 +232,8 @@ object FunctionIRReachability {
                     when (stage) {
                         is com.mezze.language.truffleir.StageIR.Map -> queue.add(stage.f.functionHash)
                         is com.mezze.language.truffleir.StageIR.Filter -> queue.add(stage.p.functionHash)
+                        is com.mezze.language.truffleir.StageIR.Take -> collectHashesFromNode(stage.n, queue)
+                        is com.mezze.language.truffleir.StageIR.Drop -> collectHashesFromNode(stage.n, queue)
                     }
                 }
                 when (val sk = node.sink) {

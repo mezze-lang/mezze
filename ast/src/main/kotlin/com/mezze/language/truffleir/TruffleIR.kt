@@ -361,6 +361,8 @@ sealed interface SourceIR {
 sealed interface StageIR {
     @Serializable data class Map(val f: MakeLambdaIR) : StageIR
     @Serializable data class Filter(val p: MakeLambdaIR) : StageIR
+    @Serializable data class Take(val n: NodeIR) : StageIR
+    @Serializable data class Drop(val n: NodeIR) : StageIR
 }
 
 /** How elements are combined. */

@@ -445,6 +445,14 @@ object DeadLetEliminator {
                         if (nE !== s.expr) SourceIR.Opaque(nE) else s
                     }
                 }
+                var stagesChanged = false
+                val newStages = node.stages.map { stage ->
+                    when (stage) {
+                        is StageIR.Map, is StageIR.Filter -> stage
+                        is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
+                        is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
+                    }
+                }
                 val newSink: SinkIR = when (val sk = node.sink) {
                     SinkIR.Sum -> sk
                     is SinkIR.Fold -> {
@@ -453,8 +461,8 @@ object DeadLetEliminator {
                     }
                     is SinkIR.ForEach -> sk
                 }
-                if (newSource !== node.source || newSink !== node.sink)
-                    node.copy(source = newSource, sink = newSink) else node
+                if (newSource !== node.source || newSink !== node.sink || stagesChanged)
+                    node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink) else node
             }
         }
 

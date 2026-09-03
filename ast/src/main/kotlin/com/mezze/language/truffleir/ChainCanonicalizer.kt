@@ -184,11 +184,13 @@ object ChainCanonicalizer {
         ChainHofClassifier.HofKind.FOLD -> extractFold(call)
         ChainHofClassifier.HofKind.SUM -> extractSum(call)
         ChainHofClassifier.HofKind.FOR_EACH -> extractForEach(call)
-        // MAP/FILTER/FROM_SEQ aren't sinks — they're peel targets. If we
-        // land here we're processing the wrong callsite kind; refuse
+        // MAP/FILTER/TAKE/DROP/FROM_SEQ aren't sinks — they're peel targets.
+        // If we land here we're processing the wrong callsite kind; refuse
         // silently so the peel step handles it recursively.
         ChainHofClassifier.HofKind.MAP,
         ChainHofClassifier.HofKind.FILTER,
+        ChainHofClassifier.HofKind.TAKE,
+        ChainHofClassifier.HofKind.DROP,
         ChainHofClassifier.HofKind.FROM_SEQ -> null
     }
 
@@ -328,6 +330,18 @@ object ChainCanonicalizer {
                 current = filterPeeled.second
                 continue
             }
+            val takePeeled = tryPeelIterTake(current, classifier)
+            if (takePeeled != null) {
+                stages.add(StageIR.Take(takePeeled.first))
+                current = takePeeled.second
+                continue
+            }
+            val dropPeeled = tryPeelIterDrop(current, classifier)
+            if (dropPeeled != null) {
+                stages.add(StageIR.Drop(dropPeeled.first))
+                current = dropPeeled.second
+                continue
+            }
             val fromSeqPeeled = tryPeelIterFromSeq(current, classifier)
             if (fromSeqPeeled != null) {
                 // from_seq terminates the iter chain — the peeled inner is
@@ -436,6 +450,30 @@ object ChainCanonicalizer {
         val pLambda = pRaw as? MakeLambdaIR ?: return null
         // Captures OK; see comment above.
         return pLambda to srcInner
+    }
+
+    /** iter::take { it = <src>, n = <count> } — returns (nExpr, srcExpr). */
+    private fun tryPeelIterTake(
+        node: NodeIR,
+        classifier: ChainHofClassifier,
+    ): Pair<NodeIR, NodeIR>? {
+        if (node !is CallDirectIR) return null
+        val callee = classifier.lookup(node.targetHash) ?: return null
+        if (callee.kind != ChainHofClassifier.HofKind.TAKE) return null
+        val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = "n") ?: return null
+        return extracted.second to extracted.first
+    }
+
+    /** iter::drop { it = <src>, n = <count> } — returns (nExpr, srcExpr). */
+    private fun tryPeelIterDrop(
+        node: NodeIR,
+        classifier: ChainHofClassifier,
+    ): Pair<NodeIR, NodeIR>? {
+        if (node !is CallDirectIR) return null
+        val callee = classifier.lookup(node.targetHash) ?: return null
+        if (callee.kind != ChainHofClassifier.HofKind.DROP) return null
+        val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = "n") ?: return null
+        return extracted.second to extracted.first
     }
 
     /**
@@ -594,7 +632,7 @@ object ChainCanonicalizer {
             }
             is FusedChainIR -> {
                 // Inner canonicalization already done bottom-up; descend
-                // into source expression and sink init.
+                // into source expression, sink init, and take/drop count exprs.
                 val newSource: SourceIR = when (val s = node.source) {
                     is SourceIR.RangeSeq -> {
                         val nStart = f(s.start); val nEnd = f(s.end)
@@ -603,12 +641,21 @@ object ChainCanonicalizer {
                     is SourceIR.RawSeq -> { val nXs = f(s.xs); if (nXs !== s.xs) SourceIR.RawSeq(nXs) else s }
                     is SourceIR.Opaque -> { val nE = f(s.expr); if (nE !== s.expr) SourceIR.Opaque(nE) else s }
                 }
+                var stagesChanged = false
+                val newStages = node.stages.map { stage ->
+                    when (stage) {
+                        is StageIR.Map, is StageIR.Filter -> stage
+                        is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
+                        is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
+                    }
+                }
                 val newSink: SinkIR = when (val sk = node.sink) {
                     is SinkIR.Fold -> { val nInit = f(sk.init); if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk }
                     is SinkIR.ForEach -> sk
                     SinkIR.Sum -> sk
                 }
-                if (newSource !== node.source || newSink !== node.sink) node.copy(source = newSource, sink = newSink) else node
+                if (newSource !== node.source || newSink !== node.sink || stagesChanged)
+                    node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink) else node
             }
         }
 
@@ -636,7 +683,7 @@ internal class ChainHofClassifier private constructor(
     private val table: Map<Hash, Callee>,
 ) {
 
-    internal enum class HofKind { FOLD, SUM, FOR_EACH, MAP, FILTER, FROM_SEQ }
+    internal enum class HofKind { FOLD, SUM, FOR_EACH, MAP, FILTER, TAKE, DROP, FROM_SEQ }
     internal data class Callee(val kind: HofKind)
 
     fun isEmpty(): Boolean = table.isEmpty()
@@ -694,6 +741,14 @@ internal class ChainHofClassifier private constructor(
                         && (name == "filter" || name.isEmpty())
                         && (params[0] == "src" || params[0] == "it")
                         && params[1] == "p" -> HofKind.FILTER
+                    params.size in 2..3
+                        && (name == "take" || name.isEmpty())
+                        && (params[0] == "src" || params[0] == "it")
+                        && params[1] == "n" -> HofKind.TAKE
+                    params.size in 2..3
+                        && (name == "drop" || name.isEmpty())
+                        && (params[0] == "src" || params[0] == "it")
+                        && params[1] == "n" -> HofKind.DROP
                     params.size == 1
                         && (name == "from_seq" || name.isEmpty())
                         && params[0] == "xs" -> HofKind.FROM_SEQ
