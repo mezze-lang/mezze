@@ -1,4 +1,4 @@
-package com.mezze.language.lsp
+package com.mezze.language.langservice.completion
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test
 
 /**
  * Direct tests for the snippet-building helpers used by dot-completion
- * (`xs.|` → `xs.method { p1 = $1, p2 = $2 }`). These avoid the LSP
- * harness so the test runs without `stdlib.sqlite` on the classpath.
+ * (`xs.|` → `xs.method { p1 = $1, p2 = $2 }`). They call the CompletionEngine
+ * helpers directly (no LSP harness, no `stdlib.sqlite` on the classpath).
  *
  * Covers:
  *   - Plain field hint → `${idx:name}` placeholder.
@@ -25,29 +25,28 @@ import org.junit.jupiter.api.Test
  */
 class MethodSnippetTest {
 
-    private val service = MezzeTextDocumentService(MezzeLanguageServer())
     private val loc = Loc("test", 1, 1, 1, 1)
 
     @Test
     fun `buildMethodSnippet emits empty braces for no params`() {
-        val s = service.buildMethodSnippet("size", emptyList())
+        val s = CompletionEngine.buildMethodSnippet("size", emptyList())
         assertEquals("size {}", s)
     }
 
     @Test
     fun `buildMethodSnippet emits plain placeholders for non-callback hints`() {
-        val s = service.buildMethodSnippet(
+        val s = CompletionEngine.buildMethodSnippet(
             "add",
-            listOf(MezzeTextDocumentService.MethodParamHint.Plain("r"))
+            listOf(CompletionEngine.MethodParamHint.Plain("r"))
         )
         assertEquals("add {r = \${1:r}}", s)
     }
 
     @Test
     fun `buildMethodSnippet emits lambda skeleton for callback hints`() {
-        val s = service.buildMethodSnippet(
+        val s = CompletionEngine.buildMethodSnippet(
             "any",
-            listOf(MezzeTextDocumentService.MethodParamHint.Callback("p", listOf("x")))
+            listOf(CompletionEngine.MethodParamHint.Callback("p", listOf("x")))
         )
         // Selecting `any` should drop a real lambda skeleton with the
         // predicate's param name `x`.
@@ -73,20 +72,20 @@ class MethodSnippetTest {
             rowVar = null
         )
 
-        val hints = service.paramHintsFromMezzeType(record, stripIt = true)
+        val hints = CompletionEngine.paramHintsFromMezzeType(record, stripIt = true)
         // `it` stripped, leaves [acc, f]
         val byName = hints.associateBy { it.name }
         assertEquals(2, hints.size)
         assertTrue(
-            byName["acc"] is MezzeTextDocumentService.MethodParamHint.Plain,
+            byName["acc"] is CompletionEngine.MethodParamHint.Plain,
             "acc is a value param, must be Plain"
         )
         val fHint = byName["f"]
         assertTrue(
-            fHint is MezzeTextDocumentService.MethodParamHint.Callback,
+            fHint is CompletionEngine.MethodParamHint.Callback,
             "f is a function param, must be Callback"
         )
-        val cb = fHint as MezzeTextDocumentService.MethodParamHint.Callback
+        val cb = fHint as CompletionEngine.MethodParamHint.Callback
         assertEquals(
             listOf("acc", "x"), cb.callbackParams,
             "callbackParams should mirror the inner record's field names"
@@ -117,26 +116,26 @@ class MethodSnippetTest {
             loc = loc
         )
 
-        val hints = service.paramHintsFromAnnotation(ann, stripIt = true)
+        val hints = CompletionEngine.paramHintsFromAnnotation(ann, stripIt = true)
         assertEquals(1, hints.size)
         val p = hints.first()
         assertTrue(
-            p is MezzeTextDocumentService.MethodParamHint.Callback,
+            p is CompletionEngine.MethodParamHint.Callback,
             "predicate `p: { x: 'a } -> Bool` must be Callback"
         )
         assertEquals("p", p.name)
-        assertEquals(listOf("x"), (p as MezzeTextDocumentService.MethodParamHint.Callback).callbackParams)
+        assertEquals(listOf("x"), (p as CompletionEngine.MethodParamHint.Callback).callbackParams)
     }
 
     @Test
     fun `buildMethodSnippet rendering matches expected for a Seq fold like signature`() {
         // Combining the helpers end-to-end: `xs.fold` should produce
         //   fold {acc = ${1:acc}, f = ${2:{acc, x} -> $0}}
-        val s = service.buildMethodSnippet(
+        val s = CompletionEngine.buildMethodSnippet(
             "fold",
             listOf(
-                MezzeTextDocumentService.MethodParamHint.Plain("acc"),
-                MezzeTextDocumentService.MethodParamHint.Callback("f", listOf("acc", "x"))
+                CompletionEngine.MethodParamHint.Plain("acc"),
+                CompletionEngine.MethodParamHint.Callback("f", listOf("acc", "x"))
             )
         )
         assertEquals("fold {acc = \${1:acc}, f = \${2:{acc, x} -> \$0}}", s)

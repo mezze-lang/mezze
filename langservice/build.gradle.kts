@@ -16,7 +16,8 @@ plugins {
 dependencies {
     implementation(project(":ast"))         // MezzeType, parsedast (Loc/ErrorCode/FixHint), TypePrinter
     implementation(project(":parser"))       // ParseException
-    implementation(project(":typechecker"))  // TypeCheckResult/Error, TypedAst, ModuleError
+    implementation(project(":typechecker"))  // TypeCheckResult/Error, TypedAst, ModuleError, unify, TypeAnnotationConverter
+    implementation(project(":store"))        // MezzeStore — completion import-path + auto-import decls
 
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
