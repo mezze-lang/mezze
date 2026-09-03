@@ -2547,13 +2547,11 @@ public final class BytecodeCompiler {
             com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
         boolean dbg = System.getenv("MEZZE_CHAIN_CANON_EMIT_DEBUG") != null;
 
-        // Only Fold sink is emittable today. ForEach needs a bool-returning
-        // step and no accSlot; wire it in Phase 4c.
-        // Classify the sink: Fold {init, folder} needs body classification;
-        // Sum is the canonical shorthand for Fold(0, {acc,x} -> acc+x).
-        InlineOp op;
-        NodeIR initExpr;
-        boolean isSumSink;
+        // Classify the sink: Fold needs body classification; Sum is
+        // Fold(0, +); ForEach calls a body function with no accumulator.
+        InlineOp op = null;
+        NodeIR initExpr = null;
+        boolean isSumSink = false;
         if (chain.getSink() instanceof SinkIR.Fold foldSink) {
             isSumSink = false;
             initExpr = foldSink.getInit();
@@ -2590,42 +2588,28 @@ public final class BytecodeCompiler {
             isSumSink = true;
             op = InlineOp.ADD;
             initExpr = new LongLitIR(0L, chain.getSrc());
+        } else if (chain.getSink() instanceof SinkIR.ForEach) {
+            // ForEach: no fold op, no init — handled below in the loop emit.
         } else {
-            if (dbg) System.err.println("[chain-canon-emit] reject: sink not Fold/Sum: " + chain.getSink().getClass().getSimpleName());
+            if (dbg) System.err.println("[chain-canon-emit] reject: sink not Fold/Sum/ForEach: " + chain.getSink().getClass().getSimpleName());
             return false;
         }
 
-        // Stages → single mapper + single filter (MVP). Multi-stage
-        // composition falls through until Phase 4c gives each stage its
-        // own emit slot in the loop body.
-        InlineOp mapperOp = null;
-        long mapperRhsLit = 0L;
-        NodeIR mapperRhsNode = null; // #515 captured RHS lifted to outer frame
-        Hash mapperCallHash = null;
-        boolean mapperCallScalarABI = false;
-        String mapperCallFieldName = null;
-        FilterPeel filterPeel = null;
-
-        int mapCount = 0, filterCount = 0;
+        // Phase 4c: classify ALL stages into a pipeline list. Stages
+        // arrive outer-to-inner (sink-first); we reverse for emission
+        // (source-first: apply innermost transform/filter first).
+        var classifiedStages = new java.util.ArrayList<ClassifiedStage>();
         for (var stage : chain.getStages()) {
             if (stage instanceof StageIR.Map mapStage) {
-                mapCount++;
-                if (mapCount > 1) {
-                    if (dbg) System.err.println("[chain-canon-emit] reject: multi-map stages (MVP)");
-                    return false;
-                }
                 var shape = classifyUnaryLiteralLambda(mapStage.getF(), language);
                 if (shape == null) {
                     if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable map lambda");
                     return false;
                 }
                 if (shape.callHash != null) {
-                    mapperCallHash = shape.callHash;
-                    mapperCallScalarABI = shape.callScalarABI;
-                    mapperCallFieldName = shape.callFieldName;
+                    classifiedStages.add(new ClassifiedStage.MapCall(
+                        shape.callHash, shape.callScalarABI, shape.callFieldName));
                 } else {
-                    // Restrict to arith ops — comparisons produce bool, not fusable
-                    // as a mapper (arith-op only).
                     switch (shape.op) {
                         case ADD, SUB, MUL, DIV, MOD -> {}
                         default -> {
@@ -2633,28 +2617,26 @@ public final class BytecodeCompiler {
                             return false;
                         }
                     }
-                    mapperOp = shape.op;
-                    mapperRhsLit = shape.rhsLit;
-                    mapperRhsNode = shape.rhsNode;
+                    classifiedStages.add(new ClassifiedStage.MapInline(
+                        shape.op, shape.rhsLit, shape.rhsNode));
                 }
             } else if (stage instanceof StageIR.Filter filterStage) {
-                filterCount++;
-                if (filterCount > 1) {
-                    if (dbg) System.err.println("[chain-canon-emit] reject: multi-filter stages (MVP)");
-                    return false;
-                }
                 var predShape = classifyUnaryPredicateLambda(filterStage.getP(), language);
                 if (predShape == null) {
                     if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable filter lambda");
                     return false;
                 }
-                filterPeel = new FilterPeel(
+                classifiedStages.add(new ClassifiedStage.FilterStep(new FilterPeel(
                     predShape.preOp, predShape.preRhs, predShape.preRhsNode,
                     predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
                     predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
-                    /*innerXs=*/ null /* unused for canon path */);
+                    /*innerXs=*/ null)));
             }
         }
+        java.util.Collections.reverse(classifiedStages);
+        // For the fast-path checks below, extract the legacy single-stage
+        // shape when exactly 0 or 1 stages of each kind are present.
+        boolean hasStages = !classifiedStages.isEmpty();
 
         // Source classification.
         NodeIR rangeStart = null, rangeEnd = null;
@@ -2665,28 +2647,19 @@ public final class BytecodeCompiler {
         } else if (chain.getSource() instanceof SourceIR.RawSeq rawSrc) {
             rawXsExpr = rawSrc.getXs();
         } else if (chain.getSource() instanceof SourceIR.Opaque opaqueSrc && isSumSink
-                && mapperOp == null && mapperCallHash == null && filterPeel == null) {
-            // Sum sink over an unclassified seq expression with no stages —
-            // emit BuiltinSumLongSeq directly. This is the shape that
-            // seq::sum {xs=<ReadLocal>} produces after canon rewrites the
-            // desugared __native_seq_sum call.
+                && !hasStages) {
             b.beginBuiltinSumLongSeq();
               emitNode(opaqueSrc.getExpr(), b, argCount, localMap);
             b.endBuiltinSumLongSeq();
             if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (Opaque+Sum)");
             return true;
         } else {
-            // Opaque with stages, or ForEach — we don't have a materialized
-            // seq to index over. Refuse; canonicalizer emitted this in
-            // error or emitter needs a new shape.
             if (dbg) System.err.println("[chain-canon-emit] reject: unhandled source/sink combo");
             return false;
         }
 
-        // #427 fast path — ADD folder over an inline range with NO map or
-        // filter collapses to a single BuiltinSumRangeLong op.
-        if (rangeStart != null && op == InlineOp.ADD
-                && mapperOp == null && mapperCallHash == null && filterPeel == null) {
+        // #427 fast path — ADD folder over an inline range with NO stages.
+        if (rangeStart != null && op == InlineOp.ADD && !hasStages) {
             b.beginBuiltinSumRangeLong();
               emitNode(rangeStart, b, argCount, localMap);
               emitNode(rangeEnd,   b, argCount, localMap);
@@ -2697,8 +2670,7 @@ public final class BytecodeCompiler {
         }
 
         // Sum sink over a RawSeq with no stages — BuiltinSumLongSeq fast path.
-        if (rawXsExpr != null && isSumSink
-                && mapperOp == null && mapperCallHash == null && filterPeel == null) {
+        if (rawXsExpr != null && isSumSink && !hasStages) {
             b.beginBuiltinSumLongSeq();
               emitNode(rawXsExpr, b, argCount, localMap);
             b.endBuiltinSumLongSeq();
@@ -2706,86 +2678,75 @@ public final class BytecodeCompiler {
             return true;
         }
 
+        // Phase 4c: emit the loop body using the classified stages list.
+        // For ForEach sink there's no accumulator; for Fold/Sum there is.
+        boolean isForEach = chain.getSink() instanceof SinkIR.ForEach;
+        com.oracle.truffle.api.CallTarget forEachTarget = null;
+        boolean forEachScalarABI = false;
+        String forEachFieldName = null;
+        if (isForEach) {
+            var forEachSink = (SinkIR.ForEach) chain.getSink();
+            var forEachShape = classifyUnaryLiteralLambda(forEachSink.getF(), language);
+            if (forEachShape != null && forEachShape.callHash != null) {
+                forEachTarget = resolveCallTarget(forEachShape.callHash);
+                if (forEachTarget == null && language != null) {
+                    forEachTarget = language.getOrMintUserStub(
+                        forEachShape.callHash, "for_each_inner");
+                }
+                if (forEachTarget != null) {
+                    forEachScalarABI = forEachShape.callScalarABI;
+                    forEachFieldName = forEachShape.callFieldName;
+                }
+            }
+            if (forEachTarget == null) {
+                // ForEach body must be a classifiable call. If we can't
+                // classify it, look it up by the lambda's function hash.
+                var feLambda = forEachSink.getF();
+                if (feLambda.getCaptures().isEmpty()) {
+                    forEachTarget = resolveCallTarget(feLambda.getFunctionHash());
+                    if (forEachTarget == null && language != null) {
+                        forEachTarget = language.getOrMintUserStub(
+                            feLambda.getFunctionHash(), "for_each_body");
+                    }
+                }
+                if (forEachTarget == null) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: ForEach body not callable");
+                    return false;
+                }
+                var feIR = language.lookupFunctionIR(feLambda.getFunctionHash());
+                if (feIR != null && feIR.getParamSlots().size() == 1) {
+                    forEachScalarABI = true;
+                    forEachFieldName = null;
+                }
+            }
+        }
+
         b.beginBlock();
-        var accSlot = b.createLocal();
         var iSlot   = b.createLocal();
         var xSlot   = b.createLocal();
+        var accSlot = isForEach ? null : b.createLocal();
 
         if (rangeStart != null) {
-            emitRangeFusedLoop(b, argCount, localMap,
+            emitMultiStageFusedLoop(b, argCount, localMap,
                     accSlot, iSlot, xSlot,
                     rangeStart, rangeEnd, initExpr,
-                    op, mapperOp, mapperRhsLit, mapperRhsNode,
-                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                    filterPeel);
+                    op, classifiedStages, isForEach,
+                    forEachTarget, forEachScalarABI, forEachFieldName,
+                    /*isRange=*/ true, /*rawXsExpr=*/ null);
             b.endBlock();
-            if (dbg) System.err.println("[chain-canon-emit] emitted range-fused loop");
+            if (dbg) System.err.println("[chain-canon-emit] emitted range-fused loop (" + classifiedStages.size() + " stages)");
             return true;
         }
 
-        // RawSeq source — general SeqSize/SeqGet indexed loop with the
-        // classified stages inside. The pre-canon path had no in-loop
-        // filter/map for the seq case; we emit them here so canon covers
-        // fold(map(filter(seq, p), f), init, g) on a materialized seq too.
-        var seqSlot  = b.createLocal();
-        var sizeSlot = b.createLocal();
-        b.beginStoreLocal(seqSlot);
-        emitNode(rawXsExpr, b, argCount, localMap);
-        b.endStoreLocal();
-        b.beginStoreLocal(sizeSlot);
-        b.beginSeqSize();
-        b.emitLoadLocal(seqSlot);
-        b.endSeqSize();
-        b.endStoreLocal();
-        b.beginStoreLocal(iSlot);
-        b.emitLoadLongConstant(0L);
-        b.endStoreLocal();
-        b.beginStoreLocal(accSlot);
-        emitNode(initExpr, b, argCount, localMap);
-        b.endStoreLocal();
-        b.beginWhile();
-          b.beginDirectLessThan();
-          b.emitLoadLocal(iSlot);
-          b.emitLoadLocal(sizeSlot);
-          b.endDirectLessThan();
-          b.beginBlock();
-            b.beginStoreLocal(xSlot);
-            b.beginSeqGet();
-            b.emitLoadLocal(seqSlot);
-            b.emitLoadLocal(iSlot);
-            b.endSeqGet();
-            b.endStoreLocal();
-            if (filterPeel != null) {
-                b.beginIfThen();
-                  emitPredicateCheck(b, xSlot, filterPeel, argCount, localMap);
-                  b.beginBlock();
-                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
-                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                        argCount, localMap);
-                    b.beginStoreLocal(accSlot);
-                    emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                    b.endStoreLocal();
-                  b.endBlock();
-                b.endIfThen();
-            } else {
-                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
-                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                    argCount, localMap);
-                b.beginStoreLocal(accSlot);
-                emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                b.endStoreLocal();
-            }
-            b.beginStoreLocal(iSlot);
-            b.beginDirectAdd();
-            b.emitLoadLocal(iSlot);
-            b.emitLoadLongConstant(1L);
-            b.endDirectAdd();
-            b.endStoreLocal();
-          b.endBlock();
-        b.endWhile();
-        b.emitLoadLocal(accSlot);
+        // RawSeq source — SeqSize/SeqGet indexed loop.
+        emitMultiStageFusedLoop(b, argCount, localMap,
+                accSlot, iSlot, xSlot,
+                null, null, initExpr,
+                op, classifiedStages, isForEach,
+                forEachTarget, forEachScalarABI, forEachFieldName,
+                /*isRange=*/ false, rawXsExpr);
         b.endBlock();
-        if (dbg) System.err.println("[chain-canon-emit] emitted seq-fused loop");
+        if (dbg) System.err.println("[chain-canon-emit] emitted seq-fused loop (" + classifiedStages.size() + " stages)");
         return true;
     }
 
@@ -3251,6 +3212,159 @@ public final class BytecodeCompiler {
                               InlineOp cmpOp, long cmpRhs, NodeIR cmpRhsNode,
                               Hash callHash, boolean callScalarABI, String callFieldName,
                               NodeIR innerXs) {}
+
+    /**
+     * Phase 4c — classified pipeline stage, either a map transform or a
+     * filter predicate. Built from the canonicalizer's StageIR list.
+     */
+    private sealed interface ClassifiedStage {
+        record MapInline(InlineOp op, long rhsLit, NodeIR rhsNode) implements ClassifiedStage {}
+        record MapCall(Hash callHash, boolean scalarABI, String fieldName) implements ClassifiedStage {}
+        record FilterStep(FilterPeel peel) implements ClassifiedStage {}
+    }
+
+    /**
+     * Phase 4c — emit a fused loop body with an arbitrary list of
+     * classified stages (filters and maps in source-to-sink order).
+     *
+     * <p>Filters nest as {@code beginIfThen} blocks: each filter wraps
+     * everything that follows (subsequent stages + the sink step).
+     * Maps apply sequentially: {@code xSlot = transform(xSlot)}.
+     *
+     * <p>For Fold/Sum sinks, the innermost step is
+     * {@code acc = acc <op> x}. For ForEach sinks, the innermost step
+     * calls the body function and the loop produces Unit.
+     */
+    private void emitMultiStageFusedLoop(
+            MezzeBytecodeRootNodeGen.Builder b,
+            int argCount,
+            com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap,
+            com.oracle.truffle.api.bytecode.BytecodeLocal accSlot,
+            com.oracle.truffle.api.bytecode.BytecodeLocal iSlot,
+            com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+            NodeIR rangeStart, NodeIR rangeEnd, NodeIR initExpr,
+            InlineOp foldOp,
+            java.util.List<ClassifiedStage> stages,
+            boolean isForEach,
+            com.oracle.truffle.api.CallTarget forEachTarget,
+            boolean forEachScalarABI,
+            String forEachFieldName,
+            boolean isRange,
+            NodeIR rawXsExpr) {
+
+        com.oracle.truffle.api.bytecode.BytecodeLocal endSlot = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal seqSlot = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal sizeSlot = null;
+
+        if (isRange) {
+            endSlot = b.createLocal();
+            b.beginStoreLocal(iSlot);
+            emitNode(rangeStart, b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginStoreLocal(endSlot);
+            emitNode(rangeEnd, b, argCount, localMap);
+            b.endStoreLocal();
+        } else {
+            seqSlot = b.createLocal();
+            sizeSlot = b.createLocal();
+            b.beginStoreLocal(seqSlot);
+            emitNode(rawXsExpr, b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginStoreLocal(sizeSlot);
+            b.beginSeqSize();
+            b.emitLoadLocal(seqSlot);
+            b.endSeqSize();
+            b.endStoreLocal();
+            b.beginStoreLocal(iSlot);
+            b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+        }
+        if (!isForEach) {
+            b.beginStoreLocal(accSlot);
+            emitNode(initExpr, b, argCount, localMap);
+            b.endStoreLocal();
+        }
+        b.beginWhile();
+          b.beginDirectLessThan();
+          b.emitLoadLocal(iSlot);
+          b.emitLoadLocal(isRange ? endSlot : sizeSlot);
+          b.endDirectLessThan();
+          b.beginBlock();
+            // Load the current element into xSlot.
+            b.beginStoreLocal(xSlot);
+            if (isRange) {
+                b.emitLoadLocal(iSlot);
+            } else {
+                b.beginSeqGet();
+                b.emitLoadLocal(seqSlot);
+                b.emitLoadLocal(iSlot);
+                b.endSeqGet();
+            }
+            b.endStoreLocal();
+
+            // Emit pipeline stages (source-to-sink order). Track how
+            // many filter IfThen blocks we opened so we can close them.
+            int filterDepth = 0;
+            for (var stage : stages) {
+                switch (stage) {
+                    case ClassifiedStage.FilterStep fs -> {
+                        b.beginIfThen();
+                          emitPredicateCheck(b, xSlot, fs.peel(), argCount, localMap);
+                          b.beginBlock();
+                        filterDepth++;
+                    }
+                    case ClassifiedStage.MapInline mi -> {
+                        emitMapperStep(b, xSlot, mi.op(), mi.rhsLit(), mi.rhsNode(),
+                            null, false, null, argCount, localMap);
+                    }
+                    case ClassifiedStage.MapCall mc -> {
+                        emitMapperStep(b, xSlot, null, 0L, null,
+                            mc.callHash(), mc.scalarABI(), mc.fieldName(),
+                            argCount, localMap);
+                    }
+                }
+            }
+
+            // Sink step.
+            if (isForEach) {
+                var argCopy = b.createLocal();
+                b.beginStoreLocal(argCopy);
+                  b.emitLoadLocal(xSlot);
+                b.endStoreLocal();
+                // Call the body function, store the return value in a
+                // scratch local to discard it (BDSL requires balanced stack).
+                var discardSlot = b.createLocal();
+                b.beginStoreLocal(discardSlot);
+                emitCallOneArg(b, forEachTarget, argCopy,
+                    forEachScalarABI, forEachFieldName);
+                b.endStoreLocal();
+            } else {
+                b.beginStoreLocal(accSlot);
+                emitInlineOpTwoLocals(foldOp, accSlot, xSlot, b);
+                b.endStoreLocal();
+            }
+
+            // Close filter IfThen blocks (innermost first).
+            for (int j = 0; j < filterDepth; j++) {
+                  b.endBlock();
+                b.endIfThen();
+            }
+
+            // Increment loop counter.
+            b.beginStoreLocal(iSlot);
+            b.beginDirectAdd();
+            b.emitLoadLocal(iSlot);
+            b.emitLoadLongConstant(1L);
+            b.endDirectAdd();
+            b.endStoreLocal();
+          b.endBlock();
+        b.endWhile();
+        if (isForEach) {
+            b.emitLoadObjectConstant(com.mezze.interpreter.values.MezzeRecord.empty());
+        } else {
+            b.emitLoadLocal(accSlot);
+        }
+    }
 
 
     /**

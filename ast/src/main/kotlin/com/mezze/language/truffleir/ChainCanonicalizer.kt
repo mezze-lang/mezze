@@ -109,6 +109,22 @@ object ChainCanonicalizer {
             // RawSeq source. Only refuse if we can't get a usable source.
             return FusedChainIR(source, stages, SinkIR.Sum, node.src)
         }
+        if (node is CallNativeIR
+            && node.name == "__native_seq_for_each"
+            && !node.isScalarABI) {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var xs: NodeIR? = null; var f: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                "xs" -> xs = fld.value
+                "f"  -> f  = fld.value
+            }
+            val xsInner = xs ?: return null
+            val fLambda = f as? MakeLambdaIR ?: return null
+            if (fLambda.captures.isNotEmpty()) return null
+            val (stages, source) = peelSource(xsInner, classifier)
+            if (stages.isEmpty() && source is SourceIR.Opaque) return null
+            return FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
+        }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
         // Extract sink + source expr from the CallDirect args.
@@ -670,6 +686,10 @@ internal class ChainHofClassifier private constructor(
                         && (name == "filter" || name.isEmpty())
                         && (params[0] == "xs" || params[0] == "it")
                         && params[1] == "p" -> HofKind.FILTER
+                    params.size == 2
+                        && (name == "for_each" || name.isEmpty())
+                        && (params[0] == "xs" || params[0] == "it")
+                        && params[1] == "f" -> HofKind.FOR_EACH
                     else -> null
                 }
             }
