@@ -743,25 +743,8 @@ class ImportResolver(
             is MezzeType.VariantType -> {
                 type.constructors.values.forEach { collectTypeApplicationConstructors(it, result) }
             }
-            is MezzeType.SeqType -> {
-                collectTypeApplicationConstructors(type.elementType, result)
-            }
-            is MezzeType.ListType -> {
-                collectTypeApplicationConstructors(type.elementType, result)
-            }
-            is MezzeType.SetType -> {
-                collectTypeApplicationConstructors(type.elementType, result)
-            }
-            is MezzeType.MapType -> {
-                collectTypeApplicationConstructors(type.keyType, result)
-                collectTypeApplicationConstructors(type.valueType, result)
-            }
-            is MezzeType.SortedSetType -> {
-                collectTypeApplicationConstructors(type.elementType, result)
-            }
-            is MezzeType.SortedMapType -> {
-                collectTypeApplicationConstructors(type.keyType, result)
-                collectTypeApplicationConstructors(type.valueType, result)
+            is MezzeType.ParametricBuiltin -> {
+                type.typeArgs.forEach { collectTypeApplicationConstructors(it, result) }
             }
             is MezzeType.EffectRow -> {
             }

@@ -701,35 +701,9 @@ internal class AbilityChecker(
                 }
                 MezzeType.VariantType(closedConstructors, rowVar = null, identity = type.identity)
             }
-            is MezzeType.ListType -> {
-                if (!needsRowClosing(type.elementType)) return type
-                MezzeType.ListType(closeOpenRecords(type.elementType))
-            }
-            is MezzeType.SeqType -> {
-                if (!needsRowClosing(type.elementType)) return type
-                MezzeType.SeqType(closeOpenRecords(type.elementType))
-            }
-            is MezzeType.SetType -> {
-                if (!needsRowClosing(type.elementType)) return type
-                MezzeType.SetType(closeOpenRecords(type.elementType))
-            }
-            is MezzeType.SortedSetType -> {
-                if (!needsRowClosing(type.elementType)) return type
-                MezzeType.SortedSetType(closeOpenRecords(type.elementType))
-            }
-            is MezzeType.MapType -> {
-                if (!needsRowClosing(type.keyType) && !needsRowClosing(type.valueType)) return type
-                MezzeType.MapType(
-                    closeOpenRecords(type.keyType),
-                    closeOpenRecords(type.valueType)
-                )
-            }
-            is MezzeType.SortedMapType -> {
-                if (!needsRowClosing(type.keyType) && !needsRowClosing(type.valueType)) return type
-                MezzeType.SortedMapType(
-                    closeOpenRecords(type.keyType),
-                    closeOpenRecords(type.valueType)
-                )
+            is MezzeType.ParametricBuiltin -> {
+                if (type.typeArgs.none { needsRowClosing(it) }) return type
+                type.rebuild(type.typeArgs.map { closeOpenRecords(it) })
             }
             is MezzeType.FunctionType -> {
                 if (!needsRowClosing(type.paramType) && !needsRowClosing(type.returnType)) return type

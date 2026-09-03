@@ -73,20 +73,8 @@ object AliasStripper {
             effects = type.effects?.let { stripEffectRow(it, inScope, registry, recursionGuard) },
             abilityConstraints = stripAbilityConstraints(type.abilityConstraints, inScope, registry, recursionGuard)
         )
-        is MezzeType.SeqType -> MezzeType.SeqType(stripImpl(type.elementType, inScope, registry, recursionGuard))
-        is MezzeType.MapType -> MezzeType.MapType(
-            keyType = stripImpl(type.keyType, inScope, registry, recursionGuard),
-            valueType = stripImpl(type.valueType, inScope, registry, recursionGuard)
-        )
-        is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-            keyType = stripImpl(type.keyType, inScope, registry, recursionGuard),
-            valueType = stripImpl(type.valueType, inScope, registry, recursionGuard)
-        )
-        is MezzeType.SortedSetType -> MezzeType.SortedSetType(
-            stripImpl(type.elementType, inScope, registry, recursionGuard)
-        )
-        is MezzeType.ListType -> MezzeType.ListType(stripImpl(type.elementType, inScope, registry, recursionGuard))
-        is MezzeType.SetType -> MezzeType.SetType(stripImpl(type.elementType, inScope, registry, recursionGuard))
+        is MezzeType.ParametricBuiltin ->
+            type.rebuild(type.typeArgs.map { stripImpl(it, inScope, registry, recursionGuard) })
         is MezzeType.NewtypeType -> type.copy(
             wrappedType = stripImpl(type.wrappedType, inScope, registry, recursionGuard)
         )

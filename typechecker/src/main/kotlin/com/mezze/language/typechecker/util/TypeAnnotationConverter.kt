@@ -444,7 +444,14 @@ object TypeAnnotationConverter {
         return out
     }
 
-    private fun collectCaughtByAncestorInto(type: MezzeType, into: MutableSet<String>) {
+    /**
+     * Union every `caughtByAncestor` set reachable from [type] into [into].
+     * Shared single source of truth — [com.mezze.language.typechecker.constraints]
+     * calls this too (was a byte-identical copy). A pure MezzeType walk: it reads
+     * only EffectRow/FunctionType-effects `caughtByAncestor`, so it belongs with the
+     * other effect-row helpers here rather than being duplicated per caller.
+     */
+    internal fun collectCaughtByAncestorInto(type: MezzeType, into: MutableSet<String>) {
         when (type) {
             is MezzeType.FunctionType -> {
                 type.effects?.let { into.addAll(it.caughtByAncestor) }

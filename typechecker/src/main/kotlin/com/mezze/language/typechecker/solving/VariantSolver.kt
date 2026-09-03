@@ -597,30 +597,8 @@ internal class VariantSolver(
                     abilityConstraints = type.abilityConstraints
                 )
             }
-            is MezzeType.SeqType -> {
-                MezzeType.SeqType(closeRowVarsInType(type.elementType, rowVarsToClose))
-            }
-            is MezzeType.ListType -> {
-                MezzeType.ListType(closeRowVarsInType(type.elementType, rowVarsToClose))
-            }
-            is MezzeType.MapType -> {
-                MezzeType.MapType(
-                    keyType = closeRowVarsInType(type.keyType, rowVarsToClose),
-                    valueType = closeRowVarsInType(type.valueType, rowVarsToClose)
-                )
-            }
-            is MezzeType.SetType -> {
-                MezzeType.SetType(closeRowVarsInType(type.elementType, rowVarsToClose))
-            }
-            is MezzeType.SortedMapType -> {
-                MezzeType.SortedMapType(
-                    keyType = closeRowVarsInType(type.keyType, rowVarsToClose),
-                    valueType = closeRowVarsInType(type.valueType, rowVarsToClose)
-                )
-            }
-            is MezzeType.SortedSetType -> {
-                MezzeType.SortedSetType(closeRowVarsInType(type.elementType, rowVarsToClose))
-            }
+            is MezzeType.ParametricBuiltin ->
+                type.rebuild(type.typeArgs.map { closeRowVarsInType(it, rowVarsToClose) })
             is MezzeType.TypeApplication -> {
                 WellKnownTypeApp.of(
                     constructor = type.constructor,

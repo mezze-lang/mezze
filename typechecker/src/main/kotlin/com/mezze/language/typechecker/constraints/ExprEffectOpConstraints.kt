@@ -307,26 +307,8 @@ internal fun ExpressionConstraintGenerator.substituteAssociatedTypesInType(
             identity = type.identity,
             ascriptionWall = type.ascriptionWall
         )
-        is MezzeType.SeqType -> MezzeType.SeqType(
-            elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)
-        )
-        is MezzeType.ListType -> MezzeType.ListType(
-            elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)
-        )
-        is MezzeType.SetType -> MezzeType.SetType(
-            elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)
-        )
-        is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-            keyType = substituteAssociatedTypesInType(type.keyType, associatedTypeBindings),
-            valueType = substituteAssociatedTypesInType(type.valueType, associatedTypeBindings)
-        )
-        is MezzeType.SortedSetType -> MezzeType.SortedSetType(
-            elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)
-        )
-        is MezzeType.MapType -> MezzeType.MapType(
-            keyType = substituteAssociatedTypesInType(type.keyType, associatedTypeBindings),
-            valueType = substituteAssociatedTypesInType(type.valueType, associatedTypeBindings)
-        )
+        is MezzeType.ParametricBuiltin ->
+            type.rebuild(type.typeArgs.map { substituteAssociatedTypesInType(it, associatedTypeBindings) })
         is MezzeType.NewtypeType -> type.copy(
             wrappedType = substituteAssociatedTypesInType(type.wrappedType, associatedTypeBindings)
         )

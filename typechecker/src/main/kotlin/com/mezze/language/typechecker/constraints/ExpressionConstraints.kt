@@ -597,28 +597,9 @@ class ExpressionConstraintGenerator {
      */
     internal fun collectCaughtByAncestor(type: MezzeType): Set<String> {
         val out = mutableSetOf<String>()
-        collectCaughtByAncestorInto(type, out)
+        // Shared with TypeAnnotationConverter (was a byte-identical private copy here).
+        TypeAnnotationConverter.collectCaughtByAncestorInto(type, out)
         return out
-    }
-
-    private fun collectCaughtByAncestorInto(type: MezzeType, into: MutableSet<String>) {
-        when (type) {
-            is MezzeType.FunctionType -> {
-                type.effects?.let { into.addAll(it.caughtByAncestor) }
-                collectCaughtByAncestorInto(type.paramType, into)
-                collectCaughtByAncestorInto(type.returnType, into)
-            }
-            is MezzeType.RecordType -> type.fields.values.forEach { collectCaughtByAncestorInto(it, into) }
-            is MezzeType.VariantType -> type.constructors.values.forEach { it?.let { collectCaughtByAncestorInto(it, into) } }
-            is MezzeType.TypeApplication -> type.args.forEach { collectCaughtByAncestorInto(it, into) }
-            is MezzeType.ParametricBuiltin -> type.typeArgs.forEach { collectCaughtByAncestorInto(it, into) }
-            is MezzeType.NewtypeType -> collectCaughtByAncestorInto(type.wrappedType, into)
-            is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
-            is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
-            is MezzeType.StringType, is MezzeType.BoolType,
-            is MezzeType.FracType, is MezzeType.BytesType,
-            is MezzeType.CharType -> {}
-        }
     }
 
     internal fun extractArgumentName(expr: ParsedExpr): String? {
