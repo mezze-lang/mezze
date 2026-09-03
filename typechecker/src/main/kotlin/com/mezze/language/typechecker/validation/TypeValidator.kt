@@ -36,11 +36,6 @@ class TypeValidator(
     private val unknownTypeValidator = UnknownTypeValidator(registry)
     private val codecGenerator = CodecGenerator()
 
-    // The runtime entry point convention: the top-level decl the CLI runs
-    // (Mezze.toml `entry`, default `main`). #377 gates unhandled-effect at the
-    // entry to exactly this decl so non-entry library fns aren't affected.
-    private val ENTRY_POINT_NAME = "main"
-
     private val typeNameCache = mutableMapOf<Int, String>()
     fun validate(
         module: ParsedModule,
@@ -82,7 +77,6 @@ class TypeValidator(
                 is ParsedLetDecl -> {
                     errors.addAll(validateParsedAnnotation(decl, substitution, constraintResults))
                     errors.addAll(validateParsedTopLevelEffects(decl, substitution, constraintResults))
-                    errors.addAll(validateEntryPointEffects(decl, substitution, constraintResults))
                     errors.addAll(validateHermeticInferredEffects(decl, substitution, constraintResults))
                     val scrutineeType = if (decl.isSimpleBinding) {
                         constraintResults[decl.variableName]?.type?.let { substitution.apply(it) }
@@ -465,62 +459,6 @@ class TypeValidator(
         return emptyList()
     }
 
-    /**
-     * #377: reject an unhandled USER effect that reaches the program ENTRY POINT.
-     *
-     * The entry point is the decl the runtime actually runs — by convention the
-     * top-level `let main = {} -> ...`. When the entry is a lambda, its residual
-     * RETURN effect row carries every effect its body performs and NOTHING
-     * discharges (a handled effect is already absent from this row — the same
-     * "concrete-vs-open-tail" model the S4.2 effect-conservation invariant uses).
-     *
-     * A WELL-KNOWN runtime effect (Console, IO, Async, Parallel, Exception,
-     * Mut, ...) is fine at the entry — the host discharges it (this is exactly
-     * what `EntryPointCheck`'s `<*>` allowance means). A USER-declared effect
-     * (a `perform`-op whose effect hash is NOT a well-known runtime effect) has
-     * no runtime provider: at runtime the un-handled op leaks a `MezzeSuspend`
-     * where a value is expected and the program crashes. So we reject IFF the
-     * residual row carries a CONCRETE effect name whose resolved hash is not a
-     * well-known runtime effect. An OPEN row-var tail `<*>` alone is NOT a
-     * violation (it carries no concrete undischarged effect); neither is a
-     * polymorphic effect row var.
-     *
-     * Scoped to the ENTRY decl only — a non-entry top-level library fn may
-     * legitimately mention a user effect in its signature (its caller
-     * discharges it), so this gate must not fire on those.
-     */
-    private fun validateEntryPointEffects(
-        decl: ParsedLetDecl,
-        substitution: Substitution,
-        constraintResults: Map<String, ConstraintResult>
-    ): List<ValidationError> {
-        if (!decl.isSimpleBinding) return emptyList()
-        if (decl.variableName != ENTRY_POINT_NAME) return emptyList()
-        val finalType = substitution.apply(constraintResults[decl.variableName]?.type ?: return emptyList())
-        if (finalType !is MezzeType.FunctionType) return emptyList()
-
-        // The residual row is the effect row of the LAST arrow in the curried
-        // chain — the effects the entry leaves undischarged after running.
-        var cursor: MezzeType.FunctionType = finalType
-        var innerType: MezzeType = cursor.returnType
-        while (innerType is MezzeType.FunctionType) {
-            cursor = innerType
-            innerType = cursor.returnType
-        }
-        val residual = cursor.effects ?: return emptyList()
-
-        // A well-known runtime effect is host-discharged; a user effect (hash not
-        // among the well-known runtime effect hashes) has no runtime provider.
-        fun resolveHash(name: String) = residual.effectHashes[name] ?: registry.resolveEffectHash(name)
-        val unhandled = residual.allEffectNames.filter { name ->
-            val h = resolveHash(name)
-            h == null || h !in WellKnownHashConstants.effectHashes.values
-        }
-        if (unhandled.isEmpty()) return emptyList()
-        return listOf(ValidationError.EntryPointUnhandledEffect(
-            entryName = decl.variableName, unhandledEffects = unhandled.sorted(), loc = decl.loc
-        ))
-    }
 
     /**
      * #202: enforce the hermetic rule (Mut must be the only effect in scope) on a

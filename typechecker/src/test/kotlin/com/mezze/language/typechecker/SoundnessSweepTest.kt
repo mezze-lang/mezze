@@ -25,11 +25,11 @@ import java.nio.file.Paths
  * Run under `-Dmezze.invariants=true` (set in setup, matching the gate) so every
  * boundary invariant is armed while these programs are checked.
  *
- * KNOWN HOLE (documented, NOT asserted here): an unhandled USER effect that
- * reaches the program ENTRY point type-checks but crashes at runtime with a
- * `MezzeSuspend`-leak. See [entryUnhandledEffectHole_S7_3_FINDING] (@Disabled) and
- * the S7.3 report. That is an entry-point-validation gap in the CLI's
- * strict-top-level path, out of scope to FIX in this ticket.
+ * ENTRY-POINT RUNNABILITY is a CLI rule (cli `EntryPointCheck`), not a typechecker
+ * rule: `main` is not special to the typechecker, and the entry name comes from
+ * Mezze.toml. So a program whose entry leaves a concrete effect undischarged
+ * type-checks fine HERE (it is well-typed) — the CLI rejects it before running.
+ * Entry-rejection coverage lives in cli `EntryPointCheckTest`.
  */
 class SoundnessSweepTest {
     private lateinit var parser: MezzeParser
@@ -319,18 +319,16 @@ class SoundnessSweepTest {
      * from the typechecker unit is out of scope; the fix (reject a concrete
      * residual effect on the entry decl's function-type row) is a separate ticket.
      */
-    // #377 FIX: the entry point's residual return effect row is now validated for
-    // a concrete undischarged USER effect. Oracle is user-declared with no
-    // handler, so `main`'s residual `<Oracle, *>` is rejected at type-check
-    // instead of crashing at runtime.
-    @Test fun entryUnhandledEffectHole_S7_3_FINDING() = rejects(
+    // Entry runnability is a CLI rule now (EntryPointCheck): the TYPECHECKER
+    // accepts this — `main : {} -> Int <Oracle, *>` is well-typed. The CLI
+    // rejects the undischarged Oracle before running (see EntryPointCheckTest).
+    @Test fun `entry with an unhandled user effect type-checks (CLI rejects it)`() = accepts(
         """
         effect Oracle where { ask: {} -> Int <Oracle> }
         let main = {} -> do
             let n = Oracle.ask {}
             n + 1
-        """.trimIndent(),
-        contains = "Oracle"
+        """.trimIndent()
     )
 
     // #377: an effectful entry that HANDLES its effect (perform Performer in ...)
@@ -347,9 +345,10 @@ class SoundnessSweepTest {
         """.trimIndent()
     )
 
-    // #377: wrong-handler variant — main handles Beta but performs Oracle; the
-    // residual row still carries the undischarged Oracle → REJECTED.
-    @Test fun `entry with wrong handler leaves undischarged user effect rejected (hash-377)`() = rejects(
+    // Wrong-handler variant — main handles Beta but performs Oracle, so `main`'s
+    // residual still carries the undischarged Oracle. The TYPECHECKER accepts it
+    // (well-typed); the CLI EntryPointCheck rejects it (see EntryPointCheckTest).
+    @Test fun `entry with wrong handler leaves undischarged user effect (CLI rejects it)`() = accepts(
         """
         effect Oracle where { ask: {} -> Int <Oracle> }
         effect Beta where { poke: {} -> Int <Beta> }
@@ -359,8 +358,7 @@ class SoundnessSweepTest {
         let main = {} -> perform MyBeta in do
             let n = Oracle.ask {}
             n + 1
-        """.trimIndent(),
-        contains = "Oracle"
+        """.trimIndent()
     )
 
     // #377 GUARD (no over-rejection): a non-entry library fn may mention a user

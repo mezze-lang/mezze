@@ -317,6 +317,26 @@ class CheckCommand {
                 rawResult as com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success
             )
 
+            // Entry-point acceptability is a CLI rule (EntryPointCheck): the entry
+            // must be `{} -> {} <*>` — no user params, `{}` return, and NO unhandled
+            // concrete effect (an unhandled effect has no handler at the entry and
+            // leaks at runtime). `mez check` enforces the same rule as build/exec/dev,
+            // so a leaky entry fails here rather than silently at runtime.
+            val entryName = appConfig.entry
+            val entryDecl = typeCheckResult.typedModule?.decls
+                ?.filterIsInstance<TypedLetDecl>()
+                ?.find { it.name == entryName }
+            if (entryDecl != null) {
+                EntryPointCheck.errorMessage(EntryPointCheck.check(entryDecl), entryName)?.let { msg ->
+                    if (jsonMode) {
+                        jsonExitWith(null, appConfig.name,
+                            DiagnosticJson(Severity.ERROR, code = "V0501", message = msg), exitCode = 4)
+                    }
+                    println("Error: $msg")
+                    kotlin.system.exitProcess(4)
+                }
+            }
+
             // Scatter into store, including the entry + per-import ParsedModules.
             val sourceHash = sha256(source)
             val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()

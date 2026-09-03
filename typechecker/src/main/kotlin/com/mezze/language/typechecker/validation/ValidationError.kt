@@ -347,34 +347,6 @@ sealed interface ValidationError {
         override fun location() = loc
     }
 
-        /**
-         * #377: the program ENTRY POINT (`main`) leaves a CONCRETE, undischarged
-         * user effect on its residual return effect row. Unlike a well-known
-         * runtime effect (Console/IO/Async/...) which the host discharges, a
-         * user-declared effect with no handler has no runtime provider — at
-         * runtime the un-handled `perform` op leaks a `MezzeSuspend` where a real
-         * value is expected and the program crashes. An OPEN row tail `<*>` and a
-         * polymorphic effect row var are NOT violations (they carry no concrete
-         * undischarged effect); a HANDLED effect is already absent from this row.
-         */
-        data class EntryPointUnhandledEffect(
-        val entryName: String,
-        val unhandledEffects: List<String>,
-        val loc: Loc? = null
-    ) : ValidationError {
-        override val code: ErrorCode = ErrorCode.V0501_EFFECT_NOT_HANDLED
-
-        override fun message(): String = buildString {
-            val list = unhandledEffects.joinToString(", ")
-            append("Entry `$entryName` leaves $list unhandled. ")
-            append("The runtime discharges the ambient effects (Console, FileSystem, …) but not these — ")
-            append("with no handler, the program would fault at runtime. ")
-            append("Handle it in `$entryName`: `perform <a handler> in …`")
-        }
-
-        override fun location() = loc
-    }
-
         data class StructuralError(
         val reason: String,
         val loc: Loc? = null
