@@ -1,6 +1,6 @@
 package com.mezze.language.cli.commands
 
-import com.mezze.language.typechecker.printing.ParseErrorFormatter
+import com.mezze.language.langservice.printing.ParseErrorFormatter
 import com.mezze.wire.Bye
 import com.mezze.wire.Evict
 import com.mezze.wire.Exited
@@ -430,7 +430,7 @@ object WireRunner {
         val rawResult = try {
             typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
         } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-            System.err.println(com.mezze.language.typechecker.printing.ErrorFormatter.format(e, source))
+            System.err.println(com.mezze.language.langservice.printing.ErrorFormatter.format(e, source))
             return null
         }
         if (rawResult is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure) {

@@ -1,12 +1,12 @@
-package com.mezze.language.typechecker.hover
+package com.mezze.language.langservice.hover
 
 import com.mezze.language.ast.*
 import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.ImportKind
 import com.mezze.language.typechecker.TypeCheckResult
-import com.mezze.language.typechecker.lookup.TypedAstLookup
-import com.mezze.language.typechecker.lookup.TypedAstScopeWalker
+import com.mezze.language.langservice.lookup.TypedAstLookup
+import com.mezze.language.langservice.lookup.TypedAstScopeWalker
 
 /**
  * Hover rendering, shared by every front end.

@@ -1,4 +1,4 @@
-package com.mezze.language.typechecker.printing
+package com.mezze.language.langservice.printing
 
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.display

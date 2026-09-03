@@ -2,7 +2,7 @@ package com.mezze.language.typechecker
 
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.parser.MezzeParser
-import com.mezze.language.typechecker.lookup.TypedAstLookup
+import com.mezze.language.langservice.lookup.TypedAstLookup
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue

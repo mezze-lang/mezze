@@ -5,7 +5,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.TypeCheckResult
 import com.mezze.language.typechecker.TypeCheckWarning
 import com.mezze.language.typechecker.TypeChecker
-import com.mezze.language.typechecker.printing.ErrorFormatter
+import com.mezze.language.langservice.printing.ErrorFormatter
 
 /**
  * Shared typecheck-result handling for `mez check` and `mez dev`.

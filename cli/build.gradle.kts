@@ -52,6 +52,7 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":stdlib"))
     implementation(project(":typechecker"))
+    implementation(project(":langservice"))
     implementation(project(":datastructures"))
     implementation(project(":lsp"))
     implementation(project(":formatter"))

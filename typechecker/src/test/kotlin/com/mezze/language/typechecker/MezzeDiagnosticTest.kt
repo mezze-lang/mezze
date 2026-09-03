@@ -6,7 +6,7 @@ import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.LevenshteinSuggest
 import com.mezze.language.parsedast.diagnostics.MezzeDiagnostic
 import com.mezze.language.parsedast.diagnostics.display
-import com.mezze.language.typechecker.printing.ErrorFormatter
+import com.mezze.language.langservice.printing.ErrorFormatter
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 

@@ -9,6 +9,7 @@ dependencies {
     implementation(project(":ast"))
     implementation(project(":parser"))
     implementation(project(":typechecker"))
+    implementation(project(":langservice"))
     implementation(project(":store-sqlite"))
     implementation(project(":formatter"))
 

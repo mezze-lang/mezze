@@ -16,6 +16,13 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.9.2")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.9.2")
     testImplementation("org.junit.jupiter:junit-jupiter-params:5.9.2")
+
+    // Test-only: several typechecker tests use HoverInfo / the diagnostic
+    // formatters (now in :langservice) as a "type-at-cursor" probe or to assert
+    // rendered diagnostics. This reaches "up" from the test source set only —
+    // typechecker:main never depends on :langservice, so the graph stays acyclic
+    // (compileTestKotlin -> :langservice:jar -> :typechecker:jar -> main).
+    testImplementation(project(":langservice"))
 }
 
 // Resolvable classpath for the WellKnownHashGenerator main, declared in

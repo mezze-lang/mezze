@@ -1,8 +1,8 @@
 package com.mezze.language.lsp
 
-import com.mezze.language.typechecker.lookup.TypedAstLookup
-import com.mezze.language.typechecker.lookup.TypedAstScopeWalker
-import com.mezze.language.typechecker.hover.HoverInfo
+import com.mezze.language.langservice.lookup.TypedAstLookup
+import com.mezze.language.langservice.lookup.TypedAstScopeWalker
+import com.mezze.language.langservice.hover.HoverInfo
 
 import com.mezze.language.ast.*
 import com.mezze.language.ast.prettyPrintTypeWithAliases

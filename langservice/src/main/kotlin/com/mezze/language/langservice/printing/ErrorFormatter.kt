@@ -1,4 +1,4 @@
-package com.mezze.language.typechecker.printing
+package com.mezze.language.langservice.printing
 
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.parsedast.diagnostics.ErrorCode
@@ -24,13 +24,17 @@ object ErrorFormatter {
             }
             appendLine("error$bracket: ${error.message}")
 
-            if (error.loc != null) {
-                val fileInfo = error.loc.file.ifEmpty { "<input>" }
-                appendLine("  --> $fileInfo:${error.loc.startLine}:${error.loc.startCol}")
+            // Bind to a local: `loc` is a nullable public property on a type in
+            // another module (:typechecker), so Kotlin won't smart-cast it after
+            // the null check across the module boundary.
+            val loc = error.loc
+            if (loc != null) {
+                val fileInfo = loc.file.ifEmpty { "<input>" }
+                appendLine("  --> $fileInfo:${loc.startLine}:${loc.startCol}")
             }
 
-            if (sourceCode != null && error.loc != null) {
-                append(SourceContext.formatCodeSnippet(sourceCode, error.loc))
+            if (sourceCode != null && loc != null) {
+                append(SourceContext.formatCodeSnippet(sourceCode, loc))
             }
 
             for (hint in error.hints) {

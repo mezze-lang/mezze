@@ -9,8 +9,8 @@ import com.mezze.language.store.StoreSerialization
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
-import com.mezze.language.typechecker.printing.ErrorFormatter
-import com.mezze.language.typechecker.printing.ParseErrorFormatter
+import com.mezze.language.langservice.printing.ErrorFormatter
+import com.mezze.language.langservice.printing.ParseErrorFormatter
 import com.mezze.language.ast.*
 import com.mezze.language.typedast.TypedLetDecl
 import java.io.File

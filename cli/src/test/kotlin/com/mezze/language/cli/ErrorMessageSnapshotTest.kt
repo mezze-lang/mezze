@@ -1,6 +1,6 @@
 package com.mezze.language.cli
 
-import com.mezze.language.typechecker.printing.ParseErrorFormatter
+import com.mezze.language.langservice.printing.ParseErrorFormatter
 import com.mezze.language.cli.commands.TypeCheckRunner
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.ModuleResolver
@@ -113,11 +113,11 @@ class ErrorMessageSnapshotTest {
             typechecker.checkParsedModule(parseResult.module, Paths.get("."), enablePrelude = false)
         } catch (e: TypeCheckError) {
             if (output.isNotEmpty()) output.append("\n\n")
-            output.append(com.mezze.language.typechecker.printing.ErrorFormatter.format(e, source))
+            output.append(com.mezze.language.langservice.printing.ErrorFormatter.format(e, source))
             return output.toString()
         } catch (e: com.mezze.language.typechecker.module.ModuleError) {
             if (output.isNotEmpty()) output.append("\n\n")
-            output.append(com.mezze.language.typechecker.printing.ErrorFormatter.formatModuleError(e))
+            output.append(com.mezze.language.langservice.printing.ErrorFormatter.formatModuleError(e))
             return output.toString()
         }
 

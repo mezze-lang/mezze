@@ -1,4 +1,4 @@
-package com.mezze.language.typechecker.lookup
+package com.mezze.language.langservice.lookup
 
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType

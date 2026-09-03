@@ -25,7 +25,6 @@ import com.mezze.language.typechecker.debug.InvariantChecker
 import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.module.*
 import com.mezze.language.typechecker.phase.*
-import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.solving.clearUnificationCache
 import com.mezze.language.typechecker.solving.withInScopeAliasNames

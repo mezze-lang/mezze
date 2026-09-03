@@ -7,7 +7,7 @@ import com.mezze.language.parsedast.Visibility as PVisibility
 import com.mezze.language.formatter.Formatter
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.typechecker.*
-import com.mezze.language.typechecker.printing.ErrorFormatter
+import com.mezze.language.langservice.printing.ErrorFormatter
 import org.graalvm.polyglot.PolyglotException
 import com.mezze.language.codebase.SQLiteMezzeStore
 import java.io.File

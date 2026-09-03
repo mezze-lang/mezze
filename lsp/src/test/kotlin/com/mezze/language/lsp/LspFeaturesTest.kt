@@ -1,6 +1,6 @@
 package com.mezze.language.lsp
 
-import com.mezze.language.typechecker.lookup.TypedAstLookup
+import com.mezze.language.langservice.lookup.TypedAstLookup
 
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.Launcher

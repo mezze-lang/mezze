@@ -1,4 +1,4 @@
-package com.mezze.language.typechecker.diagnostics
+package com.mezze.language.langservice.diagnostics
 
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.parsedast.Loc

@@ -1,7 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
-import com.mezze.language.typechecker.hover.HoverInfo
+import com.mezze.language.langservice.hover.HoverInfo
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
