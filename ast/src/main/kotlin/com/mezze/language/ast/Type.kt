@@ -140,7 +140,12 @@ sealed interface MezzeType {
         is FunctionType -> predicate(paramType) || predicate(returnType) ||
             abilityConstraints.any { c -> c.typeArgs.any(predicate) || c.associatedTypeBindings.values.any(predicate) }
         is RecordType -> fields.values.any(predicate)
-        is VariantType -> constructors.values.any { it != null && predicate(it) }
+        // #194: an applied polymorphic variant carries its args in `typeArgs`
+        // (`Tree Int` = VariantType(typeArgs=[Int])); those are structural children
+        // too, so a var/predicate hit there must be seen (else isConcrete/
+        // containsVarType/substitution silently skip them).
+        is VariantType -> constructors.values.any { it != null && predicate(it) } ||
+            typeArgs.any(predicate)
         is TypeApplication -> args.any(predicate)
         is ParametricBuiltin -> typeArgs.any(predicate)
         is NewtypeType -> predicate(wrappedType)
@@ -153,7 +158,13 @@ sealed interface MezzeType {
         is FunctionType -> copy(paramType = f(paramType), returnType = f(returnType),
             abilityConstraints = abilityConstraints.map { c -> c.copy(typeArgs = c.typeArgs.map(f), associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, v) -> f(v) }) })
         is RecordType -> copy(fields = fields.mapValues { (_, v) -> f(v) })
-        is VariantType -> copy(constructors = constructors.mapValues { (_, v) -> v?.let(f) })
+        // #194: rewrite `typeArgs` in step with the constructor payloads, else a
+        // substitution leaves `typeArgs` stale (`['a]`) against already-substituted
+        // payloads (`Int`) — an inconsistent applied variant.
+        is VariantType -> copy(
+            constructors = constructors.mapValues { (_, v) -> v?.let(f) },
+            typeArgs = typeArgs.map(f)
+        )
         is TypeApplication -> copy(args = args.map(f))
         is ParametricBuiltin -> rebuild(typeArgs.map(f))
         is NewtypeType -> copy(wrappedType = f(wrappedType))
