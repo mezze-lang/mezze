@@ -81,7 +81,11 @@ tasks.test {
     maxParallelForks = 4
     maxHeapSize = "1500m"
 
-    systemProperty("junit.jupiter.execution.timeout.default", "60s")
+    // 120s (was 60s): ExhaustivenessFuzzTest's runSweep(seed, 300) sits right at
+    // the old 60s bound under 4-fork parallel load and flakes on a TimeoutException
+    // (passes comfortably in isolation). This module-level property overrides the
+    // root default, so it must be bumped here too, not only in the root build.
+    systemProperty("junit.jupiter.execution.timeout.default", "120s")
     systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")
 
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)

@@ -65,8 +65,11 @@ subprojects {
         // Set max parallel forks to 1 to avoid test interference
         maxParallelForks = 1
 
-        // Set global timeout for all tests (can be overridden per module)
-        systemProperty("junit.jupiter.execution.timeout.default", "60s")
+        // Set global timeout for all tests (can be overridden per module).
+        // 120s (was 60s): the exhaustiveness/property fuzzers sit near the old
+        // bound and flake under full-suite parallel load; headroom kills the
+        // flake without hiding a genuine hang.
+        systemProperty("junit.jupiter.execution.timeout.default", "120s")
         systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")
     }
 }
