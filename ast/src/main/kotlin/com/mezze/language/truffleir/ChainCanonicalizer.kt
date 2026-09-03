@@ -52,10 +52,16 @@ object ChainCanonicalizer {
         val classifier = ChainHofClassifier.build(functions, stdlibSnapshot)
         if (classifier.isEmpty()) return functions
 
+        // Merge both maps for function-body lookups (effect gate, etc.).
+        val allFunctions = if (stdlibSnapshot.isEmpty()) functions
+                           else HashMap<Hash, FunctionIR>(functions.size + stdlibSnapshot.size).also {
+                               it.putAll(stdlibSnapshot); it.putAll(functions)
+                           }
+
         val out = HashMap<Hash, FunctionIR>(functions.size)
         var anyChanged = false
         for ((hash, fn) in functions) {
-            val newBody = rewrite(fn.body, classifier)
+            val newBody = rewrite(fn.body, classifier, allFunctions)
             if (newBody === fn.body) {
                 out[hash] = fn
             } else {
@@ -80,19 +86,19 @@ object ChainCanonicalizer {
      * through. Today we only recognize the flat 4-layer chain; nested
      * iter-of-iter is out of scope for MVP.
      */
-    private fun rewrite(node: NodeIR, classifier: ChainHofClassifier): NodeIR {
+    private fun rewrite(node: NodeIR, classifier: ChainHofClassifier, allFunctions: Map<Hash, FunctionIR>): NodeIR {
         // Recurse first — child nodes may contain iter chains too.
-        val descended = recurseChildren(node) { child -> rewrite(child, classifier) }
+        val descended = recurseChildren(node) { child -> rewrite(child, classifier, allFunctions) }
         // Try to canonicalize this node itself (only CallDirectIRs can
         // become FusedChainIRs).
-        return tryCanonicalize(descended, classifier) ?: descended
+        return tryCanonicalize(descended, classifier, allFunctions) ?: descended
     }
 
     /**
      * Attempt to rewrite [node] into an [FusedChainIR]. Returns null if
      * the shape isn't recognized — caller keeps the original node.
      */
-    private fun tryCanonicalize(node: NodeIR, classifier: ChainHofClassifier): FusedChainIR? {
+    private fun tryCanonicalize(node: NodeIR, classifier: ChainHofClassifier, allFunctions: Map<Hash, FunctionIR>): FusedChainIR? {
         // Bare __native_seq_sum { xs = ... } — desugared body of seq::sum.
         // Rewrite to FusedChainIR with a Sum sink so the BDSL emit can drive
         // BuiltinSumLongSeq / BuiltinSumRangeLong through the canonical path.
@@ -104,10 +110,8 @@ object ChainCanonicalizer {
             val fld = mr.fields[0]
             if (fld.name != "xs") return null
             val (stages, source) = peelSource(fld.value, classifier)
-            // Opaque with no stages: just a raw seq expression. Still worth
-            // canonicalizing — emit falls through to BuiltinSumLongSeq via
-            // RawSeq source. Only refuse if we can't get a usable source.
-            return FusedChainIR(source, stages, SinkIR.Sum, node.src)
+            val candidate = FusedChainIR(source, stages, SinkIR.Sum, node.src)
+            return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         if (node is CallNativeIR
             && node.name == "__native_seq_for_each"
@@ -123,7 +127,8 @@ object ChainCanonicalizer {
             if (fLambda.captures.isNotEmpty()) return null
             val (stages, source) = peelSource(xsInner, classifier)
             if (stages.isEmpty() && source is SourceIR.Opaque) return null
-            return FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
+            val candidate = FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
+            return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
@@ -137,7 +142,78 @@ object ChainCanonicalizer {
         // stages, this is a bare fold on an unknown value — no gain from
         // canonicalizing. Bail so downstream can dispatch normally.
         if (stages.isEmpty() && source is SourceIR.Opaque) return null
-        return FusedChainIR(source, stages, sink, node.src)
+        val candidate = FusedChainIR(source, stages, sink, node.src)
+        return if (isEffectSafe(candidate, allFunctions)) candidate else null
+    }
+
+    // ── Phase 3: effect-row safety gate ─────────────────────────────
+
+    private fun isEffectSafe(chain: FusedChainIR, allFunctions: Map<Hash, FunctionIR>): Boolean {
+        for (stage in chain.stages) {
+            val lambda = when (stage) {
+                is StageIR.Map -> stage.f
+                is StageIR.Filter -> stage.p
+            }
+            if (lambdaPerformsEffect(lambda, allFunctions)) return false
+        }
+        when (val sink = chain.sink) {
+            is SinkIR.Fold -> if (lambdaPerformsEffect(sink.f, allFunctions)) return false
+            is SinkIR.ForEach -> if (lambdaPerformsEffect(sink.f, allFunctions)) return false
+            SinkIR.Sum -> { /* no lambda */ }
+        }
+        return true
+    }
+
+    private fun lambdaPerformsEffect(lambda: MakeLambdaIR, allFunctions: Map<Hash, FunctionIR>): Boolean {
+        val fn = allFunctions[lambda.functionHash] ?: return true
+        return nodeContainsPerformOp(fn.body)
+    }
+
+    private fun nodeContainsPerformOp(node: NodeIR): Boolean = when (node) {
+        is PerformOpIR -> true
+        // HandleIR fully discharges its body's effects — don't recurse
+        // into handled bodies. Unhandled performs outside a HandleIR
+        // are caught by the PerformOpIR case above.
+        is HandleIR -> false
+        is CallDirectIR -> node.args.any { nodeContainsPerformOp(it) }
+        is CallNativeIR -> nodeContainsPerformOp(node.arg) || node.args.any { nodeContainsPerformOp(it) }
+        is CallIndirectIR -> nodeContainsPerformOp(node.function) || nodeContainsPerformOp(node.arg)
+        is CallIndirectScalarIR -> nodeContainsPerformOp(node.function) || node.args.any { nodeContainsPerformOp(it) }
+        is CallLocalIR -> nodeContainsPerformOp(node.arg)
+        is MakeRecordIR -> node.fields.any { nodeContainsPerformOp(it.value) }
+        is ReadFieldIR -> nodeContainsPerformOp(node.record)
+        is RecordUpdateIR -> nodeContainsPerformOp(node.record) || node.updates.any { nodeContainsPerformOp(it.value) }
+        is MakeVariantIR -> node.payload?.let { nodeContainsPerformOp(it) } ?: false
+        is MatchIR -> nodeContainsPerformOp(node.scrutinee) || node.cases.any {
+            nodeContainsPerformOp(it.body) || (it.guard?.let { g -> nodeContainsPerformOp(g) } ?: false)
+        }
+        is IfIR -> nodeContainsPerformOp(node.cond) || nodeContainsPerformOp(node.thenBr) || nodeContainsPerformOp(node.elseBr)
+        is BlockIR -> node.stmts.any { s ->
+            when (s) {
+                is StmtIR.Let -> nodeContainsPerformOp(s.value)
+                is StmtIR.Expr -> nodeContainsPerformOp(s.node)
+            }
+        } || nodeContainsPerformOp(node.result)
+        is WriteLocalIR -> nodeContainsPerformOp(node.value)
+        is InlineBinaryOpIR -> nodeContainsPerformOp(node.left) || nodeContainsPerformOp(node.right)
+        is InspectIR -> nodeContainsPerformOp(node.value)
+        is InterpolatedStringIR -> node.parts.any { p ->
+            when (p) {
+                is StringPartIR.Lit -> false
+                is StringPartIR.Expr -> nodeContainsPerformOp(p.node)
+            }
+        }
+        is MakeSeqIR -> node.elements.any { el ->
+            when (el) {
+                is SeqElementIR.Regular -> nodeContainsPerformOp(el.node)
+                is SeqElementIR.Spread -> nodeContainsPerformOp(el.node)
+            }
+        }
+        is SeqGetIR -> nodeContainsPerformOp(node.seq) || nodeContainsPerformOp(node.index)
+        is PartialApplyDirectIR -> node.partialFields.any { nodeContainsPerformOp(it.value) }
+        is DictMethodCallIR -> nodeContainsPerformOp(node.arg)
+        is SpecializedCallIR -> node.args.any { nodeContainsPerformOp(it) }
+        else -> false
     }
 
     /**
