@@ -3,6 +3,9 @@ package com.mezze.language.lsp
 import com.mezze.language.langservice.lookup.TypedAstLookup
 import com.mezze.language.langservice.lookup.TypedAstScopeWalker
 import com.mezze.language.langservice.hover.HoverInfo
+import com.mezze.language.langservice.diagnostics.JsonDiagnosticFormatter
+import com.mezze.language.langservice.diagnostics.DiagnosticJson
+import com.mezze.language.langservice.diagnostics.Severity
 
 import com.mezze.language.ast.*
 import com.mezze.language.ast.prettyPrintTypeWithAliases
@@ -911,35 +914,12 @@ class MezzeTextDocumentService(
      * re-deriving them from the message text. (#313 step 7.)
      */
     private fun createDiagnosticFromRecoveryError(error: TypeChecker.TypeCheckError): Diagnostic {
-        val loc = error.loc
-        // #98: append span-less advice strings (error.hints) to the message.
-        val message = if (error.hints.isEmpty()) error.message
-            else error.message + error.hints.joinToString("") { "\n  hint: $it" }
-        val diag = createDiagnostic(
-            message = message,
-            severity = DiagnosticSeverity.Error,
-            line = (loc?.startLine ?: 1) - 1,
-            column = (loc?.startCol ?: 1) - 1,
-            endLine = loc?.endLine?.minus(1),
-            endColumn = loc?.endCol,
-            // Prefer the stable ErrorCode (T0201, V0601, etc.) — the same
-            // value `mez --explain` understands, so editors can wire the
-            // diagnostic's code to `mez --explain $CODE` or a docs URL.
-            // Falls back to the legacy ErrorType name when the error site
-            // hasn't been migrated yet (UNCATEGORIZED). GENERAL still
-            // suppressed because `mezze(GENERAL)` is pure UI noise.
-            code = diagnosticCode(error.code, error.errorType)
-        )
-        // Diagnostic.data is a free-form payload lsp4j ships to the client
-        // verbatim. We use it as a channel for structured code-action info —
-        // both the legacy `metadata` map (used by some existing fixes) and
-        // the new typed `fixHints` produced by error sites that want to
-        // offer one-click fixes. Encoding fixHints as plain maps avoids
-        // pulling kotlinx-serialization into the LSP wire format.
-        val data = mutableMapOf<String, Any?>()
-        if (error.metadata.isNotEmpty()) data.putAll(error.metadata)
-        if (error.fixHints.isNotEmpty()) data["fixHints"] = encodeFixHints(error.fixHints)
-        if (data.isNotEmpty()) diag.data = data
+        // Route through the shared JsonDiagnosticFormatter so the editor squiggle
+        // is derived exactly like `mez check --json`. Code-action payload
+        // (metadata + fixHints) is attached separately — see attachCodeActionData.
+        val diag = JsonDiagnosticFormatter.fromTypeCheckError(error)
+            .toLspDiagnostic(codeFallback = errorTypeFallback(error.errorType))
+        attachCodeActionData(diag, error.metadata, error.fixHints)
         return diag
     }
 
@@ -1048,47 +1028,66 @@ class MezzeTextDocumentService(
      * Create a diagnostic from a type error.
      */
     private fun createDiagnosticFromTypeError(error: TypeCheckError): Diagnostic {
-        val loc = error.loc
-        // #98: the typechecker computes advice strings (e.g. "Did you mean
-        // `x`?", "import it: `use …`") in error.hints. They carry no span, so
-        // RelatedInformation doesn't fit — append them to the message where the
-        // user actually reads them. fixHints (with edits) still drive the
-        // codeAction quick-fixes separately.
-        val baseMessage = error.message ?: "Type error"
-        val message = if (error.hints.isEmpty()) baseMessage
-            else baseMessage + error.hints.joinToString("") { "\n  hint: $it" }
-        val diag = createDiagnostic(
-            message = message,
-            severity = DiagnosticSeverity.Error,
-            line = (loc?.startLine ?: 1) - 1,
-            column = (loc?.startCol ?: 1) - 1,
-            endLine = loc?.endLine?.minus(1),
-            endColumn = loc?.endCol,
-            code = diagnosticCode(error.code, error.errorType)
-        )
-        // Carry metadata + fixHints to the client so codeAction can offer
-        // one-click QuickFixes. See createDiagnosticFromRecoveryError for
-        // the matching encode path.
-        val data = mutableMapOf<String, Any?>()
-        if (error.metadata.isNotEmpty()) data.putAll(error.metadata)
-        if (error.fixHints.isNotEmpty()) data["fixHints"] = encodeFixHints(error.fixHints)
-        if (data.isNotEmpty()) diag.data = data
+        // #98: the typechecker's span-less advice strings (error.hints) are
+        // appended to the message by toLspDiagnostic — the shared model keeps
+        // them in a separate `hints` field, but LSP has no hints channel.
+        // fixHints (with edits) still drive codeAction quick-fixes via data.
+        val diag = JsonDiagnosticFormatter.fromTypeCheckError(error)
+            .toLspDiagnostic(codeFallback = errorTypeFallback(error.errorType))
+        attachCodeActionData(diag, error.metadata, error.fixHints)
         return diag
     }
 
     /**
-     * Choose the most useful identifier for an LSP [Diagnostic.code]:
-     * prefer the stable ErrorCode display value (e.g. `T0201`) when one
-     * is assigned, fall back to the legacy ErrorType name, suppress the
-     * meaningless `GENERAL` bucket entirely.
+     * Adapt the transport-neutral [DiagnosticJson] (the shared source of truth
+     * that also drives `mez check --json`) into an lsp4j [Diagnostic], so the
+     * editor squiggle is derived exactly like the CLI's JSON diagnostics. Reuses
+     * [createDiagnostic] for range clamping so that logic stays in one place.
+     *
+     * Two LSP-specific touches live here, not in the shared model: hints are
+     * appended to the message (LSP has no separate hints channel), and `code`
+     * falls back to the legacy ErrorType name for unmigrated UNCATEGORIZED sites
+     * (the shared model leaves those null). DiagnosticJson.code (ErrorCode when
+     * assigned, else null) plus this fallback reproduces the old diagnosticCode.
      */
-    private fun diagnosticCode(
-        code: com.mezze.language.parsedast.diagnostics.ErrorCode,
-        errorType: ErrorType,
-    ): String? {
-        val display = code.display()
-        if (display != "E0000") return display  // E0000 == UNCATEGORIZED sentinel
-        return errorType.name.takeUnless { it == ErrorType.GENERAL.name }
+    private fun DiagnosticJson.toLspDiagnostic(codeFallback: String? = null): Diagnostic {
+        val loc = location
+        val fullMessage = if (hints.isEmpty()) message
+            else message + hints.joinToString("") { "\n  hint: $it" }
+        return createDiagnostic(
+            message = fullMessage,
+            severity = if (severity == Severity.WARNING) DiagnosticSeverity.Warning else DiagnosticSeverity.Error,
+            line = (loc?.startLine ?: 1) - 1,
+            column = (loc?.startCol ?: 1) - 1,
+            endLine = loc?.endLine?.minus(1),
+            endColumn = loc?.endCol,
+            code = code ?: codeFallback,
+        )
+    }
+
+    /**
+     * Legacy ErrorType name used as a [Diagnostic.code] fallback when the shared
+     * model produced no code (an unmigrated UNCATEGORIZED site). GENERAL is
+     * suppressed because `mezze(GENERAL)` is pure UI noise.
+     */
+    private fun errorTypeFallback(errorType: ErrorType): String? =
+        errorType.name.takeUnless { it == ErrorType.GENERAL.name }
+
+    /**
+     * Attach structured code-action payload to [Diagnostic.data]: the legacy
+     * `metadata` map plus typed `fixHints` encoded as the plain-map wire form
+     * the codeAction handler decodes. lsp4j ships `data` to the client verbatim;
+     * encoding fixHints as maps keeps kotlinx-serialization off the wire.
+     */
+    private fun attachCodeActionData(
+        diag: Diagnostic,
+        metadata: Map<String, Any>,
+        fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint>,
+    ) {
+        val data = mutableMapOf<String, Any?>()
+        if (metadata.isNotEmpty()) data.putAll(metadata)
+        if (fixHints.isNotEmpty()) data["fixHints"] = encodeFixHints(fixHints)
+        if (data.isNotEmpty()) diag.data = data
     }
 
     /**
