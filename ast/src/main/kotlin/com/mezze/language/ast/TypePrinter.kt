@@ -186,35 +186,11 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
             }
         }
     }
-    is MezzeType.VariantType -> {
-        // Special case: Bool variant prints as "Bool" instead of "| True, False |"
-        if (BuiltinTypes.isBoolVariant(type)) {
-            "Bool"
-        } else if (type.identity.displayNameOrNull() != null
-            && !BuiltinTypes.isOptionVariant(type)
-            && BuiltinTypes.getResultTypes(type) == null) {
-            // The solver tagged this variant with its declared name (e.g. `Tree`) and,
-            // for polymorphic types, its type-arg vector. Print as `Tree <args>`.
-            val argsStr = if (type.typeArgs.isEmpty()) "" else " " + type.typeArgs.joinToString(" ") {
-                prettyPrintTypeWithMapping(it, typeVarMapping)
-            }
-            "${type.identity.displayNameOrNull()}$argsStr"
-        } else {
-            // Anonymous / inline variant (no name) — print structurally.
-            val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
-                when (dataType) {
-                    null -> name
-                    is MezzeType.RecordType -> "$name ${prettyPrintTypeWithMapping(dataType, typeVarMapping)}"
-                    else -> "$name(${prettyPrintTypeWithMapping(dataType, typeVarMapping)})"
-                }
-            }
-            if (type.isOpen) {
-                "| $constructors, ... |"
-            } else {
-                "| $constructors |"
-            }
-        }
-    }
+    // One variant renderer for both printers: with no aliases printVariantType
+    // still names Bool/Option/Result and declared variants (`Tree 'a`), and only
+    // an anonymous inline variant expands structurally. Sharing it here is what
+    // stops the plain and alias printers from drifting on variant rendering.
+    is MezzeType.VariantType -> printVariantType(type, emptyMap(), showExpansion = false, typeVarMapping)
     is MezzeType.SeqType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
     is MezzeType.TypeApplication -> {
         val argsStr = type.args.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }

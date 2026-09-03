@@ -357,7 +357,7 @@ class AnnotationTypeCheckingTest {
             result
             """.trimIndent(),
             "result",
-            "| Some { val: Int }, None |"
+            "Option Int"
         )
     }
 
@@ -710,7 +710,7 @@ class AnnotationTypeCheckingTest {
             unwrap {opt = Some {val = 42}}
             """.trimIndent(),
             "unwrap",
-            "{ opt: | Some { val: Int }, None | } -> Int"
+            "{ opt: Option Int } -> Int"
         )
     }
 
@@ -851,7 +851,7 @@ class AnnotationTypeCheckingTest {
             none
             """.trimIndent(),
             "none",
-            "| Some { val: Int }, None |"
+            "Option Int"
         )
     }
 

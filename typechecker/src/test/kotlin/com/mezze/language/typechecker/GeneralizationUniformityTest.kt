@@ -71,7 +71,7 @@ class GeneralizationUniformityTest {
     @Test fun `match-arm binder result generalizes through the enclosing function value`() {
         // The `v` bound by the Some arm and the `dflt` param flow to a single
         // result var, generalized because the enclosing binding is a lambda.
-        assertEquals("{ o: | Some { val: 'a }, None |, dflt: 'a } -> 'a", typeOf("f", """
+        assertEquals("{ o: Option 'a, dflt: 'a } -> 'a", typeOf("f", """
             let f = { o: | Some { val: 'a }, None |, dflt: 'a } -> match o is
               Some { val = v } -> v
               None -> dflt
