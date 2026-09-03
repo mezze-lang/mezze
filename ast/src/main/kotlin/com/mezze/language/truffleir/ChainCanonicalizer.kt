@@ -691,100 +691,88 @@ internal class ChainHofClassifier private constructor(
     fun lookup(hash: Hash?): Callee? = if (hash == null) null else table[hash]
 
     companion object {
+        /**
+         * Build the classifier. Only stdlib functions are eligible for
+         * classification — user functions with matching shapes are never
+         * fused. During stdlib precompilation [stdlibSnapshot] is empty
+         * and [functions] IS the stdlib; during user-code compilation
+         * [stdlibSnapshot] carries the precompiled stdlib and [functions]
+         * holds user code (classified only if its hash also appears in
+         * the snapshot, i.e. it IS a stdlib function re-exported by the
+         * user module — rare but possible).
+         */
         fun build(
             functions: Map<Hash, FunctionIR>,
             stdlibSnapshot: Map<Hash, FunctionIR>,
         ): ChainHofClassifier {
             val out = HashMap<Hash, Callee>()
-            fun scan(m: Map<Hash, FunctionIR>) {
-                for ((hash, fn) in m) {
-                    val kind = classify(fn) ?: continue
-                    out[hash] = Callee(kind)
-                }
+            // During stdlib precompile, stdlibSnapshot is empty and
+            // functions IS the stdlib — classify everything structural.
+            // During user-code compile, functions contains user + stdlib
+            // (merged); only classify functions whose hash is in the
+            // stdlib snapshot (or IS a snapshot entry). User functions
+            // never match because they aren't in the snapshot.
+            val isStdlibPrecompile = stdlibSnapshot.isEmpty()
+            for ((hash, fn) in stdlibSnapshot) {
+                val kind = classifyStructural(fn) ?: continue
+                out[hash] = Callee(kind)
             }
-            scan(functions)
-            scan(stdlibSnapshot)
+            for ((hash, fn) in functions) {
+                if (hash in out) continue
+                if (!isStdlibPrecompile && hash !in stdlibSnapshot) continue
+                val kind = classifyStructural(fn) ?: continue
+                out[hash] = Callee(kind)
+            }
             return ChainHofClassifier(out)
         }
 
         /**
-         * Structural classifier — matches by (basename, name, paramNames).
+         * Purely structural classifier — matches by (name, paramNames).
+         * No source-file matching: stdlib membership is enforced by the
+         * caller ([build]), so only known-stdlib functions reach this.
+         *
          * Both the pre-mono generic decl and post-mono spec (empty name)
          * are accepted, mirroring KnownHofs's mono-aware fingerprint.
-         *
-         * Only stdlib basenames match; user-code shadowing is safe.
          */
-        private fun classify(fn: FunctionIR): HofKind? {
-            val src = fn.sourceFile
-            val base = basename(src)
+        private fun classifyStructural(fn: FunctionIR): HofKind? {
             val name = fn.name
             val params = fn.paramNames
-            // iter.mz functions
-            if (base == "stdlib-std-collections-iter.mz") {
-                return when {
-                    params.size in 3..4
-                        && (name == "fold" || name.isEmpty())
-                        && (params[0] == "src" || params[0] == "it")
-                        && params[1] == "init" && params[2] == "f" -> HofKind.FOLD
-                    params.size in 1..2
-                        && (name == "sum" || name.isEmpty())
-                        && (params[0] == "src" || params[0] == "it") -> HofKind.SUM
-                    params.size in 2..3
-                        && (name == "for_each" || name.isEmpty())
-                        && (params[0] == "src" || params[0] == "it")
-                        && params[1] == "f" -> HofKind.FOR_EACH
-                    params.size in 2..3
-                        && (name == "map" || name.isEmpty())
-                        && (params[0] == "src" || params[0] == "it")
-                        && params[1] == "f" -> HofKind.MAP
-                    params.size in 2..3
-                        && (name == "filter" || name.isEmpty())
-                        && (params[0] == "src" || params[0] == "it")
-                        && params[1] == "p" -> HofKind.FILTER
-                    params.size in 2..3
-                        && (name == "take" || name.isEmpty())
-                        && (params[0] == "src" || params[0] == "it")
-                        && params[1] == "n" -> HofKind.TAKE
-                    params.size in 2..3
-                        && (name == "drop" || name.isEmpty())
-                        && (params[0] == "src" || params[0] == "it")
-                        && params[1] == "n" -> HofKind.DROP
-                    params.size == 1
-                        && (name == "from_seq" || name.isEmpty())
-                        && params[0] == "xs" -> HofKind.FROM_SEQ
-                    else -> null
-                }
+            val p0 = params.getOrNull(0) ?: return null
+            val isSrc = p0 == "xs" || p0 == "src" || p0 == "it"
+            if (!isSrc) return null
+            return when {
+                // fold(src/xs/it, init, f [, dict])
+                params.size in 3..4
+                    && (name == "fold" || name.isEmpty())
+                    && params[1] == "init" && params[2] == "f" -> HofKind.FOLD
+                // sum(src/xs/it [, dict])
+                params.size in 1..2
+                    && (name == "sum" || name.isEmpty()) -> HofKind.SUM
+                // for_each(src/xs/it, f [, dict])
+                params.size in 2..3
+                    && (name == "for_each" || name.isEmpty())
+                    && params[1] == "f" -> HofKind.FOR_EACH
+                // map(src/xs/it, f [, dict])
+                params.size in 2..3
+                    && (name == "map" || name.isEmpty())
+                    && params[1] == "f" -> HofKind.MAP
+                // filter(src/xs/it, p [, dict])
+                params.size in 2..3
+                    && (name == "filter" || name.isEmpty())
+                    && params[1] == "p" -> HofKind.FILTER
+                // take(src/xs/it, n [, dict])
+                params.size in 2..3
+                    && (name == "take" || name.isEmpty())
+                    && params[1] == "n" -> HofKind.TAKE
+                // drop(src/xs/it, n [, dict])
+                params.size in 2..3
+                    && (name == "drop" || name.isEmpty())
+                    && params[1] == "n" -> HofKind.DROP
+                // from_seq(xs)
+                params.size == 1
+                    && (name == "from_seq" || name.isEmpty()) -> HofKind.FROM_SEQ
+                else -> null
             }
-            // seq.mz functions (partial — canonicalizer covers seq
-            // side too so peel becomes uniform).
-            if (base == "stdlib-std-collections-seq.mz") {
-                return when {
-                    params.size == 3
-                        && (name == "fold" || name.isEmpty())
-                        && (params[0] == "xs" || params[0] == "it")
-                        && params[1] == "init" && params[2] == "f" -> HofKind.FOLD
-                    params.size == 2
-                        && (name == "map" || name.isEmpty())
-                        && (params[0] == "xs" || params[0] == "it")
-                        && params[1] == "f" -> HofKind.MAP
-                    params.size == 2
-                        && (name == "filter" || name.isEmpty())
-                        && (params[0] == "xs" || params[0] == "it")
-                        && params[1] == "p" -> HofKind.FILTER
-                    params.size == 2
-                        && (name == "for_each" || name.isEmpty())
-                        && (params[0] == "xs" || params[0] == "it")
-                        && params[1] == "f" -> HofKind.FOR_EACH
-                    else -> null
-                }
-            }
-            return null
-        }
-
-        private fun basename(path: String?): String {
-            if (path == null) return ""
-            val slash = path.lastIndexOf('/')
-            return if (slash >= 0) path.substring(slash + 1) else path
         }
     }
 }
