@@ -6,8 +6,8 @@ import com.mezze.language.typedast.TypedModule;
 import com.mezze.language.typedast.TypedAbilityImpl;
 import com.mezze.language.typedast.TypedExpr;
 import com.mezze.language.parsedast.Loc;
-import com.mezze.language.typechecker.lookup.TypedAstLookup;
-import com.mezze.language.typechecker.hover.HoverInfo;
+import com.mezze.language.langservice.lookup.TypedAstLookup;
+import com.mezze.language.langservice.hover.HoverInfo;
 import com.mezze.language.typechecker.TypeCheckOutputKt;
 
 import java.nio.file.Files;

@@ -44,7 +44,7 @@ fi
 # :cli is here for one reason — its jar carries META-INF/mezze/stdlib-snapshot.cbor,
 # which IncludeResources embeds. Without it the image builds fine and then
 # fails at runtime with no stdlib.
-MODULES="ast parser typechecker stdlib store interpreter datastructures formatter cli"
+MODULES="ast parser typechecker langservice stdlib store interpreter datastructures formatter cli"
 
 say "Building JVM artifacts"
 (cd "$REPO" && ./gradlew --quiet $(for m in $MODULES; do printf ':%s:jar ' "$m"; done))
