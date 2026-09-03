@@ -642,7 +642,7 @@ public final class NativeDispatch extends MezzeNode {
 
     private static void registerBoolHandlers() {
         HANDLERS.put("__native_bool_to_str", (r, c) ->
-            Boolean.toString(getBool(r, "b")));
+            getBool(r, "b") ? "True" : "False");
         HANDLERS.put("__native_bool_and", (r, c) ->
             PrimitiveNatives.boolAnd(getBool(r, "l"), getBool(r, "r")));
         HANDLERS.put("__native_bool_or", (r, c) ->

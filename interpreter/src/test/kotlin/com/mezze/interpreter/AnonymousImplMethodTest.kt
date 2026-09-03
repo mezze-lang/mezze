@@ -512,7 +512,7 @@ class AnonymousImplMethodTest {
 
     @Test
     fun `Bool to_str true`() {
-        assertEquals("true", eval("""
+        assertEquals("True", eval("""
             use std::bool
             True.to_str {}
         """))
@@ -520,7 +520,7 @@ class AnonymousImplMethodTest {
 
     @Test
     fun `Bool to_str false`() {
-        assertEquals("false", eval("""
+        assertEquals("False", eval("""
             use std::bool
             False.to_str {}
         """))

@@ -40,7 +40,7 @@ object BoolOps {
 
     private val TO_STR = NativeOp("__native_bool_to_str",
         listOf(Param("b", SlotKind.BOOLEAN)), SlotKind.OBJECT
-    ) { args -> java.lang.Boolean.toString(args.bool(0)) }
+    ) { args -> if (args.bool(0)) "True" else "False" }
 
     // ==================== typed registrations for BDSL ====================
     init {

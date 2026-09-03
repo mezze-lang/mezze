@@ -196,7 +196,8 @@ class BoolModuleTest {
             bool::to_str { b = False }
         """.trimIndent()
 
-        assertEquals("true", eval(source1))
-        assertEquals("false", eval(source2))
+        // Bool to_str matches the constructor names (True/False), like to_dbg.
+        assertEquals("True", eval(source1))
+        assertEquals("False", eval(source2))
     }
 }
