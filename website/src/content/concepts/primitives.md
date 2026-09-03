@@ -126,7 +126,7 @@ let seq = [3, 1, 2]
 let lst = list::empty {}.push { x = 2 }.push { x = 1 }
 let st = set::empty {}.insert { x = 3 }.insert { x = 3 }
 let mp = map::empty {}.insert { k = "ada", v = 36 }
-let dq = deque::push { d = deque::empty {}, x = 1 }
+let dq = deque::empty {}.push { x = 1 }
 
 let main = {} -> perform Console in do
   println { msg = "$(int.to_str {}) $(nat.to_str {}) $(float.to_str {}) $(frac.to_str {}) $(bool.to_str {})" }
