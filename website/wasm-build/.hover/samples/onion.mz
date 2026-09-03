@@ -10,7 +10,7 @@ let describe = { order } -> match order.status is
   Cancelled { why } -> "$(order.id) cancelled: $(why)"
 
 let main = {} -> perform Console in do
-  let order = { id = "A-1", qty = 3, status = Queued }
+  let order = { id = "A-1", status = Queued }
   println { msg = describe { order } }
   println { msg = describe { order = { ...order, status = Shipped { days = 0 } } } }
   println { msg = describe { order = { ...order, status = Cancelled { why = "stock" } } } }
