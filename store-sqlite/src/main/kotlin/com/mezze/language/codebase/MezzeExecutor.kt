@@ -233,6 +233,8 @@ class MezzeExecutor(
                     when (stage) {
                         is com.mezze.language.truffleir.StageIR.Map -> check(stage.f.functionHash)
                         is com.mezze.language.truffleir.StageIR.Filter -> check(stage.p.functionHash)
+                        is com.mezze.language.truffleir.StageIR.Take -> collectDirectCallTargets(stage.n, ownHashes, visited, resolves, out)
+                        is com.mezze.language.truffleir.StageIR.Drop -> collectDirectCallTargets(stage.n, ownHashes, visited, resolves, out)
                     }
                 }
                 when (val sk = node.sink) {
@@ -395,6 +397,8 @@ class MezzeExecutor(
                     when (stage) {
                         is com.mezze.language.truffleir.StageIR.Map -> queue.add(stage.f.functionHash.hex)
                         is com.mezze.language.truffleir.StageIR.Filter -> queue.add(stage.p.functionHash.hex)
+                        is com.mezze.language.truffleir.StageIR.Take -> collectReferencedHashes(stage.n, queue)
+                        is com.mezze.language.truffleir.StageIR.Drop -> collectReferencedHashes(stage.n, queue)
                     }
                 }
                 when (val sk = node.sink) {

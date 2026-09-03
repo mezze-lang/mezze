@@ -815,6 +815,8 @@ object StorePopulator {
                     when (stage) {
                         is com.mezze.language.truffleir.StageIR.Map -> report(stage.f.functionHash.hex, EdgeKind.CALLS)
                         is com.mezze.language.truffleir.StageIR.Filter -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
+                        is com.mezze.language.truffleir.StageIR.Take -> collectEdgesFromNode(stage.n, report)
+                        is com.mezze.language.truffleir.StageIR.Drop -> collectEdgesFromNode(stage.n, report)
                     }
                 }
                 when (val sk = node.sink) {
