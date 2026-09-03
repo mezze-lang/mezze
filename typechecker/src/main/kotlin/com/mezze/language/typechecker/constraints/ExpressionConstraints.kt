@@ -239,12 +239,7 @@ class ExpressionConstraintGenerator {
         is MezzeType.RecordType -> type.rowVar != null || type.fields.values.any { anyRowVarIn(it) }
         is MezzeType.VariantType -> type.rowVar != null || type.constructors.values.any { it != null && anyRowVarIn(it) }
         is MezzeType.TypeApplication -> type.args.any { anyRowVarIn(it) }
-        is MezzeType.SeqType -> anyRowVarIn(type.elementType)
-        is MezzeType.ListType -> anyRowVarIn(type.elementType)
-        is MezzeType.SetType -> anyRowVarIn(type.elementType)
-        is MezzeType.SortedSetType -> anyRowVarIn(type.elementType)
-        is MezzeType.MapType -> anyRowVarIn(type.keyType) || anyRowVarIn(type.valueType)
-        is MezzeType.SortedMapType -> anyRowVarIn(type.keyType) || anyRowVarIn(type.valueType)
+        is MezzeType.ParametricBuiltin -> type.typeArgs.any { anyRowVarIn(it) }
         is MezzeType.NewtypeType -> anyRowVarIn(type.wrappedType)
         else -> false
     }
@@ -273,18 +268,7 @@ class ExpressionConstraintGenerator {
                 rowVar = freshFor(type.rowVar)
             )
             is MezzeType.TypeApplication -> type.copy(args = type.args.map { refreshRowVarsIn(it, mapping) })
-            is MezzeType.SeqType -> type.copy(elementType = refreshRowVarsIn(type.elementType, mapping))
-            is MezzeType.ListType -> type.copy(elementType = refreshRowVarsIn(type.elementType, mapping))
-            is MezzeType.SetType -> type.copy(elementType = refreshRowVarsIn(type.elementType, mapping))
-            is MezzeType.SortedSetType -> type.copy(elementType = refreshRowVarsIn(type.elementType, mapping))
-            is MezzeType.MapType -> type.copy(
-                keyType = refreshRowVarsIn(type.keyType, mapping),
-                valueType = refreshRowVarsIn(type.valueType, mapping)
-            )
-            is MezzeType.SortedMapType -> type.copy(
-                keyType = refreshRowVarsIn(type.keyType, mapping),
-                valueType = refreshRowVarsIn(type.valueType, mapping)
-            )
+            is MezzeType.ParametricBuiltin -> type.rebuild(type.typeArgs.map { refreshRowVarsIn(it, mapping) })
             is MezzeType.NewtypeType -> type.copy(wrappedType = refreshRowVarsIn(type.wrappedType, mapping))
             else -> type
         }
@@ -369,12 +353,7 @@ class ExpressionConstraintGenerator {
                 type.constructors.values.filterNotNull().flatMap { getFreeTypeVariables(it) }.toSet() +
                 type.typeArgs.flatMap { getFreeTypeVariables(it) }.toSet()
             }
-            is MezzeType.SeqType -> getFreeTypeVariables(type.elementType)
-            is MezzeType.ListType -> getFreeTypeVariables(type.elementType)
-            is MezzeType.SetType -> getFreeTypeVariables(type.elementType)
-            is MezzeType.SortedMapType -> getFreeTypeVariables(type.keyType) + getFreeTypeVariables(type.valueType)
-            is MezzeType.SortedSetType -> getFreeTypeVariables(type.elementType)
-            is MezzeType.MapType -> getFreeTypeVariables(type.keyType) + getFreeTypeVariables(type.valueType)
+            is MezzeType.ParametricBuiltin -> type.typeArgs.flatMap { getFreeTypeVariables(it) }.toSet()
             is MezzeType.TypeApplication -> type.args.flatMap { getFreeTypeVariables(it) }.toSet()
             is MezzeType.NewtypeType -> getFreeTypeVariables(type.wrappedType)
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
@@ -426,26 +405,8 @@ class ExpressionConstraintGenerator {
                 identity = type.identity,
                 ascriptionWall = type.ascriptionWall
             )
-            is MezzeType.SeqType -> MezzeType.SeqType(
-                elementType = applyTypeVarSubstitution(type.elementType, substitution)
-            )
-            is MezzeType.ListType -> MezzeType.ListType(
-                elementType = applyTypeVarSubstitution(type.elementType, substitution)
-            )
-            is MezzeType.SetType -> MezzeType.SetType(
-                elementType = applyTypeVarSubstitution(type.elementType, substitution)
-            )
-            is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-                keyType = applyTypeVarSubstitution(type.keyType, substitution),
-                valueType = applyTypeVarSubstitution(type.valueType, substitution)
-            )
-            is MezzeType.SortedSetType -> MezzeType.SortedSetType(
-                elementType = applyTypeVarSubstitution(type.elementType, substitution)
-            )
-            is MezzeType.MapType -> MezzeType.MapType(
-                keyType = applyTypeVarSubstitution(type.keyType, substitution),
-                valueType = applyTypeVarSubstitution(type.valueType, substitution)
-            )
+            is MezzeType.ParametricBuiltin ->
+                type.rebuild(type.typeArgs.map { applyTypeVarSubstitution(it, substitution) })
             is MezzeType.TypeApplication -> WellKnownTypeApp.of(
                 constructor = type.constructor,
                 args = type.args.map { applyTypeVarSubstitution(it, substitution) },
@@ -474,12 +435,7 @@ class ExpressionConstraintGenerator {
                 type.constructors.values.filterNotNull().flatMap { extractTypeVariables(it) } +
                 type.typeArgs.flatMap { extractTypeVariables(it) }
             }
-            is MezzeType.SeqType -> extractTypeVariables(type.elementType)
-            is MezzeType.ListType -> extractTypeVariables(type.elementType)
-            is MezzeType.SetType -> extractTypeVariables(type.elementType)
-            is MezzeType.SortedMapType -> extractTypeVariables(type.keyType) + extractTypeVariables(type.valueType)
-            is MezzeType.SortedSetType -> extractTypeVariables(type.elementType)
-            is MezzeType.MapType -> extractTypeVariables(type.keyType) + extractTypeVariables(type.valueType)
+            is MezzeType.ParametricBuiltin -> type.typeArgs.flatMap { extractTypeVariables(it) }
             is MezzeType.TypeApplication -> type.args.flatMap { extractTypeVariables(it) }
             else -> emptyList()
         }
@@ -655,12 +611,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.RecordType -> type.fields.values.forEach { collectCaughtByAncestorInto(it, into) }
             is MezzeType.VariantType -> type.constructors.values.forEach { it?.let { collectCaughtByAncestorInto(it, into) } }
             is MezzeType.TypeApplication -> type.args.forEach { collectCaughtByAncestorInto(it, into) }
-            is MezzeType.SeqType -> collectCaughtByAncestorInto(type.elementType, into)
-            is MezzeType.ListType -> collectCaughtByAncestorInto(type.elementType, into)
-            is MezzeType.SetType -> collectCaughtByAncestorInto(type.elementType, into)
-            is MezzeType.SortedSetType -> collectCaughtByAncestorInto(type.elementType, into)
-            is MezzeType.MapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
-            is MezzeType.SortedMapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
+            is MezzeType.ParametricBuiltin -> type.typeArgs.forEach { collectCaughtByAncestorInto(it, into) }
             is MezzeType.NewtypeType -> collectCaughtByAncestorInto(type.wrappedType, into)
             is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,

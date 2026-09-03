@@ -108,12 +108,7 @@ data class Substitution(
             is MezzeType.TypeApplication ->
                 type.args.any { needsSubstitution(it) }
 
-            is MezzeType.SeqType -> needsSubstitution(type.elementType)
-            is MezzeType.ListType -> needsSubstitution(type.elementType)
-            is MezzeType.SetType -> needsSubstitution(type.elementType)
-            is MezzeType.SortedSetType -> needsSubstitution(type.elementType)
-            is MezzeType.SortedMapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
-            is MezzeType.MapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
+            is MezzeType.ParametricBuiltin -> type.typeArgs.any { needsSubstitution(it) }
 
             is MezzeType.NewtypeType -> needsSubstitution(type.wrappedType)
 
@@ -249,31 +244,8 @@ data class Substitution(
                 identity = type.identity
             )
 
-            is MezzeType.SeqType -> MezzeType.SeqType(
-                elementType = applyWithVisited(type.elementType, visitedVars, chainCache)
-            )
-
-            is MezzeType.ListType -> MezzeType.ListType(
-                elementType = applyWithVisited(type.elementType, visitedVars, chainCache)
-            )
-
-            is MezzeType.SetType -> MezzeType.SetType(
-                elementType = applyWithVisited(type.elementType, visitedVars, chainCache)
-            )
-
-            is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-                keyType = applyWithVisited(type.keyType, visitedVars, chainCache),
-                valueType = applyWithVisited(type.valueType, visitedVars, chainCache)
-            )
-
-            is MezzeType.SortedSetType -> MezzeType.SortedSetType(
-                elementType = applyWithVisited(type.elementType, visitedVars, chainCache)
-            )
-
-            is MezzeType.MapType -> MezzeType.MapType(
-                keyType = applyWithVisited(type.keyType, visitedVars, chainCache),
-                valueType = applyWithVisited(type.valueType, visitedVars, chainCache)
-            )
+            is MezzeType.ParametricBuiltin ->
+                type.rebuild(type.typeArgs.map { applyWithVisited(it, visitedVars, chainCache) })
 
             is MezzeType.NewtypeType -> type.copy(
                 wrappedType = applyWithVisited(type.wrappedType, visitedVars, chainCache)
@@ -461,18 +433,8 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         effects = type.effects,
         abilityConstraints = type.abilityConstraints
     )
-    is MezzeType.SeqType -> MezzeType.SeqType(closeGeneratedRowVars(type.elementType, mustBeOpenRowVars))
-    is MezzeType.ListType -> MezzeType.ListType(closeGeneratedRowVars(type.elementType, mustBeOpenRowVars))
-    is MezzeType.SetType -> MezzeType.SetType(closeGeneratedRowVars(type.elementType, mustBeOpenRowVars))
-    is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-        keyType = closeGeneratedRowVars(type.keyType, mustBeOpenRowVars),
-        valueType = closeGeneratedRowVars(type.valueType, mustBeOpenRowVars)
-    )
-    is MezzeType.SortedSetType -> MezzeType.SortedSetType(closeGeneratedRowVars(type.elementType, mustBeOpenRowVars))
-    is MezzeType.MapType -> MezzeType.MapType(
-        keyType = closeGeneratedRowVars(type.keyType, mustBeOpenRowVars),
-        valueType = closeGeneratedRowVars(type.valueType, mustBeOpenRowVars)
-    )
+    is MezzeType.ParametricBuiltin ->
+        type.rebuild(type.typeArgs.map { closeGeneratedRowVars(it, mustBeOpenRowVars) })
     is MezzeType.TypeApplication -> MezzeType.TypeApplication(
         constructor = type.constructor,
         args = type.args.map { closeGeneratedRowVars(it, mustBeOpenRowVars) },
@@ -519,18 +481,7 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
         is MezzeType.TypeApplication ->
             type.args.any { occursCheck(typeVar, it) }
 
-        is MezzeType.SeqType -> occursCheck(typeVar, type.elementType)
-        is MezzeType.ListType -> occursCheck(typeVar, type.elementType)
-        is MezzeType.SetType -> occursCheck(typeVar, type.elementType)
-        is MezzeType.SortedSetType -> occursCheck(typeVar, type.elementType)
-
-        is MezzeType.SortedMapType ->
-            occursCheck(typeVar, type.keyType) ||
-            occursCheck(typeVar, type.valueType)
-
-        is MezzeType.MapType ->
-            occursCheck(typeVar, type.keyType) ||
-            occursCheck(typeVar, type.valueType)
+        is MezzeType.ParametricBuiltin -> type.typeArgs.any { occursCheck(typeVar, it) }
 
         is MezzeType.NewtypeType -> occursCheck(typeVar, type.wrappedType)
 
@@ -584,16 +535,8 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
         is MezzeType.TypeApplication ->
             type.args.flatMap { collectFreeTypeVars(it) }.toSet()
 
-        is MezzeType.SeqType -> collectFreeTypeVars(type.elementType)
-        is MezzeType.ListType -> collectFreeTypeVars(type.elementType)
-        is MezzeType.SetType -> collectFreeTypeVars(type.elementType)
-        is MezzeType.SortedSetType -> collectFreeTypeVars(type.elementType)
-
-        is MezzeType.SortedMapType ->
-            collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
-
-        is MezzeType.MapType ->
-            collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
+        is MezzeType.ParametricBuiltin ->
+            type.typeArgs.flatMap { collectFreeTypeVars(it) }.toSet()
 
         is MezzeType.NewtypeType -> collectFreeTypeVars(type.wrappedType)
 

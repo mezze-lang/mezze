@@ -454,12 +454,7 @@ object TypeAnnotationConverter {
             is MezzeType.RecordType -> type.fields.values.forEach { collectCaughtByAncestorInto(it, into) }
             is MezzeType.VariantType -> type.constructors.values.forEach { it?.let { collectCaughtByAncestorInto(it, into) } }
             is MezzeType.TypeApplication -> type.args.forEach { collectCaughtByAncestorInto(it, into) }
-            is MezzeType.SeqType -> collectCaughtByAncestorInto(type.elementType, into)
-            is MezzeType.ListType -> collectCaughtByAncestorInto(type.elementType, into)
-            is MezzeType.SetType -> collectCaughtByAncestorInto(type.elementType, into)
-            is MezzeType.SortedSetType -> collectCaughtByAncestorInto(type.elementType, into)
-            is MezzeType.MapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
-            is MezzeType.SortedMapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
+            is MezzeType.ParametricBuiltin -> type.typeArgs.forEach { collectCaughtByAncestorInto(it, into) }
             is MezzeType.NewtypeType -> collectCaughtByAncestorInto(type.wrappedType, into)
             is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
@@ -493,18 +488,7 @@ object TypeAnnotationConverter {
                 constructors = type.constructors.mapValues { (_, v) -> v?.let { stampCaughtOnAllEffectRows(it, caught) } }
             )
             is MezzeType.TypeApplication -> type.copy(args = type.args.map { stampCaughtOnAllEffectRows(it, caught) })
-            is MezzeType.SeqType -> type.copy(elementType = stampCaughtOnAllEffectRows(type.elementType, caught))
-            is MezzeType.ListType -> type.copy(elementType = stampCaughtOnAllEffectRows(type.elementType, caught))
-            is MezzeType.SetType -> type.copy(elementType = stampCaughtOnAllEffectRows(type.elementType, caught))
-            is MezzeType.SortedSetType -> type.copy(elementType = stampCaughtOnAllEffectRows(type.elementType, caught))
-            is MezzeType.MapType -> type.copy(
-                keyType = stampCaughtOnAllEffectRows(type.keyType, caught),
-                valueType = stampCaughtOnAllEffectRows(type.valueType, caught)
-            )
-            is MezzeType.SortedMapType -> type.copy(
-                keyType = stampCaughtOnAllEffectRows(type.keyType, caught),
-                valueType = stampCaughtOnAllEffectRows(type.valueType, caught)
-            )
+            is MezzeType.ParametricBuiltin -> type.rebuild(type.typeArgs.map { stampCaughtOnAllEffectRows(it, caught) })
             is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnAllEffectRows(type.wrappedType, caught))
             is MezzeType.EffectRow -> type.copy(caughtByAncestor = type.caughtByAncestor + caught)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
@@ -551,18 +535,8 @@ object TypeAnnotationConverter {
         is MezzeType.TypeApplication -> type.copy(
             args = type.args.map { stampCaughtOnCallbackRows(it, outerReturnEffectNames) }
         )
-        is MezzeType.SeqType -> type.copy(elementType = stampCaughtOnCallbackRows(type.elementType, outerReturnEffectNames))
-        is MezzeType.ListType -> type.copy(elementType = stampCaughtOnCallbackRows(type.elementType, outerReturnEffectNames))
-        is MezzeType.SetType -> type.copy(elementType = stampCaughtOnCallbackRows(type.elementType, outerReturnEffectNames))
-        is MezzeType.SortedSetType -> type.copy(elementType = stampCaughtOnCallbackRows(type.elementType, outerReturnEffectNames))
-        is MezzeType.MapType -> type.copy(
-            keyType = stampCaughtOnCallbackRows(type.keyType, outerReturnEffectNames),
-            valueType = stampCaughtOnCallbackRows(type.valueType, outerReturnEffectNames)
-        )
-        is MezzeType.SortedMapType -> type.copy(
-            keyType = stampCaughtOnCallbackRows(type.keyType, outerReturnEffectNames),
-            valueType = stampCaughtOnCallbackRows(type.valueType, outerReturnEffectNames)
-        )
+        is MezzeType.ParametricBuiltin ->
+            type.rebuild(type.typeArgs.map { stampCaughtOnCallbackRows(it, outerReturnEffectNames) })
         is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnCallbackRows(type.wrappedType, outerReturnEffectNames))
         is MezzeType.EffectRow, is MezzeType.VarType,
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,

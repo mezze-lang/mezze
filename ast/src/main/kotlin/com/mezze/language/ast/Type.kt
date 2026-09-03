@@ -142,12 +142,7 @@ sealed interface MezzeType {
         is RecordType -> fields.values.any(predicate)
         is VariantType -> constructors.values.any { it != null && predicate(it) }
         is TypeApplication -> args.any(predicate)
-        is ListType -> predicate(elementType)
-        is MapType -> predicate(keyType) || predicate(valueType)
-        is SetType -> predicate(elementType)
-        is SortedMapType -> predicate(keyType) || predicate(valueType)
-        is SortedSetType -> predicate(elementType)
-        is SeqType -> predicate(elementType)
+        is ParametricBuiltin -> typeArgs.any(predicate)
         is NewtypeType -> predicate(wrappedType)
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
         is FracType, is BytesType,
@@ -160,12 +155,7 @@ sealed interface MezzeType {
         is RecordType -> copy(fields = fields.mapValues { (_, v) -> f(v) })
         is VariantType -> copy(constructors = constructors.mapValues { (_, v) -> v?.let(f) })
         is TypeApplication -> copy(args = args.map(f))
-        is ListType -> copy(elementType = f(elementType))
-        is MapType -> copy(keyType = f(keyType), valueType = f(valueType))
-        is SetType -> copy(elementType = f(elementType))
-        is SortedMapType -> copy(keyType = f(keyType), valueType = f(valueType))
-        is SortedSetType -> copy(elementType = f(elementType))
-        is SeqType -> copy(elementType = f(elementType))
+        is ParametricBuiltin -> rebuild(typeArgs.map(f))
         is NewtypeType -> copy(wrappedType = f(wrappedType))
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
         is FracType, is BytesType,
@@ -294,20 +284,56 @@ sealed interface MezzeType {
     //   Option 'a = Some { val: 'a } | None
     //   Result 'a 'e = Ok { val: 'a } | Err { error: 'e }
 
-    @Serializable
-    data class ListType(val elementType: MezzeType) : MezzeType
+    /**
+     * A builtin type constructor parameterized by type arguments — the collection
+     * family (Seq/List/Set/SortedSet, keyed by one arg; Map/SortedMap, keyed by
+     * two). Exposes its args positionally ([typeArgs]) and reconstructs itself from
+     * new args ([rebuild]), so a structural pass folds the whole family through ONE
+     * `is ParametricBuiltin` arm instead of six identical `is SeqType`/`is MapType`
+     * copies. This is an ACCESSOR, not a demotion: each type stays a distinct
+     * primitive `MezzeType` with its own hash tag and serialized identity — grouping
+     * them here changes no runtime shape and no content hash. Only use it where the
+     * per-collection arms are genuinely uniform (recurse on args, rebuild same
+     * constructor); sites that special-case one collection keep their explicit arms.
+     * TypeApplication/VariantType are deliberately NOT members — they carry a
+     * nominal identity and are special-cased everywhere.
+     */
+    sealed interface ParametricBuiltin : MezzeType {
+        /** Type arguments in constructor order (Map/SortedMap: [key, value]). */
+        val typeArgs: List<MezzeType>
+        /** Reconstruct this same constructor with [args] (same arity as [typeArgs]). */
+        fun rebuild(args: List<MezzeType>): ParametricBuiltin
+    }
 
     @Serializable
-    data class MapType(val keyType: MezzeType, val valueType: MezzeType) : MezzeType
+    data class ListType(val elementType: MezzeType) : ParametricBuiltin {
+        override val typeArgs: List<MezzeType> get() = listOf(elementType)
+        override fun rebuild(args: List<MezzeType>): ParametricBuiltin = ListType(args[0])
+    }
 
     @Serializable
-    data class SetType(val elementType: MezzeType) : MezzeType
+    data class MapType(val keyType: MezzeType, val valueType: MezzeType) : ParametricBuiltin {
+        override val typeArgs: List<MezzeType> get() = listOf(keyType, valueType)
+        override fun rebuild(args: List<MezzeType>): ParametricBuiltin = MapType(args[0], args[1])
+    }
 
     @Serializable
-    data class SortedMapType(val keyType: MezzeType, val valueType: MezzeType) : MezzeType
+    data class SetType(val elementType: MezzeType) : ParametricBuiltin {
+        override val typeArgs: List<MezzeType> get() = listOf(elementType)
+        override fun rebuild(args: List<MezzeType>): ParametricBuiltin = SetType(args[0])
+    }
 
     @Serializable
-    data class SortedSetType(val elementType: MezzeType) : MezzeType
+    data class SortedMapType(val keyType: MezzeType, val valueType: MezzeType) : ParametricBuiltin {
+        override val typeArgs: List<MezzeType> get() = listOf(keyType, valueType)
+        override fun rebuild(args: List<MezzeType>): ParametricBuiltin = SortedMapType(args[0], args[1])
+    }
+
+    @Serializable
+    data class SortedSetType(val elementType: MezzeType) : ParametricBuiltin {
+        override val typeArgs: List<MezzeType> get() = listOf(elementType)
+        override fun rebuild(args: List<MezzeType>): ParametricBuiltin = SortedSetType(args[0])
+    }
 
     // Generic type application (e.g., Option Int, Result String Error, MyType 'a 'b)
     // This represents applying type arguments to a type constructor
@@ -341,7 +367,10 @@ sealed interface MezzeType {
 
     // Seq types (for [] syntax)
     @Serializable
-    data class SeqType(val elementType: MezzeType) : MezzeType
+    data class SeqType(val elementType: MezzeType) : ParametricBuiltin {
+        override val typeArgs: List<MezzeType> get() = listOf(elementType)
+        override fun rebuild(args: List<MezzeType>): ParametricBuiltin = SeqType(args[0])
+    }
 
     // Function types
     @Serializable

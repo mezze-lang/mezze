@@ -47,12 +47,7 @@ internal fun isConcrete(t: MezzeType): Boolean = when (t) {
     is MezzeType.VariantType -> t.constructors.values.all { it == null || isConcrete(it) }
     is MezzeType.NewtypeType -> isConcrete(t.wrappedType)
     is MezzeType.TypeApplication -> t.args.all { isConcrete(it) }
-    is MezzeType.ListType -> isConcrete(t.elementType)
-    is MezzeType.SeqType -> isConcrete(t.elementType)
-    is MezzeType.SetType -> isConcrete(t.elementType)
-    is MezzeType.SortedSetType -> isConcrete(t.elementType)
-    is MezzeType.MapType -> isConcrete(t.keyType) && isConcrete(t.valueType)
-    is MezzeType.SortedMapType -> isConcrete(t.keyType) && isConcrete(t.valueType)
+    is MezzeType.ParametricBuiltin -> t.typeArgs.all { isConcrete(it) }
     is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
     is MezzeType.BoolType, is MezzeType.FracType,
     is MezzeType.BytesType,
