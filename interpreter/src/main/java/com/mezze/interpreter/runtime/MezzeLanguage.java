@@ -90,6 +90,25 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private final java.util.concurrent.ConcurrentHashMap<Hash, CallTarget> stdlibCallTargetCache =
         new java.util.concurrent.ConcurrentHashMap<>();
 
+    // Test-isolation guard. The test suite runs every Context off ONE shared
+    // Engine (MezzeTestHelper.sharedEngine) → one Language instance → these
+    // Language-level CallTarget caches persist across every test. A function
+    // cached here can bake a reference (a lazy stub) to a callee whose IR was
+    // registered only in the Context that compiled it. When a later test's
+    // Context reuses the cached caller (identical content hash — e.g. a shared
+    // `spawn`/`await` test prelude) but never registered that callee's IR, the
+    // stub inflates against the wrong Context and throws
+    // "no MezzeFunction registered for hash …" (order-dependent flake, e.g.
+    // StructuredConcurrencyTest / TruffleAndLoomIntegrationTest). `userStubCache`
+    // is already dropped per parse (#304) and `slotTable` on disposeContext
+    // (#392); this flag extends the same Context-scoping to the BDSL compiler's
+    // compiled-caller cache and the two Language-level CallTarget caches (the
+    // remaining cross-Context stores — see parse()). Production runs a single
+    // Context per Engine and never sets it, so it keeps the cross-Context reuse
+    // (the whole point of these caches).
+    private static final boolean TEST_ISOLATION =
+        Boolean.getBoolean("mezze.test.isolation");
+
     // #391 — Scaffold for eager whole-program BDSL compilation. Sits
     // alongside the three existing caches (globals / userStubCache /
     // stdlibCallTargetCache) that later migration steps will collapse
@@ -1139,11 +1158,32 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // context. Clear them alongside per-context user state so the next
         // test starts fresh.
         userStubCache.clear();
-        // The BDSL compiler's per-instance compiledCallTargets cache also
-        // holds the stub CTs from prior emits; evict them too so a stale
-        // stub can't be resolved on the next test's supports() check.
-        var bc = bdslCompiler;
-        if (bc != null) bc.invalidateStubs();
+        if (TEST_ISOLATION) {
+            // Full per-test reset of every cross-Context compiled-caller cache
+            // (see TEST_ISOLATION). The shared-Engine suite reuses this Language
+            // across tests, so a caller compiled in one test — held in the BDSL
+            // compiler's compiledCallTargets, or a Language-level CallTarget
+            // cache — carries a baked LazyStub to a callee whose IR only lived in
+            // that (now-closed) Context. `invalidateStubs()` alone is not enough:
+            // it evicts stub CTs but KEEPS real compiled callers, and those still
+            // reference the baked stub. Reused in a later test that never
+            // registered that callee, the stub inflates against the wrong Context
+            // and throws "no MezzeFunction registered for hash …". Dropping the
+            // compiler (its compiledCallTargets with it) + the two CallTarget
+            // caches forces this test to recompile every caller against its own
+            // IR. Cheap — the compiler is a bare `new BytecodeCompiler(...)`;
+            // production runs one Context per Engine and never sets the flag.
+            bdslCompiler = null;
+            stdlibCallTargetCache.clear();
+            importedCallTargetCache.clear();
+        } else {
+            // Production/watch-mode: keep the caches (cross-Context reuse is the
+            // point) and only evict stub + orphan-trampoline CTs (#304) so a
+            // stale stub from a disposed Context can't be resolved on the next
+            // compile's supports() check.
+            var bc = bdslCompiler;
+            if (bc != null) bc.invalidateStubs();
+        }
 
         // Check for direct TruffleIR execution (from tests or CLI)
         List<FunctionIR> directFunctions = directExecutionFunctions.get();
