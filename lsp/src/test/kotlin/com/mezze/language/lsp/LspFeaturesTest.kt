@@ -2340,6 +2340,77 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `function-argument completion offers the param field names mid-edit`() {
+        // Typing `greet { ` leaves an UNCLOSED brace, so the current buffer does
+        // not parse and its typed module is empty. Argument completion must still
+        // offer the record-param field names by falling back to the last good
+        // typed module (same fix dot completion got in #159). Drive the real edit
+        // sequence: open a valid call, then reopen the brace.
+        val valid = "let greet = {name: Str, age: Int} -> name\nlet main = {} -> greet {}\n"
+        val (uri, _) = openSingleFile(valid)
+        client.awaitDiagnostics(uri, 5_000)
+        val editedLine = "let main = {} -> greet { "
+        val edited = "let greet = {name: Str, age: Int} -> name\n$editedLine\n"
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(uri, 2),
+            listOf(TextDocumentContentChangeEvent(edited))
+        ))
+        Thread.sleep(800)
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(1, editedLine.length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val labels = comps.map { it.label }
+        assertTrue(labels.contains("name") && labels.contains("age"),
+            "expected the `greet` param field names (name, age) mid-edit, got: $labels")
+    }
+
+    @Test
+    fun `function-argument completion works for a selectively-imported function`() {
+        val valid = "use std::collections::seq::{map}\nlet main = {} -> map { xs = [1], f = {x} -> x }\n"
+        val (uri, _) = openSingleFile(valid)
+        client.awaitDiagnostics(uri, 5_000)
+        val editedLine = "let main = {} -> map { "
+        val edited = "use std::collections::seq::{map}\n$editedLine\n"
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(uri, 2),
+            listOf(TextDocumentContentChangeEvent(edited))
+        ))
+        Thread.sleep(800)
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(1, editedLine.length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val labels = comps.map { it.label }
+        assertTrue(labels.contains("xs") && labels.contains("f"),
+            "expected seq::map param fields (xs, f) for imported `map`, got: $labels")
+    }
+
+    @Test
+    fun `function-argument completion works for a module-qualified call`() {
+        val valid = "use std::collections::seq\nlet main = {} -> seq::map { xs = [1], f = {x} -> x }\n"
+        val (uri, _) = openSingleFile(valid)
+        client.awaitDiagnostics(uri, 5_000)
+        val editedLine = "let main = {} -> seq::map { "
+        val edited = "use std::collections::seq\n$editedLine\n"
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(uri, 2),
+            listOf(TextDocumentContentChangeEvent(edited))
+        ))
+        Thread.sleep(800)
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(1, editedLine.length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val labels = comps.map { it.label }
+        assertTrue(labels.contains("xs") && labels.contains("f"),
+            "expected seq::map param fields (xs, f) for qualified `seq::map`, got: $labels")
+    }
+
+    @Test
     fun `dot completion on a do-block let local works mid-edit`() {
         // #159: `y.` where y is a `let` inside a do-block returned 0 completions.
         // Root cause: typing the `.` makes the do-block a HARD parse error, the

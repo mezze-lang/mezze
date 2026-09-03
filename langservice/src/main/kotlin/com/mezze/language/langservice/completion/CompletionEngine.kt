@@ -509,9 +509,12 @@ object CompletionEngine {
             ?: return emptyList()
 
         val funcName = funcCallMatch.functionName
-        val result = ctx.typeCheckResult ?: return emptyList()
-
-        val funcType = findFunctionType(funcName, result) ?: return emptyList()
+        // Mid-call the buffer usually doesn't parse — the `{` the user just opened
+        // is unbalanced — so the current type-check's typed module / resolved
+        // imports are empty. Resolve the callee's type from the last good
+        // type-check too (the #159 fallback dot completion already uses), else
+        // typing `foo { ` after an import offers no field names.
+        val funcType = findFunctionType(funcName, ctx) ?: return emptyList()
 
         val recordFields = extractRecordParameterFields(funcType)
         if (recordFields.isEmpty()) return emptyList()
@@ -660,9 +663,15 @@ object CompletionEngine {
 
         val end = trimmed.length
         var start = end
-
-        while (start > 0 && HoverInfo.isIdentifierChar(trimmed[start - 1])) {
-            start--
+        // Consume a possibly `::`-qualified path (`seq::map`, `std::seq::map`) —
+        // a module-qualified call target resolves against the qualified import
+        // key (`BindingKey("seq","map")` → localName "seq::map"), so we must keep
+        // the qualifier, not just the last segment `map`.
+        while (true) {
+            while (start > 0 && HoverInfo.isIdentifierChar(trimmed[start - 1])) start--
+            if (start >= 2 && trimmed[start - 1] == ':' && trimmed[start - 2] == ':') {
+                start -= 2
+            } else break
         }
 
         return if (start < end) trimmed.substring(start, end) else null
@@ -671,21 +680,23 @@ object CompletionEngine {
     /**
      * Find the type of a function by name.
      */
-    private fun findFunctionType(funcName: String, result: TypeCheckResult): MezzeType? {
-        val typedBinding = result.typedModule?.decls
-            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
-            ?.find { it.name == funcName }
-
-        if (typedBinding != null) {
-            val bindingType = typedBinding.scheme.type
-            if (bindingType !is MezzeType.VarType) return bindingType
+    private fun findFunctionType(funcName: String, ctx: CompletionContext): MezzeType? {
+        // Try the current type-check first, then the last good one. Mid-call the
+        // open `{` breaks the current parse, so its typed module and resolved
+        // imports are empty (#159) — a locally-declared callee may survive via
+        // parse recovery, but an IMPORTED callee only lives in the last good
+        // resolvedImports.
+        for (result in listOfNotNull(ctx.typeCheckResult, ctx.lastSuccessful)) {
+            val typedBinding = result.typedModule?.decls
+                ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+                ?.find { it.name == funcName }
+            if (typedBinding != null) {
+                val bindingType = typedBinding.scheme.type
+                if (bindingType !is MezzeType.VarType) return bindingType
+            }
+            val import = result.resolvedImports.find { it.localName == funcName }
+            if (import != null) return import.type
         }
-
-        val import = result.resolvedImports.find { it.localName == funcName }
-        if (import != null) {
-            return import.type
-        }
-
         return null
     }
 
