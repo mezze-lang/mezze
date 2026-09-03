@@ -1,0 +1,302 @@
+---
+/**
+ * The concept reference: a tree on the left, one page's content on the right.
+ *
+ * Every page is Markdown in src/content/concepts, using the same markers as a
+ * blog post — `mezze-editor` for a runnable snippet, `mezze-code` for a static
+ * highlighted one. Order and nesting come from TREE in lib/concepts.ts.
+ *
+ * All pages ship with the document and swap client-side, so moving around the
+ * reference costs no navigation and the 60MB runtime is instantiated once.
+ */
+import Base from '../layouts/Base.astro'
+import { pages } from '../lib/concepts'
+import { applyMarkup } from '../lib/markup'
+import { highlight } from '../lib/highlight'
+import Editor from '../components/Editor.astro'
+
+const EDITOR = /<!--mezze-editor\s*([\s\S]*?)-->/g
+const STATIC = /<!--mezze-code\s*([\s\S]*?)-->/g
+const ERROR = /<!--mezze-error\s*([\s\S]*?)-->/g
+
+// Static snippets are highlighted at build time with the same tokenizer the
+// live editor uses, so a snippet you can run and one you cannot look alike.
+const esc = (t: string) =>
+  t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+// A snippet whose lines start with ## or # would be parsed as a Markdown
+// heading before this runs, so those examples are written with one leading
+// space and it is taken back off here.
+const dedent = (t: string) => {
+  const lines = t.split('\n')
+  return lines.every((l) => l === '' || l.startsWith(' '))
+    ? lines.map((l) => l.slice(1)).join('\n')
+    : t
+}
+
+const withStatic = (html: string) =>
+  html
+    .replace(STATIC, (_m, body) =>
+      `<pre class="mezze-static"><code>${highlight(dedent(String(body).replace(/^\n+|\n+$/g, '')))}</code></pre>`)
+    // Compiler output, not source: no syntax highlighting, but coloured as the
+    // error it is. A plain fence renders through Shiki with a hardcoded dark
+    // background that ignores the site theme entirely.
+    .replace(ERROR, (_m, body) =>
+      `<pre class="mezze-error"><code>${esc(String(body).trim())}</code></pre>`)
+
+// Split each page into alternating prose and editor slots. The editors are
+// rendered as components, so they cannot live inside the raw HTML string.
+type Part = { kind: 'html'; value: string } | { kind: 'editor'; value: string }
+const all = (await pages()).map((p) => {
+  const html = withStatic(applyMarkup(p.html))
+  const parts: Part[] = []
+  let cursor = 0
+  for (const m of html.matchAll(EDITOR)) {
+    if (m.index! > cursor) parts.push({ kind: 'html', value: html.slice(cursor, m.index) })
+    parts.push({ kind: 'editor', value: m[1].trim() })
+    cursor = m.index! + m[0].length
+  }
+  if (cursor < html.length) parts.push({ kind: 'html', value: html.slice(cursor) })
+  return { ...p, parts }
+})
+---
+<Base title="Concepts — Mezze" width="full" sticky description="The Mezze language, one idea at a time.">
+  <div class="concepts">
+    <div class="c-rail-wrap">
+    <nav class="c-rail" aria-label="Concepts">
+      {all.map((p, i) => (
+        <>
+          <button class="c-item" data-idx={i} data-depth={p.depth} title={p.blurb ?? p.title}>
+            {p.title}
+          </button>
+          {p.headings.map((h) => (
+            <button class="c-sub" data-idx={i} data-anchor={h.id} data-depth={p.depth}>
+              {h.text}
+            </button>
+          ))}
+        </>
+      ))}
+    </nav>
+    </div>
+
+    <div class="c-body">
+      {all.map((p, i) => (
+        <article class="c-page" data-page={i} data-slug={p.slug} hidden={i !== 0}>
+          <h1>{p.title}</h1>
+          {p.blurb && <p class="c-blurb">{p.blurb}</p>}
+          {p.parts.map((part) =>
+            part.kind === 'html'
+              ? <div class="post-body" set:html={part.value} />
+              : <div class="post-editor" style={`--h: calc(${part.value.split('\n').length} * 1.6 * .84rem + 1.8rem)`}>
+                  <Editor code={part.value} />
+                </div>
+          )}
+        </article>
+      ))}
+    </div>
+  </div>
+</Base>
+
+<script>
+  const items = Array.from(document.querySelectorAll<HTMLElement>('.c-item'))
+  const subs = Array.from(document.querySelectorAll<HTMLElement>('.c-sub'))
+  const pages = Array.from(document.querySelectorAll<HTMLElement>('.c-page'))
+  const slugFor = (i: number) => pages[i]?.dataset.slug ?? String(i)
+
+  let current = -1
+
+  const show = (n: number, anchor?: string) => {
+    if (n !== current) {
+      current = n
+      pages.forEach((el, k) => (el.hidden = k !== n))
+      items.forEach((el, k) => el.classList.toggle('is-active', k === n))
+      // A sub-item belongs to the page it was rendered under, so the whole
+      // group stays visible while that page is the one on screen.
+      subs.forEach((el) => el.classList.toggle('is-shown', Number(el.dataset.idx) === n))
+    }
+    if (anchor) {
+      document.getElementById(anchor)?.scrollIntoView({ block: 'start' })
+    } else {
+      window.scrollTo({ top: 0 })
+    }
+    requestAnimationFrame(spy)
+  }
+
+  items.forEach((el, i) => (el.onclick = () => {
+    show(Number(el.dataset.idx))
+    history.replaceState(null, '', '#' + slugFor(Number(el.dataset.idx)))
+  }))
+
+  subs.forEach((el) => (el.onclick = () => {
+    show(Number(el.dataset.idx), el.dataset.anchor)
+    history.replaceState(null, '', '#' + el.dataset.anchor)
+  }))
+
+  // Scroll-spy: highlight whichever heading the reader is under.
+  //
+  // Computed from scroll position rather than left to IntersectionObserver
+  // callbacks. An observer with a narrow band never fires for a heading close
+  // to the end of the document — there is not enough page left to scroll it
+  // into the band — so a short final section could never become current.
+  // Walking the list is a handful of comparisons and has no such blind spot.
+  const LINE = 0.1 // trigger a tenth of the way down the viewport
+  const spy = () => {
+    const hs = Array.from(
+      document.querySelectorAll<HTMLElement>('.c-page:not([hidden]) h2[id]'),
+    )
+    if (!hs.length) return
+    const line = window.innerHeight * LINE
+    // The last heading whose top has passed the line. Falls back to the first,
+    // so something is always current rather than nothing.
+    let active = hs[0].id
+    for (const h of hs) {
+      if (h.getBoundingClientRect().top <= line) active = h.id
+    }
+    // At the bottom of the page the final heading wins outright: a short last
+    // section may never reach the line, and it is plainly what is on screen.
+    const atEnd = window.innerHeight + window.scrollY >= document.body.scrollHeight - 4
+    if (atEnd) active = hs[hs.length - 1].id
+    subs.forEach((el) => el.classList.toggle('is-here', el.dataset.anchor === active))
+  }
+
+  let ticking = false
+  const onScroll = () => {
+    if (ticking) return
+    ticking = true
+    requestAnimationFrame(() => { spy(); ticking = false })
+  }
+  window.addEventListener('scroll', onScroll, { passive: true })
+  window.addEventListener('resize', onScroll, { passive: true })
+
+  // Open on the hash: either a page slug or a heading anchor within one.
+  const hash = location.hash.slice(1)
+  const byPage = pages.findIndex((el) => el.dataset.slug === hash)
+  const bySub = subs.find((el) => el.dataset.anchor === hash)
+  if (byPage >= 0) show(byPage)
+  else if (bySub) show(Number(bySub.dataset.idx), bySub.dataset.anchor)
+  else show(0)
+</script>
+
+<style is:global>
+  /* The page scrolls, not a pane inside it, so the scrollbar sits at the
+     browser's right edge where a reader expects it. An inner scroll container
+     puts a second bar in the middle of the window, which reads as a widget
+     rather than as the document. */
+  .concepts {
+    display: grid;
+    grid-template-columns: 16rem minmax(0, 1fr);
+    gap: 2.5rem;
+    max-width: 96rem;
+    margin-inline: auto;
+    padding-inline: 2rem;
+  }
+
+  .c-rail-wrap { display: contents; }
+
+  /* Sticky rather than independently scrolled: it stays in view as the
+     document moves under it, and only scrolls itself if the tree is taller
+     than the viewport. */
+  .c-rail {
+    position: sticky;
+    top: var(--header-h, 4rem);
+    align-self: start;
+    max-height: calc(100vh - var(--header-h, 4rem));
+    display: flex; flex-direction: column; gap: .1rem;
+    overflow-y: auto; padding-block: 1.5rem;
+    border-right: 1px solid var(--rule);
+    padding-right: .75rem;
+  }
+  .c-item {
+    font: inherit; font-size: .88rem; text-align: left;
+    padding: .34rem .6rem; border: 0; border-radius: 6px;
+    background: none; color: var(--soft); cursor: pointer;
+  }
+  .c-item[data-depth="1"] { padding-left: 1.5rem; font-size: .84rem; }
+  .c-item[data-depth="2"] { padding-left: 2.4rem; font-size: .82rem; }
+  .c-item:hover { background: var(--raised); color: var(--ink); }
+  .c-item.is-active { background: var(--raised); color: var(--primary); font-weight: 600; }
+
+  /* Sub-items belong to their topic: hidden until that topic is open, then
+     all of them show at once. The page is one scroll, so they are anchors
+     within it rather than separate views. */
+  .c-sub {
+    display: none;
+    font: inherit; font-size: .82rem; text-align: left;
+    padding: .26rem .6rem .26rem 1.6rem;
+    border: 0; border-radius: 6px;
+    background: none; color: var(--faint); cursor: pointer;
+  }
+  .c-sub[data-depth="1"] { padding-left: 2.5rem; }
+  .c-sub.is-shown { display: block; }
+  .c-sub:hover { color: var(--ink); }
+  /* is-here follows the scroll position, is-active follows the click. */
+  .c-sub.is-here { color: var(--primary); }
+
+  /* Headings sit under a sticky header when jumped to, so give them room. */
+  .c-page h2 { scroll-margin-top: calc(var(--header-h, 4rem) + 1rem); }
+
+  .c-body { padding-block: 1.5rem 6rem; min-width: 0; }
+
+  /* Wider than a blog post. A reference is scanned as much as read, and the
+     code blocks here carry signatures like
+     `NumMul 'r for 'l having 'out` that should not wrap. The blog's 46rem
+     measure is inherited from .post-body, so it is overridden rather than
+     left to cap the column at two thirds of the space available. */
+  .c-body .post-body { max-width: 62rem; }
+  .c-body .post-editor, .c-body .mezze-static { width: min(100%, 62rem); }
+  .c-page h1 { margin: 0 0 .4rem; font-size: 1.5rem; font-weight: 700; }
+  .c-blurb { margin: 0 0 1.8rem; color: var(--soft); font-size: 1rem; }
+
+  @media (max-width: 860px) {
+    /* Block flow at this width: one column, so the grid buys nothing and the
+       rail's containing block is simply the column. */
+    .concepts { display: block; padding-inline: 1.25rem; }
+
+    /* A single scrolling strip of topics, pinned under the header. The
+       desktop tree does not survive the narrow width: laid out as a wrapping
+       row, fifteen subheadings pile in beside their topics with nothing to
+       show which belongs to which. Topics only, scrolled sideways, is
+       legible; the subheadings are still reachable by scrolling the page. */
+    /* The wrapper sticks, the rail inside it scrolls sideways. Keeping those
+       on separate elements avoids a box that is both a scroll container and a
+       sticky element. */
+    .c-rail-wrap {
+      display: block;
+      /* Below the site bar, not behind it. .site-bar is sticky at top: 0 with
+         z-index 20, so anything else pinned to top: 0 lands in the same space
+         and is painted over. Offset by the bar's height instead. */
+      position: sticky; top: var(--header-h, 3.75rem); z-index: 5;
+      background: var(--ground);
+      border-bottom: 1px solid var(--rule);
+      margin-inline: -1.25rem;
+      padding-inline: 1.25rem;
+    }
+    .c-rail {
+      max-height: none;
+      flex-direction: row; flex-wrap: nowrap;
+      /* Only overflow-x. Pairing it with overflow-y: hidden makes the browser
+         treat the box as scrollable on both axes, which turns it into a
+         containing block and is one more thing that can break sticky. */
+      overflow-x: auto;
+      gap: .35rem;
+      padding: .6rem 0;
+      border-right: 0; border-bottom: 0;
+      scrollbar-width: none;
+    }
+    .c-rail::-webkit-scrollbar { display: none; }
+
+    .c-item {
+      flex: none;
+      white-space: nowrap;
+      padding: .3rem .7rem;
+      border: 1px solid var(--rule);
+      border-radius: 999px;
+    }
+    .c-item[data-depth="1"], .c-item[data-depth="2"] { padding-left: .7rem; }
+    .c-item.is-active { border-color: var(--primary); }
+
+    /* Subheadings would double or triple the strip's length for navigation
+       the reader can do by scrolling. */
+    .c-sub { display: none !important; }
+  }
+</style>

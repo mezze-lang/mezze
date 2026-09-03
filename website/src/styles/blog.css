@@ -27,7 +27,11 @@
 }
 .post .back:hover { color: var(--c); }
 .post-head { padding: 0 0 1.6rem; border-bottom: 1px solid var(--rule); margin-bottom: 1.8rem; }
-.post-body { max-width: 46rem; padding-bottom: 3rem; line-height: 1.75; }
+.post-body { max-width: 46rem; line-height: 1.75; }
+/* Space after the LAST prose block only. An editor splits the body into
+   several .post-body fragments, and padding on each of them put a 3rem gap
+   above every editor that a static code block never had. */
+.post-body:last-child { padding-bottom: 3rem; }
 .post-body h2 { margin: 2.2rem 0 .7rem; font-size: 1.22rem; font-weight: 700; }
 .post-body h3 { margin: 1.8rem 0 .6rem; font-size: 1.02rem; font-weight: 700; }
 .post-body p { margin: 0 0 1.05rem; }
@@ -101,3 +105,21 @@
 /* A locked snippet has no caret and no Format button, so it should not look
    like a field waiting for input. */
 .ed-readonly .ed-src { cursor: default; }
+
+/* Compiler errors quoted in prose. Coloured from the palette rather than
+   Shiki's fixed theme, and marked as an error rather than as source. */
+.mezze-error {
+  width: min(100%, 46rem);
+  margin: 0 0 1.6rem;
+  padding: .85rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--err) 40%, var(--rule));
+  border-left: 3px solid var(--err);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--err) 7%, var(--panel));
+  font-family: var(--mono);
+  font-size: .82rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: var(--err);
+}

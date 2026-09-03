@@ -1,14 +1,20 @@
 ---
 import Base from '../layouts/Base.astro'
-import { lessons } from '../data/lessons'
+import { lessons } from '../lib/lessons'
+import { applyMarkup } from '../lib/markup'
 import Editor from '../components/Editor.astro'
+
+// Rendered at build time and handed to the client script as JSON. Lessons swap
+// without a navigation, so all of them ship with the page — the same as when
+// this data lived in a TypeScript array, except the prose is now Markdown.
+const all = (await lessons()).map((l) => ({ ...l, body: applyMarkup(l.body) }))
 ---
 <Base title="Taste — Mezze" width="full" description="Learn Mezze feature by feature, running every example in your browser.">
   <div class="taste">
     <!-- LEFT: narrow vertical exercise rail + prose -->
     <div class="taste-left">
       <nav class="rail">
-        {lessons.map((l, i) => (
+        {all.map((l, i) => (
           <button class="rail-item" data-idx={i} title={l.title}>
             <span class="rail-num">{String(i + 1).padStart(2, '0')}</span>
           </button>
@@ -32,12 +38,16 @@ import Editor from '../components/Editor.astro'
       <Editor />
     </div>
   </div>
+  <script id="t-data" type="application/json" set:html={JSON.stringify(all)} is:inline />
 </Base>
 
 <script>
-  import { lessons } from '../data/lessons'
-  import { format } from '../lib/text'
   import { mountEditor } from '../scripts/editor'
+
+  // Prose is rendered from Markdown at build time and serialised into the
+  // page, so switching lessons is a swap rather than a navigation.
+  interface Lesson { slug: string; title: string; blurb: string; body: string; code: string }
+  const lessons: Lesson[] = JSON.parse(document.getElementById('t-data')!.textContent!)
 
   const $ = <T extends Element>(sel: string) => document.querySelector(sel) as T
   const editor = mountEditor($('[data-editor]'))
@@ -55,7 +65,7 @@ import Editor from '../components/Editor.astro'
     const l = lessons[n]
     $('#t-title').textContent = l.title
     $('#t-blurb').textContent = l.blurb
-    $('#t-body').innerHTML = l.body.map((para) => `<p>${format(para)}</p>`).join('')
+    $('#t-body').innerHTML = l.body
     $('#t-pos').textContent = `${n + 1} / ${lessons.length}`
     railItems.forEach((el, k) => el.classList.toggle('is-active', k === n))
     // The ends are dead ends: show that rather than letting a click do nothing.

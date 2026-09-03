@@ -108,6 +108,14 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     // ends up about two pixels short and shows a scrollbar with nothing in it.
     const h = Math.ceil(codeEl.getBoundingClientRect().height + PANE_PAD_PX + LEADING_PX)
     host.style.setProperty('--h', h + 'px')
+
+    // Resizing the pane can leave the two layers scrolled to different
+    // offsets: growing the box stops the textarea needing to scroll, so its
+    // scrollTop drops to 0, while the highlight layer keeps whatever it had.
+    // The reader then sees text from one layer and gets character offsets
+    // from the other, which shows up as hover reporting the line above.
+    // syncScroll only runs on a scroll event, and this is not one.
+    requestAnimationFrame(syncScroll)
   }
 
   srcEl.addEventListener('input', () => {
@@ -218,6 +226,7 @@ export function mountEditor(root: HTMLElement): EditorHandle {
   const posAt = (x: number, y: number): [number, number] | null => {
     const r = srcEl.getBoundingClientRect()
     if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null
+
 
     const doc = document as Document & {
       caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null

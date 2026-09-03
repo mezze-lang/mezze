@@ -15,9 +15,16 @@ interface Props {
   title: string
   description?: string
   width?: 'page' | 'full'
+  /**
+   * Release the overflow clip on <main>. A full-width page clips horizontally
+   * to stop sideways scroll, and that clip also disables position: sticky for
+   * everything inside it. Set this on pages with a sticky sidebar or header.
+   */
+  sticky?: boolean
 }
 
 const {
+  sticky = false,
   title,
   description = 'Mezze — a functional language where effects are part of the type.',
   width = 'page',
@@ -63,7 +70,7 @@ const iconList = dishes.map((d) => d.icon)
          position is already exposed by the page itself. -->
     <div class="scrollbar" aria-hidden="true"></div>
     <SiteHeader />
-    <main class:list={['site-main', `is-${width}`]}><slot /></main>
+    <main class:list={['site-main', `is-${width}`]} data-sticky={sticky || undefined}><slot /></main>
 
     <style is:global>
       *, *::before, *::after { box-sizing: border-box; }
@@ -116,7 +123,15 @@ const iconList = dishes.map((d) => d.icon)
         padding: 0 var(--page-pad);
         width: 100%;
       }
+      /* overflow-x: hidden stops a wide page scrolling sideways, but it also
+         makes this element the containing block for any position: sticky
+         descendant, which silently stops that descendant sticking. Pages that
+         need sticky children opt out with data-sticky. */
       .site-main.is-full { padding-inline: var(--page-pad); max-width: 100%; overflow-x: hidden; }
+      /* A sticky page wants <main> as tall as its content with the window
+         scrolling: no horizontal clip (which would make <main> the containing
+         block for sticky descendants) and no flex-basis cap from min-height. */
+      .site-main.is-full[data-sticky] { overflow-x: visible; min-height: auto; }
 
       h1, h2, h3 { letter-spacing: -.02em; text-wrap: balance; }
       a { color: var(--primary); }

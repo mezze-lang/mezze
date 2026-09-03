@@ -23,6 +23,7 @@ export const site = {
   tagline: 'A functional language with first class effects running on GraalVM.',
   nav: [
     { label: 'Taste', href: '/taste' },
+    { label: 'Concepts', href: '/concepts' },
     { label: 'Blog', href: '/blog' },
   ],
 }
@@ -89,7 +90,7 @@ let main = {} -> perform Console in do
   let rules = [mock_get { body = "Amsterdam: Always raining", url = "*" }]
   perform MockHttpClient { rules } in println { msg = weather { url } }
 `,
-      output: "Amsterdam: 🌦️  +16°C\nAmsterdam: Always raining",
+      output: "Amsterdam: 🌦️  +21°C\nAmsterdam: Always raining",
     },
     {
       dish: "lemon",
@@ -224,18 +225,6 @@ export const features = [
       'clock or a frozen one. Tests get a different ~~tomato:handler~~, not different code.',
   },
   {
-    title: 'A few small pieces, ~onion~reused everywhere~',
-    body:
-      'Records at core, arguments are just ~~onion:records~~, so every call names its ' +
-      'fields. Effects are records of functions and so are Abilities. Learn record, variant, effect, ability, and you have the language covered.',
-  },
-  {
-    title: 'First-class ~olive~continuations~',
-    body:
-      'Async, exceptions, and early return are ~~olive:ordinary functions~~ here, not syntax language ' +
-      'had to grow. Write your own control flow and it looks like everyone else\'s.',
-  },
-  {
     title: 'Structured concurrency, ~mint~built on Loom~',
     body:
       'Millions of ~~mint:virtual threads~~, spawning a new one is cheap. ' +
@@ -247,9 +236,21 @@ export const features = [
       'Optimised data structures, loop fusion, and safe mutation effect. AOT ~~aubergine:native binaries~~ when you want them.',
   },
   {
+    title: 'First-class ~olive~continuations~',
+    body:
+      'Async, exceptions, and early return are ~~olive:ordinary functions~~ here, not syntax language ' +
+      'had to grow. Write your own control flow and it looks like everyone else\'s.',
+  },
+  {
+    title: 'A few small pieces, ~onion~reused everywhere~',
+    body:
+      'Records at core, arguments are just ~~onion:records~~, so every call names its ' +
+      'fields. Effects are records of functions and so are Abilities. Learn record, variant, effect, ability, and you have the language covered.',
+  },
+  {
     title: 'Keep the libraries you already have^TBD^',
     body:
-      'Mezze runs on GraalVM, so calling the Java, Kotlin, Python, and Javascript you already have ' +
+      'Mezze runs on GraalVM, so calling the Java, Kotlin, Python, and Javascript code you already have ' +
       'is the plan. Designed, not yet shipped.',
   },
   {

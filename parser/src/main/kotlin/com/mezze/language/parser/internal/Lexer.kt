@@ -362,10 +362,10 @@ class Lexer(
         advance()  // skip opening quote
 
         while (!isAtEnd() && current() != '"') {
-            if (current() == '\n') {
-                line++
-                column = 1
-            }
+            // No line++ here: advance() below already counts the newline. Doing
+            // it in both places counted every newline inside a string twice, so
+            // every position after a multi-line string was reported N lines too
+            // far down, N being the newlines the string spanned.
             if (current() == '\\') {
                 advance()  // skip escape character
                 if (!isAtEnd()) advance()
@@ -425,10 +425,10 @@ class Lexer(
         advance()  // skip opening quote
 
         while (!isAtEnd() && current() != '"') {
-            if (current() == '\n') {
-                line++
-                column = 1
-            }
+            // No line++ here: advance() below already counts the newline. Doing
+            // it in both places counted every newline inside a string twice, so
+            // every position after a multi-line string was reported N lines too
+            // far down, N being the newlines the string spanned.
             if (current() == '\\') {
                 advance()  // skip escape character
                 if (!isAtEnd()) advance()

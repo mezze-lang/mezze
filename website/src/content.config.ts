@@ -21,4 +21,32 @@ const blog = defineCollection({
   }),
 })
 
-export const collections = { blog }
+/**
+ * Taste lessons, in the order set by `order` below. Markdown rather than a
+ * TypeScript array: a lesson is prose with one code sample, and prose written
+ * inside an escaped template literal is painful to edit and easy to get wrong
+ * (every `$(` in a Mezze snippet needs escaping from JS).
+ */
+const lessons = defineCollection({
+  loader: glob({ pattern: '**/*.md', base: './src/content/lessons' }),
+  schema: z.object({
+    title: z.string(),
+    blurb: z.string(),
+  }),
+})
+
+/**
+ * Concepts pages. Same authoring shape as a lesson or a post: Markdown, with
+ * `mezze-editor` for a runnable snippet and `mezze-code` for a static one.
+ * Nesting is a folder: concepts/records/open-closed.md is a child page.
+ */
+const concepts = defineCollection({
+  loader: glob({ pattern: '**/*.md', base: './src/content/concepts' }),
+  schema: z.object({
+    title: z.string(),
+    /** One line under the heading, and the sidebar tooltip. */
+    blurb: z.string().optional(),
+  }),
+})
+
+export const collections = { blog, lessons, concepts }

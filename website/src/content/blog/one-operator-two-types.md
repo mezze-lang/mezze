@@ -35,7 +35,7 @@ types==:
 newtype Money = Int
 
 impl NumAdd for Money where {
-  add = { it, r } -> Money.(it.val + r.val)
+  add = { it, r } -> ...
 }
 -->
 
@@ -122,12 +122,16 @@ use std::abilities::numeric::{ NumAdd, NumMul }
 
 newtype Money = Int
 
+# Money.(n) in a pattern position unwraps; in an expression it wraps.
+let cents = { m } -> match m is
+  Money.(n) -> n
+
 impl NumAdd Money for Money having 'out = Money where {
-  add = { it, r } -> Money.(it.val + r.val)
+  add = { it, r } -> Money.(cents { m = it } + cents { m = r })
 }
 
 impl NumMul Int for Money having 'out = Money where {
-  mul = { it, r } -> Money.(it.val * r)
+  mul = { it, r } -> Money.(cents { m = it } * r)
 }
 
 let main = {} -> perform Console in do
@@ -150,8 +154,11 @@ use std::abilities::numeric::{ NumAdd }
 
 newtype Money = Int
 
+let cents = { m } -> match m is
+  Money.(n) -> n
+
 impl NumAdd Money for Money having 'out = Money where {
-  add = { it, r } -> Money.(it.val + r.val)
+  add = { it, r } -> Money.(cents { m = it } + cents { m = r })
 }
 
 let main = {} -> perform Console in do
@@ -177,8 +184,11 @@ use std::abilities::numeric::{ NumMul }
 newtype Length = Float
 newtype Area = Float
 
+let metres = { l } -> match l is
+  Length.(n) -> n
+
 impl NumMul Length for Length having 'out = Area where {
-  mul = { it, r } -> Area.(it.val * r.val)
+  mul = { it, r } -> Area.(metres { l = it } * metres { l = r })
 }
 
 let main = {} -> perform Console in do

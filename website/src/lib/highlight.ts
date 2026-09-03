@@ -21,8 +21,9 @@ export const esc = (s: string) =>
 
 const RE = new RegExp(
   [
+    '(#\\{[^}]*\\})',                                  // #{ metadata }
     '(##?(?:[ \\t][^\\n]*)?$)',                          // comments
-    '("(?:[^"\\\\\\n]|\\\\.)*")',                        // strings
+    '("(?:[^"\\\\]|\\\\.)*")',                          // strings, which may span lines
     "('[a-zA-Z_][a-zA-Z0-9_]*)",                         // 'typevars
     '(<[A-Z][A-Za-z0-9_]*(?:\\s*,\\s*[A-Za-z0-9_.]+)*>)', // <Effect> rows
     '\\b(True|False)\\b',                                // booleans
@@ -37,7 +38,8 @@ const RE = new RegExp(
 )
 
 const CLS = [
-  'tk-com', 'tk-str', 'tk-tv', 'tk-eff', 'tk-bool',
+  // Order matches the alternation in RE, one class per capture group.
+  'tk-com', 'tk-com', 'tk-str', 'tk-tv', 'tk-eff', 'tk-bool',
   'tk-num', 'tk-kw', 'tk-fn', 'tk-mth', 'tk-fld', 'tk-ctor',
 ]
 
