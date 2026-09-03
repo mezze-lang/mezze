@@ -96,7 +96,7 @@ object TypeCheckCache {
             is MezzeType.VarType -> type.toString()
             is MezzeType.NewtypeType -> "Newtype<${typeToString(type.wrappedType)}>"
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.BoolType, is MezzeType.FracType,
             is MezzeType.BytesType,
             is MezzeType.CharType -> type.toString()
         }

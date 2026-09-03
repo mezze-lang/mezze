@@ -35,7 +35,7 @@ internal val inlineableOps = setOf(
 )
 
 private val primitiveTypes = setOf(
-    IntType::class, FloatType::class, NatType::class, BoolType::class,
+    IntType::class, FloatType::class, BoolType::class,
     StringType::class, CharType::class, FracType::class
 )
 

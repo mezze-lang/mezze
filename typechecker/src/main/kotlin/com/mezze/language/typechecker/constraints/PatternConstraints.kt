@@ -206,7 +206,7 @@ class PatternConstraintGenerator {
 
         val literalType = when (literalValue) {
             is ParsedLiteralValue.IntValue -> MezzeType.IntType
-            is ParsedLiteralValue.NatValue -> MezzeType.NatType
+            is ParsedLiteralValue.NatValue -> natLiteralType(context)
             is ParsedLiteralValue.FloatValue -> {
                 val locationInfo = sourceLoc?.let { " at line ${it.startLine}" } ?: ""
                 warnings.add(

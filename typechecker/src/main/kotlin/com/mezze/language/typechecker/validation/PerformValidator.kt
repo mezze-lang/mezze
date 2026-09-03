@@ -410,7 +410,17 @@ class PerformValidator(
             is ParsedStringLit -> MezzeType.StringType
             is ParsedIntLit -> MezzeType.IntType
             is ParsedFloatLit -> MezzeType.FloatType
-            is ParsedNatLit -> MezzeType.NatType
+            is ParsedNatLit -> {
+                val decl = typeDeclarations["Nat"]
+                val newtypeDef = decl?.definition as? ParsedNewtypeDef
+                val hash = decl?.contentHash
+                MezzeType.NewtypeType(
+                    name = "Nat",
+                    constructor = newtypeDef?.constructor ?: "Nat",
+                    wrappedType = MezzeType.IntType,
+                    identity = if (hash != null) TypeIdentity.Declared(hash, "Nat") else TypeIdentity.Anonymous,
+                )
+            }
             is ParsedCharLit -> MezzeType.CharType
             is ParsedFracLit -> MezzeType.FracType
             is ParsedIdentifier -> null

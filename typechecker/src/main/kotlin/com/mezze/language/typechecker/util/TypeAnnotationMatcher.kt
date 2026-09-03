@@ -25,9 +25,15 @@ object TypeAnnotationMatcher {
                         val typeDecl = typeDeclarations[annotation.name]
                         if (typeDecl != null) typeMatchesDeclaration(type, typeDecl)
                         else when (type) {
-                            is MezzeType.RecordType -> (type.identity as? TypeIdentity.Declared)?.hash?.let {
-                                it == typeDeclarations[annotation.name]?.contentHash
-                            } ?: (type.identity.displayNameOrNull() == annotation.name)
+                            is MezzeType.RecordType -> {
+                                // Hash-first-when-both-sides-have-it, else name. Rejecting on
+                                // hash inequality when the decl side has no hash (or the
+                                // typeDeclarations snapshot is empty) drops legitimate matches.
+                                val declHash = typeDeclarations[annotation.name]?.contentHash
+                                val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
+                                if (typeHash != null && declHash != null) typeHash == declHash
+                                else type.identity.displayNameOrNull() == annotation.name
+                            }
                             is MezzeType.VariantType -> {
                                 val declHash = typeDeclarations[annotation.name]?.contentHash
                                 val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
@@ -36,9 +42,18 @@ object TypeAnnotationMatcher {
                                 else if (type.identity.displayNameOrNull() == null && type.constructors.containsKey(annotation.name)) true
                                 else false
                             }
-                            is MezzeType.TypeApplication -> (type.identity as? TypeIdentity.Declared)?.hash?.let {
-                                it == typeDeclarations[annotation.name]?.contentHash
-                            } ?: (type.constructor == annotation.name)
+                            is MezzeType.TypeApplication -> {
+                                val declHash = typeDeclarations[annotation.name]?.contentHash
+                                val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
+                                if (typeHash != null && declHash != null) typeHash == declHash
+                                else type.constructor == annotation.name
+                            }
+                            is MezzeType.NewtypeType -> {
+                                val declHash = typeDeclarations[annotation.name]?.contentHash
+                                val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
+                                if (typeHash != null && declHash != null) typeHash == declHash
+                                else type.name == annotation.name
+                            }
                             else -> false
                         }
                     }
@@ -133,6 +148,16 @@ object TypeAnnotationMatcher {
             val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
             val hashMatch = typeHash != null && typeDecl.contentHash != null && typeHash == typeDecl.contentHash
             return hashMatch || (type.constructor == typeDecl.name && type.args.isEmpty())
+        }
+        // A NewtypeType surfaces from value-producing sites (literals, wrapping calls).
+        // Match it against a newtype declaration by nominal identity: hash first
+        // (module-opaque, distinguishes same-named decls in different modules), else
+        // by name. This bridges `impl … for Nat` when the receiver's inferred type
+        // is `NewtypeType("Nat", …)`. Only newtype decls match.
+        if (type is MezzeType.NewtypeType && typeDecl.definition is ParsedNewtypeDef) {
+            val typeHash = (type.identity as? TypeIdentity.Declared)?.hash
+            val hashMatch = typeHash != null && typeDecl.contentHash != null && typeHash == typeDecl.contentHash
+            return hashMatch || type.name == typeDecl.name
         }
 
         return when (val definition = typeDecl.definition) {

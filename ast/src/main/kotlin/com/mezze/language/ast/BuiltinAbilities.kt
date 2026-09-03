@@ -70,7 +70,6 @@ object BuiltinAbilities {
         PrimitiveTypes.FLOAT to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
         PrimitiveTypes.STR to setOf(EQ, ORD, INSPECT),
         PrimitiveTypes.BOOL to setOf(EQ, ORD, INSPECT, LOGICAL_AND, LOGICAL_OR),
-        PrimitiveTypes.NAT to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_MUL, NUM_DIV, NUM_MOD),
         PrimitiveTypes.FRAC to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
 
         // Built-in core types (conditional implementations based on element types)
@@ -98,7 +97,6 @@ object BuiltinAbilities {
             is MezzeType.FloatType -> hasAutomaticImplementation(PrimitiveTypes.FLOAT, abilityName)
             is MezzeType.StringType -> hasAutomaticImplementation(PrimitiveTypes.STR, abilityName)
             is MezzeType.BoolType -> hasAutomaticImplementation(PrimitiveTypes.BOOL, abilityName)
-            is MezzeType.NatType -> hasAutomaticImplementation(PrimitiveTypes.NAT, abilityName)
             is MezzeType.FracType -> hasAutomaticImplementation(PrimitiveTypes.FRAC, abilityName)
 
             // Parameterized types - check if element types support the ability

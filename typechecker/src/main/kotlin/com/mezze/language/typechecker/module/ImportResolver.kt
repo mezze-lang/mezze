@@ -770,7 +770,6 @@ class ImportResolver(
             }
             is MezzeType.VarType,
             is MezzeType.IntType,
-            is MezzeType.NatType,
             is MezzeType.FloatType,
             is MezzeType.FracType,
             is MezzeType.BoolType,

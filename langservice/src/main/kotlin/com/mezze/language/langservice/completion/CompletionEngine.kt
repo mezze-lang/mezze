@@ -276,7 +276,7 @@ object CompletionEngine {
             }
             // Not usefully constructible from a bare expected type.
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
-            is MezzeType.StringType, is MezzeType.CharType, is MezzeType.NatType,
+            is MezzeType.StringType, is MezzeType.CharType,
             is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.NewtypeType, is MezzeType.ListType,
             is MezzeType.SeqType, is MezzeType.MapType, is MezzeType.SetType,
@@ -770,7 +770,6 @@ object CompletionEngine {
             is MezzeType.StringType -> "Str"
             is MezzeType.BoolType -> "Bool"
             is MezzeType.CharType -> "Char"
-            is MezzeType.NatType -> "Nat"
             is MezzeType.FracType -> "Frac"
             is MezzeType.BytesType -> "Bytes"
             is MezzeType.TypeApplication ->
@@ -1298,7 +1297,6 @@ object CompletionEngine {
             is MezzeType.FloatType -> "Float"
             is MezzeType.StringType -> "Str"
             is MezzeType.BoolType -> "Bool"
-            is MezzeType.NatType -> "Nat"
             is MezzeType.FracType -> "Frac"
             is MezzeType.CharType -> "Char"
             is MezzeType.BytesType -> "Bytes"

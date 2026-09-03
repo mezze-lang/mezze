@@ -427,8 +427,8 @@ internal class AbilityChecker(
     private fun typeHeadName(type: MezzeType): String = when (type) {
         is MezzeType.IntType -> "Int"
         is MezzeType.FloatType -> "Float"
-        is MezzeType.NatType -> "Nat"
         is MezzeType.StringType -> "Str"
+        is MezzeType.NewtypeType -> type.name
         is MezzeType.BoolType -> "Bool"
         is MezzeType.TypeApplication -> type.constructor
         is MezzeType.VariantType -> type.identity.displayNameOrNull() ?: "|variant|"
@@ -746,7 +746,6 @@ internal class AbilityChecker(
             is MezzeType.FloatType,
             is MezzeType.StringType,
             is MezzeType.BoolType,
-            is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.CharType,
             is MezzeType.BytesType,

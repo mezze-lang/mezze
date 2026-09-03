@@ -122,6 +122,31 @@ class TypedAstBuilder(
     }
 
     /**
+     * Nat is a newtype (`pub newtype Nat = Int` in std/nat.mz) — synthesize its
+     * NewtypeType from the stdlib declaration so that literal `5` types the same
+     * as `Nat.(5)`. Fallback for tests without prelude.
+     */
+    private val natLiteralType: MezzeType by lazy {
+        val decl = registry.typeDeclarations["Nat"]
+        val newtypeDef = decl?.definition as? ParsedNewtypeDef
+        if (newtypeDef != null) {
+            val hash = decl.contentHash
+            MezzeType.NewtypeType(
+                name = "Nat",
+                constructor = newtypeDef.constructor,
+                wrappedType = MezzeType.IntType,
+                identity = if (hash != null) TypeIdentity.Declared(hash, "Nat") else TypeIdentity.Anonymous,
+            )
+        } else {
+            MezzeType.NewtypeType(
+                name = "Nat",
+                constructor = "Nat",
+                wrappedType = MezzeType.IntType,
+            )
+        }
+    }
+
+    /**
      * In-scope CLOSED record aliases, as (name, content hash, field-name→field-type).
      * Built once from local decls + imported types (so `pub`/import scoping is
      * respected — a private or un-imported alias never appears here). Fed to THE
@@ -559,7 +584,7 @@ class TypedAstBuilder(
         val loc = expr.loc
         return when (expr) {
             is ParsedIntLit -> TypedIntLit(expr.value, MezzeType.IntType, loc)
-            is ParsedNatLit -> TypedNatLit(expr.value, MezzeType.NatType, loc)
+            is ParsedNatLit -> TypedNatLit(expr.value, natLiteralType, loc)
             is ParsedFloatLit -> TypedFloatLit(expr.value, MezzeType.FloatType, loc)
             is ParsedFracLit -> TypedFracLit(expr.numerator, expr.denominator, MezzeType.FracType, loc)
             is ParsedCharLit -> TypedCharLit(expr.value, MezzeType.CharType, loc)
@@ -1345,7 +1370,7 @@ class TypedAstBuilder(
             is ParsedLiteralPattern -> {
                 val value = when (val v = pattern.value) {
                     is ParsedLiteralValue.IntValue -> TypedIntLit(v.value, MezzeType.IntType, loc)
-                    is ParsedLiteralValue.NatValue -> TypedNatLit(v.value, MezzeType.NatType, loc)
+                    is ParsedLiteralValue.NatValue -> TypedNatLit(v.value, natLiteralType, loc)
                     is ParsedLiteralValue.FloatValue -> TypedFloatLit(v.value, MezzeType.FloatType, loc)
                     is ParsedLiteralValue.StringValue ->
                         TypedStringLit(listOf(TypedStringPart.Literal(v.value)), MezzeType.StringType, loc)

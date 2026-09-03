@@ -150,7 +150,7 @@ sealed interface MezzeType {
         is SeqType -> predicate(elementType)
         is NewtypeType -> predicate(wrappedType)
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
-        is NatType, is FracType, is BytesType,
+        is FracType, is BytesType,
         is CharType, is EffectRow -> false
     }
 
@@ -168,7 +168,7 @@ sealed interface MezzeType {
         is SeqType -> copy(elementType = f(elementType))
         is NewtypeType -> copy(wrappedType = f(wrappedType))
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
-        is NatType, is FracType, is BytesType,
+        is FracType, is BytesType,
         is CharType, is EffectRow -> this
     }
 
@@ -186,9 +186,6 @@ sealed interface MezzeType {
     object BoolType : MezzeType
 
     // Enhanced numeric types
-    @Serializable
-    object NatType : MezzeType
-
     @Serializable
     object FracType : MezzeType
 

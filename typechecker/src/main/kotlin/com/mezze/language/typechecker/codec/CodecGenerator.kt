@@ -43,7 +43,6 @@ class CodecGenerator {
             is MezzeType.FloatType -> true
             is MezzeType.StringType -> true
             is MezzeType.BoolType -> true
-            is MezzeType.NatType -> true
             is MezzeType.FracType -> true
             is MezzeType.CharType -> true
             is MezzeType.BytesType -> true
@@ -113,7 +112,6 @@ class CodecGenerator {
             dataType is MezzeType.FloatType -> generatePrimitiveEncode(formatType, dataType, "encode_float", "val")
             dataType is MezzeType.StringType -> generatePrimitiveEncode(formatType, dataType, "encode_string", "val")
             dataType is MezzeType.BoolType -> generatePrimitiveEncode(formatType, dataType, "encode_bool", "val")
-            dataType is MezzeType.NatType -> generateNatEncode(formatType)
             dataType is MezzeType.FracType -> generatePrimitiveEncode(formatType, dataType, "encode_frac", "val")
             dataType is MezzeType.CharType -> generateCharEncode(formatType)
             dataType is MezzeType.BytesType -> generatePrimitiveEncode(formatType, dataType, "encode_bytes", "val")
@@ -162,7 +160,6 @@ class CodecGenerator {
             dataType is MezzeType.FloatType -> generatePrimitiveDecode(formatType, dataType, "decode_float")
             dataType is MezzeType.StringType -> generatePrimitiveDecode(formatType, dataType, "decode_string")
             dataType is MezzeType.BoolType -> generatePrimitiveDecode(formatType, dataType, "decode_bool")
-            dataType is MezzeType.NatType -> generateNatDecode(formatType)
             dataType is MezzeType.FracType -> generatePrimitiveDecode(formatType, dataType, "decode_frac")
             dataType is MezzeType.CharType -> generateCharDecode(formatType)
             dataType is MezzeType.BytesType -> generatePrimitiveDecode(formatType, dataType, "decode_bytes")
@@ -444,21 +441,6 @@ class CodecGenerator {
     }
 
     /**
-     * Generate encode for Nat - converts to Int first.
-     */
-    private fun generateNatEncode(formatType: MezzeType): ParsedImplAbilityDecl {
-        val toIntCall = call(
-            id("__native_nat_to_int"),
-            record("n" to id("it"))
-        )
-        val body = call(
-            member(encodeFormatImpl(formatType), "encode_int"),
-            record("val" to toIntCall, "path" to id("path"))
-        )
-        return createEncodeImpl(formatType, MezzeType.NatType, body)
-    }
-
-    /**
      * Generate encode for Char - converts to String first.
      */
     private fun generateCharEncode(formatType: MezzeType): ParsedImplAbilityDecl {
@@ -552,10 +534,6 @@ class CodecGenerator {
                 member(formatImpl, "encode_bool"),
                 record("val" to valueExpr, "path" to pathExpr)
             )
-            is MezzeType.NatType -> {
-                val toIntCall = call(id("__native_nat_to_int"), record("n" to valueExpr))
-                call(member(formatImpl, "encode_int"), record("val" to toIntCall, "path" to pathExpr))
-            }
             is MezzeType.FracType -> call(
                 member(formatImpl, "encode_frac"),
                 record("val" to valueExpr, "path" to pathExpr)
@@ -629,14 +607,6 @@ class CodecGenerator {
                 member(formatImpl, "decode_bool"),
                 record("val" to valueExpr, "path" to pathExpr)
             )
-            is MezzeType.NatType -> {
-                val decodeIntCall = call(member(formatImpl, "decode_int"), record("val" to valueExpr, "path" to pathExpr))
-                match(
-                    decodeIntCall,
-                    matchCase(okPat("int_val"), ok(call(id("__native_int_to_nat"), record("n" to id("int_val"))))),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            }
             is MezzeType.FracType -> call(
                 member(formatImpl, "decode_frac"),
                 record("val" to valueExpr, "path" to pathExpr)
@@ -1082,39 +1052,6 @@ class CodecGenerator {
             record("val" to id("it"), "path" to id("path"))
         )
         return createDecodeImpl(formatType, dataType, body)
-    }
-
-    /**
-     * Generate decode for Nat - decode Int and validate.
-     */
-    private fun generateNatDecode(formatType: MezzeType): ParsedImplAbilityDecl {
-        val body = match(
-            call(
-                member(decodeFormatImpl(formatType), "decode_int"),
-                record("val" to id("it"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("int_val"),
-                ifExpr(
-                    condition = call(
-                        member(id("int"), "gte"),
-                        record("a" to id("int_val"), "b" to intLit(0))
-                    ),
-                    thenBranch = ok(call(member(id("nat"), "from_int"), record("n" to id("int_val")))),
-                    elseBranch = call(
-                        member(id("codec"), "decode_error"),
-                        record(
-                            "path" to id("path"),
-                            "message" to str("Expected non-negative integer for Nat"),
-                            "expected" to str("Nat"),
-                            "found" to some(str("negative Int"))
-                        )
-                    )
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createDecodeImpl(formatType, MezzeType.NatType, body)
     }
 
     /**
@@ -1744,7 +1681,6 @@ class CodecGenerator {
             MezzeType.FloatType,
             MezzeType.StringType,
             MezzeType.BoolType,
-            MezzeType.NatType,
             MezzeType.FracType,
             MezzeType.CharType,
             MezzeType.BytesType,
@@ -1771,7 +1707,6 @@ class CodecGenerator {
             is MezzeType.BoolType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_bool")
             is MezzeType.FracType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_frac")
             is MezzeType.BytesType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_bytes")
-            is MezzeType.NatType -> generateNatStreamEncode(formatType)
             is MezzeType.CharType -> generateCharStreamEncode(formatType)
             is MezzeType.RecordType -> generateRecordStreamEncode(formatType, dataType)
             is MezzeType.VariantType -> generateVariantStreamEncode(formatType, dataType)
@@ -1798,7 +1733,6 @@ class CodecGenerator {
             is MezzeType.BoolType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_bool")
             is MezzeType.FracType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_frac")
             is MezzeType.BytesType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_bytes")
-            is MezzeType.NatType -> generateNatStreamDecode(formatType)
             is MezzeType.CharType -> generateCharStreamDecode(formatType)
             is MezzeType.RecordType -> generateRecordStreamDecode(formatType, dataType)
             is MezzeType.VariantType -> generateVariantStreamDecode(formatType, dataType)
@@ -1821,15 +1755,6 @@ class CodecGenerator {
             record("val" to id("it"), "buffer" to id("buffer"), "path" to id("path"))
         )
         return createStreamEncodeImpl(formatType, dataType, body)
-    }
-
-    private fun generateNatStreamEncode(formatType: MezzeType): ParsedImplAbilityDecl {
-        val toIntCall = call(member(id("nat"), "to_int"), record("n" to id("it")))
-        val body = call(
-            member(id("StreamFormat"), "stream_int"),
-            record("val" to toIntCall, "buffer" to id("buffer"), "path" to id("path"))
-        )
-        return createStreamEncodeImpl(formatType, MezzeType.NatType, body)
     }
 
     private fun generateCharStreamEncode(formatType: MezzeType): ParsedImplAbilityDecl {
@@ -2094,39 +2019,6 @@ class CodecGenerator {
             record("bytes" to id("bytes"), "offset" to id("offset"), "path" to id("path"))
         )
         return createStreamDecodeImpl(formatType, dataType, body)
-    }
-
-    private fun generateNatStreamDecode(formatType: MezzeType): ParsedImplAbilityDecl {
-        val body = match(
-            call(
-                member(id("StreamDecodeFormat"), "stream_decode_int"),
-                record("bytes" to id("bytes"), "offset" to id("offset"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("result"),
-                ifExpr(
-                    condition = call(
-                        member(id("int"), "gte"),
-                        record("a" to member(id("result"), "value"), "b" to intLit(0))
-                    ),
-                    thenBranch = ok(record(
-                        "val" to call(member(id("nat"), "from_int"), record("n" to member(id("result"), "value"))),
-                        "offset" to member(id("result"), "offset")
-                    )),
-                    elseBranch = call(
-                        member(id("codec"), "decode_error"),
-                        record(
-                            "path" to id("path"),
-                            "message" to str("Expected non-negative integer for Nat"),
-                            "expected" to str("Nat"),
-                            "found" to some(str("negative Int"))
-                        )
-                    )
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createStreamDecodeImpl(formatType, MezzeType.NatType, body)
     }
 
     private fun generateCharStreamDecode(formatType: MezzeType): ParsedImplAbilityDecl {

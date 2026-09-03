@@ -70,7 +70,7 @@ class MatchValidator(
      *  them is only exhaustive with a catch-all (`_`/variable). Bool is NOT here
      *  — it's finite and handled by the variant path. */
     private fun isNonEnumerablePrimitive(type: MezzeType): Boolean = when (type) {
-        is MezzeType.IntType, is MezzeType.NatType, is MezzeType.FloatType,
+        is MezzeType.IntType, is MezzeType.FloatType,
         is MezzeType.FracType, is MezzeType.StringType, is MezzeType.CharType -> true
         else -> false
     }

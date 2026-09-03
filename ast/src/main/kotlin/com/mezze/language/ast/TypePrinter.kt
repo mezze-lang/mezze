@@ -244,7 +244,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
 
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
-    is MezzeType.NewtypeType -> "${type.name} (wraps ${prettyPrintTypeWithMapping(type.wrappedType, typeVarMapping)})"
+    is MezzeType.NewtypeType -> type.name
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
     // #271: a type printer must NEVER throw — it is frequently called WHILE
     // formatting a TypeCheckError, so an uncaught exception here masks the real
@@ -466,7 +466,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
 
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
-    is MezzeType.NewtypeType -> "${type.name} (wraps ${prettyPrintWithAliasCheck(type.wrappedType, typeAliases, showExpansion, typeVarMapping)})"
+    is MezzeType.NewtypeType -> type.name
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
     // #271: never throw while printing a type — see prettyPrintTypeWithMapping.
     else -> type::class.simpleName ?: "<type>"

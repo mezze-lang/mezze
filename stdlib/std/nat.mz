@@ -5,6 +5,11 @@ use std::abilities::default::{ Default }
 use std::int
 use std::float
 
+## Natural numbers: non-negative integers.
+## Runtime representation is a plain `Int` (newtype is fully erased);
+## the wall exists at the typechecker only.
+pub newtype Nat = Int
+
 impl NumAdd Nat for Nat having 'out = Nat where {
   add = { it, r } -> __native_nat_add { l = it, r = r }
 }

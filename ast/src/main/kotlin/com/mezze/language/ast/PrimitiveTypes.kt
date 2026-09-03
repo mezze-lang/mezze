@@ -18,7 +18,6 @@ object PrimitiveTypes {
         FLOAT to MezzeType.FloatType,
         BOOL to MezzeType.BoolType,
         STR to MezzeType.StringType,
-        NAT to MezzeType.NatType,
         FRAC to MezzeType.FracType,
         CHAR to MezzeType.CharType,
         BYTES to MezzeType.BytesType,
@@ -38,7 +37,6 @@ object PrimitiveTypes {
     private val numericTypes: Set<MezzeType> = setOf(
         MezzeType.IntType,
         MezzeType.FloatType,
-        MezzeType.NatType,
         MezzeType.FracType,
     )
 

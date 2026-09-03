@@ -2759,7 +2759,6 @@ class TypedASTCompiler(
             concreteType is FloatType && targetType is FloatType -> true
             concreteType is StringType && targetType is StringType -> true
             concreteType is BoolType && targetType is BoolType -> true
-            concreteType is NatType && targetType is NatType -> true
             concreteType is CharType && targetType is CharType -> true
             concreteType is FracType && targetType is FracType -> true
             // Hash is authoritative nominal identity: two same-named TypeApplications
@@ -2796,6 +2795,22 @@ class TypedASTCompiler(
             concreteType is SortedMapType && targetType is SortedMapType -> true
             concreteType is RecordType && targetType is TypeApplication &&
                 concreteType.identity.displayNameOrNull() == targetType.constructor -> true
+            // Newtype receivers dispatch to `impl … for <NewtypeName>` whose target
+            // is built as a TypeApplication (see ContextBuilder ParsedNewtypeDef →
+            // WellKnownTypeApp.of). Prefer hash identity (module-distinct, #278);
+            // fall back to name when either hash is absent (builtins/pre-hash).
+            concreteType is NewtypeType && targetType is TypeApplication -> {
+                val cHash = (concreteType.identity as? TypeIdentity.Declared)?.hash
+                val tHash = (targetType.identity as? TypeIdentity.Declared)?.hash
+                if (cHash != null && tHash != null) cHash == tHash
+                else concreteType.name == targetType.constructor
+            }
+            concreteType is TypeApplication && targetType is NewtypeType -> {
+                val cHash = (concreteType.identity as? TypeIdentity.Declared)?.hash
+                val tHash = (targetType.identity as? TypeIdentity.Declared)?.hash
+                if (cHash != null && tHash != null) cHash == tHash
+                else concreteType.constructor == targetType.name
+            }
             // VariantType to VariantType: match if constructors overlap or type names match
             concreteType is VariantType && targetType is VariantType -> {
                 // Same type name (e.g., both are "Json")
@@ -2860,9 +2875,11 @@ class TypedASTCompiler(
 
     private fun typeToSlotKind(type: MezzeType): SlotKind = when (type) {
         is IntType -> SlotKind.LONG
-        is NatType -> SlotKind.LONG
         is FloatType -> SlotKind.DOUBLE
         is BoolType -> SlotKind.BOOLEAN
+        // Newtype is compile-time only — runtime slot follows wrapped type. Nat
+        // (`newtype Nat = Int`) picks up LONG here just like a raw Int.
+        is NewtypeType -> typeToSlotKind(type.wrappedType)
         else -> SlotKind.OBJECT
     }
 

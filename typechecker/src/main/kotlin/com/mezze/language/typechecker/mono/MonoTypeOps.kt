@@ -54,7 +54,7 @@ internal fun isConcrete(t: MezzeType): Boolean = when (t) {
     is MezzeType.MapType -> isConcrete(t.keyType) && isConcrete(t.valueType)
     is MezzeType.SortedMapType -> isConcrete(t.keyType) && isConcrete(t.valueType)
     is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-    is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+    is MezzeType.BoolType, is MezzeType.FracType,
     is MezzeType.BytesType,
     is MezzeType.CharType, is MezzeType.EffectRow -> true
 }
@@ -72,7 +72,6 @@ internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean 
     if (concrete is MezzeType.FloatType && target is MezzeType.FloatType) return true
     if (concrete is MezzeType.StringType && target is MezzeType.StringType) return true
     if (concrete is MezzeType.BoolType && target is MezzeType.BoolType) return true
-    if (concrete is MezzeType.NatType && target is MezzeType.NatType) return true
     if (concrete is MezzeType.CharType && target is MezzeType.CharType) return true
     if (concrete is MezzeType.FracType && target is MezzeType.FracType) return true
     // TypeApp constructor match. Hash is the authoritative nominal identity:
@@ -229,7 +228,7 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
             else -> false
         }
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.BoolType, is MezzeType.FracType,
         is MezzeType.BytesType,
         is MezzeType.CharType -> pattern == v
         is MezzeType.EffectRow -> v is MezzeType.EffectRow

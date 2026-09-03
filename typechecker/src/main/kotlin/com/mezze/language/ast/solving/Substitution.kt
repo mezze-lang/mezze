@@ -78,7 +78,7 @@ data class Substitution(
 
     private fun isConcreteType(type: MezzeType): Boolean = when (type) {
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.BoolType, is MezzeType.FracType,
         is MezzeType.BytesType,
         is MezzeType.CharType -> true
         is MezzeType.VarType, is MezzeType.FunctionType, is MezzeType.RecordType,
@@ -123,7 +123,6 @@ data class Substitution(
             is MezzeType.FloatType,
             is MezzeType.StringType,
             is MezzeType.BoolType,
-            is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.BytesType,
             is MezzeType.CharType -> false
@@ -167,7 +166,7 @@ data class Substitution(
     }
 
     private fun isLeafType(type: MezzeType): Boolean = when (type) {
-        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.NatType,
+        is MezzeType.IntType, is MezzeType.FloatType,
         is MezzeType.FracType, is MezzeType.StringType, is MezzeType.BoolType,
         is MezzeType.CharType, is MezzeType.BytesType,
         is MezzeType.VarType -> true
@@ -286,7 +285,6 @@ data class Substitution(
             is MezzeType.FloatType,
             is MezzeType.StringType,
             is MezzeType.BoolType,
-            is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.BytesType,
             is MezzeType.CharType -> type
@@ -484,7 +482,7 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         wrappedType = closeGeneratedRowVars(type.wrappedType, mustBeOpenRowVars)
     )
     is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
-    is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
+    is MezzeType.StringType, is MezzeType.BoolType,
     is MezzeType.FracType, is MezzeType.BytesType,
     is MezzeType.CharType, is MezzeType.EffectRow -> type
 }
@@ -542,7 +540,6 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
         is MezzeType.FloatType,
         is MezzeType.StringType,
         is MezzeType.BoolType,
-        is MezzeType.NatType,
         is MezzeType.FracType,
         is MezzeType.BytesType,
         is MezzeType.CharType -> false
@@ -606,7 +603,6 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
         is MezzeType.FloatType,
         is MezzeType.StringType,
         is MezzeType.BoolType,
-        is MezzeType.NatType,
         is MezzeType.FracType,
         is MezzeType.BytesType,
         is MezzeType.CharType -> emptySet()

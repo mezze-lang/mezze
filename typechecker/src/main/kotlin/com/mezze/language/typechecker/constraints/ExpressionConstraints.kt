@@ -378,7 +378,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.TypeApplication -> type.args.flatMap { getFreeTypeVariables(it) }.toSet()
             is MezzeType.NewtypeType -> getFreeTypeVariables(type.wrappedType)
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.BoolType, is MezzeType.FracType,
             is MezzeType.BytesType,
             is MezzeType.CharType, is MezzeType.EffectRow -> emptySet()
         }
@@ -455,7 +455,7 @@ class ExpressionConstraintGenerator {
                 wrappedType = applyTypeVarSubstitution(type.wrappedType, substitution)
             )
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.BoolType, is MezzeType.FracType,
             is MezzeType.BytesType,
             is MezzeType.CharType, is MezzeType.EffectRow -> type
         }
@@ -664,7 +664,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.NewtypeType -> collectCaughtByAncestorInto(type.wrappedType, into)
             is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
-            is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
+            is MezzeType.StringType, is MezzeType.BoolType,
             is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.CharType -> {}
         }

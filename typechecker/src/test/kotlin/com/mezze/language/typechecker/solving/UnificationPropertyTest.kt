@@ -16,7 +16,7 @@ class UnificationPropertyTest {
     fun `unifying identical concrete types yields empty substitution`() {
         val concreteTypes = listOf(
             MezzeType.IntType, MezzeType.StringType, MezzeType.BoolType,
-            MezzeType.FloatType, MezzeType.NatType, MezzeType.CharType,
+            MezzeType.FloatType, MezzeType.CharType,
         )
 
         for (type in concreteTypes) {

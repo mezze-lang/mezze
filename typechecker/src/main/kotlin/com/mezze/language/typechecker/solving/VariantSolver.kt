@@ -636,7 +636,6 @@ internal class VariantSolver(
             is MezzeType.FloatType,
             is MezzeType.StringType,
             is MezzeType.BoolType,
-            is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.BytesType,
             is MezzeType.CharType,

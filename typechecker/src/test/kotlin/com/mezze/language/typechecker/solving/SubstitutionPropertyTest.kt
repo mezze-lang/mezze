@@ -20,7 +20,7 @@ class SubstitutionPropertyTest {
         1 -> MezzeType.StringType
         2 -> MezzeType.BoolType
         3 -> MezzeType.FloatType
-        else -> MezzeType.NatType
+        else -> MezzeType.IntType
     }
 
     private fun randomType(depth: Int, seed: Int): MezzeType {

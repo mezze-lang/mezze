@@ -48,7 +48,6 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.FloatType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x02))
         is MezzeType.StringType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x03))
         is MezzeType.BoolType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x04))
-        is MezzeType.NatType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x06))
         is MezzeType.CharType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x07))
         is MezzeType.FracType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x08))
         is MezzeType.BytesType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x09))

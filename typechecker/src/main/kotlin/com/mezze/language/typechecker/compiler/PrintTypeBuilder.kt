@@ -53,7 +53,6 @@ class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
         is MezzeType.StringType -> PrintType.Scalar(PrintType.ScalarKind.Str)
         is MezzeType.BoolType -> PrintType.Scalar(PrintType.ScalarKind.Bool)
         is MezzeType.CharType -> PrintType.Scalar(PrintType.ScalarKind.Char)
-        is MezzeType.NatType -> PrintType.Scalar(PrintType.ScalarKind.Nat)
         is MezzeType.BytesType -> PrintType.Scalar(PrintType.ScalarKind.Bytes)
 
         is MezzeType.FracType -> PrintType.Frac

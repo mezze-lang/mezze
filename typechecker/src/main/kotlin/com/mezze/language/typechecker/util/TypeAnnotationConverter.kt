@@ -463,7 +463,7 @@ object TypeAnnotationConverter {
             is MezzeType.NewtypeType -> collectCaughtByAncestorInto(type.wrappedType, into)
             is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
-            is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
+            is MezzeType.StringType, is MezzeType.BoolType,
             is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.CharType -> {}
         }
@@ -508,7 +508,7 @@ object TypeAnnotationConverter {
             is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnAllEffectRows(type.wrappedType, caught))
             is MezzeType.EffectRow -> type.copy(caughtByAncestor = type.caughtByAncestor + caught)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
-            is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
+            is MezzeType.StringType, is MezzeType.BoolType,
             is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.CharType -> type
         }
@@ -566,7 +566,7 @@ object TypeAnnotationConverter {
         is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnCallbackRows(type.wrappedType, outerReturnEffectNames))
         is MezzeType.EffectRow, is MezzeType.VarType,
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.BoolType, is MezzeType.FracType,
         is MezzeType.BytesType,
         is MezzeType.CharType -> type
     }

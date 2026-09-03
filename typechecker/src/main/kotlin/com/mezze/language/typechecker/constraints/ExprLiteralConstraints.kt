@@ -29,7 +29,28 @@ internal fun ExpressionConstraintGenerator.generateBinaryOp(expr: ParsedBinaryOp
 }
 
 internal fun ExpressionConstraintGenerator.generateIntLiteral(expr: ParsedIntLit, context: ConstraintContext) = ConstraintResult.simple(MezzeType.IntType)
-internal fun ExpressionConstraintGenerator.generateNatLiteral(expr: ParsedNatLit, context: ConstraintContext) = ConstraintResult.simple(MezzeType.NatType)
+internal fun ExpressionConstraintGenerator.generateNatLiteral(expr: ParsedNatLit, context: ConstraintContext) = ConstraintResult.simple(natLiteralType(context))
+
+internal fun natLiteralType(context: ConstraintContext): MezzeType {
+    val decl = context.typeDeclarations["Nat"]
+    val newtypeDef = decl?.definition as? ParsedNewtypeDef
+    return if (newtypeDef != null) {
+        val hash = decl.contentHash
+        MezzeType.NewtypeType(
+            name = "Nat",
+            constructor = newtypeDef.constructor,
+            wrappedType = MezzeType.IntType,
+            identity = if (hash != null) TypeIdentity.Declared(hash, "Nat") else TypeIdentity.Anonymous,
+        )
+    } else {
+        // Fallback: stdlib not loaded (e.g. tests without prelude).
+        MezzeType.NewtypeType(
+            name = "Nat",
+            constructor = "Nat",
+            wrappedType = MezzeType.IntType,
+        )
+    }
+}
 internal fun ExpressionConstraintGenerator.generateFloatLiteral(expr: ParsedFloatLit, context: ConstraintContext) = ConstraintResult.simple(MezzeType.FloatType)
 internal fun ExpressionConstraintGenerator.generateFractionLiteral(expr: ParsedFracLit, context: ConstraintContext) = ConstraintResult.simple(MezzeType.FracType)
 

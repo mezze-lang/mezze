@@ -346,7 +346,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         type1 is MezzeType.FloatType && type2 is MezzeType.FloatType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.StringType && type2 is MezzeType.StringType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.BoolType && type2 is MezzeType.BoolType -> UnificationResult.Success(Substitution.empty)
-        type1 is MezzeType.NatType && type2 is MezzeType.NatType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.FracType && type2 is MezzeType.FracType -> UnificationResult.Success(Substitution.empty)
 
         type1 is MezzeType.NewtypeType && type2 is MezzeType.NewtypeType -> {
@@ -392,6 +391,36 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
                     type2 = type2
                 )
             }
+        }
+        // TypeApplication vs NewtypeType: an annotation-side ParsedNamedType for a
+        // newtype decl surfaces as a nominal TypeApplication (name+identity, no
+        // payload), while a value-producing expression (a literal `0n`, a wrapping
+        // call) surfaces as a NewtypeType carrying the wrapped payload. Same
+        // declaration ⇒ same type — reconcile by nominal identity (hash first,
+        // name as fallback). No payload re-unification: the decl's identity fixes
+        // the payload and expanding the TypeApp side produces a synthetic `{val: T}`
+        // record that isn't the raw wrapped type.
+        type1 is MezzeType.TypeApplication && type2 is MezzeType.NewtypeType -> {
+            val h1 = (type1.identity as? TypeIdentity.Declared)?.hash
+            val h2 = (type2.identity as? TypeIdentity.Declared)?.hash
+            val sameDeclaration = if (h1 != null && h2 != null) h1 == h2 else type1.constructor == type2.name
+            if (sameDeclaration) UnificationResult.Success(Substitution.empty)
+            else UnificationResult.Failure(
+                message = "Type mismatch: ${type1.constructor} is not the same type as ${type2.name}",
+                type1 = type1,
+                type2 = type2
+            )
+        }
+        type1 is MezzeType.NewtypeType && type2 is MezzeType.TypeApplication -> {
+            val h1 = (type1.identity as? TypeIdentity.Declared)?.hash
+            val h2 = (type2.identity as? TypeIdentity.Declared)?.hash
+            val sameDeclaration = if (h1 != null && h2 != null) h1 == h2 else type1.name == type2.constructor
+            if (sameDeclaration) UnificationResult.Success(Substitution.empty)
+            else UnificationResult.Failure(
+                message = "Type mismatch: ${type1.name} is not the same type as ${type2.constructor}",
+                type1 = type1,
+                type2 = type2
+            )
         }
         type1 is MezzeType.BytesType && type2 is MezzeType.BytesType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.CharType && type2 is MezzeType.CharType -> UnificationResult.Success(Substitution.empty)

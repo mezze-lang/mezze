@@ -331,7 +331,7 @@ internal fun ExpressionConstraintGenerator.substituteAssociatedTypesInType(
             wrappedType = substituteAssociatedTypesInType(type.wrappedType, associatedTypeBindings)
         )
         is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.BoolType, is MezzeType.FracType,
         is MezzeType.BytesType,
         is MezzeType.CharType, is MezzeType.EffectRow -> type
     }

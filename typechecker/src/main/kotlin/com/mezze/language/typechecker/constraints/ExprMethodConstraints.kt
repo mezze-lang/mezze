@@ -729,7 +729,7 @@ internal fun ExpressionConstraintGenerator.recordMethodResolveBucket(
 internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: ParsedExpr, context: ConstraintContext): MezzeType? {
     when (receiver) {
         is ParsedIntLit -> return MezzeType.IntType
-        is ParsedNatLit -> return MezzeType.NatType
+        is ParsedNatLit -> return natLiteralType(context)
         is ParsedFloatLit -> return MezzeType.FloatType
         is ParsedFracLit -> return MezzeType.FracType
         is ParsedStringLit -> return MezzeType.StringType
@@ -901,7 +901,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         is MezzeType.RecordType -> t.identity is TypeIdentity.Declared
         is MezzeType.VariantType -> t.identity is TypeIdentity.Declared
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.BoolType, is MezzeType.FracType,
         is MezzeType.CharType, is MezzeType.BytesType -> true
         else -> false
     }
