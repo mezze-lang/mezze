@@ -20,6 +20,14 @@ impl Agent 'a where {
   has_error = { it } -> has_error { agent = it },
   restart = { it, val } -> restart_agent { agent = it, val = val },
   set_error_handler = { it, handler } -> set_error_handler { agent = it, handler = handler },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  deref_agent = { it } -> deref_agent { agent = it },
+  await_agent = { it } -> await_agent { agent = it },
+  await_agent_timeout = { it, timeout_ms } -> await_agent_timeout { agent = it, timeout_ms = timeout_ms },
+  agent_error = { it } -> agent_error { agent = it },
+  restart_agent = { it, val } -> restart_agent { agent = it, val = val },
 }
 
 ## Create a new agent with the given initial value.

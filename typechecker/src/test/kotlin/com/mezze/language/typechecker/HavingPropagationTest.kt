@@ -69,9 +69,9 @@ class HavingPropagationTest {
     @Test
     fun `generic method using both associated types renders both having bindings`() {
         val t = typeOf("go", """
-            ability Split for 'c having 'k, 'v where { split: { it: 'c } -> { k: 'k, v: 'v } }
-            impl Split for [Int] having 'k = Int, 'v = Str where { split = { it } -> { k = 0, v = "x" } }
-            pub let go = { xs } -> xs.split {}
+            ability Unbundle for 'c having 'k, 'v where { unbundle: { it: 'c } -> { k: 'k, v: 'v } }
+            impl Unbundle for [Int] having 'k = Int, 'v = Str where { unbundle = { it } -> { k = 0, v = "x" } }
+            pub let go = { xs } -> xs.unbundle {}
         """.trimIndent())
         assertNotNull(t, "go should typecheck")
         assertTrue(Regex("""having 'k = '\w+, 'v = '\w+""").containsMatchIn(t!!),
@@ -81,18 +81,18 @@ class HavingPropagationTest {
     @Test
     fun `concrete receiver resolves both associated types`() {
         assertNull(err("""
-            ability Split for 'c having 'k, 'v where { split: { it: 'c } -> { k: 'k, v: 'v } }
-            impl Split for [Int] having 'k = Int, 'v = Str where { split = { it } -> { k = 0, v = "x" } }
-            pub let go: {} -> { k: Int, v: Str } = {} -> ([1]).split {}
+            ability Unbundle for 'c having 'k, 'v where { unbundle: { it: 'c } -> { k: 'k, v: 'v } }
+            impl Unbundle for [Int] having 'k = Int, 'v = Str where { unbundle = { it } -> { k = 0, v = "x" } }
+            pub let go: {} -> { k: Int, v: Str } = {} -> ([1]).unbundle {}
         """.trimIndent()), "both 'k=Int and 'v=Str must resolve on a concrete receiver")
     }
 
     @Test
     fun `wrong having on one of two associated types is rejected`() {
         val e = err("""
-            ability Split for 'c having 'k, 'v where { split: { it: 'c } -> { k: 'k, v: 'v } }
-            impl Split for [Int] having 'k = Int, 'v = Str where { split = { it } -> { k = 0, v = "x" } }
-            pub let go: {} -> { k: Int, v: Int } = {} -> ([1]).split {}
+            ability Unbundle for 'c having 'k, 'v where { unbundle: { it: 'c } -> { k: 'k, v: 'v } }
+            impl Unbundle for [Int] having 'k = Int, 'v = Str where { unbundle = { it } -> { k = 0, v = "x" } }
+            pub let go: {} -> { k: Int, v: Int } = {} -> ([1]).unbundle {}
         """.trimIndent())
         assertNotNull(e, "annotating 'v as Int (impl says Str) must be rejected")
     }

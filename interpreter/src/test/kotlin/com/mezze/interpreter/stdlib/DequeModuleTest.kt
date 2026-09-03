@@ -514,4 +514,26 @@ class DequeModuleTest {
         """)
         assertEquals("hello", result)
     }
+
+    // ===== Dot-chain parity: newly-added inherent methods =====
+
+    @Test
+    fun `newly-added inherent methods dot-chain off a deque receiver`() {
+        // slice / get / dedup were free functions only; now they chain as `d.op {}`
+        // via the inherent `impl Deque 'a` block.
+        assertEquals(2L, eval("""
+            use std::collections::deque::{ from_seq }
+            from_seq { xs = [3, 1, 2, 1, 3] }.slice { start = 1, end = 3 }.size {}
+        """))
+        assertEquals(3L, eval("""
+            use std::collections::deque::{ from_seq }
+            match from_seq { xs = [3, 1, 2] }.get { i = 0 } is
+                Some { val = v } -> v
+                None -> -1
+        """))
+        assertEquals(3L, eval("""
+            use std::collections::deque::{ from_seq }
+            from_seq { xs = [3, 1, 1, 2, 2] }.dedup {}.size {}
+        """))
+    }
 }

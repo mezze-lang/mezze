@@ -53,6 +53,17 @@ impl ValidatedAtom 'a where {
   get_and_swap = { it, f } -> get_and_swap_validated { atom = it, f = f },
   add_watch = { it, key, f } -> add_watch_validated { atom = it, key = key, f = f },
   remove_watch = { it, key } -> remove_watch_validated { atom = it, key = key },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  deref_validated = { it } -> deref_validated { atom = it },
+  reset_validated = { it, val } -> reset_validated { atom = it, val = val },
+  swap_validated = { it, f } -> swap_validated { atom = it, f = f },
+  compare_and_set_validated = { it, expected, new } -> compare_and_set_validated { atom = it, expected = expected, new = new },
+  swap_with_validated = { it, f, arg } -> swap_with_validated { atom = it, f = f, arg = arg },
+  get_and_swap_validated = { it, f } -> get_and_swap_validated { atom = it, f = f },
+  add_watch_validated = { it, key, f } -> add_watch_validated { atom = it, key = key, f = f },
+  remove_watch_validated = { it, key } -> remove_watch_validated { atom = it, key = key },
 }
 
 ## Create a new atom with an initial value.

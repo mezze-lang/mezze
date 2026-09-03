@@ -214,6 +214,26 @@ impl Set 'a where {
   max = { it } -> max { s = it },
   to_seq = { it } -> to_seq { s = it },
   to_list = { it } -> to_list { s = it },
+
+  ## dot-chain parity: an inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` always works.
+  insert_all = { it, xs } -> insert_all { s = it, xs = xs },
+  remove_all = { it, xs } -> remove_all { s = it, xs = xs },
+  none = { it, p } -> none { s = it, p = p },
+  sum = { it } -> sum { s = it },
+  product = { it } -> product { s = it },
+  reduce = { it, f } -> reduce { s = it, f = f },
+  min_by = { it, f } -> min_by { s = it, f = f },
+  max_by = { it, f } -> max_by { s = it, f = f },
+  partition = { it, p } -> partition { s = it, p = p },
+  sum_float = { it } -> sum_float { s = it },
+  product_float = { it } -> product_float { s = it },
+  flat_map = { it, f } -> flat_map { s = it, f = f },
+  group_by = { it, f } -> group_by { s = it, f = f },
+  filter_map = { it, f } -> filter_map { set = it, f = f },
+  collect_seq = { it, f } -> collect_seq { set = it, f = f },
+  collect_list = { it, f } -> collect_list { set = it, f = f },
+  to_sorted_set = { it } -> to_sorted_set { s = it },
 }
 
 impl Sized for Set 'a where {

@@ -401,6 +401,10 @@ impl Request where {
   send = { it } -> Http.request { req = it, config = default_http_config },
   ## Terminal with config override.
   send_with = { it: 'it, config: HttpConfig } -> Http.request { req = it, config = config },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  retry = { it, max_attempts, backoff_ms } -> retry { req = it, max_attempts = max_attempts, backoff_ms = backoff_ms },
 }
 
 ## Impl Response gives chainable decoders + predicates + header lookup.
@@ -428,6 +432,16 @@ impl Response where {
   header = { it: 'it, name: Str } -> get_header { resp = it, name = name },
   content_type = { it } -> get_content_type { resp = it },
   content_length = { it } -> get_content_length { resp = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  body_str = { it } -> body_str { resp = it },
+  body_json = { it } -> body_json { resp = it },
+  is_client_error = { it } -> is_client_error { resp = it },
+  is_server_error = { it } -> is_server_error { resp = it },
+  get_header = { it, name } -> get_header { resp = it, name = name },
+  get_content_type = { it } -> get_content_type { resp = it },
+  get_content_length = { it } -> get_content_length { resp = it },
 }
 
 ## A reusable HTTP client value. Bind a service's base URL, default
@@ -885,4 +899,8 @@ impl Result Response HttpError where {
   json_or = { it: 'it, def: Json } -> json_or { resp = it, def = def },
   on_ok = { it, f } -> on_ok { resp = it, f = f },
   on_err = { it, f } -> on_err { resp = it, f = f },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  ensure_ok = { it } -> ensure_ok { resp = it },
 }

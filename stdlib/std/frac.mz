@@ -121,4 +121,8 @@ impl Frac where {
     __native_frac_less_than { l = it, r = __native_int_to_frac { n = 0 } },
   reciprocal: { it: Frac } -> Frac = { it } ->
     __native_frac_divide { l = __native_int_to_frac { n = 1 }, r = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  reduce = { it } -> reduce { n = it },
 }

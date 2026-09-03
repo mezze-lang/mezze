@@ -235,6 +235,28 @@ impl SortedSet 'a where {
   to_list = { it } -> to_list { s = it },
   to_set = { it } -> to_set { s = it },
   to_seq = { it } -> to_seq { s = it },
+
+  ## dot-chain parity: an inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` always works.
+  partition = { it, p } -> partition { s = it, p = p },
+  min_by = { it, f } -> min_by { s = it, f = f },
+  max_by = { it, f } -> max_by { s = it, f = f },
+  take = { it, n } -> take { s = it, n = n },
+  drop = { it, n } -> drop { s = it, n = n },
+  range = { it, lo, hi } -> range { s = it, lo = lo, hi = hi },
+  head_set = { it, to } -> head_set { s = it, to = to },
+  tail_set = { it, from } -> tail_set { s = it, from = from },
+  filter_map = { it, f } -> filter_map { set = it, f = f },
+  collect_seq = { it, f } -> collect_seq { set = it, f = f },
+  collect_list = { it, f } -> collect_list { set = it, f = f },
+  none = { it, p } -> none { s = it, p = p },
+  count = { it, p } -> count { s = it, p = p },
+  reduce = { it, f } -> reduce { s = it, f = f },
+  sum = { it } -> sum { s = it },
+  sum_float = { it } -> sum_float { s = it },
+  product = { it } -> product { s = it },
+  product_float = { it } -> product_float { s = it },
+  for_each = { it, f } -> for_each { s = it, f = f },
 }
 
 impl Sized for SortedSet 'a where {

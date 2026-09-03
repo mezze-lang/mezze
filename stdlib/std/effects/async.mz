@@ -657,6 +657,17 @@ impl Scope 'a where {
   is_cancelled = { it } -> scope_is_cancelled { sc = it },
   get_token = { it } -> scope_get_token { sc = it },
   join_until = { it, ps, ms } -> scope_join_until { sc = it, ps = ps, ms = ms },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  scope_spawn = { it, f } -> scope_spawn { sc = it, f = f },
+  scope_cancel_all = { it } -> scope_cancel_all { sc = it },
+  scope_get_token = { it } -> scope_get_token { sc = it },
+  scope_is_cancelled = { it } -> scope_is_cancelled { sc = it },
+  scope_join_until = { it, ps, ms } -> scope_join_until { sc = it, ps = ps, ms = ms },
+  join_on_success = { it, ps } -> join_on_success { sc = it, ps = ps },
+  join_on_failure = { it, ps } -> join_on_failure { sc = it, ps = ps },
+  join_on_first = { it, ps } -> join_on_first { sc = it, ps = ps },
 }
 
 # ============================================================================
@@ -840,6 +851,11 @@ impl CancellationToken where {
   remove_callback = { it, id } -> remove_callback { token = it, id = id },
   create_child = { it } -> create_child { token = it },
   with_cancellation = { it, f } -> with_cancellation { token = it, f = f },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  throw_if_cancelled = { it } -> throw_if_cancelled { token = it },
+  on_cancellation = { it, callback } -> on_cancellation { token = it, callback = callback },
 }
 
 ## Create a new cancellation token.

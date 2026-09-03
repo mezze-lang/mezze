@@ -196,6 +196,25 @@ impl SortedMap 'k 'v where {
   map_values = { it, f } -> map_values { m = it, f = f },
   to_map = { it } -> to_map { m = it },
   to_list = { it } -> to_list { m = it },
+
+  ## dot-chain parity: an inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` always works.
+  entries = { it } -> entries { m = it },
+  min_entry = { it } -> min_entry { m = it },
+  max_entry = { it } -> max_entry { m = it },
+  partition = { it, p } -> partition { m = it, p = p },
+  range = { it, lo, hi } -> range { m = it, lo = lo, hi = hi },
+  floor_key = { it, k } -> floor_key { m = it, k = k },
+  ceiling_key = { it, k } -> ceiling_key { m = it, k = k },
+  head_map = { it, to } -> head_map { m = it, to = to },
+  tail_map = { it, from } -> tail_map { m = it, from = from },
+  sub_map = { it, lo, hi } -> sub_map { m = it, lo = lo, hi = hi },
+  take = { it, n } -> take { m = it, n = n },
+  drop = { it, n } -> drop { m = it, n = n },
+  map_keys = { it, f } -> map_keys { m = it, f = f },
+  filter_keys = { it, p } -> filter_keys { m = it, p = p },
+  filter_values = { it, p } -> filter_values { m = it, p = p },
+  invert = { it } -> invert { m = it },
 }
 
 impl Sized for SortedMap 'k 'v where {

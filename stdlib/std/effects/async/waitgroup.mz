@@ -16,6 +16,11 @@ impl WaitGroup where {
   wait = { it } -> wait { wg = it },
   wait_timeout = { it, ms } -> wait_timeout { wg = it, ms = ms },
   get_count = { it } -> get_count_wg { wg = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  wait_async = { it } -> wait_async { wg = it },
+  get_count_wg = { it } -> get_count_wg { wg = it },
 }
 
 ## Create a new wait group with count 0.

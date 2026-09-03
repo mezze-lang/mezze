@@ -18,6 +18,11 @@ impl TVar 'a where {
   swap = { it, val } -> STM.swap { var = it, val = val },
   ensure = { it } -> STM.ensure { var = it },
   deref = { it } -> deref { var = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  transfer = { it, to, amount } -> transfer { from = it, to = to, amount = amount },
+  transfer_or_wait = { it, to, amount } -> transfer_or_wait { from = it, to = to, amount = amount },
 }
 
 ## Create a new TVar with an initial value.
@@ -158,6 +163,16 @@ impl TMVar 'a where {
   try_put = { it, val } -> try_put_tmvar { var = it, val = val },
   swap = { it, val } -> swap_tmvar { var = it, val = val },
   is_empty = { it } -> is_empty_tmvar { var = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  take_tmvar = { it } -> take_tmvar { var = it },
+  put_tmvar = { it, val } -> put_tmvar { var = it, val = val },
+  read_tmvar = { it } -> read_tmvar { var = it },
+  try_take_tmvar = { it } -> try_take_tmvar { var = it },
+  try_put_tmvar = { it, val } -> try_put_tmvar { var = it, val = val },
+  swap_tmvar = { it, val } -> swap_tmvar { var = it, val = val },
+  is_empty_tmvar = { it } -> is_empty_tmvar { var = it },
 }
 
 let unwrap_tmvar: { var: TMVar 'a } -> TVar (Option 'a) = { var } -> match var is
@@ -256,6 +271,15 @@ impl TQueue 'a where {
   peek = { it } -> peek_tqueue { q = it },
   is_empty = { it } -> is_empty_tqueue { q = it },
   size = { it } -> size_tqueue { q = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  write_tqueue = { it, val } -> write_tqueue { q = it, val = val },
+  read_tqueue = { it } -> read_tqueue { q = it },
+  try_read_tqueue = { it } -> try_read_tqueue { q = it },
+  peek_tqueue = { it } -> peek_tqueue { q = it },
+  is_empty_tqueue = { it } -> is_empty_tqueue { q = it },
+  size_tqueue = { it } -> size_tqueue { q = it },
 }
 
 let unwrap_tqueue
@@ -392,6 +416,18 @@ impl TBQueue 'a where {
   is_full = { it } -> is_full_tbqueue { q = it },
   size = { it } -> size_tbqueue { q = it },
   capacity = { it } -> capacity_tbqueue { q = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  write_tbqueue = { it, val } -> write_tbqueue { q = it, val = val },
+  read_tbqueue = { it } -> read_tbqueue { q = it },
+  try_read_tbqueue = { it } -> try_read_tbqueue { q = it },
+  try_write_tbqueue = { it, val } -> try_write_tbqueue { q = it, val = val },
+  peek_tbqueue = { it } -> peek_tbqueue { q = it },
+  is_empty_tbqueue = { it } -> is_empty_tbqueue { q = it },
+  is_full_tbqueue = { it } -> is_full_tbqueue { q = it },
+  size_tbqueue = { it } -> size_tbqueue { q = it },
+  capacity_tbqueue = { it } -> capacity_tbqueue { q = it },
 }
 
 let unwrap_tbqueue

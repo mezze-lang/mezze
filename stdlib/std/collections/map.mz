@@ -251,6 +251,30 @@ impl Map 'k 'v where {
   count = { it, p } -> count { m = it, p = p },
   to_seq = { it } -> to_seq { m = it },
   to_list = { it } -> to_list { m = it },
+
+  ## dot-chain parity: an inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` always works.
+  update = { it, k, f } -> update { m = it, k = k, f = f },
+  remove_all = { it, ks } -> remove_all { m = it, ks = ks },
+  none = { it, p } -> none { m = it, p = p },
+  contains_value = { it, v } -> contains_value { m = it, v = v },
+  keys_seq = { it } -> keys_seq { m = it },
+  values_seq = { it } -> values_seq { m = it },
+  partition = { it, p } -> partition { m = it, p = p },
+  min_key = { it } -> min_key { m = it },
+  max_key = { it } -> max_key { m = it },
+  min_value = { it } -> min_value { m = it },
+  max_value = { it } -> max_value { m = it },
+  invert = { it } -> invert { m = it },
+  select_keys = { it, ks } -> select_keys { m = it, ks = ks },
+  reject_keys = { it, ks } -> reject_keys { m = it, ks = ks },
+  reduce = { it, f } -> reduce { m = it, f = f },
+  group_by_value = { it } -> group_by_value { m = it },
+  map_keys = { it, f } -> map_keys { m = it, f = f },
+  filter_keys = { it, p } -> filter_keys { m = it, p = p },
+  filter_values = { it, p } -> filter_values { m = it, p = p },
+  flat_map = { it, f } -> flat_map { m = it, f = f },
+  to_sorted_map = { it } -> to_sorted_map { m = it },
 }
 
 impl Sized for Map 'k 'v where {

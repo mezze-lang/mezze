@@ -159,6 +159,15 @@ impl NonEmptyList 'a where {
   sort_by = { it, cmp } -> sort_by { xs = it, cmp = cmp },
   to_list = { it } -> to_list { xs = it },
   to_seq = { it } -> to_seq { xs = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  append = { it, ys } -> append { xs = it, ys = ys },
+  append_list = { it, ys } -> append_list { xs = it, ys = ys },
+  get = { it, index } -> get { xs = it, index = index },
+  fold_right = { it, init, f } -> fold_right { xs = it, init = init, f = f },
+  zip = { it, ys } -> zip { xs = it, ys = ys },
+  intersperse = { it, sep } -> intersperse { xs = it, sep = sep },
 }
 
 ## NonEmptyList is never empty, so is_empty always returns False.

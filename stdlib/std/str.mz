@@ -53,6 +53,10 @@ impl Str where {
   to_camel_case = { it } -> to_camel_case { s = it },
   to_kebab_case = { it } -> to_kebab_case { s = it },
   to_screaming_snake_case = { it } -> to_screaming_snake_case { s = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  concat = { it, r } -> concat { l = it, r = r },
 }
 
 ## Concatenate two strings.

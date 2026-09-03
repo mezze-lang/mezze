@@ -122,6 +122,13 @@ impl Bytes where {
   to_seq = { it } -> to_seq { b = it },
   to_hex = { it } -> to_hex { b = it },
   to_base64 = { it } -> to_base64 { b = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  repeat = { it, n } -> repeat { b = it, n = n },
+  index_of = { it, pattern } -> index_of { b = it, pattern = pattern },
+  starts_with = { it, prefix } -> starts_with { b = it, prefix = prefix },
+  ends_with = { it, suffix } -> ends_with { b = it, suffix = suffix },
 }
 
 impl Sized for Bytes where {

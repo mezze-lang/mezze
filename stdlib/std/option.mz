@@ -203,6 +203,13 @@ impl Option 'a where {
   flatten = { it } -> flatten { opt = it },
   to_result = { it, error } -> to_result { opt = it, error = error },
   to_list = { it } -> to_list { opt = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  if_some = { it, action } -> if_some { opt = it, action = action },
+  if_none = { it, action } -> if_none { opt = it, action = action },
+  zip = { it, b } -> zip { a = it, b = b },
+  zip_with = { it, b, f } -> zip_with { a = it, b = b, f = f },
 }
 
 ## Wrap any value in Some via method syntax: `x.some {}` → `Some { val = x }`.

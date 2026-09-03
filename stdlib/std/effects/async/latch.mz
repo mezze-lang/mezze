@@ -15,6 +15,12 @@ impl Latch where {
   await = { it } -> await_latch { latch = it },
   await_timeout = { it, ms } -> await_latch_timeout { latch = it, ms = ms },
   get_count = { it } -> get_count { latch = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  await_latch = { it } -> await_latch { latch = it },
+  await_latch_async = { it } -> await_latch_async { latch = it },
+  await_latch_timeout = { it, ms } -> await_latch_timeout { latch = it, ms = ms },
 }
 
 ## Create a new latch with the given count (must be non-negative).

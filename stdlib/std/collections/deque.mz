@@ -275,6 +275,37 @@ impl Deque 'a where {
   unique = { it } -> unique { d = it },
   to_list = { it } -> to_list { d = it },
   to_seq = { it } -> to_seq { d = it },
+
+  ## dot-chain parity: an inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` always works.
+  enqueue = { it, x } -> enqueue { d = it, x = x },
+  dequeue = { it } -> dequeue { d = it },
+  push = { it, x } -> push { d = it, x = x },
+  pop = { it } -> pop { d = it },
+  min_by = { it, f } -> min_by { d = it, f = f },
+  max_by = { it, f } -> max_by { d = it, f = f },
+  get = { it, i } -> get { d = it, i = i },
+  slice = { it, start, end } -> slice { d = it, start = start, end = end },
+  index_of = { it, x } -> index_of { d = it, x = x },
+  find_index = { it, p } -> find_index { d = it, p = p },
+  take_while = { it, p } -> take_while { d = it, p = p },
+  drop_while = { it, p } -> drop_while { d = it, p = p },
+  split_at = { it, i } -> split_at { d = it, i = i },
+  span = { it, p } -> span { d = it, p = p },
+  scan = { it, init, f } -> scan { d = it, init = init, f = f },
+  dedup = { it } -> dedup { d = it },
+  dedup_by = { it, f } -> dedup_by { d = it, f = f },
+  intersperse = { it, sep } -> intersperse { d = it, sep = sep },
+  zip_with_index = { it } -> zip_with_index { d = it },
+  rotate_left = { it, n } -> rotate_left { d = it, n = n },
+  rotate_right = { it, n } -> rotate_right { d = it, n = n },
+  to_set = { it } -> to_set { d = it },
+  to_sorted_set = { it } -> to_sorted_set { d = it },
+  to_map = { it } -> to_map { d = it },
+  to_sorted_map = { it } -> to_sorted_map { d = it },
+  partition = { it, p } -> partition { d = it, p = p },
+  sum_float = { it } -> sum_float { d = it },
+  product_float = { it } -> product_float { d = it },
 }
 
 impl Sized for Deque 'a where {

@@ -18,6 +18,11 @@ impl Semaphore where {
   try_acquire_n = { it, permits } -> try_acquire_n { sem = it, permits = permits },
   available = { it } -> available { sem = it },
   with_permit = { it, f } -> with_permit { sem = it, f = f },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  acquire_async = { it } -> acquire_async { sem = it },
+  acquire_n_async = { it, permits } -> acquire_n_async { sem = it, permits = permits },
 }
 
 ## Create a semaphore with the given number of permits.

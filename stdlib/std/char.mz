@@ -94,4 +94,9 @@ impl Char where {
   is_whitespace = { it } -> __native_char_is_whitespace { c = it },
   is_upper = { it } -> __native_char_is_upper { c = it },
   is_lower = { it } -> __native_char_is_lower { c = it },
+
+  ## dot-chain parity: inherent method for every receiver-taking free
+  ## function not already covered by an ability, so `x.op {}` works.
+  is_alpha_numeric = { it } -> is_alpha_numeric { c = it },
+  digit_to_int = { it, radix } -> digit_to_int { c = it, radix = radix },
 }
