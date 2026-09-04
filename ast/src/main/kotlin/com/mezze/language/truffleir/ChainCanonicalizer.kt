@@ -132,14 +132,14 @@ object ChainCanonicalizer {
             val candidate = FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
-        // __native_iter_fold — iter::fold { it, init, f }
+        // __native_iter_fold / __native_seq_fold — fold { it/xs, init, f }
         if (node is CallNativeIR
-            && node.name == "__native_iter_fold"
+            && (node.name == "__native_iter_fold" || node.name == "__native_seq_fold")
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
             var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
             for (fld in mr.fields) when (fld.name) {
-                "it" -> src = fld.value
+                "it", "xs" -> src = fld.value
                 "init" -> init = fld.value
                 "f" -> f = fld.value
             }
@@ -151,7 +151,7 @@ object ChainCanonicalizer {
             val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
-        // __native_iter_{count,any,all,find,reduce,to_seq,to_list}
+        // __native_{iter,seq}_{count,any,all,find,reduce,to_seq,to_list}
         if (node is CallNativeIR && !node.isScalarABI) {
             val result = tryCanonicalizeNativeSink(node, classifier, allFunctions)
             if (result != null) return result
@@ -195,10 +195,11 @@ object ChainCanonicalizer {
     ): FusedChainIR? {
         val mr = node.arg as? MakeRecordIR ?: return null
         val candidate: FusedChainIR? = when (node.name) {
-            "__native_iter_count" -> {
+            "__native_iter_count", "__native_seq_count" -> {
+                val srcField = if (node.name.startsWith("__native_iter")) "it" else "xs"
                 var src: NodeIR? = null; var p: NodeIR? = null
                 for (fld in mr.fields) when (fld.name) {
-                    "it" -> src = fld.value; "p" -> p = fld.value
+                    srcField -> src = fld.value; "p" -> p = fld.value
                 }
                 val srcInner = src ?: return null
                 val pLambda = p as? MakeLambdaIR ?: return null
@@ -209,13 +210,17 @@ object ChainCanonicalizer {
                 val candidate = FusedChainIR(source, allStages, SinkIR.Count, node.src)
                 if (isEffectSafe(candidate, allFunctions)) candidate else null
             }
-            "__native_iter_any" -> buildPredicateFused(mr, classifier, allFunctions, node.src) { SinkIR.Any(it) }
-            "__native_iter_all" -> buildPredicateFused(mr, classifier, allFunctions, node.src) { SinkIR.All(it) }
-            "__native_iter_find" -> buildPredicateFused(mr, classifier, allFunctions, node.src) { SinkIR.Find(it) }
-            "__native_iter_reduce" -> {
+            "__native_iter_any", "__native_seq_any" ->
+                buildPredicateFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.Any(it) }
+            "__native_iter_all", "__native_seq_all" ->
+                buildPredicateFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.All(it) }
+            "__native_iter_find", "__native_seq_find" ->
+                buildPredicateFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.Find(it) }
+            "__native_iter_reduce", "__native_seq_reduce" -> {
+                val srcField = if (node.name.startsWith("__native_iter")) "it" else "xs"
                 var src: NodeIR? = null; var f: NodeIR? = null
                 for (fld in mr.fields) when (fld.name) {
-                    "it" -> src = fld.value; "f" -> f = fld.value
+                    srcField -> src = fld.value; "f" -> f = fld.value
                 }
                 val srcInner = src ?: return null
                 val fLambda = f as? MakeLambdaIR ?: return null
@@ -245,14 +250,16 @@ object ChainCanonicalizer {
     /** Build a FusedChainIR with a predicate sink (any/all/find) from a native call record. */
     private fun buildPredicateFused(
         mr: MakeRecordIR,
+        nativeName: String,
         classifier: ChainHofClassifier,
         allFunctions: Map<Hash, FunctionIR>,
         src: SourceInfo,
         wrap: (MakeLambdaIR) -> SinkIR,
     ): FusedChainIR? {
+        val srcField = if (nativeName.startsWith("__native_iter")) "it" else "xs"
         var srcNode: NodeIR? = null; var p: NodeIR? = null
         for (fld in mr.fields) when (fld.name) {
-            "it" -> srcNode = fld.value; "p" -> p = fld.value
+            srcField -> srcNode = fld.value; "p" -> p = fld.value
         }
         val srcInner = srcNode ?: return null
         val pLambda = p as? MakeLambdaIR ?: return null
