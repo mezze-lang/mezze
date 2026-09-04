@@ -379,6 +379,20 @@ sealed interface SinkIR {
      * treats this identically to Fold with an ADD folder over init=0.
      */
     @Serializable data object Sum : SinkIR
+    /** Count — increments a counter per element. Result is Int. */
+    @Serializable data object Count : SinkIR
+    /** Reduce — fold without init; first element is the initial accumulator. */
+    @Serializable data class Reduce(val f: MakeLambdaIR) : SinkIR
+    /** Any — short-circuit: return true on first predicate match. */
+    @Serializable data class Any(val p: MakeLambdaIR) : SinkIR
+    /** All — short-circuit: return false on first predicate failure. */
+    @Serializable data class All(val p: MakeLambdaIR) : SinkIR
+    /** Find — short-circuit: return Some(x) on first predicate match, None otherwise. */
+    @Serializable data class Find(val p: MakeLambdaIR) : SinkIR
+    /** ToSeq — materialize into a Seq (builder pattern). */
+    @Serializable data object ToSeq : SinkIR
+    /** ToList — materialize into a List (builder pattern). */
+    @Serializable data object ToList : SinkIR
 }
 
 // Effects

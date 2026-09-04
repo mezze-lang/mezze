@@ -825,7 +825,14 @@ object StorePopulator {
                         report(sk.f.functionHash.hex, EdgeKind.CALLS)
                     }
                     is com.mezze.language.truffleir.SinkIR.ForEach -> report(sk.f.functionHash.hex, EdgeKind.CALLS)
-                    com.mezze.language.truffleir.SinkIR.Sum -> {}
+                    is com.mezze.language.truffleir.SinkIR.Reduce -> report(sk.f.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.Any -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.All -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.Find -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
+                    com.mezze.language.truffleir.SinkIR.Sum,
+                    com.mezze.language.truffleir.SinkIR.Count,
+                    com.mezze.language.truffleir.SinkIR.ToSeq,
+                    com.mezze.language.truffleir.SinkIR.ToList -> {}
                 }
             }
         }

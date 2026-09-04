@@ -1,0 +1,45 @@
+use std::effects::log::{println, Console}
+use std::collections::iter
+
+## count with predicate: number of even numbers in 0..1000000
+let compute_count = {n: Int} -> iter::range { start = 0, end = n }
+    .count { p = {x: Int} -> x % 2 == 0 }
+
+## any: is there any element > 500000 in 0..1000000?
+let compute_any = {n: Int} -> iter::range { start = 0, end = n }
+    .any { p = {x: Int} -> x > 500000 }
+
+## all: are all elements < 2000000 in 0..1000000?
+let compute_all = {n: Int} -> iter::range { start = 0, end = n }
+    .all { p = {x: Int} -> x < 2000000 }
+
+## any with filter: any even number > 500000?
+let compute_any_filter = {n: Int} -> iter::range { start = 0, end = n }
+    .filter { p = {x: Int} -> x % 2 == 0 }
+    .any { p = {x: Int} -> x > 500000 }
+
+## all with map: are all doubled values < 4000000?
+let compute_all_map = {n: Int} -> iter::range { start = 0, end = n }
+    .map { f = {x: Int} -> x * 2 }
+    .all { p = {x: Int} -> x < 4000000 }
+
+## count after filter + map: count of items where x*2 > 500000
+let compute_count_stages = {n: Int} -> iter::range { start = 0, end = n }
+    .filter { p = {x: Int} -> x % 3 == 0 }
+    .map { f = {x: Int} -> x * 2 }
+    .count { p = {x: Int} -> x > 500000 }
+
+let main = {} -> perform Console in do
+    let n = 1000000
+    let c = compute_count { n = n }
+    println { msg = "count evens 1M = $(c.to_str{})" }
+    let a = compute_any { n = n }
+    println { msg = "any > 500000 in 1M = $(a.to_str{})" }
+    let al = compute_all { n = n }
+    println { msg = "all < 2000000 in 1M = $(al.to_str{})" }
+    let af = compute_any_filter { n = n }
+    println { msg = "any even > 500000 in 1M = $(af.to_str{})" }
+    let am = compute_all_map { n = n }
+    println { msg = "all doubled < 4000000 in 1M = $(am.to_str{})" }
+    let cs = compute_count_stages { n = n }
+    println { msg = "count f.m.count 1M = $(cs.to_str{})" }

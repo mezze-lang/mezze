@@ -243,7 +243,14 @@ class MezzeExecutor(
                         check(sk.f.functionHash)
                     }
                     is com.mezze.language.truffleir.SinkIR.ForEach -> check(sk.f.functionHash)
-                    com.mezze.language.truffleir.SinkIR.Sum -> {}
+                    is com.mezze.language.truffleir.SinkIR.Reduce -> check(sk.f.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.Any -> check(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.All -> check(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.Find -> check(sk.p.functionHash)
+                    com.mezze.language.truffleir.SinkIR.Sum,
+                    com.mezze.language.truffleir.SinkIR.Count,
+                    com.mezze.language.truffleir.SinkIR.ToSeq,
+                    com.mezze.language.truffleir.SinkIR.ToList -> {}
                 }
             }
             // Leaves / effect-hash / read-global — not validated, no recursion.
@@ -407,7 +414,14 @@ class MezzeExecutor(
                         queue.add(sk.f.functionHash.hex)
                     }
                     is com.mezze.language.truffleir.SinkIR.ForEach -> queue.add(sk.f.functionHash.hex)
-                    com.mezze.language.truffleir.SinkIR.Sum -> {}
+                    is com.mezze.language.truffleir.SinkIR.Reduce -> queue.add(sk.f.functionHash.hex)
+                    is com.mezze.language.truffleir.SinkIR.Any -> queue.add(sk.p.functionHash.hex)
+                    is com.mezze.language.truffleir.SinkIR.All -> queue.add(sk.p.functionHash.hex)
+                    is com.mezze.language.truffleir.SinkIR.Find -> queue.add(sk.p.functionHash.hex)
+                    com.mezze.language.truffleir.SinkIR.Sum,
+                    com.mezze.language.truffleir.SinkIR.Count,
+                    com.mezze.language.truffleir.SinkIR.ToSeq,
+                    com.mezze.language.truffleir.SinkIR.ToList -> {}
                 }
             }
         }

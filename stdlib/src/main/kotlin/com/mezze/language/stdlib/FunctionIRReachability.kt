@@ -237,12 +237,19 @@ object FunctionIRReachability {
                     }
                 }
                 when (val sk = node.sink) {
-                    com.mezze.language.truffleir.SinkIR.Sum -> {}
+                    com.mezze.language.truffleir.SinkIR.Sum,
+                    com.mezze.language.truffleir.SinkIR.Count,
+                    com.mezze.language.truffleir.SinkIR.ToSeq,
+                    com.mezze.language.truffleir.SinkIR.ToList -> {}
                     is com.mezze.language.truffleir.SinkIR.Fold -> {
                         collectHashesFromNode(sk.init, queue)
                         queue.add(sk.f.functionHash)
                     }
                     is com.mezze.language.truffleir.SinkIR.ForEach -> queue.add(sk.f.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.Reduce -> queue.add(sk.f.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.Any -> queue.add(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.All -> queue.add(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.Find -> queue.add(sk.p.functionHash)
                 }
             }
         }

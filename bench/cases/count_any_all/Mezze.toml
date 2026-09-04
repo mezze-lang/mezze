@@ -1,0 +1,12 @@
+[package]
+name = "bench_count_any_all"
+version = "0.1.0"
+
+[[app]]
+name = "bench_count_any_all"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

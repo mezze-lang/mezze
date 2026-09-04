@@ -731,8 +731,8 @@ object TrivialWrapperInliner {
                         val nInit = f(sk.init)
                         if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk
                     }
-                    is SinkIR.ForEach -> sk
-                    SinkIR.Sum -> sk
+                    is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find -> sk
+                    SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sk
                 }
                 if (newSource !== node.source || newSink !== node.sink || stagesChanged)
                     node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink) else node

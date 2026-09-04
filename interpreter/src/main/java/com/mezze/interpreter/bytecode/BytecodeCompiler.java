@@ -2550,6 +2550,7 @@ public final class BytecodeCompiler {
         InlineOp op = null;
         NodeIR initExpr = null;
         boolean isSumSink = false;
+        boolean isCountSink = false;
         if (chain.getSink() instanceof SinkIR.Fold foldSink) {
             isSumSink = false;
             initExpr = foldSink.getInit();
@@ -2588,8 +2589,19 @@ public final class BytecodeCompiler {
             initExpr = new LongLitIR(0L, chain.getSrc());
         } else if (chain.getSink() instanceof SinkIR.ForEach) {
             // ForEach: no fold op, no init — handled below in the loop emit.
+        } else if (chain.getSink() instanceof SinkIR.Count) {
+            // Count: acc starts at 0, incremented by 1 per (post-filter)
+            // element. Reuses the Fold path with a hardcoded acc++ sink step.
+            isCountSink = true;
+            op = InlineOp.ADD;
+            initExpr = new LongLitIR(0L, chain.getSrc());
+            isSumSink = false;
+        } else if (chain.getSink() instanceof SinkIR.Any
+                || chain.getSink() instanceof SinkIR.All) {
+            // Short-circuit sinks — handled by emitShortCircuitSink below
+            // after source + stage classification.
         } else {
-            if (dbg) System.err.println("[chain-canon-emit] reject: sink not Fold/Sum/ForEach: " + chain.getSink().getClass().getSimpleName());
+            if (dbg) System.err.println("[chain-canon-emit] reject: sink not Fold/Sum/ForEach/Count/Any/All: " + chain.getSink().getClass().getSimpleName());
             return false;
         }
 
@@ -2660,8 +2672,21 @@ public final class BytecodeCompiler {
             return false;
         }
 
+        // Short-circuit sinks: separate emit path (compound loop condition
+        // with found-flag for early exit).
+        if (chain.getSink() instanceof SinkIR.Any anySink) {
+            return emitShortCircuitSink(chain, anySink.getP(), /*isAny=*/ true,
+                    classifiedStages, rangeStart, rangeEnd, rawXsExpr,
+                    b, argCount, localMap, dbg);
+        }
+        if (chain.getSink() instanceof SinkIR.All allSink) {
+            return emitShortCircuitSink(chain, allSink.getP(), /*isAny=*/ false,
+                    classifiedStages, rangeStart, rangeEnd, rawXsExpr,
+                    b, argCount, localMap, dbg);
+        }
+
         // #427 fast path — ADD folder over an inline range with NO stages.
-        if (rangeStart != null && op == InlineOp.ADD && !hasStages) {
+        if (rangeStart != null && op == InlineOp.ADD && !hasStages && !isCountSink) {
             b.beginBuiltinSumRangeLong();
               emitNode(rangeStart, b, argCount, localMap);
               emitNode(rangeEnd,   b, argCount, localMap);
@@ -2732,7 +2757,7 @@ public final class BytecodeCompiler {
             emitMultiStageFusedLoop(b, argCount, localMap,
                     accSlot, iSlot, xSlot,
                     rangeStart, rangeEnd, initExpr,
-                    op, classifiedStages, isForEach,
+                    op, classifiedStages, isForEach, isCountSink,
                     forEachTarget, forEachScalarABI, forEachFieldName,
                     /*isRange=*/ true, /*rawXsExpr=*/ null);
             b.endBlock();
@@ -2744,7 +2769,7 @@ public final class BytecodeCompiler {
         emitMultiStageFusedLoop(b, argCount, localMap,
                 accSlot, iSlot, xSlot,
                 null, null, initExpr,
-                op, classifiedStages, isForEach,
+                op, classifiedStages, isForEach, isCountSink,
                 forEachTarget, forEachScalarABI, forEachFieldName,
                 /*isRange=*/ false, rawXsExpr);
         b.endBlock();
@@ -3123,7 +3148,7 @@ public final class BytecodeCompiler {
             NodeIR rangeStart, NodeIR rangeEnd, NodeIR initExpr,
             InlineOp foldOp,
             java.util.List<ClassifiedStage> stages,
-            boolean isForEach,
+            boolean isForEach, boolean isCountSink,
             com.oracle.truffle.api.CallTarget forEachTarget,
             boolean forEachScalarABI,
             String forEachFieldName,
@@ -3268,6 +3293,14 @@ public final class BytecodeCompiler {
                 emitCallOneArg(b, forEachTarget, argCopy,
                     forEachScalarABI, forEachFieldName);
                 b.endStoreLocal();
+            } else if (isCountSink) {
+                // Count: acc = acc + 1 (ignore element value).
+                b.beginStoreLocal(accSlot);
+                  b.beginDirectAdd();
+                    b.emitLoadLocal(accSlot);
+                    b.emitLoadLongConstant(1L);
+                  b.endDirectAdd();
+                b.endStoreLocal();
             } else {
                 b.beginStoreLocal(accSlot);
                 emitInlineOpTwoLocals(foldOp, accSlot, xSlot, b);
@@ -3306,6 +3339,224 @@ public final class BytecodeCompiler {
         }
     }
 
+
+    /**
+     * Emit a fused loop for short-circuit sinks (Any / All).
+     *
+     * <p>Structure:
+     * <pre>
+     *   foundSlot = false
+     *   i = start; end = ...
+     *   while (i < end && !found) {
+     *     x = element(i)
+     *     [stages: map/filter/take/drop]
+     *     if (p(x))  { found = true; }   // Any
+     *     if (!p(x)) { found = true; }   // All
+     *     i++
+     *   }
+     *   result: found (Any) | !found (All)
+     * </pre>
+     *
+     * @param isAny true for Any (stop on first match, result=found),
+     *              false for All (stop on first non-match, result=!found)
+     */
+    private boolean emitShortCircuitSink(
+            FusedChainIR chain,
+            MakeLambdaIR predicateLambda,
+            boolean isAny,
+            java.util.List<ClassifiedStage> classifiedStages,
+            NodeIR rangeStart, NodeIR rangeEnd, NodeIR rawXsExpr,
+            MezzeBytecodeRootNodeGen.Builder b,
+            int argCount,
+            com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap,
+            boolean dbg) {
+        // Classify the predicate.
+        var predShape = classifyUnaryPredicateLambda(predicateLambda, language);
+        if (predShape == null) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable "
+                    + (isAny ? "Any" : "All") + " predicate");
+            return false;
+        }
+        var predPeel = new FilterPeel(
+                predShape.preOp, predShape.preRhs, predShape.preRhsNode,
+                predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
+                predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
+                /*innerXs=*/ null);
+
+        boolean isRange = rangeStart != null;
+
+        b.beginBlock();
+        var iSlot     = b.createLocal();
+        var xSlot     = b.createLocal();
+        var foundSlot = b.createLocal();
+
+        com.oracle.truffle.api.bytecode.BytecodeLocal endSlot  = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal seqSlot  = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal sizeSlot = null;
+
+        // Init found = false.
+        b.beginStoreLocal(foundSlot);
+          b.emitLoadObjectConstant(Boolean.FALSE);
+        b.endStoreLocal();
+
+        if (isRange) {
+            endSlot = b.createLocal();
+            b.beginStoreLocal(iSlot);
+              emitNode(rangeStart, b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginStoreLocal(endSlot);
+              emitNode(rangeEnd, b, argCount, localMap);
+            b.endStoreLocal();
+        } else {
+            seqSlot = b.createLocal();
+            sizeSlot = b.createLocal();
+            b.beginStoreLocal(seqSlot);
+              emitNode(rawXsExpr, b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginStoreLocal(sizeSlot);
+              b.beginSeqSize();
+                b.emitLoadLocal(seqSlot);
+              b.endSeqSize();
+            b.endStoreLocal();
+            b.beginStoreLocal(iSlot);
+              b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+        }
+
+        // while (i < end && !found)
+        b.beginWhile();
+          b.beginDirectAnd();
+            b.beginDirectLessThan();
+              b.emitLoadLocal(iSlot);
+              b.emitLoadLocal(isRange ? endSlot : sizeSlot);
+            b.endDirectLessThan();
+            b.beginDirectNot();
+              b.emitLoadLocal(foundSlot);
+            b.endDirectNot();
+          b.endDirectAnd();
+          b.beginBlock();
+
+            // Load element into xSlot.
+            b.beginStoreLocal(xSlot);
+            if (isRange) {
+                b.emitLoadLocal(iSlot);
+            } else {
+                b.beginSeqGet();
+                  b.emitLoadLocal(seqSlot);
+                  b.emitLoadLocal(iSlot);
+                b.endSeqGet();
+            }
+            b.endStoreLocal();
+
+            // Emit pipeline stages (same as fold loop).
+            int filterDepth = 0;
+            var takeCounterPostIncrement = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
+            for (var stage : classifiedStages) {
+                switch (stage) {
+                    case ClassifiedStage.FilterStep fs -> {
+                        b.beginIfThen();
+                          emitPredicateCheck(b, xSlot, fs.peel(), argCount, localMap);
+                          b.beginBlock();
+                        filterDepth++;
+                    }
+                    case ClassifiedStage.MapInline mi -> {
+                        emitMapperStep(b, xSlot, mi.op(), mi.rhsLit(), mi.rhsNode(),
+                            null, false, null, argCount, localMap);
+                    }
+                    case ClassifiedStage.MapCall mc -> {
+                        emitMapperStep(b, xSlot, null, 0L, null,
+                            mc.callHash(), mc.scalarABI(), mc.fieldName(),
+                            argCount, localMap);
+                    }
+                    case ClassifiedStage.DropStep ds -> {
+                        var ctr = b.createLocal();
+                        b.beginStoreLocal(ctr);
+                          b.beginDirectAdd();
+                            b.emitLoadLocal(ctr);
+                            b.emitLoadLongConstant(1L);
+                          b.endDirectAdd();
+                        b.endStoreLocal();
+                        b.beginIfThen();
+                          b.beginDirectLessThan();
+                            emitNode(ds.n(), b, argCount, localMap);
+                            b.emitLoadLocal(ctr);
+                          b.endDirectLessThan();
+                          b.beginBlock();
+                        filterDepth++;
+                    }
+                    case ClassifiedStage.TakeStep ts -> {
+                        var ctr = b.createLocal();
+                        b.beginIfThen();
+                          b.beginDirectLessThan();
+                            b.emitLoadLocal(ctr);
+                            emitNode(ts.n(), b, argCount, localMap);
+                          b.endDirectLessThan();
+                          b.beginBlock();
+                        filterDepth++;
+                        takeCounterPostIncrement.add(ctr);
+                    }
+                }
+            }
+
+            // Short-circuit sink step.
+            // Any: if (p(x)) found = true
+            // All: if (!p(x)) found = true
+            b.beginIfThen();
+            if (isAny) {
+                // Condition: p(x) is true → found
+                emitPredicateCheck(b, xSlot, predPeel, argCount, localMap);
+            } else {
+                // All: condition is !p(x) → negate the predicate result
+                b.beginDirectNot();
+                  emitPredicateCheck(b, xSlot, predPeel, argCount, localMap);
+                b.endDirectNot();
+            }
+              b.beginStoreLocal(foundSlot);
+                b.emitLoadObjectConstant(Boolean.TRUE);
+              b.endStoreLocal();
+            b.endIfThen();
+
+            // Increment take counters.
+            for (var ctr : takeCounterPostIncrement) {
+                b.beginStoreLocal(ctr);
+                  b.beginDirectAdd();
+                    b.emitLoadLocal(ctr);
+                    b.emitLoadLongConstant(1L);
+                  b.endDirectAdd();
+                b.endStoreLocal();
+            }
+
+            // Close filter/take/drop IfThen blocks.
+            for (int j = 0; j < filterDepth; j++) {
+                  b.endBlock();
+                b.endIfThen();
+            }
+
+            // Increment loop counter.
+            b.beginStoreLocal(iSlot);
+              b.beginDirectAdd();
+                b.emitLoadLocal(iSlot);
+                b.emitLoadLongConstant(1L);
+              b.endDirectAdd();
+            b.endStoreLocal();
+
+          b.endBlock();
+        b.endWhile();
+
+        // Result: Any → found; All → !found.
+        if (isAny) {
+            b.emitLoadLocal(foundSlot);
+        } else {
+            b.beginDirectNot();
+              b.emitLoadLocal(foundSlot);
+            b.endDirectNot();
+        }
+        b.endBlock();
+
+        if (dbg) System.err.println("[chain-canon-emit] emitted short-circuit "
+                + (isAny ? "Any" : "All") + " fused loop (" + classifiedStages.size() + " stages)");
+        return true;
+    }
 
     /**
      * #437 — classify a MakeLambdaIR whose body is

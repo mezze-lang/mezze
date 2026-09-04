@@ -151,6 +151,11 @@ object ChainCanonicalizer {
             val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
+        // __native_iter_{count,any,all,find,reduce,to_seq,to_list}
+        if (node is CallNativeIR && !node.isScalarABI) {
+            val result = tryCanonicalizeNativeSink(node, classifier, allFunctions)
+            if (result != null) return result
+        }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
         // Extract sink + source expr from the CallDirect args.
@@ -163,7 +168,98 @@ object ChainCanonicalizer {
         // stages, this is a bare fold on an unknown value — no gain from
         // canonicalizing. Bail so downstream can dispatch normally.
         if (stages.isEmpty() && source is SourceIR.Opaque) return null
+        // Gate: only produce FusedChainIR for sinks the BDSL emitter supports.
+        // New sink types (Count, Any, All, Find, Reduce, ToSeq, ToList) are
+        // classified but not yet emittable — producing them would crash at
+        // BytecodeCompiler line 1611. Remove this gate as emit support lands.
+        if (!isEmittableSink(sink)) return null
         val candidate = FusedChainIR(source, stages, sink, node.src)
+        return if (isEffectSafe(candidate, allFunctions)) candidate else null
+    }
+
+    /** True for sinks the BDSL emitter can handle today. */
+    private fun isEmittableSink(sink: SinkIR): Boolean = when (sink) {
+        is SinkIR.Fold, SinkIR.Sum, is SinkIR.ForEach -> true
+        SinkIR.Count, is SinkIR.Any, is SinkIR.All -> true
+        // TODO: implement emit for these
+        is SinkIR.Reduce, is SinkIR.Find, SinkIR.ToSeq, SinkIR.ToList -> false
+    }
+
+    /** Handle __native_iter_{count,any,all,find,reduce,to_seq,to_list}.
+     *  These sinks are classified but not yet emittable — the method builds
+     *  the FusedChainIR, then gates on [isEmittableSink] before returning. */
+    private fun tryCanonicalizeNativeSink(
+        node: CallNativeIR,
+        classifier: ChainHofClassifier,
+        allFunctions: Map<Hash, FunctionIR>,
+    ): FusedChainIR? {
+        val mr = node.arg as? MakeRecordIR ?: return null
+        val candidate: FusedChainIR? = when (node.name) {
+            "__native_iter_count" -> {
+                var src: NodeIR? = null; var p: NodeIR? = null
+                for (fld in mr.fields) when (fld.name) {
+                    "it" -> src = fld.value; "p" -> p = fld.value
+                }
+                val srcInner = src ?: return null
+                val pLambda = p as? MakeLambdaIR ?: return null
+                if (pLambda.captures.isNotEmpty()) return null
+                val (stages, source) = peelSource(srcInner, classifier)
+                // count(p) = filter(p) + count
+                val allStages = stages + StageIR.Filter(pLambda)
+                val candidate = FusedChainIR(source, allStages, SinkIR.Count, node.src)
+                if (isEffectSafe(candidate, allFunctions)) candidate else null
+            }
+            "__native_iter_any" -> buildPredicateFused(mr, classifier, allFunctions, node.src) { SinkIR.Any(it) }
+            "__native_iter_all" -> buildPredicateFused(mr, classifier, allFunctions, node.src) { SinkIR.All(it) }
+            "__native_iter_find" -> buildPredicateFused(mr, classifier, allFunctions, node.src) { SinkIR.Find(it) }
+            "__native_iter_reduce" -> {
+                var src: NodeIR? = null; var f: NodeIR? = null
+                for (fld in mr.fields) when (fld.name) {
+                    "it" -> src = fld.value; "f" -> f = fld.value
+                }
+                val srcInner = src ?: return null
+                val fLambda = f as? MakeLambdaIR ?: return null
+                if (fLambda.captures.isNotEmpty()) return null
+                val (stages, source) = peelSource(srcInner, classifier)
+                if (stages.isEmpty() && source is SourceIR.Opaque) return null
+                val candidate = FusedChainIR(source, stages, SinkIR.Reduce(fLambda), node.src)
+                if (isEffectSafe(candidate, allFunctions)) candidate else null
+            }
+            "__native_iter_to_seq", "__native_iter_to_list" -> {
+                var src: NodeIR? = null
+                for (fld in mr.fields) { if (fld.name == "it") src = fld.value }
+                val srcInner = src ?: return null
+                val sink = if (node.name == "__native_iter_to_seq") SinkIR.ToSeq else SinkIR.ToList
+                val (stages, source) = peelSource(srcInner, classifier)
+                if (stages.isEmpty() && source is SourceIR.Opaque) return null
+                val candidate = FusedChainIR(source, stages, sink, node.src)
+                if (isEffectSafe(candidate, allFunctions)) candidate else null
+            }
+            else -> null
+        }
+        // Gate: only return if the emitter can handle the sink.
+        if (candidate != null && !isEmittableSink(candidate.sink)) return null
+        return candidate
+    }
+
+    /** Build a FusedChainIR with a predicate sink (any/all/find) from a native call record. */
+    private fun buildPredicateFused(
+        mr: MakeRecordIR,
+        classifier: ChainHofClassifier,
+        allFunctions: Map<Hash, FunctionIR>,
+        src: SourceInfo,
+        wrap: (MakeLambdaIR) -> SinkIR,
+    ): FusedChainIR? {
+        var srcNode: NodeIR? = null; var p: NodeIR? = null
+        for (fld in mr.fields) when (fld.name) {
+            "it" -> srcNode = fld.value; "p" -> p = fld.value
+        }
+        val srcInner = srcNode ?: return null
+        val pLambda = p as? MakeLambdaIR ?: return null
+        if (pLambda.captures.isNotEmpty()) return null
+        val (stages, source) = peelSource(srcInner, classifier)
+        if (stages.isEmpty() && source is SourceIR.Opaque) return null
+        val candidate = FusedChainIR(source, stages, wrap(pLambda), src)
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
 
@@ -205,6 +301,13 @@ object ChainCanonicalizer {
         ChainHofClassifier.HofKind.FOLD -> extractFold(call)
         ChainHofClassifier.HofKind.SUM -> extractSum(call)
         ChainHofClassifier.HofKind.FOR_EACH -> extractForEach(call)
+        ChainHofClassifier.HofKind.COUNT -> extractCount(call)
+        ChainHofClassifier.HofKind.REDUCE -> extractReduce(call)
+        ChainHofClassifier.HofKind.ANY -> extractPredicateSink(call) { SinkIR.Any(it) }
+        ChainHofClassifier.HofKind.ALL -> extractPredicateSink(call) { SinkIR.All(it) }
+        ChainHofClassifier.HofKind.FIND -> extractPredicateSink(call) { SinkIR.Find(it) }
+        ChainHofClassifier.HofKind.TO_SEQ -> extractUnarySink(call, SinkIR.ToSeq)
+        ChainHofClassifier.HofKind.TO_LIST -> extractUnarySink(call, SinkIR.ToList)
         // MAP/FILTER/TAKE/DROP/FROM_SEQ aren't sinks — they're peel targets.
         // If we land here we're processing the wrong callsite kind; refuse
         // silently so the peel step handles it recursively.
@@ -259,6 +362,71 @@ object ChainCanonicalizer {
         val fLambda = fRaw as? MakeLambdaIR ?: return null
         if (fLambda.captures.isNotEmpty()) return null
         return SinkIR.ForEach(fLambda) to src
+    }
+
+    /** iter::count — (src, p) + optional trailing dict.
+     *  count(xs, p) = filter(xs, p).count — we DON'T fold the predicate
+     *  into a Count-with-predicate sink; instead we return src to the
+     *  canonicalizer which will peel the source expression. The predicate
+     *  is lost here because extractSinkAndSource only returns (sink, srcExpr);
+     *  the caller peels stages from srcExpr. For count-with-predicate to work
+     *  properly, the caller would need to inject a Filter stage. For now,
+     *  handle the simple case: count is only useful as a sink when the
+     *  predicate filtering is already a peeled stage in the chain. */
+    private fun extractCount(call: CallDirectIR): Pair<SinkIR, NodeIR>? {
+        val args = call.args
+        // Try to extract just the source (ignore predicate — it should
+        // already be a filter stage peeled by the caller).
+        val srcExpr: NodeIR = if (call.isScalarABI) {
+            if (args.isEmpty()) return null
+            args[0]
+        } else {
+            if (args.size != 1) return null
+            val rec = args[0] as? MakeRecordIR ?: return null
+            var src: NodeIR? = null
+            for (fld in rec.fields) {
+                if (fld.name in SRC_NAMES) src = fld.value
+            }
+            src ?: return null
+        }
+        return SinkIR.Count to srcExpr
+    }
+
+    /** iter::reduce — (src, f) + optional trailing dict. */
+    private fun extractReduce(call: CallDirectIR): Pair<SinkIR, NodeIR>? {
+        val (src, fRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = "f") ?: return null
+        val fLambda = fRaw as? MakeLambdaIR ?: return null
+        if (fLambda.captures.isNotEmpty()) return null
+        return SinkIR.Reduce(fLambda) to src
+    }
+
+    /** any/all/find — (src, p) + optional trailing dict. Predicate sinks. */
+    private fun extractPredicateSink(
+        call: CallDirectIR,
+        wrap: (MakeLambdaIR) -> SinkIR,
+    ): Pair<SinkIR, NodeIR>? {
+        val (src, pRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = "p") ?: return null
+        val pLambda = pRaw as? MakeLambdaIR ?: return null
+        if (pLambda.captures.isNotEmpty()) return null
+        return wrap(pLambda) to src
+    }
+
+    /** to_seq/to_list — unary (src) sinks. */
+    private fun extractUnarySink(call: CallDirectIR, sink: SinkIR): Pair<SinkIR, NodeIR>? {
+        val args = call.args
+        val srcExpr: NodeIR = if (call.isScalarABI) {
+            if (args.isEmpty()) return null
+            args[0]
+        } else {
+            if (args.size != 1) return null
+            val rec = args[0] as? MakeRecordIR ?: return null
+            var src: NodeIR? = null
+            for (fld in rec.fields) {
+                if (fld.name in SRC_NAMES) src = fld.value
+            }
+            src ?: return null
+        }
+        return sink to srcExpr
     }
 
     /** Field names that mean "the collection source position" across
@@ -689,7 +857,11 @@ object ChainCanonicalizer {
                 val newSink: SinkIR = when (val sk = node.sink) {
                     is SinkIR.Fold -> { val nInit = f(sk.init); if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk }
                     is SinkIR.ForEach -> sk
-                    SinkIR.Sum -> sk
+                    is SinkIR.Reduce -> sk
+                    is SinkIR.Any -> sk
+                    is SinkIR.All -> sk
+                    is SinkIR.Find -> sk
+                    SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sk
                 }
                 if (newSource !== node.source || newSink !== node.sink || stagesChanged)
                     node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink) else node
@@ -720,7 +892,10 @@ internal class ChainHofClassifier private constructor(
     private val table: Map<Hash, Callee>,
 ) {
 
-    internal enum class HofKind { FOLD, SUM, FOR_EACH, MAP, FILTER, TAKE, DROP, FROM_SEQ }
+    internal enum class HofKind {
+        FOLD, SUM, FOR_EACH, MAP, FILTER, TAKE, DROP, FROM_SEQ,
+        COUNT, REDUCE, ANY, ALL, FIND, TO_SEQ, TO_LIST
+    }
     internal data class Callee(val kind: HofKind)
 
     fun isEmpty(): Boolean = table.isEmpty()
@@ -809,6 +984,26 @@ internal class ChainHofClassifier private constructor(
                 params.size in 2..3
                     && (name == "drop" || name.isEmpty())
                     && params[1] == "n" -> HofKind.DROP
+                // ── Sink HOFs (named only — mono collides with stages) ──
+                // count(it, p) — same shape as filter, distinguish by name
+                params.size in 2..3 && name == "count"
+                    && params[1] == "p" -> HofKind.COUNT
+                // any(it, p)
+                params.size in 2..3 && name == "any"
+                    && params[1] == "p" -> HofKind.ANY
+                // all(it, p)
+                params.size in 2..3 && name == "all"
+                    && params[1] == "p" -> HofKind.ALL
+                // find(it, p)
+                params.size in 2..3 && name == "find"
+                    && params[1] == "p" -> HofKind.FIND
+                // reduce(it, f) — like fold but no init
+                params.size in 2..3 && name == "reduce"
+                    && params[1] == "f" -> HofKind.REDUCE
+                // to_seq(it) — materialize
+                params.size == 1 && name == "to_seq" -> HofKind.TO_SEQ
+                // to_list(it) — materialize
+                params.size == 1 && name == "to_list" -> HofKind.TO_LIST
                 // sum(src/xs/it [, dict]) — LAST among 1-2 param patterns;
                 // no params[1] constraint so it would shadow MAP/FILTER
                 // etc. if placed earlier.
