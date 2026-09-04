@@ -61,6 +61,8 @@ enum class ErrorCode {
     P0126_DECL_NAME_ON_NEW_LINE, // `let\nname` / `type\nName` — the name must be on the same line as the declaration keyword
     P0127_HAVING_NEEDS_BINDING, // `having Int` — must bind a type variable: `having 'elem = Int`
     P0128_INVALID_LET_BINDING_TARGET, // `let 3 = x` — a let binds a name, `_`, or a `{ … }` destructuring pattern, not a literal/expression
+    P0129_RECORD_FIELD_USES_EQUALS, // `{ a: 1 }` in value position — record LITERAL fields bind with `=` (`{ a = 1 }`); `:` annotates a type
+    P0130_PIPE_MISSING_RHS, // `a |>` with nothing (or nothing valid) after it — the pipe needs a right-hand expression
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,

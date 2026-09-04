@@ -123,6 +123,17 @@ fun ErrorCode.explain(): String = when (this) {
         "`having 'elem = Int`, not `having Int`. The type variable must match " +
         "the one declared in the ability's `having` clause."
 
+    ErrorCode.P0130_PIPE_MISSING_RHS ->
+        "The `|>` pipe operator needs an expression on its right to pipe the value " +
+        "INTO — usually a function call with `@` marking where the piped value goes: " +
+        "`x |> f { arg = @ }`. There was nothing valid after the `|>`."
+
+    ErrorCode.P0129_RECORD_FIELD_USES_EQUALS ->
+        "In a record LITERAL (a value), fields bind with `=`: `{ a = 1, b = 2 }`. " +
+        "A `:` there is a type annotation, which only belongs in a type position " +
+        "(`let r: { a: Int } = ...`). Use `=` for the value, or `{ a }` to pun a " +
+        "same-named binding into the field."
+
     ErrorCode.P0128_INVALID_LET_BINDING_TARGET ->
         "The thing between `let` and `=` must be a binding target: a name " +
         "(`let x = ...`), a wildcard to discard the value (`let _ = ...`), or a " +

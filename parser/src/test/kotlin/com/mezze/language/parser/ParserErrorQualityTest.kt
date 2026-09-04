@@ -59,7 +59,7 @@ class ParserErrorQualityTest {
         Bad("type Foo =", mustMention = "{"),
         Bad("type = Int", mustMention = "identifier"),
         Bad("let x = { a = }", mustMention = "expression"),
-        Bad("let x = { a: }", mustMention = "}"),
+        Bad("let x = { a: }", expectCode = ErrorCode.P0129_RECORD_FIELD_USES_EQUALS, mustMention = "="),
         // ── match / control ─────────────────────────────────────────────
         Bad("let x = match y", mustMention = "is"),
         Bad("let x = do", expectCode = ErrorCode.P0114_DO_BLOCK_EMPTY, mustMention = "empty"),
@@ -74,6 +74,7 @@ class ParserErrorQualityTest {
         // ── operators / pipes ───────────────────────────────────────────
         Bad("let x = 1 ++ 2", mustMention = "++"),
         Bad("let x = |> foo", mustMention = "expression"),
+        Bad("let p = a |>", expectCode = ErrorCode.P0130_PIPE_MISSING_RHS, mustMention = "pipe"),
         Bad("x |> @.method {}", expectCode = ErrorCode.P0124_PIPE_PLACEHOLDER_AS_RECEIVER, mustMention = "@"),
         // ── misc expression starts ──────────────────────────────────────
         Bad("let x = .foo", mustMention = "expression"),

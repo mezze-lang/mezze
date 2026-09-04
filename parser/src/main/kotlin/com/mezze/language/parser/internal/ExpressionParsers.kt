@@ -560,6 +560,21 @@ internal val MezzeParser.recordLiteralEntryParser: Parser<ParsedRecordEntry>
                     val stream1 = ident.remaining
                     val fieldToken = ident.value
 
+                    // `{ a: ... }` in value position: a record LITERAL binds fields
+                    // with `=`, not `:` (which annotates a TYPE, only in a type
+                    // position). Catch it here — otherwise `a` puns as a field and
+                    // the stray `:` surfaces later as a misleading "Expected '}'".
+                    if (stream1.current()?.type == TokenType.COLON) {
+                        stream1.failure(
+                            "Record fields bind with `=`, not `:`: write " +
+                                "`{ ${ident.value.text} = value }`. A `:` here reads as a " +
+                                "type annotation, which only belongs in a type position.",
+                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0129_RECORD_FIELD_USES_EQUALS,
+                            hints = listOf(
+                                "write `${ident.value.text} = <value>`, or just `${ident.value.text}` to pun a same-named binding"
+                            )
+                        )
+                    } else {
                     val assign = tok(TokenType.ASSIGN)(stream1)
                     when (assign) {
                         is ParseResult.Success -> {
@@ -582,6 +597,7 @@ internal val MezzeParser.recordLiteralEntryParser: Parser<ParsedRecordEntry>
                                 stream1
                             )
                         }
+                    }
                     }
                 }
                 is ParseResult.Failure -> ident
@@ -1777,7 +1793,7 @@ internal val MezzeParser.logicalOrExpression: Parser<ParsedExpr>
                             right.remaining
                         )
                     }
-                    is ParseResult.Failure -> result // Keep left side on error
+                    is ParseResult.Failure -> right // RHS failed: propagate its terminating error instead of keeping the left and re-spinning on the unconsumed operator (fuzz: `a ||`/`a ==` etc. hung)
                 }
             } else {
                 break
@@ -1811,7 +1827,7 @@ internal val MezzeParser.logicalAndExpression: Parser<ParsedExpr>
                             right.remaining
                         )
                     }
-                    is ParseResult.Failure -> result // Keep left side on error
+                    is ParseResult.Failure -> right // RHS failed: propagate its terminating error instead of keeping the left and re-spinning on the unconsumed operator (fuzz: `a ||`/`a ==` etc. hung)
                 }
             } else {
                 break
@@ -2067,7 +2083,24 @@ internal val MezzeParser.pipeExpression: Parser<ParsedExpr>
                             }
                         }
                     }
-                    is ParseResult.Failure -> result // Keep left side on error
+                    is ParseResult.Failure ->
+                        // The RHS after `|>` didn't parse. The old code returned
+                        // `result` (the left) here, leaving `|>` UNCONSUMED — so the
+                        // `while (result is Success)` loop saw PIPE_OP again and spun
+                        // forever (fuzz: `a |>` hung the parser). Fail and stop. If the
+                        // RHS made progress (advanced past the op) or committed, its
+                        // error is more specific — keep it; else give the targeted
+                        // "pipe needs a right-hand side" message.
+                        if (right.isFatal || right.position > rhsStream.getSourcePosition()) right
+                        else ParseResult.Failure(
+                            "The `|>` pipe needs an expression on its right, " +
+                                "e.g. `x |> f { arg = @ }`",
+                            rhsStream.getSourcePosition(),
+                            op.line,
+                            op.column,
+                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0130_PIPE_MISSING_RHS,
+                            hints = listOf("pipe into a function call with `@` for the value: `|> f { arg = @ }`")
+                        )
                 }
             } else {
                 break
@@ -2103,7 +2136,7 @@ internal val MezzeParser.comparisonExpression: Parser<ParsedExpr>
                             right.remaining
                         )
                     }
-                    is ParseResult.Failure -> result // Keep left side on error
+                    is ParseResult.Failure -> right // RHS failed: propagate its terminating error instead of keeping the left and re-spinning on the unconsumed operator (fuzz: `a ||`/`a ==` etc. hung)
                 }
             } else {
                 break
