@@ -54,6 +54,25 @@ class ParserFuzzTest {
         "let p = a |> seq::map { xs = @, f = {x} -> x }",
         "let s = \"hi $(name), you are $(age)\"",
         "impl Show for Int where { show = { it } -> it.to_str {} }",
+        // richer surface — nesting, effects, chains, spreads, guards, generics
+        "let nested = f { a = g { b = h { c = 1 } } }",
+        "let r = perform Log in do\n  emit { msg = \"x\" }\n  1",
+        "let chain = xs.map { f = {x} -> x + 1 }.filter { p = @ }.fold { init = 0, f = {acc, x} -> acc + x }",
+        "let guarded = {x} -> match x is\n  n if n > 0 -> n\n  _ -> 0",
+        "newtype UserId = Int",
+        "let typed = {a: Int, b: Str, c} -> a",
+        "let interp = \"outer $(f { x = inner { y = 1 } })\"",
+        "let spread = { ...base, a = 1, b = 2 }",
+        "let seqspread = [...ys, 1, 2]",
+        "type Pair 'a 'b = | P { fst: 'a, snd: 'b } |",
+        "let deep = (((1 + 2) * 3))",
+        "let nestedseq = [[1, 2], [3, 4], [5]]",
+        "let multido = {} -> do\n  let a = 1\n  let b = a + 1\n  let c = b + 1\n  c",
+        "effect State 'a where { get: {} -> 'a, put: { val: 'a } -> Unit }",
+        "let withc = {x: 'a} -> x.show {} with Show 'a",
+        "let opt = match maybe is\n  Some { val } -> val\n  None -> 0",
+        "pub let exported = {x} -> x",
+        "let lam = {f: {x: Int} -> Int} -> f { x = 1 }",
     )
 
     private fun esc(s: String) = s.replace("\n", "\\n")
