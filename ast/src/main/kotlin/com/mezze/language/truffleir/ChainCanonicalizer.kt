@@ -247,7 +247,6 @@ object ChainCanonicalizer {
         call: CallDirectIR,
         allFunctions: Map<Hash, FunctionIR>,
     ): CallNativeIR? {
-        if (!call.isScalarABI) return null
         val target = allFunctions[call.targetHash] ?: return null
         // Only handle simple wrappers: no captures, no locals.
         if (target.captureSlots.isNotEmpty() || target.localSlots.isNotEmpty()) return null
@@ -258,11 +257,28 @@ object ChainCanonicalizer {
         // Substitute ReadLocalIR(param slot) → corresponding call arg.
         // Frame layout with 0 captures: param i lives at slot i.
         val paramCount = target.paramSlots.size
-        if (call.args.size < paramCount) return null
+        // Build slot → value map: works for both scalar-ABI (positional)
+        // and record-ABI (single MakeRecordIR arg with named fields).
+        val slotValues: Map<Int, NodeIR>
+        if (call.isScalarABI) {
+            if (call.args.size < paramCount) return null
+            slotValues = (0 until paramCount).associateWith { call.args[it] }
+        } else {
+            // Record-ABI: single arg is a MakeRecordIR. Match field names
+            // to param names to resolve slot indices.
+            val callRecord = call.args.singleOrNull() as? MakeRecordIR ?: return null
+            val fieldMap = callRecord.fields.associate { it.name to it.value }
+            val resolved = HashMap<Int, NodeIR>(paramCount)
+            for (slot in 0 until paramCount) {
+                val paramName = target.paramNames.getOrNull(slot) ?: return null
+                resolved[slot] = fieldMap[paramName] ?: return null
+            }
+            slotValues = resolved
+        }
         val newFields = mr.fields.map { fld ->
             val v = fld.value
             if (v is ReadLocalIR && v.slot < paramCount) {
-                FieldIR(fld.name, call.args[v.slot])
+                FieldIR(fld.name, slotValues[v.slot] ?: return null)
             } else {
                 fld
             }
@@ -1206,9 +1222,9 @@ internal class ChainHofClassifier private constructor(
             // #446 fix: SUM was matching mono map/filter/for_each before
             // they could reach their own branches.
             return when {
-                // fold(src/xs/it, init, f [, dict]) — most specific (3-4 params)
+                // fold/fold_left(src/xs/it, init, f [, dict]) — most specific (3-4 params)
                 params.size in 3..4
-                    && (name == "fold" || name.isEmpty())
+                    && (name == "fold" || name == "fold_left" || name.isEmpty())
                     && params[1] == "init" && params[2] == "f" -> HofKind.FOLD
                 // map(src/xs/it, f [, dict]) — constrains params[1]
                 params.size in 2..3

@@ -1,0 +1,108 @@
+## List chain fusion benchmark
+## Tests fused chains: map.filter.fold, map.fold, filter.any, etc.
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::list
+use std::collections::seq
+
+let n = 100000
+
+let build_list = {size: Int} -> do
+    let s = seq::range { start = 0, end = size }
+    list::from_seq { xs = s }
+
+## Chain: map then fold — should fuse into single loop
+let bench_map_fold = {xs: List Int} ->
+    list::fold_left { xs = list::map { xs = xs, f = {x} -> x * 2 }, init = 0, f = {acc, x} -> acc + x }
+
+## Chain: filter then fold — should fuse
+let bench_filter_fold = {xs: List Int} ->
+    list::fold_left { xs = list::filter { xs = xs, p = {x} -> x % 2 == 0 }, init = 0, f = {acc, x} -> acc + x }
+
+## Chain: map then filter then fold — 3-stage fusion
+let bench_map_filter_fold = {xs: List Int} ->
+    list::fold_left {
+        xs = list::filter {
+            xs = list::map { xs = xs, f = {x} -> x * 3 },
+            p = {x} -> x % 4 == 0
+        },
+        init = 0,
+        f = {acc, x} -> acc + x
+    }
+
+## Chain: filter then any — should fuse
+let bench_filter_any = {xs: List Int} -> match list::any {
+    xs = list::filter { xs = xs, p = {x} -> x % 2 == 0 },
+    p = {x} -> x > (n - 10)
+} is
+    True -> 1
+    False -> 0
+
+## Chain: map then all — should fuse
+let bench_map_all = {xs: List Int} -> match list::all {
+    xs = list::map { xs = xs, f = {x} -> x * 2 },
+    p = {x} -> x >= 0
+} is
+    True -> 1
+    False -> 0
+
+## Chain: map then find — should fuse
+let bench_map_find = {xs: List Int} -> match list::find {
+    xs = list::map { xs = xs, f = {x} -> x * 2 },
+    p = {x} -> x > (n * 2 - 20)
+} is
+    Some { val } -> val
+    None -> 0 - 1
+
+## Single fold (baseline — no chain)
+let bench_fold_only = {xs: List Int} ->
+    list::fold_left { xs = xs, init = 0, f = {acc, x} -> acc + x }
+
+## Single map then size (measures map materialization vs fusion avoidance)
+let bench_map_only = {xs: List Int} ->
+    list::size { xs = list::map { xs = xs, f = {x} -> x * 2 } }
+
+let time_it = {label: Str, f: {} -> Int} -> perform Console in perform SystemTime in do
+    ## 3 warmup
+    let w0 = f {}
+    let w1 = f {}
+    let w2 = f {}
+    ## 5 measured
+    let t0 = monotonic {}
+    let r0 = f {}
+    let e0 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t0 } }
+
+    let t1 = monotonic {}
+    let r1 = f {}
+    let e1 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t1 } }
+
+    let t2 = monotonic {}
+    let r2 = f {}
+    let e2 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t2 } }
+
+    let t3 = monotonic {}
+    let r3 = f {}
+    let e3 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t3 } }
+
+    let t4 = monotonic {}
+    let r4 = f {}
+    let e4 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t4 } }
+
+    let avg = (e0 + e1 + e2 + e3 + e4) / 5
+    let avg_ms = avg / 1000000
+    println { msg = "$(label): avg=$(avg_ms.to_str{})ms  [$(e0.to_str{}) $(e1.to_str{}) $(e2.to_str{}) $(e3.to_str{}) $(e4.to_str{})]ns  r=$(r0.to_str{})" }
+
+let main = {} -> perform Console in perform SystemTime in do
+    println { msg = "== List Chain Fusion N=$(n.to_str{}) ==" }
+    let xs = build_list { size = n }
+    println { msg = "list built: size=$(list::size { xs = xs }.to_str{})" }
+    let _1 = time_it { label = "fold_only       ", f = {} -> bench_fold_only { xs = xs } }
+    let _2 = time_it { label = "map+fold        ", f = {} -> bench_map_fold { xs = xs } }
+    let _3 = time_it { label = "filter+fold     ", f = {} -> bench_filter_fold { xs = xs } }
+    let _4 = time_it { label = "map+filter+fold ", f = {} -> bench_map_filter_fold { xs = xs } }
+    let _5 = time_it { label = "filter+any      ", f = {} -> bench_filter_any { xs = xs } }
+    let _6 = time_it { label = "map+all         ", f = {} -> bench_map_all { xs = xs } }
+    let _7 = time_it { label = "map+find        ", f = {} -> bench_map_find { xs = xs } }
+    let _8 = time_it { label = "map_only(+size) ", f = {} -> bench_map_only { xs = xs } }
+    println { msg = "== done ==" }
