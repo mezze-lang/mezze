@@ -112,6 +112,13 @@ kotlinx
 org.slf4j
 ch.qos.logback
 
+# Helidon webclient (used by RuntimeServer) — TypeStash holds a
+# ReentrantReadWriteLock whose exclusiveOwnerThread is a ForkJoinWorkerThread
+# from the build JVM. Without this, native-image rejects it:
+# "An object of type ForkJoinWorkerThread$InnocuousForkJoinWorkerThread
+#  was found in the image heap."
+io.helidon
+
 [cli-only-init-at-build-time]
 # Packages only the CLI binary itself needs to freeze.
 # The user-app native build doesn't ship these.

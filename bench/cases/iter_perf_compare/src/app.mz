@@ -1,0 +1,76 @@
+## Iter fusion perf — simple timed runs
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::iter
+use std::collections::seq
+
+let n = 10000000
+
+let bench_sum = {} ->
+    iter::fold { it = iter::range { start = 0, end = n }, init = 0, f = {acc, x} -> acc + x }
+
+let bench_filter_fold = {} -> do
+    let half = n / 2
+    iter::fold {
+        it = iter::filter { it = iter::range { start = 0, end = n }, p = {x} -> x < half },
+        init = 0,
+        f = {acc, x} -> acc + x
+    }
+
+let bench_filter_map_fold = {} -> do
+    let half = n / 2
+    iter::fold {
+        it = iter::map {
+            it = iter::filter { it = iter::range { start = 0, end = n }, p = {x} -> x < half },
+            f = {x} -> x * 2
+        },
+        init = 0,
+        f = {acc, x} -> acc + x
+    }
+
+let bench_count = {} -> do
+    let half = n / 2
+    iter::count { it = iter::range { start = 0, end = n }, p = {x} -> x < half }
+
+let bench_to_seq = {} ->
+    seq::size { xs = iter::to_seq { it = iter::filter { it = iter::range { start = 0, end = n }, p = {x} -> x % 2 == 0 } } }
+
+let time_it = {label: Str, f: {} -> Int} -> perform Console in perform SystemTime in do
+    ## 3 warmup
+    let w0 = f {}
+    let w1 = f {}
+    let w2 = f {}
+    ## 5 measured
+    let t0 = monotonic {}
+    let r0 = f {}
+    let e0 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t0 } }
+
+    let t1 = monotonic {}
+    let r1 = f {}
+    let e1 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t1 } }
+
+    let t2 = monotonic {}
+    let r2 = f {}
+    let e2 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t2 } }
+
+    let t3 = monotonic {}
+    let r3 = f {}
+    let e3 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t3 } }
+
+    let t4 = monotonic {}
+    let r4 = f {}
+    let e4 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t4 } }
+
+    let avg = (e0 + e1 + e2 + e3 + e4) / 5
+    let avg_ms = avg / 1000000
+    println { msg = "$(label): avg=$(avg_ms.to_str{})ms  [$(e0.to_str{}) $(e1.to_str{}) $(e2.to_str{}) $(e3.to_str{}) $(e4.to_str{})]ns" }
+
+let main = {} -> perform Console in perform SystemTime in do
+    println { msg = "== Mezze Iter Fusion Perf N=$(n.to_str{}) ==" }
+    let _1 = time_it { label = "sum(0..10M)           ", f = bench_sum }
+    let _2 = time_it { label = "filter+fold(0..10M)   ", f = bench_filter_fold }
+    let _3 = time_it { label = "filter+map+fold(0..10M)", f = bench_filter_map_fold }
+    let _4 = time_it { label = "count(0..10M)         ", f = bench_count }
+    let _5 = time_it { label = "filter+to_seq(0..10M) ", f = bench_to_seq }
+    println { msg = "== done ==" }
