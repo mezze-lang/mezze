@@ -131,6 +131,24 @@ class ParserFuzzTest {
     }
 
     @Test
+    fun `regression - the exact inputs fuzzing caught crashing now fail gracefully`() {
+        // Locked forever: each of these used to HANG (unconsumed operator loop) or
+        // StackOverflow the parser. assertRobust runs under a per-input timeout, so
+        // a re-introduced hang fails here by name, not by wedging the suite.
+        val previouslyCrashing = listOf(
+            "let p = a |>",                       // pipe with no RHS — HUNG
+            "let x = a ==",                       // comparison, no RHS — HUNG
+            "let x = a ||",                       // logical-or, no RHS — HUNG
+            "let x = a &&",                       // logical-and, no RHS — HUNG
+            "let x = a + ",                       // additive, no RHS — HUNG
+            "let x = " + "(".repeat(1000) + "1" + ")".repeat(1000),  // deep parens — StackOverflow
+            "let x = " + "(".repeat(1000),        // deep unbalanced — StackOverflow
+            "type T = " + "[".repeat(1000) + "Int" + "]".repeat(1000) // deep type — StackOverflow
+        )
+        for (src in previouslyCrashing) assertRobust(src)
+    }
+
+    @Test
     fun `bracket chaos - flipping, dropping and adding brackets never crashes`() {
         val rng = Random(0xB4ACE7L)
         val brackets = "{}()[]".toList()
