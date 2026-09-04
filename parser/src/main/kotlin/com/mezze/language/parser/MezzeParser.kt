@@ -20,7 +20,17 @@ class MezzeParser {
      */
     internal var inMatchGuard: Boolean = false
 
-    companion object
+    // Recursive-descent nesting depth (expressions + type annotations). Guards
+    // against StackOverflowError on pathologically-nested input like
+    // `((((((…))))))` — a user or generated code pasting deep nesting must get a
+    // clean parse error, not a compiler crash (fuzz-found). Reset per parse.
+    internal var nestDepth: Int = 0
+
+    companion object {
+        // Well under the ~700–1000-level recursive-descent depth that overflows a
+        // default JVM stack; leaves huge margin over any real hand-written nesting.
+        internal const val MAX_NEST_DEPTH = 256
+    }
 
     fun parseParsedModule(source: String, file: String = "<unknown>"): ParsedModule {
         // Corpus capture (opt-in, off by default): when MEZZE_CORPUS_CAPTURE is
@@ -44,6 +54,7 @@ class MezzeParser {
     private fun parseParsedModuleImpl(source: String, file: String): ParsedModule {
         currentSource = source
         currentFile = file
+        nestDepth = 0
 
         // Clear syntax metadata from previous parses
         SyntaxMetadata.clear()

@@ -130,6 +130,88 @@ class ParserFuzzTest {
         }
     }
 
+    @Test
+    fun `bracket chaos - flipping, dropping and adding brackets never crashes`() {
+        val rng = Random(0xB4ACE7L)
+        val brackets = "{}()[]".toList()
+        repeat(5000) {
+            val seed = seeds[rng.nextInt(seeds.size)]
+            val chars = seed.toMutableList()
+            var i = 0
+            while (i < chars.size) {
+                if (chars[i] in brackets && rng.nextInt(3) == 0) {
+                    when (rng.nextInt(3)) {
+                        0 -> chars[i] = brackets[rng.nextInt(brackets.size)]   // flip to another bracket
+                        1 -> { chars.removeAt(i); continue }                   // drop it
+                        2 -> chars.add(i, brackets[rng.nextInt(brackets.size)])// add a stray one
+                    }
+                }
+                i++
+            }
+            assertRobust(chars.joinToString(""))
+        }
+    }
+
+    @Test
+    fun `keyword and operator mistypes never crash`() {
+        val rng = Random(0x7A9E1L)
+        // token -> plausible near-misses a user actually fat-fingers
+        val swaps = mapOf(
+            "->" to listOf("=>", "-", ">", "->>", "<-"),
+            "=" to listOf("==", ":=", "=>", "="),
+            "::" to listOf(":", ":::", ".", "::="),
+            "|>" to listOf("|", ">", "|>>", "||>"),
+            "let" to listOf("lett", "le", "lets", "let"),
+            "match" to listOf("mathc", "mtch", "Match"),
+            "type" to listOf("tpye", "typ", "Type"),
+            "effect" to listOf("efect", "effct"),
+            "ability" to listOf("abilty", "abilit"),
+            "where" to listOf("were", "wher", "whre"),
+            "do" to listOf("dp", "od"),
+            "is" to listOf("si", "iss"),
+            "with" to listOf("wth", "wit")
+        )
+        repeat(4000) {
+            var src = seeds[rng.nextInt(seeds.size)]
+            repeat(rng.nextInt(1, 4)) {
+                val (from, tos) = swaps.entries.elementAt(rng.nextInt(swaps.size))
+                if (src.contains(from)) src = src.replaceFirst(from, tos[rng.nextInt(tos.size)])
+            }
+            assertRobust(src)
+        }
+    }
+
+    @Test
+    fun `unbalanced bracket soup never crashes`() {
+        val rng = Random(0xB507L)
+        val bracketChars = "{}()[]<>".toList()
+        repeat(4000) {
+            val n = rng.nextInt(1, 60)
+            val body = (0 until n).map { bracketChars[rng.nextInt(bracketChars.size)] }.joinToString("")
+            // sometimes wrap in a decl so it enters expression/type parsing
+            val src = when (rng.nextInt(3)) {
+                0 -> body
+                1 -> "let x = $body"
+                else -> "type T = $body"
+            }
+            assertRobust(src)
+        }
+    }
+
+    @Test
+    fun `deep nesting does not crash the parser`() {
+        // Probe recursion limits: nested parens/brackets/braces, balanced and not.
+        // A StackOverflowError here is a real robustness finding (a user pasting
+        // deeply-nested generated code must get an error, not a compiler crash).
+        for (depth in listOf(25, 100, 250, 500, 1000)) {
+            assertRobust("let x = " + "(".repeat(depth) + "1" + ")".repeat(depth))
+            assertRobust("let x = " + "(".repeat(depth) + "1")           // unbalanced open
+            assertRobust("let x = " + "[".repeat(depth) + "1" + "]".repeat(depth))
+            assertRobust("let x = " + "{ a = ".repeat(depth) + "1" + " }".repeat(depth))
+            assertRobust("type T = " + "[".repeat(depth) + "Int" + "]".repeat(depth))
+        }
+    }
+
     private fun mutate(s: String, rng: Random, insertable: List<Char>): String {
         val chars = s.toMutableList()
         repeat(rng.nextInt(1, 6)) {

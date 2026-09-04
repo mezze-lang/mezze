@@ -1749,14 +1749,31 @@ private fun MezzeParser.parseIfLetBindingsAndBody(
     //   message about the actual missing thing (an expression).
 internal val MezzeParser.expression: Parser<ParsedExpr>
     get() = { stream ->
-        val r = logicalOrExpression(stream)
-        if (r is ParseResult.Failure && r.message.startsWith("Expected 'perform'")) {
-            val got = tokenGotDescription(stream.current())
-            ParseResult.Failure(
-                "Expected an expression, but got $got",
-                r.position, r.line, r.column, r.isFatal,
+        // Depth guard: each nested `(expr)` / `[..]` / `{ f = expr }` re-enters
+        // here, so deep nesting recurses the whole precedence chain and can blow
+        // the stack. Fail cleanly past the limit instead of crashing (fuzz-found).
+        if (nestDepth >= MezzeParser.MAX_NEST_DEPTH) {
+            stream.failure(
+                "Expression is nested too deeply (over ${MezzeParser.MAX_NEST_DEPTH} levels) — " +
+                    "usually runaway or unbalanced brackets.",
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0131_NESTING_TOO_DEEP,
+                hints = listOf("check for unbalanced `(`/`[`/`{`, or split into named `let` bindings")
             )
-        } else r
+        } else {
+            nestDepth++
+            try {
+                val r = logicalOrExpression(stream)
+                if (r is ParseResult.Failure && r.message.startsWith("Expected 'perform'")) {
+                    val got = tokenGotDescription(stream.current())
+                    ParseResult.Failure(
+                        "Expected an expression, but got $got",
+                        r.position, r.line, r.column, r.isFatal,
+                    )
+                } else r
+            } finally {
+                nestDepth--
+            }
+        }
     }
 
     // Logical OR operator: ||

@@ -138,7 +138,20 @@ internal val MezzeParser.recordTypeEntryParser: Parser<ParsedRecordTypeEntry>
 // Type annotation parser (main entry point)
 internal val MezzeParser.typeAnnotationParser: Parser<ParsedTypeAnnotation>
     get() = { stream ->
-        functionTypeAnnotation(stream)
+        // Depth guard (shared with expressions): nested `[[[…]]]` / `Map K V` /
+        // function types re-enter here, so deep nesting can blow the stack. Fail
+        // cleanly past the limit instead of crashing (fuzz-found).
+        if (nestDepth >= MezzeParser.MAX_NEST_DEPTH) {
+            stream.failure(
+                "Type is nested too deeply (over ${MezzeParser.MAX_NEST_DEPTH} levels) — " +
+                    "usually runaway or unbalanced brackets.",
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0131_NESTING_TOO_DEEP,
+                hints = listOf("check for unbalanced `[`/`{`/`(`, or introduce a `type` alias")
+            )
+        } else {
+            nestDepth++
+            try { functionTypeAnnotation(stream) } finally { nestDepth-- }
+        }
     }
 
 // Function type annotation parser

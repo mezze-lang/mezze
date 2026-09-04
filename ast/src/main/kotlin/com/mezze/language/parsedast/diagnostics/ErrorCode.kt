@@ -63,6 +63,7 @@ enum class ErrorCode {
     P0128_INVALID_LET_BINDING_TARGET, // `let 3 = x` — a let binds a name, `_`, or a `{ … }` destructuring pattern, not a literal/expression
     P0129_RECORD_FIELD_USES_EQUALS, // `{ a: 1 }` in value position — record LITERAL fields bind with `=` (`{ a = 1 }`); `:` annotates a type
     P0130_PIPE_MISSING_RHS, // `a |>` with nothing (or nothing valid) after it — the pipe needs a right-hand expression
+    P0131_NESTING_TOO_DEEP, // `((((((…))))))` — expression/type nesting exceeds the depth limit (guards against a parser stack overflow)
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,

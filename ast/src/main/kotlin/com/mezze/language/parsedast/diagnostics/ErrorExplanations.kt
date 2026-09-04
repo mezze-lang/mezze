@@ -123,6 +123,14 @@ fun ErrorCode.explain(): String = when (this) {
         "`having 'elem = Int`, not `having Int`. The type variable must match " +
         "the one declared in the ability's `having` clause."
 
+    ErrorCode.P0131_NESTING_TOO_DEEP ->
+        "The expression or type is nested more deeply than the parser allows. This " +
+        "is almost always runaway or unbalanced brackets (`(`/`[`/`{`), or machine- " +
+        "generated code. Real code rarely nests more than a handful of levels — " +
+        "check your brackets, or break the expression into named `let` bindings. " +
+        "The limit exists so deep input fails with THIS message instead of crashing " +
+        "the compiler with a stack overflow."
+
     ErrorCode.P0130_PIPE_MISSING_RHS ->
         "The `|>` pipe operator needs an expression on its right to pipe the value " +
         "INTO — usually a function call with `@` marking where the piped value goes: " +
