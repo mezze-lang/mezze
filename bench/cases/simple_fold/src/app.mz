@@ -1,0 +1,25 @@
+use std::effects::log::{println, Console}
+use std::collections::iter
+
+## iter::range.sum — simplest possible fusion test
+let compute_sum = {n: Int} -> iter::range { start = 0, end = n }
+    .sum {}
+
+## iter::range.map.fold — one stage + sink
+let compute_map_fold = {n: Int} -> iter::range { start = 0, end = n }
+    .map { f = {x: Int} -> x * 2 }
+    .fold { init = 0, f = {acc: Int, x: Int} -> acc + x }
+
+## iter::range.filter.map.fold — two stages + sink
+let compute_fmf = {n: Int} -> iter::range { start = 0, end = n }
+    .filter { p = {x: Int} -> x % 2 == 0 }
+    .map { f = {x: Int} -> x * 2 }
+    .fold { init = 0, f = {acc: Int, x: Int} -> acc + x }
+
+let main = {} -> perform Console in do
+    let s = compute_sum { n = 1000000 }
+    println { msg = "sum 1M = $(s.to_str{})" }
+    let mf = compute_map_fold { n = 1000000 }
+    println { msg = "map_fold 1M = $(mf.to_str{})" }
+    let fmf = compute_fmf { n = 1000000 }
+    println { msg = "fmf 1M = $(fmf.to_str{})" }
