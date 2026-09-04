@@ -567,16 +567,13 @@ object ChainCanonicalizer {
                 if (start != null && end != null) return SourceIR.RangeSeq(start, end)
             }
         }
-        // Any other native call producing a Seq, ReadLocal of a Seq
-        // param, etc. — treat as raw materialized seq. The BDSL emit
-        // uses SeqSize/SeqGet indexed loop for RawSeq. If the runtime
-        // value isn't actually a Seq, we'd crash — so canonicalizer must
-        // only tag as RawSeq when we're confident.
-        //
-        // MVP: only tag CallNativeIR results as RawSeq (they're typed
-        // seq producers). ReadLocalIR/CallDirectIR of unknown shape →
-        // Opaque, forcing peel to bail so ability-dispatch runs.
-        if (expr is CallNativeIR) {
+        // Any other native call producing a Seq — treat as raw materialized
+        // seq. The BDSL emit uses SeqSize/SeqGet indexed loop for RawSeq.
+        // If the runtime value isn't actually a Seq, we'd crash — so only
+        // tag as RawSeq when we're confident. __native_iter_* calls produce
+        // MezzeIter objects (not Seq), so those must be Opaque — SeqSize
+        // would throw on them at runtime.
+        if (expr is CallNativeIR && !expr.name.startsWith("__native_iter_")) {
             return SourceIR.RawSeq(expr)
         }
         return SourceIR.Opaque(expr)
@@ -654,6 +651,20 @@ object ChainCanonicalizer {
         node: NodeIR,
         classifier: ChainHofClassifier,
     ): Pair<NodeIR, NodeIR>? {
+        // Native __native_iter_take / __native_seq_take — record-ABI only.
+        if (node is CallNativeIR
+            && (node.name == "__native_iter_take" || node.name == "__native_seq_take")
+            && !node.isScalarABI) {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var src: NodeIR? = null; var n: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                "xs", "it" -> src = fld.value
+                "n"  -> n  = fld.value
+            }
+            val srcInner = src ?: return null
+            val nExpr = n ?: return null
+            return nExpr to srcInner
+        }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
         if (callee.kind != ChainHofClassifier.HofKind.TAKE) return null
@@ -666,6 +677,20 @@ object ChainCanonicalizer {
         node: NodeIR,
         classifier: ChainHofClassifier,
     ): Pair<NodeIR, NodeIR>? {
+        // Native __native_iter_drop / __native_seq_drop — record-ABI only.
+        if (node is CallNativeIR
+            && (node.name == "__native_iter_drop" || node.name == "__native_seq_drop")
+            && !node.isScalarABI) {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var src: NodeIR? = null; var n: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                "xs", "it" -> src = fld.value
+                "n"  -> n  = fld.value
+            }
+            val srcInner = src ?: return null
+            val nExpr = n ?: return null
+            return nExpr to srcInner
+        }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
         if (callee.kind != ChainHofClassifier.HofKind.DROP) return null

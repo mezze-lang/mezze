@@ -2628,7 +2628,7 @@ public final class BytecodeCompiler {
                         }
                     }
                     classifiedStages.add(new ClassifiedStage.MapInline(
-                        shape.op, shape.rhsLit, shape.rhsNode));
+                        shape.op, shape.rhsLit, shape.rhsNode, shape.selfOp));
                 }
             } else if (stage instanceof StageIR.Filter filterStage) {
                 var predShape = classifyUnaryPredicateLambda(filterStage.getP(), language);
@@ -2847,6 +2847,9 @@ public final class BytecodeCompiler {
                                 com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
         if (mapperCallHash != null) {
             var target = resolveCallTarget(mapperCallHash);
+            if (target == null && language != null) {
+                target = language.getOrMintUserStub(mapperCallHash, "fused_map_step");
+            }
             if (target != null) {
                 // #442 Day 9 fix — stage the arg through a fresh local before
                 // the call. The naive `beginStoreLocal(xSlot); call(xSlot);
@@ -2867,8 +2870,8 @@ public final class BytecodeCompiler {
                 b.endStoreLocal();
                 return;
             }
-            // Fallthrough: hash didn't resolve — emit nothing, xSlot stays
-            // as-is. Safer than aborting emission mid-loop.
+            // Fallthrough: hash didn't resolve and stub couldn't be minted —
+            // emit nothing, xSlot stays as-is.
         }
         if (mapperOp != null) {
             // Inline op is safe as-is: the emitted op reads xSlot on the
@@ -3119,7 +3122,7 @@ public final class BytecodeCompiler {
      * filter predicate. Built from the canonicalizer's StageIR list.
      */
     private sealed interface ClassifiedStage {
-        record MapInline(InlineOp op, long rhsLit, NodeIR rhsNode) implements ClassifiedStage {}
+        record MapInline(InlineOp op, long rhsLit, NodeIR rhsNode, boolean selfOp) implements ClassifiedStage {}
         record MapCall(Hash callHash, boolean scalarABI, String fieldName) implements ClassifiedStage {}
         record FilterStep(FilterPeel peel) implements ClassifiedStage {}
         record TakeStep(NodeIR n) implements ClassifiedStage {}
@@ -3187,6 +3190,22 @@ public final class BytecodeCompiler {
             emitNode(initExpr, b, argCount, localMap);
             b.endStoreLocal();
         }
+
+        // Pre-allocate and zero-initialize Take/Drop counter locals BEFORE
+        // the while loop. BDSL locals start "Illegal" (uninitialized);
+        // reading one before the first store throws FrameSlotTypeException.
+        var takeDropCounters = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
+        for (var stage : stages) {
+            if (stage instanceof ClassifiedStage.TakeStep
+                    || stage instanceof ClassifiedStage.DropStep) {
+                var ctr = b.createLocal();
+                b.beginStoreLocal(ctr);
+                  b.emitLoadLongConstant(0L);
+                b.endStoreLocal();
+                takeDropCounters.add(ctr);
+            }
+        }
+
         b.beginWhile();
           b.beginDirectLessThan();
           b.emitLoadLocal(iSlot);
@@ -3208,6 +3227,7 @@ public final class BytecodeCompiler {
             // Emit pipeline stages (source-to-sink order). Track how
             // many filter/take/drop IfThen blocks we opened so we can close them.
             int filterDepth = 0;
+            int takeDropIdx = 0;
             // Collect take counter slots that need post-sink increment.
             var takeCounterPostIncrement = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
             for (var stage : stages) {
@@ -3219,8 +3239,15 @@ public final class BytecodeCompiler {
                         filterDepth++;
                     }
                     case ClassifiedStage.MapInline mi -> {
-                        emitMapperStep(b, xSlot, mi.op(), mi.rhsLit(), mi.rhsNode(),
-                            null, false, null, argCount, localMap);
+                        if (mi.selfOp()) {
+                            // Shape E: x <op> x (e.g. x * x).
+                            b.beginStoreLocal(xSlot);
+                            emitInlineOpTwoLocals(mi.op(), xSlot, xSlot, b);
+                            b.endStoreLocal();
+                        } else {
+                            emitMapperStep(b, xSlot, mi.op(), mi.rhsLit(), mi.rhsNode(),
+                                null, false, null, argCount, localMap);
+                        }
                     }
                     case ClassifiedStage.MapCall mc -> {
                         emitMapperStep(b, xSlot, null, 0L, null,
@@ -3228,23 +3255,9 @@ public final class BytecodeCompiler {
                             argCount, localMap);
                     }
                     case ClassifiedStage.DropStep ds -> {
-                        // Drop: skip first n elements. Uses a counter that
-                        // increments every iteration. Guard: counter >= n.
-                        var ctr = b.createLocal();
-                        // Counter is initialized before the while loop — but we're
-                        // inside the loop body here. Use a pattern: load counter,
-                        // increment unconditionally, then guard on old value >= n.
-                        // Actually: we can't initialize here. Move init outside.
-                        // Simpler: use iSlot-based offset for range sources, or
-                        // for general case, treat Drop like Filter with a counter.
-                        //
-                        // Emit: counter++; if (counter > n) { <rest> }
-                        // But counter needs init to 0 before loop. We'll use a
-                        // local that starts at 0 (created before the while loop).
-                        // Problem: b.createLocal() is valid here but init must be
-                        // before the while. BDSL locals are zero-initialized by
-                        // default (long 0). So just increment and guard.
-
+                        // Drop: skip first n elements. Counter was pre-allocated
+                        // and initialized to 0 before the while loop.
+                        var ctr = takeDropCounters.get(takeDropIdx++);
                         // Increment: counter = counter + 1
                         b.beginStoreLocal(ctr);
                           b.beginDirectAdd();
@@ -3252,9 +3265,9 @@ public final class BytecodeCompiler {
                             b.emitLoadLongConstant(1L);
                           b.endDirectAdd();
                         b.endStoreLocal();
-                        // Guard: counter > n (i.e. counter - 1 >= n, means we've
-                        // seen more than n elements). Since we incremented first,
-                        // counter starts at 1 for the first element.
+                        // Guard: counter > n (i.e. we've seen more than n
+                        // elements). Since we incremented first, counter starts
+                        // at 1 for the first element.
                         b.beginIfThen();
                           b.beginDirectLessThan();
                             emitNode(ds.n(), b, argCount, localMap);
@@ -3264,9 +3277,9 @@ public final class BytecodeCompiler {
                         filterDepth++;
                     }
                     case ClassifiedStage.TakeStep ts -> {
-                        // Take: pass only first n elements. Counter incremented
-                        // inside the guard (only counts passed elements).
-                        var ctr = b.createLocal();
+                        // Take: pass only first n elements. Counter was
+                        // pre-allocated and initialized to 0 before the while.
+                        var ctr = takeDropCounters.get(takeDropIdx++);
                         // Guard: counter < n
                         b.beginIfThen();
                           b.beginDirectLessThan();
@@ -3423,6 +3436,19 @@ public final class BytecodeCompiler {
             b.endStoreLocal();
         }
 
+        // Pre-allocate and zero-initialize Take/Drop counter locals.
+        var takeDropCounters2 = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
+        for (var stage : classifiedStages) {
+            if (stage instanceof ClassifiedStage.TakeStep
+                    || stage instanceof ClassifiedStage.DropStep) {
+                var ctr = b.createLocal();
+                b.beginStoreLocal(ctr);
+                  b.emitLoadLongConstant(0L);
+                b.endStoreLocal();
+                takeDropCounters2.add(ctr);
+            }
+        }
+
         // while (i < end && !found)
         b.beginWhile();
           b.beginDirectAnd();
@@ -3450,6 +3476,7 @@ public final class BytecodeCompiler {
 
             // Emit pipeline stages (same as fold loop).
             int filterDepth = 0;
+            int takeDropIdx2 = 0;
             var takeCounterPostIncrement = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
             for (var stage : classifiedStages) {
                 switch (stage) {
@@ -3460,8 +3487,14 @@ public final class BytecodeCompiler {
                         filterDepth++;
                     }
                     case ClassifiedStage.MapInline mi -> {
-                        emitMapperStep(b, xSlot, mi.op(), mi.rhsLit(), mi.rhsNode(),
-                            null, false, null, argCount, localMap);
+                        if (mi.selfOp()) {
+                            b.beginStoreLocal(xSlot);
+                            emitInlineOpTwoLocals(mi.op(), xSlot, xSlot, b);
+                            b.endStoreLocal();
+                        } else {
+                            emitMapperStep(b, xSlot, mi.op(), mi.rhsLit(), mi.rhsNode(),
+                                null, false, null, argCount, localMap);
+                        }
                     }
                     case ClassifiedStage.MapCall mc -> {
                         emitMapperStep(b, xSlot, null, 0L, null,
@@ -3469,7 +3502,7 @@ public final class BytecodeCompiler {
                             argCount, localMap);
                     }
                     case ClassifiedStage.DropStep ds -> {
-                        var ctr = b.createLocal();
+                        var ctr = takeDropCounters2.get(takeDropIdx2++);
                         b.beginStoreLocal(ctr);
                           b.beginDirectAdd();
                             b.emitLoadLocal(ctr);
@@ -3485,7 +3518,7 @@ public final class BytecodeCompiler {
                         filterDepth++;
                     }
                     case ClassifiedStage.TakeStep ts -> {
-                        var ctr = b.createLocal();
+                        var ctr = takeDropCounters2.get(takeDropIdx2++);
                         b.beginIfThen();
                           b.beginDirectLessThan();
                             b.emitLoadLocal(ctr);
@@ -3572,6 +3605,9 @@ public final class BytecodeCompiler {
          *  Set to a {@link ReadLocalIR} pointing at the outer frame slot
          *  the lambda's capture[idx].slot refers to. */
         final NodeIR rhsNode;
+        /** True when both operands are the parameter itself (e.g. {@code x * x}).
+         *  Emit side uses {@code xSlot <op> xSlot} instead of xSlot <op> rhs. */
+        final boolean selfOp;
         /** #442 Day 9 — non-null when the mapper body is a call to a pure
          *  user function (rather than {@code x <op> lit}). When set,
          *  {@code op} is null and {@code rhsLit} is ignored;
@@ -3583,15 +3619,20 @@ public final class BytecodeCompiler {
         final boolean callScalarABI;
         final String callFieldName;
         UnaryLitShape(InlineOp op, long rhsLit) {
-            this.op = op; this.rhsLit = rhsLit; this.rhsNode = null;
+            this.op = op; this.rhsLit = rhsLit; this.rhsNode = null; this.selfOp = false;
             this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
         }
         UnaryLitShape(InlineOp op, NodeIR rhsNode) {
-            this.op = op; this.rhsLit = 0L; this.rhsNode = rhsNode;
+            this.op = op; this.rhsLit = 0L; this.rhsNode = rhsNode; this.selfOp = false;
+            this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
+        }
+        /** Shape E: param <op> param (e.g. x * x). */
+        UnaryLitShape(InlineOp op, boolean selfOp) {
+            this.op = op; this.rhsLit = 0L; this.rhsNode = null; this.selfOp = selfOp;
             this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
         }
         UnaryLitShape(Hash callHash, boolean callScalarABI, String callFieldName) {
-            this.op = null; this.rhsLit = 0L; this.rhsNode = null;
+            this.op = null; this.rhsLit = 0L; this.rhsNode = null; this.selfOp = false;
             this.callHash = callHash;
             this.callScalarABI = callScalarABI;
             this.callFieldName = callFieldName;
@@ -3897,6 +3938,10 @@ public final class BytecodeCompiler {
             if (right instanceof LongLitIR r) {
                 return new UnaryLitShape(bin.getOp(), r.getValue());
             }
+            // Shape E: param <op> param — e.g. {x} -> x * x (squaring).
+            if (right instanceof ReadLocalIR rr && rr.getSlot() == paramSlot) {
+                return new UnaryLitShape(bin.getOp(), /*selfOp=*/ true);
+            }
             NodeIR lifted = liftCaptureRhs(right, caps);
             if (lifted != null) return new UnaryLitShape(bin.getOp(), lifted);
         }
@@ -3962,6 +4007,16 @@ public final class BytecodeCompiler {
                 }
                 return null;
             }
+        }
+        // Shape F: general catch-all for any capture-free single-param lambda
+        // whose body the shapes above couldn't classify (e.g. PerformOpIR-based
+        // effect calls). Instead of classifying the body's op/rhs, emit a call
+        // to the lambda's own compiled function. The lambda's BDSL handles
+        // effects, PerformOp, etc. — we just call it with the element value.
+        // The canonicalizer's isEffectSafe gate already validated the chain.
+        if (caps.isEmpty()) {
+            return new UnaryLitShape(ml.getFunctionHash(),
+                    /*callScalarABI=*/ true, /*callFieldName=*/ null);
         }
         return null;
     }
