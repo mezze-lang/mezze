@@ -692,34 +692,26 @@ internal class ChainHofClassifier private constructor(
 
     companion object {
         /**
-         * Build the classifier. Only stdlib functions are eligible for
-         * classification — user functions with matching shapes are never
-         * fused. During stdlib precompilation [stdlibSnapshot] is empty
-         * and [functions] IS the stdlib; during user-code compilation
-         * [stdlibSnapshot] carries the precompiled stdlib and [functions]
-         * holds user code (classified only if its hash also appears in
-         * the snapshot, i.e. it IS a stdlib function re-exported by the
-         * user module — rare but possible).
+         * Build the classifier from both maps. Classifies ANY function
+         * whose (name, paramNames) structurally matches a known HOF
+         * shape — generic stdlib originals AND monomorphized
+         * specializations (which have empty names but identical param
+         * layouts). The structural fingerprint is restrictive enough
+         * that accidental matches on user code are harmless: downstream
+         * extractors + source peelers reject anything that isn't a real
+         * fusable chain.
          */
         fun build(
             functions: Map<Hash, FunctionIR>,
             stdlibSnapshot: Map<Hash, FunctionIR>,
         ): ChainHofClassifier {
             val out = HashMap<Hash, Callee>()
-            // During stdlib precompile, stdlibSnapshot is empty and
-            // functions IS the stdlib — classify everything structural.
-            // During user-code compile, functions contains user + stdlib
-            // (merged); only classify functions whose hash is in the
-            // stdlib snapshot (or IS a snapshot entry). User functions
-            // never match because they aren't in the snapshot.
-            val isStdlibPrecompile = stdlibSnapshot.isEmpty()
             for ((hash, fn) in stdlibSnapshot) {
                 val kind = classifyStructural(fn) ?: continue
                 out[hash] = Callee(kind)
             }
             for ((hash, fn) in functions) {
                 if (hash in out) continue
-                if (!isStdlibPrecompile && hash !in stdlibSnapshot) continue
                 val kind = classifyStructural(fn) ?: continue
                 out[hash] = Callee(kind)
             }
