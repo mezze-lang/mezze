@@ -2642,14 +2642,11 @@ public final class BytecodeCompiler {
             rangeEnd = rangeSrc.getEnd();
         } else if (chain.getSource() instanceof SourceIR.RawSeq rawSrc) {
             rawXsExpr = rawSrc.getXs();
-        } else if (chain.getSource() instanceof SourceIR.Opaque opaqueSrc && isSumSink
-                && !hasStages) {
-            b.beginBuiltinSumLongSeq();
-              emitNode(opaqueSrc.getExpr(), b, argCount, localMap);
-            b.endBuiltinSumLongSeq();
-            if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (Opaque+Sum)");
-            return true;
         } else {
+            // Opaque source — the runtime value could be Seq, List, Deque, etc.
+            // BuiltinSumLongSeq only handles MezzeSeq; passing other types
+            // crashes with UnsupportedSpecializationException.  Bail so the
+            // unfused native dispatch runs instead.
             if (dbg) System.err.println("[chain-canon-emit] reject: unhandled source/sink combo");
             return false;
         }
@@ -3564,7 +3561,18 @@ public final class BytecodeCompiler {
                 b.endConditional();
             }
             case FusedSinkMode.Materialize m -> {
-                if (useLongBuilder) {
+                if (useLongBuilder && m.target() == FusedSinkMode.MaterializeTarget.LIST) {
+                    // long[] → MezzeList: convert via MezzeSeq then to list.
+                    // The LongSeqBuilder stores unboxed longs; wrap into a
+                    // MezzeList by going through LongSeqStorage → MezzeSeq
+                    // → MezzeList.of(). We reuse the SeqBuilderToList
+                    // conversion by first materializing the seq, then
+                    // converting — but that costs an extra copy. Instead,
+                    // build a LongSeqBuilderToList that does it in one step.
+                    b.beginLongSeqBuilderToList();
+                      b.emitLoadLocal(builderSlot);
+                    b.endLongSeqBuilderToList();
+                } else if (useLongBuilder) {
                     // long[] → MezzeSeq via LongSeqStorage (unboxed)
                     b.beginLongSeqBuilderToSeq();
                       b.emitLoadLocal(builderSlot);

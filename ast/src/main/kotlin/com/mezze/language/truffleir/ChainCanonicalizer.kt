@@ -107,6 +107,12 @@ object ChainCanonicalizer {
             val fld = mr.fields[0]
             if (fld.name != "xs" && fld.name != "it") return null
             val (stages, source) = peelSource(fld.value, classifier, allFunctions)
+            // Opaque source = the expression is a parameter reference or local
+            // variable. The runtime value could be Seq, List, or any collection.
+            // BuiltinSumLongSeq only handles MezzeSeq; emitting it for Opaque
+            // would crash when `list::sum` dispatches through `seq::sum`'s
+            // compiled body. Reject — the unfused native path handles all types.
+            if (source is SourceIR.Opaque) return null
             val candidate = FusedChainIR(source, stages, SinkIR.Sum, node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
@@ -124,10 +130,8 @@ object ChainCanonicalizer {
             val fLambda = f as? MakeLambdaIR ?: return null
             // Captures OK — emit-side handles them via capture slot remap.
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-            val effectiveSource = if (source is SourceIR.Opaque && node.name == "__native_seq_for_each")
-                SourceIR.RawSeq(source.expr) else source
-            if (effectiveSource is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.ForEach(fLambda), node.src)
+            if (source is SourceIR.Opaque) return null
+            val candidate = FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // __native_iter_fold / __native_seq_fold — fold { it/xs, init, f }
@@ -145,14 +149,8 @@ object ChainCanonicalizer {
             val initExpr = init ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-            // For __native_seq_fold the source is guaranteed to be a Seq.
-            // Convert Opaque → RawSeq so the emitter uses SeqSize/SeqGet
-            // indexed loop with the fold body inlined — much faster than the
-            // unfused CallIndirect dispatch (~100ns/element overhead).
-            val effectiveSource = if (source is SourceIR.Opaque && node.name == "__native_seq_fold")
-                SourceIR.RawSeq(source.expr) else source
-            if (effectiveSource is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
+            if (source is SourceIR.Opaque) return null
+            val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // __native_{iter,seq}_{count,any,all,find,reduce,to_seq,to_list}
@@ -185,10 +183,12 @@ object ChainCanonicalizer {
         // Peel the source expression: strip iter::map/filter/from_seq
         // layers, then classify the terminal source (RangeSeq/RawSeq/Opaque).
         val (stages, source) = peelSource(sourceExpr, classifier, allFunctions)
-        // The emitter only handles Opaque for bare Sum (no stages).
-        // For all other cases, Opaque means we can't drive a loop —
-        // bail so the native function runs unfused.
-        if (source is SourceIR.Opaque && !(sink is SinkIR.Sum && stages.isEmpty())) return null
+        // The classifier path handles ALL collection types (iter, seq, list,
+        // etc.), so an Opaque source here could be any type — we can't assume
+        // Seq for BuiltinSumLongSeq. Reject all Opaque sources; the explicit
+        // native-call handlers (__native_iter_sum, __native_seq_sum) handle
+        // Opaque+Sum safely because they know the collection type.
+        if (source is SourceIR.Opaque) return null
         // Gate: only produce FusedChainIR for sinks the BDSL emitter supports.
         // New sink types (Count, Any, All, Find, Reduce, ToSeq, ToList) are
         // classified but not yet emittable — producing them would crash at
@@ -270,6 +270,7 @@ object ChainCanonicalizer {
             val fld = mr.fields[0]
             if (fld.name != "xs" && fld.name != "it") return null
             val (stages, source) = peelSource(fld.value, classifier, allFunctions)
+            if (source is SourceIR.Opaque) return null
             val candidate = FusedChainIR(source, stages, SinkIR.Sum, node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
@@ -284,11 +285,8 @@ object ChainCanonicalizer {
             val srcInner = src ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-            val effectiveSource = if (source is SourceIR.Opaque && node.name == "__native_seq_for_each")
-                SourceIR.RawSeq(source.expr) else source
-            // Emitter can't drive a generic iter loop from Opaque; bail to native.
-            if (effectiveSource is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.ForEach(fLambda), node.src)
+            if (source is SourceIR.Opaque) return null
+            val candidate = FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // Fold
@@ -304,11 +302,8 @@ object ChainCanonicalizer {
             val initExpr = init ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-            val effectiveSource = if (source is SourceIR.Opaque && node.name == "__native_seq_fold")
-                SourceIR.RawSeq(source.expr) else source
-            // Emitter can't drive a generic iter loop from Opaque; bail to native.
-            if (effectiveSource is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
+            if (source is SourceIR.Opaque) return null
+            val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         return null
@@ -722,13 +717,11 @@ object ChainCanonicalizer {
                 if (start != null && end != null) return SourceIR.RangeSeq(start, end)
             }
         }
-        // Any other native call producing a Seq — treat as raw materialized
-        // seq. The BDSL emit uses SeqSize/SeqGet indexed loop for RawSeq.
-        // If the runtime value isn't actually a Seq, we'd crash — so only
-        // tag as RawSeq when we're confident. __native_iter_* calls produce
-        // MezzeIter objects (not Seq), so those must be Opaque — SeqSize
-        // would throw on them at runtime.
-        if (effective is CallNativeIR && !effective.name.startsWith("__native_iter_")) {
+        // Only __native_seq_* calls (except range, handled above) produce
+        // MezzeSeq values. __native_list_*, __native_deque_*, etc. produce
+        // non-Seq types — BuiltinSumLongSeq/SeqSize would crash on them.
+        // Tag only seq-producing natives as RawSeq; everything else is Opaque.
+        if (effective is CallNativeIR && effective.name.startsWith("__native_seq_")) {
             return SourceIR.RawSeq(effective)
         }
         return SourceIR.Opaque(expr)

@@ -1588,6 +1588,23 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Finalize long builder into a MezzeList.
+     * Converts the unboxed long[] accumulator into a boxed Object[] for
+     * {@link com.mezze.datastructures.list.MezzeList}.
+     */
+    @Operation
+    public static final class LongSeqBuilderToList {
+        @Specialization
+        public static Object doFinalize(long[] builder) {
+            int count = (int) builder[0];
+            if (count == 0) return com.mezze.datastructures.list.MezzeList.empty();
+            Object[] boxed = new Object[count];
+            for (int i = 0; i < count; i++) boxed[i] = builder[i + 1];
+            return com.mezze.datastructures.list.MezzeList.of(boxed);
+        }
+    }
+
+    /**
      * Construct a variant with no payload (e.g. {@code None}, {@code True}).
      *
      * <p>Lowers {@link com.mezze.language.truffleir.MakeVariantIR} when

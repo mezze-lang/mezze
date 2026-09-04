@@ -164,6 +164,16 @@ val benchClassPatterns = listOf(
 
 tasks.test {
     applyCommonTestConfig()
+    // Test-isolation: the correctness suite shares one Engine
+    // (MezzeTestHelper.sharedEngine) across every test, so Language-level
+    // CallTarget caches + the BDSL compiler's compiled-caller cache persist and a
+    // caller cached in one test can hold a baked stub to a callee whose IR only
+    // lived in a now-closed Context → order-dependent "no MezzeFunction registered
+    // for hash" flakes. This flips MezzeLanguage into per-parse cache clearing.
+    // Set ONLY here, never on `bench`: benches share the jitEngine ACROSS Contexts
+    // specifically to warm CallTargets, and per-parse clearing would force every
+    // bench iteration cold and wreck the measurements.
+    systemProperty("mezze.test.isolation", "true")
     // Default `test` excludes benches so `./gradlew :interpreter:test`
     // stays a fast feedback loop. Benches live in :interpreter:bench.
     benchClassPatterns.forEach { exclude(it) }
