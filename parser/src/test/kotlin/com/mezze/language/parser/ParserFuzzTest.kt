@@ -54,6 +54,27 @@ class ParserFuzzTest {
         "let p = a |> seq::map { xs = @, f = {x} -> x }",
         "let s = \"hi $(name), you are $(age)\"",
         "impl Show for Int where { show = { it } -> it.to_str {} }",
+        // advanced surface — effects, abilities, associated types, handlers, constraints
+        "effect Time where { now: {} -> Int }",
+        "effect Exception having 'error where { raise: { err: 'error } -> Unit }",
+        "pub effect Env where { get: { key: Str } -> Str, set: { key: Str, val: Str } -> Unit }",
+        "ability Somable for 'a where { some: {} -> 'a }",
+        "ability Okable 'e for 'a where { ok: { it: 'a } -> Result 'a 'e }",
+        "ability Tryable for 'm having 'inner where { unwrap: { it: 'm } -> 'inner }",
+        "ability Format 'repr for 'fmt where { encode: { it: 'fmt } -> 'repr }",
+        "impl Eq for Str where { eq = { it, r } -> True }",
+        "impl NumAdd Int for Nat having 'out = Int where { add = { l, r } -> l }",
+        "impl Str where { len = { it } -> 0 }",
+        "let sig: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <...> = { xs, f } -> xs",
+        "let effrow: {} -> Int <Async, Exception> = {} -> 1",
+        "let handled = perform Log in do\n  emit { msg = \"hi\" }\n  1",
+        "let nested_perform = perform SystemTime in perform LoomAsync in do\n  1",
+        "let withc: { it: 'a, r: 'a } with Ord 'a -> Bool = { it, r } -> True",
+        "newtype UserId = Int",
+        "let u = UserId.(5)",
+        "let unwrap = { u: UserId } -> match u is\n  UserId.(v) -> v",
+        "type Result 'a 'e = | Ok { val: 'a }, Err { error: 'e } |",
+        "let cons = xs with Ord 'a with Eq 'a",
         // richer surface — nesting, effects, chains, spreads, guards, generics
         "let nested = f { a = g { b = h { c = 1 } } }",
         "let r = perform Log in do\n  emit { msg = \"x\" }\n  1",
@@ -244,6 +265,22 @@ class ParserFuzzTest {
             assertRobust("let s = " + "\"$(".repeat(depth) + "x" + ")\"".repeat(depth))  // nested string interpolation
             assertRobust("let n = " + "-".repeat(depth) + "1")                       // unary chain
             assertRobust("let m = " + "[".repeat(depth) + "1")                       // deep seq, unbalanced
+        }
+    }
+
+    @Test
+    fun `advanced feature stress - long rows, chained constraints, deep effectful types`() {
+        // The effect-row `<...>`, `with`-constraint, `having`, ability/impl-decl
+        // parsers are their own paths (flat sepBy loops + type recursion). Stress
+        // them at scale and depth — a loop bug (like the `|>` hang) or an unguarded
+        // recursion would show here.
+        for (n in listOf(20, 100, 400)) {
+            assertRobust("let f: {} -> Int <" + (0 until n).joinToString(", ") { "E$it" } + "> = g")   // long effect row
+            assertRobust("let g = x" + (0 until n).joinToString("") { " with A$it 'a" })                 // chained with-constraints
+            assertRobust("let h: " + "{} -> ".repeat(n) + "Int <Async> = fn")                            // deeply-curried effectful type
+            assertRobust("ability Big for 'a where { " + (0 until n).joinToString(", ") { "m$it: {} -> 'a" } + " }") // big ability decl
+            assertRobust("impl X for Y having 'o = " + "[".repeat(n) + "Int" + "]".repeat(n) + " where {}")          // deep having-bound type
+            assertRobust("effect E having 'r where { " + (0 until n).joinToString(", ") { "op$it: {} -> 'r" } + " }") // big effect decl
         }
     }
 
