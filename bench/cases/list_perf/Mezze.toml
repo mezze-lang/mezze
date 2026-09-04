@@ -1,3 +1,12 @@
 [package]
 name = "bench_list_perf"
-source = "src/app.mz"
+version = "0.1.0"
+
+[[app]]
+name = "bench_list_perf"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

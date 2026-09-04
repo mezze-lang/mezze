@@ -189,12 +189,17 @@ public final class ListNatives {
 
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return list;
-        // toArray() is O(n), then map loop is O(n) — total O(n).
         Object[] src = list.toArray();
         Object[] result = new Object[src.length];
+        // Reuse args array across iterations.
+        Object[] closureValues = mapper.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = mapper.getCallTarget();
+        Object[] args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
         for (int i = 0; i < src.length; i++) {
-            result[i] = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, src[i]));
+            args[closureLen] = MezzeRecord.wrapX(src[i]);
+            result[i] = callNode.call(target, args);
         }
         return MezzeList.of(result);
     }
@@ -204,14 +209,19 @@ public final class ListNatives {
 
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return list;
-        // toArray() is O(n), then filter loop is O(n) — total O(n).
         Object[] src = list.toArray();
         Object[] temp = new Object[src.length];
         int count = 0;
+        // Reuse args array across iterations.
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        Object[] args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
         for (int i = 0; i < src.length; i++) {
             Object element = src[i];
-            Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, element));
+            args[closureLen] = MezzeRecord.wrapX(element);
+            Object result = callNode.call(target, args);
             if (result instanceof Boolean && (Boolean) result) {
                 temp[count++] = element;
             }
@@ -249,7 +259,30 @@ public final class ListNatives {
     @TruffleBoundary
     public static boolean contains(MezzeList list, Object element) {
         // head/tail walk — O(n) instead of O(n²) via get(i).
+        // Specialized fast paths avoid deepEquals overhead per element.
         MezzeList current = list;
+        if (element instanceof Long target) {
+            long t = target;
+            while (!current.isEmpty()) {
+                if (current instanceof MezzeLongCons lc) {
+                    if (lc.headLong() == t) return true;
+                } else {
+                    Object h = current.head();
+                    if (h instanceof Long l && l.longValue() == t) return true;
+                }
+                current = current.tail();
+            }
+            return false;
+        }
+        if (element instanceof String target) {
+            while (!current.isEmpty()) {
+                Object h = current.head();
+                if (h instanceof String s && s.equals(target)) return true;
+                current = current.tail();
+            }
+            return false;
+        }
+        // Generic path for records, variants, etc.
         while (!current.isEmpty()) {
             if (deepEquals(current.head(), element)) return true;
             current = current.tail();
@@ -261,12 +294,17 @@ public final class ListNatives {
     public static MezzeVariant find(MezzeList list, MezzeFunction predicate,
 
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        // head/tail walk — O(n) short-circuit.
+        // head/tail walk with reused args — O(n) short-circuit.
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        Object[] args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
         MezzeList current = list;
         while (!current.isEmpty()) {
             Object element = current.head();
-            Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, element));
+            args[closureLen] = MezzeRecord.wrapX(element);
+            Object result = callNode.call(target, args);
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some(element);
             }
@@ -279,11 +317,16 @@ public final class ListNatives {
     public static MezzeVariant findIndex(MezzeList list, MezzeFunction predicate,
 
                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        Object[] args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
         MezzeList current = list;
         long idx = 0;
         while (!current.isEmpty()) {
-            Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, current.head()));
+            args[closureLen] = MezzeRecord.wrapX(current.head());
+            Object result = callNode.call(target, args);
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some(idx);
             }
@@ -299,10 +342,15 @@ public final class ListNatives {
     public static boolean any(MezzeList list, MezzeFunction predicate,
 
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        Object[] args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
         MezzeList current = list;
         while (!current.isEmpty()) {
-            Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, current.head()));
+            args[closureLen] = MezzeRecord.wrapX(current.head());
+            Object result = callNode.call(target, args);
             if (result instanceof Boolean && (Boolean) result) {
                 return true;
             }
@@ -315,10 +363,15 @@ public final class ListNatives {
     public static boolean all(MezzeList list, MezzeFunction predicate,
 
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        Object[] args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
         MezzeList current = list;
         while (!current.isEmpty()) {
-            Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, current.head()));
+            args[closureLen] = MezzeRecord.wrapX(current.head());
+            Object result = callNode.call(target, args);
             if (!(result instanceof Boolean) || !(Boolean) result) {
                 return false;
             }
@@ -516,9 +569,10 @@ public final class ListNatives {
         int step = reverse ? -1 : 1;
         int end = reverse ? -1 : size;
         Object acc = init;
+        // Reuse args array across iterations — avoids 100K allocations per fold.
+        Object[] args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
         for (int i = from; i != end; i += step) {
-            Object[] args = new Object[closureLen + 1];
-            System.arraycopy(closureValues, 0, args, 0, closureLen);
             args[closureLen] = MezzeRecord.wrapAccX(acc, elements[i]);
             acc = callNode.call(target, args);
             if (scanOut != null) scanOut[i + 1] = acc;
