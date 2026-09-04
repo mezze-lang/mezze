@@ -1,0 +1,3 @@
+[package]
+name = "bench_list_perf"
+source = "src/app.mz"

@@ -2,6 +2,7 @@ package com.mezze.interpreter.nodes.builtin.collections;
 
 import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.list.MezzeLongCons;
 import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.datastructures.set.MezzeSet;
@@ -125,13 +126,11 @@ public final class ListNatives {
         if (list1.isEmpty()) return list2;
         if (list2.isEmpty()) return list1;
 
-        Object[] elements = new Object[list1.size() + list2.size()];
-        for (int i = 0; i < list1.size(); i++) {
-            elements[i] = list1.get(i);
-        }
-        for (int i = 0; i < list2.size(); i++) {
-            elements[list1.size() + i] = list2.get(i);
-        }
+        Object[] src1 = list1.toArray();
+        Object[] src2 = list2.toArray();
+        Object[] elements = new Object[src1.length + src2.length];
+        System.arraycopy(src1, 0, elements, 0, src1.length);
+        System.arraycopy(src2, 0, elements, src1.length, src2.length);
         return MezzeList.of(elements);
     }
 
@@ -141,21 +140,20 @@ public final class ListNatives {
      */
     @TruffleBoundary
     public static MezzeList concat(MezzeList listOfLists) {
+        Object[] outerSrc = listOfLists.toArray();
         int totalSize = 0;
-        for (int i = 0; i < listOfLists.size(); i++) {
-            MezzeList inner = (MezzeList) listOfLists.get(i);
-            totalSize += inner.size();
+        for (int i = 0; i < outerSrc.length; i++) {
+            totalSize += ((MezzeList) outerSrc[i]).size();
         }
 
         if (totalSize == 0) return MezzeList.empty();
 
         Object[] elements = new Object[totalSize];
         int offset = 0;
-        for (int i = 0; i < listOfLists.size(); i++) {
-            MezzeList inner = (MezzeList) listOfLists.get(i);
-            for (int j = 0; j < inner.size(); j++) {
-                elements[offset++] = inner.get(j);
-            }
+        for (int i = 0; i < outerSrc.length; i++) {
+            Object[] innerSrc = ((MezzeList) outerSrc[i]).toArray();
+            System.arraycopy(innerSrc, 0, elements, offset, innerSrc.length);
+            offset += innerSrc.length;
         }
         return MezzeList.of(elements);
     }
@@ -177,35 +175,41 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeList reverse(MezzeList list) {
         if (list.size() <= 1) return list;
-        Object[] elements = new Object[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            elements[list.size() - 1 - i] = list.get(i);
+        // toArray() is O(n), then reverse-copy is O(n) — total O(n).
+        Object[] src = list.toArray();
+        Object[] elements = new Object[src.length];
+        for (int i = 0; i < src.length; i++) {
+            elements[src.length - 1 - i] = src[i];
         }
         return MezzeList.of(elements);
     }
 
     @TruffleBoundary
     public static MezzeList map(MezzeList list, MezzeFunction mapper,
-                                 
+
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return list;
-        Object[] result = new Object[list.size()];
-        for (int i = 0; i < list.size(); i++) {
+        // toArray() is O(n), then map loop is O(n) — total O(n).
+        Object[] src = list.toArray();
+        Object[] result = new Object[src.length];
+        for (int i = 0; i < src.length; i++) {
             result[i] = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, list.get(i)));
+                prepareArgs(mapper, src[i]));
         }
         return MezzeList.of(result);
     }
 
     @TruffleBoundary
     public static MezzeList filter(MezzeList list, MezzeFunction predicate,
-                                    
+
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return list;
-        Object[] temp = new Object[list.size()];
+        // toArray() is O(n), then filter loop is O(n) — total O(n).
+        Object[] src = list.toArray();
+        Object[] temp = new Object[src.length];
         int count = 0;
-        for (int i = 0; i < list.size(); i++) {
-            Object element = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object element = src[i];
             Object result = callNode.call(predicate.getCallTarget(),
                 prepareArgs(predicate, element));
             if (result instanceof Boolean && (Boolean) result) {
@@ -244,39 +248,47 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static boolean contains(MezzeList list, Object element) {
-        for (int i = 0; i < list.size(); i++) {
-            if (deepEquals(list.get(i), element)) {
-                return true;
-            }
+        // head/tail walk — O(n) instead of O(n²) via get(i).
+        MezzeList current = list;
+        while (!current.isEmpty()) {
+            if (deepEquals(current.head(), element)) return true;
+            current = current.tail();
         }
         return false;
     }
 
     @TruffleBoundary
     public static MezzeVariant find(MezzeList list, MezzeFunction predicate,
-                                     
+
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        for (int i = 0; i < list.size(); i++) {
-            Object element = list.get(i);
+        // head/tail walk — O(n) short-circuit.
+        MezzeList current = list;
+        while (!current.isEmpty()) {
+            Object element = current.head();
             Object result = callNode.call(predicate.getCallTarget(),
                 prepareArgs(predicate, element));
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some(element);
             }
+            current = current.tail();
         }
         return MezzeVariant.none();
     }
 
     @TruffleBoundary
     public static MezzeVariant findIndex(MezzeList list, MezzeFunction predicate,
-                                          
+
                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        for (int i = 0; i < list.size(); i++) {
+        MezzeList current = list;
+        long idx = 0;
+        while (!current.isEmpty()) {
             Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, list.get(i)));
+                prepareArgs(predicate, current.head()));
             if (result instanceof Boolean && (Boolean) result) {
-                return MezzeVariant.some((long) i);
+                return MezzeVariant.some(idx);
             }
+            current = current.tail();
+            idx++;
         }
         return MezzeVariant.none();
     }
@@ -285,28 +297,32 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static boolean any(MezzeList list, MezzeFunction predicate,
-                               
+
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        for (int i = 0; i < list.size(); i++) {
+        MezzeList current = list;
+        while (!current.isEmpty()) {
             Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, list.get(i)));
+                prepareArgs(predicate, current.head()));
             if (result instanceof Boolean && (Boolean) result) {
                 return true;
             }
+            current = current.tail();
         }
         return false;
     }
 
     @TruffleBoundary
     public static boolean all(MezzeList list, MezzeFunction predicate,
-                               
+
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        for (int i = 0; i < list.size(); i++) {
+        MezzeList current = list;
+        while (!current.isEmpty()) {
             Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, list.get(i)));
+                prepareArgs(predicate, current.head()));
             if (!(result instanceof Boolean) || !(Boolean) result) {
                 return false;
             }
+            current = current.tail();
         }
         return true;
     }
@@ -315,15 +331,16 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static MezzeRecord partition(MezzeList list, MezzeFunction predicate,
-                                         
+
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object[] matching = new Object[list.size()];
-        Object[] nonMatching = new Object[list.size()];
+        Object[] src = list.toArray();
+        Object[] matching = new Object[src.length];
+        Object[] nonMatching = new Object[src.length];
         int matchCount = 0;
         int nonMatchCount = 0;
 
-        for (int i = 0; i < list.size(); i++) {
-            Object element = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object element = src[i];
             Object result = callNode.call(predicate.getCallTarget(),
                 prepareArgs(predicate, element));
             if (result instanceof Boolean && (Boolean) result) {
@@ -354,11 +371,13 @@ public final class ListNatives {
         int len = Math.min(list1.size(), list2.size());
         if (len == 0) return MezzeList.empty();
 
+        Object[] src1 = list1.toArray();
+        Object[] src2 = list2.toArray();
         Object[] result = new Object[len];
         for (int i = 0; i < len; i++) {
             result[i] = MezzeRecord.fromFields(
                 new String[]{"fst", "snd"},
-                new Object[]{list1.get(i), list2.get(i)}
+                new Object[]{src1[i], src2[i]}
             );
         }
         return MezzeList.of(result);
@@ -366,11 +385,11 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static MezzeRecord unzip(MezzeList list) {
-        Object[] firsts = new Object[list.size()];
-        Object[] seconds = new Object[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            MezzeRecord pair = (MezzeRecord) list.get(i);
-            // Try both naming conventions: fst/snd and first/second
+        Object[] src = list.toArray();
+        Object[] firsts = new Object[src.length];
+        Object[] seconds = new Object[src.length];
+        for (int i = 0; i < src.length; i++) {
+            MezzeRecord pair = (MezzeRecord) src[i];
             int firstIdx = pair.getFieldIndex("fst");
             if (firstIdx < 0) firstIdx = pair.getFieldIndex("first");
             int secondIdx = pair.getFieldIndex("snd");
@@ -378,7 +397,6 @@ public final class ListNatives {
             firsts[i] = pair.getField(firstIdx);
             seconds[i] = pair.getField(secondIdx);
         }
-        // Return {fsts, snds} (plural) per stdlib convention
         return MezzeRecord.fromFields(
             new String[]{"fsts", "snds"},
             new Object[]{
@@ -394,10 +412,11 @@ public final class ListNatives {
     public static MezzeList intersperse(MezzeList list, Object separator) {
         if (list.size() <= 1) return list;
 
-        Object[] result = new Object[list.size() * 2 - 1];
-        for (int i = 0; i < list.size(); i++) {
-            result[i * 2] = list.get(i);
-            if (i < list.size() - 1) {
+        Object[] src = list.toArray();
+        Object[] result = new Object[src.length * 2 - 1];
+        for (int i = 0; i < src.length; i++) {
+            result[i * 2] = src[i];
+            if (i < src.length - 1) {
                 result[i * 2 + 1] = separator;
             }
         }
@@ -411,10 +430,7 @@ public final class ListNatives {
     public static MezzeList sort(MezzeList list) {
         if (list.size() <= 1) return list;
 
-        Object[] arr = new Object[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            arr[i] = list.get(i);
-        }
+        Object[] arr = list.toArray();
 
         java.util.Arrays.sort(arr, (a, b) -> {
             if (a instanceof Long && b instanceof Long) {
@@ -438,11 +454,7 @@ public final class ListNatives {
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.size() <= 1) return list;
 
-        // Copy to array for sorting
-        Object[] arr = new Object[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            arr[i] = list.get(i);
-        }
+        Object[] arr = list.toArray();
 
         // Sort using comparator function that takes {a, b} record
         java.util.Arrays.sort(arr, (elemA, elemB) -> {
@@ -461,11 +473,7 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static Object[] toArray(MezzeList list) {
-        Object[] result = new Object[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            result[i] = list.get(i);
-        }
-        return result;
+        return list.toArray();
     }
 
     @TruffleBoundary
@@ -491,6 +499,10 @@ public final class ListNatives {
      * we do NOT skip the {@code MezzeRecord{acc, x}} wrap because the
      * folder's param naming is user-chosen and disambiguating positional
      * slots at runtime would require name-based dispatch.
+     *
+     * Uses toArray() for O(n) random-access instead of list.get(i) which
+     * was O(n²) for cons-list. toArray() is a single O(n) pass, then the
+     * fold loop is O(n) — total O(n) instead of O(n²).
      */
     private static Object foldTwoArg(MezzeList list, Object init, MezzeFunction folder,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
@@ -498,7 +510,8 @@ public final class ListNatives {
         Object[] closureValues = folder.getClosureValues();
         int closureLen = closureValues.length;
         com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
-        int size = list.size();
+        Object[] elements = list.toArray();
+        int size = elements.length;
         int from = reverse ? size - 1 - startIndex : startIndex;
         int step = reverse ? -1 : 1;
         int end = reverse ? -1 : size;
@@ -506,7 +519,7 @@ public final class ListNatives {
         for (int i = from; i != end; i += step) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
-            args[closureLen] = MezzeRecord.wrapAccX(acc, list.get(i));
+            args[closureLen] = MezzeRecord.wrapAccX(acc, elements[i]);
             acc = callNode.call(target, args);
             if (scanOut != null) scanOut[i + 1] = acc;
         }
@@ -553,9 +566,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeVariant min(MezzeList list) {
         if (list.isEmpty()) return MezzeVariant.none();
-        Object minVal = list.get(0);
-        for (int i = 1; i < list.size(); i++) {
-            Object curr = list.get(i);
+        Object[] src = list.toArray();
+        Object minVal = src[0];
+        for (int i = 1; i < src.length; i++) {
+            Object curr = src[i];
             if (compare(curr, minVal) < 0) {
                 minVal = curr;
             }
@@ -566,9 +580,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeVariant max(MezzeList list) {
         if (list.isEmpty()) return MezzeVariant.none();
-        Object maxVal = list.get(0);
-        for (int i = 1; i < list.size(); i++) {
-            Object curr = list.get(i);
+        Object[] src = list.toArray();
+        Object maxVal = src[0];
+        for (int i = 1; i < src.length; i++) {
+            Object curr = src[i];
             if (compare(curr, maxVal) > 0) {
                 maxVal = curr;
             }
@@ -580,10 +595,11 @@ public final class ListNatives {
     public static MezzeVariant minBy(MezzeList list, MezzeFunction keyFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return MezzeVariant.none();
-        Object minElem = list.get(0);
+        Object[] src = list.toArray();
+        Object minElem = src[0];
         Object minKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, minElem));
-        for (int i = 1; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 1; i < src.length; i++) {
+            Object elem = src[i];
             Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
             if (compare(key, minKey) < 0) {
                 minElem = elem;
@@ -597,10 +613,11 @@ public final class ListNatives {
     public static MezzeVariant maxBy(MezzeList list, MezzeFunction keyFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return MezzeVariant.none();
-        Object maxElem = list.get(0);
+        Object[] src = list.toArray();
+        Object maxElem = src[0];
         Object maxKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, maxElem));
-        for (int i = 1; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 1; i < src.length; i++) {
+            Object elem = src[i];
             Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
             if (compare(key, maxKey) > 0) {
                 maxElem = elem;
@@ -615,10 +632,17 @@ public final class ListNatives {
     @TruffleBoundary
     public static long sum(MezzeList list) {
         long total = 0;
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
-            if (elem instanceof Long l) total += l;
-            else if (elem instanceof Integer n) total += n;
+        // Walk head/tail — O(n). The previous list.get(i) was O(n²).
+        MezzeList current = list;
+        while (!current.isEmpty()) {
+            if (current instanceof MezzeLongCons lc) {
+                total += lc.headLong();
+            } else {
+                Object elem = current.head();
+                if (elem instanceof Long l) total += l;
+                else if (elem instanceof Integer n) total += n;
+            }
+            current = current.tail();
         }
         return total;
     }
@@ -626,12 +650,14 @@ public final class ListNatives {
     @TruffleBoundary
     public static double sumFloat(MezzeList list) {
         double total = 0.0;
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        MezzeList current = list;
+        while (!current.isEmpty()) {
+            Object elem = current.head();
             if (elem instanceof Double d) total += d;
             else if (elem instanceof Float f) total += f;
             else if (elem instanceof Long l) total += l;
             else if (elem instanceof Integer n) total += n;
+            current = current.tail();
         }
         return total;
     }
@@ -639,9 +665,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static long product(MezzeList list) {
         if (list.isEmpty()) return 1L;
+        Object[] src = list.toArray();
         long result = 1;
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             if (elem instanceof Long l) result *= l;
             else if (elem instanceof Integer n) result *= n;
         }
@@ -651,9 +678,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static double productFloat(MezzeList list) {
         if (list.isEmpty()) return 1.0;
+        Object[] src = list.toArray();
         double result = 1.0;
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             if (elem instanceof Double d) result *= d;
             else if (elem instanceof Float f) result *= f;
             else if (elem instanceof Long l) result *= l;
@@ -667,9 +695,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeList groupBy(MezzeList list, MezzeFunction keyFn,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] src = list.toArray();
         java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
             groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(elem);
         }
@@ -693,11 +722,12 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static MezzeList zipWithIndex(MezzeList list) {
-        Object[] result = new Object[list.size()];
-        for (int i = 0; i < list.size(); i++) {
+        Object[] src = list.toArray();
+        Object[] result = new Object[src.length];
+        for (int i = 0; i < src.length; i++) {
             result[i] = MezzeRecord.fromFields(
                 new String[]{"value", "index"},
-                new Object[]{list.get(i), (long) i}
+                new Object[]{src[i], (long) i}
             );
         }
         return MezzeList.of(result);
@@ -706,8 +736,9 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeRecord forEach(MezzeList list, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        for (int i = 0; i < list.size(); i++) {
-            callNode.call(fn.getCallTarget(), prepareArgs(fn, list.get(i)));
+        Object[] src = list.toArray();
+        for (int i = 0; i < src.length; i++) {
+            callNode.call(fn.getCallTarget(), prepareArgs(fn, src[i]));
         }
         return MezzeRecord.empty();
     }
@@ -734,9 +765,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeRecord span(MezzeList list, MezzeFunction predicate,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] src = list.toArray();
         int splitIdx = 0;
-        for (int i = 0; i < list.size(); i++) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, list.get(i)));
+        for (int i = 0; i < src.length; i++) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, src[i]));
             if (result instanceof Boolean && (Boolean) result) {
                 splitIdx++;
             } else {
@@ -754,11 +786,12 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeList dedup(MezzeList list) {
         if (list.isEmpty()) return list;
+        Object[] src = list.toArray();
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
-        Object last = list.get(0);
+        Object last = src[0];
         result.add(last);
-        for (int i = 1; i < list.size(); i++) {
-            Object curr = list.get(i);
+        for (int i = 1; i < src.length; i++) {
+            Object curr = src[i];
             if (!java.util.Objects.equals(curr, last)) {
                 result.add(curr);
                 last = curr;
@@ -771,12 +804,13 @@ public final class ListNatives {
     public static MezzeList dedupBy(MezzeList list, MezzeFunction keyFn,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return list;
+        Object[] src = list.toArray();
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
-        Object lastElem = list.get(0);
+        Object lastElem = src[0];
         Object lastKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, lastElem));
         result.add(lastElem);
-        for (int i = 1; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 1; i < src.length; i++) {
+            Object elem = src[i];
             Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
             if (!java.util.Objects.equals(key, lastKey)) {
                 result.add(elem);
@@ -819,13 +853,14 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeList groupConsecutive(MezzeList list) {
         if (list.isEmpty()) return MezzeList.empty();
+        Object[] src = list.toArray();
         java.util.ArrayList<Object> groups = new java.util.ArrayList<>();
         java.util.ArrayList<Object> currentGroup = new java.util.ArrayList<>();
-        Object currentKey = list.get(0);
+        Object currentKey = src[0];
         currentGroup.add(currentKey);
 
-        for (int i = 1; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 1; i < src.length; i++) {
+            Object elem = src[i];
             if (java.util.Objects.equals(elem, currentKey)) {
                 currentGroup.add(elem);
             } else {
@@ -843,14 +878,15 @@ public final class ListNatives {
     public static MezzeList groupConsecutiveBy(MezzeList list, MezzeFunction keyFn,
                                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return MezzeList.empty();
+        Object[] src = list.toArray();
         java.util.ArrayList<Object> groups = new java.util.ArrayList<>();
         java.util.ArrayList<Object> currentGroup = new java.util.ArrayList<>();
-        Object firstElem = list.get(0);
+        Object firstElem = src[0];
         Object currentKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, firstElem));
         currentGroup.add(firstElem);
 
-        for (int i = 1; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 1; i < src.length; i++) {
+            Object elem = src[i];
             Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
             if (java.util.Objects.equals(key, currentKey)) {
                 currentGroup.add(elem);
@@ -870,12 +906,14 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeList flatMap(MezzeList list, MezzeFunction mapper,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] src = list.toArray();
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        for (int i = 0; i < list.size(); i++) {
-            Object mapped = callNode.call(mapper.getCallTarget(), prepareArgs(mapper, list.get(i)));
+        for (int i = 0; i < src.length; i++) {
+            Object mapped = callNode.call(mapper.getCallTarget(), prepareArgs(mapper, src[i]));
             if (mapped instanceof MezzeList innerList) {
-                for (int j = 0; j < innerList.size(); j++) {
-                    results.add(innerList.get(j));
+                Object[] innerSrc = innerList.toArray();
+                for (int j = 0; j < innerSrc.length; j++) {
+                    results.add(innerSrc[j]);
                 }
             }
         }
@@ -885,9 +923,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeList takeWhile(MezzeList list, MezzeFunction predicate,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] src = list.toArray();
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        for (int i = 0; i < list.size(); i++) {
-            Object element = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object element = src[i];
             Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
             if (result instanceof Boolean && (Boolean) result) {
                 results.add(element);
@@ -901,9 +940,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeList dropWhile(MezzeList list, MezzeFunction predicate,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] src = list.toArray();
         int dropCount = 0;
-        for (int i = 0; i < list.size(); i++) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, list.get(i)));
+        for (int i = 0; i < src.length; i++) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, src[i]));
             if (result instanceof Boolean && (Boolean) result) {
                 dropCount++;
             } else {
@@ -924,9 +964,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static long count(MezzeList list, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] src = list.toArray();
         long cnt = 0;
-        for (int i = 0; i < list.size(); i++) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, list.get(i)));
+        for (int i = 0; i < src.length; i++) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, src[i]));
             if (result instanceof Boolean && (Boolean) result) {
                 cnt++;
             }
@@ -938,9 +979,10 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static MezzeList unique(MezzeList list) {
+        Object[] src = list.toArray();
         java.util.LinkedHashSet<Object> seen = new java.util.LinkedHashSet<>();
-        for (int i = 0; i < list.size(); i++) {
-            seen.add(list.get(i));
+        for (int i = 0; i < src.length; i++) {
+            seen.add(src[i]);
         }
         return MezzeList.of(seen.toArray());
     }
@@ -952,12 +994,14 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static MezzeList flatten(MezzeList list) {
+        Object[] src = list.toArray();
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             if (elem instanceof MezzeList innerList) {
-                for (int j = 0; j < innerList.size(); j++) {
-                    results.add(innerList.get(j));
+                Object[] innerSrc = innerList.toArray();
+                for (int j = 0; j < innerSrc.length; j++) {
+                    results.add(innerSrc[j]);
                 }
             }
         }
@@ -1000,8 +1044,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static boolean equals(MezzeList list1, MezzeList list2) {
         if (list1.size() != list2.size()) return false;
-        for (int i = 0; i < list1.size(); i++) {
-            if (!deepEquals(list1.get(i), list2.get(i))) {
+        Object[] src1 = list1.toArray();
+        Object[] src2 = list2.toArray();
+        for (int i = 0; i < src1.length; i++) {
+            if (!deepEquals(src1[i], src2[i])) {
                 return false;
             }
         }
@@ -1010,8 +1056,9 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static MezzeVariant indexOf(MezzeList list, Object element) {
-        for (int i = 0; i < list.size(); i++) {
-            if (deepEquals(list.get(i), element)) {
+        Object[] src = list.toArray();
+        for (int i = 0; i < src.length; i++) {
+            if (deepEquals(src[i], element)) {
                 return MezzeVariant.some((long) i);
             }
         }
@@ -1020,8 +1067,9 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static MezzeVariant lastIndexOf(MezzeList list, Object element) {
-        for (int i = list.size() - 1; i >= 0; i--) {
-            if (deepEquals(list.get(i), element)) {
+        Object[] src = list.toArray();
+        for (int i = src.length - 1; i >= 0; i--) {
+            if (deepEquals(src[i], element)) {
                 return MezzeVariant.some((long) i);
             }
         }
@@ -1091,10 +1139,12 @@ public final class ListNatives {
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.size() <= 1) return list;
 
+        Object[] src = list.toArray();
+
         // Build array of {element, key} pairs
-        Object[][] pairs = new Object[list.size()][2];
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        Object[][] pairs = new Object[src.length][2];
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
             pairs[i][0] = elem;
             pairs[i][1] = key;
@@ -1104,8 +1154,8 @@ public final class ListNatives {
         java.util.Arrays.sort(pairs, (a, b) -> compare(a[1], b[1]));
 
         // Extract sorted elements
-        Object[] result = new Object[list.size()];
-        for (int i = 0; i < list.size(); i++) {
+        Object[] result = new Object[src.length];
+        for (int i = 0; i < src.length; i++) {
             result[i] = pairs[i][0];
         }
         return MezzeList.of(result);
@@ -1114,12 +1164,13 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeList rotateLeft(MezzeList list, long n) {
         if (list.isEmpty()) return list;
-        int size = list.size();
+        Object[] src = list.toArray();
+        int size = src.length;
         int rotation = (int) (((n % size) + size) % size);
         if (rotation == 0) return list;
         Object[] result = new Object[size];
         for (int i = 0; i < size; i++) {
-            result[i] = list.get((i + rotation) % size);
+            result[i] = src[(i + rotation) % size];
         }
         return MezzeList.of(result);
     }
@@ -1158,9 +1209,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeMap toMap(MezzeList list) {
         // Expects list of {k, v} records.
+        Object[] src = list.toArray();
         MezzeMap result = MapNatives.empty();
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             if (elem instanceof MezzeRecord rec) {
                 int keyIdx = rec.getFieldIndex("k");
                 int valIdx = rec.getFieldIndex("v");
@@ -1175,9 +1227,10 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeSortedMap toSortedMap(MezzeList list) {
         // Expects list of {k, v} records.
+        Object[] src = list.toArray();
         MezzeSortedMap result = SortedMapNatives.empty();
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             if (elem instanceof MezzeRecord rec) {
                 int keyIdx = rec.getFieldIndex("k");
                 int valIdx = rec.getFieldIndex("v");
@@ -1228,10 +1281,11 @@ public final class ListNatives {
         if (list.isEmpty()) {
             return MezzeVariant.none();
         }
+        Object[] src = list.toArray();
         double sum = 0.0;
         int count = 0;
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             if (elem instanceof Long l) {
                 sum += l;
                 count++;
@@ -1249,11 +1303,12 @@ public final class ListNatives {
         if (list.isEmpty()) {
             return MezzeVariant.none();
         }
+        Object[] src = list.toArray();
         // Calculate mean
         double sum = 0.0;
         int count = 0;
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             if (elem instanceof Long l) {
                 sum += l;
                 count++;
@@ -1267,8 +1322,8 @@ public final class ListNatives {
 
         // Calculate variance (population variance)
         double variance = 0.0;
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             double val = 0.0;
             if (elem instanceof Long l) {
                 val = l;
@@ -1296,10 +1351,11 @@ public final class ListNatives {
         if (list.isEmpty()) {
             return MezzeVariant.none();
         }
+        Object[] src = list.toArray();
         // Convert to doubles and sort
-        double[] values = new double[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
+        double[] values = new double[src.length];
+        for (int i = 0; i < src.length; i++) {
+            Object elem = src[i];
             if (elem instanceof Long l) {
                 values[i] = l;
             } else if (elem instanceof Double d) {
@@ -1308,8 +1364,8 @@ public final class ListNatives {
         }
         java.util.Arrays.sort(values);
 
-        int mid = list.size() / 2;
-        if (list.size() % 2 == 0) {
+        int mid = src.length / 2;
+        if (src.length % 2 == 0) {
             return MezzeVariant.some((values[mid - 1] + values[mid]) / 2.0);
         } else {
             return MezzeVariant.some(values[mid]);
@@ -1321,35 +1377,40 @@ public final class ListNatives {
     @TruffleBoundary
     public static long compare(MezzeList list1, MezzeList list2) {
         // Lexicographic comparison: -1, 0, or 1
-        int minLen = Math.min(list1.size(), list2.size());
+        Object[] src1 = list1.toArray();
+        Object[] src2 = list2.toArray();
+        int minLen = Math.min(src1.length, src2.length);
         for (int i = 0; i < minLen; i++) {
-            int cmp = compareElements(list1.get(i), list2.get(i));
+            int cmp = compareElements(src1[i], src2[i]);
             if (cmp != 0) {
                 return cmp < 0 ? -1L : 1L;
             }
         }
-        return Integer.compare(list1.size(), list2.size());
+        return Integer.compare(src1.length, src2.length);
     }
 
     @TruffleBoundary
     public static long lexicographicCompare(MezzeList list1, MezzeList list2, MezzeFunction cmp,
                                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        int minLen = Math.min(list1.size(), list2.size());
+        Object[] src1 = list1.toArray();
+        Object[] src2 = list2.toArray();
+        int minLen = Math.min(src1.length, src2.length);
         for (int i = 0; i < minLen; i++) {
             Object result = callNode.call(cmp.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"a", "b"}, new Object[]{list1.get(i), list2.get(i)})});
+                new Object[]{MezzeRecord.fromFields(new String[]{"a", "b"}, new Object[]{src1[i], src2[i]})});
             if (result instanceof Long l && l != 0) {
                 return l < 0 ? -1L : 1L;
             }
         }
-        return Integer.compare(list1.size(), list2.size());
+        return Integer.compare(src1.length, src2.length);
     }
 
     @TruffleBoundary
     public static boolean isSorted(MezzeList list) {
         if (list.size() <= 1) return true;
-        for (int i = 1; i < list.size(); i++) {
-            if (compareElements(list.get(i - 1), list.get(i)) > 0) {
+        Object[] src = list.toArray();
+        for (int i = 1; i < src.length; i++) {
+            if (compareElements(src[i - 1], src[i]) > 0) {
                 return false;
             }
         }
@@ -1360,9 +1421,10 @@ public final class ListNatives {
     public static boolean isSortedBy(MezzeList list, MezzeFunction cmp,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.size() <= 1) return true;
-        for (int i = 1; i < list.size(); i++) {
+        Object[] src = list.toArray();
+        for (int i = 1; i < src.length; i++) {
             Object result = callNode.call(cmp.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"a", "b"}, new Object[]{list.get(i - 1), list.get(i)})});
+                new Object[]{MezzeRecord.fromFields(new String[]{"a", "b"}, new Object[]{src[i - 1], src[i]})});
             if (result instanceof Long l && l > 0) {
                 return false;
             }
@@ -1373,8 +1435,9 @@ public final class ListNatives {
     @TruffleBoundary
     public static boolean isSortedDescending(MezzeList list) {
         if (list.size() <= 1) return true;
-        for (int i = 1; i < list.size(); i++) {
-            if (compareElements(list.get(i - 1), list.get(i)) < 0) {
+        Object[] src = list.toArray();
+        for (int i = 1; i < src.length; i++) {
+            if (compareElements(src[i - 1], src[i]) < 0) {
                 return false;
             }
         }
@@ -1406,11 +1469,12 @@ public final class ListNatives {
      */
     @TruffleBoundary
     public static MezzeVariant binarySearch(MezzeList list, Object target) {
+        Object[] src = list.toArray();
         int lo = 0;
-        int hi = list.size() - 1;
+        int hi = src.length - 1;
         while (lo <= hi) {
             int mid = lo + (hi - lo) / 2;
-            int cmp = compareElements(list.get(mid), target);
+            int cmp = compareElements(src[mid], target);
             if (cmp == 0) {
                 return MezzeVariant.some((long) mid);
             } else if (cmp < 0) {
@@ -1430,11 +1494,12 @@ public final class ListNatives {
      */
     @TruffleBoundary
     public static long binarySearchInsertPoint(MezzeList list, Object target) {
+        Object[] src = list.toArray();
         int lo = 0;
-        int hi = list.size();
+        int hi = src.length;
         while (lo < hi) {
             int mid = lo + (hi - lo) / 2;
-            int cmp = compareElements(list.get(mid), target);
+            int cmp = compareElements(src[mid], target);
             if (cmp < 0) {
                 lo = mid + 1;
             } else {
@@ -1460,11 +1525,12 @@ public final class ListNatives {
      */
     @TruffleBoundary
     public static long upperBound(MezzeList list, Object target) {
+        Object[] src = list.toArray();
         int lo = 0;
-        int hi = list.size();
+        int hi = src.length;
         while (lo < hi) {
             int mid = lo + (hi - lo) / 2;
-            int cmp = compareElements(list.get(mid), target);
+            int cmp = compareElements(src[mid], target);
             if (cmp <= 0) {
                 lo = mid + 1;
             } else {
@@ -1497,12 +1563,13 @@ public final class ListNatives {
     @TruffleBoundary
     public static MezzeVariant binarySearchBy(MezzeList list, Object target, MezzeFunction cmp,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] src = list.toArray();
         int lo = 0;
-        int hi = list.size() - 1;
+        int hi = src.length - 1;
         while (lo <= hi) {
             int mid = lo + (hi - lo) / 2;
             Object cmpResult = callNode.call(cmp.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"a", "b"}, new Object[]{list.get(mid), target})});
+                new Object[]{MezzeRecord.fromFields(new String[]{"a", "b"}, new Object[]{src[mid], target})});
             int comparison = 0;
             if (cmpResult instanceof Long l) {
                 comparison = l.intValue();
