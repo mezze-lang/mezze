@@ -230,6 +230,57 @@ class ParserFuzzTest {
         }
     }
 
+    @Test
+    fun `deep nesting of varied constructs does not crash`() {
+        // Probe recursion paths that may NOT flow through the expression/type
+        // depth guards: nested lambdas, function types, match, do-blocks, record
+        // literals, and string interpolation. A StackOverflowError on any is a
+        // guard gap to close.
+        for (depth in listOf(50, 200, 600, 1200)) {
+            assertRobust("let f = " + "{x} -> ".repeat(depth) + "x")                 // nested lambdas
+            assertRobust("let t: " + "{} -> ".repeat(depth) + "Int = f")             // nested function types
+            assertRobust("let d = {} -> " + "do\n  ".repeat(depth) + "1")            // nested do-blocks
+            assertRobust("let r = " + "{ a = ".repeat(depth) + "1" + " }".repeat(depth)) // nested records
+            assertRobust("let s = " + "\"$(".repeat(depth) + "x" + ")\"".repeat(depth))  // nested string interpolation
+            assertRobust("let n = " + "-".repeat(depth) + "1")                       // unary chain
+            assertRobust("let m = " + "[".repeat(depth) + "1")                       // deep seq, unbalanced
+        }
+    }
+
+    @Test
+    fun `string and number literal edge cases never crash`() {
+        val literals = listOf(
+            // strings / interpolation / escapes
+            "\"", "\"\\", "\"\\n\"", "\"$(", "\"$()\"", "\"$(x", "\"$($(x))\"",
+            "\"unterminated", "\"\\u\"", "\"\\u12\"", "\"tab\\there\"", "\"\\\"",
+            "\"$(\"$(y)\")\"", "\"a $(b) c $(d",
+            // numbers / fractions / naturals
+            "1.2.3", "1e", "1e999", "0x", "0xGG", "1_", "_1", "1__2", "1.", ".5",
+            "1n", "3/4", "1.2.3.4", "999999999999999999999999999999", "0b", "0o9",
+            "1.0e", "1.e5", "0x1p3", "--1", "1..2"
+        )
+        for (lit in literals) {
+            assertRobust(lit)
+            assertRobust("let x = $lit")
+            assertRobust("let x = $lit + 1")
+        }
+    }
+
+    @Test
+    fun `whitespace, newline and comment injection never crashes`() {
+        val rng = Random(0x115L)
+        val inject = listOf(" ", "\n", "\t", "\n\n", "  ", "\r\n", " # note\n", "\n## doc\n", "\n   \n")
+        repeat(4000) {
+            val seed = seeds[rng.nextInt(seeds.size)]
+            val sb = StringBuilder()
+            for (c in seed) {
+                sb.append(c)
+                if (rng.nextInt(6) == 0) sb.append(inject[rng.nextInt(inject.size)])
+            }
+            assertRobust(sb.toString())
+        }
+    }
+
     private fun mutate(s: String, rng: Random, insertable: List<Char>): String {
         val chars = s.toMutableList()
         repeat(rng.nextInt(1, 6)) {
