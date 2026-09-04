@@ -13,6 +13,9 @@ let
 
 in
 {
+  # This file is the ENVIRONMENT ONLY — toolchain, env vars, PATH. Every runnable
+  # command (build the compiler, run the test suites, run mez, tooling, website,
+  # deploy) lives in the Justfile. Run `just` (or `just --list`) to see them.
   packages = [
     pkgs-unstable.kotlin
     graalvm
@@ -27,7 +30,7 @@ in
     # website deployment — see the Justfile
     pkgs.pulumi-bin
     pkgs.pulumiPackages.pulumi-nodejs
-    pkgs.just                     # command runner
+    pkgs.just                     # command runner — the entry point for everything
     pkgs.sops                     # secret file encryption
     pkgs.age                      # asymmetric backend for sops
   ] ++ lib.optionals pkgs.stdenv.isLinux [
@@ -58,144 +61,26 @@ in
     };
   };
 
-  # Set environment variables for Gradle and other Java tools
+  # Environment for Gradle and the Truffle/native-image toolchain.
   env = {
     JAVA_HOME = lib.mkForce "${graalvm}";
     JAVA_OPTS = "--enable-native-access=ALL-UNNAMED";
     LIBRARY_PATH = "${pkgs.zlib}/lib";
-  };
-
-  scripts = {
-    # Build the mez CLI → ./cli/build/install/mez/bin/mez
-    build.exec = ''
-      echo "🔨 Building the mez CLI..."
-      ./gradlew :cli:installDist
-      echo "✅ mez → ./cli/build/install/mez/bin/mez"
-    '';
-
-    clean.exec = ''
-      echo "🧹 gradle clean..."
-      ./gradlew clean
-    '';
-
-    # The typechecker and interpreter suites are heavy and share a lot of RAM,
-    # so run them as SEPARATE --no-daemon invocations, never one `gradle test`.
-    test.exec = ''
-      echo "🧪 parser + typechecker + interpreter (separate, --no-daemon)..."
-      ./gradlew :parser:test      --no-daemon
-      ./gradlew :typechecker:test --no-daemon
-      ./gradlew :interpreter:test --no-daemon
-    '';
-
-    # The dev CLI (built jar launcher). Builds it first if missing.
-    #   mez init hello   ·   mez exec app.mz   ·   mez check   ·   mez dev
-    mez.exec = ''
-      MEZ="./cli/build/install/mez/bin/mez"
-      if [ ! -x "$MEZ" ]; then
-        echo "mez not built yet — running: ./gradlew :cli:installDist" >&2
-        ./gradlew :cli:installDist
-      fi
-      exec "$MEZ" "$@"
-    '';
-
-    build-native.exec = ''
-      echo "🚀 Building the native mez binary..."
-      export PATH="${graalvm}/bin:${pkgs.gcc}/bin:$PATH"
-      export ZLIB_LIB_PATH="${pkgs.zlib}/lib"
-
-      ./gradlew :cli:nativeCompile
-
-      BIN="./cli/build/native/nativeCompile/mez"
-      if [ -f "$BIN" ]; then
-        echo "✅ Native binary: $BIN ($(du -h "$BIN" | cut -f1))"
-      else
-        echo "❌ Native compilation failed" >&2
-        exit 1
-      fi
-    '';
-
-    # Run the AOT native binary (build it with build-native first).
-    mez-native.exec = ''
-      BIN="./cli/build/native/nativeCompile/mez"
-      if [ -x "$BIN" ]; then
-        exec "$BIN" "$@"
-      else
-        echo "❌ Native binary not found. Run 'build-native' first." >&2
-        exit 1
-      fi
-    '';
-
-    ts-build.exec = ''
-      echo "🌲 Generating + building tree-sitter-mezze..."
-      cd tooling/tree-sitter-mezze
-      tree-sitter generate
-      tree-sitter build
-    '';
-
-    ts-test.exec = ''
-      echo "🌲 Running tree-sitter corpus tests..."
-      cd tooling/tree-sitter-mezze
-      tree-sitter generate
-      tree-sitter test
-    '';
-
-    vscode-install.exec = ''
-      echo "📦 Packaging VSCode extension..."
-      cd tooling/vscode-extension/extension
-      npx vsce package --allow-missing-repository
-      VSIX=$(ls -t *.vsix | head -1)
-      if [ -f "$VSIX" ]; then
-        echo "📥 Installing $VSIX..."
-        code --install-extension "$VSIX" --force
-        echo "✅ Extension installed! Reload VSCode to activate."
-      else
-        echo "❌ Failed to package extension"
-        exit 1
-      fi
-    '';
-
-    web-dev.exec = ''
-      echo "🌐 Starting website dev server..."
-      cd website
-      [ -d node_modules ] || npm install
-      npm run dev -- "$@"
-    '';
-
-    web-build.exec = ''
-      echo "🌐 Building website..."
-      cd website
-      [ -d node_modules ] || npm install
-      npm run build
-    '';
-
-    smoke-tests.exec = ''
-      echo "🧪 Running CLI smoke tests..."
-      ./docker-test-project/run-tests.sh "$@"
-    '';
+    # native-image needs the C toolchain + zlib; harmless when unused.
+    ZLIB_LIB_PATH = "${pkgs.zlib}/lib";
   };
 
   enterShell = ''
-    echo "🚀 Mezze development environment"
+    echo "🍽  Mezze dev environment  —  everything runs through 'just'"
     echo ""
-    echo "  Build & test"
-    echo "    build          build the mez CLI (./gradlew :cli:installDist)"
-    echo "    test           parser + typechecker + interpreter (separate suites)"
-    echo "    clean          gradle clean"
+    echo "   just              list every command"
+    echo "   just build        build the mez CLI"
+    echo "   just test         parser + typechecker + interpreter suites"
+    echo "   just mez ...       run mez, e.g.  just mez init hello  ·  just mez exec app.mz"
+    echo "   just site-dev     website dev server"
     echo ""
-    echo "  Run the compiler"
-    echo "    mez ...        dev CLI, e.g.  mez init hello  ·  mez exec app.mz  ·  mez check"
-    echo "    build-native   build the AOT native binary"
-    echo "    mez-native ... run the native binary"
-    echo ""
-    echo "  Tooling"
-    echo "    ts-build / ts-test   tree-sitter grammar (tooling/tree-sitter-mezze)"
-    echo "    vscode-install       package + install the VSCode extension"
-    echo "    smoke-tests          CLI smoke tests (docker-test-project)"
-    echo ""
-    echo "  Website (or use: just <recipe>)"
-    echo "    web-dev / web-build  dev server / static build (website/)"
-    echo ""
-    echo "  Try it:  mez init hello && cd hello && mez dev"
+    echo "   (direnv loads this env, so 'just' works directly. Outside it:"
+    echo "    devenv shell -- just <recipe> )"
     echo ""
   '';
 

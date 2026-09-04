@@ -1,175 +1,245 @@
-# Task runner for the Mezze repo.
+# Mezze — one task runner for the whole repo. Run `just` to see everything.
 #
-#   language/  — build, test and run the mez compiler (thin ./gradlew wrappers).
-#                For richer dev commands use the devenv shell (build, test, mez …).
-#   website/   — the mezze-lang.org marketing site + browser playground, plus its
-#                Cloudflare deploy pipeline. This is the bulk of the file below.
+# ENVIRONMENT
+#   The toolchain (GraalVM/JDK 25, Kotlin, Node, tree-sitter, just) comes from the
+#   devenv shell. direnv (.envrc) loads it automatically, so inside this repo
+#   `just <recipe>` just works. From a shell WITHOUT direnv (CI, an agent, a bare
+#   terminal), wrap it:
 #
-# Website one-time setup:
+#       devenv shell -- just <recipe>          # e.g. devenv shell -- just test
+#
+# TWO AREAS
+#   • the mez compiler — build / run / test        (groups: mez, test)
+#   • the website       — mezze-lang.org + playground + Cloudflare deploy
+#                         (groups: site, deploy)
+#
+# WEBSITE one-time setup:
 #   1. your age private key is already at ~/.config/sops/age/keys.txt
 #      (.sops.yaml uses the same recipient as shriyans.im)
-#   2. `just secrets-edit` — populate the CLOUDFLARE_* values
-#   3. `just infra-install && just infra-up` — provision Pages + DNS
-#   4. `just deploy` — build + upload
-#
-# All secrets live in secrets.yaml, encrypted in place by sops (safe to commit).
+#   2. `just secrets-edit`                    — populate the CLOUDFLARE_* values
+#   3. `just infra-install && just infra-up`  — provision Pages + DNS
+#   4. `just deploy`                          — build + upload
+#   All secrets live in secrets.yaml, encrypted in place by sops (safe to commit).
 
 set shell := ["bash", "-cu"]
 set dotenv-load := false
 
-site := "website"
+mez     := "cli/build/install/mez/bin/mez"
+site    := "website"
 project := "mezze-lang"
-stack := "prod"
+stack   := "prod"
 
-# bare `just` lists all recipes
+# bare `just` lists every recipe, grouped
 default:
-    @just --list --unsorted
+    @just --list
 
 # ============================================================
-# language / compiler  (the mez CLI — thin ./gradlew wrappers)
+# compiler — build & run mez
 # ============================================================
 
 # Build the mez CLI → cli/build/install/mez/bin/mez
-mez-build:
+[group('mez')]
+build:
     ./gradlew :cli:installDist
-    @echo "mez → ./cli/build/install/mez/bin/mez"
+    @echo "→ {{mez}}"
 
-# Run the dev CLI, e.g.  just mez init hello   ·   just mez exec app.mz
-mez *args:
-    @[ -x cli/build/install/mez/bin/mez ] || ./gradlew :cli:installDist
-    @cli/build/install/mez/bin/mez {{args}}
+# internal: build the CLI only if the launcher is missing
+[private]
+_mez:
+    @[ -x {{mez}} ] || ./gradlew :cli:installDist
 
-# All test suites, run SEPARATELY (heavy; they share a lot of RAM)
-mez-test:
-    ./gradlew :parser:test      --no-daemon
-    ./gradlew :typechecker:test --no-daemon
-    ./gradlew :interpreter:test --no-daemon
+# Run mez with any args:  just mez init hello   ·   just mez exec app.mz
+[group('mez')]
+mez *args: _mez
+    @{{mez}} {{args}}
 
-# One suite, e.g.  just mez-test-one typechecker
-mez-test-one module:
-    ./gradlew :{{module}}:test --no-daemon
+# Run a single .mz file:  just run app.mz
+[group('mez')]
+run file: _mez
+    {{mez}} exec {{file}}
+
+# Type-check a file or the current project:  just check [path]
+[group('mez')]
+check *args: _mez
+    {{mez}} check {{args}}
+
+# Format source:  just fmt [path]
+[group('mez')]
+fmt *args: _mez
+    {{mez}} fmt {{args}}
+
+# Explain a diagnostic code:  just explain T0205
+[group('mez')]
+explain code: _mez
+    {{mez}} explain {{code}}
 
 # AOT native binary → cli/build/native/nativeCompile/mez
-mez-native:
+[group('mez')]
+native:
     ./gradlew :cli:nativeCompile
-    @echo "native → ./cli/build/native/nativeCompile/mez"
+    @echo "→ cli/build/native/nativeCompile/mez"
+
+# gradle clean (compiler build outputs)
+[group('mez')]
+clean:
+    ./gradlew clean
+
+# ============================================================
+# compiler — tests
+# ============================================================
+# The suites are heavy and share a lot of RAM: always run each as its OWN
+# --no-daemon invocation, never one `gradle test`. Output is tee'd to logs/.
+
+# One module's suite → logs/<module>-test.log :  just test-one typechecker
+[group('test')]
+test-one module:
+    @mkdir -p logs
+    ./gradlew :{{module}}:test --no-daemon 2>&1 | tee logs/{{module}}-test.log
+
+# The usual set: parser + typechecker + interpreter (separate, logged)
+[group('test')]
+test: (test-one "parser") (test-one "typechecker") (test-one "interpreter")
+
+# Full gate: the three above + cli
+[group('test')]
+gate: test (test-one "cli")
+
+# Just one class:  just test-class typechecker '*AntiHang*'
+[group('test')]
+test-class module pattern:
+    @mkdir -p logs
+    ./gradlew :{{module}}:test --no-daemon --tests '{{pattern}}' 2>&1 | tee logs/{{module}}-{{pattern}}.log
+
+# ============================================================
+# tooling
+# ============================================================
+
+# Generate + build the tree-sitter-mezze grammar
+[group('tooling')]
+ts-build:
+    cd tooling/tree-sitter-mezze && tree-sitter generate && tree-sitter build
+
+# Run the tree-sitter corpus tests
+[group('tooling')]
+ts-test:
+    cd tooling/tree-sitter-mezze && tree-sitter generate && tree-sitter test
+
+# Package + install the VSCode extension into your local VSCode
+[group('tooling')]
+vscode-install:
+    cd tooling/vscode-extension/extension && \
+      npx vsce package --allow-missing-repository && \
+      code --install-extension "$(ls -t *.vsix | head -1)" --force
+
+# CLI smoke tests (docker-test-project)
+[group('tooling')]
+smoke-tests *args:
+    ./docker-test-project/run-tests.sh {{args}}
 
 # ============================================================
 # website — dev / build
 # ============================================================
 
-# Dev server
-dev:
+# Website dev server
+[group('site')]
+site-dev:
     cd {{site}} && npm run dev -- --host 0.0.0.0
 
-# Type + template checks
-check:
+# astro type + template checks
+[group('site')]
+site-check:
     cd {{site}} && npx astro check
 
 # Static production build → website/dist/
-build:
+[group('site')]
+site-build:
     cd {{site}} && npm run build
 
-# Skipped automatically when public/wasm is newer than the compiler sources.
-# Compile the Mezze compiler to WebAssembly (Docker; slow)
+# Compile the Mezze compiler to WebAssembly (Docker; slow; skipped when current)
+[group('site')]
 wasm:
     cd {{site}} && npm run build:wasm
 
 # Rebuild the WASM runtime even if it looks current
+[group('site')]
 wasm-force:
     cd {{site}} && ./wasm-build/build.sh --force
 
-# The samples are fixed, so their types are extracted once on the JVM rather
-# than shipping the 58MB runtime to a page that never runs code (~28KB output).
-# Precompute hover types for the landing-page samples
+# Precompute hover types for the landing-page samples (needs the jars wasm built)
+[group('site')]
 hovers:
     cd {{site}} && ./wasm-build/hovers.sh
 
-#   wasm    compiler -> WebAssembly (Docker, slow; skipped when current)
-#   hovers  type hints for the static samples (needs the jars wasm just built)
-#   build   astro check + astro build, which embeds both
-#
-# Use `just build` alone only when the runtime and hover data are current.
-# Everything: wasm -> hovers -> site. A full build from a clean checkout
-release: wasm hovers build
-
-# Alias kept for muscle memory — same thing as `release`.
-build-all: release
+# Everything: wasm -> hovers -> site build (a full build from a clean checkout)
+[group('site')]
+release: wasm hovers site-build
 
 # Serve the built site locally
-preview: build
+[group('site')]
+site-preview: site-build
     cd {{site}} && npm run preview -- --host 0.0.0.0 --port 4322
 
-# Remove build artifacts (leaves public/wasm — that is expensive to rebuild)
-clean:
+# Remove website build artifacts (leaves public/wasm — expensive to rebuild)
+[group('site')]
+site-clean:
     cd {{site}} && rm -rf dist .astro
 
 # ============================================================
-# secrets — sops + age
+# deploy — secrets / infra / release  (Cloudflare via Pulumi)
 # ============================================================
 
 # Edit the encrypted secrets file (creates it on first run per .sops.yaml)
+[group('deploy')]
 secrets-edit:
     sops secrets.yaml
 
 # Print decrypted secrets to stdout (careful — don't paste this anywhere)
+[group('deploy')]
 secrets-view:
     @sops -d secrets.yaml
 
-# ============================================================
-# infra (Pulumi + Cloudflare)
-# ============================================================
-
 # Install infra/ dependencies
+[group('deploy')]
 infra-install:
     cd infra && npm install
 
-# Pick an existing stack, or create it (idempotent)
+# internal: pick or create the pulumi stack (idempotent)
+[private]
 _stack:
     @cd infra && (pulumi stack select {{stack}} 2>/dev/null || pulumi stack init {{stack}}) >/dev/null
 
 # Dry-run: show what pulumi would change
+[group('deploy')]
 infra-preview: _stack
     sops exec-env secrets.yaml 'cd infra && pulumi preview'
 
 # Provision / update Cloudflare Pages project + custom domains + DNS
+[group('deploy')]
 infra-up: _stack
     sops exec-env secrets.yaml 'cd infra && pulumi up'
 
 # Tear down everything Pulumi created
+[group('deploy')]
 infra-destroy: _stack
     sops exec-env secrets.yaml 'cd infra && pulumi destroy'
 
-# ============================================================
-# deploy
-# ============================================================
-
-# Upload the WebAssembly runtime to R2.
-#
-# Pages rejects files over 25 MiB and the runtime is ~56, so it is served from
-# the bucket instead. Both files go together: mezze.js finds its .wasm through
-# document.currentScript.src, so they must share an origin.
-# Push the runtime to the R2 bucket
+# Push the compressed WASM runtime to the R2 bucket (Pages rejects >25 MiB).
+# Both mezze.js and mezze.js.wasm go together — they must share an origin.
+[group('deploy')]
 push-wasm:
     @cd infra && pulumi stack select {{stack}} >/dev/null 2>&1
     node {{site}}/tools/compress-wasm.mjs
     sops exec-env secrets.yaml 'set -euo pipefail; B=$(cd infra && pulumi stack output runtimeBucket); for f in mezze.js mezze.js.wasm; do echo "  uploading $f"; if [ "$f" = mezze.js.wasm ]; then CT=application/wasm; else CT=text/javascript; fi; npx --yes wrangler@latest r2 object put "$B/wasm/$f" --file "{{site}}/public/wasm/.br/$f" --remote --content-encoding br --content-type "$CT" --cache-control "public, max-age=31536000, immutable"; done'
 
-# The compressed WASM runtime is uploaded to R2 BEFORE the site is built and
-# deployed — they are one unit: mezze.js is fetched from the R2 origin the site
-# was built to point at (PUBLIC_WASM_BASE), so the runtime must already be live
-# at that URL when the referring HTML ships. Order: wasm -> hovers (artifacts) ->
-# push-wasm (compress + upload) -> build ONCE with the R2 URL -> deploy Pages.
-#
-# Note this deliberately does NOT depend on `release`: `release` ends in a site
-# `build` with no PUBLIC_WASM_BASE, which deploy would only have to throw away and
-# rebuild. We take `release`'s artifact halves (wasm, hovers) and do the single
-# authoritative build here, after the runtime URL is known.
-# Full pipeline: build the runtime, upload it, then build+deploy the site against it
+# Full pipeline: build the runtime, upload it, then build+deploy the site against it.
+# Order matters: the runtime must be live at PUBLIC_WASM_BASE before the HTML ships.
+[group('deploy')]
 deploy: wasm hovers push-wasm
     @cd infra && pulumi stack select {{stack}} >/dev/null 2>&1
     sops exec-env secrets.yaml 'set -euo pipefail; URL=$(cd infra && pulumi stack output runtimeUrl); echo "  runtime: $URL"; PUBLIC_WASM_BASE="$URL" npm --prefix {{site}} run build; rm -rf {{site}}/dist/wasm; npx --yes wrangler@latest pages deploy {{site}}/dist --project-name {{project}} --branch main'
+
 # Deploy without a fresh build (uses whatever is in website/dist/)
+[group('deploy')]
 deploy-only:
     sops exec-env secrets.yaml \
       'npx --yes wrangler@latest pages deploy {{site}}/dist --project-name {{project}} --branch main'
