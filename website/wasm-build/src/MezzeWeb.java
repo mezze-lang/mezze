@@ -13,6 +13,10 @@ import com.mezze.language.langservice.diagnostics.JsonDiagnosticFormatter;
 import com.mezze.language.langservice.printing.ErrorFormatter;
 import com.mezze.language.langservice.printing.ParseErrorFormatter;
 import com.mezze.language.langservice.hover.HoverInfo;
+import com.mezze.language.langservice.completion.CompletionEngine;
+import com.mezze.language.langservice.completion.CompletionContext;
+import com.mezze.language.langservice.completion.CompletionCandidate;
+import com.mezze.language.store.InMemoryMezzeStore;
 import com.mezze.language.typechecker.TypeCheckOutputKt;
 import com.mezze.language.typechecker.SourceContext;
 import com.mezze.language.parsedast.Loc;
@@ -51,6 +55,11 @@ public final class MezzeWeb {
     // line/col are 1-based, matching Loc.
     @JS(args = {"fn"}, value = "globalThis.typeAt = (src, line, col) => fn(src + '\\u0000' + line + '\\u0000' + col);")
     private static native void installTypeAt(Function<JSString, JSString> fn);
+
+    // line/col are 1-based here too. Returns a JSON array of candidates.
+    @JS(args = {"fn"}, value = "globalThis.completeMezze = (src, line, col) => JSON.parse(fn(src + '\\u0000' + line + '\\u0000' + col));")
+    private static native void installComplete(Function<JSString, JSString> fn);
+
 
     public static String run(String source) {
         // Empty or main-less input crashes deep in the pipeline
@@ -294,6 +303,325 @@ public final class MezzeWeb {
         return end > 0 ? s.substring(i + 8, end) : s.substring(i + 8, Math.min(i + 308, s.length()));
     }
 
+    /**
+     * Completion candidates at a position, as a JSON array.
+     *
+     * The engine lives in :langservice and knows nothing about lsp4j or about
+     * this bridge, so the work here is building its context and turning its
+     * candidates into JSON. Fields the browser cannot use are dropped:
+     * additionalEdits and resolveData both assume a workspace on disk.
+     */
+    /**
+     * Module paths for import completion, read once from stdlib/MANIFEST.txt.
+     *
+     * The engine asks the store for these. PrecompiledStdlib.stdlibTypedModules
+     * only holds PRELUDE modules (27 of 65), so std::effects::*, std::math::*
+     * and std::codec::* were invisible to `use ` completion. The manifest lists
+     * every stdlib file and ships in the same jar, so it is the honest source
+     * for "what could I import".
+     */
+    private static InMemoryMezzeStore moduleStore;
+
+    /**
+     * The most recent typecheck that produced a usable typed module.
+     *
+     * The engine takes a `lastSuccessful` for exactly this: the buffer being
+     * completed is mid-edit, so its own typecheck fails and carries no types
+     * for the locals in scope. Handing it the same failed result twice meant
+     * dot completion worked on top-level bindings (whose types survive a
+     * failed check) and returned nothing for anything inside a do block.
+     */
+    private static com.mezze.language.typechecker.TypeCheckResult lastGood;
+
+    private static synchronized InMemoryMezzeStore moduleStore() {
+        if (moduleStore != null) return moduleStore;
+        InMemoryMezzeStore st = new InMemoryMezzeStore();
+        try (var in = MezzeWeb.class.getResourceAsStream("/stdlib/MANIFEST.txt")) {
+            if (in != null) {
+                String all = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+                for (String raw : all.split("\n")) {
+                    String f = raw.trim();
+                    if (!f.endsWith(".mz")) continue;
+                    // build/resources/main/std/effects/log.mz -> std::effects::log
+                    int i = f.indexOf("/std/");
+                    String rel = i >= 0 ? f.substring(i + 1) : f;
+                    String path = rel.substring(0, rel.length() - 3).replace("/", "::");
+                    if (path.endsWith("_prelude")) continue;
+                    st.putModule(path, f, "");
+                }
+            }
+        } catch (Throwable ignored) {
+            // No manifest: import completion falls back to typed modules.
+        }
+        moduleStore = st;
+        return st;
+    }
+
+    /**
+     * Names a module exports, for `use a::b::{ … }` completion.
+     *
+     * Read from the module's own source, which ships in the jar beside the
+     * manifest. The completion engine has no path for this — its import
+     * regex stops at `::{` — and the alternatives are worse: the precompiled
+     * types cover only the prelude, and a store lookup needs a project.
+     *
+     * Returns null when the module is unknown, so the caller can fall back.
+     */
+    private static java.util.List<String> moduleExports(String modulePath) {
+        String res = "/stdlib/" + modulePath.replace("::", "/") + ".mz";
+        try (var in = MezzeWeb.class.getResourceAsStream(res)) {
+            if (in == null) return null;
+            String src = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            var out = new java.util.ArrayList<String>();
+            for (String raw : src.split("\n")) {
+                String t = raw.trim();
+                if (!t.startsWith("pub ")) continue;
+                String rest = t.substring(4).trim();
+                // pub let / type / newtype / effect / ability NAME …
+                for (String kw : new String[]{"let ", "type ", "newtype ", "effect ", "ability "}) {
+                    if (!rest.startsWith(kw)) continue;
+                    String name = rest.substring(kw.length()).trim();
+                    int end = 0;
+                    while (end < name.length()
+                           && (Character.isLetterOrDigit(name.charAt(end)) || name.charAt(end) == '_')) end++;
+                    if (end > 0) out.add(name.substring(0, end));
+                    break;
+                }
+            }
+            return out;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Completion inside `use a::b::{ … }`, which the engine does not handle.
+     *
+     * Returns null when the cursor is not in such a block, so `complete`
+     * carries on to the engine.
+     */
+    private static String selectiveImport(String source, int line, int col) {
+        String[] lines = source.split("\n", -1);
+        if (line - 1 < 0 || line - 1 >= lines.length) return null;
+        String cur = lines[line - 1];
+        String upto = cur.substring(0, Math.min(col - 1, cur.length()));
+
+        java.util.regex.Matcher m = java.util.regex.Pattern
+            .compile("^\\s*(?:pub\\s+)?use\\s+([\\w:]+)::\\{([^}]*)$")
+            .matcher(upto);
+        if (!m.find()) return null;
+
+        String modulePath = m.group(1);
+        String inside = m.group(2);
+        // What is already typed after the last comma, and what is already
+        // listed — an import should not offer a name twice.
+        int lastComma = inside.lastIndexOf(',');
+        String typed = inside.substring(lastComma + 1).trim();
+        var already = new java.util.HashSet<String>();
+        for (String part : inside.split(",")) {
+            String t = part.trim();
+            if (!t.isEmpty()) already.add(t);
+        }
+        already.remove(typed);
+
+        java.util.List<String> names = moduleExports(modulePath);
+        // An unknown module means an empty list, not a fall-through: inside
+        // `::{ … }` the engine has no candidates and answers with keywords,
+        // which is worse than nothing.
+        if (names == null) return "[]";
+
+        int startCol = col - 1 - typed.length();
+        StringBuilder out = new StringBuilder("[");
+        int n = 0;
+        for (String name : names) {
+            if (!name.startsWith(typed) || already.contains(name)) continue;
+            if (n++ > 0) out.append(',');
+            out.append('{')
+               .append("\"label\":").append(jsonOrNull(name)).append(',')
+               .append("\"kind\":\"Variable\",")
+               .append("\"detail\":").append(jsonOrNull(modulePath)).append(',')
+               .append("\"insertText\":").append(jsonOrNull(name)).append(',')
+               .append("\"snippet\":false,")
+               .append("\"sortText\":").append(jsonOrNull(name)).append(',')
+               .append("\"edit\":{\"startLine\":").append(line - 1)
+               .append(",\"startCol\":").append(startCol)
+               .append(",\"endLine\":").append(line - 1)
+               .append(",\"endCol\":").append(col - 1)
+               .append(",\"newText\":").append(jsonOrNull(name)).append('}')
+               .append('}');
+        }
+        return out.append(']').toString();
+    }
+
+    /**
+     * Completion after a qualified prefix in an expression: `map::`, `list::f`.
+     *
+     * Resolved against the imported module's exports, the same source the
+     * selective-import path uses. Without this the engine treats `map::` as
+     * an ordinary identifier position and answers with variant constructors.
+     *
+     * Returns null when the cursor is not after such a prefix.
+     */
+    private static String qualifiedName(String source, int line, int col) {
+        String[] lines = source.split("\n", -1);
+        if (line - 1 < 0 || line - 1 >= lines.length) return null;
+        String cur = lines[line - 1];
+        String upto = cur.substring(0, Math.min(col - 1, cur.length()));
+        if (upto.stripLeading().startsWith("use ")) return null;  // handled elsewhere
+
+        java.util.regex.Matcher m = java.util.regex.Pattern
+            .compile("([a-z_][\\w]*)::([\\w]*)$").matcher(upto);
+        if (!m.find()) return null;
+        String alias = m.group(1);
+        String typed = m.group(2);
+
+        // The alias is whatever the file imported: `use std::collections::map`
+        // brings `map` into scope for `map::empty`.
+        String modulePath = null;
+        for (String l : lines) {
+            java.util.regex.Matcher im = java.util.regex.Pattern
+                .compile("^\\s*(?:pub\\s+)?use\\s+([\\w:]+)\\s*$").matcher(l);
+            if (im.find() && im.group(1).endsWith("::" + alias)) { modulePath = im.group(1); break; }
+        }
+        if (modulePath == null) return null;
+
+        java.util.List<String> names = moduleExports(modulePath);
+        if (names == null) return "[]";
+
+        int startCol = col - 1 - typed.length();
+        StringBuilder out = new StringBuilder("[");
+        int n = 0;
+        for (String name : names) {
+            if (!name.startsWith(typed)) continue;
+            if (n++ > 0) out.append(',');
+            out.append('{')
+               .append("\"label\":").append(jsonOrNull(name)).append(',')
+               .append("\"kind\":\"Function\",")
+               .append("\"detail\":").append(jsonOrNull(modulePath)).append(',')
+               .append("\"insertText\":").append(jsonOrNull(name)).append(',')
+               .append("\"snippet\":false,")
+               .append("\"sortText\":").append(jsonOrNull(name)).append(',')
+               .append("\"edit\":{\"startLine\":").append(line - 1)
+               .append(",\"startCol\":").append(startCol)
+               .append(",\"endLine\":").append(line - 1)
+               .append(",\"endCol\":").append(col - 1)
+               .append(",\"newText\":").append(jsonOrNull(name)).append('}')
+               .append('}');
+        }
+        return out.append(']').toString();
+    }
+
+    public static String complete(String source, int line, int col) {
+        if (source == null) return "[]";
+        // Handled here rather than by the engine, whose import regex stops
+        // at `::{` and would fall through to keywords.
+        String selective = selectiveImport(source, line, col);
+        if (selective != null) return selective;
+        String qualified = qualifiedName(source, line, col);
+        if (qualified != null) return qualified;
+        try {
+            MezzeParser parser = new MezzeParser();
+            // parseWithRecovery, not parseParsedModule: the buffer being
+            // completed is mid-edit by definition — a dangling `.` or a
+            // half-typed `use` is a hard parse error, and the strict parser
+            // would throw before the engine ever sees it.
+            ParsedModule m = parser.parseWithRecovery(source, "/tmp/playground.mz").getModule();
+            TypeChecker tc = new TypeChecker();
+
+            // The typecheck itself can THROW rather than return a Failure:
+            // `use std::ef` raises ModuleNotFound while the reader is still
+            // typing the path. Completion still has useful context without it
+            // (keywords, the module list, bindings from the parse), so a throw
+            // must not lose the whole request.
+            com.mezze.language.typechecker.TypeCheckResult res = null;
+            try {
+                TypeChecker.TypeCheckResult r =
+                    tc.checkParsedModule(m, Path.of("/tmp"), null, true);
+                res = TypeCheckOutputKt.toHoverResult(r);
+                // Only a SUCCESS is worth remembering. A Failure also carries a
+                // typedModule, so caching on that overwrote the good one with
+                // the broken buffer on the very first request and the fallback
+                // had nothing better to offer.
+                if (r instanceof TypeChecker.TypeCheckResult.Success) lastGood = res;
+            } catch (Throwable ignored) {
+                // res stays null; the engine treats it as "no type info yet".
+            }
+
+            CompletionContext ctx = new CompletionContext(
+                "file:///tmp/playground.mz",
+                source,
+                line - 1,      // engine is 0-based, the editor is 1-based
+                col - 1,
+                res,
+                tc.getTypeAliases(),
+                m,
+                lastGood != null ? lastGood : res,   // lastSuccessful
+                moduleStore(), // module paths for `use ` completion
+                parser,        // strip-dot recovery reparses with these
+                tc,
+                null,          // workspaceRoot: nothing on disk
+                (kotlin.jvm.functions.Function1<String, java.nio.file.Path>) uri -> null,
+                (kotlin.jvm.functions.Function1<String, String>) use -> use,
+                (kotlin.jvm.functions.Function1<String, kotlin.Unit>) msg -> kotlin.Unit.INSTANCE);
+
+            List<CompletionCandidate> items = CompletionEngine.INSTANCE.complete(ctx);
+
+            StringBuilder out = new StringBuilder("[");
+            for (int i = 0; i < items.size(); i++) {
+                CompletionCandidate c = items.get(i);
+                if (i > 0) out.append(',');
+                out.append('{')
+                   .append("\"label\":").append(jsonOrNull(c.getLabel())).append(',')
+                   .append("\"kind\":").append(jsonOrNull(c.getKind().name())).append(',')
+                   .append("\"detail\":").append(jsonOrNull(c.getDetail())).append(',')
+                   .append("\"insertText\":").append(jsonOrNull(
+                       c.getInsertText() == null ? c.getLabel() : c.getInsertText())).append(',')
+                   .append("\"snippet\":").append(c.getSnippet()).append(',')
+                   .append("\"sortText\":").append(jsonOrNull(c.getSortText())).append(',')
+                   // The engine knows exactly which span an item replaces —
+                   // for a module path that is the whole `std::eff` typed so
+                   // far, not just the last identifier. Without this the
+                   // editor has to guess, and guessing on an identifier
+                   // boundary leaves `use std::std::effects::http`.
+                   .append("\"edit\":").append(editJson(c.getTextEdit()))
+                   .append('}');
+            }
+            return out.append(']').toString();
+        } catch (Throwable t) {
+            return "[]";
+        }
+    }
+
+    /** A candidate's replacement range, 0-based and half-open, or null. */
+    private static String editJson(com.mezze.language.langservice.completion.NeutralTextEdit e) {
+        if (e == null) return "null";
+        return "{\"startLine\":" + e.getStartLine()
+             + ",\"startCol\":" + e.getStartCol()
+             + ",\"endLine\":" + e.getEndLine()
+             + ",\"endCol\":" + e.getEndCol()
+             + ",\"newText\":" + jsonOrNull(e.getNewText()) + "}";
+    }
+
+    /** Like jsonStr, but a null value becomes the JSON literal null. */
+    private static String jsonOrNull(String v) {
+        if (v == null) return "null";
+        StringBuilder b = new StringBuilder("\"");
+        for (int i = 0; i < v.length(); i++) {
+            char ch = v.charAt(i);
+            switch (ch) {
+                case '"':  b.append("\\\""); break;
+                case '\\': b.append("\\\\"); break;
+                case '\n': b.append("\\n"); break;
+                case '\r': b.append("\\r"); break;
+                case '\t': b.append("\\t"); break;
+                default:
+                    if (ch < 0x20) b.append(String.format("\\u%04x", (int) ch));
+                    else b.append(ch);
+            }
+        }
+        return b.append('"').toString();
+    }
+
     public static void main(String[] args) {
         System.setProperty("polyglot.engine.allowUnsupportedPlatform", "true");
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false");
@@ -325,6 +653,14 @@ public final class MezzeWeb {
                     Integer.parseInt(parts[1]), Integer.parseInt(parts[2])));
             } catch (NumberFormatException e) { return JSString.of(""); }
         });
-        System.out.println("mezze-wasm ready: runMezze(src), formatMezze(src)");
+        installComplete(js -> {
+            String[] parts = js.asString().split("\u0000", -1);
+            if (parts.length != 3) return JSString.of("[]");
+            try {
+                return JSString.of(complete(parts[0],
+                    Integer.parseInt(parts[1]), Integer.parseInt(parts[2])));
+            } catch (NumberFormatException e) { return JSString.of("[]"); }
+        });
+        System.out.println("mezze-wasm ready: runMezze(src), formatMezze(src), completeMezze(src, line, col)");
     }
 }

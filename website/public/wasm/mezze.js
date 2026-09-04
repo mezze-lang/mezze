@@ -1380,6 +1380,11 @@ wasmImports.jsbody = {
 			globalThis.checkMezze = (src) => JSON.parse(fn(src));
 		}catch( e ) {
 			conversion.handleJSError(e);}}).call(...args),
+	'_LMezzeWeb.installComplete___Function_V' : (...args) => (function(fn){
+		try{
+			globalThis.completeMezze = (src, line, col) => JSON.parse(fn(src + '\u0000' + line + '\u0000' + col));
+		}catch( e ) {
+			conversion.handleJSError(e);}}).call(...args),
 	'_LMezzeWeb.installFmt___Function_V' : (...args) => (function(fn){
 		try{
 			globalThis.formatMezze = (src, cols) => fn(src + '\u0000' + (cols || 0));

@@ -22,7 +22,31 @@ declare global {
     /** cols is optional; 0 or omitted keeps the CLI width. */
     formatMezze?: (source: string, cols?: number) => string
     typeAt?: (source: string, line: number, col: number) => string
+    /** Completion candidates at a 1-based position. */
+    completeMezze?: (source: string, line: number, col: number) => Completion[]
   }
+}
+
+/** One completion candidate, as the WASM bridge serialises it. */
+export interface Completion {
+  label: string
+  kind: string
+  detail: string | null
+  insertText: string
+  snippet: boolean
+  sortText: string | null
+  /**
+   * Exact span this item replaces, 0-based and half-open, when the engine
+   * knows it. A module path replaces the whole `std::eff` typed so far, which
+   * is wider than the identifier fragment an editor would guess at.
+   */
+  edit?: {
+    startLine: number
+    startCol: number
+    endLine: number
+    endCol: number
+    newText: string
+  } | null
 }
 
 export interface MezzeRuntime {

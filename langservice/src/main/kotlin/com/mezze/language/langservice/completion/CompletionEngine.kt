@@ -509,12 +509,20 @@ object CompletionEngine {
             ?: return emptyList()
 
         val funcName = funcCallMatch.functionName
-        // Mid-call the buffer usually doesn't parse — the `{` the user just opened
-        // is unbalanced — so the current type-check's typed module / resolved
-        // imports are empty. Resolve the callee's type from the last good
-        // type-check too (the #159 fallback dot completion already uses), else
-        // typing `foo { ` after an import offers no field names.
-        val funcType = findFunctionType(funcName, ctx) ?: return emptyList()
+        // A method resolves against the receiver's type (needs a good type-check
+        // result); a plain call resolves against a binding of that name, with the
+        // #29 mid-edit fallback to the last successful check. Mid-call the buffer
+        // usually doesn't parse (the `{` the user just opened is unbalanced), so
+        // the current typed module / resolved imports are empty — without the
+        // fallback, typing `foo { ` after an import offers no field names.
+        val result = ctx.typeCheckResult
+        val receiver = funcCallMatch.receiverName
+        val funcType = (
+            if (receiver != null && result != null)
+                findReceiverType(receiver, result, line, character, ctx)
+                    ?.let { methodTypeOn(it, funcName, ctx, result) }
+            else null
+        ) ?: findFunctionType(funcName, ctx) ?: return emptyList()
 
         val recordFields = extractRecordParameterFields(funcType)
         if (recordFields.isEmpty()) return emptyList()
@@ -641,7 +649,16 @@ object CompletionEngine {
                             }
                             val funcName = extractIdentifierBefore(upToBrace)
                             if (funcName != null) {
-                                return FunctionCallContext(funcName)
+                                // For `xs.insert {` the identifier is a method,
+                                // so keep the receiver: without it the lookup
+                                // below searches for a top-level `insert`,
+                                // finds nothing, and method calls get no
+                                // argument-name completion at all.
+                                val head = upToBrace.trimEnd().dropLast(funcName.length).trimEnd()
+                                val recv = if (head.endsWith(".")) {
+                                    extractIdentifierBefore(head.dropLast(1))
+                                } else null
+                                return FunctionCallContext(funcName, recv)
                             }
                             return null
                         }
@@ -652,7 +669,15 @@ object CompletionEngine {
         return null
     }
 
-    private data class FunctionCallContext(val functionName: String)
+    /**
+     * [receiverName] is set when the call is a METHOD call — `xs.insert {` —
+     * where the parameters live on the receiver's type rather than on a
+     * top-level binding of that name.
+     */
+    private data class FunctionCallContext(
+        val functionName: String,
+        val receiverName: String? = null,
+    )
 
     /**
      * Extract the identifier immediately before a position (skipping whitespace).
@@ -703,6 +728,78 @@ object CompletionEngine {
     /**
      * Extract record field names and types from a function's parameter type.
      */
+    /**
+     * The function type of [method] when called on [receiver], or null.
+     *
+     * A method is an ability operation or an inherent impl member on the
+     * receiver's type, not a top-level binding, so [findFunctionType] never
+     * finds one. Returns the op's declared type so the caller can pull its
+     * record parameter apart exactly as it does for a plain function.
+     */
+    private fun methodTypeOn(
+        receiver: MezzeType,
+        method: String,
+        ctx: CompletionContext,
+        result: TypeCheckResult,
+    ): MezzeType? {
+        val typeName = getTypeName(receiver)
+        val convert = { ann: ParsedTypeAnnotation? ->
+            try {
+                ann?.let { com.mezze.language.typechecker.util.TypeAnnotationConverter.convert(it) }
+            } catch (_: Exception) { null }
+        }
+
+        // Ability operations whose ability applies to this receiver.
+        val localAbilities = ctx.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>() ?: emptyList()
+        for (ability in result.importedAbilities.values + localAbilities) {
+            if (!isBuiltinAbilityForType(ability.name, receiver)) continue
+            val op = ability.operations.firstOrNull { it.name == method } ?: continue
+            val param = convert(op.paramType) ?: continue
+            val ret = convert(op.returnType) ?: param
+            return MezzeType.FunctionType(param, ret)
+        }
+
+        val targetOf = { types: List<ParsedTypeAnnotation> ->
+            types.firstOrNull()?.let { ann ->
+                when (ann) {
+                    is com.mezze.language.parsedast.ParsedNamedType -> ann.name
+                    is com.mezze.language.parsedast.ParsedTypeApp -> ann.constructor
+                    else -> null
+                }
+            }
+        }
+
+        // Inherent impls in this file: `impl Deque 'a where { push_front = … }`
+        val impls = ctx.parsedModule?.decls?.filterIsInstance<ParsedImplAbilityDecl>() ?: emptyList()
+        for (impl in impls) {
+            if (impl.target !is ParsedImplTarget.Inherent) continue
+            if (typeName != null && targetOf(impl.targetTypes) != typeName) continue
+            val op = impl.operations.firstOrNull { it.name == method } ?: continue
+            val param = convert(op.paramType) ?: continue
+            // Only the parameter is read downstream; the return is a filler.
+            return MezzeType.FunctionType(param, param)
+        }
+
+        // Inherent impls from the prelude — where `Map.insert`, `List.push`
+        // and the rest of the stdlib's methods actually live. Prefer the
+        // TYPED parameter, which is specialized for this receiver; the parsed
+        // annotation still carries the ability's own type variables.
+        try {
+            val pre = com.mezze.language.typechecker.PrecompiledStdlib
+            for ((_, impl) in pre.preludeImportContext.importedAbilityImpls) {
+                if (!impl.isInherent) continue
+                val implTarget = targetOf(impl.targetTypes) ?: continue
+                if (typeName != null && implTarget != typeName) continue
+                val op = impl.operations.firstOrNull { it.name == method } ?: continue
+                val param = lookupTypedImplOpParamType(pre, implTarget, op.name)
+                    ?: convert(op.paramType) ?: continue
+                val ret = lookupTypedImplOpReturnType(pre, implTarget, op.name) ?: param
+                return MezzeType.FunctionType(param, ret)
+            }
+        } catch (_: Exception) { /* no prelude — fall through */ }
+        return null
+    }
+
     private fun extractRecordParameterFields(funcType: MezzeType): List<Pair<String, MezzeType>> {
         val recordType = when (funcType) {
             is MezzeType.FunctionType -> funcType.paramType

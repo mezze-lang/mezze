@@ -8,6 +8,10 @@
 import { esc, highlight, withError } from '../lib/highlight'
 import { renderHover } from '../lib/hover'
 import { hideHoverTip, moveHoverTip, showHoverTip } from './hover-tip'
+import {
+  completionKey, hideCompletions, showCompletions,
+} from './completion-popup'
+import type { Completion } from './mezze-runtime'
 import { loadMezze } from './mezze-runtime'
 
 /** How long typing must pause before diagnostics re-run. */
@@ -121,6 +125,7 @@ export function mountEditor(root: HTMLElement): EditorHandle {
   srcEl.addEventListener('input', () => {
     paint()
     sizeToContent()
+    askCompletions()
     clearTimeout(liveTimer)
     liveTimer = window.setTimeout(liveCheck, LIVE_CHECK_MS)
   })
@@ -139,6 +144,7 @@ export function mountEditor(root: HTMLElement): EditorHandle {
   // flicker through half-finished states. On blur the reader has stopped, so
   // report properly: same rendering as pressing Check.
   srcEl.addEventListener('blur', () => {
+    hideCompletions()
     if (typeof window.checkMezze !== 'function') return
     try {
       report(window.checkMezze(srcEl.value))
@@ -147,14 +153,203 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     }
   })
   srcEl.addEventListener('keydown', (e) => {
+    // The popup owns arrows, Enter, Tab and Escape while it is open.
+    // Let the browser's own undo/redo through untouched: intercepting the
+    // keydown at all breaks the textarea's native history.
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'y')) {
+      hideCompletions()
+      return
+    }
+    if (completionKey(e)) { e.preventDefault(); return }
+    if (e.key === ' ' && e.ctrlKey) { e.preventDefault(); askCompletions(true); return }
     if (e.key !== 'Tab') return
     e.preventDefault()
-    const a = srcEl.selectionStart
-    const b = srcEl.selectionEnd
-    srcEl.value = srcEl.value.slice(0, a) + '  ' + srcEl.value.slice(b)
-    srcEl.selectionStart = srcEl.selectionEnd = a + 2
+    replaceRange(srcEl.selectionStart, srcEl.selectionEnd, '  ')
     paint()
   })
+
+  // ---- completion -------------------------------------------------------
+
+  /** 1-based caret position, matching what completeMezze expects. */
+  const caretPos = (): [number, number] => {
+    const before = srcEl.value.slice(0, srcEl.selectionStart)
+    return [before.split('\n').length, srcEl.selectionStart - before.lastIndexOf('\n')]
+  }
+
+  /**
+   * Where to put the popup, in viewport coordinates.
+   *
+   * Derived from the caret's line and column rather than measured: a textarea
+   * exposes no caret rect, but both layers share their metrics, so a column
+   * times the character width lands on the right glyph.
+   */
+  const caretXY = (line: number, col: number): [number, number] => {
+    const r = srcEl.getBoundingClientRect()
+    const cs = getComputedStyle(srcEl)
+    return [
+      r.left + parseFloat(cs.paddingLeft) + (col - 1) * measureCharWidth(),
+      r.top + parseFloat(cs.paddingTop) + (line - 1) * parseFloat(cs.lineHeight) - srcEl.scrollTop,
+    ]
+  }
+
+  /**
+   * Strip LSP snippet syntax down to plain text.
+   *
+   * Some candidates are marked as snippets and carry insertText in the LSP
+   * placeholder form, so `.insert {k = ${1:k}, v = ${2:v}}` arrives verbatim.
+   * A real LSP client turns those into tab stops; this editor has none, so
+   * the raw string would leave the placeholder syntax in the buffer. Keep the
+   * default text out of each placeholder and drop the scaffolding.
+   */
+  const plainFromSnippet = (t: string): string => {
+    let out = ''
+    for (let i = 0; i < t.length; i++) {
+      const ch = t[i]
+      if (ch === '\\' && t[i + 1] === '$') { out += '$'; i++; continue }
+      if (ch !== '$') { out += ch; continue }
+      if (t[i + 1] === '{') {
+        // Scan to the MATCHING brace: a default can itself contain braces
+        // (`${1:{ x } -> x}`), so stopping at the first one would eat it.
+        let depth = 1
+        let j = i + 2
+        while (j < t.length && depth > 0) {
+          if (t[j] === '{') depth++
+          else if (t[j] === '}') depth--
+          if (depth > 0) j++
+        }
+        const body = t.slice(i + 2, j)
+        const colon = body.indexOf(':')
+        const bar = body.indexOf('|')
+        out += colon >= 0 ? body.slice(colon + 1)
+             : bar >= 0 ? body.slice(bar + 1).split(/[,|]/)[0]
+             : ''
+        i = j
+        continue
+      }
+      let j = i + 1
+      while (j < t.length && t[j] >= '0' && t[j] <= '9') j++
+      if (j > i + 1) { i = j - 1; continue }
+      out += '$'
+    }
+    return out
+  }
+
+  /**
+   * Replace a span with text, preserving native undo.
+   *
+   * Assigning srcEl.value wipes the textarea's undo stack outright, which is
+   * why Cmd+Z did nothing after accepting a completion or pressing Tab.
+   * setRangeText with 'preserve'/'end' is an editing command the browser
+   * records, so its own history keeps working. execCommand('insertText') is
+   * the older equivalent; setRangeText is supported everywhere we target.
+   */
+  const replaceRange = (start: number, end: number, text: string) => {
+    srcEl.focus()
+    srcEl.setSelectionRange(start, end)
+    srcEl.setRangeText(text, start, end, 'end')
+  }
+
+  /** Buffer offset of a 0-based line/col, as the engine reports them. */
+  const offsetOf = (line: number, col: number): number => {
+    const lines = srcEl.value.split('\n')
+    let n = 0
+    for (let i = 0; i < line && i < lines.length; i++) n += lines[i].length + 1
+    return n + col
+  }
+
+  const applyCompletion = (c: Completion) => {
+    const caret = srcEl.selectionStart
+    const raw = c.insertText || c.label
+    const text = c.snippet ? plainFromSnippet(raw) : raw
+
+    // Prefer the engine's own replacement range. It knows what the item is
+    // replacing: for a module path that is the whole `std::eff` typed so far,
+    // where the fragment fallback below would keep `std::` and append the
+    // full path after it. The LSP honours the same field.
+    let start: number
+    let end = caret
+    if (c.edit) {
+      start = offsetOf(c.edit.startLine, c.edit.startCol)
+      end = offsetOf(c.edit.endLine, c.edit.endCol)
+    } else {
+      // No range given: replace the identifier fragment already typed, so
+      // accepting `to_str` after `n.to` does not leave `n.toto_str`.
+      const frag = srcEl.value.slice(0, caret).match(/[A-Za-z0-9_]*$/)?.[0] ?? ''
+      start = caret - frag.length
+    }
+
+    replaceRange(start, end, text)
+    paint()
+    sizeToContent()
+  }
+
+  let cmpTimer: number | undefined
+  /** force: Ctrl+Space, which opens the menu whatever precedes the caret. */
+  const askCompletions = (force = false) => {
+    clearTimeout(cmpTimer)
+    cmpTimer = window.setTimeout(() => {
+      if (!ready || typeof window.completeMezze !== 'function') return
+
+      // The engine answers a completion request at ANY position, including a
+      // bare cursor on a blank line, where it returns the entire keyword list.
+      // In an editor embedded in prose that reads as noise, so this asks only
+      // in the four positions where a suggestion is clearly wanted:
+      //
+      //   .          a method or field on the receiver to the left
+      //   { or ,     an argument name inside a call's record
+      //   use …      a module path
+      //   match … is an arm for the scrutinee's cases
+      //
+      // Anything else — mid-expression, after a complete statement, on a fresh
+      // line — stays quiet. Ctrl+Space overrides and asks regardless.
+      const upto = srcEl.value.slice(0, srcEl.selectionStart)
+      const curLine = upto.slice(upto.lastIndexOf('\n') + 1)
+
+      // The word fragment already typed, if any. A trigger still counts once
+      // the reader has started typing after it (`n.to`, `use std::ef`).
+      const head = curLine.replace(/[A-Za-z0-9_]*$/, '')
+      const trigger = head.trimEnd().slice(-1)
+
+      // Two positions only, both of which resolve to something concrete:
+      //
+      //   .       methods and fields on the receiver's type
+      //   use …   module paths
+      //
+      // Argument names inside `{ … }` are deliberately absent. The engine
+      // cannot resolve a method's parameters while the call is still open —
+      // the buffer does not typecheck, so the receiver has no type — and what
+      // it returns instead is unrelated: variant constructors, or a snippet
+      // whose placeholders leak into the buffer. Silence beats that.
+      // Any `use` line, including once it opens a selective `::{ … }` block —
+      // the bridge answers that case from the module's own exports.
+      // `::` completes a module's exports (`map::empty`), the same question a
+      // selective import asks, so it triggers alongside `.` and `use`.
+      const afterColons = /::\w*$/.test(curLine)
+      const wanted = trigger === '.' || afterColons ||
+                     /^\s*(pub\s+)?use\s/.test(curLine)
+      if (!force && !wanted) return hideCompletions()
+
+      const [line, col] = caretPos()
+      let list
+      try {
+        list = window.completeMezze(srcEl.value, line, col)
+      } catch {
+        return hideCompletions()
+      }
+      if (!list?.length) return hideCompletions()
+
+      // Keywords are never what these four positions want. The engine has no
+      // candidates for some of them (a selective `use …::{ ` block, an
+      // argument name it cannot resolve) and falls back to the keyword list,
+      // so `if`/`match`/`do` turned up after `{`. Dropping them leaves the
+      // menu empty in that case, which is the honest answer.
+      const useful = force ? list : list.filter((c) => c.kind !== 'Keyword')
+      if (!useful.length) return hideCompletions()
+
+      const [x, y] = caretXY(line, col)
+      showCompletions(useful.slice(0, 40), x, y, applyCompletion)
+    }, 90)
+  }
 
   // ---- hover types ------------------------------------------------------
   // typeAt walks the TypedAST — the same utility the LSP hover uses — so this
@@ -383,7 +578,10 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     check: () => void report(window.checkMezze!(srcEl.value)),
     fmt: () => {
       hideTip()
-      srcEl.value = String(window.formatMezze!(srcEl.value, editorCols()))
+      // Through replaceRange, so Cmd+Z undoes a format. Assigning value
+      // directly would clear the textarea's history.
+      replaceRange(0, srcEl.value.length,
+        String(window.formatMezze!(srcEl.value, editorCols())))
       paint()
       // Formatting rewrites the source, so the row count changes — it wraps to
       // the pane width, which on a narrow screen is a very different shape from
