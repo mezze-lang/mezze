@@ -2955,6 +2955,9 @@ public final class BytecodeCompiler {
             // through a fresh local to isolate it from the callee's frame
             // activity (see emitMapperStep for the full rationale).
             var target = resolveCallTarget(filter.callHash);
+            if (target == null && language != null) {
+                target = language.getOrMintUserStub(filter.callHash, "fused_pred_check");
+            }
             if (target != null) {
                 var argCopy = b.createLocal();
                 b.beginStoreLocal(argCopy);
@@ -3724,7 +3727,18 @@ public final class BytecodeCompiler {
         // are present. Simpler: adjust the check below to also accept
         // ReadLocal(paramSlot).
         var outer = matchBinaryOpAgainstConstOrCapture(body, caps, paramSlot);
-        if (outer == null) return null;
+        if (outer == null) {
+            // Shape F: general catch-all for any capture-free single-param
+            // predicate lambda whose body couldn't be classified inline.
+            // Call the lambda function directly — it returns Bool, usable
+            // as an if-condition. Same rationale as classifyUnaryLiteralLambda's
+            // Shape F. The canonicalizer's isEffectSafe gate validates the chain.
+            if (caps.isEmpty()) {
+                return new PredShape(ml.getFunctionHash(),
+                        /*callScalarABI=*/ true, /*callFieldName=*/ null);
+            }
+            return null;
+        }
         // Outer must be a comparison op — predicate produces Bool.
         switch (outer.op) {
             case EQ, NEQ, LT, LE, GT, GE -> {}
