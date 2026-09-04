@@ -29,7 +29,7 @@ export const site = {
 }
 
 export const hero = {
-  headline: 'Write what it ~onion~does~.\nThe types ~~olive:keep up~~.',
+  headline: 'Write what the program ~onion~does~.\nThe types ~~olive:keep up~~.',
   lede:
     'Every function tells you what it touches, files, network, failure, and you never annotate one. Full type safety, performance of GraalVM.',
   primaryCta: { label: 'Taste of Mezze', href: '/taste' },
