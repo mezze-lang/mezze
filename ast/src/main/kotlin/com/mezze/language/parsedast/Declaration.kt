@@ -368,6 +368,16 @@ data class ParsedPerformerOp(
     val returnType: ParsedTypeAnnotation? = null,
     val implementation: ParsedExpr,
     val effects: ParsedEffectRow? = null,
+    /**
+     * Method-level `with <Ability>` constraints from the op's type annotation.
+     * Bug B (#86): the parser routes ALL `impl X for Y where { … }` decls
+     * through the performer parser first — reclassification into
+     * [ParsedImplAbilityDecl] happens later via [ImplClassifier]. Without
+     * carrying the constraints here, ability-impl operations lose their
+     * method-level `with` clauses (blanket-impl bodies whose downstream
+     * method call needs dict-passing).
+     */
+    val abilityConstraints: List<ParsedFnAbilityConstraint> = emptyList(),
     val doc: String? = null,
     val loc: Loc
 )

@@ -185,7 +185,8 @@ class TypedASTCompiler(
                     allDecls.add(decl)
                     val value = decl.value
                     if (value is TypedLambda) {
-                        val methods = scanExprForVarTypeMethodCalls(value.body)
+                        val constrained = arrowHasAbilityConstraint(value.type)
+                        val methods = scanExprForVarTypeMethodCalls(value.body, constrained)
                         if (methods.isNotEmpty()) {
                             dictMethodsForHash[decl.hash] = methods
                         }
@@ -197,11 +198,20 @@ class TypedASTCompiler(
         // Phase 1b: scan ability impl operation bodies for VarType method calls.
         // Auto-generated codec impls have bodies like `fmt.encode_int { ... }` where
         // `fmt` is a VarType param. These need dict params just like regular functions.
+        //
+        // Bug B (#86): blanket-impl bodies also gate off `with <Ability>` constraints
+        // on the enclosing arrow. When the impl is compiled at stdlib-precompile
+        // time, the abilityOpIndex has zero entries for the inner method (e.g. no
+        // `impl Encode` in scope yet), so the receiver-only check would miss the
+        // dispatch. Collect the constraint typevars from the op's own FunctionType
+        // and thread them so `receiver.method` on any of those typevars is marked
+        // regardless of impl-index size.
         for (impl in abilityImpls) {
             for ((opName, opBody) in impl.operations) {
                 val opHash = computeOpHash(impl.hash, opName)
                 val bodyExpr = if (opBody is TypedLambda) opBody.body else opBody
-                val methods = scanExprForVarTypeMethodCalls(bodyExpr)
+                val constrained = arrowHasAbilityConstraint(opBody.type)
+                val methods = scanExprForVarTypeMethodCalls(bodyExpr, constrained)
                 if (methods.isNotEmpty()) {
                     dictMethodsForHash[opHash] = methods
                 }
@@ -361,35 +371,78 @@ class TypedASTCompiler(
      * Recursively scan a TypedExpr for VarType method calls (i.e., calls where
      * the receiver is VarType and the method is a known ability operation).
      * Returns the set of ability method names found.
+     *
+     * `activeConstraints` — the set of TypeVar ids that the enclosing function's
+     * `with <Ability>` clause quantifies over. A receiver VarType whose id is in
+     * this set is marked for dict-passing regardless of impl-index population, so
+     * blanket-impl bodies (`with Encode JsonC 'a`) dispatch correctly even when
+     * the impl-index has zero entries at stdlib-precompile time (Bug B / #86).
      */
-    private fun scanExprForVarTypeMethodCalls(expr: TypedExpr): Set<String> {
+    private fun scanExprForVarTypeMethodCalls(
+        expr: TypedExpr,
+        arrowIsConstrained: Boolean = false
+    ): Set<String> {
         val result = mutableSetOf<String>()
-        scanExprForVarTypeMethods(expr, result)
+        scanExprForVarTypeMethods(expr, result, arrowIsConstrained)
         return result
     }
 
-    private fun scanExprForVarTypeMethods(expr: TypedExpr, out: MutableSet<String>) {
+    /**
+     * True iff the arrow carries at least one `with <Ability>` constraint.
+     * Bug B (#86): a `with`-constrained arrow lets its body call ability ops
+     * on a still-generic receiver (`{it: 'a} with Encode JsonC 'a -> …` allows
+     * `it.encode {…}`). Any VarType-receiver method call in such an arrow must
+     * be marked for dict-passing so the resolved impl reaches the call site.
+     * Matching on ability-hash / typevar-id would misfire under mono
+     * specialization (fresh ids); the boolean "arrow is constrained" bit is
+     * stable regardless of substitution.
+     */
+    private fun arrowHasAbilityConstraint(type: MezzeType): Boolean {
+        if (type !is MezzeType.FunctionType) return false
+        return type.abilityConstraints.isNotEmpty()
+    }
+
+    private fun scanExprForVarTypeMethods(
+        expr: TypedExpr,
+        out: MutableSet<String>,
+        arrowIsConstrained: Boolean = false
+    ) {
         when (expr) {
             is TypedCall -> {
                 val fn = expr.function
                 if (fn is TypedFieldAccess) {
                     val methodName = fn.field
                     val receiverType = fn.record.type
-                    // If receiver is VarType and the method is a known ability op,
-                    // only flag as needing dict if there are multiple candidates
-                    // (ambiguous — can't resolve statically). Single candidate = resolved
-                    // in compileCall without needing a dict param.
+                    // Bug B (#86): a VarType receiver whose id is in the enclosing
+                    // arrow's `with`-constraint typevar set needs dict-passing even
+                    // when abilityOpIndex has zero entries at this compile step
+                    // (blanket-impl body precompiled before any user impl exists).
+                    // Otherwise fall back to the impl-index population check: only
+                    // flag as needing dict if there are multiple candidates
+                    // (ambiguous — can't resolve statically). Single candidate =
+                    // resolved in compileCall without needing a dict param.
                     if (receiverType is VarType && methodName !in inlineableOps) {
                         val opCandidates = abilityOpIndex[methodName]
-                        if (opCandidates != null && opCandidates.size > 1) {
-                            out.add(methodName)
+                        // Bug B (#86): a `with`-constrained arrow lets its
+                        // body call ability ops on a still-generic receiver —
+                        // typecheck already justified the call, so we mark
+                        // regardless of impl-index population (which is empty
+                        // at stdlib-precompile time for methods whose impls
+                        // are auto-derived per user type). Outside a
+                        // constrained arrow, fall back to the pre-existing
+                        // "multiple candidates → dict" rule.
+                        val shouldMark = when {
+                            arrowIsConstrained -> true
+                            opCandidates != null && opCandidates.size > 1 -> true
+                            else -> false
                         }
+                        if (shouldMark) out.add(methodName)
                     }
-                    scanExprForVarTypeMethods(fn.record, out)
+                    scanExprForVarTypeMethods(fn.record, out, arrowIsConstrained)
                 } else {
-                    scanExprForVarTypeMethods(fn, out)
+                    scanExprForVarTypeMethods(fn, out, arrowIsConstrained)
                 }
-                scanExprForVarTypeMethods(expr.arg, out)
+                scanExprForVarTypeMethods(expr.arg, out, arrowIsConstrained)
             }
             is TypedLambda -> {
                 // #195 B2: descend into nested lambdas. When the inner body calls
@@ -398,62 +451,67 @@ class TypedASTCompiler(
                 // request `__dict_<method>` so the inner lambda can capture it
                 // from the outer's frame. Skipping here used to make the inner
                 // call fall through to plain field access at runtime → crash.
-                scanExprForVarTypeMethods(expr.body, out)
+                //
+                // Bug B (#86): an inner arrow that carries its own `with`
+                // constraint promotes to arrowIsConstrained; the outer scan
+                // already runs constrained when the OUTER arrow was.
+                val innerConstrained = arrowIsConstrained || arrowHasAbilityConstraint(expr.type)
+                scanExprForVarTypeMethods(expr.body, out, innerConstrained)
             }
             is TypedBlock -> {
                 for (s in expr.statements) {
                     when (s) {
-                        is TypedStatement.Let -> scanExprForVarTypeMethods(s.value, out)
-                        is TypedStatement.Expr -> scanExprForVarTypeMethods(s.expr, out)
+                        is TypedStatement.Let -> scanExprForVarTypeMethods(s.value, out, arrowIsConstrained)
+                        is TypedStatement.Expr -> scanExprForVarTypeMethods(s.expr, out, arrowIsConstrained)
                     }
                 }
-                scanExprForVarTypeMethods(expr.result, out)
+                scanExprForVarTypeMethods(expr.result, out, arrowIsConstrained)
             }
             is TypedIf -> {
-                scanExprForVarTypeMethods(expr.condition, out)
-                scanExprForVarTypeMethods(expr.thenBranch, out)
-                scanExprForVarTypeMethods(expr.elseBranch, out)
+                scanExprForVarTypeMethods(expr.condition, out, arrowIsConstrained)
+                scanExprForVarTypeMethods(expr.thenBranch, out, arrowIsConstrained)
+                scanExprForVarTypeMethods(expr.elseBranch, out, arrowIsConstrained)
             }
             is TypedMatch -> {
-                scanExprForVarTypeMethods(expr.scrutinee, out)
+                scanExprForVarTypeMethods(expr.scrutinee, out, arrowIsConstrained)
                 for (c in expr.cases) {
-                    c.guard?.let { scanExprForVarTypeMethods(it, out) }
-                    scanExprForVarTypeMethods(c.body, out)
+                    c.guard?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained) }
+                    scanExprForVarTypeMethods(c.body, out, arrowIsConstrained)
                 }
             }
             is TypedRecord -> {
                 for (e in expr.entries) {
                     when (e) {
-                        is TypedRecordEntry.Field -> scanExprForVarTypeMethods(e.value, out)
-                        is TypedRecordEntry.Spread -> scanExprForVarTypeMethods(e.expr, out)
+                        is TypedRecordEntry.Field -> scanExprForVarTypeMethods(e.value, out, arrowIsConstrained)
+                        is TypedRecordEntry.Spread -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained)
                     }
                 }
             }
-            is TypedFieldAccess -> scanExprForVarTypeMethods(expr.record, out)
-            is TypedVariantConstruct -> expr.payload?.let { scanExprForVarTypeMethods(it, out) }
+            is TypedFieldAccess -> scanExprForVarTypeMethods(expr.record, out, arrowIsConstrained)
+            is TypedVariantConstruct -> expr.payload?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained) }
             is TypedRecordUpdate -> {
-                scanExprForVarTypeMethods(expr.record, out)
+                scanExprForVarTypeMethods(expr.record, out, arrowIsConstrained)
                 for (e in expr.updates) {
-                    if (e is TypedRecordEntry.Field) scanExprForVarTypeMethods(e.value, out)
+                    if (e is TypedRecordEntry.Field) scanExprForVarTypeMethods(e.value, out, arrowIsConstrained)
                 }
             }
-            is TypedPerform -> scanExprForVarTypeMethods(expr.body, out)
-            is TypedPerformOp -> scanExprForVarTypeMethods(expr.arg, out)
+            is TypedPerform -> scanExprForVarTypeMethods(expr.body, out, arrowIsConstrained)
+            is TypedPerformOp -> scanExprForVarTypeMethods(expr.arg, out, arrowIsConstrained)
             is TypedPipe -> {
-                scanExprForVarTypeMethods(expr.left, out)
-                scanExprForVarTypeMethods(expr.right, out)
+                scanExprForVarTypeMethods(expr.left, out, arrowIsConstrained)
+                scanExprForVarTypeMethods(expr.right, out, arrowIsConstrained)
             }
             is TypedSeq -> {
                 for (e in expr.elements) {
                     when (e) {
-                        is TypedSeqElement.Regular -> scanExprForVarTypeMethods(e.expr, out)
-                        is TypedSeqElement.Spread -> scanExprForVarTypeMethods(e.expr, out)
+                        is TypedSeqElement.Regular -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained)
+                        is TypedSeqElement.Spread -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained)
                     }
                 }
             }
             is TypedStringLit -> {
                 for (p in expr.parts) {
-                    if (p is TypedStringPart.Interpolation) scanExprForVarTypeMethods(p.expr, out)
+                    if (p is TypedStringPart.Interpolation) scanExprForVarTypeMethods(p.expr, out, arrowIsConstrained)
                 }
             }
             // Leaf nodes: no children
@@ -1380,7 +1438,19 @@ class TypedASTCompiler(
             // VarType receiver — try dictionary passing first, then fall back to dynamic dispatch.
             if (receiverType is VarType && methodName !in inlineableOps) {
                 val opCandidates = abilityOpIndex[methodName]
-                if (opCandidates != null && opCandidates.isNotEmpty()) {
+                // Bug B (#86): also enter this branch when there are no impl
+                // candidates yet (blanket-impl body precompiled with the
+                // ability-op index empty) but the current function has a
+                // `__dict_<method>` param waiting. Without this, control
+                // falls through to the regular-call path which compiles the
+                // FieldAccess as `ReadFieldByName`, causing runtime
+                // "Field not found: <method>".
+                val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
+                val hasDictParam =
+                    currentParamNames.indexOf(dictParamName) >= 0 ||
+                    currentCaptureNames[dictParamName] != null
+                if ((opCandidates != null && opCandidates.isNotEmpty()) || hasDictParam) {
+                    val opCandidatesSafe: List<AbilityOp> = opCandidates ?: emptyList()
                     val receiverIR = compileReceiverExpr(fn.record)
                     // Build arg with receiver injected as "it"
                     val fields = mutableListOf<FieldIR>()
@@ -1405,7 +1475,7 @@ class TypedASTCompiler(
                     // resolved against the concrete types of the user-visible record
                     // fields (`fmt`, etc.). Mirrors the concrete-receiver path above.
                     val transitiveDictMethods = HashSet<String>()
-                    for (candidate in opCandidates) {
+                    for (candidate in opCandidatesSafe) {
                         dictMethodsForHash[candidate.opHash]?.let { transitiveDictMethods.addAll(it) }
                     }
                     if (transitiveDictMethods.isNotEmpty()) {
@@ -1418,19 +1488,19 @@ class TypedASTCompiler(
                             }
                         }
                         for (dictMethodName in transitiveDictMethods.sorted()) {
-                            val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(dictMethodName)
+                            val innerDictName = com.mezze.language.ast.MagicParams.dictParamName(dictMethodName)
                             // Don't double-inject if the user already wrote this field.
-                            if (fields.any { it.name == dictParamName }) continue
+                            if (fields.any { it.name == innerDictName }) continue
                             val resolvedHash = resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
                             if (resolvedHash != null) {
-                                fields.add(FieldIR(dictParamName, ReadGlobalFnByHashIR(resolvedHash, src)))
+                                fields.add(FieldIR(innerDictName, ReadGlobalFnByHashIR(resolvedHash, src)))
                             } else {
                                 // Forward from caller's own dict params (caller is itself polymorphic
                                 // on the same format type).
-                                val callerDictIdx = currentParamNames.indexOf(dictParamName)
+                                val callerDictIdx = currentParamNames.indexOf(innerDictName)
                                 if (callerDictIdx >= 0) {
                                     val slot = currentCaptureCount + callerDictIdx
-                                    fields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
+                                    fields.add(FieldIR(innerDictName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
                                 }
                             }
                         }
@@ -1441,7 +1511,6 @@ class TypedASTCompiler(
                     // Dictionary passing: if the current function has a __dict_<method> param,
                     // read the resolved impl function from the frame and call it directly.
                     // No runtime dispatch — the typechecker resolved everything statically.
-                    val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
                     val dictParamIdx = currentParamNames.indexOf(dictParamName)
                     if (dictParamIdx >= 0) {
                         val dictSlot = currentCaptureCount + dictParamIdx

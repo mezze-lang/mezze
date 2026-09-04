@@ -586,6 +586,154 @@ class CodecRoundTripTest {
     }
 
     // ========================================================================
+    // Bug B (#86) — Tier-4 sugar (`x.json {}` / `x.json_with { config = … }`)
+    //
+    // Blanket-impl body dispatch: `it.encode {…}` inside `impl ToJson for 'a`
+    // now marks `encode` as needing dict-passing driven off the enclosing
+    // arrow's `with Encode JsonC 'a` constraint — no longer off impl-index
+    // population (which is empty at stdlib-precompile time). See the codec
+    // redesign doc for the three-step fix.
+    // ========================================================================
+
+    /** Small helper that extracts a JInt payload. */
+    private fun jIntVal(x: Any): Long {
+        val v = asVariant(x)
+        assertEquals("JInt", v.constructorName)
+        return asRecord(v.payloadValue!!).getField("val") as Long
+    }
+
+    /** Small helper that extracts a JString payload. */
+    private fun jStringVal(x: Any): String {
+        val v = asVariant(x)
+        assertEquals("JString", v.constructorName)
+        return asRecord(v.payloadValue!!).getField("val") as String
+    }
+
+    /** Small helper that extracts a JBool payload. */
+    private fun jBoolVal(x: Any): Boolean {
+        val v = asVariant(x)
+        assertEquals("JBool", v.constructorName)
+        return asRecord(v.payloadValue!!).getField("val") as Boolean
+    }
+
+    /** Small helper that extracts a JFloat payload. */
+    private fun jFloatVal(x: Any): Double {
+        val v = asVariant(x)
+        assertEquals("JFloat", v.constructorName)
+        return asRecord(v.payloadValue!!).getField("val") as Double
+    }
+
+    @Test
+    fun `Bug B - json sugar on Int primitive`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default }
+            let n: Int = 42
+            n.json {}
+        """.trimIndent()
+        assertEquals(42L, jIntVal(eval(src)))
+    }
+
+    @Test
+    fun `Bug B - json sugar on Str primitive`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default }
+            let s: Str = "hello"
+            s.json {}
+        """.trimIndent()
+        assertEquals("hello", jStringVal(eval(src)))
+    }
+
+    @Test
+    fun `Bug B - json sugar on Bool primitive`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default }
+            let b: Bool = True
+            b.json {}
+        """.trimIndent()
+        assertEquals(true, jBoolVal(eval(src)))
+    }
+
+    @Test
+    fun `Bug B - json sugar on Float primitive`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default }
+            let f: Float = 1.5
+            f.json {}
+        """.trimIndent()
+        assertEquals(1.5, jFloatVal(eval(src)), 1e-9)
+    }
+
+    @Test
+    fun `Bug B - json sugar on user record`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default }
+            type Point = { x: Int, y: Int }
+            let p: Point = { x = 3, y = 4 }
+            p.json {}
+        """.trimIndent()
+        // Verify by round-tripping through to_str.
+        val src2 = """
+            use std::codec::json::{ Json, ToJson, json_default, to_str }
+            type Point = { x: Int, y: Int }
+            let p: Point = { x = 3, y = 4 }
+            to_str { json = p.json {} }
+        """.trimIndent()
+        // Field order is stable within Encode Record impls.
+        val s = eval(src2) as String
+        assertEquals("{\"x\":3,\"y\":4}", s)
+        // Also make sure the direct call returns a JObject.
+        val v = asVariant(eval(src))
+        assertEquals("JObject", v.constructorName)
+    }
+
+    @Test
+    fun `Bug B - json sugar on nested user record`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default, to_str }
+            type Address = { city: Str, zip: Int }
+            type Person = { id: Int, addr: Address }
+            let p: Person = { id = 1, addr = { city = "NYC", zip = 10001 } }
+            to_str { json = p.json {} }
+        """.trimIndent()
+        assertEquals(
+            "{\"addr\":{\"city\":\"NYC\",\"zip\":10001},\"id\":1}",
+            eval(src) as String
+        )
+    }
+
+    @Test
+    fun `Bug B - json sugar composes with to_str`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default, to_str }
+            let n: Int = 42
+            to_str { json = n.json {} }
+        """.trimIndent()
+        assertEquals("42", eval(src) as String)
+    }
+
+    @Test
+    fun `Bug B - json sugar composes with round-trip`() {
+        // Encode via .json{}, serialize, parse, decode — must round-trip.
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default, to_str, parse_str }
+            use std::codec::core::{ Decode, DecodeError }
+            type Point = { x: Int, y: Int }
+            let original: Point = { x = 3, y = 4 }
+            let encoded: Json = original.json {}
+            let s: Str = to_str { json = encoded }
+            match parse_str { s = s } is
+              Ok { val = j } -> do
+                let dec: Result Point DecodeError = j.decode { config = json_default }
+                dec
+              Err { error = e } -> Err { error = { path = [], message = "parse", expected = "Point", found = None } }
+        """.trimIndent()
+        val v = okVal(eval(src))
+        val r = asRecord(v)
+        assertEquals(3L, r.getField("x"))
+        assertEquals(4L, r.getField("y"))
+    }
+
+    // ========================================================================
     // KNOWN GAPS — open work items after this commit
     //
     //  * `Nat` (newtype over Int) does not auto-derive: the walker recurses
@@ -593,13 +741,23 @@ class CodecRoundTripTest {
     //    time. Workaround: hand-write `impl Encode JsonC for Nat` at the
     //    call site. Same for user newtypes over primitives.
     //
-    //  * Tier-4 sugar (`x.json {}` / `Type.from_json {…}`) — the ability
-    //    dispatch for `.encode {…}` inside a blanket impl body's method-
-    //    level `with Encode 'c 'a` constraint doesn't monomorphize; emit
-    //    lowers `it.encode {…}` to a field access and the runtime fails
-    //    with "Expected record for field 'encode', got: …". Direct
-    //    `x.encode { config = json_default }` still works. This is a
-    //    fundamental gap in how blanket-impl method bodies with method-
-    //    level constraints get lowered — not a codec-generator issue.
+    //  * `.json_with { config = <expr> }` — passing an explicit JsonC at the
+    //    Tier-4 sugar site triggers a JsonC-vs-JsonC identity mismatch during
+    //    ability-impl auto-derivation (the impl-op's `with Encode JsonC 'a`
+    //    constraint's JsonC is threaded through the AbilityChecker's
+    //    `typeAnnotationToMezzeType` while the caller's `json_default` binding
+    //    goes through the ordinary import resolution — the two paths mint
+    //    JsonC TypeApplications whose Declared identities differ by field
+    //    structure, so unify falls back to structural and rejects them). The
+    //    zero-config `.json {}` sugar path (this commit) works end-to-end.
+    //
+    //  * `.from_json { it = <Json> }` / `Type.from_json { … }` sugar is not
+    //    yet wired to the ability-method-dispatch path — a Type-prefixed
+    //    method syntax lands on `MemberAccess(Type, "from_json")` where the
+    //    receiver's type is the type name (variant `Json`), and the
+    //    constraint-gen path treats it as a plain field access rather than an
+    //    ability method (T0201). The compile-time dict-passing fix in this
+    //    commit is orthogonal — it's the DISPATCH resolver that needs a
+    //    target-driven path for FromJson-style `'a`-on-return abilities.
     // ========================================================================
 }

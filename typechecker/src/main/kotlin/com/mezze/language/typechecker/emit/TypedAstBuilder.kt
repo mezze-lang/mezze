@@ -691,10 +691,14 @@ class TypedAstBuilder(
                 val ctxFnType = substitution.apply(contextType) as? MezzeType.FunctionType
                 val paramRecordType = ctxFnType?.paramType
                     ?: MezzeType.RecordType(params.associate { p -> p.name to p.type })
+                // Propagate `with <Ability>` constraints from the enclosing arrow so
+                // the compiler's prescan can see them on the TypedLambda's type when
+                // deciding which method calls need dict-passing (Bug B / #86).
                 val funcType = MezzeType.FunctionType(
                     paramType = paramRecordType,
                     returnType = body.type,
-                    effects = ctxFnType?.effects
+                    effects = ctxFnType?.effects,
+                    abilityConstraints = ctxFnType?.abilityConstraints ?: emptyList()
                 )
 
                 val captures = collectCaptures(body, params.map { it.name }.toSet())
