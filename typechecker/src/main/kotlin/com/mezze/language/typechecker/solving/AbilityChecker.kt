@@ -17,7 +17,7 @@ import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.typedast.Hash
 
-internal class AbilityChecker(
+class AbilityChecker internal constructor(
     private val context: TypingContext,
     private val registry: DeclarationRegistry,
     /**
@@ -27,7 +27,13 @@ internal class AbilityChecker(
      * operator body using a type whose impl isn't import-visible at this site
      * isn't spuriously rejected. A truly-absent impl still fails.
      */
-    private val deferExistingAbilityImpls: Boolean = false
+    private val deferExistingAbilityImpls: Boolean = false,
+    /**
+     * Optional caller-owned codec-impl registry shared with sibling solvers in
+     * the same module typecheck (see the field-level note on
+     * [generatedCodecImpls]). `null` uses a private per-instance map.
+     */
+    private val sharedGeneratedCodecImpls: MutableMap<Hash, GeneratedCodecImpl>? = null,
 ) {
     private val codecGenerator = CodecGenerator()
 
@@ -45,7 +51,22 @@ internal class AbilityChecker(
         val fromAnnotation: Boolean = false
     )
 
-    private val generatedCodecImpls = mutableMapOf<Hash, GeneratedCodecImpl>()
+    // Codec-impl derivation is a SIDE EFFECT of ability-constraint checking that
+    // must OUTLIVE a single AbilityChecker instance. During a module typecheck the
+    // constraint generator creates transient per-binding [ConstraintSolver]s (each
+    // with its own AbilityChecker) so it can incrementally solve one binding at a
+    // time; the impls a per-binding solver auto-derives (e.g. `Encode JsonC Bool`
+    // for a bare `True.encode {…}`) would be dropped when that solver is thrown
+    // away, and the outer module-level solver often can't rederive them because
+    // the equality that pinned the receiver's type var lives INSIDE the discarded
+    // per-binding substitution. Publishing every fresh impl to
+    // [sharedGeneratedCodecImpls] — a mutable map the module typecheck owns and
+    // hands to both per-binding and module-level solvers — makes the derivations
+    // visible to [TypedModuleEmitter] regardless of which solver instance
+    // synthesized them. Falls back to a private map when no shared map is
+    // installed (single-solver callers).
+    private val generatedCodecImpls: MutableMap<Hash, GeneratedCodecImpl> =
+        sharedGeneratedCodecImpls ?: mutableMapOf()
     private val typeVarAbilityConstraints = mutableMapOf<TypeVar, MutableList<TrackedAbilityConstraint>>()
     private val deferredInference = mutableMapOf<TypeVar, MezzeType>()
     private val associatedTypeResolutionConstraints = mutableMapOf<TypeVar, MutableList<Constraint.AssociatedTypeResolution>>()

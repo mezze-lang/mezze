@@ -43,6 +43,12 @@ class ConstraintGenerator(
     initialPerformerAddedEffects: Map<String, Set<String>> = emptyMap(),
     private val abilityNames: Set<String> = emptySet(),
     private val effectNames: Set<String> = emptySet(),
+    // Caller-owned codec-impl registry shared with the module-level solver, so
+    // codec impls the per-binding solver auto-derives survive across solver
+    // instances. See ConstraintSolver.sharedGeneratedCodecImpls / the
+    // AbilityChecker field-level note. Null falls back to per-solver private
+    // storage (safe for unit test callers that never emit).
+    private val sharedGeneratedCodecImpls: MutableMap<com.mezze.language.typedast.Hash, com.mezze.language.typechecker.solving.AbilityChecker.GeneratedCodecImpl>? = null,
 ) {
     private val performerAddedEffects: MutableMap<String, Set<String>> = initialPerformerAddedEffects.toMutableMap()
     private val typeVarCache = mutableMapOf<String, TypeVar>()
@@ -103,7 +109,7 @@ class ConstraintGenerator(
 
         var perBindingSubstitution = Substitution.empty
 
-        val solver = ConstraintSolver(context, registry)
+        val solver = ConstraintSolver(context, registry, sharedGeneratedCodecImpls = sharedGeneratedCodecImpls)
 
         val letBindings = module.decls.filterIsInstance<ParsedLetDecl>()
         val placeholderNames = mutableSetOf<String>()
@@ -1342,6 +1348,7 @@ class ConstraintGenerator(
             abilityNames: Set<String> = emptySet(),
             effectNames: Set<String> = emptySet(),
             isStdlibModule: Boolean = false,
+            sharedGeneratedCodecImpls: MutableMap<com.mezze.language.typedast.Hash, com.mezze.language.typechecker.solving.AbilityChecker.GeneratedCodecImpl>? = null,
         ): ConstraintGenerator {
             val expressionGen = ExpressionConstraintGenerator()
             expressionGen.registry = registry
@@ -1356,6 +1363,7 @@ class ConstraintGenerator(
                 performerAddedEffects,
                 abilityNames,
                 effectNames,
+                sharedGeneratedCodecImpls,
             )
             // S1.3: route the do-block `let` path through the SAME bindLet the
             // top-level path uses. bindLet needs ConstraintGenerator's private

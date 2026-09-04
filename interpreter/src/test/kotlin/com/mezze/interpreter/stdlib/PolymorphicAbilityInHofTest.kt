@@ -1,21 +1,20 @@
 package com.mezze.interpreter.stdlib
 
 import com.mezze.interpreter.MezzeTestHelper
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
  * #195 PR-B — calling an ability method on a polymorphic value inside a HOF
- * callback should dispatch through the ability impl resolved at the outer
- * call site. With PR-A's seeded primitive impls in place, the impls exist;
- * the gap is in how the compiler threads the impl into the inner lambda.
+ * callback must dispatch through the impl resolved at the outer call site.
+ * Ported to the new codec surface (task #86): the polymorphic helper carries
+ * `with Encode JsonC 'a` and the compiler auto-derives `Encode JsonC Str`
+ * per-value-type at the caller.
  *
- * These tests fail today (pre-PR-B) — they're the regression net that
- * proves PR-B's fix actually works.
+ * These tests exercise Tier-3 dispatch inside a HOF callback (`seq::fold`),
+ * proving impl-threading survives lambda nesting.
  */
-@Disabled("#399: fails with 'Non-exhaustive match: no variant tag matched' — surfaced once #397 unblocked the ParallelJoinPanicTest hang. Root cause is #398 (TypedVariantPattern.type never receives solver substitution → tag mismatch between codec-generated Ok/Err construction and pattern sites). Re-enable after codec redesign lands and #398 is fixed.")
 class PolymorphicAbilityInHofTest {
 
     @BeforeEach
@@ -27,41 +26,42 @@ class PolymorphicAbilityInHofTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     @Test
-    fun `polymorphic helper dispatches encode_repr on Str via outer constraint`() {
-        // The classic motivator: a helper with `'a with EncodeRepr 'a` calls
-        // `value.encode_repr` inside its body, and gets invoked with 'a = Str.
+    fun `polymorphic helper dispatches encode on Str via outer constraint`() {
+        // A helper `'a with Encode JsonC 'a` calls `value.encode` inside its
+        // body, and is invoked with `'a = Str`. Encoding is total (no Result)
+        // per redesign principle #2.
         val result = eval("""
-            use std::codec::json::{json_fmt}
-            use std::codec::core::{EncodeRepr, default_config}
+            use std::codec::json::{Json, JsonC, json_default, to_str}
+            use std::codec::core::{Encode}
 
-            let to_query_str : { val: 'a } with EncodeRepr 'a -> Str = { val } ->
-              match val.encode_repr { fmt = json_fmt, config = default_config } is
-                Ok { val = _ } -> "ok"
-                Err { error = _ } -> "err"
+            let to_query_str : { val: 'a } with Encode JsonC 'a -> Str = { val } -> do
+              let encoded: Json = val.encode { config = json_default }
+              to_str { json = encoded }
 
             to_query_str { val = "hello" }
         """)
-        assertEquals("ok", result)
+        assertEquals("\"hello\"", result)
     }
 
     @Test
-    fun `polymorphic helper dispatches encode_repr inside a fold callback`() {
-        // The actual #195 shape: the call site is nested inside a seq::fold lambda.
+    fun `polymorphic helper dispatches encode inside a fold callback`() {
+        // The #195 shape: the call site is nested inside a seq::fold lambda.
+        // Impl-threading must survive lambda nesting.
         val result = eval("""
-            use std::codec::json::{json_fmt}
-            use std::codec::core::{EncodeRepr, default_config}
+            use std::codec::json::{Json, JsonC, json_default}
+            use std::codec::core::{Encode}
             use std::collections::seq
 
-            let count_encodable : { xs: [Str] } -> Int = { xs } ->
+            let count_encoded : { xs: [Str] } -> Int = { xs } ->
               seq::fold {
                 xs = xs,
                 init = 0,
-                f = { acc, x } -> match x.encode_repr { fmt = json_fmt, config = default_config } is
-                  Ok { val = _ } -> acc + 1
-                  Err { error = _ } -> acc,
+                f = { acc, x } -> do
+                  let _: Json = x.encode { config = json_default }
+                  acc + 1,
               }
 
-            count_encodable { xs = ["a", "b", "c"] }
+            count_encoded { xs = ["a", "b", "c"] }
         """)
         assertEquals(3L, result)
     }

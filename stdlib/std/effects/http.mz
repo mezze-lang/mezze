@@ -1,5 +1,5 @@
 use std::codec::json::{ Json, to_str, parse_str }
-use std::codec::core::{ DecodeError, default_config }
+use std::codec::core::{ DecodeError }
 use std::codec::url::{ url_encode_component }
 use std::collections::map
 use std::collections::seq
@@ -101,7 +101,7 @@ impl Http for HttpClientWith { config: HttpConfig } where {
   finalize_scope = {} -> do
     __native_http_client_close { client = scope.client }
     {},
-  request = { req: 'req, config: default_config } ->
+  request = { req, config } ->
     __native_http_request { req = req, config = config, client = scope.client },
 }
 
@@ -116,7 +116,7 @@ impl Http for SimpleHttpClient where {
 
 ## Simple HTTP client with a fixed config override.
 impl Http for SimpleHttpClientWith { config: HttpConfig } where {
-  request = { req: 'req, config: default_config } -> do
+  request = { req, config } -> do
     let client = __native_http_client_create {}
     let result = __native_http_request { req = req, config = config, client = client }
     __native_http_client_close { client = client }
@@ -213,7 +213,16 @@ pub let body_str: { resp: Response } -> Result Str Str = { resp } ->
 ## Decode response body as JSON.
 pub let body_json: { resp: Response } -> Result Json DecodeError = { resp } -> do
   match body_str { resp = resp } is
-    Ok { val } -> parse_str { s = val }
+    Ok { val } -> match parse_str { s = val } is
+      Ok { val = j } -> Ok { val = j }
+      Err { error } -> Err {
+        error = {
+          path = error.path,
+          message = error.reason,
+          expected = "JSON",
+          found = error.input_ref,
+        },
+      }
     Err { error } -> Err {
       error = {
         path = [],
@@ -327,8 +336,8 @@ pub let with_method: { req: Request, val: Method } -> Request = { req, val } ->
 ##
 ## Mixed-type values must be pre-converted to Str by the caller (e.g.
 ## `int::to_str { n = 42 }`). A future revision may add a polymorphic
-## variant gated on `EncodeRepr 'a` once primitive types implement the
-## ability; today the codec only auto-derives for records and variants.
+## variant gated on `Encode UrlC 'a` (see `std::codec::url`) so that any
+## scalar-encodable value can be passed directly.
 ##
 ## Empty map is a no-op.
 pub let with_query: { req: Request, params: Map Str Str } -> Request = { req, params } ->

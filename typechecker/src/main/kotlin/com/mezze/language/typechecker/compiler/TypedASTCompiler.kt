@@ -2762,6 +2762,16 @@ class TypedASTCompiler(
             concreteType is BoolType && targetType is BoolType -> true
             concreteType is CharType && targetType is CharType -> true
             concreteType is FracType && targetType is FracType -> true
+            // Bool has two surface types — the primitive `BoolType` and the
+            // constructor-form `VariantType({True, False})`. A codec-generated
+            // `impl … for Bool` registers its target as `BoolType`, but the
+            // receiver at a bare `True.encode {…}` call keeps its constructor
+            // form. Normalise both directions so ability dispatch on a Bool
+            // constant routes through the generated impl.
+            concreteType is VariantType && targetType is BoolType &&
+                com.mezze.language.ast.PrimitiveTypes.isBoolVariant(concreteType) -> true
+            concreteType is BoolType && targetType is VariantType &&
+                com.mezze.language.ast.PrimitiveTypes.isBoolVariant(targetType) -> true
             // Hash is authoritative nominal identity: two same-named TypeApplications
             // from DIFFERENT declarations (differing content hash) must NOT match —
             // mirrors the solver's unifyTypeApplications veto (#278/F0). Name match,

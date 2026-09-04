@@ -32,15 +32,13 @@ pub type FieldTransform = |
 ## preferences uniformly.
 pub type SharedConfig = { field_transform: FieldTransform }
 
-## Emit-time context threaded through encode walks. `path` accumulates
+## Context threaded through encode / decode walks. `path` accumulates
 ## record / list positions for error reporting; `shared` carries the
-## cross-format knobs.
-pub type EncodeCtx = { path: [Str], shared: SharedConfig }
-
-## Parse-time context threaded through decode walks. Same fields as
-## `EncodeCtx` — kept as a separate type so future decode-only knobs can
-## be added without perturbing the encode side.
-pub type DecodeCtx = { path: [Str], shared: SharedConfig }
+## cross-format knobs. Records are structural in Mezze, so encode and
+## decode share the single type — direction-specific knobs will need
+## nominal wrappers (newtype) or extra discriminating fields when they
+## are added.
+pub type CodecCtx = { path: [Str], shared: SharedConfig }
 
 ## Structured decode error. `path` locates the field / index, `message`
 ## is human-readable, `expected` / `found` describe the mismatch.
@@ -67,82 +65,82 @@ ability Format for 'config having 'out where {
 ## Encode primitive scalars. Every format must implement these to encode
 ## anything; missing means "format can't produce output at all".
 ability EncodeScalar for 'config having 'out where {
-  encode_int:   { it: 'config, val: Int,   ctx: EncodeCtx } -> 'out,
-  encode_float: { it: 'config, val: Float, ctx: EncodeCtx } -> 'out,
-  encode_str:   { it: 'config, val: Str,   ctx: EncodeCtx } -> 'out,
-  encode_bool:  { it: 'config, val: Bool,  ctx: EncodeCtx } -> 'out,
-  encode_frac:  { it: 'config, val: Frac,  ctx: EncodeCtx } -> 'out,
-  encode_bytes: { it: 'config, val: Bytes, ctx: EncodeCtx } -> 'out,
-  encode_char:  { it: 'config, val: Char,  ctx: EncodeCtx } -> 'out,
-  encode_nat:   { it: 'config, val: Nat,   ctx: EncodeCtx } -> 'out,
+  encode_int:   { it: 'config, val: Int,   ctx: CodecCtx } -> 'out,
+  encode_float: { it: 'config, val: Float, ctx: CodecCtx } -> 'out,
+  encode_str:   { it: 'config, val: Str,   ctx: CodecCtx } -> 'out,
+  encode_bool:  { it: 'config, val: Bool,  ctx: CodecCtx } -> 'out,
+  encode_frac:  { it: 'config, val: Frac,  ctx: CodecCtx } -> 'out,
+  encode_bytes: { it: 'config, val: Bytes, ctx: CodecCtx } -> 'out,
+  encode_char:  { it: 'config, val: Char,  ctx: CodecCtx } -> 'out,
+  encode_nat:   { it: 'config, val: Nat,   ctx: CodecCtx } -> 'out,
 }
 
 ## Encode a record shape given per-field key/value pairs already encoded
 ## to `'out` by the walker.
 ability EncodeRecord for 'config having 'out where {
-  encode_record: { it: 'config, fields: [{ key: Str, val: 'out }], ctx: EncodeCtx } -> 'out,
+  encode_record: { it: 'config, fields: [{ key: Str, value: 'out }], ctx: CodecCtx } -> 'out,
 }
 
 ## Encode a variant shape given tag and optional payload already encoded.
 ability EncodeVariant for 'config having 'out where {
-  encode_variant: { it: 'config, tag: Str, payload: Option 'out, ctx: EncodeCtx } -> 'out,
+  encode_variant: { it: 'config, tag: Str, payload: Option 'out, ctx: CodecCtx } -> 'out,
 }
 
 ## Encode a list / sequence given per-element output already encoded.
 ## Sets flow through this after `set::to_seq`.
 ability EncodeList for 'config having 'out where {
-  encode_list: { it: 'config, elems: ['out], ctx: EncodeCtx } -> 'out,
+  encode_list: { it: 'config, elems: ['out], ctx: CodecCtx } -> 'out,
 }
 
 ## Encode a map given per-entry key/value output already encoded.
 ability EncodeMap for 'config having 'out where {
-  encode_map: { it: 'config, entries: [{ key: 'out, val: 'out }], ctx: EncodeCtx } -> 'out,
+  encode_map: { it: 'config, entries: [{ key: 'out, value: 'out }], ctx: CodecCtx } -> 'out,
 }
 
 ## Encode an option — `Some` wraps its inner encoded value, `None`
 ## renders however the format prefers (JSON null, absent field, etc.).
 ability EncodeOption for 'config having 'out where {
-  encode_option: { it: 'config, val: Option 'out, ctx: EncodeCtx } -> 'out,
+  encode_option: { it: 'config, val: Option 'out, ctx: CodecCtx } -> 'out,
 }
 
 ## ---- Tier 2 — Per-shape decode (6 abilities) ---------------------------
 
 ## Decode primitive scalars from the format's input representation.
 ability DecodeScalar for 'config having 'in where {
-  decode_int:   { it: 'config, val: 'in, ctx: DecodeCtx } -> Result Int   DecodeError,
-  decode_float: { it: 'config, val: 'in, ctx: DecodeCtx } -> Result Float DecodeError,
-  decode_str:   { it: 'config, val: 'in, ctx: DecodeCtx } -> Result Str   DecodeError,
-  decode_bool:  { it: 'config, val: 'in, ctx: DecodeCtx } -> Result Bool  DecodeError,
-  decode_frac:  { it: 'config, val: 'in, ctx: DecodeCtx } -> Result Frac  DecodeError,
-  decode_bytes: { it: 'config, val: 'in, ctx: DecodeCtx } -> Result Bytes DecodeError,
-  decode_char:  { it: 'config, val: 'in, ctx: DecodeCtx } -> Result Char  DecodeError,
-  decode_nat:   { it: 'config, val: 'in, ctx: DecodeCtx } -> Result Nat   DecodeError,
+  decode_int:   { it: 'config, val: 'in, ctx: CodecCtx } -> Result Int   DecodeError,
+  decode_float: { it: 'config, val: 'in, ctx: CodecCtx } -> Result Float DecodeError,
+  decode_str:   { it: 'config, val: 'in, ctx: CodecCtx } -> Result Str   DecodeError,
+  decode_bool:  { it: 'config, val: 'in, ctx: CodecCtx } -> Result Bool  DecodeError,
+  decode_frac:  { it: 'config, val: 'in, ctx: CodecCtx } -> Result Frac  DecodeError,
+  decode_bytes: { it: 'config, val: 'in, ctx: CodecCtx } -> Result Bytes DecodeError,
+  decode_char:  { it: 'config, val: 'in, ctx: CodecCtx } -> Result Char  DecodeError,
+  decode_nat:   { it: 'config, val: 'in, ctx: CodecCtx } -> Result Nat   DecodeError,
 }
 
 ## Decode a single record field by key from the input, leaving the walker
 ## to further descend into the returned sub-value.
 ability DecodeRecord for 'config having 'in where {
-  decode_record_field: { it: 'config, val: 'in, key: Str, ctx: DecodeCtx } -> Result 'in DecodeError,
+  decode_record_field: { it: 'config, val: 'in, key: Str, ctx: CodecCtx } -> Result 'in DecodeError,
 }
 
 ## Decode a variant: pull tag + optional payload out of the input.
 ability DecodeVariant for 'config having 'in where {
-  decode_variant: { it: 'config, val: 'in, ctx: DecodeCtx } -> Result { tag: Str, payload: Option 'in } DecodeError,
+  decode_variant: { it: 'config, val: 'in, ctx: CodecCtx } -> Result { tag: Str, payload: Option 'in } DecodeError,
 }
 
 ## Decode a list into per-element input values; the walker recurses on each.
 ability DecodeList for 'config having 'in where {
-  decode_list: { it: 'config, val: 'in, ctx: DecodeCtx } -> Result ['in] DecodeError,
+  decode_list: { it: 'config, val: 'in, ctx: CodecCtx } -> Result ['in] DecodeError,
 }
 
 ## Decode a map into per-entry input pairs; the walker recurses on each side.
 ability DecodeMap for 'config having 'in where {
-  decode_map: { it: 'config, val: 'in, ctx: DecodeCtx } -> Result [{ key: 'in, val: 'in }] DecodeError,
+  decode_map: { it: 'config, val: 'in, ctx: CodecCtx } -> Result [{ key: 'in, value: 'in }] DecodeError,
 }
 
 ## Decode an option — `None` for absent / null, `Some` for present.
 ability DecodeOption for 'config having 'in where {
-  decode_option: { it: 'config, val: 'in, ctx: DecodeCtx } -> Result (Option 'in) DecodeError,
+  decode_option: { it: 'config, val: 'in, ctx: CodecCtx } -> Result (Option 'in) DecodeError,
 }
 
 ## ---- Tier 3 — Encode / Decode primitives -------------------------------

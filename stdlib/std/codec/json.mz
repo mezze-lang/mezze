@@ -26,10 +26,10 @@ use std::codec::core::{
   EncodeScalar, EncodeRecord, EncodeVariant, EncodeList, EncodeMap, EncodeOption,
   DecodeScalar, DecodeRecord, DecodeVariant, DecodeList, DecodeMap, DecodeOption,
   Encode, Decode,
-  EncodeCtx, DecodeCtx, SharedConfig, FieldTransform, DecodeError,
+  CodecCtx, SharedConfig, FieldTransform, DecodeError,
   default_shared,
   apply_field_transform,
-  transform_field_name, inverse_transform_field_name,
+  transform_field_name, inverse_transform_field_name
 }
 
 ## ---- Intermediate representation ---------------------------------------
@@ -40,9 +40,9 @@ pub type Json = |
   JBool { val: Bool },
   JInt { val: Int },
   JFloat { val: Float },
-  JStr { val: Str },
-  JList { items: [Json] },
-  JObj { fields: [{ key: Str, val: Json }] },
+  JString { val: Str },
+  JArray { items: [Json] },
+  JObject { fields: [{ key: Str, value: Json }] },
 |
 
 ## ---- Config types ------------------------------------------------------
@@ -61,13 +61,17 @@ pub type JsonC = {
 }
 
 ## JSON config — direct-to-bytes path. Same knobs, different output shape
-## (`Bytes` — see `impl Format for JsonUtf8C having 'out = Bytes`).
+## (`Bytes` — see `impl Format for JsonUtf8C having 'out = Bytes`). Carries
+## a distinct `emits_bytes: Bool` marker field: Mezze records are structural,
+## so JsonC and JsonUtf8C would otherwise be the same type — that would
+## break format-dispatch on `'config`.
 pub type JsonUtf8C = {
   shared: SharedConfig,
   pretty: Bool,
   indent: Option Int,
   null_handling: NullHandling,
   sort_keys: Bool,
+  emits_bytes: Bool,
 }
 
 ## ---- Preset configs ----------------------------------------------------
@@ -102,6 +106,7 @@ pub let json_utf8_default: JsonUtf8C = {
   indent = None,
   null_handling = IncludeNull,
   sort_keys = False,
+  emits_bytes = True,
 }
 
 pub let json_utf8_camel: JsonUtf8C = {
@@ -110,6 +115,7 @@ pub let json_utf8_camel: JsonUtf8C = {
   indent = None,
   null_handling = IncludeNull,
   sort_keys = False,
+  emits_bytes = True,
 }
 
 ## ---- Format links ------------------------------------------------------
@@ -159,14 +165,14 @@ let json_type_name: { json: Json } -> Str = { json } -> match json is
   JBool { val } -> "boolean"
   JInt { val } -> "integer"
   JFloat { val } -> "float"
-  JStr { val } -> "string"
-  JList { items } -> "array"
-  JObj { fields } -> "object"
+  JString { val } -> "string"
+  JArray { items } -> "array"
+  JObject { fields } -> "object"
 
-let find_field_value = { fields: [{ key: Str, val: Json }], key: Str, idx: Int } ->
+let find_field_value = { fields: [{ key: Str, value: Json }], key: Str, idx: Int } ->
   if idx >= seq::size { xs = fields } then None else match seq::get { xs = fields, i = idx } is
     Some { val = entry } ->
-      if entry.key == key then Some { val = entry.val }
+      if entry.key == key then Some { val = entry.value }
       else find_field_value { fields = fields, key = key, idx = idx + 1 }
     None -> None
 
@@ -184,41 +190,41 @@ let missing_field_error = { path: [Str], key: Str } -> Err {
 impl EncodeScalar for JsonC having 'out = Json where {
   encode_int   = { it, val, ctx } -> JInt   { val = val },
   encode_float = { it, val, ctx } -> JFloat { val = val },
-  encode_str   = { it, val, ctx } -> JStr   { val = val },
+  encode_str   = { it, val, ctx } -> JString   { val = val },
   encode_bool  = { it, val, ctx } -> JBool  { val = val },
   encode_frac  = { it, val, ctx } -> JFloat { val = __native_frac_to_float { n = val } },
-  encode_bytes = { it, val, ctx } -> JStr   { val = bytes::to_base64 { b = val } },
-  encode_char  = { it, val, ctx } -> JStr   { val = char::to_str { c = val } },
+  encode_bytes = { it, val, ctx } -> JString   { val = bytes::to_base64 { b = val } },
+  encode_char  = { it, val, ctx } -> JString   { val = char::to_str { c = val } },
   encode_nat   = { it, val, ctx } -> JInt   { val = nat::to_int { n = val } },
 }
 
 impl EncodeRecord for JsonC having 'out = Json where {
-  encode_record = { it, fields, ctx } -> JObj { fields = fields },
+  encode_record = { it, fields, ctx } -> JObject { fields = fields },
 }
 
 impl EncodeVariant for JsonC having 'out = Json where {
   encode_variant = { it, tag, payload, ctx } -> match payload is
-    Some { val = p } -> JObj {
+    Some { val = p } -> JObject {
       fields = [
-        { key = "tag", val = JStr { val = tag } },
-        { key = "value", val = p },
+        { key = "tag", value = JString { val = tag } },
+        { key = "value", value = p },
       ],
     }
-    None -> JObj {
-      fields = [{ key = "tag", val = JStr { val = tag } }],
+    None -> JObject {
+      fields = [{ key = "tag", value = JString { val = tag } }],
     },
 }
 
 impl EncodeList for JsonC having 'out = Json where {
-  encode_list = { it, elems, ctx } -> JList { items = elems },
+  encode_list = { it, elems, ctx } -> JArray { items = elems },
 }
 
 impl EncodeMap for JsonC having 'out = Json where {
-  encode_map = { it, entries, ctx } -> JList {
-    items = seq::map { xs = entries, f = { x } -> JObj {
+  encode_map = { it, entries, ctx } -> JArray {
+    items = seq::map { xs = entries, f = { x } -> JObject {
       fields = [
-        { key = "key", val = x.key },
-        { key = "value", val = x.val },
+        { key = "key", value = x.key },
+        { key = "value", value = x.value },
       ],
     } },
   },
@@ -251,7 +257,7 @@ impl DecodeScalar for JsonC having 'in = Json where {
       found = Some { val = json_type_name { json = val } },
     } },
   decode_str = { it, val, ctx } -> match val is
-    JStr { val = v } -> Ok { val = v }
+    JString { val = v } -> Ok { val = v }
     _ -> Err { error = {
       path = ctx.path,
       message = "Expected string",
@@ -276,7 +282,7 @@ impl DecodeScalar for JsonC having 'in = Json where {
       found = Some { val = json_type_name { json = val } },
     } },
   decode_bytes = { it, val, ctx } -> match val is
-    JStr { val = v } -> match bytes::from_base64 { s = v } is
+    JString { val = v } -> match bytes::from_base64 { s = v } is
       Some { val = b } -> Ok { val = b }
       None -> Err { error = {
         path = ctx.path,
@@ -291,7 +297,7 @@ impl DecodeScalar for JsonC having 'in = Json where {
       found = Some { val = json_type_name { json = val } },
     } },
   decode_char = { it, val, ctx } -> match val is
-    JStr { val = v } -> match char::from_str { s = v } is
+    JString { val = v } -> match char::from_str { s = v } is
       Some { val = c } -> Ok { val = c }
       None -> Err { error = {
         path = ctx.path,
@@ -324,7 +330,7 @@ impl DecodeScalar for JsonC having 'in = Json where {
 
 impl DecodeRecord for JsonC having 'in = Json where {
   decode_record_field = { it, val, key, ctx } -> match val is
-    JObj { fields } -> match find_field_value { fields = fields, key = key, idx = 0 } is
+    JObject { fields } -> match find_field_value { fields = fields, key = key, idx = 0 } is
       Some { val = v } -> Ok { val = v }
       None -> missing_field_error { path = ctx.path, key = key }
     _ -> Err { error = {
@@ -337,9 +343,9 @@ impl DecodeRecord for JsonC having 'in = Json where {
 
 impl DecodeVariant for JsonC having 'in = Json where {
   decode_variant = { it, val, ctx } -> match val is
-    JObj { fields } -> match find_field_value { fields = fields, key = "tag", idx = 0 } is
+    JObject { fields } -> match find_field_value { fields = fields, key = "tag", idx = 0 } is
       Some { val = tag_json } -> match tag_json is
-        JStr { val = tag } -> Ok { val = {
+        JString { val = tag } -> Ok { val = {
           tag = tag,
           payload = find_field_value { fields = fields, key = "value", idx = 0 },
         } }
@@ -365,7 +371,7 @@ impl DecodeVariant for JsonC having 'in = Json where {
 
 impl DecodeList for JsonC having 'in = Json where {
   decode_list = { it, val, ctx } -> match val is
-    JList { items } -> Ok { val = items }
+    JArray { items } -> Ok { val = items }
     _ -> Err { error = {
       path = ctx.path,
       message = "Expected array",
@@ -376,9 +382,9 @@ impl DecodeList for JsonC having 'in = Json where {
 
 impl DecodeMap for JsonC having 'in = Json where {
   decode_map = { it, val, ctx } -> match val is
-    JObj { fields } -> Ok { val = seq::map { xs = fields, f = { x } -> {
-      key = JStr { val = x.key },
-      val = x.val,
+    JObject { fields } -> Ok { val = seq::map { xs = fields, f = { x } -> {
+      key = JString { val = x.key },
+      value = x.value,
     } } }
     _ -> Err { error = {
       path = ctx.path,
@@ -415,11 +421,11 @@ let json_to_bytes: { j: Json } -> Bytes = { j } ->
 impl EncodeScalar for JsonUtf8C having 'out = Bytes where {
   encode_int   = { it, val, ctx } -> json_to_bytes { j = JInt   { val = val } },
   encode_float = { it, val, ctx } -> json_to_bytes { j = JFloat { val = val } },
-  encode_str   = { it, val, ctx } -> json_to_bytes { j = JStr   { val = val } },
+  encode_str   = { it, val, ctx } -> json_to_bytes { j = JString   { val = val } },
   encode_bool  = { it, val, ctx } -> json_to_bytes { j = JBool  { val = val } },
   encode_frac  = { it, val, ctx } -> json_to_bytes { j = JFloat { val = __native_frac_to_float { n = val } } },
-  encode_bytes = { it, val, ctx } -> json_to_bytes { j = JStr   { val = bytes::to_base64 { b = val } } },
-  encode_char  = { it, val, ctx } -> json_to_bytes { j = JStr   { val = char::to_str { c = val } } },
+  encode_bytes = { it, val, ctx } -> json_to_bytes { j = JString   { val = bytes::to_base64 { b = val } } },
+  encode_char  = { it, val, ctx } -> json_to_bytes { j = JString   { val = char::to_str { c = val } } },
   encode_nat   = { it, val, ctx } -> json_to_bytes { j = JInt   { val = nat::to_int { n = val } } },
 }
 
@@ -432,8 +438,8 @@ ability ToJson for 'a where {
 }
 
 impl ToJson for 'a where {
-  json      = { it }         with Encode JsonC 'a -> it.encode { config = json_default },
-  json_with = { it, config } with Encode JsonC 'a -> it.encode { config = config },
+  json:      { it: 'a }                with Encode JsonC 'a -> Json = { it }         -> it.encode { config = json_default },
+  json_with: { it: 'a, config: JsonC } with Encode JsonC 'a -> Json = { it, config } -> it.encode { config = config },
 }
 
 ## Encode any value directly to UTF-8 bytes.
@@ -443,8 +449,8 @@ ability ToJsonUtf8 for 'a where {
 }
 
 impl ToJsonUtf8 for 'a where {
-  json_utf8      = { it }         with Encode JsonUtf8C 'a -> it.encode { config = json_utf8_default },
-  json_utf8_with = { it, config } with Encode JsonUtf8C 'a -> it.encode { config = config },
+  json_utf8:      { it: 'a }                    with Encode JsonUtf8C 'a -> Bytes = { it }         -> it.encode { config = json_utf8_default },
+  json_utf8_with: { it: 'a, config: JsonUtf8C } with Encode JsonUtf8C 'a -> Bytes = { it, config } -> it.encode { config = config },
 }
 
 ## Decode a value from a `Json` tree via `Type.from_json{}` inherent syntax.
@@ -456,6 +462,6 @@ ability FromJson 'a for 'in where {
 }
 
 impl FromJson 'a for Json where {
-  from_json      = { it }         with Decode JsonC 'a -> it.decode { config = json_default },
-  from_json_with = { it, config } with Decode JsonC 'a -> it.decode { config = config },
+  from_json:      { it: Json }                with Decode JsonC 'a -> Result 'a DecodeError = { it }         -> it.decode { config = json_default },
+  from_json_with: { it: Json, config: JsonC } with Decode JsonC 'a -> Result 'a DecodeError = { it, config } -> it.decode { config = config },
 }

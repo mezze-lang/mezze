@@ -65,7 +65,7 @@ class UnusedImportLintTest {
         val msgs = unused("""
             use std::codec::core::{ Format }
             type Foo = { x: Int }
-            impl Format for Str Foo where { }
+            impl Format for Foo having 'out = Str where { }
         """.trimIndent())
         assertFalse(msgs.any { it.contains("'Format'") }, "'Format' is used in an impl. Got: $msgs")
     }

@@ -6,8 +6,14 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * Tests for std/codec module.
- * Tests codec error types, configurations, and helper functions.
+ * Tests for std::codec::core — value-level API stable across the phase-M
+ * redesign: `FieldTransform`, `SharedConfig` + `default_shared`, `DecodeError`,
+ * `empty_path` / `append_path` / `append_index` / `format_path`, `decode_error`.
+ *
+ * `EncodeError` / `encode_error` / `CodecConfig` / `default_config` are gone
+ * — encoding is total (redesign principle #2) and the cross-format config
+ * type is now `SharedConfig` embedded in per-format configs. Tests for those
+ * removed symbols have been dropped rather than migrated.
  */
 class CodecModuleTest {
 
@@ -85,14 +91,14 @@ class CodecModuleTest {
         assertEquals(true, result)
     }
 
-    // === CodecConfig Tests ===
+    // === SharedConfig Tests ===
 
     @Test
-    fun `test default_config has Identity transform`() {
+    fun `test default_shared has Identity transform`() {
         val result = eval("""
-            use std::codec::core::{default_config}
+            use std::codec::core::{default_shared}
 
-            match default_config.field_transform is
+            match default_shared.field_transform is
                 Identity -> True
                 _ -> False
         """)
@@ -100,48 +106,16 @@ class CodecModuleTest {
     }
 
     @Test
-    fun `test CodecConfig construction`() {
+    fun `test SharedConfig override with spread`() {
         val result = eval("""
-            use std::codec::core::{CodecConfig, FieldTransform, NullHandling, default_config}
+            use std::codec::core::{SharedConfig, FieldTransform, default_shared}
 
-            let t: FieldTransform = SnakeCase
-            let config: CodecConfig = {...default_config, field_transform = t}
-            match config.field_transform is
+            let cfg: SharedConfig = { ...default_shared, field_transform = SnakeCase }
+            match cfg.field_transform is
                 SnakeCase -> True
                 _ -> False
         """)
         assertEquals(true, result)
-    }
-
-    // === EncodeError Tests ===
-
-    @Test
-    fun `test EncodeError construction`() {
-        val result = eval("""
-            use std::codec::core::{EncodeError}
-
-            let error: EncodeError = {
-                path = ["user", "address"],
-                message = "Cannot encode nested record"
-            }
-            error.message
-        """)
-        assertEquals("Cannot encode nested record", result)
-    }
-
-    @Test
-    fun `test EncodeError path`() {
-        val result = eval("""
-            use std::codec::core::{EncodeError}
-            use std::collections::seq
-
-            let error: EncodeError = {
-                path = ["user", "name"],
-                message = "Encoding failed"
-            }
-            seq::size {xs = error.path}
-        """)
-        assertEquals(2L, result)
     }
 
     // === DecodeError Tests ===
@@ -265,19 +239,6 @@ class CodecModuleTest {
     }
 
     // === Error Constructor Tests ===
-
-    @Test
-    fun `test encode_error creates Err variant`() {
-        val result = eval("""
-            use std::codec::core::{encode_error, empty_path}
-
-            let err = encode_error {path = empty_path, message = "Test error"}
-            match err is
-                Err {error} -> error.message
-                _ -> "not an error"
-        """)
-        assertEquals("Test error", result)
-    }
 
     @Test
     fun `test decode_error creates Err variant`() {

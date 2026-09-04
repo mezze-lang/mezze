@@ -158,7 +158,7 @@ class CodecGenerator {
             fields.map { (fieldName, fieldType) ->
                 record(
                     "key" to transformFieldName(fieldName),
-                    "val" to buildEncodeExpr(fieldType, member(valueExpr, fieldName)),
+                    "value" to buildEncodeExpr(fieldType, member(valueExpr, fieldName)),
                 )
             }
         )
@@ -227,7 +227,7 @@ class CodecGenerator {
                     listOf("entry"),
                     record(
                         "key" to buildEncodeExpr(keyType, member(id("entry"), "key")),
-                        "val" to buildEncodeExpr(valType, member(id("entry"), "val")),
+                        "value" to buildEncodeExpr(valType, member(id("entry"), "value")),
                     ),
                 ),
             ),
@@ -456,10 +456,10 @@ class CodecGenerator {
                         matchCase(
                             okPat("__k"),
                             match(
-                                buildDecodeExpr(valType, member(id("entry"), "val")),
+                                buildDecodeExpr(valType, member(id("entry"), "value")),
                                 matchCase(
                                     okPat("__v"),
-                                    ok(record("key" to id("__k"), "val" to id("__v"))),
+                                    ok(record("key" to id("__k"), "value" to id("__v"))),
                                 ),
                                 matchCase(errPat("e"), err(id("e"))),
                             ),
@@ -564,22 +564,36 @@ class CodecGenerator {
     )
 
     /**
-     * `codec::apply_field_transform { name = "<field>", shared = config.shared }`.
+     * Apply the runtime field-name transform to a static field name at emit time.
      *
-     * Fully qualified because the generator emits AST that will land in an
-     * arbitrary user module — we can't assume the helper is in scope.
+     * Semantically equivalent to `std::codec::core::apply_field_transform
+     * { name = "<field>", shared = config.shared }`, but INLINED so the
+     * generated impl body doesn't reference stdlib helpers by fully-qualified
+     * path. buildExpr's `resolveBinding` for a qualified identifier only checks
+     * the user module's hash table and imports — auto-derived impls land in an
+     * arbitrary user module that doesn't import `std::codec::core`, so a naked
+     * fully-qualified call slips through to a `BindingRef.Local(0,0)` fallback
+     * and crashes at runtime.
+     *
+     * We inline as a match on `config.shared.field_transform`, dispatching each
+     * arm to the corresponding `__native_string_to_*` intrinsic (native
+     * symbols always resolve via `MagicParams.isIntrinsicSymbol`). Identity
+     * returns the literal name.
      */
-    private fun transformFieldName(fieldName: String): ParsedExpr = call(
-        ParsedIdentifier(
-            localName = "apply_field_transform",
-            qualifier = ParsedModulePath(listOf("std", "codec", "core")),
-            loc = GEN_LOC,
-        ),
-        record(
-            "name" to str(fieldName),
-            "shared" to member(id("config"), "shared"),
-        ),
-    )
+    private fun transformFieldName(fieldName: String): ParsedExpr {
+        val nameLit = str(fieldName)
+        fun nativeCase(nativeName: String): ParsedExpr =
+            call(id(nativeName), record("s" to nameLit))
+        return match(
+            member(member(id("config"), "shared"), "field_transform"),
+            matchCase(constructorPat("Identity", null), nameLit),
+            matchCase(constructorPat("SnakeCase", null), nativeCase("__native_string_to_snake_case")),
+            matchCase(constructorPat("CamelCase", null), nativeCase("__native_string_to_camel_case")),
+            matchCase(constructorPat("KebabCase", null), nativeCase("__native_string_to_kebab_case")),
+            matchCase(constructorPat("ScreamingSnakeCase", null),
+                      nativeCase("__native_string_to_screaming_snake_case")),
+        )
+    }
 
     private fun record(vararg fields: Pair<String, ParsedExpr>): ParsedRecordLit =
         ParsedRecordLit(

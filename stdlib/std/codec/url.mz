@@ -14,8 +14,8 @@ use std::codec::core::{
   EncodeScalar, EncodeVariant, EncodeOption,
   DecodeScalar, DecodeVariant, DecodeOption,
   Encode, Decode,
-  EncodeCtx, DecodeCtx, SharedConfig, FieldTransform, DecodeError,
-  default_shared,
+  CodecCtx, SharedConfig, FieldTransform, DecodeError,
+  default_shared
 }
 use std::int
 use std::float
@@ -194,8 +194,8 @@ ability ToUrl for 'a where {
 }
 
 impl ToUrl for 'a where {
-  url      = { it }         with Encode UrlC 'a -> it.encode { config = url_default },
-  url_with = { it, config } with Encode UrlC 'a -> it.encode { config = config },
+  url:      { it: 'a }               with Encode UrlC 'a -> Str = { it }         -> it.encode { config = url_default },
+  url_with: { it: 'a, config: UrlC } with Encode UrlC 'a -> Str = { it, config } -> it.encode { config = config },
 }
 
 ## Decode a value from a URL query-parameter string via inherent method
@@ -206,6 +206,6 @@ ability FromUrl 'a for 'in where {
 }
 
 impl FromUrl 'a for Str where {
-  from_url      = { it }         with Decode UrlC 'a -> it.decode { config = url_default },
-  from_url_with = { it, config } with Decode UrlC 'a -> it.decode { config = config },
+  from_url:      { it: Str }               with Decode UrlC 'a -> Result 'a DecodeError = { it }         -> it.decode { config = url_default },
+  from_url_with: { it: Str, config: UrlC } with Decode UrlC 'a -> Result 'a DecodeError = { it, config } -> it.decode { config = config },
 }

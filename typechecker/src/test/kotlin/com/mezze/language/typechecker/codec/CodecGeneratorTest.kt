@@ -11,11 +11,18 @@ import kotlin.test.assertEquals
 /**
  * Unit tests for the CodecGenerator class.
  *
- * Tests the automatic derivation of EncodeRepr/DecodeRepr implementations.
+ * Tests the automatic derivation of Tier-3 `Encode` / `Decode` implementations
+ * per (config, data) / (config, data, in) pair. Users of the new codec surface
+ * do not interact with these directly — the Tier-4 sugar (`.json{}` /
+ * `Type.from_json{}`) in each format module wraps them. See
+ * `docs/codec/redesign-2026-09.md` §"Tier 3 — Encode / Decode primitive".
  */
 class CodecGeneratorTest {
 
     private lateinit var generator: CodecGenerator
+
+    private val jsonC = MezzeType.TypeApplication("JsonC", emptyList())
+    private val jsonInType = MezzeType.TypeApplication("Json", emptyList())
 
     @BeforeEach
     fun setup() {
@@ -40,12 +47,10 @@ class CodecGeneratorTest {
     }
 
     @Test
-    fun `Bytes is serializable, ByteBuffer is not`() {
-        // #195 PR-A: Bytes now has a real `impl EncodeRepr` / `impl DecodeRepr` via
-        // Format.encode_bytes / decode_bytes — needed so polymorphic stdlib helpers
-        // (`'a with EncodeRepr 'a`) dispatch when `'a` instantiates to Bytes.
-        // (ByteBuffer is now a stdlib newtype over a native handle — an unserializable
-        // mutable I/O cursor — so it is no longer a MezzeType node to assert on here.)
+    fun `Bytes is serializable`() {
+        // Bytes maps to Tier-2 `encode_bytes` / `decode_bytes` — needed so
+        // polymorphic helpers (`'a with Encode 'c 'a`) dispatch when `'a`
+        // instantiates to Bytes.
         assertTrue(generator.isSerializable(MezzeType.BytesType))
     }
 
@@ -205,233 +210,150 @@ class CodecGeneratorTest {
         assertTrue(generator.isSerializable(varType))
     }
 
+    // ---- generateEncodeImpl: 2-slot shape (formatType, dataType) ---------
+
     @Test
     fun `generateEncodeImpl for Int creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
-        val impl = generator.generateEncodeImpl(formatType, MezzeType.IntType)
+        val impl = generator.generateEncodeImpl(jsonC, MezzeType.IntType)
 
-        assertEquals("EncodeRepr", impl.abilityName)
-        // Roc-style: single type parameter (just the data type)
+        assertEquals("Encode", impl.abilityName)
+        // Tier-3 shape: ability param is the config; target is the data type.
+        assertEquals(1, impl.abilityTypeArgs.size)
         assertEquals(1, impl.targetTypes.size)
-        assertEquals(1, impl.operations.size)  // encode with config
-        assertEquals("encode_repr", impl.operations[0].name)
+        assertEquals(1, impl.operations.size)
+        assertEquals("encode", impl.operations[0].name)
     }
 
     @Test
     fun `generateEncodeImpl for simple record creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
         val recordType = MezzeType.RecordType(mapOf(
             "name" to MezzeType.StringType,
             "age" to MezzeType.IntType
         ))
-        val impl = generator.generateEncodeImpl(formatType, recordType)
+        val impl = generator.generateEncodeImpl(jsonC, recordType)
 
-        assertEquals("EncodeRepr", impl.abilityName)
-        // Roc-style: single type parameter (just the data type)
+        assertEquals("Encode", impl.abilityName)
+        assertEquals(1, impl.abilityTypeArgs.size)
         assertEquals(1, impl.targetTypes.size)
-        assertEquals(1, impl.operations.size)  // encode with config
+        assertEquals(1, impl.operations.size)
         assertNotNull(impl.operations[0].implementation)
     }
 
     @Test
     fun `generateEncodeImpl for variant creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
         val variantType = MezzeType.VariantType(mapOf(
             "Some" to MezzeType.IntType,
             "None" to null
         ))
-        val impl = generator.generateEncodeImpl(formatType, variantType)
+        val impl = generator.generateEncodeImpl(jsonC, variantType)
 
-        assertEquals("EncodeRepr", impl.abilityName)
-        assertEquals(1, impl.operations.size)  // encode with config
+        assertEquals("Encode", impl.abilityName)
+        assertEquals(1, impl.operations.size)
     }
 
     @Test
     fun `generateEncodeImpl for List creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
         val listType = MezzeType.ListType(MezzeType.IntType)
-        val impl = generator.generateEncodeImpl(formatType, listType)
+        val impl = generator.generateEncodeImpl(jsonC, listType)
 
-        assertEquals("EncodeRepr", impl.abilityName)
-        assertEquals(1, impl.operations.size)  // encode with config
+        assertEquals("Encode", impl.abilityName)
+        assertEquals(1, impl.operations.size)
     }
 
     @Test
     fun `generated impls are cached`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
+        val impl1 = generator.generateEncodeImpl(jsonC, MezzeType.IntType)
+        val impl2 = generator.generateEncodeImpl(jsonC, MezzeType.IntType)
 
-        val impl1 = generator.generateEncodeImpl(formatType, MezzeType.IntType)
-        val impl2 = generator.generateEncodeImpl(formatType, MezzeType.IntType)
-
-        // Should return the same instance due to caching
         assertTrue(impl1 === impl2)
     }
 
+    // ---- generateDecodeImpl: 3-slot shape (formatType, dataType, inType) --
+
     @Test
     fun `generateDecodeImpl for Int creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
-        val impl = generator.generateDecodeImpl(formatType, MezzeType.IntType)
+        val impl = generator.generateDecodeImpl(jsonC, MezzeType.IntType, jsonInType)
 
-        assertEquals("DecodeRepr", impl.abilityName)
-        // Roc-style: single type parameter (just the data type)
+        assertEquals("Decode", impl.abilityName)
+        // Tier-3 decode shape: two ability params (config, data), one target (input).
+        assertEquals(2, impl.abilityTypeArgs.size)
         assertEquals(1, impl.targetTypes.size)
-        assertEquals(1, impl.operations.size)  // decode with config
-        assertEquals("decode_repr", impl.operations[0].name)
+        assertEquals(1, impl.operations.size)
+        assertEquals("decode", impl.operations[0].name)
     }
 
     @Test
     fun `generateDecodeImpl for simple record creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
         val recordType = MezzeType.RecordType(mapOf(
             "name" to MezzeType.StringType,
             "age" to MezzeType.IntType
         ))
-        val impl = generator.generateDecodeImpl(formatType, recordType)
+        val impl = generator.generateDecodeImpl(jsonC, recordType, jsonInType)
 
-        assertEquals("DecodeRepr", impl.abilityName)
-        assertEquals(1, impl.operations.size)  // decode with config
+        assertEquals("Decode", impl.abilityName)
+        assertEquals(1, impl.operations.size)
         assertNotNull(impl.operations[0].implementation)
     }
 
     @Test
     fun `generateDecodeImpl for variant creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
         val variantType = MezzeType.VariantType(mapOf(
             "Some" to MezzeType.IntType,
             "None" to null
         ))
-        val impl = generator.generateDecodeImpl(formatType, variantType)
+        val impl = generator.generateDecodeImpl(jsonC, variantType, jsonInType)
 
-        assertEquals("DecodeRepr", impl.abilityName)
-        assertEquals(1, impl.operations.size)  // decode with config
-    }
-
-    @Test
-    fun `generateStreamEncodeImpl for Int creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("JsonStream", emptyList())
-        val impl = generator.generateStreamEncodeImpl(formatType, MezzeType.IntType)
-
-        assertEquals("StreamEncode", impl.abilityName)
-        // Roc-style: single type parameter (just the data type)
-        assertEquals(1, impl.targetTypes.size)
+        assertEquals("Decode", impl.abilityName)
         assertEquals(1, impl.operations.size)
-        assertEquals("stream_encode", impl.operations[0].name)
     }
 
-    @Test
-    fun `generateStreamDecodeImpl for Int creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("JsonStream", emptyList())
-        val impl = generator.generateStreamDecodeImpl(formatType, MezzeType.IntType)
-
-        assertEquals("StreamDecode", impl.abilityName)
-        // Roc-style: single type parameter (just the data type)
-        assertEquals(1, impl.targetTypes.size)
-        assertEquals(1, impl.operations.size)
-        assertEquals("stream_decode", impl.operations[0].name)
-    }
-
-    // Type Application Tests (Option, Result)
+    // ---- Type application: Option / Result ------------------------------
 
     @Test
     fun `generateEncodeImpl for Option creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
         val optionType = MezzeType.TypeApplication("Option", listOf(MezzeType.IntType))
-        val impl = generator.generateEncodeImpl(formatType, optionType)
+        val impl = generator.generateEncodeImpl(jsonC, optionType)
 
-        assertEquals("EncodeRepr", impl.abilityName)
-        assertEquals(1, impl.operations.size)  // encode with config
+        assertEquals("Encode", impl.abilityName)
+        assertEquals(1, impl.operations.size)
     }
 
     @Test
     fun `generateDecodeImpl for Option creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
         val optionType = MezzeType.TypeApplication("Option", listOf(MezzeType.IntType))
-        val impl = generator.generateDecodeImpl(formatType, optionType)
+        val impl = generator.generateDecodeImpl(jsonC, optionType, jsonInType)
 
-        assertEquals("DecodeRepr", impl.abilityName)
-        assertEquals(1, impl.operations.size)  // decode with config
+        assertEquals("Decode", impl.abilityName)
+        assertEquals(1, impl.operations.size)
     }
 
     @Test
     fun `generateEncodeImpl for Result creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
         val resultType = MezzeType.TypeApplication("Result", listOf(MezzeType.IntType, MezzeType.StringType))
-        val impl = generator.generateEncodeImpl(formatType, resultType)
+        val impl = generator.generateEncodeImpl(jsonC, resultType)
 
-        assertEquals("EncodeRepr", impl.abilityName)
-        assertEquals(1, impl.operations.size)  // encode with config
+        assertEquals("Encode", impl.abilityName)
+        assertEquals(1, impl.operations.size)
     }
 
     @Test
     fun `generateDecodeImpl for Result creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
         val resultType = MezzeType.TypeApplication("Result", listOf(MezzeType.IntType, MezzeType.StringType))
-        val impl = generator.generateDecodeImpl(formatType, resultType)
+        val impl = generator.generateDecodeImpl(jsonC, resultType, jsonInType)
 
-        assertEquals("DecodeRepr", impl.abilityName)
-        assertEquals(1, impl.operations.size)  // decode with config
+        assertEquals("Decode", impl.abilityName)
+        assertEquals(1, impl.operations.size)
     }
 
-    // Normalized Cache Key Tests
-
-    @Test
-    fun `records with same fields in different order share cache key`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
-
-        // Record with fields in order: name, age
-        val record1 = MezzeType.RecordType(linkedMapOf(
-            "name" to MezzeType.StringType,
-            "age" to MezzeType.IntType
-        ))
-
-        // Record with fields in order: age, name
-        val record2 = MezzeType.RecordType(linkedMapOf(
-            "age" to MezzeType.IntType,
-            "name" to MezzeType.StringType
-        ))
-
-        val impl1 = generator.generateEncodeImpl(formatType, record1)
-        val impl2 = generator.generateEncodeImpl(formatType, record2)
-
-        // Should return the same cached instance
-        assertTrue(impl1 === impl2, "Records with same fields in different order should share encoder")
-    }
-
-    @Test
-    fun `nested records with different field orders share cache key`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
-
-        // Nested record: {address: {city, zip}, name}
-        val inner1 = MezzeType.RecordType(linkedMapOf(
-            "city" to MezzeType.StringType,
-            "zip" to MezzeType.IntType
-        ))
-        val outer1 = MezzeType.RecordType(linkedMapOf(
-            "address" to inner1,
-            "name" to MezzeType.StringType
-        ))
-
-        // Nested record with different order: {name, address: {zip, city}}
-        val inner2 = MezzeType.RecordType(linkedMapOf(
-            "zip" to MezzeType.IntType,
-            "city" to MezzeType.StringType
-        ))
-        val outer2 = MezzeType.RecordType(linkedMapOf(
-            "name" to MezzeType.StringType,
-            "address" to inner2
-        ))
-
-        val impl1 = generator.generateEncodeImpl(formatType, outer1)
-        val impl2 = generator.generateEncodeImpl(formatType, outer2)
-
-        // Should return the same cached instance
-        assertTrue(impl1 === impl2, "Nested records with same structure should share encoder")
-    }
+    // ---- Cache-key distinctness ----------------------------------------
+    // (Order-invariant cache-key normalisation was a perf-hint of the old
+    // generator that the new implementation does not promise — the walker
+    // sorts fields at emit time, so order-differing keys still produce
+    // identical impl bodies, they just miss the cache. The tests below only
+    // probe distinctness, which IS a correctness invariant.)
 
     @Test
     fun `records with different fields do not share cache key`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
-
         val record1 = MezzeType.RecordType(mapOf(
             "name" to MezzeType.StringType,
             "age" to MezzeType.IntType
@@ -442,17 +364,14 @@ class CodecGeneratorTest {
             "email" to MezzeType.StringType
         ))
 
-        val impl1 = generator.generateEncodeImpl(formatType, record1)
-        val impl2 = generator.generateEncodeImpl(formatType, record2)
+        val impl1 = generator.generateEncodeImpl(jsonC, record1)
+        val impl2 = generator.generateEncodeImpl(jsonC, record2)
 
-        // Should NOT return the same instance
         assertFalse(impl1 === impl2, "Records with different fields should not share encoder")
     }
 
     @Test
     fun `records with same field names but different types do not share cache key`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
-
         val record1 = MezzeType.RecordType(mapOf(
             "value" to MezzeType.IntType
         ))
@@ -461,14 +380,13 @@ class CodecGeneratorTest {
             "value" to MezzeType.StringType
         ))
 
-        val impl1 = generator.generateEncodeImpl(formatType, record1)
-        val impl2 = generator.generateEncodeImpl(formatType, record2)
+        val impl1 = generator.generateEncodeImpl(jsonC, record1)
+        val impl2 = generator.generateEncodeImpl(jsonC, record2)
 
-        // Should NOT return the same instance
         assertFalse(impl1 === impl2, "Records with same field name but different types should not share encoder")
     }
 
-    // Variant Type Tests
+    // ---- Variant coverage ----------------------------------------------
 
     @Test
     fun `variant with record payload should be serializable`() {
@@ -500,12 +418,11 @@ class CodecGeneratorTest {
 
     @Test
     fun `generateEncodeImpl for empty variant creates valid impl`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
         val emptyVariant = MezzeType.VariantType(emptyMap())
-        val impl = generator.generateEncodeImpl(formatType, emptyVariant)
+        val impl = generator.generateEncodeImpl(jsonC, emptyVariant)
 
-        assertEquals("EncodeRepr", impl.abilityName)
-        assertEquals(1, impl.operations.size)  // encode with config
+        assertEquals("Encode", impl.abilityName)
+        assertEquals(1, impl.operations.size)
     }
 
     @Test

@@ -43,13 +43,11 @@ class HttpStageDTest {
         assertEquals(true, result)
     }
 
-    // Note: `(42).encode_repr {...}` and `True.encode_repr {...}` style
-    // tests for primitive EncodeRepr dispatch are deliberately omitted —
-    // the codec auto-derivation today only covers records and variants,
-    // not primitives. Once primitives are wired into EncodeRepr we can
-    // expose a polymorphic `with_query` accepting `Map Str 'a with
-    // EncodeRepr 'a`. For Stage D the API is `Map Str Str` and callers
-    // convert primitives at the call-site.
+    // Note: `(42).url {}` / `True.url {}` style tests for primitive `ToUrl`
+    // dispatch are deliberately omitted — the current `with_query` surface
+    // takes `Map Str Str`, so callers convert primitives at the call-site.
+    // Once the API is widened to `Map Str 'a with Encode UrlC 'a`, primitive
+    // ToUrl dispatch will land its own regression coverage next to this one.
 
     // =========================================================================
     // with_query — append + percent-encode
@@ -71,7 +69,7 @@ class HttpStageDTest {
 
     @Test
     fun `with_query int value via pre-encoded string`() {
-        // Polymorphic-value `with_query` is deferred (see EncodeRepr note);
+        // Polymorphic-value `with_query` is deferred (see ToUrl note);
         // callers stringify primitives at the call-site.
         val result = eval("""
             use std::effects::http::{request}

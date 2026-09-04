@@ -413,12 +413,14 @@ class ImportedPerformerTest {
 
     @Test
     fun `ability imported from stdlib codec should work`() {
-        // Test importing actual stdlib ability
+        // Test importing actual stdlib abilities + supporting types from the
+        // new codec surface (`docs/codec/redesign-2026-09.md`): `Encode` is
+        // the Tier-3 primitive, `SharedConfig` is the cross-format shared
+        // config record, `default_shared` is its preset.
         val source = """
-            use std::codec::core::{Encode, EncodeError, CodecConfig, default_config}
+            use std::codec::core::{Encode, DecodeError, SharedConfig, default_shared}
 
-            # Just verify the imports work - Encode is a single-param ability, CodecConfig is a record type
-            let config: CodecConfig = default_config
+            let shared: SharedConfig = default_shared
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
