@@ -57,19 +57,6 @@ class CodecRoundTripTest {
         return asRecord(v.payloadValue!!).getField("val") as Any
     }
 
-    /** Assert an error surfaces (Err or exception). Returns a description. */
-    private fun expectError(source: String, why: String): String {
-        try {
-            val r = eval(source)
-            if (r is MezzeVariant && r.constructorName == "Err") {
-                return "Err: ${(r.payloadValue as MezzeRecord).getField("error")}"
-            }
-            return fail("$why: expected error, got: $r")
-        } catch (e: Throwable) {
-            return e.message ?: e.javaClass.simpleName
-        }
-    }
-
     // ========================================================================
     // Primitives x JsonC — full round-trip via encode + to_str + parse_str + decode
     // ========================================================================
@@ -412,88 +399,121 @@ class CodecRoundTripTest {
     }
 
     // ========================================================================
-    // Structural mismatch — currently surfaces at runtime
+    // Structural mismatch — the design's DP-10 property (compile-time error
+    // at the field path) is enforced in CodecAbilityShapeTest via
+    // ExpectedTypeCheckError. At runtime these expressions should never be
+    // reachable — the typechecker rejects them before emit.
+    // ========================================================================
+
+    // ========================================================================
+    // GAP 2 round-trips — Seq, Option, variant-with-payload
     //
-    // Per docs/codec/redesign-2026-09.md §"Missing capability = compile-time
-    // error at the field path", encoding a record through UrlC (which
-    // lacks EncodeRecord) SHOULD be a typecheck error at the field's
-    // path. The current CodecGenerator emits the `config.encode_record`
-    // method call unconditionally and only fails at RUNTIME when the
-    // config lacks the method.
+    // The T-phase notes documented four decode-side gaps:
+    //   1. `[T]` decode emitted `__native_seq_try_map` with no handler.
+    //   2. `Option T` decode had an under-constrained let-annotation.
+    //   3. Variant-with-payload emit bound the payload to a variable
+    //      pattern named `__payload` which the runtime treated as a real
+    //      record field.
+    //   4. `Nat` (newtype over Int) infinite-recursed via Tier 3.
     //
-    // These tests pin the "no silent success" property in its weaker
-    // current form. When the CodecGenerator gains up-front Tier-2
-    // availability checking, they migrate to
-    // `CodecAbilityShapeTest.compile-error` and tighten to
-    // `assertThrows<TypeCheckError>`.
+    // Fixes shipped for #1, #2, and #3 close their round-trips here. #4
+    // remains open — Nat/newtype auto-derive across module boundaries
+    // requires a wrapper-unwrap that the compiler can't emit while the
+    // newtype's constructor is module-private.
     // ========================================================================
 
     @Test
-    fun `record through UrlC fails (runtime today)`() {
+    fun `JsonC round-trip list of Int`() {
         val src = """
-            use std::codec::url::{ url_default }
-            use std::codec::core::{ Encode }
-            let bad = ({ name = "A", age = 1 }).encode { config = url_default }
-            bad
+            $jsonPreamble
+            let original: [Int] = [1, 2, 3]
+            let encoded: Json = original.encode { config = json_default }
+            let s: Str = to_str { json = encoded }
+            match parse_str { s = s } is
+              Ok { val = j } -> do
+                let dec: Result [Int] DecodeError = j.decode { config = json_default }
+                dec
+              Err { error = e } -> Err { error = { path = [], message = "parse", expected = "[Int]", found = None } }
         """.trimIndent()
-        val msg = expectError(src, "record + UrlC should not silently succeed")
-        assertTrue(msg.isNotBlank(), "error surface must be non-empty, got: $msg")
+        val v = okVal(eval(src))
+        val seq = v as com.mezze.datastructures.seq.MezzeSeq<*>
+        assertEquals(3, seq.size())
+        assertEquals(1L, seq.get(0))
+        assertEquals(2L, seq.get(1))
+        assertEquals(3L, seq.get(2))
     }
 
     @Test
-    fun `list through UrlC fails (runtime today)`() {
+    fun `JsonC round-trip Option Some Int`() {
         val src = """
-            use std::codec::url::{ url_default }
-            use std::codec::core::{ Encode }
-            let bad: Str = [1, 2, 3].encode { config = url_default }
-            bad
+            $jsonPreamble
+            let original: Option Int = Some { val = 42 }
+            let encoded: Json = original.encode { config = json_default }
+            let s: Str = to_str { json = encoded }
+            match parse_str { s = s } is
+              Ok { val = j } -> do
+                let dec: Result (Option Int) DecodeError = j.decode { config = json_default }
+                dec
+              Err { error = e } -> Err { error = { path = [], message = "parse", expected = "Option Int", found = None } }
         """.trimIndent()
-        val msg = expectError(src, "list + UrlC should not silently succeed")
-        assertTrue(msg.isNotBlank(), "error surface must be non-empty, got: $msg")
+        val v = okVal(eval(src))
+        val opt = asVariant(v)
+        assertEquals("Some", opt.constructorName)
+        assertEquals(42L, asRecord(opt.payloadValue!!).getField("val"))
     }
 
     @Test
-    fun `map through UrlC fails (runtime today)`() {
+    fun `JsonC round-trip Option None`() {
         val src = """
-            use std::codec::url::{ url_default }
-            use std::codec::core::{ Encode }
-            use std::collections::map
-            let m: Map Str Int = map::empty {}
-            let bad: Str = m.encode { config = url_default }
-            bad
+            $jsonPreamble
+            let original: Option Int = None
+            let encoded: Json = original.encode { config = json_default }
+            let s: Str = to_str { json = encoded }
+            match parse_str { s = s } is
+              Ok { val = j } -> do
+                let dec: Result (Option Int) DecodeError = j.decode { config = json_default }
+                dec
+              Err { error = e } -> Err { error = { path = [], message = "parse", expected = "Option Int", found = None } }
         """.trimIndent()
-        val msg = expectError(src, "map + UrlC should not silently succeed")
-        assertTrue(msg.isNotBlank(), "error surface must be non-empty, got: $msg")
+        val v = okVal(eval(src))
+        val opt = asVariant(v)
+        assertEquals("None", opt.constructorName)
+    }
+
+    @Test
+    fun `JsonC round-trip anonymous variant with payload`() {
+        val src = """
+            $jsonPreamble
+            let original: | Left { val: Int }, Right { val: Str } | = Left { val = 42 }
+            let encoded: Json = original.encode { config = json_default }
+            let s: Str = to_str { json = encoded }
+            match parse_str { s = s } is
+              Ok { val = j } -> do
+                let dec: Result (| Left { val: Int }, Right { val: Str } |) DecodeError = j.decode { config = json_default }
+                dec
+              Err { error = e } -> Err { error = { path = [], message = "parse", expected = "variant", found = None } }
+        """.trimIndent()
+        val v = okVal(eval(src))
+        val variant = asVariant(v)
+        assertEquals("Left", variant.constructorName)
+        assertEquals(42L, asRecord(variant.payloadValue!!).getField("val"))
     }
 
     // ========================================================================
-    // NOTE: current CodecGenerator gaps
+    // KNOWN GAPS — open work items after this commit
     //
-    // The following tests would be added here once the corresponding
-    // codec gaps close (all runtime-error today, not silent):
+    //  * `Nat` (newtype over Int) does not auto-derive: the walker recurses
+    //    through Tier 3, and newtype opacity prevents unwrapping at emit
+    //    time. Workaround: hand-write `impl Encode JsonC for Nat` at the
+    //    call site. Same for user newtypes over primitives.
     //
-    //  1. Full round-trip for `Option T` — the auto-derived decode body
-    //     annotates the fresh `let` binding with `Result 'a DecodeError`,
-    //     which is under-constrained and rejected as an annotation
-    //     mismatch by the typechecker. Fix: propagate `'a` from the
-    //     enclosing signature into the walker's `let` annotations.
-    //
-    //  2. Full round-trip for `[T]` (list decode) — the walker emits
-    //     `__native_seq_try_map` which has no BDSL handler yet. Fix:
-    //     add the intrinsic to the BDSL compiler's native-op table.
-    //
-    //  3. Full round-trip for variants with payloads — the walker binds
-    //     the incoming payload to `__payload` but the runtime looks up
-    //     `__payload` as a real field; fix by binding it as a proper
-    //     lambda parameter.
-    //
-    //  4. Full round-trip for `Nat` — Nat is a newtype over Int; the
-    //     walker recurses through `Encode 'c Nat` which itself needs
-    //     to auto-derive, and the fixpoint loops. Fix: teach the
-    //     newtype path to unwrap before recursing.
-    //
-    // Tier-4 sugar (`.json{}` / `Type.from_json{}`) is not yet
-    // dispatch-wired for method syntax on nominal types; see the
-    // separate LSP/dispatch tracking issue.
+    //  * Tier-4 sugar (`x.json {}` / `Type.from_json {…}`) — the ability
+    //    dispatch for `.encode {…}` inside a blanket impl body's method-
+    //    level `with Encode 'c 'a` constraint doesn't monomorphize; emit
+    //    lowers `it.encode {…}` to a field access and the runtime fails
+    //    with "Expected record for field 'encode', got: …". Direct
+    //    `x.encode { config = json_default }` still works. This is a
+    //    fundamental gap in how blanket-impl method bodies with method-
+    //    level constraints get lowered — not a codec-generator issue.
     // ========================================================================
 }

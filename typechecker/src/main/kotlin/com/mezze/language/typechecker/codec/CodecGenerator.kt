@@ -183,10 +183,17 @@ class CodecGenerator {
                     ),
                 )
             } else {
-                val payloadVar = "__payload"
-                val encodedPayload = buildEncodeExpr(payloadType, id(payloadVar))
+                // Payload is (in Mezze) a record — the compiler's variant-pattern
+                // lowering only handles record-shaped payloads (constructor pattern
+                // with a bare variable pattern uses the variable NAME as a real
+                // field key at runtime — see TypedASTCompiler.compilePattern's
+                // TypedVarPattern branch). So we always destructure the payload
+                // record's fields explicitly, bind each to a fresh local, and
+                // rebuild the record literal before encoding it.
+                val (pattern, rebuiltPayload) = destructureAndRebuildPayload(ctorName, payloadType)
+                val encodedPayload = buildEncodeExpr(payloadType, rebuiltPayload)
                 matchCase(
-                    constructorPat(ctorName, varPat(payloadVar)),
+                    constructorPat(ctorName, pattern),
                     call(
                         member(id("config"), "encode_variant"),
                         record(
@@ -199,6 +206,44 @@ class CodecGenerator {
             }
         }
         return match(valueExpr, *cases.toTypedArray())
+    }
+
+    /**
+     * Build a record pattern that binds every field of a variant's payload record,
+     * plus the expression that reconstructs the payload record from those bindings.
+     * For a non-record payload (rare — Mezze variants normally carry record
+     * payloads), fall back to a bare-variable pattern; the runtime handles that
+     * path via the single-field variant lowering.
+     */
+    private fun destructureAndRebuildPayload(
+        ctorName: String,
+        payloadType: MezzeType,
+    ): Pair<ParsedPattern, ParsedExpr> {
+        if (payloadType is MezzeType.RecordType) {
+            val bindingNames = payloadType.fields.keys.associateWith { fieldName ->
+                "__${ctorName}_${fieldName}"
+            }
+            val patternEntries = payloadType.fields.entries.map { (fieldName, _) ->
+                ParsedRecordPatternEntry(
+                    name = fieldName,
+                    pattern = varPat(bindingNames[fieldName]!!),
+                    loc = GEN_LOC,
+                )
+            }
+            val pattern = ParsedRecordPattern(entries = patternEntries, isOpen = false, loc = GEN_LOC)
+            val rebuiltPayload = ParsedRecordLit(
+                entries = payloadType.fields.entries.map { (fieldName, _) ->
+                    ParsedRecordEntry.Field(fieldName, id(bindingNames[fieldName]!!), GEN_LOC)
+                },
+                loc = GEN_LOC,
+            )
+            return pattern to rebuiltPayload
+        }
+        // Non-record payload — fall back to a whole-payload variable binding.
+        // The runtime's variant-pattern lowering stores this as a single-slot
+        // "value" field lookup, matching the single-argument variant shape.
+        val payloadVar = "__${ctorName}_payload"
+        return varPat(payloadVar) to id(payloadVar)
     }
 
     private fun buildEncodeList(elemType: MezzeType, valueExpr: ParsedExpr): ParsedExpr {
@@ -391,6 +436,10 @@ class CodecGenerator {
             // Payloadless constructor. Ignore any incidental payload.
             return ok(variant(ctorName, null))
         }
+        // The decoded payload IS the constructor's payload record — pass it
+        // through as the variant's payload directly, never wrap in a synthetic
+        // `{ val = ... }` (which would break multi-field payloads and inject
+        // an extra layer for single-field ones).
         return match(
             payloadOpt,
             matchCase(nonePat(), err(
@@ -407,7 +456,7 @@ class CodecGenerator {
                     buildDecodeExpr(payloadType, id("__raw_payload")),
                     matchCase(
                         okPat("__decoded_payload"),
-                        ok(variant(ctorName, record("val" to id("__decoded_payload")))),
+                        ok(variant(ctorName, id("__decoded_payload"))),
                     ),
                     matchCase(errPat("e"), err(id("e"))),
                 ),

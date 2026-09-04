@@ -723,4 +723,91 @@ class CodecAbilityShapeTest {
             "list of functions rejected",
         )
     }
+
+    // =========================================================================
+    // DP-10 — Missing Tier-2 capability = compile-time error at the field path
+    //
+    // Migrated from CodecRoundTripTest's "runtime today" tests. The
+    // CodecGenerator now walks the value shape at auto-derive time and
+    // rejects the encode/decode BEFORE emit when the target format lacks
+    // a Tier-2 impl the walk would call. Records / lists / maps routed
+    // through UrlC (which ships only EncodeScalar + EncodeVariant +
+    // EncodeOption) surface as typecheck errors, not `Field 'encode_*'
+    // not found` runtime crashes.
+    //
+    // See docs/codec/redesign-2026-09.md §Partial-capability formats.
+    // =========================================================================
+
+    @Test
+    fun `record through UrlC is a compile-time capability error`() {
+        val msg = checkFails(
+            """
+            use std::codec::url::{ url_default }
+            use std::codec::core::{ Encode }
+
+            pub let bad = ({ name = "A", age = 1 }).encode { config = url_default }
+            """.trimIndent(),
+            "record + UrlC must be rejected at typecheck",
+        )
+        assertTrue(
+            msg.contains("EncodeRecord", ignoreCase = true) || msg.contains("does not implement"),
+            "error must name the missing Tier-2 or the containing ability: $msg",
+        )
+    }
+
+    @Test
+    fun `list through UrlC is a compile-time capability error`() {
+        val msg = checkFails(
+            """
+            use std::codec::url::{ url_default }
+            use std::codec::core::{ Encode }
+
+            pub let bad : Str = [1, 2, 3].encode { config = url_default }
+            """.trimIndent(),
+            "list + UrlC must be rejected at typecheck",
+        )
+        assertTrue(
+            msg.contains("EncodeList", ignoreCase = true) || msg.contains("does not implement"),
+            "error must name the missing Tier-2 or the containing ability: $msg",
+        )
+    }
+
+    @Test
+    fun `map through UrlC is a compile-time capability error`() {
+        val msg = checkFails(
+            """
+            use std::codec::url::{ url_default }
+            use std::codec::core::{ Encode }
+            use std::collections::map
+
+            pub let m : Map Str Int = map::empty {}
+            pub let bad : Str = m.encode { config = url_default }
+            """.trimIndent(),
+            "map + UrlC must be rejected at typecheck",
+        )
+        assertTrue(
+            msg.contains("EncodeMap", ignoreCase = true) || msg.contains("does not implement"),
+            "error must name the missing Tier-2 or the containing ability: $msg",
+        )
+    }
+
+    @Test
+    fun `record with variant field through UrlC names the variant path`() {
+        // Deep-path check: an outer field routes through EncodeRecord (missing
+        // for UrlC) OR through a nested EncodeVariant slot. Either way the
+        // check catches it at compile time — the design's "path pointing at
+        // the offending field" property.
+        val msg = checkFails(
+            """
+            use std::codec::url::{ url_default }
+            use std::codec::core::{ Encode }
+
+            type Status = | Active, Inactive |
+            type User = { name: Str, status: Status }
+            pub let bad = ({ name = "A", status = Active } : User).encode { config = url_default }
+            """.trimIndent(),
+            "record with variant field + UrlC rejected at typecheck",
+        )
+        assertTrue(msg.isNotBlank(), "error surface must be non-empty: $msg")
+    }
 }

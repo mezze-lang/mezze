@@ -645,6 +645,15 @@ class AbilityChecker internal constructor(
      * type tuple of the ability at the constraint site (Encode → [config,
      * data], Decode → [config, data, in]); [dataType] is the value shape the
      * emitter walks when it synthesizes the impl body.
+     *
+     * DP-10 (docs/codec/redesign-2026-09.md §Design principles): a missing
+     * Tier-2 capability for the target format is a **compile-time error at
+     * the offending field path**, never a runtime "field 'encode_variant'
+     * not found". Before registering, walk the value shape and verify every
+     * Tier-2 impl the emit would call is available for this config. If any
+     * are missing, THROW with the path — the ability system's usual
+     * "no impl" error surfaces the encode/decode site rather than a
+     * cryptic runtime crash inside the auto-derived body.
      */
     private fun checkCodecAbilityImplementation(
         abilityName: String,
@@ -657,6 +666,26 @@ class AbilityChecker internal constructor(
 
         if (allTypes.any { containsVarType(it) }) {
             return false
+        }
+
+        val effectiveHash = registry.resolveAbilityHash(abilityName)
+        val isEncode = effectiveHash == WellKnownHashConstants.ABILITY_ENCODE
+        val isDecode = effectiveHash == WellKnownHashConstants.ABILITY_DECODE
+        if (isEncode || isDecode) {
+            val configType = allTypes[0]
+            val missing = walkTier2Capabilities(dataType, configType, isEncode, path = emptyList())
+            if (missing != null) {
+                throw com.mezze.language.typechecker.TypeCheckError(
+                    message = "Cannot auto-derive ${if (isEncode) "Encode" else "Decode"} " +
+                        "${typeHeadName(configType)} for ${typeHeadName(dataType)}: " +
+                        "format lacks ${missing.abilityName} " +
+                        (if (missing.path.isEmpty()) "(at root)"
+                         else "at field path .${missing.path.joinToString(".")}"),
+                    loc = null,
+                    errorType = com.mezze.language.typechecker.ErrorType.ABILITY_ERROR,
+                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0408_NO_IMPLEMENTATION,
+                )
+            }
         }
 
         val hashBuilder = MezzeHashBuilder()
@@ -677,6 +706,125 @@ class AbilityChecker internal constructor(
             contentHash = implKey
         )
         return true
+    }
+
+    /** Missing-Tier-2 report used by [walkTier2Capabilities]. */
+    private data class MissingTier2(val abilityName: String, val path: List<String>)
+
+    /**
+     * Walk the value shape and, for each shape that requires a Tier-2 impl
+     * from the format, verify the impl exists. Returns the first missing
+     * requirement (with field path) or null if every shape is covered.
+     *
+     * Mirrors [CodecGenerator]'s emit walk so the check is exactly what
+     * gets called at runtime — no false positives (asking for an impl the
+     * emitter wouldn't call) or false negatives (letting emit reach an
+     * unregistered `.encode_*` method).
+     */
+    private fun walkTier2Capabilities(
+        dataType: MezzeType,
+        configType: MezzeType,
+        isEncode: Boolean,
+        path: List<String>,
+    ): MissingTier2? {
+        val prefix = if (isEncode) "Encode" else "Decode"
+
+        fun require(abilityName: String): MissingTier2? {
+            val hash = registry.resolveAbilityHash(abilityName)
+            val impls = abilityImpls(abilityName, hash)
+            val hit = impls.any { impl ->
+                val ann = impl.targetTypeAnnotations?.firstOrNull() ?: return@any false
+                val bindings = mutableMapOf<String, MezzeType>()
+                TypeAnnotationMatcher.typeMatchesAnnotation(configType, ann, registry.typeDeclarations, impl.typeVars, bindings)
+            }
+            return if (hit) null else MissingTier2(abilityName, path)
+        }
+
+        // Bool-variant (`| True, False |`) folds into the scalar bool hook,
+        // per PrimitiveTypes.isBoolVariant — treat it as scalar, not variant.
+        if (com.mezze.language.ast.PrimitiveTypes.isBoolVariant(dataType)) {
+            return require("${prefix}Scalar")
+        }
+
+        return when (dataType) {
+            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+            is MezzeType.BoolType, is MezzeType.FracType, is MezzeType.CharType,
+            is MezzeType.BytesType -> require("${prefix}Scalar")
+
+            is MezzeType.RecordType -> require("${prefix}Record") ?: run {
+                for ((fieldName, fieldType) in dataType.fields) {
+                    val nested = walkTier2Capabilities(fieldType, configType, isEncode, path + fieldName)
+                    if (nested != null) return nested
+                }
+                null
+            }
+
+            is MezzeType.VariantType -> require("${prefix}Variant") ?: run {
+                for ((ctorName, payload) in dataType.constructors) {
+                    if (payload != null) {
+                        val nested = walkTier2Capabilities(payload, configType, isEncode, path + ctorName)
+                        if (nested != null) return nested
+                    }
+                }
+                null
+            }
+
+            is MezzeType.ListType -> require("${prefix}List") ?:
+                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "[]")
+            is MezzeType.SeqType -> require("${prefix}List") ?:
+                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "[]")
+            is MezzeType.SetType -> require("${prefix}List") ?:
+                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "{}")
+            is MezzeType.SortedSetType -> require("${prefix}List") ?:
+                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "{}")
+
+            is MezzeType.MapType -> require("${prefix}Map") ?: run {
+                val k = walkTier2Capabilities(dataType.keyType, configType, isEncode, path + "key")
+                if (k != null) return k
+                walkTier2Capabilities(dataType.valueType, configType, isEncode, path + "value")
+            }
+            is MezzeType.SortedMapType -> require("${prefix}Map") ?: run {
+                val k = walkTier2Capabilities(dataType.keyType, configType, isEncode, path + "key")
+                if (k != null) return k
+                walkTier2Capabilities(dataType.valueType, configType, isEncode, path + "value")
+            }
+
+            is MezzeType.TypeApplication -> when (dataType.constructor) {
+                BuiltinTypes.OPTION -> require("${prefix}Option") ?: run {
+                    val inner = dataType.args.firstOrNull() ?: return@run null
+                    walkTier2Capabilities(inner, configType, isEncode, path + "?")
+                }
+                // Builtin collection type-applications: some contexts produce
+                // `TypeApplication("Map"|"List"|"Seq"|"Set"|…, args)` rather than
+                // the structural `MezzeType.MapType`/`ListType`/… — the two are
+                // interchangeable identity-wise (see BuiltinTypes.getGenericName).
+                BuiltinTypes.LIST, BuiltinTypes.SEQ ->
+                    require("${prefix}List") ?: dataType.args.firstOrNull()?.let {
+                        walkTier2Capabilities(it, configType, isEncode, path + "[]")
+                    }
+                BuiltinTypes.SET, BuiltinTypes.SORTED_SET ->
+                    require("${prefix}List") ?: dataType.args.firstOrNull()?.let {
+                        walkTier2Capabilities(it, configType, isEncode, path + "{}")
+                    }
+                BuiltinTypes.MAP, BuiltinTypes.SORTED_MAP ->
+                    require("${prefix}Map") ?: run {
+                        val k = dataType.args.getOrNull(0)?.let {
+                            walkTier2Capabilities(it, configType, isEncode, path + "key")
+                        }
+                        if (k != null) return k
+                        dataType.args.getOrNull(1)?.let {
+                            walkTier2Capabilities(it, configType, isEncode, path + "value")
+                        }
+                    }
+                else -> null
+            }
+
+            // VarType / NewtypeType / FunctionType / EffectRow — the walker doesn't
+            // emit a Tier-2 call for these directly. NewtypeType falls back to a
+            // Tier-3 recursion at emit time; VarType is filtered by the
+            // containsVarType gate above. Nothing to check.
+            else -> null
+        }
     }
 
     internal fun containsVarType(type: MezzeType): Boolean {
