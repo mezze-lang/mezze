@@ -18,6 +18,24 @@ pub type UrlParamFmt = {}
 ## URL-param format instance.
 pub let url_param_fmt: UrlParamFmt = {}
 
+## Structured URL. Produced by `parse`, consumed by `render`. Absent
+## components (no scheme, no userinfo, no port, etc.) are `None`. `path`
+## is a plain `Str` and is `""` when the URI has no path component
+## (RFC 3986 §3.3 allows this).
+##
+## Introduced in Phase 1 of the codec redesign (task #86) — the record
+## shape is fixed by `interpreter/.../io/UrlNatives.java` and must not
+## drift from it.
+pub type Url = {
+  scheme: Option Str,
+  user_info: Option Str,
+  host: Option Str,
+  port: Option Int,
+  path: Str,
+  query: Option Str,
+  fragment: Option Str,
+}
+
 ## Percent-encode a single URL component (path segment or query value).
 ## Matches JS `encodeURIComponent` / RFC 3986 unreserved set.
 pub let url_encode_component: { s: Str } -> Str = { s } -> __native_url_encode_component { s = s }
@@ -25,6 +43,20 @@ pub let url_encode_component: { s: Str } -> Str = { s } -> __native_url_encode_c
 ## Inverse of `url_encode_component`. Decodes %xx sequences and `+`
 ## (form-encoded space) back to their UTF-8 source.
 pub let url_decode_component: { s: Str } -> Str = { s } -> __native_url_decode_component { s = s }
+
+## Parse a URL string into a `Url` record. Backed by `java.net.URI`
+## which follows RFC 2396 with the RFC 3986 clarifications the JDK adds.
+## Returns the same `ParseError` shape as `json::parse_str`.
+pub let parse
+  : { s: Str }
+  -> Result Url { path: [Str], reason: Str, input_ref: Option Str }
+  = { s } -> __native_url_parse { s = s }
+
+## Render a `Url` record back to a string. This is the inverse of `parse`
+## for well-formed inputs — the natives use URI's canonical constructor,
+## so `parse` + `render` normalises escaping / case but preserves scheme,
+## host, port, path, query, and fragment identity.
+pub let render: { url: Url } -> Str = { url } -> __native_url_render { url = url }
 
 ## impl Format Str for UrlParamFmt — scalar encoders only. Composites
 ## (records, lists, maps, sets) aren't representable as a single query

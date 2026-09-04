@@ -553,6 +553,8 @@ public final class NativeDispatch extends MezzeNode {
             urlEncodeComponent(getString(r, "s")));
         HANDLERS.put("__native_url_decode_component", (r, c) ->
             urlDecodeComponent(getString(r, "s")));
+        HANDLERS.put("__native_url_parse", (r, c) -> UrlNatives.urlParse(r));
+        HANDLERS.put("__native_url_render", (r, c) -> UrlNatives.urlRender(r));
         // String comparisons
         HANDLERS.put("__native_string_eq", (r, c) ->
             PrimitiveNatives.strEq(getString(r, "l"), getString(r, "r")));

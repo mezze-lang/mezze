@@ -120,14 +120,18 @@ let serialize_pretty: { json: Json, indent: Int, indent_size: Int } -> Str = { j
 
 let escape_string: { s: Str } -> Str = { s } -> s
 
+## TODO: old codec, will be removed in M phase — the wrapper still calls
+## the Phase-1 native (which now returns the new ParseError record shape).
+## The error-record annotation is updated in place to match; the rest of
+## the old codec keeps using this function through the happy path only.
 pub let parse
   : { bytes: Bytes }
-  -> Result Json { path: [Str], message: Str, expected: Str, found: Option Str }
+  -> Result Json { path: [Str], reason: Str, input_ref: Option Str }
   = { bytes } -> __native_json_parse_bytes { bytes = bytes }
 
 pub let parse_str
   : { s: Str }
-  -> Result Json { path: [Str], message: Str, expected: Str, found: Option Str }
+  -> Result Json { path: [Str], reason: Str, input_ref: Option Str }
   = { s } -> __native_json_parse { s = s }
 
 pub let transform_field_name = { name: Str, transform: FieldTransform } -> match transform is
