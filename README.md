@@ -2,7 +2,7 @@
 
 **A functional language with first-class effects, running on GraalVM.**
 
-Write what a function *does* — the types keep up. Every function tells you what it
+Write what a program *does* — the types keep up. Every function tells you what it
 touches (files, network, failure, concurrency), and you never annotate one. Full
 type safety, the performance of GraalVM, and the same program can ship as a native
 binary or a polyglot JVM jar.
@@ -86,10 +86,12 @@ Kotlin and Node it needs:
 ```bash
 git clone https://github.com/shrynx/funk-lang.git mezze
 cd mezze
-devenv shell     # drops you into a shell with mez, gradle & graalvm on PATH
-build            # build the compiler  (./gradlew :cli:installDist)
-mez --help
+devenv shell        # toolchain: graalvm, gradle, just on PATH (direnv also auto-loads it)
+just build          # build the compiler  (./gradlew :cli:installDist)
+just mez --help     # run mez
 ```
+
+`just` is the entry point for everything — run `just` to list all recipes.
 
 ### With Gradle directly
 
@@ -153,26 +155,23 @@ the store, and the language server.
 
 ## Development
 
-Inside `devenv shell`:
+Everything runs through `just`. The devenv shell (auto-loaded by direnv) provides
+the toolchain; from a shell without direnv, use `devenv shell -- just <recipe>`.
 
 ```bash
-build            # ./gradlew :cli:installDist
-test             # build + run the test suites
-build-native     # AOT native binary via :cli:nativeCompile
+just build                  # build the mez CLI
+just test                   # parser + typechecker + interpreter
+just test-one typechecker   # one suite
+just gate                   # the three above + cli
+just native                 # AOT native binary
 ```
 
-The typechecker and interpreter suites are heavy and share a lot of RAM — run them
-as **separate** Gradle invocations rather than one `gradle test`:
+The suites are heavy and share a lot of RAM, so `just test` runs each as its own
+`--no-daemon` invocation and tees the output to `logs/`.
 
-```bash
-./gradlew :parser:test       --no-daemon
-./gradlew :typechecker:test  --no-daemon
-./gradlew :interpreter:test  --no-daemon
-```
-
-The marketing site + browser playground live in `website/` and are driven by the
-`Justfile` (`just dev`, `just build`, `just deploy`). The tree-sitter grammar lives
-in `tooling/` (`ts-build`, `ts-test` in the devenv shell).
+The marketing site + browser playground live in `website/`: `just site-dev`,
+`just site-build`, `just deploy`. The tree-sitter grammar is `just ts-build` /
+`just ts-test`. Run `just` to list every recipe.
 
 ---
 
