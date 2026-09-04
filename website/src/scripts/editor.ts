@@ -6,6 +6,7 @@
  * swap the source when the lesson changes.
  */
 import { esc, highlight, withError } from '../lib/highlight'
+import { plainFromSnippet } from '../lib/snippet'
 import { renderHover } from '../lib/hover'
 import { hideHoverTip, moveHoverTip, showHoverTip } from './hover-tip'
 import {
@@ -192,47 +193,7 @@ export function mountEditor(root: HTMLElement): EditorHandle {
     ]
   }
 
-  /**
-   * Strip LSP snippet syntax down to plain text.
-   *
-   * Some candidates are marked as snippets and carry insertText in the LSP
-   * placeholder form, so `.insert {k = ${1:k}, v = ${2:v}}` arrives verbatim.
-   * A real LSP client turns those into tab stops; this editor has none, so
-   * the raw string would leave the placeholder syntax in the buffer. Keep the
-   * default text out of each placeholder and drop the scaffolding.
-   */
-  const plainFromSnippet = (t: string): string => {
-    let out = ''
-    for (let i = 0; i < t.length; i++) {
-      const ch = t[i]
-      if (ch === '\\' && t[i + 1] === '$') { out += '$'; i++; continue }
-      if (ch !== '$') { out += ch; continue }
-      if (t[i + 1] === '{') {
-        // Scan to the MATCHING brace: a default can itself contain braces
-        // (`${1:{ x } -> x}`), so stopping at the first one would eat it.
-        let depth = 1
-        let j = i + 2
-        while (j < t.length && depth > 0) {
-          if (t[j] === '{') depth++
-          else if (t[j] === '}') depth--
-          if (depth > 0) j++
-        }
-        const body = t.slice(i + 2, j)
-        const colon = body.indexOf(':')
-        const bar = body.indexOf('|')
-        out += colon >= 0 ? body.slice(colon + 1)
-             : bar >= 0 ? body.slice(bar + 1).split(/[,|]/)[0]
-             : ''
-        i = j
-        continue
-      }
-      let j = i + 1
-      while (j < t.length && t[j] >= '0' && t[j] <= '9') j++
-      if (j > i + 1) { i = j - 1; continue }
-      out += '$'
-    }
-    return out
-  }
+
 
   /**
    * Replace a span with text, preserving native undo.
@@ -517,15 +478,25 @@ export function mountEditor(root: HTMLElement): EditorHandle {
   })
 
   // ---- actions ----------------------------------------------------------
-  /** Renders diagnostics; returns true when the source is clean. */
+  /**
+   * Renders diagnostics; returns true when the source is RUNNABLE.
+   *
+   * Warnings are shown but do not block: an unused import is worth saying and
+   * is not worth refusing to run over. Treating every diagnostic as fatal made
+   * `use std::effects::http::{ Http, … }` — where only the operations are
+   * named — print an error instead of the program's output.
+   */
   const report = (res: any): boolean => {
     const ds = res?.diagnostics ?? []
+    const errs = ds.filter((d: any) => d.severity !== 'warning')
     if (!ds.length) {
       paint()
       show('No errors.', 'ok')
       return true
     }
-    paint(withError(srcEl.value, ds[0], ds[0].message))
+    // Underline the first thing worth looking at, preferring a real error.
+    const first = errs[0] ?? ds[0]
+    paint(withError(srcEl.value, first, first.message))
     // `pretty` is rendered by the compiler-s own ErrorFormatter, so the pane
     // reads exactly like `mez check`: error code, --> location, source snippet
     // with a caret, hints and notes. Reused rather than reimplemented here —
@@ -537,11 +508,12 @@ export function mountEditor(root: HTMLElement): EditorHandle {
         : ds.map((d: any) => {
             const l = d.location
             const at = l?.startLine ? `${l.startLine}:${l.startCol}` : '?'
-            return `error at ${at}\n  ${d.message}`
+            const what = d.severity === 'warning' ? 'warning' : 'error'
+            return `${what} at ${at}\n  ${d.message}`
           }).join('\n\n'),
-      'err',
+      errs.length ? 'err' : 'warn',
     )
-    return false
+    return errs.length === 0
   }
 
   /** Disables the controls for the duration, since the call is synchronous. */
