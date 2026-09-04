@@ -505,11 +505,7 @@ public final class MezzeRecord implements TruffleObject {
      */
     @TruffleBoundary
     public static MezzeRecord fromFields(String[] fieldNames, Object[] values) {
-        FieldLocation[] locations = new FieldLocation[fieldNames.length];
-        for (int i = 0; i < fieldNames.length; i++) {
-            locations[i] = new FieldLocation(FieldLocation.StorageType.OBJECT, i);
-        }
-        Shape shape = new Shape(fieldNames, locations);
+        Shape shape = ShapeCache.getOrCreateAllObjects(fieldNames);
         return new MezzeRecord(shape, new long[0], new double[0], values, true);
     }
 

@@ -1,0 +1,15 @@
+use std::effects::log::{println, Console}
+
+let fib = {n} -> if n < 2 then n else fib {n = n - 1} + fib {n = n - 2}
+
+let main = {} -> perform Console in do
+    # Warmup — triggers JIT compilation
+    let _ = fib {n = 30}
+    let _ = fib {n = 30}
+    let _ = fib {n = 30}
+    println { msg = "warmup done" }
+    # Actual measurement
+    let a = fib {n = 35}
+    println { msg = "fib(35) = $(a.to_str{})" }
+    let b = fib {n = 38}
+    println { msg = "fib(38) = $(b.to_str{})" }

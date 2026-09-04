@@ -83,7 +83,15 @@ object EmbeddedExec {
             if (timing) System.err.println("[${(System.nanoTime() - t0) / 1_000_000}ms] $label")
         }
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
-        System.setProperty("polyglot.log.level", "OFF")
+        // Suppress chatty Truffle log output UNLESS the user asked for
+        // trace compilation — compilation trace events route through the
+        // polyglot logger and would be eaten by level=OFF. (#515)
+        val traceRequested = System.getenv("MEZZE_TRACE_COMPILATION")?.let {
+            it == "1" || it.equals("true", ignoreCase = true)
+        } ?: false
+        if (!traceRequested) {
+            System.setProperty("polyglot.log.level", "OFF")
+        }
 
         // Truffle JIT is ON by default for standalone apps (truffle-runtime
         // is on the classpath; engine.Compilation defaults to true). Users
@@ -137,17 +145,40 @@ object EmbeddedExec {
         // tight loops (useful for benching small-N programs where
         // 100k iterations would dwarf the loop body's natural size).
         val osrThreshold = System.getenv("MEZZE_OSR_THRESHOLD")?.toIntOrNull()
+        // MEZZE_TRACE_TTI=1 → engine.TraceTransferToInterpreter: prints
+        // stack trace at every transferToInterpreter call (deopt diagnostic).
+        val traceTTI = System.getenv("MEZZE_TRACE_TTI")?.let {
+            it == "1" || it.equals("true", ignoreCase = true)
+        } ?: false
         val engineBuilder = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
             .apply { if (jitDisabled) option("engine.Compilation", "false") }
             .apply { if (traceCompilation && jitCapable) option("engine.TraceCompilation", "true") }
             .apply { if (traceInlining && jitCapable) option("engine.TraceCompilationDetails", "true") }
+            .apply { if (traceTTI && jitCapable) option("engine.TraceTransferToInterpreter", "true") }
             .apply { if (osrThreshold != null && jitCapable) option("engine.OSRCompilationThreshold", osrThreshold.toString()) }
+            // MEZZE_ENGINE_OPTS="key1=val1,key2=val2" → pass arbitrary engine
+            // options through to Truffle. For perf experimentation without
+            // recompiling (e.g. "engine.Inlining=false,engine.SingleTierCompilationThreshold=50000").
+            .apply {
+                System.getenv("MEZZE_ENGINE_OPTS")?.takeIf { it.isNotBlank() }?.let { raw ->
+                    for (pair in raw.split(",")) {
+                        val eq = pair.indexOf('=')
+                        if (eq > 0) {
+                            val k = pair.substring(0, eq).trim()
+                            val v = pair.substring(eq + 1).trim()
+                            try { option(k, v) } catch (e: Exception) {
+                                System.err.println("[mezze] MEZZE_ENGINE_OPTS: ignoring '$k=$v' — ${e.message}")
+                            }
+                        }
+                    }
+                }
+            }
             // Polyglot routes engine.Trace* output through its own logger. Pin
             // it to stderr so users see the trace events without needing
             // --log.file=...; safe always since options are off by default.
-            .apply { if ((traceCompilation || traceInlining) && jitCapable) err(System.err) }
+            .apply { if ((traceCompilation || traceInlining || traceTTI) && jitCapable) err(System.err) }
 
         val profile = args.contains("--profile")
         val coverage = args.contains("--coverage")
@@ -188,7 +219,16 @@ object EmbeddedExec {
         // isn't registered, so we skip setting it and print a warning.
         // Building the probe engine is unavoidable overhead but only pays
         // when the user asked for instrumentation, and it's cheap (<50ms).
-        val availableOptions: Set<String> = try {
+        // Only build the probe engine when the user actually requested
+        // instrumentation — the probe engine's creation initializes
+        // process-global Truffle options to their defaults, which steals
+        // options like engine.TraceTransferToInterpreter and prevents the
+        // real engine from setting them. (#515, deopt-trace fix)
+        val instrumentationRequested = profile || coverage || allocations ||
+            inspect || inspectBrk || dap || insightFile != null
+        val availableOptions: Set<String> = if (!instrumentationRequested) {
+            emptySet()
+        } else try {
             Engine.newBuilder().option("engine.WarnInterpreterOnly", "false").build().use { probe ->
                 probe.options.mapNotNull { it.name }.toSet()
             }

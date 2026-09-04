@@ -109,7 +109,7 @@ import com.oracle.truffle.api.nodes.RootNode;
  */
 @GenerateBytecode(
     languageClass = MezzeLanguage.class,
-    boxingEliminationTypes = {long.class, double.class, boolean.class},
+    boxingEliminationTypes = {},
     enableUncachedInterpreter = true,
     enableYield = true,
     enableSerialization = true,
@@ -2393,11 +2393,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
     @TruffleBoundary
     private static MezzeRecord buildAllObjectRecord(String[] fieldNames, Object[] values) {
-        FieldLocation[] locations = new FieldLocation[fieldNames.length];
-        for (int i = 0; i < fieldNames.length; i++) {
-            locations[i] = new FieldLocation(StorageType.OBJECT, i);
-        }
-        Shape shape = new Shape(fieldNames, locations);
+        Shape shape = com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
         long[] longFields = new long[0];
         double[] doubleFields = new double[0];
         Object[] objectFields = new Object[fieldNames.length];

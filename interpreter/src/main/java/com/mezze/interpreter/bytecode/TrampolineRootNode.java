@@ -207,32 +207,14 @@ public final class TrampolineRootNode extends RootNode {
                     "TrampolineRootNode[" + name + "] executed before attachInner");
         }
         Object[] rawArgs = frame.getArguments();
-        // #389 — partial application entry check: when a caller invokes
-        // this trampoline with a record missing some param fields (e.g.
-        // `multiply {x=2}` on a 3-param `multiply`), return a partial
-        // MezzeFunction instead of executing with nulls. Downstream calls
-        // on the returned MezzeFunction go through CallIndirect, which
-        // has the merge/complete slow path.
+        // #389 — partial application entry check (boundary method to
+        // prevent PE from following getFieldIndex → JDK internals)
         if (parameterCount >= 2
                 && rawArgs.length == closureCount + 1
                 && closureCount < rawArgs.length
                 && rawArgs[closureCount] instanceof com.mezze.interpreter.values.MezzeRecord rec) {
-            for (int i = 0; i < parameterCount; i++) {
-                if (rec.getFieldIndex(parameterNames[i]) < 0) {
-                    CompilerDirectives.transferToInterpreter();
-                    Object[] closures;
-                    if (closureCount == 0) {
-                        closures = null;
-                    } else {
-                        closures = new Object[closureCount];
-                        System.arraycopy(rawArgs, 0, closures, 0, closureCount);
-                    }
-                    com.mezze.interpreter.values.MezzeFunction fn =
-                            new com.mezze.interpreter.values.MezzeFunction(
-                                    this.getCallTarget(), name, closures, parameterNames);
-                    return fn.withPartialArgs(rec);
-                }
-            }
+            Object partial = checkPartialApplication(rec, rawArgs);
+            if (partial != null) return partial;
         }
         Object[] flatArgs = parameterCount == 0
                 ? rawArgs
@@ -241,6 +223,32 @@ public final class TrampolineRootNode extends RootNode {
         frame.setObject(targetSlot, innerTarget);
         loop.execute(frame);
         return frame.getObject(resultSlot);
+    }
+
+    /**
+     * Boundary: check if the incoming record is a partial application
+     * (missing some param fields). Returns the partial MezzeFunction if
+     * so, or null if all fields are present (normal call).
+     */
+    @CompilerDirectives.TruffleBoundary
+    private Object checkPartialApplication(
+            com.mezze.interpreter.values.MezzeRecord rec, Object[] rawArgs) {
+        for (int i = 0; i < parameterCount; i++) {
+            if (rec.getFieldIndex(parameterNames[i]) < 0) {
+                Object[] closures;
+                if (closureCount == 0) {
+                    closures = null;
+                } else {
+                    closures = new Object[closureCount];
+                    System.arraycopy(rawArgs, 0, closures, 0, closureCount);
+                }
+                com.mezze.interpreter.values.MezzeFunction fn =
+                        new com.mezze.interpreter.values.MezzeFunction(
+                                this.getCallTarget(), name, closures, parameterNames);
+                return fn.withPartialArgs(rec);
+            }
+        }
+        return null;
     }
 
     /** Package-private hook for the repeating node to re-normalise args on tail-call resume. */
@@ -298,9 +306,10 @@ public final class TrampolineRootNode extends RootNode {
             // the callee expects the RAW record as its single arg (its
             // body reads .field via ReadFieldIR). Detect by probing the
             // record for the paramName; if absent, pass the record
-            // verbatim.
+            // verbatim. Boundary to keep PE from following into string
+            // comparison code at every recursive inlining level.
             if (parameterCount == 1
-                    && rec.getFieldIndex(parameterNames[0]) < 0) {
+                    && isSingleParamRawRecord(rec)) {
                 return args;
             }
             Object[] flat = new Object[closureCount + parameterCount];
@@ -314,6 +323,17 @@ public final class TrampolineRootNode extends RootNode {
         return args;
     }
 
+    /**
+     * Boundary helper: check if a single-param function received a record
+     * that doesn't contain the expected parameter name (meaning the
+     * function expects the raw record as its argument, not an unpacked
+     * field).
+     */
+    @CompilerDirectives.TruffleBoundary
+    private boolean isSingleParamRawRecord(com.mezze.interpreter.values.MezzeRecord rec) {
+        return rec.getFieldIndex(parameterNames[0]) < 0;
+    }
+
     private void unpackRecord(com.mezze.interpreter.values.MezzeRecord rec, Object[] flat) {
         Object shape = rec.getShape();
         int[] indices = cachedFieldIndices;
@@ -325,6 +345,11 @@ public final class TrampolineRootNode extends RootNode {
             return;
         }
         CompilerDirectives.transferToInterpreterAndInvalidate();
+        unpackRecordSlow(rec, flat);
+    }
+
+    @CompilerDirectives.TruffleBoundary
+    private void unpackRecordSlow(com.mezze.interpreter.values.MezzeRecord rec, Object[] flat) {
         int[] fresh = new int[parameterCount];
         for (int i = 0; i < parameterCount; i++) {
             int fi = rec.getFieldIndex(parameterNames[i]);
@@ -332,7 +357,7 @@ public final class TrampolineRootNode extends RootNode {
             if (fi >= 0) flat[closureCount + i] = rec.getField(fi);
         }
         this.cachedFieldIndices = fresh;
-        this.cachedShape = shape;
+        this.cachedShape = rec.getShape();
     }
 
     @Override
