@@ -139,6 +139,7 @@ enum class ErrorCode {
     V0707_CONSTRUCTOR_MUST_BE_UPPERCASE,
     V0708_SPREAD_ONLY_RECORD_FORBIDDEN,
     V0709_CIRCULAR_TYPE_DEPENDENCY,
+    V0710_TOP_LEVEL_EXPRESSION, // a bare expression at the top level of a program (only decls allowed); fine in the REPL
 
     // ─── Typechecker: misc syntax/desugar (T04xx) ────────────────────────
     T0401_UNKNOWN_OPERATOR,

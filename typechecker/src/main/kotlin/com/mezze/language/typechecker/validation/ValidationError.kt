@@ -22,6 +22,20 @@ sealed interface ValidationError {
     val fixHints: List<FixHint>
         get() = emptyList()
 
+    /** A bare expression at the top level of a PROGRAM (flagged only in
+     *  `strictTopLevel` mode; a REPL/eval evaluates a bare expression on purpose). */
+    data class TopLevelExpression(val loc: Loc? = null) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0710_TOP_LEVEL_EXPRESSION
+        override val hints: List<String>
+            get() = listOf("move it into `let main = {} -> ...` (or another function)")
+        override fun message(): String =
+            "A bare expression isn't valid at the top level of a program — the top level " +
+                "takes declarations (`let`, `type`, `effect`, `ability`, `impl`, `use`). This " +
+                "expression has nothing to run it and won't execute. Wrap it in a function and " +
+                "use that as the entry point, e.g. `let main = {} -> ...`."
+        override fun location(): Loc? = loc
+    }
+
         data class AbilityNotSatisfied(
         val type: MezzeType,
         val abilityName: String,

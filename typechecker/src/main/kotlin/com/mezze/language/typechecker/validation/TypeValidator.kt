@@ -84,7 +84,19 @@ class TypeValidator(
                     if (scrutineeType != null) errors.addAll(validateLetPattern(decl.pattern, scrutineeType))
                     errors.addAll(validatePatternsInExpression(decl.value, substitution))
                 }
-                is ParsedTopLevelExpr -> errors.addAll(validatePatternsInExpression(decl.expression, substitution))
+                is ParsedTopLevelExpr -> {
+                    // A bare expression at the top level parses (it's the REPL/eval
+                    // affordance — a single expression IS the program), but in a
+                    // real program file it has nothing to run it and silently never
+                    // executes. In strict (program) mode, flag it. `strictTopLevel`
+                    // is false for the eval/REPL/interpreter paths, so this only
+                    // fires for `mez check`/`dev`/`build` and any frontend that opts
+                    // into program mode.
+                    if (strictTopLevel) {
+                        errors.add(ValidationError.TopLevelExpression(decl.loc))
+                    }
+                    errors.addAll(validatePatternsInExpression(decl.expression, substitution))
+                }
                 is ParsedEffectDecl -> errors.addAll(effectValidator.validateEffectDeclaration(decl))
                 is ParsedPerformerDecl -> {
                     val effectDecl = effectDeclarations[decl.effect.localName]

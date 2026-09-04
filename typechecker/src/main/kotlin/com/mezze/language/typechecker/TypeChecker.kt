@@ -43,6 +43,14 @@ class TypeChecker(
     internal val parentContext: TypingContext = createInitialContext(),
     internal val strictTopLevel: Boolean = false,
 ) {
+    /**
+     * Java/WASM-friendly constructor: default context, explicit program-mode flag.
+     * WASM (MezzeWeb.java) can't use Kotlin named args / defaults, so it calls
+     * `new TypeChecker(true)` to run the same strict PROGRAM rules the CLI does —
+     * e.g. rejecting a bare top-level expression (V0710).
+     */
+    constructor(strictTopLevel: Boolean) : this(createInitialContext(), strictTopLevel)
+
     internal fun loadPreludeModulesPublic(importResolver: ImportResolver): ModuleImportContext {
         return loadPreludeModulesInternal(importResolver, ModuleImportContext.empty())
     }

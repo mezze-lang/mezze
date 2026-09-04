@@ -403,6 +403,14 @@ fun ErrorCode.explain(): String = when (this) {
         "Types form a circular dependency. " +
         "Break the cycle by introducing an indirection (e.g., via a type parameter)."
 
+    ErrorCode.V0710_TOP_LEVEL_EXPRESSION ->
+        "The top level of a program is for DECLARATIONS — `let`, `type`, `effect`, " +
+        "`ability`, `impl`, `use`. A bare expression here (like a call `f { ... }`) " +
+        "has nothing to run it, so it never executes. Put it inside a function and " +
+        "make that your entry point: `let main = {} -> ...`. (A bare expression is " +
+        "fine in the REPL, where it IS the thing being evaluated — this only applies " +
+        "to a program.)"
+
     ErrorCode.T0401_UNKNOWN_OPERATOR ->
         "This operator is not recognized. Check that it's a valid Mezze operator."
 

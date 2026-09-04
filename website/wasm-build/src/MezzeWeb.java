@@ -69,7 +69,7 @@ public final class MezzeWeb {
             try {
                 ParsedModule m = new MezzeParser().parseParsedModule(source, "/tmp/playground.mz");
                 TypeChecker.TypeCheckResult r =
-                    new TypeChecker().checkParsedModule(m, Path.of("/tmp"), null, true);
+                    new TypeChecker(true).checkParsedModule(m, Path.of("/tmp"), null, true);
                 if (!(r instanceof TypeChecker.TypeCheckResult.Success s)) {
                     return "TYPE ERROR: " + firstMessage(String.valueOf(r));
                 }
@@ -118,7 +118,7 @@ public final class MezzeWeb {
         try {
             ParsedModule m = new MezzeParser().parseParsedModule(source, "/tmp/playground.mz");
             TypeChecker.TypeCheckResult r =
-                new TypeChecker().checkParsedModule(m, Path.of("/tmp"), null, true);
+                new TypeChecker(true).checkParsedModule(m, Path.of("/tmp"), null, true);
             if (r instanceof TypeChecker.TypeCheckResult.Success s) {
                 return JsonDiagnosticFormatter.INSTANCE.render(
                     // Pass the typed module so `bindings` is populated:
@@ -219,7 +219,7 @@ public final class MezzeWeb {
         if (source == null || source.isBlank()) return "";
         try {
             ParsedModule m = new MezzeParser().parseParsedModule(source, "/tmp/playground.mz");
-            TypeChecker tc = new TypeChecker();
+            TypeChecker tc = new TypeChecker(true);
             TypeChecker.TypeCheckResult r = tc.checkParsedModule(m, Path.of("/tmp"), null, true);
 
             // Both outcomes carry a typed module, so hover keeps working on
