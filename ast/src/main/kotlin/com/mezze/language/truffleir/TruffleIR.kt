@@ -350,6 +350,10 @@ sealed interface SourceIR {
     /** Any expression evaluating to a materialized Seq at runtime. Uses
      *  SeqSize/SeqGet indexed loop in the emit. */
     @Serializable data class RawSeq(val xs: NodeIR) : SourceIR
+    /** Any expression evaluating to a materialized List at runtime. The
+     *  emit path converts to Object[] via list.toArray() then iterates
+     *  by index — same indexed loop as RawSeq but with a toArray() step. */
+    @Serializable data class RawList(val xs: NodeIR) : SourceIR
     /** Fall-through — canonicalizer refuses to fuse (unknown expression,
      *  descriptor we couldn't peel through). Peel MUST reject on Opaque
      *  and let ability-dispatch handle it. */

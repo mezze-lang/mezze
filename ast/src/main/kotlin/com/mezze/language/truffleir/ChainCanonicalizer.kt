@@ -153,6 +153,25 @@ object ChainCanonicalizer {
             val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
+        // __native_list_fold_left { xs, init, f }
+        if (node is CallNativeIR
+            && node.name == "__native_list_fold_left"
+            && !node.isScalarABI) {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                "xs" -> src = fld.value
+                "init" -> init = fld.value
+                "f" -> f = fld.value
+            }
+            val srcInner = src ?: return null
+            val initExpr = init ?: return null
+            val fLambda = f as? MakeLambdaIR ?: return null
+            val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+            val effectiveSource = if (source is SourceIR.Opaque) SourceIR.RawList(source.expr) else source
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
+            return if (isEffectSafe(candidate, allFunctions)) candidate else null
+        }
         // __native_{iter,seq}_{count,any,all,find,reduce,to_seq,to_list}
         if (node is CallNativeIR && !node.isScalarABI) {
             val result = tryCanonicalizeNativeSink(node, classifier, allFunctions)
@@ -289,7 +308,7 @@ object ChainCanonicalizer {
             val candidate = FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
-        // Fold
+        // Fold (iter/seq)
         if (node.name == "__native_iter_fold" || node.name == "__native_seq_fold") {
             val mr = node.arg as? MakeRecordIR ?: return null
             var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
@@ -304,6 +323,25 @@ object ChainCanonicalizer {
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             if (source is SourceIR.Opaque) return null
             val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
+            return if (isEffectSafe(candidate, allFunctions)) candidate else null
+        }
+        // Fold (list — fold_left)
+        if (node.name == "__native_list_fold_left") {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                "xs" -> src = fld.value
+                "init" -> init = fld.value
+                "f" -> f = fld.value
+            }
+            val srcInner = src ?: return null
+            val initExpr = init ?: return null
+            val fLambda = f as? MakeLambdaIR ?: return null
+            val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+            // List context: Opaque terminal becomes RawList — we know the
+            // chain entered through a list native, so the source is a list.
+            val effectiveSource = if (source is SourceIR.Opaque) SourceIR.RawList(source.expr) else source
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         return null
@@ -342,10 +380,16 @@ object ChainCanonicalizer {
             }
             "__native_iter_any", "__native_seq_any" ->
                 buildPredicateFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.Any(it) }
+            "__native_list_any" ->
+                buildPredicateFusedList(mr, classifier, allFunctions, node.src) { SinkIR.Any(it) }
             "__native_iter_all", "__native_seq_all" ->
                 buildPredicateFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.All(it) }
+            "__native_list_all" ->
+                buildPredicateFusedList(mr, classifier, allFunctions, node.src) { SinkIR.All(it) }
             "__native_iter_find", "__native_seq_find" ->
                 buildPredicateFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.Find(it) }
+            "__native_list_find" ->
+                buildPredicateFusedList(mr, classifier, allFunctions, node.src) { SinkIR.Find(it) }
             "__native_iter_reduce", "__native_seq_reduce" -> {
                 val srcField = if (node.name.startsWith("__native_iter")) "it" else "xs"
                 var src: NodeIR? = null; var f: NodeIR? = null
@@ -362,6 +406,18 @@ object ChainCanonicalizer {
                     val candidate = FusedChainIR(source, stages, SinkIR.Reduce(fLambda), node.src)
                     if (isEffectSafe(candidate, allFunctions)) candidate else null
                 }
+            }
+            "__native_list_reduce" -> {
+                var src: NodeIR? = null; var f: NodeIR? = null
+                for (fld in mr.fields) when (fld.name) {
+                    "xs" -> src = fld.value; "f" -> f = fld.value
+                }
+                val srcInner = src ?: return null
+                val fLambda = f as? MakeLambdaIR ?: return null
+                val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+                val effectiveSource = if (source is SourceIR.Opaque) SourceIR.RawList(source.expr) else source
+                val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Reduce(fLambda), node.src)
+                if (isEffectSafe(candidate, allFunctions)) candidate else null
             }
             "__native_iter_to_seq", "__native_iter_to_list" -> {
                 var src: NodeIR? = null
@@ -380,6 +436,28 @@ object ChainCanonicalizer {
         // Gate: only return if the emitter can handle the sink.
         if (candidate != null && !isEmittableSink(candidate.sink)) return null
         return candidate
+    }
+
+    /** Build a FusedChainIR with a predicate sink from a list native call record.
+     *  Opaque terminal sources are promoted to RawList since we know the chain
+     *  entered through a __native_list_* call. */
+    private fun buildPredicateFusedList(
+        mr: MakeRecordIR,
+        classifier: ChainHofClassifier,
+        allFunctions: Map<Hash, FunctionIR>,
+        src: SourceInfo,
+        wrap: (MakeLambdaIR) -> SinkIR,
+    ): FusedChainIR? {
+        var srcNode: NodeIR? = null; var p: NodeIR? = null
+        for (fld in mr.fields) when (fld.name) {
+            "xs" -> srcNode = fld.value; "p" -> p = fld.value
+        }
+        val srcInner = srcNode ?: return null
+        val pLambda = p as? MakeLambdaIR ?: return null
+        val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+        val effectiveSource = if (source is SourceIR.Opaque) SourceIR.RawList(source.expr) else source
+        val candidate = FusedChainIR(effectiveSource, stages, wrap(pLambda), src)
+        return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
 
     /** Build a FusedChainIR with a predicate sink (any/all/find) from a native call record. */
@@ -738,10 +816,11 @@ object ChainCanonicalizer {
         node: NodeIR,
         classifier: ChainHofClassifier,
     ): Pair<MakeLambdaIR, NodeIR>? {
-        // Native seq::map or iter::map — record-ABI only.
-        // seq uses field "xs", iter uses field "it".
+        // Native seq::map, iter::map, or list::map — record-ABI only.
+        // seq uses field "xs", iter uses field "it", list uses field "xs".
         if (node is CallNativeIR
-            && (node.name == "__native_seq_map" || node.name == "__native_iter_map")
+            && (node.name == "__native_seq_map" || node.name == "__native_iter_map"
+                || node.name == "__native_list_map")
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
             var src: NodeIR? = null; var f: NodeIR? = null
@@ -769,9 +848,10 @@ object ChainCanonicalizer {
         node: NodeIR,
         classifier: ChainHofClassifier,
     ): Pair<MakeLambdaIR, NodeIR>? {
-        // Native seq::filter or iter::filter — record-ABI only.
+        // Native seq::filter, iter::filter, or list::filter — record-ABI only.
         if (node is CallNativeIR
-            && (node.name == "__native_seq_filter" || node.name == "__native_iter_filter")
+            && (node.name == "__native_seq_filter" || node.name == "__native_iter_filter"
+                || node.name == "__native_list_filter")
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
             var src: NodeIR? = null; var p: NodeIR? = null
@@ -1017,6 +1097,7 @@ object ChainCanonicalizer {
                         if (nStart !== s.start || nEnd !== s.end) SourceIR.RangeSeq(nStart, nEnd) else s
                     }
                     is SourceIR.RawSeq -> { val nXs = f(s.xs); if (nXs !== s.xs) SourceIR.RawSeq(nXs) else s }
+                    is SourceIR.RawList -> { val nXs = f(s.xs); if (nXs !== s.xs) SourceIR.RawList(nXs) else s }
                     is SourceIR.Opaque -> { val nE = f(s.expr); if (nE !== s.expr) SourceIR.Opaque(nE) else s }
                 }
                 var stagesChanged = false

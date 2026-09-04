@@ -1378,12 +1378,28 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
-    /** Get seq size as a long. Used by #407 fold-fusion inlined loops. */
+    /** Get seq size as a long. Used by #407 fold-fusion inlined loops.
+     *  Extended for Object[] to support list chain fusion (list.toArray()
+     *  produces Object[], then the fused loop iterates by index). */
     @Operation
     public static final class SeqSize {
         @Specialization
         public static long doSeq(MezzeSeq<?> seq) {
             return seq.size();
+        }
+        @Specialization
+        public static long doObjectArray(Object[] array) {
+            return array.length;
+        }
+    }
+
+    /** Convert a MezzeList to Object[] for indexed iteration in fused loops.
+     *  Single O(n) pass — the resulting array supports O(1) SeqGet access. */
+    @Operation
+    public static final class ListToArray {
+        @Specialization
+        public static Object[] doList(com.mezze.datastructures.list.MezzeList<?> list) {
+            return list.toArray();
         }
     }
 

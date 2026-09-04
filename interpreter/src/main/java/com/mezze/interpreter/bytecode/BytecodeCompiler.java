@@ -571,6 +571,7 @@ public final class BytecodeCompiler {
                 if (!supportsNode(rs.getEnd(), argCount)) return false;
             }
             if (src instanceof SourceIR.RawSeq rs && !supportsNode(rs.getXs(), argCount)) return false;
+            if (src instanceof SourceIR.RawList rl && !supportsNode(rl.getXs(), argCount)) return false;
             if (src instanceof SourceIR.Opaque os && !supportsNode(os.getExpr(), argCount)) return false;
             return true;
         }
@@ -2635,6 +2636,7 @@ public final class BytecodeCompiler {
         // ── Phase 4c: classify source ──
         NodeIR rangeStart = null, rangeEnd = null;
         NodeIR rawXsExpr = null;
+        NodeIR rawListExpr = null;
         boolean isSumSink = sinkMode instanceof FusedSinkMode.Accumulate a
                 && !a.ignoreElement() && a.op() == InlineOp.ADD;
         if (chain.getSource() instanceof SourceIR.RangeSeq rangeSrc) {
@@ -2642,6 +2644,8 @@ public final class BytecodeCompiler {
             rangeEnd = rangeSrc.getEnd();
         } else if (chain.getSource() instanceof SourceIR.RawSeq rawSrc) {
             rawXsExpr = rawSrc.getXs();
+        } else if (chain.getSource() instanceof SourceIR.RawList rawListSrc) {
+            rawListExpr = rawListSrc.getXs();
         } else {
             // Opaque source — the runtime value could be Seq, List, Deque, etc.
             // BuiltinSumLongSeq only handles MezzeSeq; passing other types
@@ -2675,7 +2679,7 @@ public final class BytecodeCompiler {
 
         // ── Phase 4d: emit the generic fused loop ──
         emitFusedLoop(classifiedStages, rangeStart, rangeEnd, rawXsExpr,
-                sinkMode, b, argCount, localMap);
+                rawListExpr, sinkMode, b, argCount, localMap);
         if (dbg) System.err.println("[chain-canon-emit] emitted fused loop ("
                 + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
         return true;
@@ -3201,12 +3205,14 @@ public final class BytecodeCompiler {
     private void emitFusedLoop(
             java.util.List<ClassifiedStage> stages,
             NodeIR rangeStart, NodeIR rangeEnd, NodeIR rawXsExpr,
+            NodeIR rawListExpr,
             FusedSinkMode mode,
             MezzeBytecodeRootNodeGen.Builder b,
             int argCount,
             com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
 
         boolean isRange = rangeStart != null;
+        boolean isList = rawListExpr != null;
         boolean useCompoundCond = mode instanceof FusedSinkMode.ShortCircuit;
 
         b.beginBlock();
@@ -3263,6 +3269,23 @@ public final class BytecodeCompiler {
             b.endStoreLocal();
             b.beginStoreLocal(endSlot);
               emitNode(rangeEnd, b, argCount, localMap);
+            b.endStoreLocal();
+        } else if (isList) {
+            // List source: convert to Object[] via ListToArray, then iterate
+            // by index. SeqGet already handles Object[] with O(1) access,
+            // and SeqSize handles Object[] via the doObjectArray specialization.
+            seqSlot = b.createLocal();
+            sizeSlot = b.createLocal();
+            b.beginStoreLocal(seqSlot);
+              b.beginListToArray();
+                emitNode(rawListExpr, b, argCount, localMap);
+              b.endListToArray();
+            b.endStoreLocal();
+            b.beginStoreLocal(sizeSlot);
+              b.beginSeqSize(); b.emitLoadLocal(seqSlot); b.endSeqSize();
+            b.endStoreLocal();
+            b.beginStoreLocal(iSlot);
+              b.emitLoadLongConstant(0L);
             b.endStoreLocal();
         } else {
             seqSlot = b.createLocal();
