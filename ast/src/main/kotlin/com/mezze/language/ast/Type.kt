@@ -98,6 +98,25 @@ sealed interface TypeIdentity {
     }
 }
 
+/**
+ * Rewrite [f] over the type-valued children of an effect row — the associated
+ * types bound in each [MezzeType.EffectInstance] (`Exception having 'error = 'a`).
+ * Effect names, rowVar and flags are not types, so they pass through untouched.
+ * Used by [MezzeType.transformChildren] so a substitution reaches type vars living
+ * inside a function's effect row, not just its param/return positions.
+ */
+private fun mapEffectRowChildren(er: MezzeType.EffectRow, f: (MezzeType) -> MezzeType): MezzeType.EffectRow {
+    if (er.effectInstances.none { it.associatedTypes.isNotEmpty() }) return er
+    return er.copy(effectInstances = er.effectInstances.map { inst ->
+        if (inst.associatedTypes.isEmpty()) inst
+        else inst.copy(associatedTypes = inst.associatedTypes.mapValues { (_, t) -> f(t) })
+    }.toSet())
+}
+
+/** True if any associated type in [er]'s effect instances satisfies [predicate]. */
+private fun effectRowAnyChild(er: MezzeType.EffectRow, predicate: (MezzeType) -> Boolean): Boolean =
+    er.effectInstances.any { inst -> inst.associatedTypes.values.any(predicate) }
+
 @Serializable
 @JsonClassDiscriminator("typeKind")
 sealed interface MezzeType {
@@ -138,7 +157,8 @@ sealed interface MezzeType {
 
     fun anyChild(predicate: (MezzeType) -> Boolean): Boolean = when (this) {
         is FunctionType -> predicate(paramType) || predicate(returnType) ||
-            abilityConstraints.any { c -> c.typeArgs.any(predicate) || c.associatedTypeBindings.values.any(predicate) }
+            abilityConstraints.any { c -> c.typeArgs.any(predicate) || c.associatedTypeBindings.values.any(predicate) } ||
+            (effects?.let { effectRowAnyChild(it, predicate) } ?: false)
         is RecordType -> fields.values.any(predicate)
         // #194: an applied polymorphic variant carries its args in `typeArgs`
         // (`Tree Int` = VariantType(typeArgs=[Int])); those are structural children
@@ -149,14 +169,18 @@ sealed interface MezzeType {
         is TypeApplication -> args.any(predicate)
         is ParametricBuiltin -> typeArgs.any(predicate)
         is NewtypeType -> predicate(wrappedType)
+        // A standalone effect row's associated types are children too (a function's
+        // effect row is reached via the FunctionType arm above).
+        is EffectRow -> effectRowAnyChild(this, predicate)
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
         is FracType, is BytesType,
-        is CharType, is EffectRow -> false
+        is CharType -> false
     }
 
     fun transformChildren(f: (MezzeType) -> MezzeType): MezzeType = when (this) {
         is FunctionType -> copy(paramType = f(paramType), returnType = f(returnType),
-            abilityConstraints = abilityConstraints.map { c -> c.copy(typeArgs = c.typeArgs.map(f), associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, v) -> f(v) }) })
+            abilityConstraints = abilityConstraints.map { c -> c.copy(typeArgs = c.typeArgs.map(f), associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, v) -> f(v) }) },
+            effects = effects?.let { mapEffectRowChildren(it, f) })
         is RecordType -> copy(fields = fields.mapValues { (_, v) -> f(v) })
         // #194: rewrite `typeArgs` in step with the constructor payloads, else a
         // substitution leaves `typeArgs` stale (`['a]`) against already-substituted
@@ -168,9 +192,10 @@ sealed interface MezzeType {
         is TypeApplication -> copy(args = args.map(f))
         is ParametricBuiltin -> rebuild(typeArgs.map(f))
         is NewtypeType -> copy(wrappedType = f(wrappedType))
+        is EffectRow -> mapEffectRowChildren(this, f)
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
         is FracType, is BytesType,
-        is CharType, is EffectRow -> this
+        is CharType -> this
     }
 
     // Primitive types

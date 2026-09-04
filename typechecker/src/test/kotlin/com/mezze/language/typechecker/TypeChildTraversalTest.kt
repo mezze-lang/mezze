@@ -73,6 +73,40 @@ class TypeChildTraversalTest {
         assertEquals("Tree", subst.identity.displayNameOrNull(), "nominal identity preserved")
     }
 
+    private fun fnWithVarOnlyInEffectRow(v: MezzeType): MezzeType.FunctionType =
+        MezzeType.FunctionType(
+            paramType = MezzeType.RecordType(fields = emptyMap(), rowVar = null),
+            returnType = MezzeType.IntType,
+            // The var lives ONLY in the effect instance's associated type
+            // (`Exception having 'error = 'a`), nowhere in param/return.
+            effects = MezzeType.EffectRow(
+                effects = setOf("Exception"),
+                effectInstances = setOf(MezzeType.EffectInstance("Exception", mapOf("error" to v)))
+            )
+        )
+
+    @Test
+    fun `anyChild sees a type var that lives only in a function's effect row`() {
+        val v = MezzeType.VarType(TypeVar.fresh())
+        assertTrue(
+            fnWithVarOnlyInEffectRow(v).anyChild { it is MezzeType.VarType },
+            "anyChild must traverse FunctionType.effects associated types"
+        )
+    }
+
+    @Test
+    fun `transformChildren rewrites a type var in a function's effect row`() {
+        val v = MezzeType.VarType(TypeVar.fresh())
+        val subst = fnWithVarOnlyInEffectRow(v).transformChildren {
+            if (it is MezzeType.VarType) MezzeType.IntType else it
+        } as MezzeType.FunctionType
+        val rewritten = subst.effects!!.effectInstances.first().associatedTypes["error"]
+        assertEquals(
+            MezzeType.IntType, rewritten,
+            "transformChildren must rewrite the effect instance's associated type var"
+        )
+    }
+
     @Test
     fun `anyChild is false on a fully-concrete variant`() {
         val concrete = MezzeType.VariantType(
