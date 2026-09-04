@@ -20,7 +20,13 @@ export const TREE: Node[] = [
   { slug: 'intro' },
   { slug: 'syntax' },
   { slug: 'primitives' },
+  { slug: 'records' },
+  { slug: 'variants' },
+  { slug: 'aliases' },
   { slug: 'functions' },
+  { slug: 'abilities' },
+  { slug: 'effects' },
+  { slug: 'modules' },
 ]
 
 export interface Heading {

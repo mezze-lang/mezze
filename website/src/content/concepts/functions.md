@@ -61,6 +61,40 @@ form has the field names to check itself against and can see immediately that
 only position, and position is exactly the information that a reader, human or
 otherwise, cannot recover from the call.
 
+## The arrow carries the effects
+
+A function's type is not only what goes in and what comes out. It also records
+what calling it *does*:
+
+<!--mezze-code
+{ url: Str } -> Str <Http>
+-->
+
+The part in angle brackets is the effect row, and it belongs to the arrow
+rather than to either type beside it. Calling this reaches the network; the
+`Str` that comes back is an ordinary `Str`.
+
+An effect a function does not handle raises to that function's own arrow, and
+calling it raises the effect again to the caller:
+
+<!--mezze-code
+let outer = {} -> do
+  let inner = {} -> do
+    fetch { url = "https://example.com" }   # performs Http, not handled here
+  # inner : {} -> Str <Http>                  raised to inner's arrow
+  inner {}                                  # calling inner incurs it
+# outer : {} -> Str <Http>                    raised again to outer's arrow
+-->
+
+Neither `inner` nor `outer` mentions the network, and both types say
+`<Http>`. That is the guarantee: between the operation and the handler that
+catches it, every arrow in the chain declares it.
+
+A function that performs nothing has no row at all, and that absence is worth
+as much as the row. `{ x: Int } -> Int` is a promise, not an omission.
+
+[Effects](#effects) covers handlers, the `*` marker and the rest of the model.
+
 ## Currying comes free
 
 Currying means calling a function with some of its arguments and getting back
