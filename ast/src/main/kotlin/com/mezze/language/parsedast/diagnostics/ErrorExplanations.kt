@@ -131,6 +131,14 @@ fun ErrorCode.explain(): String = when (this) {
         "The limit exists so deep input fails with THIS message instead of crashing " +
         "the compiler with a stack overflow."
 
+    ErrorCode.P0132_PARSER_LIMIT_EXCEEDED ->
+        "The parser did far more work on this input than any valid program requires " +
+        "and stopped rather than risk running forever. This almost always means the " +
+        "source is malformed or pathological — unbalanced or unterminated brackets/" +
+        "quotes, or a runaway generated construct — near the reported position. The " +
+        "limit is a safety backstop: the parser is guaranteed to terminate with THIS " +
+        "error instead of ever hanging the compiler, editor, or playground."
+
     ErrorCode.P0130_PIPE_MISSING_RHS ->
         "The `|>` pipe operator needs an expression on its right to pipe the value " +
         "INTO — usually a function call with `@` marking where the piped value goes: " +
@@ -206,6 +214,15 @@ fun ErrorCode.explain(): String = when (this) {
     ErrorCode.T0213_UNKNOWN_TYPE ->
         "An uppercase name in a type position resolves to no declaration, import, or builtin. " +
         "Declare it (`type X = ...` / `newtype X = ...`), import it (`use mod::{X}`), or fix the spelling."
+
+    ErrorCode.T0214_TYPECHECK_LIMIT_EXCEEDED ->
+        "The typechecker recursed further than any real program requires and stopped " +
+        "rather than risk overflowing the stack or running away. This almost always " +
+        "means a pathological or malformed type — a deeply nested or mutually/self- " +
+        "referential shape that expands without bound. Simplify the type, break it into " +
+        "named aliases, or check for an unintended recursive definition. The limit is a " +
+        "safety backstop: the checker is guaranteed to stop with THIS error instead of " +
+        "ever crashing or hanging the compiler, editor, or playground."
 
     ErrorCode.T0301_UNBOUND_TYPE_VAR ->
         "A type variable in an annotation is not bound by any parameter. " +

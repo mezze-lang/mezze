@@ -472,6 +472,7 @@ internal val MezzeParser.recordLiteral: Parser<ParsedExpr>
                 var cur = skipNewlinesOnly(lbrace.remaining)
                 var recordFailure: ParseResult.Failure? = null
                 while (true) {
+                    parseTick(cur)  // anti-hang: bounded work per record entry
                     val (afterAnn, ann) = skipNewlinesCollectAnnotations(cur)
                     cur = afterAnn
                     val here = cur.current()
@@ -1015,6 +1016,7 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                 val doBlockColumn = skipNewlines(stream1).current()?.column
 
                 while (finalResult == null) {
+                    parseTick(currentStream)  // anti-hang: bounded work per do-statement
                     // Collect any comments (`#`, `#{}`, `##`) sitting before the
                     // next statement so the formatter can round-trip them. They
                     // attach to whichever statement is parsed next.
@@ -1343,6 +1345,7 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
                                         var currentStream = skipNewlinesOnly(firstCase.remaining)
 
                                         while (true) {
+                                            parseTick(currentStream)  // anti-hang: bounded work per match arm
                                             // Comments before the next arm are only
                                             // THIS match's if a case actually follows.
                                             // Collect them on a SPECULATIVE stream and
@@ -1749,6 +1752,9 @@ private fun MezzeParser.parseIfLetBindingsAndBody(
     //   message about the actual missing thing (an expression).
 internal val MezzeParser.expression: Parser<ParsedExpr>
     get() = { stream ->
+        // Anti-hang backstop: every expression re-entry is one unit of work, so
+        // a spin or exponential re-scan trips the step/time budget (P0132) here.
+        parseTick(stream)
         // Depth guard: each nested `(expr)` / `[..]` / `{ f = expr }` re-enters
         // here, so deep nesting recurses the whole precedence chain and can blow
         // the stack. Fail cleanly past the limit instead of crashing (fuzz-found).

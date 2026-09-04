@@ -118,6 +118,11 @@ object Parsers {
         while (true) {
             when (val result = parser(currentStream)) {
                 is ParseResult.Success -> {
+                    // Progress guard: a sub-parser that succeeds WITHOUT consuming
+                    // input (e.g. `optional`, or an empty-matching parser) would
+                    // spin here forever. Stop the moment an iteration doesn't
+                    // advance the stream — the anti-hang invariant for `many`.
+                    if (result.remaining.position == currentStream.position) break
                     results.add(result.value)
                     currentStream = result.remaining
                 }

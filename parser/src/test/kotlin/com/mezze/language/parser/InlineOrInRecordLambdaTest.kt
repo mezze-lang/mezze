@@ -2,132 +2,126 @@ package com.mezze.language.parser
 
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
+import org.junit.jupiter.api.Assertions.assertTrue
 import java.time.Duration
 
 /**
- * Parser non-termination on `||` between two record-arg calls inside a
- * record-field lambda body. Caught during #239 OnSuccess work — see
- * memory/project_239_match_user_adt_bug.md.
+ * Parser termination + correctness on a binary operator between two record-arg
+ * calls inside a record-field lambda body. Caught during #239 OnSuccess work —
+ * see memory/project_239_match_user_adt_bug.md.
  *
- * The failing shape (exact repro from std::effects::async::join_on_success
- * before the workaround):
+ * The shape (exact repro from std::effects::async::join_on_success before its
+ * workaround):
  *
  *     Async.park { predicate = {} ->
  *       seq::any { xs = ps, p = { x } -> is_done { p = x } } ||
  *       seq::all { xs = ps, p = { x } -> is_done { p = x } } }
  *
- * The parser appears to greedily extend the first `seq::any { ... }` past
- * the trailing `||`, never stabilising. We use `assertTimeoutPreemptively`
- * which runs the parser in a worker thread and force-kills it on timeout
- * — `Thread.interrupt()` alone is not enough because the parser's tight
- * Kotlin loop has no safepoints, so JUnit's `@Timeout` annotation would
- * hang the whole test process.
- *
- * Tests are intentionally NOT @Disabled — they should fail until the
- * parser bug is fixed, so the test bar visibly tracks the followup.
- * Workaround in stdlib is to let-bind the operands first.
+ * This used to HANG: the record-arg list loop (`many`/`sepEndBy`) spun without
+ * consuming, so the parser greedily re-tried the first `{ ... }` past the
+ * trailing operator, never stabilising. FIXED by the `many` progress guard
+ * (break when an iteration doesn't advance the stream) plus the P0132 work
+ * budget. The shapes now PARSE correctly — a left-associative binary op with
+ * both call operands — so these tests assert the parse, not merely that it
+ * terminates. The `assertTimeoutPreemptively` wrapper stays as a belt-and-
+ * suspenders tripwire against any regression back to a hang.
  */
 class InlineOrInRecordLambdaTest {
 
     private val parser = MezzeParser()
     private val limit: Duration = Duration.ofSeconds(5)
 
+    /** Parse under a hang-tripwire; assert no errors and, if given, that the
+     *  tree contains [mustContain] (the operator / RHS that used to be lost). */
+    private fun parsesClean(src: String, vararg mustContain: String) {
+        assertTimeoutPreemptively(limit) {
+            val r = parser.parseWithRecovery(src, "<test>")
+            assertTrue(
+                r.errors.isEmpty(),
+                "expected a clean parse; got errors: ${r.errors.map { it.code to it.errorMessage }}"
+            )
+            val tree = r.module.decls.joinToString("\n") { it.toString() }
+            for (needle in mustContain) {
+                assertTrue(tree.contains(needle), "parsed tree is missing `$needle`:\n$tree")
+            }
+        }
+    }
+
     @Test
     fun `sanity - simple || between two function calls outside a lambda`() {
-        // Sanity: outside a lambda, `||` between two `{...}`-arg calls
-        // parses fine. If this regresses, the bug got worse.
-        val src = """
-            let main = {} -> bar { x = 1 } || baz { y = 2 }
-        """
-        assertTimeoutPreemptively(limit) {
-            parser.parseParsedModule(src, "<test>")
-        }
+        parsesClean("let main = {} -> bar { x = 1 } || baz { y = 2 }\n", "ParsedBinaryOp", "baz")
     }
 
     @Test
     fun `sanity - || between two function calls inside a 'do' block`() {
-        // Sanity: with `do`, the workaround in stdlib's join_on_success
-        // parses fine. This is the let-bound variant — explicit statement
-        // boundaries kill the ambiguity.
-        val src = """
+        parsesClean(
+            """
             let main = {} -> foo { f = {} -> do
               let l = bar { x = 1 }
               let r = baz { y = 2 }
               l || r }
-        """
-        assertTimeoutPreemptively(limit) {
-            parser.parseParsedModule(src, "<test>")
-        }
+            """.trimIndent(),
+            "ParsedBinaryOp"
+        )
     }
 
     @Test
-    fun `failing - || between two record-arg calls inside a record-field lambda body`() {
-        // The repro. Currently hangs (caught by the 5s timeout, which
-        // fails the test). Fix the parser to make this pass.
-        val src = """
+    fun `parses - || between two record-arg calls inside a record-field lambda body`() {
+        parsesClean(
+            """
             let main = {} -> foo { f = {} ->
               bar { x = 1 } ||
               baz { y = 2 } }
-        """
-        assertTimeoutPreemptively(limit) {
-            parser.parseParsedModule(src, "<test>")
-        }
+            """.trimIndent(),
+            "ParsedBinaryOp", "bar", "baz"
+        )
     }
 
     @Test
-    fun `failing - the exact OnSuccess shape that caused the bug`() {
-        // The shape that started the investigation: Async.park with a
-        // compound predicate spanning two seq::* calls.
-        val src = """
+    fun `parses - the exact OnSuccess shape that caused the bug`() {
+        parsesClean(
+            """
             let main = {} -> Async.park { predicate = {} ->
               seq::any { xs = ps, p = { x } -> is_done { p = x } } ||
               seq::all { xs = ps, p = { x } -> is_done { p = x } } }
-        """
-        assertTimeoutPreemptively(limit) {
-            parser.parseParsedModule(src, "<test>")
-        }
+            """.trimIndent(),
+            "ParsedBinaryOp", "any", "all"
+        )
     }
 
     @Test
-    fun `failing - same shape with && instead of ||`() {
-        // The bug likely affects && too since both are binary infix
-        // operators handled with the same loop structure.
-        val src = """
+    fun `parses - same shape with && instead of ||`() {
+        parsesClean(
+            """
             let main = {} -> foo { f = {} ->
               bar { x = 1 } &&
               baz { y = 2 } }
-        """
-        assertTimeoutPreemptively(limit) {
-            parser.parseParsedModule(src, "<test>")
-        }
+            """.trimIndent(),
+            "ParsedBinaryOp", "baz"
+        )
     }
 
     @Test
-    fun `failing - same shape with + (additive) instead of ||`() {
-        // Each operator precedence level uses the same loop pattern
-        // (logicalOrExpression / logicalAndExpression / additiveExpression /
-        // multiplicativeExpression / comparisonExpression in
-        // ExpressionParsers.kt). If `||` loops on this shape, `+` should
-        // too — and the parser fix has to address all of them at once.
-        val src = """
+    fun `parses - same shape with + (additive) instead of ||`() {
+        parsesClean(
+            """
             let main = {} -> foo { f = {} ->
               bar { x = 1 } +
               baz { y = 2 } }
-        """
-        assertTimeoutPreemptively(limit) {
-            parser.parseParsedModule(src, "<test>")
-        }
+            """.trimIndent(),
+            "ParsedBinaryOp", "baz"
+        )
     }
 
     @Test
-    fun `failing - same shape with == (comparison) instead of ||`() {
-        val src = """
+    fun `parses - same shape with == (comparison) instead of ||`() {
+        parsesClean(
+            """
             let main = {} -> foo { f = {} ->
               bar { x = 1 } ==
               baz { y = 2 } }
-        """
-        assertTimeoutPreemptively(limit) {
-            parser.parseParsedModule(src, "<test>")
-        }
+            """.trimIndent(),
+            "ParsedBinaryOp", "baz"
+        )
     }
 }

@@ -64,6 +64,7 @@ enum class ErrorCode {
     P0129_RECORD_FIELD_USES_EQUALS, // `{ a: 1 }` in value position — record LITERAL fields bind with `=` (`{ a = 1 }`); `:` annotates a type
     P0130_PIPE_MISSING_RHS, // `a |>` with nothing (or nothing valid) after it — the pipe needs a right-hand expression
     P0131_NESTING_TOO_DEEP, // `((((((…))))))` — expression/type nesting exceeds the depth limit (guards against a parser stack overflow)
+    P0132_PARSER_LIMIT_EXCEEDED, // the parser hit its work/time budget on this input (pathological or malformed source) — a clean bail-out instead of ever hanging
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,
@@ -79,6 +80,7 @@ enum class ErrorCode {
     T0211_CALLBACK_PARAM_NAMES_MISMATCH, // `f = { acc, i } -> ...` where sig wants `{ acc, x }` — lambda param names ARE record destructuring, must match the caller's field names
     T0212_NOT_A_NEWTYPE, // `Foo.(x)` where Foo isn't a newtype (ability, effect, variant, record, primitive, or unknown)
     T0213_UNKNOWN_TYPE, // an uppercase type name in a type position resolves to no declaration/builtin (e.g. `{ val: Gadget }` with no `type Gadget`)
+    T0214_TYPECHECK_LIMIT_EXCEEDED, // the typechecker hit an internal recursion/work limit on this program (pathological or malformed) — a clean bail-out instead of ever crashing/hanging
 
     // ─── Typechecker: inference & binding (T03xx) ────────────────────────
     T0301_UNBOUND_TYPE_VAR,

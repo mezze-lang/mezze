@@ -204,14 +204,33 @@ internal val MezzeParser.seqPattern: Parser<ParsedPattern>
 // Pattern parser (main entry point)
 internal val MezzeParser.patternParser: Parser<ParsedPattern>
     get() = { stream ->
-        Parsers.oneOf(
-            wildcardPattern,
-            literalPattern,
-            seqPattern,
-            standaloneRecordPattern,
-            constructorPattern,
-            variablePattern
-        )(stream)
+        // Anti-hang backstop + depth guard: nested patterns (`[[[[…]]]]`,
+        // `Name.(Name.(…))`, record patterns) re-enter here, so deep nesting can
+        // blow the stack. Tick the work budget and fail cleanly past the depth
+        // limit instead of crashing (fuzz-found gap: patterns were unguarded).
+        parseTick(stream)
+        if (nestDepth >= MezzeParser.MAX_NEST_DEPTH) {
+            stream.failure(
+                "Pattern is nested too deeply (over ${MezzeParser.MAX_NEST_DEPTH} levels) — " +
+                    "usually runaway or unbalanced brackets.",
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0131_NESTING_TOO_DEEP,
+                hints = listOf("check for unbalanced `[`/`{`/`(` in the pattern")
+            )
+        } else {
+            nestDepth++
+            try {
+                Parsers.oneOf(
+                    wildcardPattern,
+                    literalPattern,
+                    seqPattern,
+                    standaloneRecordPattern,
+                    constructorPattern,
+                    variablePattern
+                )(stream)
+            } finally {
+                nestDepth--
+            }
+        }
     }
 
 // Standalone record pattern for matching on records directly (not wrapped in a constructor)

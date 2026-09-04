@@ -138,6 +138,8 @@ internal val MezzeParser.recordTypeEntryParser: Parser<ParsedRecordTypeEntry>
 // Type annotation parser (main entry point)
 internal val MezzeParser.typeAnnotationParser: Parser<ParsedTypeAnnotation>
     get() = { stream ->
+        // Anti-hang backstop: one unit of work per type re-entry (P0132).
+        parseTick(stream)
         // Depth guard (shared with expressions): nested `[[[…]]]` / `Map K V` /
         // function types re-enter here, so deep nesting can blow the stack. Fail
         // cleanly past the limit instead of crashing (fuzz-found).
@@ -161,6 +163,7 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
         var result: ParseResult<ParsedTypeAnnotation> = primaryTypeAnnotation(stream)
 
         while (result is ParseResult.Success) {
+            parseTick(result.remaining)  // anti-hang: bounded work per iteration
             val startToken = stream.current() ?: break
             var currentStream = result.remaining
 
@@ -178,6 +181,7 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
 
                     val typeArgs = mutableListOf<ParsedTypeAnnotation>()
                     while (true) {
+                        parseTick(abilityStream)  // anti-hang: bounded work per iteration
                         val typeResult = atomicTypeAnnotation(abilityStream)
                         when (typeResult) {
                             is ParseResult.Success -> {
@@ -281,7 +285,10 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
 
             if (arrow?.type == TokenType.ARROW) {
                 val arrowStream = streamBeforeArrow.advance()
-                val returnType = functionTypeAnnotation(arrowStream)
+                // Route the return-type recursion through the depth-guarded entry
+                // (not functionTypeAnnotation directly) so a curried `{}->{}->…->T`
+                // is bounded by MAX_NEST_DEPTH instead of recursing unguarded.
+                val returnType = typeAnnotationParser(arrowStream)
 
                 val paramType = (result as ParseResult.Success).value
                 result = when (returnType) {
@@ -471,7 +478,19 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                         }
                     } // else (result is not Failure)
                     }
-                    is ParseResult.Failure -> break
+                    is ParseResult.Failure -> {
+                        // Normally a return-type parse failure means the `->` wasn't
+                        // ours (it belongs to an enclosing lambda/match) — swallow it
+                        // and keep the param type. But a DEFINITIVE limit failure
+                        // (nesting too deep / work budget) must propagate: otherwise a
+                        // runaway `{}->{}->…->T` gets silently truncated with no error
+                        // and a huge type flows on to the typechecker.
+                        if (returnType.code == com.mezze.language.parsedast.diagnostics.ErrorCode.P0131_NESTING_TOO_DEEP ||
+                            returnType.code == com.mezze.language.parsedast.diagnostics.ErrorCode.P0132_PARSER_LIMIT_EXCEEDED) {
+                            result = returnType
+                        }
+                        break
+                    }
                 }
             } else {
                 break
@@ -753,6 +772,7 @@ internal val MezzeParser.typeApplicationAnnotation: Parser<ParsedTypeAnnotation>
                     val args = mutableListOf<ParsedTypeAnnotation>()
 
                     while (true) {
+                        parseTick(currentStream)  // anti-hang: bounded work per iteration
                         val argResult = simpleTypeArgument(currentStream)
                         when (argResult) {
                             is ParseResult.Success -> {

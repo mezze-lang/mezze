@@ -178,6 +178,30 @@ class TypeChecker(
         currentPath: Path = Paths.get("."),
         currentModulePath: String? = null,
         enablePrelude: Boolean = false
+    ): TypeCheckResult = try {
+        checkParsedModuleInner(module, currentPath, currentModulePath, enablePrelude)
+    } catch (e: StackOverflowError) {
+        // Ultimate anti-crash backstop: a pathological/malformed program can drive
+        // the checker's recursive descent (type-annotation conversion, unification,
+        // pattern validation, ability derivation, pretty-printing) into a stack
+        // overflow. Convert it to a clean located T0214 rather than crashing the
+        // compiler/LSP/playground. The parser already caps syntactic nesting, so
+        // this only fires on shapes that slip past that (inference-built or
+        // recursive/mutually-referential types).
+        TypeCheckResult.Failure(listOf(TypeCheckError(
+            phase = "typecheck",
+            message = "This program is too complex or too deeply/recursively nested for the " +
+                "typechecker to process safely.",
+            code = com.mezze.language.parsedast.diagnostics.ErrorCode.T0214_TYPECHECK_LIMIT_EXCEEDED,
+            hints = listOf("simplify the type, split it into named aliases, or check for an unintended recursive definition")
+        )))
+    }
+
+    private fun checkParsedModuleInner(
+        module: ParsedModule,
+        currentPath: Path = Paths.get("."),
+        currentModulePath: String? = null,
+        enablePrelude: Boolean = false
     ): TypeCheckResult {
         @Suppress("NAME_SHADOWING")
         val module = desugarPipesInParsedModule(module)

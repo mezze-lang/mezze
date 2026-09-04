@@ -735,13 +735,25 @@ internal class AbilityChecker(
         } || type.anyChild { needsRowClosing(it) }
     }
 
-    private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
+    private fun canDeriveAbility(
+        abilityName: String,
+        type: MezzeType,
+        abilityHash: Hash? = null,
+        seen: MutableSet<Any> = mutableSetOf(),
+    ): Boolean {
         val resolvedHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
         var unwrappedType = type
 
         var isNewtype = unwrappedType is MezzeType.NewtypeType
 
         if (unwrappedType is MezzeType.TypeApplication) {
+            // Cycle guard: a recursive nominal type (e.g.
+            // `type Tree = | Node { child: Tree } | Leaf`) re-enters here through
+            // its own fields/payloads. A back-edge to a type already on the current
+            // derivation path is treated as satisfied (coinductive) — derivability
+            // is decided by the non-recursive components. Without this the recursion
+            // never terminates (StackOverflow) and recursive types can't derive Eq.
+            if (!seen.add(unwrappedType.constructor)) return true
             val typeDecl = registry.lookupType(unwrappedType.constructor)
                 ?: ModuleResolver.lookupTypeDeclaration(unwrappedType.constructor)
             if (typeDecl?.definition is ParsedNewtypeDef) {
@@ -768,10 +780,10 @@ internal class AbilityChecker(
 
             WellKnownHashConstants.isEq(abilityHash) -> {
                 unwrappedType is MezzeType.VarType || BuiltInAbilities.isBoolVariant(unwrappedType) ||
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
-                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash)) ||
-                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash))
+                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it, abilityHash, seen) }) ||
+                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it, abilityHash, seen) }) ||
+                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash, seen)) ||
+                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash, seen))
             }
 
             WellKnownHashConstants.isOrd(abilityHash) -> {
@@ -796,8 +808,13 @@ internal class AbilityChecker(
         }
     }
 
-    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
-        if (canDeriveAbility(abilityName, type, abilityHash)) return true
+    private fun canDeriveOrHasImpl(
+        abilityName: String,
+        type: MezzeType,
+        abilityHash: Hash? = null,
+        seen: MutableSet<Any> = mutableSetOf(),
+    ): Boolean {
+        if (canDeriveAbility(abilityName, type, abilityHash, seen)) return true
         if (abilityHash != null && checkAbilityImplementation(abilityName, listOf(type), abilityHash)) return true
         return checkAbilityImplementation(abilityName, listOf(type))
     }

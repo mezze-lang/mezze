@@ -619,7 +619,14 @@ internal val MezzeParser.typeDefinitionParser: Parser<ParsedTypeDef> get() = { s
                                         aliasResult.remaining
                                     )
                                 }
-                                is ParseResult.Failure -> recordResult
+                                // A definitive limit failure (nesting too deep / work
+                                // budget) must propagate, not be masked by the earlier
+                                // record attempt's shallower error.
+                                is ParseResult.Failure ->
+                                    if (aliasResult.code == com.mezze.language.parsedast.diagnostics.ErrorCode.P0131_NESTING_TOO_DEEP ||
+                                        aliasResult.code == com.mezze.language.parsedast.diagnostics.ErrorCode.P0132_PARSER_LIMIT_EXCEEDED)
+                                        aliasResult
+                                    else recordResult
                             }
                         }
                     }
@@ -1386,6 +1393,7 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                                     var argStream = stream2
                                     val abilityTypeArgs = mutableListOf<ParsedTypeAnnotation>()
                                     while (true) {
+                                        parseTick(argStream)  // anti-hang: bounded work per iteration
                                         // Stop if we see 'for' — that ends the type args
                                         val nextTok = argStream.current()
                                         if (nextTok?.type == TokenType.FOR) break
@@ -1463,6 +1471,7 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                 currentStream = skipNewlines(firstType.remaining)
 
                 while (true) {
+                    parseTick(currentStream)  // anti-hang: bounded work per iteration
                     val nextToken = currentStream.current()
                     if (nextToken?.type == TokenType.WHERE || nextToken?.type == TokenType.HAVING) {
                         break
@@ -1580,6 +1589,7 @@ internal val MezzeParser.implTargetTypeAnnotation: Parser<ParsedTypeAnnotation>
                     val args = mutableListOf<ParsedTypeAnnotation>()
                     var currentStream = first.remaining
                     while (true) {
+                        parseTick(currentStream)  // anti-hang: bounded work per iteration
                         val nextTok = currentStream.current()
                         // Only consume type variables ('a), seq types ([T]), and record types ({fields})
                         // Do NOT consume capitalized identifiers — those are separate target types
