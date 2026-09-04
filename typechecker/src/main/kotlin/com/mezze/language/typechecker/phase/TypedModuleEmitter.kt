@@ -62,7 +62,7 @@ internal fun emitTypedModuleAndLower(
         val typed = builder.build(parsedModule)
 
         val codecImpls = solver.getGeneratedCodecImpls()
-        val codecGen = CodecGenerator()
+        val codecGen = CodecGenerator(registry)
         val extraImpls = mutableListOf<TypedAbilityImpl>()
 
         // New codec ability shape (docs/codec/redesign-2026-09.md):

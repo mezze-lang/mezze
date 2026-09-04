@@ -3,7 +3,11 @@ package com.mezze.language.typechecker.codec
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.PrimitiveTypes
+import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.parsedast.*
+import com.mezze.language.typechecker.context.DeclarationRegistry
+import com.mezze.language.typechecker.solving.expandTypeApplicationToRecord
+import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
 
 /**
  * Auto-derivation of the Tier-3 codec abilities (`Encode` and `Decode`).
@@ -20,7 +24,15 @@ import com.mezze.language.parsedast.*
  *
  * See `docs/codec/redesign-2026-09.md` §"Tier 3 — Encode / Decode primitive".
  */
-class CodecGenerator {
+class CodecGenerator(
+    // Used to expand `Declared` TypeApplication to its underlying RecordType /
+    // VariantType so the emitter walks the shape here instead of recursing back
+    // into itself through Tier-3 (`it.encode { config = config }`). Callers that
+    // only need `isSerializable` can leave the default — expansion is only
+    // consulted when a user-declared TypeApplication reaches the encode/decode
+    // walk.
+    private val registry: DeclarationRegistry = DeclarationRegistry.EMPTY,
+) {
 
     private val encodeCache = mutableMapOf<String, ParsedImplAbilityDecl>()
     private val decodeCache = mutableMapOf<String, ParsedImplAbilityDecl>()
@@ -126,8 +138,11 @@ class CodecGenerator {
             is MezzeType.MapType       -> buildEncodeMap(type.keyType, type.valueType, valueExpr)
             is MezzeType.SortedMapType -> buildEncodeMap(type.keyType, type.valueType, valueExpr)
 
-            is MezzeType.TypeApplication -> when (type.constructor) {
-                BuiltinTypes.OPTION -> buildEncodeOption(type.args.firstOrNull(), valueExpr)
+            is MezzeType.TypeApplication -> when {
+                type.constructor == BuiltinTypes.OPTION ->
+                    buildEncodeOption(type.args.firstOrNull(), valueExpr)
+                type.identity is TypeIdentity.Declared ->
+                    buildEncodeDeclared(type, valueExpr)
                 else -> tierThreeEncode(valueExpr)
             }
 
@@ -136,6 +151,35 @@ class CodecGenerator {
             // otherwise the constraint solver drives its own auto-derivation.
             else -> tierThreeEncode(valueExpr)
         }
+    }
+
+    /**
+     * Expand a user-declared `TypeApplication` (e.g. `Person`, `Colour`) to its
+     * underlying record / variant shape and walk that shape here. Without this
+     * step the emit would fall through to [tierThreeEncode] and lower to
+     * `it.encode { config = config }` — a self-call inside the impl body we're
+     * synthesizing, causing runtime infinite recursion.
+     *
+     * If expansion doesn't yield a record / variant (e.g. the decl is a
+     * newtype, or the registry is empty at this call site), fall back to
+     * Tier-3 so a user-written impl can still win the dispatch.
+     */
+    private fun buildEncodeDeclared(type: MezzeType.TypeApplication, valueExpr: ParsedExpr): ParsedExpr {
+        expandTypeApplicationToRecord(type, registry)?.let {
+            return buildEncodeRecord(it, valueExpr)
+        }
+        expandTypeApplicationToVariant(type, registry)?.let { variant ->
+            // Only walk true variants here. Newtypes also come back through
+            // this helper wrapped as a single-constructor variant — that
+            // opacity case is intentionally left to Tier-3 (see the known-gap
+            // note at the top of CodecRoundTripTest.kt).
+            val decl = registry.lookupType(type.constructor,
+                (type.identity as? TypeIdentity.Declared)?.hash)
+            if (decl?.definition !is ParsedNewtypeDef) {
+                return buildEncodeVariant(variant, valueExpr)
+            }
+        }
+        return tierThreeEncode(valueExpr)
     }
 
     /** `config.encode_<hook> { val = <valueExpr>, ctx = ctx }` */
@@ -329,13 +373,37 @@ class CodecGenerator {
             is MezzeType.MapType       -> buildDecodeMap(type.keyType, type.valueType, inputExpr)
             is MezzeType.SortedMapType -> buildDecodeMap(type.keyType, type.valueType, inputExpr)
 
-            is MezzeType.TypeApplication -> when (type.constructor) {
-                BuiltinTypes.OPTION -> buildDecodeOption(type.args.firstOrNull(), inputExpr)
+            is MezzeType.TypeApplication -> when {
+                type.constructor == BuiltinTypes.OPTION ->
+                    buildDecodeOption(type.args.firstOrNull(), inputExpr)
+                type.identity is TypeIdentity.Declared ->
+                    buildDecodeDeclared(type, inputExpr)
                 else -> tierThreeDecode(inputExpr)
             }
 
             else -> tierThreeDecode(inputExpr)
         }
+    }
+
+    /** Decode-side mirror of [buildEncodeDeclared]. Expands `Declared`
+     *  TypeApplications to their underlying record / variant shape and walks
+     *  that shape here — the previous fall-through to [tierThreeDecode]
+     *  synthesized `it.decode { config = config }` inside the very impl we're
+     *  generating (self-recursion). Newtypes are still routed through Tier-3
+     *  so a hand-written impl can pick them up.
+     */
+    private fun buildDecodeDeclared(type: MezzeType.TypeApplication, inputExpr: ParsedExpr): ParsedExpr {
+        expandTypeApplicationToRecord(type, registry)?.let {
+            return buildDecodeRecord(it, inputExpr)
+        }
+        expandTypeApplicationToVariant(type, registry)?.let { variant ->
+            val decl = registry.lookupType(type.constructor,
+                (type.identity as? TypeIdentity.Declared)?.hash)
+            if (decl?.definition !is ParsedNewtypeDef) {
+                return buildDecodeVariant(variant, inputExpr)
+            }
+        }
+        return tierThreeDecode(inputExpr)
     }
 
     /** `config.decode_<hook> { val = <inputExpr>, ctx = ctx }`. Returns `Result T DecodeError`. */
@@ -743,12 +811,22 @@ class CodecGenerator {
         PrimitiveTypes.toName(type)?.let { return ParsedNamedType(it, GEN_LOC) }
         return when (type) {
             is MezzeType.VarType -> ParsedNamedType(type.variable.name, GEN_LOC)
-            is MezzeType.RecordType -> ParsedRecordType(
-                entries = type.fields.map { (name, fieldType) ->
-                    ParsedRecordTypeEntry(name, mezzeTypeToAnnotation(fieldType), GEN_LOC)
-                },
-                loc = GEN_LOC,
-            )
+            is MezzeType.RecordType -> {
+                // A nominal record (e.g. `type Point = { x: Int, y: Int }`) has a
+                // `Declared` identity. The runtime ability dispatcher matches a
+                // record receiver against a `TypeApplication` target by nominal
+                // name (TypedASTCompiler.typeMatchesTarget), so the impl target
+                // must be `Point`, not the anonymous structural `{x,y}` shape —
+                // otherwise `p.encode {…}` falls back to a bytecode field read.
+                val named = type.identity.displayNameOrNull()
+                if (named != null) ParsedNamedType(named, GEN_LOC)
+                else ParsedRecordType(
+                    entries = type.fields.map { (name, fieldType) ->
+                        ParsedRecordTypeEntry(name, mezzeTypeToAnnotation(fieldType), GEN_LOC)
+                    },
+                    loc = GEN_LOC,
+                )
+            }
             is MezzeType.VariantType -> {
                 val named = type.identity.displayNameOrNull()
                 if (named != null) ParsedNamedType(named, GEN_LOC)

@@ -500,6 +500,92 @@ class CodecRoundTripTest {
     }
 
     // ========================================================================
+    // Bug A — auto-derive for user `type` (Declared TypeApplication)
+    //
+    // Before the CodecGenerator TypeApplication branch expanded Declared
+    // typeapps to their underlying record/variant shape, the emit fell
+    // through to `tierThreeEncode`, which lowered to
+    // `it.encode { config = config }` — a self-call inside the impl body
+    // that infinite-recursed (or, once caught by JIT depth limits, produced
+    // "Expected record for field 'encode'"). These four tests would fail
+    // pre-fix and pass post-fix.
+    // ========================================================================
+
+    @Test
+    fun `Bug A - JsonC encode direct on user record type`() {
+        val src = """
+            $jsonPreamble
+            type Point = { x: Int, y: Int }
+            let p: Point = { x = 3, y = 4 }
+            let encoded: Json = p.encode { config = json_default }
+            to_str { json = encoded }
+        """.trimIndent()
+        val s = eval(src) as String
+        // Field order in the emitted JSON is sorted (see buildEncodeRecord).
+        assertEquals("{\"x\":3,\"y\":4}", s)
+    }
+
+    @Test
+    fun `Bug A - JsonC encode direct on user record with Option field`() {
+        val src = """
+            $jsonPreamble
+            type Contact = { name: Str, email: Option Str }
+            let c: Contact = { name = "A", email = Some { val = "a@b" } }
+            let encoded: Json = c.encode { config = json_default }
+            to_str { json = encoded }
+        """.trimIndent()
+        val s = eval(src) as String
+        assertEquals("{\"email\":\"a@b\",\"name\":\"A\"}", s)
+    }
+
+    @Test
+    fun `Bug A - JsonC encode direct on user record with Seq field`() {
+        val src = """
+            $jsonPreamble
+            type Bag = { tags: [Str] }
+            let b: Bag = { tags = ["a", "b", "c"] }
+            let encoded: Json = b.encode { config = json_default }
+            to_str { json = encoded }
+        """.trimIndent()
+        val s = eval(src) as String
+        assertEquals("{\"tags\":[\"a\",\"b\",\"c\"]}", s)
+    }
+
+    @Test
+    fun `Bug A - JsonC encode direct on nested user record`() {
+        val src = """
+            $jsonPreamble
+            type Addr = { city: Str, zip: Int }
+            type Person = { id: Int, addr: Addr }
+            let p: Person = { id = 1, addr = { city = "NYC", zip = 10001 } }
+            let encoded: Json = p.encode { config = json_default }
+            to_str { json = encoded }
+        """.trimIndent()
+        val s = eval(src) as String
+        assertEquals("{\"addr\":{\"city\":\"NYC\",\"zip\":10001},\"id\":1}", s)
+    }
+
+    @Test
+    fun `Bug A - JsonC round-trip on user record type`() {
+        val src = """
+            $jsonPreamble
+            type Point = { x: Int, y: Int }
+            let original: Point = { x = 3, y = 4 }
+            let encoded: Json = original.encode { config = json_default }
+            let s: Str = to_str { json = encoded }
+            match parse_str { s = s } is
+              Ok { val = j } -> do
+                let dec: Result Point DecodeError = j.decode { config = json_default }
+                dec
+              Err { error = e } -> Err { error = { path = [], message = "parse", expected = "Point", found = None } }
+        """.trimIndent()
+        val v = okVal(eval(src))
+        val r = asRecord(v)
+        assertEquals(3L, r.getField("x"))
+        assertEquals(4L, r.getField("y"))
+    }
+
+    // ========================================================================
     // KNOWN GAPS — open work items after this commit
     //
     //  * `Nat` (newtype over Int) does not auto-derive: the walker recurses
