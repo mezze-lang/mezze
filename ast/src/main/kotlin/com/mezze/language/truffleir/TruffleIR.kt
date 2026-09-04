@@ -340,6 +340,11 @@ sealed interface PatternIR {
     val stages: List<StageIR>,
     val sink: SinkIR,
     override val src: SourceInfo,
+    /** Original IR node before canonicalization. When the BDSL emitter
+     *  can't classify the fused chain (e.g. non-trivial fold body or
+     *  complex predicate), it falls back to emitting this node instead
+     *  of crashing. Null only for legacy serialized data. */
+    val fallback: NodeIR? = null,
 ) : NodeIR
 
 /** Where the iterator's elements come from. */

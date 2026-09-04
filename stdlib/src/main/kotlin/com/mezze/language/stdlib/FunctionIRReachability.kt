@@ -252,6 +252,9 @@ object FunctionIRReachability {
                     is com.mezze.language.truffleir.SinkIR.All -> queue.add(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.Find -> queue.add(sk.p.functionHash)
                 }
+                // Walk the fallback node (the original IR before fusion)
+                // so its referenced hashes remain reachable.
+                node.fallback?.let { collectHashesFromNode(it, queue) }
             }
         }
     }

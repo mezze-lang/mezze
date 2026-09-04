@@ -86,8 +86,12 @@ object ChainCanonicalizer {
         val descended = recurseChildren(node) { child -> rewrite(child, classifier, allFunctions) }
         // Try to canonicalize this node itself (only CallDirectIRs can
         // become FusedChainIRs).
-        val result = tryCanonicalize(descended, classifier, allFunctions)
-        return result ?: descended
+        val result = tryCanonicalize(descended, classifier, allFunctions) ?: return descended
+        // Preserve the original node as fallback. FusedChainIR replaces
+        // the original IR — if the BDSL emitter can't classify the fused
+        // chain (complex fold body, un-classifiable predicate, etc.), it
+        // falls back to emitting this node instead of crashing.
+        return result.copy(fallback = descended)
     }
 
     /**
@@ -148,6 +152,7 @@ object ChainCanonicalizer {
             val srcInner = src ?: return null
             val initExpr = init ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
+            if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             if (source is SourceIR.Opaque) return null
             val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
@@ -167,6 +172,7 @@ object ChainCanonicalizer {
             val srcInner = src ?: return null
             val initExpr = init ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
+            if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             val effectiveSource = if (source is SourceIR.Opaque) SourceIR.RawList(source.expr) else source
             val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
@@ -223,6 +229,53 @@ object ChainCanonicalizer {
         SinkIR.Count, is SinkIR.Any, is SinkIR.All -> true
         is SinkIR.Find, is SinkIR.Reduce -> true
         SinkIR.ToSeq, SinkIR.ToList -> true
+    }
+
+    /**
+     * Check whether a fold/reduce lambda can be emitted by the BDSL
+     * `classifyBinaryFolder` → `classifyFolderBody` path.
+     *
+     * FusedChainIR REPLACES the original CallDirect with no fallback, so
+     * creating one whose sink the emitter can't classify crashes
+     * compilation. This mirrors the emitter's classification so we only
+     * create fusable Fold/Reduce chains.
+     *
+     * Accepted fold-body shapes (must have 0 captures, 2 params, 0 locals):
+     * 1. InlineBinaryOpIR(ReadLocalIR, ReadLocalIR)
+     * 2. CallDirectIR scalar-ABI, 2 ReadLocalIR args (known arith)
+     * 3. CallIndirectIR(ReadFieldIR(ReadLocalIR, _), MakeRecordIR{2 fields})
+     */
+    private fun isFoldLambdaEmittable(
+        fLambda: MakeLambdaIR,
+        allFunctions: Map<Hash, FunctionIR>,
+    ): Boolean {
+        if (fLambda.captures.isNotEmpty()) return false
+        val fn = allFunctions[fLambda.functionHash] ?: return false
+        if (fn.captureSlots.isNotEmpty() || fn.paramSlots.size != 2 || fn.localSlots.isNotEmpty()) return false
+        return isFoldBodyEmittable(fn.body)
+    }
+
+    private fun isFoldBodyEmittable(body: NodeIR): Boolean = when (body) {
+        // Pattern 1: inline binary op with ReadLocal operands — the common
+        // case for sum/product fold bodies after the compiler inlines arith.
+        is InlineBinaryOpIR -> body.left is ReadLocalIR && body.right is ReadLocalIR
+        // Pattern 2: CallDirectIR to a known arith op (scalar-ABI, 2 ReadLocal
+        // args). The BDSL emitter additionally checks KnownArithOps.lookup —
+        // but that's in the interpreter module (Java). To avoid false positives
+        // (e.g. list::cons is scalar-ABI 2-arg but NOT a known arith op), we
+        // conservatively reject CallDirectIR here. InlineBinaryOpIR covers the
+        // normal arith path; the only miss is a mono spec the compiler didn't
+        // reduce to InlineBinaryOpIR, which is rare and benign (unfused path
+        // handles it).
+        //
+        // Pattern 3: dict-method dispatch — CallIndirect(ReadField(ReadLocal, _),
+        // MakeRecord{2}). Same concern as pattern 2: the emitter checks
+        // ABILITY_OP_NAMES which isn't available here. Be conservative.
+        //
+        // Both patterns 2 and 3 are intentionally omitted to prevent
+        // non-arith functions (cons, map-insert) from creating un-emittable
+        // FusedChainIR nodes. The unfused fallback handles them correctly.
+        else -> false
     }
 
     /**
@@ -336,6 +389,7 @@ object ChainCanonicalizer {
             val srcInner = src ?: return null
             val initExpr = init ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
+            if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             if (source is SourceIR.Opaque) return null
             val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
@@ -353,6 +407,7 @@ object ChainCanonicalizer {
             val srcInner = src ?: return null
             val initExpr = init ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
+            if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             // List context: Opaque terminal becomes RawList — we know the
             // chain entered through a list native, so the source is a list.
@@ -1133,8 +1188,9 @@ object ChainCanonicalizer {
                     is SinkIR.Find -> sk
                     SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sk
                 }
-                if (newSource !== node.source || newSink !== node.sink || stagesChanged)
-                    node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink) else node
+                val newFallback = node.fallback?.let(f)
+                if (newSource !== node.source || newSink !== node.sink || stagesChanged || newFallback !== node.fallback)
+                    node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink, fallback = newFallback) else node
             }
         }
 

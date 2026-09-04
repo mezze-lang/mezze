@@ -239,6 +239,24 @@ public final class BytecodeCompiler {
     }
 
     /**
+     * Remove an unattached trampoline that {@link #compile} registered
+     * before crashing mid-emit. Without this cleanup, subsequent
+     * {@code supports()} calls find the trampoline as "local" (already
+     * in {@link #compiledCallTargets}) and skip the {@link LazyStubRootNode}
+     * fallback — the {@code !localMl} guard in the {@code MakeLambdaIR}
+     * handler treats local entries as "will be attached later", which is
+     * false when the compile that registered them failed.
+     *
+     * <p>Called by {@code eagerCompileReachable} in the catch block.
+     */
+    public void evictUnattachedTrampoline(Hash hash) {
+        CallTarget ct = compiledCallTargets.get(hash);
+        if (ct != null && isUnattachedTrampoline(ct)) {
+            compiledCallTargets.remove(hash);
+        }
+    }
+
+    /**
      * #356 — set by {@link #compile} at the top of each fn compile.
      * Non-null iff BDSL debug instrumentation is on AND the fn's source
      * file could be resolved. Read by {@link #emitNode} to decide
@@ -1644,13 +1662,19 @@ public final class BytecodeCompiler {
             // #446 Phase 4b — canonicalized iter chain from ChainCanonicalizer.
             // See emitCanonicalIterChain for the full policy.
             if (emitCanonicalIterChain(chain, b, argCount, localMap)) return;
-            // Fail loud if the canonicalizer produced a shape the emitter
-            // can't handle. The two must stay in lockstep: any shape the
-            // canonicalizer emits must be emittable here. Silent fall-
-            // through would miscompile (there's no CallDirect equivalent
-            // to reconstruct).
+            // The emitter can't handle this chain (complex fold body,
+            // un-classifiable predicate, etc.). Fall back to the original
+            // node preserved by the canonicalizer. This is the safe path:
+            // the original CallDirect/CallNative is emitted as if fusion
+            // never ran.
+            if (chain.getFallback() != null) {
+                emitNode(chain.getFallback(), b, argCount, localMap);
+                return;
+            }
+            // No fallback available (legacy serialized data or bug in
+            // the canonicalizer). Fail loud so we know which shape to add.
             throw new IllegalStateException(
-                "FusedChainIR reached BDSL emit but emitter refused it. " +
+                "FusedChainIR reached BDSL emit but emitter refused it and no fallback available. " +
                 "Source=" + chain.getSource().getClass().getSimpleName() +
                 " stages=" + chain.getStages().size() +
                 " sink=" + chain.getSink().getClass().getSimpleName());
@@ -2730,6 +2754,208 @@ public final class BytecodeCompiler {
     }
 
     /**
+<<<<<<< Updated upstream
+=======
+     * #437 — emit the shared range-fused Block/While loop body. Both
+     * {@link #tryEmitFusedFold} and the sum-sink path
+     * ({@link #tryEmitBuiltinSeqReducer}) delegate here so map/filter
+     * peel + range fusion share one code path.
+     *
+     * <p>Layout (semantics identical to the folder inline shape):
+     * <pre>
+     *   Block {
+     *     i    = Estart
+     *     end  = Eend
+     *     acc  = Einit
+     *     While (i < end) {
+     *       x = i
+     *       if (predOp(x, predRhsLit)) {              // if pred peeled
+     *         x = x <mapperOp> mapperRhsLit           // if map peeled
+     *         acc = acc <op> x
+     *       }
+     *       i = i + 1
+     *     }
+     *     acc
+     *   }
+     * </pre>
+     * Peel data-flow order: predicate always sees the raw range element;
+     * map runs after filter; fold step runs last on the mapped element.
+     *
+     * <p>Callers own the outer {@code beginBlock}/{@code endBlock} — this
+     * helper emits only the interior (stores, while, final load).
+     * @param initEmit — call it to emit the init value expression; use
+     *                   a lambda to invoke {@link #emitNode} on any NodeIR,
+     *                   or a direct {@code b.emitLoadLongConstant(0L)} for
+     *                   the sum case.
+     */
+    private void emitRangeFusedLoop(MezzeBytecodeRootNodeGen.Builder b,
+                                    int argCount,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal accSlot,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal iSlot,
+                                    com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+                                    NodeIR rangeStart, NodeIR rangeEnd,
+                                    Runnable initEmit,
+                                    InlineOp op,
+                                    InlineOp mapperOp, long mapperRhsLit, NodeIR mapperRhsNode,
+                                    Hash mapperCallHash,
+                                    boolean mapperCallScalarABI,
+                                    String mapperCallFieldName,
+                                    FilterPeel filter) {
+        var endSlot = b.createLocal();
+        b.beginStoreLocal(iSlot);
+        emitNode(rangeStart, b, argCount, localMap);
+        b.endStoreLocal();
+        b.beginStoreLocal(endSlot);
+        emitNode(rangeEnd, b, argCount, localMap);
+        b.endStoreLocal();
+        b.beginStoreLocal(accSlot);
+        initEmit.run();
+        b.endStoreLocal();
+
+        // #515 — loop-unroll gate. Env-controlled so we can A/B on/off:
+        //   MEZZE_UNROLL=0 or 1   disable (scalar loop only)
+        //   MEZZE_UNROLL=N        unroll factor N (default 2)
+        // When unroll factor >= 2 we emit a main loop that runs N bodies
+        // per trip (each on i+0..i+N-1), then a scalar tail loop for the
+        // straggler <N iters. All bodies share the same predicate/mapper/
+        // fold semantics; we only replicate to reduce loop overhead and
+        // give the JIT wider ILP.
+        int unroll = 2;
+        String unrollEnv = System.getenv("MEZZE_UNROLL");
+        if (unrollEnv != null) {
+            try {
+                int parsed = Integer.parseInt(unrollEnv.trim());
+                if (parsed >= 0) unroll = parsed;
+            } catch (NumberFormatException ignore) { /* keep default */ }
+        }
+
+        if (unroll >= 2) {
+            // Compute end_unroll = end - (unroll - 1) so main loop only
+            // runs when at least `unroll` iters remain.
+            var endUnrollSlot = b.createLocal();
+            b.beginStoreLocal(endUnrollSlot);
+              b.beginDirectSubtract();
+              b.emitLoadLocal(endSlot);
+              b.emitLoadLongConstant((long)(unroll - 1));
+              b.endDirectSubtract();
+            b.endStoreLocal();
+
+            // Main unrolled loop.
+            b.beginWhile();
+              b.beginDirectLessThan();
+              b.emitLoadLocal(iSlot);
+              b.emitLoadLocal(endUnrollSlot);
+              b.endDirectLessThan();
+              b.beginBlock();
+                for (int k = 0; k < unroll; k++) {
+                    emitFusedBodyAt(b, iSlot, xSlot, accSlot, (long) k,
+                        op, mapperOp, mapperRhsLit, mapperRhsNode,
+                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                        filter, argCount, localMap);
+                }
+                // i = i + unroll
+                b.beginStoreLocal(iSlot);
+                  b.beginDirectAdd();
+                  b.emitLoadLocal(iSlot);
+                  b.emitLoadLongConstant((long) unroll);
+                  b.endDirectAdd();
+                b.endStoreLocal();
+              b.endBlock();
+            b.endWhile();
+        }
+
+        // Scalar (tail) loop — also the sole loop when unroll < 2.
+        b.beginWhile();
+          b.beginDirectLessThan();
+          b.emitLoadLocal(iSlot);
+          b.emitLoadLocal(endSlot);
+          b.endDirectLessThan();
+          b.beginBlock();
+            emitFusedBodyAt(b, iSlot, xSlot, accSlot, 0L,
+                op, mapperOp, mapperRhsLit, mapperRhsNode,
+                mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                filter, argCount, localMap);
+            b.beginStoreLocal(iSlot);
+              b.beginDirectAdd();
+              b.emitLoadLocal(iSlot);
+              b.emitLoadLongConstant(1L);
+              b.endDirectAdd();
+            b.endStoreLocal();
+          b.endBlock();
+        b.endWhile();
+        b.emitLoadLocal(accSlot);
+        if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
+            System.err.println("[fold-fuse] emitted range-fused loop for op=" + op
+                + " mapper=" + (mapperCallHash != null ? "CALL " + mapperCallHash.getHex().substring(0, 8) : mapperOp)
+                + " pred=" + describeFilter(filter)
+                + " unroll=" + unroll);
+        }
+    }
+
+    /**
+     * #515 — emit one fused body step for element i+offset:
+     * <pre>
+     *   xSlot = i + offset           (or just i, when offset == 0)
+     *   if (pred(xSlot)) {
+     *     xSlot = map(xSlot)
+     *     acc   = acc <op> xSlot
+     *   }
+     * </pre>
+     * Shared by both the unrolled main loop (offset 0..unroll-1) and the
+     * scalar tail loop (offset 0). Predicate/mapper/fold operate on
+     * xSlot exactly as in the un-unrolled emit — this is a semantics-
+     * preserving replication.
+     */
+    private void emitFusedBodyAt(MezzeBytecodeRootNodeGen.Builder b,
+                                 com.oracle.truffle.api.bytecode.BytecodeLocal iSlot,
+                                 com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+                                 com.oracle.truffle.api.bytecode.BytecodeLocal accSlot,
+                                 long offset,
+                                 InlineOp op,
+                                 InlineOp mapperOp, long mapperRhsLit, NodeIR mapperRhsNode,
+                                 Hash mapperCallHash,
+                                 boolean mapperCallScalarABI,
+                                 String mapperCallFieldName,
+                                 FilterPeel filter,
+                                 int argCount,
+                                 com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
+        // xSlot = i + offset  (offset==0 → xSlot = i)
+        b.beginStoreLocal(xSlot);
+          if (offset == 0L) {
+              b.emitLoadLocal(iSlot);
+          } else {
+              b.beginDirectAdd();
+              b.emitLoadLocal(iSlot);
+              b.emitLoadLongConstant(offset);
+              b.endDirectAdd();
+          }
+        b.endStoreLocal();
+
+        if (filter != null) {
+            b.beginIfThen();
+              emitPredicateCheck(b, xSlot, filter, argCount, localMap);
+              b.beginBlock();
+                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
+                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                    argCount, localMap);
+                b.beginStoreLocal(accSlot);
+                emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+                b.endStoreLocal();
+              b.endBlock();
+            b.endIfThen();
+        } else {
+            emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
+                mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                argCount, localMap);
+            b.beginStoreLocal(accSlot);
+            emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+            b.endStoreLocal();
+        }
+    }
+
+    /**
+>>>>>>> Stashed changes
      * #442 Day 9 — emit the map step inside the range-fused loop body.
      * Three cases:
      *   - No mapper: emit nothing (fold step reads xSlot directly).

@@ -465,8 +465,9 @@ object DeadLetEliminator {
                     }
                     is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find -> sk
                 }
-                if (newSource !== node.source || newSink !== node.sink || stagesChanged)
-                    node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink) else node
+                val newFallback = node.fallback?.let(f)
+                if (newSource !== node.source || newSink !== node.sink || stagesChanged || newFallback !== node.fallback)
+                    node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink, fallback = newFallback) else node
             }
         }
 

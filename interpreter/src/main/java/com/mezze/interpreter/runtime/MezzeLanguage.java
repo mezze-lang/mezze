@@ -631,6 +631,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 slot.publish((com.oracle.truffle.api.RootCallTarget) root.getCallTarget());
                 emitted++;
             } catch (Throwable t) {
+                // compile() may have pre-registered a TrampolineRootNode
+                // in compiledCallTargets before crashing mid-emit. That
+                // trampoline has no inner attached. If left in the map,
+                // subsequent supports() calls treat it as a locally-
+                // registered entry and skip the LazyStub fallback (the
+                // `!local` guard in MakeLambdaIR/CallDirectIR handlers),
+                // causing "executed before attachInner" at runtime.
+                bdsl.evictUnattachedTrampoline(h);
                 failed++;
                 if (System.getenv("MEZZE_DEBUG") != null) {
                     System.err.println("[eager #391] emit failed for "
