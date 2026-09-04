@@ -56,6 +56,32 @@ let bench_reduce = {} ->
         Some { val } -> val
         None -> 0 - 1
 
+## ── Seq benchmarks ──
+let bench_seq_sum = {} ->
+    seq::sum { xs = seq::range { start = 0, end = n } }
+
+let bench_seq_fold = {} ->
+    seq::fold { xs = seq::range { start = 0, end = n }, init = 0, f = {acc, x} -> acc + x }
+
+let bench_seq_filter_fold = {} -> do
+    let half = n / 2
+    seq::fold {
+        xs = seq::filter { xs = seq::range { start = 0, end = n }, p = {x} -> x < half },
+        init = 0,
+        f = {acc, x} -> acc + x
+    }
+
+let bench_seq_map_fold = {} -> do
+    let half = n / 2
+    seq::fold {
+        xs = seq::map {
+            xs = seq::filter { xs = seq::range { start = 0, end = n }, p = {x} -> x < half },
+            f = {x} -> x * 2
+        },
+        init = 0,
+        f = {acc, x} -> acc + x
+    }
+
 let time_it = {label: Str, f: {} -> Int} -> perform Console in perform SystemTime in do
     ## 3 warmup
     let w0 = f {}
@@ -97,4 +123,9 @@ let main = {} -> perform Console in perform SystemTime in do
     let _7 = time_it { label = "any(0..10M)           ", f = bench_any }
     let _8 = time_it { label = "all(0..10M)           ", f = bench_all }
     let _9 = time_it { label = "reduce(0..10M)        ", f = bench_reduce }
+    println { msg = "-- seq --" }
+    let _10 = time_it { label = "seq_sum(0..10M)       ", f = bench_seq_sum }
+    let _11 = time_it { label = "seq_fold(+)(0..10M)   ", f = bench_seq_fold }
+    let _12 = time_it { label = "seq_filter+fold(0..10M)", f = bench_seq_filter_fold }
+    let _13 = time_it { label = "seq_map+fold(0..10M)  ", f = bench_seq_map_fold }
     println { msg = "== done ==" }

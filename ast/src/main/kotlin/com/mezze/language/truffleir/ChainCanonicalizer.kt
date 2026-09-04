@@ -106,7 +106,7 @@ object ChainCanonicalizer {
             if (mr.fields.size != 1) return null
             val fld = mr.fields[0]
             if (fld.name != "xs" && fld.name != "it") return null
-            val (stages, source) = peelSource(fld.value, classifier)
+            val (stages, source) = peelSource(fld.value, classifier, allFunctions)
             val candidate = FusedChainIR(source, stages, SinkIR.Sum, node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
@@ -123,9 +123,11 @@ object ChainCanonicalizer {
             val srcInner = src ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
             // Captures OK — emit-side handles them via capture slot remap.
-            val (stages, source) = peelSource(srcInner, classifier)
-            if (stages.isEmpty() && source is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
+            val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+            val effectiveSource = if (source is SourceIR.Opaque && node.name == "__native_seq_for_each")
+                SourceIR.RawSeq(source.expr) else source
+            if (effectiveSource is SourceIR.Opaque) return null
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.ForEach(fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // __native_iter_fold / __native_seq_fold — fold { it/xs, init, f }
@@ -142,9 +144,15 @@ object ChainCanonicalizer {
             val srcInner = src ?: return null
             val initExpr = init ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
-            val (stages, source) = peelSource(srcInner, classifier)
-            if (stages.isEmpty() && source is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
+            val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+            // For __native_seq_fold the source is guaranteed to be a Seq.
+            // Convert Opaque → RawSeq so the emitter uses SeqSize/SeqGet
+            // indexed loop with the fold body inlined — much faster than the
+            // unfused CallIndirect dispatch (~100ns/element overhead).
+            val effectiveSource = if (source is SourceIR.Opaque && node.name == "__native_seq_fold")
+                SourceIR.RawSeq(source.expr) else source
+            if (effectiveSource is SourceIR.Opaque) return null
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // __native_{iter,seq}_{count,any,all,find,reduce,to_seq,to_list}
@@ -153,18 +161,20 @@ object ChainCanonicalizer {
             if (result != null) return result
         }
         // Peek through CallDirect to mono wrappers whose body is a native
-        // sink call (e.g., mono iter::count with a baked-in predicate lambda).
+        // call (e.g., mono iter::count / seq::fold with a baked-in lambda).
         // The TrivialWrapperInliner can't inline these because `countParamReads`
         // rejects MakeLambdaIR in the wrapper body. But we can still fuse them
         // by manually substituting the call args into the native body and routing
-        // through the native-sink path. This covers mono specializations of
-        // count/any/all/find/reduce/to_seq/to_list that the classifier
-        // misclassifies as FILTER/MAP due to empty names.
+        // through the native-sink path AND the fold/sum/for_each handlers.
         if (node is CallDirectIR) {
             val peeked = peekThroughMonoWrapper(node, allFunctions)
             if (peeked != null) {
-                val result = tryCanonicalizeNativeSink(peeked, classifier, allFunctions)
-                if (result != null) return result
+                // Try native-sink handlers first (count, any, all, find, etc.)
+                val sinkResult = tryCanonicalizeNativeSink(peeked, classifier, allFunctions)
+                if (sinkResult != null) return sinkResult
+                // Try fold/sum/for_each handlers (needed for mono seq::fold etc.)
+                val foldResult = tryCanonicalizeNativeFoldSumForEach(peeked, classifier, allFunctions)
+                if (foldResult != null) return foldResult
             }
         }
         if (node !is CallDirectIR) return null
@@ -174,11 +184,11 @@ object ChainCanonicalizer {
         val (sink, sourceExpr) = sinkAndSrc
         // Peel the source expression: strip iter::map/filter/from_seq
         // layers, then classify the terminal source (RangeSeq/RawSeq/Opaque).
-        val (stages, source) = peelSource(sourceExpr, classifier)
-        // If we couldn't reach anything better than Opaque AND we had no
-        // stages, this is a bare fold on an unknown value — no gain from
-        // canonicalizing. Bail so downstream can dispatch normally.
-        if (stages.isEmpty() && source is SourceIR.Opaque) return null
+        val (stages, source) = peelSource(sourceExpr, classifier, allFunctions)
+        // The emitter only handles Opaque for bare Sum (no stages).
+        // For all other cases, Opaque means we can't drive a loop —
+        // bail so the native function runs unfused.
+        if (source is SourceIR.Opaque && !(sink is SinkIR.Sum && stages.isEmpty())) return null
         // Gate: only produce FusedChainIR for sinks the BDSL emitter supports.
         // New sink types (Count, Any, All, Find, Reduce, ToSeq, ToList) are
         // classified but not yet emittable — producing them would crash at
@@ -241,6 +251,69 @@ object ChainCanonicalizer {
         return nativeCall.copy(arg = MakeRecordIR(newFields, mr.src))
     }
 
+    /**
+     * Handle __native_{iter,seq}_{sum,fold,for_each} for peeked-through mono
+     * wrappers. These are the handlers that live above the generic native-sink
+     * check in [tryCanonicalize] — sum, for_each, and fold — extracted so
+     * the peek-through block can call them directly.
+     */
+    private fun tryCanonicalizeNativeFoldSumForEach(
+        node: CallNativeIR,
+        classifier: ChainHofClassifier,
+        allFunctions: Map<Hash, FunctionIR>,
+    ): FusedChainIR? {
+        if (node.isScalarABI) return null
+        // Sum
+        if (node.name == "__native_seq_sum" || node.name == "__native_iter_sum") {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            if (mr.fields.size != 1) return null
+            val fld = mr.fields[0]
+            if (fld.name != "xs" && fld.name != "it") return null
+            val (stages, source) = peelSource(fld.value, classifier, allFunctions)
+            val candidate = FusedChainIR(source, stages, SinkIR.Sum, node.src)
+            return if (isEffectSafe(candidate, allFunctions)) candidate else null
+        }
+        // For-each
+        if (node.name == "__native_seq_for_each" || node.name == "__native_iter_for_each") {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var src: NodeIR? = null; var f: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                "xs", "it" -> src = fld.value
+                "f" -> f = fld.value
+            }
+            val srcInner = src ?: return null
+            val fLambda = f as? MakeLambdaIR ?: return null
+            val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+            val effectiveSource = if (source is SourceIR.Opaque && node.name == "__native_seq_for_each")
+                SourceIR.RawSeq(source.expr) else source
+            // Emitter can't drive a generic iter loop from Opaque; bail to native.
+            if (effectiveSource is SourceIR.Opaque) return null
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.ForEach(fLambda), node.src)
+            return if (isEffectSafe(candidate, allFunctions)) candidate else null
+        }
+        // Fold
+        if (node.name == "__native_iter_fold" || node.name == "__native_seq_fold") {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                "it", "xs" -> src = fld.value
+                "init" -> init = fld.value
+                "f" -> f = fld.value
+            }
+            val srcInner = src ?: return null
+            val initExpr = init ?: return null
+            val fLambda = f as? MakeLambdaIR ?: return null
+            val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+            val effectiveSource = if (source is SourceIR.Opaque && node.name == "__native_seq_fold")
+                SourceIR.RawSeq(source.expr) else source
+            // Emitter can't drive a generic iter loop from Opaque; bail to native.
+            if (effectiveSource is SourceIR.Opaque) return null
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
+            return if (isEffectSafe(candidate, allFunctions)) candidate else null
+        }
+        return null
+    }
+
     /** Handle __native_iter_{count,any,all,find,reduce,to_seq,to_list}.
      *  These sinks are classified but not yet emittable — the method builds
      *  the FusedChainIR, then gates on [isEmittableSink] before returning. */
@@ -260,11 +333,17 @@ object ChainCanonicalizer {
                 val srcInner = src ?: return null
                 val pLambda = p as? MakeLambdaIR ?: return null
                 // Captures OK — emit-side handles them via capture slot remap.
-                val (stages, source) = peelSource(srcInner, classifier)
-                // count(p) = filter(p) + count
-                val allStages = stages + StageIR.Filter(pLambda)
-                val candidate = FusedChainIR(source, allStages, SinkIR.Count, node.src)
-                if (isEffectSafe(candidate, allFunctions)) candidate else null
+                val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+                // The emitter can only handle Range/RawSeq sources for Count.
+                // Opaque (e.g., ReadLocalIR from multi-field record arg eval
+                // ordering) can't be emitted — bail so native __iter_count runs.
+                if (source is SourceIR.Opaque) null
+                else {
+                    // count(p) = filter(p) + count
+                    val allStages = stages + StageIR.Filter(pLambda)
+                    val candidate = FusedChainIR(source, allStages, SinkIR.Count, node.src)
+                    if (isEffectSafe(candidate, allFunctions)) candidate else null
+                }
             }
             "__native_iter_any", "__native_seq_any" ->
                 buildPredicateFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.Any(it) }
@@ -281,20 +360,25 @@ object ChainCanonicalizer {
                 val srcInner = src ?: return null
                 val fLambda = f as? MakeLambdaIR ?: return null
                 // Captures OK — emit-side handles them via capture slot remap.
-                val (stages, source) = peelSource(srcInner, classifier)
-                if (stages.isEmpty() && source is SourceIR.Opaque) return null
-                val candidate = FusedChainIR(source, stages, SinkIR.Reduce(fLambda), node.src)
-                if (isEffectSafe(candidate, allFunctions)) candidate else null
+                val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+                // Emitter can't drive a generic iter loop from Opaque.
+                if (source is SourceIR.Opaque) null
+                else {
+                    val candidate = FusedChainIR(source, stages, SinkIR.Reduce(fLambda), node.src)
+                    if (isEffectSafe(candidate, allFunctions)) candidate else null
+                }
             }
             "__native_iter_to_seq", "__native_iter_to_list" -> {
                 var src: NodeIR? = null
                 for (fld in mr.fields) { if (fld.name == "it") src = fld.value }
                 val srcInner = src ?: return null
                 val sink = if (node.name == "__native_iter_to_seq") SinkIR.ToSeq else SinkIR.ToList
-                val (stages, source) = peelSource(srcInner, classifier)
-                if (stages.isEmpty() && source is SourceIR.Opaque) return null
-                val candidate = FusedChainIR(source, stages, sink, node.src)
-                if (isEffectSafe(candidate, allFunctions)) candidate else null
+                val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+                if (source is SourceIR.Opaque) null
+                else {
+                    val candidate = FusedChainIR(source, stages, sink, node.src)
+                    if (isEffectSafe(candidate, allFunctions)) candidate else null
+                }
             }
             else -> null
         }
@@ -320,8 +404,9 @@ object ChainCanonicalizer {
         val srcInner = srcNode ?: return null
         val pLambda = p as? MakeLambdaIR ?: return null
         // Captures OK — emit-side handles them via capture slot remap.
-        val (stages, source) = peelSource(srcInner, classifier)
-        if (stages.isEmpty() && source is SourceIR.Opaque) return null
+        val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+        // Emitter can't handle Opaque source for predicate sinks.
+        if (source is SourceIR.Opaque) return null
         val candidate = FusedChainIR(source, stages, wrap(pLambda), src)
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
@@ -560,6 +645,7 @@ object ChainCanonicalizer {
     private fun peelSource(
         sourceExpr: NodeIR,
         classifier: ChainHofClassifier,
+        allFunctions: Map<Hash, FunctionIR> = emptyMap(),
     ): Pair<List<StageIR>, SourceIR> {
         val stages = mutableListOf<StageIR>()
         var current = sourceExpr
@@ -596,27 +682,35 @@ object ChainCanonicalizer {
             if (fromSeqPeeled != null) {
                 // from_seq terminates the iter chain — the peeled inner is
                 // now a Seq expression. Classify it and return.
-                return stages to classifyTerminalSource(fromSeqPeeled)
+                return stages to classifyTerminalSource(fromSeqPeeled, allFunctions)
             }
             // Nothing peeled — treat current as the terminal source.
-            return stages to classifyTerminalSource(current)
+            return stages to classifyTerminalSource(current, allFunctions)
         }
         // Guard exhausted — chain too deep. Bail with what we have.
-        return stages to classifyTerminalSource(current)
+        return stages to classifyTerminalSource(current, allFunctions)
     }
 
     /** Recognize `__native_seq_range` / `__native_iter_range` for a fusable
      *  counted loop, or wrap anything else as RawSeq (seq indexed loop)
-     *  or Opaque (unknown). */
-    private fun classifyTerminalSource(expr: NodeIR): SourceIR {
-        if (expr is CallNativeIR
-            && (expr.name == "__native_seq_range" || expr.name == "__native_iter_range")) {
+     *  or Opaque (unknown). Also peeks through CallDirect mono wrappers
+     *  that the TrivialWrapperInliner didn't inline (same pattern as
+     *  peekThroughMonoWrapper: baked MakeLambdaIR prevents inlining). */
+    private fun classifyTerminalSource(
+        expr: NodeIR,
+        allFunctions: Map<Hash, FunctionIR> = emptyMap(),
+    ): SourceIR {
+        val effective = if (expr is CallDirectIR && allFunctions.isNotEmpty()) {
+            peekThroughMonoWrapper(expr, allFunctions) ?: expr
+        } else expr
+        if (effective is CallNativeIR
+            && (effective.name == "__native_seq_range" || effective.name == "__native_iter_range")) {
             // Both scalar-ABI (args=[start, end]) and record-ABI (arg
             // = MakeRecord{start, end}) shapes exist.
-            if (expr.isScalarABI && expr.args.size == 2) {
-                return SourceIR.RangeSeq(expr.args[0], expr.args[1])
+            if (effective.isScalarABI && effective.args.size == 2) {
+                return SourceIR.RangeSeq(effective.args[0], effective.args[1])
             }
-            val rec = expr.arg as? MakeRecordIR
+            val rec = effective.arg as? MakeRecordIR
             if (rec != null) {
                 var start: NodeIR? = null; var end: NodeIR? = null
                 for (fld in rec.fields) {
@@ -634,8 +728,8 @@ object ChainCanonicalizer {
         // tag as RawSeq when we're confident. __native_iter_* calls produce
         // MezzeIter objects (not Seq), so those must be Opaque — SeqSize
         // would throw on them at runtime.
-        if (expr is CallNativeIR && !expr.name.startsWith("__native_iter_")) {
-            return SourceIR.RawSeq(expr)
+        if (effective is CallNativeIR && !effective.name.startsWith("__native_iter_")) {
+            return SourceIR.RawSeq(effective)
         }
         return SourceIR.Opaque(expr)
     }

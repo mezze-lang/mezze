@@ -532,7 +532,7 @@ public final class BytecodeCompiler {
         if (node instanceof ReadArgIR) return true;
         if (node instanceof ReadCaptureIR) return true;
         if (node instanceof EffectBindingIR) return true;
-        if (node instanceof FusedChainIR) {
+        if (node instanceof FusedChainIR chain) {
             // Canon-emit contract (#446): canonicalizer must only produce
             // shapes emit can handle. Accept unconditionally here; if emit
             // refuses at runtime, it throws and MezzeLanguage buckets it
@@ -540,6 +540,38 @@ public final class BytecodeCompiler {
             // when Phase 4b landed), supports() rejects at line 864 and
             // emit is never given a chance — which crashed all
             // fusion-producing user programs like bench/cases/sum_fold.
+            //
+            // #446 Phase 5 fix: walk into the FusedChainIR's embedded
+            // MakeLambdaIR nodes (in stages + sink) so their function hashes
+            // get pre-compiled into compiledCallTargets. Without this, the
+            // emitter resolves them via LazyStub → TrampolineRootNode whose
+            // inner is never attached, crashing with "executed before
+            // attachInner". The non-fused path pre-compiles these at the
+            // MakeLambdaIR supportsNode handler (below); the fused path
+            // must do the same.
+            for (var stage : chain.getStages()) {
+                if (stage instanceof StageIR.Map ms && !supportsNode(ms.getF(), argCount)) return false;
+                if (stage instanceof StageIR.Filter fs && !supportsNode(fs.getP(), argCount)) return false;
+            }
+            var sink = chain.getSink();
+            if (sink instanceof SinkIR.Fold fold) {
+                if (!supportsNode(fold.getF(), argCount)) return false;
+                if (!supportsNode(fold.getInit(), argCount)) return false;
+            }
+            if (sink instanceof SinkIR.ForEach fe && !supportsNode(fe.getF(), argCount)) return false;
+            if (sink instanceof SinkIR.Any a && !supportsNode(a.getP(), argCount)) return false;
+            if (sink instanceof SinkIR.All a && !supportsNode(a.getP(), argCount)) return false;
+            if (sink instanceof SinkIR.Find f && !supportsNode(f.getP(), argCount)) return false;
+            if (sink instanceof SinkIR.Reduce r && !supportsNode(r.getF(), argCount)) return false;
+            // Source expressions (range start/end, opaque/raw-seq source) also
+            // need to be walked so their sub-expressions compile cleanly.
+            var src = chain.getSource();
+            if (src instanceof SourceIR.RangeSeq rs) {
+                if (!supportsNode(rs.getStart(), argCount)) return false;
+                if (!supportsNode(rs.getEnd(), argCount)) return false;
+            }
+            if (src instanceof SourceIR.RawSeq rs && !supportsNode(rs.getXs(), argCount)) return false;
+            if (src instanceof SourceIR.Opaque os && !supportsNode(os.getExpr(), argCount)) return false;
             return true;
         }
         if (node instanceof PerformOpIR p) {
