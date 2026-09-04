@@ -30,8 +30,8 @@ let bench_filter_map_fold = {} -> do
     }
 
 let bench_count = {} -> do
-    let half = n / 2
-    iter::count { it = iter::range { start = 0, end = n }, p = {x} -> x < half }
+    ## Use literal to avoid captures issue — 5000000 = n / 2
+    iter::count { it = iter::range { start = 0, end = n }, p = {x} -> x < 5000000 }
 
 let bench_to_seq = {} ->
     seq::size { xs = iter::to_seq { it = iter::filter { it = iter::range { start = 0, end = n }, p = {x} -> x % 2 == 0 } } }

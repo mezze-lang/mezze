@@ -69,11 +69,6 @@ object ChainCanonicalizer {
                 anyChanged = true
             }
         }
-        if (System.getenv("MEZZE_CHAIN_CANON_DEBUG") != null) {
-            System.err.println("[chain-canon] rewrote bodies in " +
-                out.count { it.value.body !== functions[it.key]?.body } +
-                "/${functions.size} functions")
-        }
         return if (anyChanged) out else functions
     }
 
@@ -91,7 +86,8 @@ object ChainCanonicalizer {
         val descended = recurseChildren(node) { child -> rewrite(child, classifier, allFunctions) }
         // Try to canonicalize this node itself (only CallDirectIRs can
         // become FusedChainIRs).
-        return tryCanonicalize(descended, classifier, allFunctions) ?: descended
+        val result = tryCanonicalize(descended, classifier, allFunctions)
+        return result ?: descended
     }
 
     /**
@@ -126,7 +122,7 @@ object ChainCanonicalizer {
             }
             val srcInner = src ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
-            if (fLambda.captures.isNotEmpty()) return null
+            // Captures OK — emit-side handles them via capture slot remap.
             val (stages, source) = peelSource(srcInner, classifier)
             if (stages.isEmpty() && source is SourceIR.Opaque) return null
             val candidate = FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
@@ -155,6 +151,21 @@ object ChainCanonicalizer {
         if (node is CallNativeIR && !node.isScalarABI) {
             val result = tryCanonicalizeNativeSink(node, classifier, allFunctions)
             if (result != null) return result
+        }
+        // Peek through CallDirect to mono wrappers whose body is a native
+        // sink call (e.g., mono iter::count with a baked-in predicate lambda).
+        // The TrivialWrapperInliner can't inline these because `countParamReads`
+        // rejects MakeLambdaIR in the wrapper body. But we can still fuse them
+        // by manually substituting the call args into the native body and routing
+        // through the native-sink path. This covers mono specializations of
+        // count/any/all/find/reduce/to_seq/to_list that the classifier
+        // misclassifies as FILTER/MAP due to empty names.
+        if (node is CallDirectIR) {
+            val peeked = peekThroughMonoWrapper(node, allFunctions)
+            if (peeked != null) {
+                val result = tryCanonicalizeNativeSink(peeked, classifier, allFunctions)
+                if (result != null) return result
+            }
         }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
@@ -185,6 +196,51 @@ object ChainCanonicalizer {
         SinkIR.ToSeq, SinkIR.ToList -> true
     }
 
+    /**
+     * Peek through a CallDirect to a monomorphized wrapper whose body is a
+     * single record-ABI native call. Returns a substituted [CallNativeIR]
+     * with the CallDirect's positional args replacing [ReadLocalIR] param
+     * references in the native body, or null if the shape doesn't match.
+     *
+     * This handles the case where [TrivialWrapperInliner] couldn't inline
+     * the mono wrapper because the body contains [MakeLambdaIR] baked in
+     * by the monomorphizer, which `countParamReads` rejects. Without this,
+     * the [ChainHofClassifier] misclassifies the CallDirect as FILTER/MAP
+     * due to the empty name and matching param structure (e.g. mono
+     * `iter::count` with params `[it, p]` collides with FILTER), and the
+     * chain can't fuse.
+     *
+     * The substituted CallNativeIR is then routed through
+     * [tryCanonicalizeNativeSink] which recognizes the native name and
+     * builds the correct [FusedChainIR].
+     */
+    private fun peekThroughMonoWrapper(
+        call: CallDirectIR,
+        allFunctions: Map<Hash, FunctionIR>,
+    ): CallNativeIR? {
+        if (!call.isScalarABI) return null
+        val target = allFunctions[call.targetHash] ?: return null
+        // Only handle simple wrappers: no captures, no locals.
+        if (target.captureSlots.isNotEmpty() || target.localSlots.isNotEmpty()) return null
+        // Body must be a single record-ABI native call.
+        val nativeCall = target.body as? CallNativeIR ?: return null
+        if (nativeCall.isScalarABI) return null
+        val mr = nativeCall.arg as? MakeRecordIR ?: return null
+        // Substitute ReadLocalIR(param slot) → corresponding call arg.
+        // Frame layout with 0 captures: param i lives at slot i.
+        val paramCount = target.paramSlots.size
+        if (call.args.size < paramCount) return null
+        val newFields = mr.fields.map { fld ->
+            val v = fld.value
+            if (v is ReadLocalIR && v.slot < paramCount) {
+                FieldIR(fld.name, call.args[v.slot])
+            } else {
+                fld
+            }
+        }
+        return nativeCall.copy(arg = MakeRecordIR(newFields, mr.src))
+    }
+
     /** Handle __native_iter_{count,any,all,find,reduce,to_seq,to_list}.
      *  These sinks are classified but not yet emittable — the method builds
      *  the FusedChainIR, then gates on [isEmittableSink] before returning. */
@@ -203,7 +259,7 @@ object ChainCanonicalizer {
                 }
                 val srcInner = src ?: return null
                 val pLambda = p as? MakeLambdaIR ?: return null
-                if (pLambda.captures.isNotEmpty()) return null
+                // Captures OK — emit-side handles them via capture slot remap.
                 val (stages, source) = peelSource(srcInner, classifier)
                 // count(p) = filter(p) + count
                 val allStages = stages + StageIR.Filter(pLambda)
@@ -224,7 +280,7 @@ object ChainCanonicalizer {
                 }
                 val srcInner = src ?: return null
                 val fLambda = f as? MakeLambdaIR ?: return null
-                if (fLambda.captures.isNotEmpty()) return null
+                // Captures OK — emit-side handles them via capture slot remap.
                 val (stages, source) = peelSource(srcInner, classifier)
                 if (stages.isEmpty() && source is SourceIR.Opaque) return null
                 val candidate = FusedChainIR(source, stages, SinkIR.Reduce(fLambda), node.src)
@@ -263,7 +319,7 @@ object ChainCanonicalizer {
         }
         val srcInner = srcNode ?: return null
         val pLambda = p as? MakeLambdaIR ?: return null
-        if (pLambda.captures.isNotEmpty()) return null
+        // Captures OK — emit-side handles them via capture slot remap.
         val (stages, source) = peelSource(srcInner, classifier)
         if (stages.isEmpty() && source is SourceIR.Opaque) return null
         val candidate = FusedChainIR(source, stages, wrap(pLambda), src)
@@ -329,9 +385,7 @@ object ChainCanonicalizer {
     private fun extractFold(call: CallDirectIR): Pair<SinkIR, NodeIR>? {
         val (src, init, fRaw) = extractThreeArgs(call, srcNames = SRC_NAMES) ?: return null
         val fLambda = fRaw as? MakeLambdaIR ?: return null
-        // Folder must be pure — reject captures. (Stage lambdas with
-        // captures need slot-remap at fusion emit time; MVP refuses.)
-        if (fLambda.captures.isNotEmpty()) return null
+        // Captures OK — emit-side handles them via capture slot remap.
         return SinkIR.Fold(init, fLambda) to src
     }
 
@@ -367,7 +421,7 @@ object ChainCanonicalizer {
     private fun extractForEach(call: CallDirectIR): Pair<SinkIR, NodeIR>? {
         val (src, fRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = "f") ?: return null
         val fLambda = fRaw as? MakeLambdaIR ?: return null
-        if (fLambda.captures.isNotEmpty()) return null
+        // Captures OK — emit-side handles them via capture slot remap.
         return SinkIR.ForEach(fLambda) to src
     }
 
@@ -403,7 +457,7 @@ object ChainCanonicalizer {
     private fun extractReduce(call: CallDirectIR): Pair<SinkIR, NodeIR>? {
         val (src, fRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = "f") ?: return null
         val fLambda = fRaw as? MakeLambdaIR ?: return null
-        if (fLambda.captures.isNotEmpty()) return null
+        // Captures OK — emit-side handles them via capture slot remap.
         return SinkIR.Reduce(fLambda) to src
     }
 
@@ -414,7 +468,7 @@ object ChainCanonicalizer {
     ): Pair<SinkIR, NodeIR>? {
         val (src, pRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = "p") ?: return null
         val pLambda = pRaw as? MakeLambdaIR ?: return null
-        if (pLambda.captures.isNotEmpty()) return null
+        // Captures OK — emit-side handles them via capture slot remap.
         return wrap(pLambda) to src
     }
 

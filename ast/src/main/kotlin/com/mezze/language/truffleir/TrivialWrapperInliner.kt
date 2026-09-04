@@ -165,43 +165,19 @@ object TrivialWrapperInliner {
         if (fn.captureSlots.isNotEmpty()) return false
         if (fn.localSlots.isNotEmpty()) return false
         if (fn.paramSlots.isEmpty()) {
-            // Zero-param wrappers (e.g. `seq::empty {} -> __native_seq_empty {}`)
-            // are still worth inlining; the savings is just one frame
-            // alloc per call.
-            // Fall through.
+            // Zero-param wrappers
         }
-
-        val paramStart = fn.captureSlots.size  // == 0 since captures is empty
+        val paramStart = fn.captureSlots.size
         val paramEnd = paramStart + fn.paramSlots.size
-
-        // Body must be a pure expression tree whose leaves reference each
-        // param a known number of times and read no other slots. Accepted
-        // top-level shapes are single calls, expression-form control
-        // flow (`If`, `Block` without lets), or pure data construction /
-        // access (`MakeRecord`, `MakeVariant`, `RecordUpdate`, `MakeSeq`,
-        // `ReadField`, `SeqGet`, `InlineBinaryOp`). Whether the actual
-        // tree is inlineable is decided by [countParamReads] descending
-        // through it — nothing unsafe (Match, Perform, Lambda, indirect
-        // dispatch, WriteLocal, …) will pass that check.
         val body = fn.body
         if (body is ReadCaptureIR || body is ReadArgIR) return false
         val counts = IntArray(paramEnd - paramStart)
         if (!countParamReads(body, paramStart, paramEnd, counts)) return false
-        // Non-scalar-ABI CallDirect is a legacy record-ABI receiver
-        // shape — safest to keep excluded, since Phase 0's constraint
-        // was already tighter here.
         if (body is CallDirectIR && !body.isScalarABI) return false
-        // Recursion guard: a wrapper whose body calls itself would
-        // unfold forever at compile time. Once Phase B relaxed the
-        // "≤1 read" rule, `If`-shaped self-recursive functions like
-        // `gcd { a, b } -> if b == 0 then a else gcd { a = b, b = a % b }`
-        // pass the earlier gates — reject them here.
         if (containsSelfCall(body, fn.hash)) return false
-        // Size budget (Phase C): don't inline bodies larger than
-        // [INLINE_SIZE_BUDGET] IR nodes. Prevents duplicating a big
-        // body across many call sites (code-size explosion) and keeps
-        // the CallTarget cache useful for genuinely-large functions.
-        return sizeOf(body) <= INLINE_SIZE_BUDGET
+        val sz = sizeOf(body)
+        if (sz > INLINE_SIZE_BUDGET) return false
+        return true
     }
 
     /** Max IR-node count for a body to be considered a "trivial" wrapper. */
