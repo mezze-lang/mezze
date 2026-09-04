@@ -247,6 +247,10 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     var resolvedAbilityName: String? = null
     val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
     val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
+    // #86 sub-gap 2: fresh var for the ability's first typeParam, so
+    // `TypeName.method{…}` can pin it below via Equality once the ability
+    // resolves. Null when this branch isn't taken.
+    var firstClassArgVar: TypeVar? = null
     abilityConstraints.addAll(receiverResult.abilityConstraints)
     abilityConstraints.addAll(argumentResult.abilityConstraints)
     associatedTypeConstraints.addAll(receiverResult.associatedTypeConstraints)
@@ -412,6 +416,10 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
                 context = "Method call: $methodName",
                 loc = expr.loc
             ))
+            // #86 sub-gap 2: record the ability's first class-arg TyVar; the
+            // Type-prefixed dispatch pin (Equality below) unifies it with the
+            // TypeApplication threaded through `context.pinFirstAbilityTypeArg`.
+            firstClassArgVar = abilityTypeVars.first()
 
             if (associatedTypeNames.isNotEmpty()) {
                 val associatedTypeNamesNormalized = associatedTypeNames.map { it.removePrefix("'") }.toSet()
@@ -491,6 +499,24 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         context = "Method call return type",
         loc = expr.loc
     ))
+
+    // #86 sub-gap 2 (docs/codec/redesign-2026-09.md §Open questions Q1): pin the
+    // ability's first class-param to the type-name prefix the caller wrote. This
+    // is what makes `Person.from_json { it = raw }` dispatch to `FromJson`'s `'a`
+    // slot even though `'a` only appears in the return type — a return-driver
+    // pattern the receiver-driven ladder can't decide on its own. Consumed here
+    // for the current call site only; caller (generateFunctionCall) stashes the
+    // pin under a synthetic `it.method` rewrite so tryGenerateMethodCall's usual
+    // machinery still runs.
+    val pin = context.pinFirstAbilityTypeArg
+    if (pin != null && firstClassArgVar != null) {
+        constraints.add(Constraint.Equality(
+            left = MezzeType.VarType(firstClassArgVar),
+            right = pin,
+            context = "Type-prefixed dispatch pin: ${methodName} class-arg",
+            loc = expr.loc,
+        ))
+    }
 
     val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
         wrapCallResultWithEffects(resultType, strippedMethodType.effects)

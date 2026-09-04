@@ -518,6 +518,14 @@ data class ConstraintContext(
     // literal, remains flexible). Keyed by binding name; a binding whose type is
     // still a VarType is absent (genuinely unresolved).
     val matchBindingConcreteTypes: Map<String, MezzeType> = emptyMap(),
+    // #86 sub-gap 2 (docs/codec/redesign-2026-09.md §Open questions Q1):
+    // Type-prefixed method call `TypeName.method { it = ... }` is meaningful when
+    // the ability's class-param (`FromJson 'a for 'in`) appears only in the return.
+    // generateFunctionCall converts `TypeName.method { it = X, ...args }` into a
+    // synthetic `X.method { ...args }` and stashes `TypeApplication(TypeName)` here
+    // so tryGenerateMethodCall can pin the first typeParam's fresh var to it once
+    // the ability resolves. Consumed and cleared inside tryGenerateMethodCall.
+    val pinFirstAbilityTypeArg: MezzeType? = null,
 ) {
     fun extend(name: String, type: MezzeType): ConstraintContext {
         return copy(typingContext = typingContext.extendMono(name, type))

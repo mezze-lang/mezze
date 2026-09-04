@@ -734,30 +734,161 @@ class CodecRoundTripTest {
     }
 
     // ========================================================================
+    // Bug C (#86 sub-gap 1) — `.json_with { config = <expr> }` sugar
+    //
+    // Root cause was in `expandTypeApplication` /
+    // `expandTypeApplicationToRecord` (typechecker/solving/Unification.kt):
+    // they used registry-only lookup, so a nested TypeApplication reached
+    // through an inlined alias for an imported-but-not-directly-`use`d type
+    // (SharedConfig inside JsonC) resolved to NotFound and unification fell
+    // through to a "SharedConfig is not compatible with SharedConfig" refusal.
+    // Added a ModuleResolver.lookupTypeDeclaration fallback mirroring the one
+    // already used by expandTypeApplicationToVariant.
+    // ========================================================================
+
+    @Test
+    fun `Bug C - JsonC binding of json_default succeeds`() {
+        val src = """
+            use std::codec::json::{ JsonC, json_default }
+            let c: JsonC = json_default
+            42
+        """.trimIndent()
+        assertEquals(42L, eval(src))
+    }
+
+    @Test
+    fun `Bug C - json_with explicit json_default on user record`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default, to_str }
+            type Point = { x: Int, y: Int }
+            let p: Point = { x = 3, y = 4 }
+            to_str { json = p.json_with { config = json_default } }
+        """.trimIndent()
+        assertEquals("{\"x\":3,\"y\":4}", eval(src) as String)
+    }
+
+    @Test
+    fun `Bug C - json_with with pretty preset on user record`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_pretty, to_str }
+            type Point = { x: Int, y: Int }
+            let p: Point = { x = 3, y = 4 }
+            to_str { json = p.json_with { config = json_pretty } }
+        """.trimIndent()
+        // to_str uses the pretty flag but the config passed determines the
+        // synthesized encoder's shape; result is still a compact JObject
+        // (pretty is currently ignored by the native to_str path). We just
+        // verify the encoded value survives the round-trip.
+        val s = eval(src) as String
+        assertTrue(s.contains("\"x\"") && s.contains("\"y\""), "expected fields in output, got: $s")
+    }
+
+    @Test
+    fun `Bug C - json_with on primitive Int`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default, to_str }
+            let n: Int = 42
+            to_str { json = n.json_with { config = json_default } }
+        """.trimIndent()
+        assertEquals("42", eval(src) as String)
+    }
+
+    @Test
+    fun `Bug C - json_with on nested user record`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, json_default, to_str }
+            type Addr = { city: Str, zip: Int }
+            type Person = { id: Int, addr: Addr }
+            let p: Person = { id = 1, addr = { city = "NYC", zip = 10001 } }
+            to_str { json = p.json_with { config = json_default } }
+        """.trimIndent()
+        assertEquals(
+            "{\"addr\":{\"city\":\"NYC\",\"zip\":10001},\"id\":1}",
+            eval(src) as String,
+        )
+    }
+
+    // ========================================================================
+    // Bug D (#86 sub-gap 2) — `TypeName.from_json { it = raw }` sugar
+    //
+    // Two-part fix (typechecker/constraints/ExprFunctionConstraints.kt +
+    // ExprMethodConstraints.kt + Constraint.kt):
+    //   1. Recognize `TypeName.method { it = X, … }` where TypeName is a
+    //      declared type: rewrite as `X.method { … }` and thread a pin type
+    //      (TypeApplication(TypeName)) through `pinFirstAbilityTypeArg`.
+    //   2. In tryGenerateMethodCall, once the ability resolves, emit an
+    //      Equality binding the ability's first typeParam TyVar to the pin.
+    // Plus AbilityChecker padding for operation-constraint `with Decode
+    // JsonC 'a` — the with-clause is short by one slot (missing 'in), so
+    // pad with the outer impl's trailing target type (`Json`).
+    // ========================================================================
+
+    @Test
+    fun `Bug D - Type_from_json on user record via annotated Json binding`() {
+        val src = """
+            use std::codec::json::{ Json, FromJson, json_default }
+            use std::codec::core::{ DecodeError }
+            type Point = { x: Int, y: Int }
+            let raw: Json = JObject { fields = [
+              { key = "x", value = JInt { val = 3 } },
+              { key = "y", value = JInt { val = 4 } },
+            ] }
+            let dec: Result Point DecodeError = Point.from_json { it = raw }
+            dec
+        """.trimIndent()
+        val v = okVal(eval(src))
+        val r = asRecord(v)
+        assertEquals(3L, r.getField("x"))
+        assertEquals(4L, r.getField("y"))
+    }
+
+    @Test
+    fun `Bug D - Type_from_json through parse and re-annotate`() {
+        val src = """
+            use std::codec::json::{ Json, FromJson, json_default, parse_str }
+            use std::codec::core::{ DecodeError }
+            type Point = { x: Int, y: Int }
+            match parse_str { s = "{\"x\":3,\"y\":4}" } is
+              Ok { val = j } -> do
+                let jt: Json = j
+                let dec: Result Point DecodeError = Point.from_json { it = jt }
+                dec
+              Err { error = e } -> Err { error = { path = [], message = "parse", expected = "Point", found = None } }
+        """.trimIndent()
+        val v = okVal(eval(src))
+        val r = asRecord(v)
+        assertEquals(3L, r.getField("x"))
+        assertEquals(4L, r.getField("y"))
+    }
+
+    @Test
+    fun `Bug D - Type_from_json round-trips through json encode+parse`() {
+        val src = """
+            use std::codec::json::{ Json, ToJson, FromJson, json_default, to_str, parse_str }
+            use std::codec::core::{ DecodeError }
+            type Point = { x: Int, y: Int }
+            let original: Point = { x = 3, y = 4 }
+            let encoded: Json = original.json {}
+            let s: Str = to_str { json = encoded }
+            match parse_str { s = s } is
+              Ok { val = j } -> do
+                let jt: Json = j
+                let dec: Result Point DecodeError = Point.from_json { it = jt }
+                dec
+              Err { error = e } -> Err { error = { path = [], message = "parse", expected = "Point", found = None } }
+        """.trimIndent()
+        val v = okVal(eval(src))
+        val r = asRecord(v)
+        assertEquals(3L, r.getField("x"))
+        assertEquals(4L, r.getField("y"))
+    }
+
+    // ========================================================================
     // KNOWN GAPS — open work items after this commit
     //
     //  * `Nat` (newtype over Int) does not auto-derive: the walker recurses
     //    through Tier 3, and newtype opacity prevents unwrapping at emit
     //    time. Workaround: hand-write `impl Encode JsonC for Nat` at the
     //    call site. Same for user newtypes over primitives.
-    //
-    //  * `.json_with { config = <expr> }` — passing an explicit JsonC at the
-    //    Tier-4 sugar site triggers a JsonC-vs-JsonC identity mismatch during
-    //    ability-impl auto-derivation (the impl-op's `with Encode JsonC 'a`
-    //    constraint's JsonC is threaded through the AbilityChecker's
-    //    `typeAnnotationToMezzeType` while the caller's `json_default` binding
-    //    goes through the ordinary import resolution — the two paths mint
-    //    JsonC TypeApplications whose Declared identities differ by field
-    //    structure, so unify falls back to structural and rejects them). The
-    //    zero-config `.json {}` sugar path (this commit) works end-to-end.
-    //
-    //  * `.from_json { it = <Json> }` / `Type.from_json { … }` sugar is not
-    //    yet wired to the ability-method-dispatch path — a Type-prefixed
-    //    method syntax lands on `MemberAccess(Type, "from_json")` where the
-    //    receiver's type is the type name (variant `Json`), and the
-    //    constraint-gen path treats it as a plain field access rather than an
-    //    ability method (T0201). The compile-time dict-passing fix in this
-    //    commit is orthogonal — it's the DISPATCH resolver that needs a
-    //    target-driven path for FromJson-style `'a`-on-return abilities.
     // ========================================================================
 }

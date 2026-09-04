@@ -627,7 +627,37 @@ class AbilityChecker internal constructor(
                             else -> typeAnnotationToMezzeType(typeArg)
                         }
                     }
-                    checkAbilityImplementation(constraint.abilityName, resolvedTypeArgs, registry.resolveAbilityHash(constraint.abilityName))
+                    // #86 sub-gap 2: when the with-clause has fewer args than the
+                    // constrained ability's arity (e.g. `with Decode JsonC 'a`
+                    // supplies 2 of Decode's 3 typeParams — 'config/'a but not
+                    // 'in), the missing tail-slots correspond positionally to the
+                    // OUTER impl's own receiver-type ('in). For an outer impl
+                    // `FromJson 'a for Json`, the outer targets end with `Json`
+                    // — that's the same `'in` the op body's `it` binds. Pad
+                    // resolvedTypeArgs with the outer impl's trailing target
+                    // types so the recursive check gets a full class-arg tuple.
+                    // Without this, `Decode JsonC 'a` recursed with only
+                    // [JsonC, Point] (2 args) and missed the codec-derive path
+                    // which requires size 3 [config, data, in] — auto-derived
+                    // decode was never triggered by `Type.from_json`.
+                    val depAbility = registry.lookupAbility(constraint.abilityName)
+                    val depArity = depAbility?.typeParams?.size ?: resolvedTypeArgs.size
+                    val paddedTypeArgs = if (resolvedTypeArgs.size < depArity && annotations.size >= depArity - resolvedTypeArgs.size) {
+                        val padCount = depArity - resolvedTypeArgs.size
+                        val trailing = annotations.takeLast(padCount).map { ann ->
+                            when (ann) {
+                                is ParsedNamedType -> {
+                                    val bound = typeVarBindings[ann.name]
+                                    bound ?: typeAnnotationToMezzeType(ann)
+                                }
+                                else -> typeAnnotationToMezzeType(ann)
+                            }
+                        }
+                        resolvedTypeArgs + trailing
+                    } else {
+                        resolvedTypeArgs
+                    }
+                    checkAbilityImplementation(constraint.abilityName, paddedTypeArgs, registry.resolveAbilityHash(constraint.abilityName))
                 }
             } else {
                 true

@@ -1228,7 +1228,18 @@ private fun substituteTypeParamsByName(type: MezzeType, subst: Map<String, Mezze
 }
 
 internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, registry: DeclarationRegistry): MezzeType.RecordType? {
-    val typeDecl = registry.lookupType(typeApp.constructor, (typeApp.identity as? TypeIdentity.Declared)?.hash) ?: return null
+    // Registry lookup first (import-scoped + transitive-by-hash); fall back to the
+    // module cache when a Declared TypeApplication references a type from a module
+    // that wasn't directly imported by the current file. Without this fallback, an
+    // annotation whose alias-inline leaves a nested `TypeApplication(SharedConfig)`
+    // fails to unify against a fully-expanded RecordType(SharedConfig, …) reached
+    // through a same-hash imported alias (e.g. `let c: JsonC = json_default`) —
+    // `expandTypeApplication` returns NotFound and the RecordType-vs-TypeApp arm
+    // reports "SharedConfig is not compatible with SharedConfig". Mirrors the
+    // ModuleResolver fallback already used by expandTypeApplicationToVariant.
+    val typeDecl = registry.lookupType(typeApp.constructor, (typeApp.identity as? TypeIdentity.Declared)?.hash)
+        ?: ModuleResolver.lookupTypeDeclaration(typeApp.constructor)
+        ?: return null
 
     val recordDef = typeDecl.definition as? ParsedRecordDef ?: return null
 
@@ -1342,7 +1353,14 @@ internal fun expandTypeApplication(
     typeApp: MezzeType.TypeApplication,
     registry: DeclarationRegistry
 ): TypeExpansionResult {
-    val typeDecl = registry.lookupType(typeApp.constructor, (typeApp.identity as? TypeIdentity.Declared)?.hash) ?: return TypeExpansionResult.NotFound
+    // Fall back to the module cache when the current file's registry doesn't
+    // carry this type — a nested TypeApplication reached through an alias-inline
+    // of an imported type (e.g. `JsonC` inlining to a record with a
+    // `TypeApplication(SharedConfig)` field, where `SharedConfig` isn't directly
+    // imported). Mirrors the fallback already used by expandTypeApplicationToVariant.
+    val typeDecl = registry.lookupType(typeApp.constructor, (typeApp.identity as? TypeIdentity.Declared)?.hash)
+        ?: ModuleResolver.lookupTypeDeclaration(typeApp.constructor)
+        ?: return TypeExpansionResult.NotFound
 
     return when (val definition = typeDecl.definition) {
         is ParsedRecordDef -> {
