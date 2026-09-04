@@ -138,10 +138,9 @@ pub let all: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p
   __native_list_all { xs = xs, p = p }
 
 ## Returns True if the list contains the element.
-## Uses any + eq. Requires 'a to have Eq (checked at call site).
-pub let contains: { xs: List 'a, x: 'a } with Eq 'a -> Bool = { xs, x } -> do
-  let target = x
-  any { xs = xs, p = { x } -> x == target }
+## Native head/tail walk with Long-specialized fast path (no callback dispatch).
+pub let contains: { xs: List 'a, x: 'a } with Eq 'a -> Bool = { xs, x } ->
+  __native_list_contains { xs = xs, x = x }
 
 ## Reverses the list.
 pub let reverse: { xs: List 'a } -> List 'a = { xs } -> __native_list_reverse { xs = xs }
