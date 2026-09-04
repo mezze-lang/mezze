@@ -3284,20 +3284,39 @@ public final class BytecodeCompiler {
         // RangeSeq sources produce longs — use a long[] builder to avoid
         // boxing. RawSeq sources use the generic ArrayList<Object> builder.
         boolean useLongBuilder = isRange && mode instanceof FusedSinkMode.Materialize;
+        boolean hasFilter = stages.stream().anyMatch(s -> s instanceof ClassifiedStage.FilterStep);
         if (mode instanceof FusedSinkMode.Materialize) {
             // Size hint: range end - start (if range); else seq size.
-            // With filters the actual count may be less, but over-alloc
-            // is cheaper than realloc.
+            // With filters, halve the estimate — most filters pass ~50%
+            // of elements; over-alloc wastes zeroing time (80MB→40MB for
+            // 10M range). The builder grows if underestimated.
             b.beginStoreLocal(builderSlot);
             if (useLongBuilder) {
                 b.beginNewLongSeqBuilder();
-                  b.beginDirectSubtract();
-                    b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
-                  b.endDirectSubtract();
+                if (hasFilter) {
+                    // (end - start) / 2
+                    b.beginDirectDivide();
+                      b.beginDirectSubtract();
+                        b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                      b.endDirectSubtract();
+                      b.emitLoadLongConstant(2L);
+                    b.endDirectDivide();
+                } else {
+                    b.beginDirectSubtract();
+                      b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                    b.endDirectSubtract();
+                }
                 b.endNewLongSeqBuilder();
             } else {
                 b.beginNewSeqBuilder();
-                  b.emitLoadLocal(sizeSlot);
+                if (hasFilter) {
+                    b.beginDirectDivide();
+                      b.emitLoadLocal(sizeSlot);
+                      b.emitLoadLongConstant(2L);
+                    b.endDirectDivide();
+                } else {
+                    b.emitLoadLocal(sizeSlot);
+                }
                 b.endNewSeqBuilder();
             }
             b.endStoreLocal();
