@@ -3252,20 +3252,25 @@ public final class BytecodeCompiler {
         var boundSlot = isRange ? endSlot : sizeSlot;
 
         // ── Init builder for materializing sinks ──
+        // RangeSeq sources produce longs — use a long[] builder to avoid
+        // boxing. RawSeq sources use the generic ArrayList<Object> builder.
+        boolean useLongBuilder = isRange && mode instanceof FusedSinkMode.Materialize;
         if (mode instanceof FusedSinkMode.Materialize) {
             // Size hint: range end - start (if range); else seq size.
             // With filters the actual count may be less, but over-alloc
             // is cheaper than realloc.
             b.beginStoreLocal(builderSlot);
-              b.beginNewSeqBuilder();
-              if (isRange) {
+            if (useLongBuilder) {
+                b.beginNewLongSeqBuilder();
                   b.beginDirectSubtract();
                     b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
                   b.endDirectSubtract();
-              } else {
+                b.endNewLongSeqBuilder();
+            } else {
+                b.beginNewSeqBuilder();
                   b.emitLoadLocal(sizeSlot);
-              }
-              b.endNewSeqBuilder();
+                b.endNewSeqBuilder();
+            }
             b.endStoreLocal();
         }
 
@@ -3441,14 +3446,25 @@ public final class BytecodeCompiler {
                 b.endIfThenElse();
             }
             case FusedSinkMode.Materialize ignored -> {
-                // builder.add(x) — discard the returned builder ref
-                var discardSlot2 = b.createLocal();
-                b.beginStoreLocal(discardSlot2);
-                  b.beginSeqBuilderAdd();
-                    b.emitLoadLocal(builderSlot);
-                    b.emitLoadLocal(xSlot);
-                  b.endSeqBuilderAdd();
-                b.endStoreLocal();
+                if (useLongBuilder) {
+                    // long[] builder = LongSeqBuilderAdd(builder, x)
+                    // Must store back — array may grow (new allocation).
+                    b.beginStoreLocal(builderSlot);
+                      b.beginLongSeqBuilderAdd();
+                        b.emitLoadLocal(builderSlot);
+                        b.emitLoadLocal(xSlot);
+                      b.endLongSeqBuilderAdd();
+                    b.endStoreLocal();
+                } else {
+                    // builder.add(x) — discard the returned builder ref
+                    var discardSlot2 = b.createLocal();
+                    b.beginStoreLocal(discardSlot2);
+                      b.beginSeqBuilderAdd();
+                        b.emitLoadLocal(builderSlot);
+                        b.emitLoadLocal(xSlot);
+                      b.endSeqBuilderAdd();
+                    b.endStoreLocal();
+                }
             }
         }
 
@@ -3516,7 +3532,12 @@ public final class BytecodeCompiler {
                 b.endConditional();
             }
             case FusedSinkMode.Materialize m -> {
-                if (m.target() == FusedSinkMode.MaterializeTarget.SEQ) {
+                if (useLongBuilder) {
+                    // long[] → MezzeSeq via LongSeqStorage (unboxed)
+                    b.beginLongSeqBuilderToSeq();
+                      b.emitLoadLocal(builderSlot);
+                    b.endLongSeqBuilderToSeq();
+                } else if (m.target() == FusedSinkMode.MaterializeTarget.SEQ) {
                     b.beginSeqBuilderToSeq();
                       b.emitLoadLocal(builderSlot);
                     b.endSeqBuilderToSeq();

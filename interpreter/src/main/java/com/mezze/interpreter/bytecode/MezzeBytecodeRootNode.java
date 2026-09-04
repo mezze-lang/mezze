@@ -1531,6 +1531,62 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    // ── Long-specialized seq builder for fused RangeSeq→filter→to_seq ──
+    //
+    // The generic SeqBuilder uses ArrayList<Object>, forcing every long
+    // through autoboxing. For RangeSeq sources (which produce longs), we
+    // use a long[] directly — no boxing, no GC pressure, and the result
+    // lands in MezzeSeq's LongSeqStorage (unboxed).
+
+    /**
+     * Create a long[] builder with initial capacity. Returns a long[2]
+     * header: [count, capacity] followed by the data array stored as a
+     * two-element Object[]: {long[] data, long count}.
+     */
+    @Operation
+    public static final class NewLongSeqBuilder {
+        @Specialization
+        public static Object doNew(long sizeHint) {
+            int cap = sizeHint > 0 ? (int) Math.min(sizeHint, Integer.MAX_VALUE - 8) : 16;
+            return new long[cap + 1]; // slot 0 = count, slots 1..cap = data
+        }
+    }
+
+    /**
+     * Append a long to the builder. Returns the (possibly grown) builder.
+     */
+    @Operation
+    public static final class LongSeqBuilderAdd {
+        @Specialization
+        public static long[] doAdd(long[] builder, long element) {
+            int count = (int) builder[0];
+            if (count + 1 >= builder.length) {
+                int newCap = builder.length * 2;
+                long[] grown = new long[newCap];
+                System.arraycopy(builder, 0, grown, 0, count + 1);
+                builder = grown;
+            }
+            builder[count + 1] = element; // data starts at index 1
+            builder[0] = count + 1;
+            return builder;
+        }
+    }
+
+    /**
+     * Finalize long builder into a MezzeSeq with LongSeqStorage.
+     */
+    @Operation
+    public static final class LongSeqBuilderToSeq {
+        @Specialization
+        public static Object doFinalize(long[] builder) {
+            int count = (int) builder[0];
+            if (count == 0) return MezzeSeq.empty();
+            long[] data = new long[count];
+            System.arraycopy(builder, 1, data, 0, count);
+            return MezzeSeq.fromLongs(data);
+        }
+    }
+
     /**
      * Construct a variant with no payload (e.g. {@code None}, {@code True}).
      *
