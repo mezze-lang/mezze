@@ -14,11 +14,29 @@ data class MezzeHash private constructor(
         }
     }
 
-    override fun toString(): String =
-        "#" + bytes.take(DISPLAY_BYTES).joinToString("") { String.format("%02x", it) }
+    override fun toString(): String = "#" + hex(DISPLAY_BYTES)
 
-    fun toFullHexString(): String =
-        bytes.joinToString("") { String.format("%02x", it) }
+    fun toFullHexString(): String = hex(bytes.size)
+
+    /**
+     * Lower-case hex of the first [n] bytes.
+     *
+     * Table lookup into a fixed char array rather than `String.format("%02x")`
+     * per byte. Both produce identical output, but String.format reparses the
+     * format string and allocates a Formatter on every call, and this runs 64
+     * times per hash. Hashing is on the typechecker's hot path — a sampling
+     * profile of a repeated typecheck put 68% of all samples inside this one
+     * method, which made every keystroke in the browser editor cost ~180ms.
+     */
+    private fun hex(n: Int): String {
+        val out = CharArray(n * 2)
+        for (i in 0 until n) {
+            val v = bytes[i].toInt() and 0xff
+            out[i * 2] = HEX[v ushr 4]
+            out[i * 2 + 1] = HEX[v and 0x0f]
+        }
+        return String(out)
+    }
 
     fun toByteArray(): ByteArray = bytes.copyOf()
 
@@ -31,6 +49,8 @@ data class MezzeHash private constructor(
     override fun hashCode(): Int = bytes.contentHashCode()
 
     companion object {
+        private val HEX = "0123456789abcdef".toCharArray()
+
         const val HASH_SIZE_BYTES = 64
         const val DISPLAY_BYTES = 16
         const val SHORT_DISPLAY_BYTES = 8
