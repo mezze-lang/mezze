@@ -1,6 +1,11 @@
-# mezze-lang.org — everything you'll ever want to run, in one place.
+# Task runner for the Mezze repo.
 #
-# One-time setup:
+#   language/  — build, test and run the mez compiler (thin ./gradlew wrappers).
+#                For richer dev commands use the devenv shell (build, test, mez …).
+#   website/   — the mezze-lang.org marketing site + browser playground, plus its
+#                Cloudflare deploy pipeline. This is the bulk of the file below.
+#
+# Website one-time setup:
 #   1. your age private key is already at ~/.config/sops/age/keys.txt
 #      (.sops.yaml uses the same recipient as shriyans.im)
 #   2. `just secrets-edit` — populate the CLOUDFLARE_* values
@@ -21,7 +26,36 @@ default:
     @just --list --unsorted
 
 # ============================================================
-# dev / build
+# language / compiler  (the mez CLI — thin ./gradlew wrappers)
+# ============================================================
+
+# Build the mez CLI → cli/build/install/mez/bin/mez
+mez-build:
+    ./gradlew :cli:installDist
+    @echo "mez → ./cli/build/install/mez/bin/mez"
+
+# Run the dev CLI, e.g.  just mez init hello   ·   just mez exec app.mz
+mez *args:
+    @[ -x cli/build/install/mez/bin/mez ] || ./gradlew :cli:installDist
+    @cli/build/install/mez/bin/mez {{args}}
+
+# All test suites, run SEPARATELY (heavy; they share a lot of RAM)
+mez-test:
+    ./gradlew :parser:test      --no-daemon
+    ./gradlew :typechecker:test --no-daemon
+    ./gradlew :interpreter:test --no-daemon
+
+# One suite, e.g.  just mez-test-one typechecker
+mez-test-one module:
+    ./gradlew :{{module}}:test --no-daemon
+
+# AOT native binary → cli/build/native/nativeCompile/mez
+mez-native:
+    ./gradlew :cli:nativeCompile
+    @echo "native → ./cli/build/native/nativeCompile/mez"
+
+# ============================================================
+# website — dev / build
 # ============================================================
 
 # Dev server

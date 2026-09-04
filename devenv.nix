@@ -66,55 +66,61 @@ in
   };
 
   scripts = {
+    # Build the mez CLI → ./cli/build/install/mez/bin/mez
     build.exec = ''
-      echo "🔨 Building Mezze language..."
-      gradle build
+      echo "🔨 Building the mez CLI..."
+      ./gradlew :cli:installDist
+      echo "✅ mez → ./cli/build/install/mez/bin/mez"
     '';
 
     clean.exec = ''
-      echo "🧹 Cleaning project..."
-      gradle clean
+      echo "🧹 gradle clean..."
+      ./gradlew clean
     '';
 
+    # The typechecker and interpreter suites are heavy and share a lot of RAM,
+    # so run them as SEPARATE --no-daemon invocations, never one `gradle test`.
     test.exec = ''
-      echo "🧪 Running tests..."
-      gradle test
+      echo "🧪 parser + typechecker + interpreter (separate, --no-daemon)..."
+      ./gradlew :parser:test      --no-daemon
+      ./gradlew :typechecker:test --no-daemon
+      ./gradlew :interpreter:test --no-daemon
     '';
 
-    mezze-dev.exec = ''
-      if [ ! -f "./cli/build/libs/mezze.jar" ]; then
-        echo "❌ JAR not found. Building it first..."
-        gradle build
+    # The dev CLI (built jar launcher). Builds it first if missing.
+    #   mez init hello   ·   mez exec app.mz   ·   mez check   ·   mez dev
+    mez.exec = ''
+      MEZ="./cli/build/install/mez/bin/mez"
+      if [ ! -x "$MEZ" ]; then
+        echo "mez not built yet — running: ./gradlew :cli:installDist" >&2
+        ./gradlew :cli:installDist
       fi
-      java $JAVA_OPTS \
-        -Dpolyglot.engine.WarnInterpreterOnly=false \
-        -Dtruffle.TruffleRuntime=com.oracle.truffle.api.impl.DefaultTruffleRuntime \
-        -jar ./cli/build/libs/mezze.jar "$@"
+      exec "$MEZ" "$@"
     '';
 
     build-native.exec = ''
-      echo "🚀 Building native Mezze binary..."
+      echo "🚀 Building the native mez binary..."
       export PATH="${graalvm}/bin:${pkgs.gcc}/bin:$PATH"
       export ZLIB_LIB_PATH="${pkgs.zlib}/lib"
 
-      gradle build
-      gradle :cli:nativeCompile
+      ./gradlew :cli:nativeCompile
 
-      if [ -f "./cli/build/native/nativeCompile/mezze" ]; then
-        echo "✅ Native binary built: ./cli/build/native/nativeCompile/mezze"
-        echo "📊 Size: $(du -h ./cli/build/native/nativeCompile/mezze | cut -f1)"
+      BIN="./cli/build/native/nativeCompile/mez"
+      if [ -f "$BIN" ]; then
+        echo "✅ Native binary: $BIN ($(du -h "$BIN" | cut -f1))"
       else
-        echo "❌ Native compilation failed"
+        echo "❌ Native compilation failed" >&2
         exit 1
       fi
     '';
 
-    mezze.exec = ''
-      NATIVE_BINARY="./cli/build/native/nativeCompile/mezze"
-      if [ -f "$NATIVE_BINARY" ]; then
-        "$NATIVE_BINARY" "$@"
+    # Run the AOT native binary (build it with build-native first).
+    mez-native.exec = ''
+      BIN="./cli/build/native/nativeCompile/mez"
+      if [ -x "$BIN" ]; then
+        exec "$BIN" "$@"
       else
-        echo "❌ Native binary not found. Run 'build-native' first."
+        echo "❌ Native binary not found. Run 'build-native' first." >&2
         exit 1
       fi
     '';
@@ -169,32 +175,27 @@ in
   };
 
   enterShell = ''
-    echo "🚀 Mezze Language Development Environment"
+    echo "🚀 Mezze development environment"
     echo ""
-    echo "📦 Build Commands:"
-    echo "  build        - Build the project"
-    echo "  clean        - Clean build artifacts"
-    echo "  test         - Run tests"
+    echo "  Build & test"
+    echo "    build          build the mez CLI (./gradlew :cli:installDist)"
+    echo "    test           parser + typechecker + interpreter (separate suites)"
+    echo "    clean          gradle clean"
     echo ""
-    echo "🎯 Mezze CLI:"
-    echo "  mezze-dev     - Development CLI (JAR, faster builds)"
-    echo "  mezze         - Native binary CLI (production)"
-    echo "  build-native - Build native binary"
+    echo "  Run the compiler"
+    echo "    mez ...        dev CLI, e.g.  mez init hello  ·  mez exec app.mz  ·  mez check"
+    echo "    build-native   build the AOT native binary"
+    echo "    mez-native ... run the native binary"
     echo ""
-    echo "🛠️  Tooling:"
-    echo "  vscode-install - Package and install VSCode extension"
-    echo "  smoke-tests    - Run comprehensive CLI smoke tests"
-    echo "  ts-build       - Generate + build tree-sitter-mezze grammar"
-    echo "  ts-test        - Run tree-sitter corpus tests"
+    echo "  Tooling"
+    echo "    ts-build / ts-test   tree-sitter grammar (tooling/tree-sitter-mezze)"
+    echo "    vscode-install       package + install the VSCode extension"
+    echo "    smoke-tests          CLI smoke tests (docker-test-project)"
     echo ""
-    echo "🌐 Website:"
-    echo "  web-dev        - Website dev server (website/)"
-    echo "  web-build      - Build website to website/dist"
+    echo "  Website (or use: just <recipe>)"
+    echo "    web-dev / web-build  dev server / static build (website/)"
     echo ""
-    echo "📝 Examples:"
-    echo "  mezze-dev parse examples/basic/hello_world.mezze"
-    echo "  mezze-dev check examples/functions/lambda_examples.mezze"
-    echo "  mezze-dev exec examples/variants/color_examples.mezze"
+    echo "  Try it:  mez init hello && cd hello && mez dev"
     echo ""
   '';
 

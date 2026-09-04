@@ -1,275 +1,187 @@
-# Mezze Programming Language
+# Mezze
 
-<div align="center">
+**A functional language with first-class effects, running on GraalVM.**
 
-**A modern functional programming language with powerful pattern matching and algebraic effects**
+Write what a function *does* — the types keep up. Every function tells you what it
+touches (files, network, failure, concurrency), and you never annotate one. Full
+type safety, the performance of GraalVM, and the same program can ship as a native
+binary or a polyglot JVM jar.
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/your-org/mezze)
-[![Tests](https://img.shields.io/badge/tests-577%20passing-brightgreen.svg)](https://github.com/your-org/mezze)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
-[**🚀 Quick Start**](#quick-start) • [**📚 Documentation**](./docs/) • [**🎯 Examples**](./examples/) • [**🔧 Installation**](#installation)
-
-</div>
+**[▶ Try it in your browser — mezze-lang.org](https://mezze-lang.org)** · nothing to install.
 
 ---
 
-## ✨ What Makes Mezze Special?
+## A taste
 
-Mezze is designed around **powerful pattern matching** with a clean, modern syntax that makes complex data transformations intuitive and safe.
+Effects are first-class. A function's type says *what* it needs, never *which*
+implementation answers — so the caller swaps a real client for a mock without
+touching the function:
 
 ```mezze
-type Result = | Success { data: String }, Error { code: Int, message: String } |
+use std::effects::log::{ Console, println }
+use std::effects::http::{ HttpClient, MockHttpClient, mock_get, request }
 
-let handleResult = {result: Result} -> match result is
-  Success { data } -> "✅ Got: $(data)"
-  Error { code, message } if code >= 500 -> "🚨 Server error: $(message)"
-  Error { code, message } -> "⚠️  Client error ($(intToString {val = code})): $(message)"
+# weather says <Http> in its type. It never says which client answers,
+# so the caller below picks that, not weather.
+let weather = { url } -> request { url }.send {}.text_or { def = "offline" }
+
+let main = {} -> perform Console in do
+  let url = "https://wttr.in/Amsterdam?format=3"
+
+  # The real client — goes over the network.
+  perform HttpClient in println { msg = weather { url } }
+
+  # Same function, same url, no network at all.
+  let rules = [mock_get { body = "Amsterdam: Always raining", url = "*" }]
+  perform MockHttpClient { rules } in println { msg = weather { url } }
 ```
 
-### 🔥 Key Features
+Pattern matching is exhaustive — miss a case and it will not compile:
 
-- **🎯 New Match Syntax**: Clean `match ... is` syntax instead of `match ... {}`
-- **⚡ Multiple Patterns**: Group similar cases with `Red | Blue -> "primary"`
-- **🛡️ Guard Conditions**: Add `if condition` to patterns for precise control
-- **🧠 Logical Operators**: Use `&&` and `||` in guard expressions
-- **✅ Exhaustiveness Checking**: Compiler ensures all cases are handled
-- **🔧 Algebraic Effects**: Manage side effects functionally
-- **📊 Strong Type System**: Variants, records, and type inference
-- **🚀 Fast Execution**: Efficient interpreter with comprehensive optimization
+```mezze
+type Status = | Queued, Shipped { days: Int }, Cancelled { why: Str } |
 
-## 🚀 Quick Start
+let describe = { order } -> match order.status is
+  Queued               -> "$(order.id) waiting"
+  Shipped { days = 0 } -> "$(order.id) arrives today"
+  Shipped { days }     -> "$(order.id) arrives in $(days.to_str {}) days"
+  Cancelled { why }    -> "$(order.id) cancelled: $(why)"
+```
 
-### Installation
+Abilities give shared behaviour to your own types — one method, any type:
+
+```mezze
+ability Summary for 'a where { summarize: { it: 'a } -> Str }
+
+type Post = { user: Str, body: Str }
+impl Summary for Post where { summarize = { it } -> "@$(it.user): $(it.body)" }
+```
+
+More — async & structured concurrency, method chaining, scoped exceptions — at
+**[mezze-lang.org/taste](https://mezze-lang.org/taste)**, all runnable in the page.
+
+---
+
+## Why "Mezze"?
+
+Mezze is a spread of small dishes, where the meal is the combination rather than
+any one plate. A few simple constructs — records, variants, abilities, effects —
+combine to cover what larger languages need dedicated features for. A parameter
+list *is* a record; an ability and an effect are both named sets of operations,
+written and read the same way — what differs is who supplies them and when. Learn
+records well and most of the syntax follows.
+
+---
+
+## Getting started
+
+The zero-install path is the **[browser playground](https://mezze-lang.org)**. To
+build from source:
+
+### With Nix + devenv (recommended)
+
+The repo ships a [`devenv`](https://devenv.sh) shell with the exact GraalVM/JDK,
+Kotlin and Node it needs:
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/mezze.git
+git clone https://github.com/shrynx/funk-lang.git mezze
 cd mezze
-
-# Build the project
-gradle build
-
-# Verify installation
-mezze-dev --version
+devenv shell     # drops you into a shell with mez, gradle & graalvm on PATH
+build            # build the compiler  (./gradlew :cli:installDist)
+mez --help
 ```
 
-### Your First Program
-
-Create `hello.mz`:
-```mezze
-# Welcome to Mezze!
-let greeting = "Hello, Mezze!"
-let audience = "World"
-let message = "$(greeting), $(audience)! 🎉"
-
-message
-```
-
-Run it:
-```bash
-mezze-dev exec hello.mz
-# Output: Hello, Mezze!, World! 🎉
-```
-
-### Pattern Matching in Action
-
-```mezze
-type Weather = | Sunny { temp: Int }, Rainy, Cloudy, Snowy { temp: Int } |
-
-let planActivity = {weather: Weather} -> match weather is
-  Sunny { temp } if temp > 25 -> "🏖️ Beach day!"
-  Sunny { temp } -> "🚶 Nice walk weather"
-  Rainy -> "📚 Perfect reading weather"
-  Snowy { temp } if temp < -10 -> "🏠 Stay inside!"
-  Snowy { temp } -> "⛄ Snowman time!"
-  Cloudy -> "☁️ Maybe bring an umbrella"
-
-let today = Sunny { temp = 28 }
-planActivity {weather = today}  # "🏖️ Beach day!"
-```
-
-## 📚 Learn Mezze
-
-### 🎓 Learning Path
-
-1. **[📖 Getting Started](./docs/language-guide/getting-started.md)** - Installation and basics
-2. **[⚡ Basic Syntax](./docs/language-guide/basic-syntax.md)** - Language fundamentals
-3. **[🎯 Pattern Matching](./docs/language-guide/pattern-matching.md)** - Master the key feature
-4. **[🎯 Examples](./examples/)** - Hands-on code examples
-
-### 📁 Documentation Structure
-
-- **[📚 Language Guide](./docs/language-guide/)** - Learn Mezze step by step
-- **[📖 Reference](./docs/reference/)** - Complete technical reference  
-- **[🎯 Tutorials](./docs/tutorials/)** - Project-based learning
-- **[💡 Examples](./examples/)** - Organized code samples
-
-### 🎯 Examples by Topic
-
-- **[01-basics](./examples/01-basics/)** - Variables, functions, basic syntax
-- **[02-pattern-matching](./examples/02-pattern-matching/)** - Match expressions, guards, multiple patterns
-- **[03-functions](./examples/03-functions/)** - Lambdas, composition, higher-order functions
-- **[04-types](./examples/04-types/)** - Variants, records, type annotations
-- **[05-effects](./examples/05-effects/)** - Algebraic effects and handlers
-- **[06-advanced](./examples/06-advanced/)** - Complex patterns and real-world examples
-
-## 🔧 Development
-
-### Project Structure
-
-```
-mezze/
-├── 📚 docs/                    # Documentation
-├── 🎯 examples/                # Code examples  
-├── 🏗️  ast/                    # Abstract Syntax Tree
-├── 📝 parser/                  # ANTLR-based parser
-├── 🔍 typechecker/             # Type checking & inference
-├── ⚡ interpreter/              # Runtime execution
-├── 🖥️  cli/                    # Command-line interface
-└── 📦 stdlib/                  # Standard library
-```
-
-### Building from Source
+### With Gradle directly
 
 ```bash
-# Full build
-gradle build
-
-# Run tests
-gradle test
-
-# Build CLI
-gradle :cli:build
-
-# Run specific module tests
-gradle :typechecker:test
-gradle :interpreter:test
+./gradlew :cli:installDist
+export PATH="$PWD/cli/build/install/mez/bin:$PATH"
+mez --help
 ```
 
-### Testing
-
-Mezze has comprehensive test coverage:
-
-- **✅ Parser Tests**: Syntax parsing and AST generation
-- **✅ Typechecker Tests**: 325+ tests for type inference and exhaustiveness  
-- **✅ Interpreter Tests**: 252+ tests for runtime execution
-- **✅ Integration Tests**: End-to-end functionality
+### Your first program
 
 ```bash
-# Run all tests
-gradle test
-
-# Run specific test suites
-gradle :parser:test
-gradle :typechecker:test  
-gradle :interpreter:test
+mez init hello
+cd hello
+mez dev          # run it
 ```
 
-## 🌟 Language Features
-
-### Pattern Matching Evolution
-
-```mezze
-# ❌ Old syntax (deprecated)
-match value {
-  | Pattern -> result
-}
-
-# ✅ New syntax (current)
-match value is
-  Pattern -> result
-```
-
-### Multiple Patterns
-
-```mezze
-type Status = | Success, Info, Warning, Error, Critical |
-
-let severity = {status: Status} -> match status is
-  Success | Info -> "low"           # Multiple patterns with |
-  Warning -> "medium"               
-  Error | Critical -> "high"        # Group related cases
-```
-
-### Guard Conditions with Logic
-
-```mezze
-type User = | User { age: Int, premium: Boolean, verified: Boolean } |
-
-let accessLevel = {user: User} -> match user is
-  User { age, premium, verified } if age >= 18 && premium && verified -> "full"
-  User { age, premium, verified } if age >= 18 && (premium || verified) -> "standard"  
-  User { age, premium, verified } if age >= 13 -> "basic"
-  _ -> "restricted"
-```
-
-### Exhaustiveness Checking
-
-```mezze
-type Color = | Red, Green, Blue |
-
-# ✅ Exhaustive - compiles successfully
-let describe = {color: Color} -> match color is
-  Red -> "warm"
-  Green -> "natural"  
-  Blue -> "cool"
-
-# ❌ Non-exhaustive - compile error!
-let incomplete = {color: Color} -> match color is
-  Red -> "warm"
-  # Missing Green and Blue - compiler catches this!
-```
-
-## 🤝 Contributing
-
-We welcome contributions! Here's how to get started:
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Make your changes** and add tests
-4. **Run the test suite**: `gradle test`
-5. **Commit your changes**: `git commit -m 'Add amazing feature'`
-6. **Push to your branch**: `git push origin feature/amazing-feature`
-7. **Open a Pull Request**
-
-### Development Guidelines
-
-- **Add tests** for new features
-- **Update documentation** for user-facing changes
-- **Follow existing code style**
-- **Write clear commit messages**
-
-## 📊 Project Status
-
-- **🟢 Parser**: Complete with new syntax support
-- **🟢 Type System**: Full type inference and checking
-- **🟢 Pattern Matching**: Complete with guards and multiple patterns
-- **🟢 Interpreter**: Full runtime execution
-- **🟢 Effects System**: Algebraic effects implementation
-- **🟢 Documentation**: Comprehensive guides and examples
-- **🟡 Standard Library**: Growing collection of utilities
-- **🔴 Package Manager**: Planned for future release
-
-## 📜 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **ANTLR** - For the excellent parser generator
-- **Kotlin** - For the robust implementation platform  
-- **Gradle** - For the build system
-- **The functional programming community** - For inspiration and guidance
+…or run a single file: `mez exec app.mz`.
 
 ---
 
-<div align="center">
+## The `mez` CLI
 
-**Ready to explore functional programming with powerful pattern matching?**
+| command | what it does |
+|---|---|
+| `mez init <name>` | scaffold a new project |
+| `mez dev` | run the app — interpreted, fast startup, no JIT warm-up |
+| `mez build` | build a JVM jar (JIT); add `--native` for an AOT GraalVM binary |
+| `mez exec <file.mz>` | run a single file |
+| `mez check` | type-check without running |
+| `mez fmt` | format source |
+| `mez index` | build the content-addressed store |
+| `mez lsp` | language server (editor integration) |
 
-[**🚀 Get Started**](./docs/language-guide/getting-started.md) • [**📚 Read the Docs**](./docs/) • [**🎯 Try Examples**](./examples/)
+---
 
-**Made with ❤️ by the Mezze team**
+## How it's built
 
-</div>
+Mezze is a Kotlin front-end on a GraalVM/Truffle runtime, split into focused
+Gradle modules:
+
+| module | role |
+|---|---|
+| `ast` | parsed-AST nodes, diagnostics, and the shared type core (content hashing) |
+| `parser` | hand-written recursive-descent parser + combinators (no ANTLR) |
+| `typechecker` | inference, unification, ability/effect/exhaustiveness checking |
+| `interpreter` | GraalVM/Truffle runtime — effect handlers, native nodes |
+| `langservice` | shared diagnostics, hover & completion — powers LSP, CLI and the WASM playground |
+| `lsp` | Language Server Protocol server |
+| `cli` | the `mez` command |
+| `store` · `store-sqlite` | content-addressed storage (SQLite-backed) |
+| `stdlib` | the standard library, written in Mezze |
+| `formatter` | source formatter |
+| `datastructures` | Truffle-native collections (Seq/List/Map/Set) |
+| `wire-protocol` | runtime wire protocol for distributed execution |
+
+Every declaration is hashed by structure, which drives incremental compilation,
+the store, and the language server.
+
+---
+
+## Development
+
+Inside `devenv shell`:
+
+```bash
+build            # ./gradlew :cli:installDist
+test             # build + run the test suites
+build-native     # AOT native binary via :cli:nativeCompile
+```
+
+The typechecker and interpreter suites are heavy and share a lot of RAM — run them
+as **separate** Gradle invocations rather than one `gradle test`:
+
+```bash
+./gradlew :parser:test       --no-daemon
+./gradlew :typechecker:test  --no-daemon
+./gradlew :interpreter:test  --no-daemon
+```
+
+The marketing site + browser playground live in `website/` and are driven by the
+`Justfile` (`just dev`, `just build`, `just deploy`). The tree-sitter grammar lives
+in `tooling/` (`ts-build`, `ts-test` in the devenv shell).
+
+---
+
+## Status
+
+Under active development. The language, type system, effect runtime, formatter,
+LSP and browser playground all work today; APIs still move. `planned_features/`
+holds designs not yet implemented (macros, polyglot interop).
+
+## License
+
+No license yet — all rights reserved for now.
