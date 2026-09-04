@@ -7,11 +7,30 @@ import com.mezze.language.parser.internal.lib.*
 // Let binding pattern parser (for irrefutable patterns in let bindings)
 internal val MezzeParser.letBindingPattern: Parser<ParsedPattern>
     get() = { stream ->
-        Parsers.oneOf(
+        when (val r = Parsers.oneOf(
             wildcardPattern,
             standaloneRecordPattern,
             variablePatternForLet
-        )(stream)
+        )(stream)) {
+            is ParseResult.Success -> r
+            is ParseResult.Failure ->
+                // `oneOf` surfaces ONE alternative's low-level failure here —
+                // usually the wildcard's "Expected '_'", which misdiagnoses
+                // `let 3 = x` (the real problem isn't a missing `_`). Replace it
+                // with what a let can actually bind + what was there — but ONLY
+                // when no alternative made progress past the first token. A
+                // deeper failure (r.position advanced) means an alternative
+                // committed and produced a SPECIFIC error — e.g. `let scope = …`
+                // parsed the name then hit the reserved-name check, or a record
+                // pattern failed mid-way — and that error is the right one to keep.
+                if (r.isFatal || r.position > stream.getSourcePosition()) r
+                else stream.failure(
+                    "A `let` binds a name, a wildcard `_`, or a `{ … }` destructuring " +
+                        "pattern, but got ${com.mezze.language.parser.tokenGotDescription(stream.current())}",
+                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0128_INVALID_LET_BINDING_TARGET,
+                    hints = listOf("name the binding, e.g. `let x = ...`")
+                )
+        }
     }
 
 // Variable pattern for let bindings - simple identifier becomes ParsedVariablePattern

@@ -123,6 +123,12 @@ fun ErrorCode.explain(): String = when (this) {
         "`having 'elem = Int`, not `having Int`. The type variable must match " +
         "the one declared in the ability's `having` clause."
 
+    ErrorCode.P0128_INVALID_LET_BINDING_TARGET ->
+        "The thing between `let` and `=` must be a binding target: a name " +
+        "(`let x = ...`), a wildcard to discard the value (`let _ = ...`), or a " +
+        "`{ ... }` record-destructuring pattern (`let { x, y } = ...`). A literal or " +
+        "expression like `3` can't be bound — name it instead."
+
     ErrorCode.T0201_TYPE_MISMATCH ->
         "Two types that should be the same are different. This is the most common type error. " +
         "Check that the argument types match the function's parameter types, " +

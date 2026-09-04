@@ -60,6 +60,7 @@ enum class ErrorCode {
     P0125_INTEGER_LITERAL_OUT_OF_RANGE, // `9223372036854775808` — literal exceeds the 64-bit integer range
     P0126_DECL_NAME_ON_NEW_LINE, // `let\nname` / `type\nName` — the name must be on the same line as the declaration keyword
     P0127_HAVING_NEEDS_BINDING, // `having Int` — must bind a type variable: `having 'elem = Int`
+    P0128_INVALID_LET_BINDING_TARGET, // `let 3 = x` — a let binds a name, `_`, or a `{ … }` destructuring pattern, not a literal/expression
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,
