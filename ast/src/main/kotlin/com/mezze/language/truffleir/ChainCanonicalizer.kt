@@ -182,8 +182,7 @@ object ChainCanonicalizer {
         is SinkIR.Fold, SinkIR.Sum, is SinkIR.ForEach -> true
         SinkIR.Count, is SinkIR.Any, is SinkIR.All -> true
         is SinkIR.Find, is SinkIR.Reduce -> true
-        // TODO: implement emit for these
-        SinkIR.ToSeq, SinkIR.ToList -> false
+        SinkIR.ToSeq, SinkIR.ToList -> true
     }
 
     /** Handle __native_iter_{count,any,all,find,reduce,to_seq,to_list}.

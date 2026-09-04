@@ -1469,6 +1469,68 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    // ── Seq/List builder operations for fused materializing sinks ───────
+
+    /**
+     * Create a new mutable seq builder (backed by ArrayList) for use
+     * in fused ToSeq/ToList loops. Optional size-hint parameter enables
+     * pre-allocation when the output size is known (e.g. range source
+     * with no filter stages). Returns raw Object to satisfy Truffle's
+     * BDSL type constraints (no generics).
+     */
+    @Operation
+    public static final class NewSeqBuilder {
+        @Specialization
+        @SuppressWarnings("unchecked")
+        public static Object doNew(long sizeHint) {
+            return new java.util.ArrayList<>(sizeHint > 0 ? (int) sizeHint : 16);
+        }
+    }
+
+    /**
+     * Append an element to the mutable seq builder. Returns the
+     * builder itself (for balanced BDSL stack).
+     */
+    @Operation
+    public static final class SeqBuilderAdd {
+        @Specialization
+        @SuppressWarnings("unchecked")
+        public static Object doAdd(Object builder, Object element) {
+            ((java.util.ArrayList<Object>) builder).add(element);
+            return builder;
+        }
+    }
+
+    /**
+     * Finalize the seq builder into an immutable {@link MezzeSeq}.
+     * The builder should not be used after this call.
+     */
+    @Operation
+    public static final class SeqBuilderToSeq {
+        @Specialization
+        @SuppressWarnings("unchecked")
+        public static MezzeSeq<Object> doFinalize(Object builder) {
+            var list = (java.util.ArrayList<Object>) builder;
+            if (list.isEmpty()) return MezzeSeq.empty();
+            return MezzeSeq.of(list.toArray());
+        }
+    }
+
+    /**
+     * Finalize the seq builder into a {@link com.mezze.datastructures.list.MezzeList}.
+     * The builder should not be used after this call.
+     */
+    @Operation
+    public static final class SeqBuilderToList {
+        @Specialization
+        @SuppressWarnings("unchecked")
+        public static Object doFinalize(Object builder) {
+            var list = (java.util.ArrayList<Object>) builder;
+            if (list.isEmpty()) return com.mezze.datastructures.list.MezzeList.empty();
+            return com.mezze.datastructures.list.MezzeList.of(list.toArray());
+        }
+    }
+
     /**
      * Construct a variant with no payload (e.g. {@code None}, {@code True}).
      *

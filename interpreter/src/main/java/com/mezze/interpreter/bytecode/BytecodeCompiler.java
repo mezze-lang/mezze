@@ -3020,8 +3020,11 @@ public final class BytecodeCompiler {
         record ShortCircuit(FilterPeel predPeel, ShortCircuitKind kind) implements FusedSinkMode {}
         /** Fold with first element as init; result wrapped in Option. */
         record ReduceOpt(InlineOp op) implements FusedSinkMode {}
+        /** Collect elements into a Seq or List. */
+        record Materialize(MaterializeTarget target) implements FusedSinkMode {}
 
         enum ShortCircuitKind { ANY, ALL, FIND }
+        enum MaterializeTarget { SEQ, LIST }
     }
 
     /**
@@ -3058,6 +3061,12 @@ public final class BytecodeCompiler {
             var reducerOp = classifyBinaryFolder(reduceSink.getF(), dbg, "reducer");
             if (reducerOp == null) return null;
             return new FusedSinkMode.ReduceOpt(reducerOp);
+        }
+        if (chain.getSink() instanceof SinkIR.ToSeq) {
+            return new FusedSinkMode.Materialize(FusedSinkMode.MaterializeTarget.SEQ);
+        }
+        if (chain.getSink() instanceof SinkIR.ToList) {
+            return new FusedSinkMode.Materialize(FusedSinkMode.MaterializeTarget.LIST);
         }
         if (dbg) System.err.println("[chain-canon-emit] reject: unsupported sink: "
                 + chain.getSink().getClass().getSimpleName());
@@ -3178,10 +3187,11 @@ public final class BytecodeCompiler {
         var xSlot = b.createLocal();
 
         // ── Mode-specific locals ──
-        com.oracle.truffle.api.bytecode.BytecodeLocal accSlot    = null;
-        com.oracle.truffle.api.bytecode.BytecodeLocal foundSlot  = null;
-        com.oracle.truffle.api.bytecode.BytecodeLocal resultSlot = null;
-        com.oracle.truffle.api.bytecode.BytecodeLocal hasAccSlot = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal accSlot     = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal foundSlot   = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal resultSlot  = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal hasAccSlot  = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal builderSlot = null;
 
         switch (mode) {
             case FusedSinkMode.Accumulate a -> {
@@ -3206,6 +3216,9 @@ public final class BytecodeCompiler {
                 b.beginStoreLocal(hasAccSlot);
                   b.emitLoadObjectConstant(Boolean.FALSE);
                 b.endStoreLocal();
+            }
+            case FusedSinkMode.Materialize ignored -> {
+                builderSlot = b.createLocal();
             }
         }
 
@@ -3237,6 +3250,24 @@ public final class BytecodeCompiler {
         }
 
         var boundSlot = isRange ? endSlot : sizeSlot;
+
+        // ── Init builder for materializing sinks ──
+        if (mode instanceof FusedSinkMode.Materialize) {
+            // Size hint: range end - start (if range); else seq size.
+            // With filters the actual count may be less, but over-alloc
+            // is cheaper than realloc.
+            b.beginStoreLocal(builderSlot);
+              b.beginNewSeqBuilder();
+              if (isRange) {
+                  b.beginDirectSubtract();
+                    b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                  b.endDirectSubtract();
+              } else {
+                  b.emitLoadLocal(sizeSlot);
+              }
+              b.endNewSeqBuilder();
+            b.endStoreLocal();
+        }
 
         // ── Pre-allocate Take/Drop counter locals ──
         var takeDropCounters = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
@@ -3409,6 +3440,16 @@ public final class BytecodeCompiler {
                   b.endBlock();
                 b.endIfThenElse();
             }
+            case FusedSinkMode.Materialize ignored -> {
+                // builder.add(x) — discard the returned builder ref
+                var discardSlot2 = b.createLocal();
+                b.beginStoreLocal(discardSlot2);
+                  b.beginSeqBuilderAdd();
+                    b.emitLoadLocal(builderSlot);
+                    b.emitLoadLocal(xSlot);
+                  b.endSeqBuilderAdd();
+                b.endStoreLocal();
+            }
         }
 
         // ── Close stages (shared) ──
@@ -3473,6 +3514,17 @@ public final class BytecodeCompiler {
                   b.emitMakeVariantNoPayload(NONE_TAG,
                       com.mezze.language.ast.BuiltinTypes.NONE);
                 b.endConditional();
+            }
+            case FusedSinkMode.Materialize m -> {
+                if (m.target() == FusedSinkMode.MaterializeTarget.SEQ) {
+                    b.beginSeqBuilderToSeq();
+                      b.emitLoadLocal(builderSlot);
+                    b.endSeqBuilderToSeq();
+                } else {
+                    b.beginSeqBuilderToList();
+                      b.emitLoadLocal(builderSlot);
+                    b.endSeqBuilderToList();
+                }
             }
         }
 
