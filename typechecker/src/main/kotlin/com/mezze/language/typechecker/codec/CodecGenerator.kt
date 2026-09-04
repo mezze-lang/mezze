@@ -1,2362 +1,730 @@
 package com.mezze.language.typechecker.codec
 
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.PrimitiveTypes
-import com.mezze.language.ast.TypeVar
 import com.mezze.language.parsedast.*
 
 /**
- * CodecGenerator - Generates Encode/Decode ability implementations automatically.
+ * Auto-derivation of the Tier-3 codec abilities (`Encode` and `Decode`).
  *
- * This generator is invoked by the TypeChecker when it encounters an Encode/Decode
- * constraint that doesn't have an explicit implementation. It generates the
- * implementation AST based on the type structure.
+ * When the constraint solver sees an `Encode 'config 'a` or `Decode 'config 'a 'in`
+ * obligation with no matching user impl, this generator synthesizes one by
+ * walking the value-type shape and dispatching to the format's Tier-2 per-
+ * shape ability methods (`config.encode_int`, `config.encode_record`,
+ * `config.decode_variant`, …). Missing Tier-2 capability (e.g. CSV lacking
+ * `EncodeVariant`) surfaces naturally as a typecheck error at the field's
+ * method call site — the enclosing solver adds path context.
  *
- * Example: For `user.encode { fmt = json::utf8, config = default_config }` where
- * user: {name: Str, age: Int}, this generates an impl with `it` as the receiver:
+ * User-written impls always take precedence over auto-derivation.
  *
- * ```
- * impl EncodeRepr for {name: Str, age: Int} where {
- *     encode_repr = {fmt, config} ->
- *         let name_encoded = Format.encode_string {val = it.name, path = ...}
- *         let age_encoded = Format.encode_int {val = it.age, path = ...}
- *         Format.encode_record {fields = [{key = "name", value = name_encoded}, ...], path = ...}
- * }
- * ```
+ * See `docs/codec/redesign-2026-09.md` §"Tier 3 — Encode / Decode primitive".
  */
 class CodecGenerator {
 
-    private val GEN_LOC = Loc("<generated>", 0, 0, 0, 0)
-
-    // Cache of generated implementations to avoid regeneration
     private val encodeCache = mutableMapOf<String, ParsedImplAbilityDecl>()
     private val decodeCache = mutableMapOf<String, ParsedImplAbilityDecl>()
-    private val streamEncodeCache = mutableMapOf<String, ParsedImplAbilityDecl>()
-    private val streamDecodeCache = mutableMapOf<String, ParsedImplAbilityDecl>()
+
+    // ---------------------------------------------------------------------
+    // Public API
+    // ---------------------------------------------------------------------
 
     /**
-     * Check if a type can be automatically serialized.
+     * Return true iff a codec impl can be auto-derived for [type]. Function
+     * / effect-row types are unsupported; everything else with derivable
+     * children is.
      */
-    fun isSerializable(type: MezzeType): Boolean {
-        return when (type) {
-            is MezzeType.IntType -> true
-            is MezzeType.FloatType -> true
-            is MezzeType.StringType -> true
-            is MezzeType.BoolType -> true
-            is MezzeType.FracType -> true
-            is MezzeType.CharType -> true
-            is MezzeType.BytesType -> true
-            is MezzeType.FunctionType -> false
-            is MezzeType.EffectRow -> false
-            is MezzeType.RecordType -> type.fields.values.all { isSerializable(it) }
-            is MezzeType.VariantType -> type.constructors.values.all { payload ->
-                payload == null || isSerializable(payload)
-            }
-            is MezzeType.ListType -> isSerializable(type.elementType)
-            is MezzeType.SeqType -> isSerializable(type.elementType)
-            is MezzeType.SetType -> isSerializable(type.elementType)
-            is MezzeType.SortedSetType -> isSerializable(type.elementType)
-            is MezzeType.MapType -> isSerializable(type.keyType) && isSerializable(type.valueType)
-            is MezzeType.SortedMapType -> isSerializable(type.keyType) && isSerializable(type.valueType)
-            is MezzeType.TypeApplication -> {
-                type.args.all { isSerializable(it) }
-            }
-            is MezzeType.NewtypeType -> false
-            is MezzeType.VarType -> true
+    fun isSerializable(type: MezzeType): Boolean = when (type) {
+        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+        is MezzeType.BoolType, is MezzeType.FracType, is MezzeType.CharType,
+        is MezzeType.BytesType -> true
+        is MezzeType.FunctionType -> false
+        is MezzeType.EffectRow -> false
+        is MezzeType.RecordType -> type.fields.values.all { isSerializable(it) }
+        is MezzeType.VariantType -> type.constructors.values.all { payload ->
+            payload == null || isSerializable(payload)
         }
+        is MezzeType.ListType -> isSerializable(type.elementType)
+        is MezzeType.SeqType -> isSerializable(type.elementType)
+        is MezzeType.SetType -> isSerializable(type.elementType)
+        is MezzeType.SortedSetType -> isSerializable(type.elementType)
+        is MezzeType.MapType -> isSerializable(type.keyType) && isSerializable(type.valueType)
+        is MezzeType.SortedMapType -> isSerializable(type.keyType) && isSerializable(type.valueType)
+        is MezzeType.TypeApplication -> type.args.all { isSerializable(it) }
+        is MezzeType.NewtypeType -> false
+        is MezzeType.VarType -> true
     }
 
     /**
-     * Generate a normalized cache key for a type.
-     */
-    private fun normalizedCacheKey(formatType: MezzeType, dataType: MezzeType): String {
-        val normalizedData = normalizeType(dataType)
-        return "${normalizeType(formatType)}_$normalizedData"
-    }
-
-    /**
-     * Normalize a type for consistent cache key generation.
-     */
-    private fun normalizeType(type: MezzeType): String {
-        return when (type) {
-            is MezzeType.RecordType -> {
-                val sortedFields = type.fields.entries.sortedBy { it.key }
-                    .joinToString(",") { "${it.key}:${normalizeType(it.value)}" }
-                "{$sortedFields}"
-            }
-            is MezzeType.VariantType -> {
-                val sortedCtors = type.constructors.entries.sortedBy { it.key }
-                    .joinToString(",") { "${it.key}:${it.value?.let { v -> normalizeType(v) } ?: "()"}" }
-                "|$sortedCtors|"
-            }
-            is MezzeType.ListType -> "List[${normalizeType(type.elementType)}]"
-            is MezzeType.SeqType -> "Seq[${normalizeType(type.elementType)}]"
-            is MezzeType.SetType -> "Set[${normalizeType(type.elementType)}]"
-            is MezzeType.SortedSetType -> "SortedSet[${normalizeType(type.elementType)}]"
-            is MezzeType.MapType -> "Map[${normalizeType(type.keyType)},${normalizeType(type.valueType)}]"
-            is MezzeType.SortedMapType -> "SortedMap[${normalizeType(type.keyType)},${normalizeType(type.valueType)}]"
-            is MezzeType.TypeApplication -> "${type.constructor}[${type.args.joinToString(",") { normalizeType(it) }}]"
-            else -> type.toString()
-        }
-    }
-
-    /**
-     * Generate an Encode implementation for the given format and data type.
+     * Synthesize `impl Encode <formatType> for <dataType>` whose body walks
+     * [dataType] and dispatches per-field / per-element / per-constructor to
+     * the format's Tier-2 encoder methods (via `config.encode_<shape>`) and
+     * recurses into compound children through Tier 3 (`x.encode { config = config }`).
+     *
+     * The impl header omits `having 'out = …` — the Format ability's associated
+     * type resolves that at constraint-solve time.
      */
     fun generateEncodeImpl(formatType: MezzeType, dataType: MezzeType): ParsedImplAbilityDecl {
-        val cacheKey = normalizedCacheKey(formatType, dataType)
-        encodeCache[cacheKey]?.let { return it }
+        val key = "$formatType|$dataType"
+        encodeCache[key]?.let { return it }
 
-        val impl = when {
-            dataType is MezzeType.IntType -> generatePrimitiveEncode(formatType, dataType, "encode_int", "val")
-            dataType is MezzeType.FloatType -> generatePrimitiveEncode(formatType, dataType, "encode_float", "val")
-            dataType is MezzeType.StringType -> generatePrimitiveEncode(formatType, dataType, "encode_string", "val")
-            dataType is MezzeType.BoolType -> generatePrimitiveEncode(formatType, dataType, "encode_bool", "val")
-            dataType is MezzeType.FracType -> generatePrimitiveEncode(formatType, dataType, "encode_frac", "val")
-            dataType is MezzeType.CharType -> generateCharEncode(formatType)
-            dataType is MezzeType.BytesType -> generatePrimitiveEncode(formatType, dataType, "encode_bytes", "val")
-            isBoolVariant(dataType) -> generateBoolEncode(formatType)
-            dataType is MezzeType.RecordType -> generateRecordEncode(formatType, dataType)
-            dataType is MezzeType.VariantType -> generateVariantEncode(formatType, dataType)
-            dataType is MezzeType.ListType -> generateListEncode(formatType, dataType)
-            dataType is MezzeType.SeqType -> generateArrayEncode(formatType, dataType)
-            dataType is MezzeType.SetType -> generateSetEncode(formatType, dataType)
-            dataType is MezzeType.SortedSetType -> generateSortedSetEncode(formatType, dataType)
-            dataType is MezzeType.MapType -> generateMapEncode(formatType, dataType)
-            dataType is MezzeType.SortedMapType -> generateSortedMapEncode(formatType, dataType)
-            dataType is MezzeType.TypeApplication -> generateTypeApplicationEncode(formatType, dataType)
-            else -> throw IllegalArgumentException("Cannot generate Encode for type: $dataType")
-        }
-
-        encodeCache[cacheKey] = impl
-        return impl
-    }
-
-    private fun isBoolVariant(type: MezzeType): Boolean = PrimitiveTypes.isBoolVariant(type)
-
-    /**
-     * Generate encode for Bool (which is internally a variant | True, False |).
-     */
-    private fun generateBoolEncode(formatType: MezzeType): ParsedImplAbilityDecl {
-        val body = call(
-            member(encodeFormatImpl(formatType), "encode_bool"),
-            record("val" to id("it"), "path" to id("path"))
-        )
-        return createEncodeImpl(formatType, MezzeType.VariantType(
-            constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null),
-            rowVar = null
-        ), body)
-    }
-
-    /**
-     * Generate a Decode implementation for the given format and data type.
-     */
-    fun generateDecodeImpl(formatType: MezzeType, dataType: MezzeType): ParsedImplAbilityDecl {
-        val cacheKey = normalizedCacheKey(formatType, dataType)
-        decodeCache[cacheKey]?.let { return it }
-
-        val impl = when {
-            dataType is MezzeType.IntType -> generatePrimitiveDecode(formatType, dataType, "decode_int")
-            dataType is MezzeType.FloatType -> generatePrimitiveDecode(formatType, dataType, "decode_float")
-            dataType is MezzeType.StringType -> generatePrimitiveDecode(formatType, dataType, "decode_string")
-            dataType is MezzeType.BoolType -> generatePrimitiveDecode(formatType, dataType, "decode_bool")
-            dataType is MezzeType.FracType -> generatePrimitiveDecode(formatType, dataType, "decode_frac")
-            dataType is MezzeType.CharType -> generateCharDecode(formatType)
-            dataType is MezzeType.BytesType -> generatePrimitiveDecode(formatType, dataType, "decode_bytes")
-            isBoolVariant(dataType) -> generateBoolDecode(formatType)
-            dataType is MezzeType.RecordType -> generateRecordDecode(formatType, dataType)
-            dataType is MezzeType.VariantType -> generateVariantDecode(formatType, dataType)
-            dataType is MezzeType.ListType -> generateListDecode(formatType, dataType)
-            dataType is MezzeType.SeqType -> generateArrayDecode(formatType, dataType)
-            dataType is MezzeType.SetType -> generateSetDecode(formatType, dataType)
-            dataType is MezzeType.SortedSetType -> generateSortedSetDecode(formatType, dataType)
-            dataType is MezzeType.MapType -> generateMapDecode(formatType, dataType)
-            dataType is MezzeType.SortedMapType -> generateSortedMapDecode(formatType, dataType)
-            dataType is MezzeType.TypeApplication -> generateTypeApplicationDecode(formatType, dataType)
-            else -> throw IllegalArgumentException("Cannot generate Decode for type: $dataType")
-        }
-
-        decodeCache[cacheKey] = impl
+        val encoded = buildEncodeExpr(dataType, id("it"))
+        val body = doWithLet("ctx", initialCtx(), encoded)
+        val impl = createEncodeImpl(formatType, dataType, body)
+        encodeCache[key] = impl
         return impl
     }
 
     /**
-     * Generate decode for Bool (which is internally a variant | True, False |).
+     * Synthesize `impl Decode <formatType> <dataType> for <inType>` whose body
+     * walks [dataType] and dispatches per-shape to `config.decode_*` (Tier 2),
+     * recursing into compound children through Tier 3.
+     *
+     * [inType] is the format's input representation (`Json` for `JsonC`,
+     * `Bytes` for `JsonUtf8C`, `Str` for `UrlC`) — the emitter reads it off
+     * the 3-slot constraint that triggered this synthesis.
      */
-    private fun generateBoolDecode(formatType: MezzeType): ParsedImplAbilityDecl {
-        val body = call(
-            member(decodeFormatImpl(formatType), "decode_bool"),
-            record("val" to id("it"), "path" to id("path"))
+    fun generateDecodeImpl(
+        formatType: MezzeType,
+        dataType: MezzeType,
+        inType: MezzeType,
+    ): ParsedImplAbilityDecl {
+        val key = "$formatType|$dataType|$inType"
+        decodeCache[key]?.let { return it }
+
+        val decoded = buildDecodeExpr(dataType, id("it"))
+        val body = doWithLet("ctx", initialCtx(), decoded)
+        val impl = createDecodeImpl(formatType, dataType, inType, body)
+        decodeCache[key] = impl
+        return impl
+    }
+
+    // ---------------------------------------------------------------------
+    // Encode body construction
+    // ---------------------------------------------------------------------
+
+    /** Encode a value of [type] bound to [valueExpr] into the format's output. */
+    private fun buildEncodeExpr(type: MezzeType, valueExpr: ParsedExpr): ParsedExpr {
+        if (PrimitiveTypes.isBoolVariant(type)) return scalarEncode("encode_bool", valueExpr)
+        return when (type) {
+            is MezzeType.IntType    -> scalarEncode("encode_int",   valueExpr)
+            is MezzeType.FloatType  -> scalarEncode("encode_float", valueExpr)
+            is MezzeType.StringType -> scalarEncode("encode_str",   valueExpr)
+            is MezzeType.BoolType   -> scalarEncode("encode_bool",  valueExpr)
+            is MezzeType.FracType   -> scalarEncode("encode_frac",  valueExpr)
+            is MezzeType.CharType   -> scalarEncode("encode_char",  valueExpr)
+            is MezzeType.BytesType  -> scalarEncode("encode_bytes", valueExpr)
+
+            is MezzeType.RecordType -> buildEncodeRecord(type, valueExpr)
+            is MezzeType.VariantType -> buildEncodeVariant(type, valueExpr)
+
+            is MezzeType.ListType    -> buildEncodeList(type.elementType, valueExpr)
+            is MezzeType.SeqType     -> buildEncodeList(type.elementType, valueExpr)
+            is MezzeType.SetType     -> buildEncodeList(type.elementType, valueExpr)
+            is MezzeType.SortedSetType -> buildEncodeList(type.elementType, valueExpr)
+
+            is MezzeType.MapType       -> buildEncodeMap(type.keyType, type.valueType, valueExpr)
+            is MezzeType.SortedMapType -> buildEncodeMap(type.keyType, type.valueType, valueExpr)
+
+            is MezzeType.TypeApplication -> when (type.constructor) {
+                BuiltinTypes.OPTION -> buildEncodeOption(type.args.firstOrNull(), valueExpr)
+                else -> tierThreeEncode(valueExpr)
+            }
+
+            // Newtypes / VarTypes / anything else: recurse through Tier 3.
+            // Any user-written `impl Encode 'config for T` wins the dispatch;
+            // otherwise the constraint solver drives its own auto-derivation.
+            else -> tierThreeEncode(valueExpr)
+        }
+    }
+
+    /** `config.encode_<hook> { val = <valueExpr>, ctx = ctx }` */
+    private fun scalarEncode(hookName: String, valueExpr: ParsedExpr): ParsedExpr =
+        call(
+            member(id("config"), hookName),
+            record("val" to valueExpr, "ctx" to id("ctx")),
         )
-        return createDecodeImpl(formatType, MezzeType.VariantType(
-            constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null),
-            rowVar = null
-        ), body)
-    }
 
-    /** Create a record literal with field entries */
-    private fun record(vararg fields: Pair<String, ParsedExpr>): ParsedRecordLit {
-        return ParsedRecordLit(
-            entries = fields.map { (name, value) -> ParsedRecordEntry.Field(name, value, GEN_LOC) },
-            loc = GEN_LOC
+    /** Nested-value dispatch via Tier 3: `<valueExpr>.encode { config = config }`. */
+    private fun tierThreeEncode(valueExpr: ParsedExpr): ParsedExpr =
+        call(
+            member(valueExpr, "encode"),
+            record("config" to id("config")),
+        )
+
+    private fun buildEncodeRecord(type: MezzeType.RecordType, valueExpr: ParsedExpr): ParsedExpr {
+        val fields = type.fields.entries.sortedBy { it.key }
+        val encodedFieldsSeq = seqLit(
+            fields.map { (fieldName, fieldType) ->
+                record(
+                    "key" to transformFieldName(fieldName),
+                    "val" to buildEncodeExpr(fieldType, member(valueExpr, fieldName)),
+                )
+            }
+        )
+        return call(
+            member(id("config"), "encode_record"),
+            record("fields" to encodedFieldsSeq, "ctx" to id("ctx")),
         )
     }
 
-    /** Create a function call */
-    private fun call(func: ParsedExpr, args: ParsedRecordLit): ParsedFunctionCall {
-        return ParsedFunctionCall(function = func, arguments = args, loc = GEN_LOC)
+    private fun buildEncodeVariant(type: MezzeType.VariantType, valueExpr: ParsedExpr): ParsedExpr {
+        val cases = type.constructors.entries.sortedBy { it.key }.map { (ctorName, payloadType) ->
+            if (payloadType == null) {
+                matchCase(
+                    constructorPat(ctorName, null),
+                    call(
+                        member(id("config"), "encode_variant"),
+                        record(
+                            "tag" to str(ctorName),
+                            "payload" to none(),
+                            "ctx" to id("ctx"),
+                        ),
+                    ),
+                )
+            } else {
+                val payloadVar = "__payload"
+                val encodedPayload = buildEncodeExpr(payloadType, id(payloadVar))
+                matchCase(
+                    constructorPat(ctorName, varPat(payloadVar)),
+                    call(
+                        member(id("config"), "encode_variant"),
+                        record(
+                            "tag" to str(ctorName),
+                            "payload" to some(encodedPayload),
+                            "ctx" to id("ctx"),
+                        ),
+                    ),
+                )
+            }
+        }
+        return match(valueExpr, *cases.toTypedArray())
     }
 
-    /** Create a member access expression */
-    private fun member(receiver: ParsedExpr, memberName: String): ParsedMemberAccess {
-        return ParsedMemberAccess(receiver = receiver, member = memberName, loc = GEN_LOC)
-    }
-
-    /** Create an identifier expression */
-    private fun id(name: String): ParsedIdentifier {
-        return ParsedIdentifier(localName = name, qualifier = null, loc = GEN_LOC)
-    }
-
-    /** Create a string literal */
-    private fun str(value: String): ParsedStringLit {
-        return ParsedStringLit(parts = listOf(ParsedStringPart.Literal(value)), loc = GEN_LOC)
-    }
-
-    /** Create an int literal */
-    private fun intLit(value: Long): ParsedIntLit {
-        return ParsedIntLit(value = value, loc = GEN_LOC)
-    }
-
-    /** Create a variant construction */
-    private fun variant(constructor: String, payload: ParsedExpr? = null): ParsedVariantConstruct {
-        return ParsedVariantConstruct(constructor = constructor, value = payload, loc = GEN_LOC)
-    }
-
-    /** Create a constructor pattern for match */
-    private fun constructorPat(name: String, payload: ParsedPattern? = null): ParsedConstructorPattern {
-        return ParsedConstructorPattern(constructor = name, payload = payload, loc = GEN_LOC)
-    }
-
-    /** Create a variable pattern */
-    private fun varPat(name: String): ParsedVariablePattern {
-        return ParsedVariablePattern(name = name, loc = GEN_LOC)
-    }
-
-    /** Create a record pattern */
-    private fun recordPat(vararg entries: Pair<String, ParsedPattern?>): ParsedRecordPattern {
-        return ParsedRecordPattern(
-            entries = entries.map { (name, pat) -> ParsedRecordPatternEntry(name, pat, GEN_LOC) },
-            loc = GEN_LOC
+    private fun buildEncodeList(elemType: MezzeType, valueExpr: ParsedExpr): ParsedExpr {
+        // seq::map { xs = <valueExpr>, f = { x } -> <encode x> } — then wrap.
+        val mappedElems = call(
+            id("__native_seq_map"),
+            record(
+                "xs" to valueExpr,
+                "f" to lambda(listOf("x"), buildEncodeExpr(elemType, id("x"))),
+            ),
+        )
+        return call(
+            member(id("config"), "encode_list"),
+            record("elems" to mappedElems, "ctx" to id("ctx")),
         )
     }
 
-    /** Create a match case with single pattern */
-    private fun matchCase(pattern: ParsedPattern, body: ParsedExpr, guard: ParsedExpr? = null): ParsedMatchCase {
-        return ParsedMatchCase(patterns = listOf(pattern), guard = guard, body = body, loc = GEN_LOC)
+    private fun buildEncodeMap(keyType: MezzeType, valType: MezzeType, valueExpr: ParsedExpr): ParsedExpr {
+        // fetch entries as [{key, value}], then map encoding key + value.
+        val entries = call(id("__native_map_entries"), record("m" to valueExpr))
+        val encodedEntries = call(
+            id("__native_seq_map"),
+            record(
+                "xs" to entries,
+                "f" to lambda(
+                    listOf("entry"),
+                    record(
+                        "key" to buildEncodeExpr(keyType, member(id("entry"), "key")),
+                        "val" to buildEncodeExpr(valType, member(id("entry"), "val")),
+                    ),
+                ),
+            ),
+        )
+        return call(
+            member(id("config"), "encode_map"),
+            record("entries" to encodedEntries, "ctx" to id("ctx")),
+        )
     }
 
-    /** Create a match expression */
-    private fun match(expr: ParsedExpr, vararg cases: ParsedMatchCase): ParsedMatch {
-        return ParsedMatch(scrutinee = expr, cases = cases.toList(), loc = GEN_LOC)
+    private fun buildEncodeOption(innerType: MezzeType?, valueExpr: ParsedExpr): ParsedExpr {
+        val optionVal = if (innerType == null) {
+            valueExpr // opaque `Option 'a` — hand it to the format as-is.
+        } else {
+            match(
+                valueExpr,
+                matchCase(nonePat(), none()),
+                matchCase(
+                    somePat("__opt"),
+                    some(buildEncodeExpr(innerType, id("__opt"))),
+                ),
+            )
+        }
+        return call(
+            member(id("config"), "encode_option"),
+            record("val" to optionVal, "ctx" to id("ctx")),
+        )
     }
 
-    /** Create a lambda expression with untyped parameters */
-    private fun lambda(paramNames: List<String>, body: ParsedExpr): ParsedLambda {
-        return ParsedLambda(
+    // ---------------------------------------------------------------------
+    // Decode body construction
+    // ---------------------------------------------------------------------
+
+    /** Decode [type] out of [inputExpr]. Returns `Result <type> DecodeError`. */
+    private fun buildDecodeExpr(type: MezzeType, inputExpr: ParsedExpr): ParsedExpr {
+        if (PrimitiveTypes.isBoolVariant(type)) return scalarDecode("decode_bool", inputExpr)
+        return when (type) {
+            is MezzeType.IntType    -> scalarDecode("decode_int",   inputExpr)
+            is MezzeType.FloatType  -> scalarDecode("decode_float", inputExpr)
+            is MezzeType.StringType -> scalarDecode("decode_str",   inputExpr)
+            is MezzeType.BoolType   -> scalarDecode("decode_bool",  inputExpr)
+            is MezzeType.FracType   -> scalarDecode("decode_frac",  inputExpr)
+            is MezzeType.CharType   -> scalarDecode("decode_char",  inputExpr)
+            is MezzeType.BytesType  -> scalarDecode("decode_bytes", inputExpr)
+
+            is MezzeType.RecordType -> buildDecodeRecord(type, inputExpr)
+            is MezzeType.VariantType -> buildDecodeVariant(type, inputExpr)
+
+            is MezzeType.ListType     -> buildDecodeList(type.elementType, inputExpr)
+            is MezzeType.SeqType      -> buildDecodeList(type.elementType, inputExpr)
+            is MezzeType.SetType      -> buildDecodeList(type.elementType, inputExpr)
+            is MezzeType.SortedSetType -> buildDecodeList(type.elementType, inputExpr)
+
+            is MezzeType.MapType       -> buildDecodeMap(type.keyType, type.valueType, inputExpr)
+            is MezzeType.SortedMapType -> buildDecodeMap(type.keyType, type.valueType, inputExpr)
+
+            is MezzeType.TypeApplication -> when (type.constructor) {
+                BuiltinTypes.OPTION -> buildDecodeOption(type.args.firstOrNull(), inputExpr)
+                else -> tierThreeDecode(inputExpr)
+            }
+
+            else -> tierThreeDecode(inputExpr)
+        }
+    }
+
+    /** `config.decode_<hook> { val = <inputExpr>, ctx = ctx }`. Returns `Result T DecodeError`. */
+    private fun scalarDecode(hookName: String, inputExpr: ParsedExpr): ParsedExpr =
+        call(
+            member(id("config"), hookName),
+            record("val" to inputExpr, "ctx" to id("ctx")),
+        )
+
+    private fun tierThreeDecode(inputExpr: ParsedExpr): ParsedExpr =
+        call(
+            member(inputExpr, "decode"),
+            record("config" to id("config")),
+        )
+
+    private fun buildDecodeRecord(type: MezzeType.RecordType, inputExpr: ParsedExpr): ParsedExpr {
+        val fields = type.fields.entries.sortedBy { it.key }
+        if (fields.isEmpty()) {
+            return ok(ParsedRecordLit(entries = emptyList(), loc = GEN_LOC))
+        }
+
+        val recordCtor = ParsedRecordLit(
+            entries = fields.map { (fieldName, _) ->
+                ParsedRecordEntry.Field(fieldName, id("${fieldName}_val"), GEN_LOC)
+            },
+            loc = GEN_LOC,
+        )
+        var acc: ParsedExpr = ok(recordCtor)
+
+        for ((fieldName, fieldType) in fields.reversed()) {
+            val fetchRaw = call(
+                member(id("config"), "decode_record_field"),
+                record(
+                    "val" to inputExpr,
+                    "key" to transformFieldName(fieldName),
+                    "ctx" to id("ctx"),
+                ),
+            )
+            val decodeSub = buildDecodeExpr(fieldType, id("${fieldName}_raw"))
+            acc = match(
+                fetchRaw,
+                matchCase(
+                    okPat("${fieldName}_raw"),
+                    match(
+                        decodeSub,
+                        matchCase(okPat("${fieldName}_val"), acc),
+                        matchCase(errPat("e"), err(id("e"))),
+                    ),
+                ),
+                matchCase(errPat("e"), err(id("e"))),
+            )
+        }
+        return acc
+    }
+
+    private fun buildDecodeVariant(type: MezzeType.VariantType, inputExpr: ParsedExpr): ParsedExpr {
+        val ctors = type.constructors.entries.sortedBy { it.key }
+        // config.decode_variant { val = it, ctx = ctx } -> Ok { val = { tag, payload } }.
+        val decodeCall = call(
+            member(id("config"), "decode_variant"),
+            record("val" to inputExpr, "ctx" to id("ctx")),
+        )
+
+        // Build a per-tag dispatch: match info.tag string, decode payload
+        // through the constructor's payload type, and build the Ok result.
+        val tagVar = "__variant"
+        val defaultBranch: ParsedExpr = err(
+            record(
+                "path" to member(id("ctx"), "path"),
+                "message" to str("Unknown variant tag"),
+                "expected" to str(ctors.joinToString(" | ") { it.key }),
+                "found" to some(member(id(tagVar), "tag")),
+            )
+        )
+
+        var tagDispatch: ParsedExpr = defaultBranch
+        for ((ctorName, payloadType) in ctors.reversed()) {
+            tagDispatch = ifExpr(
+                condition = call(
+                    id("__native_string_eq"),
+                    record("l" to member(id(tagVar), "tag"), "r" to str(ctorName)),
+                ),
+                thenBranch = buildDecodeVariantCase(ctorName, payloadType),
+                elseBranch = tagDispatch,
+            )
+        }
+
+        return match(
+            decodeCall,
+            matchCase(okPat(tagVar), tagDispatch),
+            matchCase(errPat("e"), err(id("e"))),
+        )
+    }
+
+    private fun buildDecodeVariantCase(ctorName: String, payloadType: MezzeType?): ParsedExpr {
+        val payloadOpt = member(id("__variant"), "payload")
+        if (payloadType == null) {
+            // Payloadless constructor. Ignore any incidental payload.
+            return ok(variant(ctorName, null))
+        }
+        return match(
+            payloadOpt,
+            matchCase(nonePat(), err(
+                record(
+                    "path" to member(id("ctx"), "path"),
+                    "message" to str("Missing payload for $ctorName"),
+                    "expected" to str(ctorName),
+                    "found" to none(),
+                )
+            )),
+            matchCase(
+                somePat("__raw_payload"),
+                match(
+                    buildDecodeExpr(payloadType, id("__raw_payload")),
+                    matchCase(
+                        okPat("__decoded_payload"),
+                        ok(variant(ctorName, record("val" to id("__decoded_payload")))),
+                    ),
+                    matchCase(errPat("e"), err(id("e"))),
+                ),
+            ),
+        )
+    }
+
+    private fun buildDecodeList(elemType: MezzeType, inputExpr: ParsedExpr): ParsedExpr {
+        // config.decode_list { val = it, ctx = ctx } -> Ok { val = ['in] }.
+        // Then map each element through decodeExpr, gathering into Ok/Err.
+        val listCall = call(
+            member(id("config"), "decode_list"),
+            record("val" to inputExpr, "ctx" to id("ctx")),
+        )
+        // Auto-derived list decode currently threads through a helper native
+        // that iterates and decodes element-wise via `elem.decode { config }`.
+        // We compose the element callback and let the runtime dispatch handle
+        // it — a full try-fold in Mezze would work too but is a lot noisier.
+        val mapped = call(
+            id("__native_seq_try_map"),
+            record(
+                "xs" to id("__list_raw"),
+                "f" to lambda(listOf("x"), buildDecodeExpr(elemType, id("x"))),
+            ),
+        )
+        return match(
+            listCall,
+            matchCase(okPat("__list_raw"), mapped),
+            matchCase(errPat("e"), err(id("e"))),
+        )
+    }
+
+    private fun buildDecodeMap(keyType: MezzeType, valType: MezzeType, inputExpr: ParsedExpr): ParsedExpr {
+        val mapCall = call(
+            member(id("config"), "decode_map"),
+            record("val" to inputExpr, "ctx" to id("ctx")),
+        )
+        val mapped = call(
+            id("__native_seq_try_map"),
+            record(
+                "xs" to id("__map_raw"),
+                "f" to lambda(
+                    listOf("entry"),
+                    match(
+                        buildDecodeExpr(keyType, member(id("entry"), "key")),
+                        matchCase(
+                            okPat("__k"),
+                            match(
+                                buildDecodeExpr(valType, member(id("entry"), "val")),
+                                matchCase(
+                                    okPat("__v"),
+                                    ok(record("key" to id("__k"), "val" to id("__v"))),
+                                ),
+                                matchCase(errPat("e"), err(id("e"))),
+                            ),
+                        ),
+                        matchCase(errPat("e"), err(id("e"))),
+                    ),
+                ),
+            ),
+        )
+        return match(
+            mapCall,
+            matchCase(okPat("__map_raw"), mapped),
+            matchCase(errPat("e"), err(id("e"))),
+        )
+    }
+
+    private fun buildDecodeOption(innerType: MezzeType?, inputExpr: ParsedExpr): ParsedExpr {
+        val optCall = call(
+            member(id("config"), "decode_option"),
+            record("val" to inputExpr, "ctx" to id("ctx")),
+        )
+        if (innerType == null) {
+            return optCall
+        }
+        return match(
+            optCall,
+            matchCase(
+                okPat("__opt_raw"),
+                match(
+                    id("__opt_raw"),
+                    matchCase(nonePat(), ok(none())),
+                    matchCase(
+                        somePat("__raw"),
+                        match(
+                            buildDecodeExpr(innerType, id("__raw")),
+                            matchCase(okPat("__decoded"), ok(some(id("__decoded")))),
+                            matchCase(errPat("e"), err(id("e"))),
+                        ),
+                    ),
+                ),
+            ),
+            matchCase(errPat("e"), err(id("e"))),
+        )
+    }
+
+    // ---------------------------------------------------------------------
+    // Impl construction
+    // ---------------------------------------------------------------------
+
+    private fun createEncodeImpl(
+        formatType: MezzeType,
+        dataType: MezzeType,
+        body: ParsedExpr,
+    ): ParsedImplAbilityDecl = ParsedImplAbilityDecl(
+        target = ParsedImplTarget.Named(ParsedQualifiedRef("Encode", null, GEN_LOC)),
+        abilityTypeArgs = listOf(mezzeTypeToAnnotation(formatType)),
+        targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
+        operations = listOf(
+            ParsedImplOp(
+                name = "encode",
+                paramType = null,
+                returnType = null,
+                implementation = lambda(listOf("it", "config"), body),
+                loc = GEN_LOC,
+            )
+        ),
+        loc = GEN_LOC,
+    )
+
+    private fun createDecodeImpl(
+        formatType: MezzeType,
+        dataType: MezzeType,
+        inType: MezzeType,
+        body: ParsedExpr,
+    ): ParsedImplAbilityDecl = ParsedImplAbilityDecl(
+        target = ParsedImplTarget.Named(ParsedQualifiedRef("Decode", null, GEN_LOC)),
+        abilityTypeArgs = listOf(
+            mezzeTypeToAnnotation(formatType),
+            mezzeTypeToAnnotation(dataType),
+        ),
+        targetTypes = listOf(mezzeTypeToAnnotation(inType)),
+        operations = listOf(
+            ParsedImplOp(
+                name = "decode",
+                paramType = null,
+                returnType = null,
+                implementation = lambda(listOf("it", "config"), body),
+                loc = GEN_LOC,
+            )
+        ),
+        loc = GEN_LOC,
+    )
+
+    // ---------------------------------------------------------------------
+    // AST helpers
+    // ---------------------------------------------------------------------
+
+    /** `{ path = [], shared = config.shared }` — initial encode/decode ctx. */
+    private fun initialCtx(): ParsedExpr = record(
+        "path" to seqLit(emptyList()),
+        "shared" to member(id("config"), "shared"),
+    )
+
+    /**
+     * `codec::apply_field_transform { name = "<field>", shared = config.shared }`.
+     *
+     * Fully qualified because the generator emits AST that will land in an
+     * arbitrary user module — we can't assume the helper is in scope.
+     */
+    private fun transformFieldName(fieldName: String): ParsedExpr = call(
+        ParsedIdentifier(
+            localName = "apply_field_transform",
+            qualifier = ParsedModulePath(listOf("std", "codec", "core")),
+            loc = GEN_LOC,
+        ),
+        record(
+            "name" to str(fieldName),
+            "shared" to member(id("config"), "shared"),
+        ),
+    )
+
+    private fun record(vararg fields: Pair<String, ParsedExpr>): ParsedRecordLit =
+        ParsedRecordLit(
+            entries = fields.map { (n, v) -> ParsedRecordEntry.Field(n, v, GEN_LOC) },
+            loc = GEN_LOC,
+        )
+
+    private fun call(func: ParsedExpr, args: ParsedRecordLit): ParsedFunctionCall =
+        ParsedFunctionCall(function = func, arguments = args, loc = GEN_LOC)
+
+    private fun member(receiver: ParsedExpr, memberName: String): ParsedMemberAccess =
+        ParsedMemberAccess(receiver = receiver, member = memberName, loc = GEN_LOC)
+
+    private fun id(name: String): ParsedIdentifier =
+        ParsedIdentifier(localName = name, qualifier = null, loc = GEN_LOC)
+
+    private fun str(value: String): ParsedStringLit =
+        ParsedStringLit(parts = listOf(ParsedStringPart.Literal(value)), loc = GEN_LOC)
+
+    private fun seqLit(elements: List<ParsedExpr>): ParsedSeqLit =
+        ParsedSeqLit(
+            elements = elements.map { ParsedSeqElement.Regular(it) },
+            loc = GEN_LOC,
+        )
+
+    private fun variant(constructor: String, payload: ParsedExpr? = null): ParsedVariantConstruct =
+        ParsedVariantConstruct(constructor = constructor, value = payload, loc = GEN_LOC)
+
+    private fun constructorPat(name: String, payload: ParsedPattern?): ParsedConstructorPattern =
+        ParsedConstructorPattern(constructor = name, payload = payload, loc = GEN_LOC)
+
+    private fun varPat(name: String): ParsedVariablePattern =
+        ParsedVariablePattern(name = name, loc = GEN_LOC)
+
+    private fun matchCase(pattern: ParsedPattern, body: ParsedExpr): ParsedMatchCase =
+        ParsedMatchCase(patterns = listOf(pattern), guard = null, body = body, loc = GEN_LOC)
+
+    private fun match(scrutinee: ParsedExpr, vararg cases: ParsedMatchCase): ParsedMatch =
+        ParsedMatch(scrutinee = scrutinee, cases = cases.toList(), loc = GEN_LOC)
+
+    private fun lambda(paramNames: List<String>, body: ParsedExpr): ParsedLambda =
+        ParsedLambda(
             params = ParsedLambdaParams.Untyped(names = paramNames),
             body = body,
-            loc = GEN_LOC
+            loc = GEN_LOC,
         )
-    }
 
-    /** Create a do expression with a let statement followed by a result */
-    private fun doWithLet(varName: String, varValue: ParsedExpr, result: ParsedExpr): ParsedDo {
-        return ParsedDo(
+    private fun doWithLet(varName: String, varValue: ParsedExpr, result: ParsedExpr): ParsedDo =
+        ParsedDo(
             statements = listOf(
                 ParsedStatement.Let(
                     pattern = ParsedVariablePattern(name = varName, loc = GEN_LOC),
                     typeAnnotation = null,
                     value = varValue,
-                    loc = GEN_LOC
+                    loc = GEN_LOC,
                 )
             ),
             result = result,
-            loc = GEN_LOC
-        )
-    }
-
-    /** Create a simple let statement */
-    private fun letStmt(varName: String, value: ParsedExpr): ParsedStatement.Let {
-        return ParsedStatement.Let(
-            pattern = ParsedVariablePattern(name = varName, loc = GEN_LOC),
-            typeAnnotation = null,
-            value = value,
-            loc = GEN_LOC
-        )
-    }
-
-    /** Create a seq literal from expressions */
-    private fun array(elements: List<ParsedExpr>): ParsedSeqLit {
-        return ParsedSeqLit(elements = elements.map { ParsedSeqElement.Regular(it) }, loc = GEN_LOC)
-    }
-
-    /** Create a list from a seq expression using __native_list_from_seq */
-    private fun listFromArray(elements: List<ParsedExpr>): ParsedExpr {
-        return call(
-            id("__native_list_from_seq"),
-            record("xs" to array(elements))
-        )
-    }
-
-    /** Create an if expression */
-    private fun ifExpr(condition: ParsedExpr, thenBranch: ParsedExpr, elseBranch: ParsedExpr): ParsedIf {
-        return ParsedIf(condition = condition, thenBranch = thenBranch, elseBranch = elseBranch, loc = GEN_LOC)
-    }
-
-    /** Create Ok variant */
-    private fun ok(value: ParsedExpr): ParsedVariantConstruct {
-        return variant("Ok", record("val" to value))
-    }
-
-    /** Create Err variant */
-    private fun err(errorExpr: ParsedExpr): ParsedVariantConstruct {
-        return variant("Err", record("error" to errorExpr))
-    }
-
-    /** Create Some variant */
-    private fun some(value: ParsedExpr): ParsedVariantConstruct {
-        return variant("Some", record("val" to value))
-    }
-
-    /** Create None variant */
-    private fun none(): ParsedVariantConstruct {
-        return variant("None", null)
-    }
-
-    /** Pattern for Ok {val = x} */
-    private fun okPat(varName: String): ParsedConstructorPattern {
-        return constructorPat("Ok", recordPat("val" to varPat(varName)))
-    }
-
-    /** Pattern for Err {error = e} */
-    private fun errPat(varName: String = "e"): ParsedConstructorPattern {
-        return constructorPat("Err", recordPat("error" to varPat(varName)))
-    }
-
-    /** Pattern for Some {val = x} */
-    private fun somePat(varName: String): ParsedConstructorPattern {
-        return constructorPat("Some", recordPat("val" to varPat(varName)))
-    }
-
-    /** Pattern for None */
-    private fun nonePat(): ParsedConstructorPattern {
-        return constructorPat("None", null)
-    }
-
-    /**
-     * Get the Format ability identifier.
-     */
-    private fun encodeFormatImpl(formatType: MezzeType): ParsedIdentifier {
-        // Use the `fmt` parameter directly as the receiver for Format ability methods.
-        // The `fmt` param holds the concrete format impl (e.g., json_fmt) at runtime.
-        // Previously used id("Format") which is an ability name that can't be resolved
-        // as a value in the generated impl's buildExpr pass.
-        return id("fmt")
-    }
-
-    /**
-     * Get the DecodeFormat ability identifier.
-     */
-    private fun decodeFormatImpl(formatType: MezzeType): ParsedIdentifier {
-        // Use the `fmt` parameter directly — see encodeFormatImpl comment.
-        return id("fmt")
-    }
-
-    /**
-     * Get the StreamFormat ability identifier.
-     */
-    private fun streamEncodeFormatImpl(formatType: MezzeType): ParsedIdentifier {
-        return id("StreamFormat")
-    }
-
-    /**
-     * Get the StreamDecodeFormat ability identifier.
-     */
-    private fun streamDecodeFormatImpl(formatType: MezzeType): ParsedIdentifier {
-        return id("StreamDecodeFormat")
-    }
-
-    /** Call append_path using native seq operations directly */
-    private fun appendPath(pathExpr: ParsedExpr, fieldName: String): ParsedExpr {
-        return call(
-            id("__native_seq_add"),
-            record(
-                "xs" to pathExpr,
-                "x" to str(fieldName)
-            )
-        )
-    }
-
-    /** Transform a field name using EncodeFormat.transform_field */
-    private fun transformFieldName(formatType: MezzeType, fieldName: String, configExpr: ParsedExpr = id("config")): ParsedExpr {
-        return call(
-            member(encodeFormatImpl(formatType), "transform_field"),
-            record("name" to str(fieldName), "config" to configExpr)
-        )
-    }
-
-    /** Transform a field name for decoding using DecodeFormat.transform_field */
-    private fun transformFieldNameForDecode(formatType: MezzeType, fieldName: String, configExpr: ParsedExpr = id("config")): ParsedExpr {
-        return call(
-            member(decodeFormatImpl(formatType), "transform_field"),
-            record("name" to str(fieldName), "config" to configExpr)
-        )
-    }
-
-    /** Call append_index using native seq operations directly */
-    private fun appendIndex(pathExpr: ParsedExpr, indexExpr: ParsedExpr): ParsedExpr {
-        return call(
-            id("__native_seq_add"),
-            record(
-                "xs" to pathExpr,
-                "x" to call(id("__native_int_to_string"), record("n" to indexExpr))
-            )
-        )
-    }
-
-    /**
-     * Generate encode for primitive types (Int, Float, String, Bool, Frac).
-     */
-    private fun generatePrimitiveEncode(
-        formatType: MezzeType,
-        dataType: MezzeType,
-        hookName: String,
-        paramName: String
-    ): ParsedImplAbilityDecl {
-        val body = call(
-            member(encodeFormatImpl(formatType), hookName),
-            record(paramName to id("it"), "path" to id("path"))
-        )
-        return createEncodeImpl(formatType, dataType, body)
-    }
-
-    /**
-     * Generate encode for Char - converts to String first.
-     */
-    private fun generateCharEncode(formatType: MezzeType): ParsedImplAbilityDecl {
-        val toStringCall = call(
-            id("__native_char_to_string"),
-            record("c" to id("it"))
-        )
-        val body = call(
-            member(encodeFormatImpl(formatType), "encode_string"),
-            record("val" to toStringCall, "path" to id("path"))
-        )
-        return createEncodeImpl(formatType, MezzeType.CharType, body)
-    }
-
-    /**
-     * Generate encode for record types.
-     */
-    private fun generateRecordEncode(formatType: MezzeType, recordType: MezzeType.RecordType): ParsedImplAbilityDecl {
-        val fields = recordType.fields.entries.sortedBy { it.key }
-
-        if (fields.isEmpty()) {
-            val body = call(
-                member(encodeFormatImpl(formatType), "encode_record"),
-                record("fields" to array(emptyList()), "path" to id("path"))
-            )
-            return createEncodeImpl(formatType, recordType, body)
-        }
-
-        val body = buildRecordEncodeBody(formatType, fields)
-        return createEncodeImpl(formatType, recordType, body)
-    }
-
-    /**
-     * Build the body for record encoding with Result handling.
-     */
-    private fun buildRecordEncodeBody(formatType: MezzeType, fields: List<Map.Entry<String, MezzeType>>): ParsedExpr {
-        var resultExpr: ParsedExpr = call(
-            member(encodeFormatImpl(formatType), "encode_record"),
-            record(
-                "fields" to array(fields.map { (fieldName, _) ->
-                    record(
-                        "key" to transformFieldName(formatType, fieldName),
-                        "value" to id("${fieldName}_encoded")
-                    )
-                }),
-                "path" to id("path")
-            )
+            loc = GEN_LOC,
         )
 
-        for ((fieldName, fieldType) in fields.reversed()) {
-            val encodeCall = generateDirectEncodeCall(formatType, fieldType, member(id("it"), fieldName), fieldName)
+    private fun ifExpr(condition: ParsedExpr, thenBranch: ParsedExpr, elseBranch: ParsedExpr): ParsedIf =
+        ParsedIf(condition = condition, thenBranch = thenBranch, elseBranch = elseBranch, loc = GEN_LOC)
 
-            resultExpr = match(
-                encodeCall,
-                matchCase(okPat("${fieldName}_encoded"), resultExpr),
-                matchCase(errPat("e"), err(id("e")))
-            )
-        }
+    private fun ok(value: ParsedExpr): ParsedVariantConstruct =
+        variant("Ok", record("val" to value))
 
-        return resultExpr
-    }
+    private fun err(errorExpr: ParsedExpr): ParsedVariantConstruct =
+        variant("Err", record("error" to errorExpr))
 
-    /**
-     * Generate a direct EncodeFormat impl method call for a value of the given type.
-     */
-    private fun generateDirectEncodeCall(formatType: MezzeType, type: MezzeType, valueExpr: ParsedExpr, fieldName: String): ParsedExpr {
-        val pathExpr = appendPath(id("path"), fieldName)
-        val formatImpl = encodeFormatImpl(formatType)
+    private fun some(value: ParsedExpr): ParsedVariantConstruct =
+        variant("Some", record("val" to value))
 
-        if (isBoolVariant(type)) {
-            return call(
-                member(formatImpl, "encode_bool"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-        }
+    private fun none(): ParsedVariantConstruct = variant("None", null)
 
-        return when (type) {
-            is MezzeType.IntType -> call(
-                member(formatImpl, "encode_int"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.FloatType -> call(
-                member(formatImpl, "encode_float"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.StringType -> call(
-                member(formatImpl, "encode_string"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.BoolType -> call(
-                member(formatImpl, "encode_bool"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.FracType -> call(
-                member(formatImpl, "encode_frac"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.CharType -> {
-                val toStrCall = call(id("__native_char_to_string"), record("c" to valueExpr))
-                call(member(formatImpl, "encode_string"), record("val" to toStrCall, "path" to pathExpr))
-            }
-            is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.SeqType, is MezzeType.SetType,
-            is MezzeType.MapType, is MezzeType.VariantType, is MezzeType.TypeApplication -> {
-                typedEncodeCall(type, valueExpr)
-            }
-            else -> {
-                typedEncodeCall(type, valueExpr)
-            }
-        }
-    }
+    private fun okPat(varName: String): ParsedConstructorPattern =
+        constructorPat("Ok", recordPat("val" to varPat(varName)))
 
-    /**
-     * Create a typed codec call using method-call syntax: value.<methodName> { fmt, config }.
-     * Shared by both encode_repr and decode_repr generation.
-     */
-    private fun typedCodecCall(valueExpr: ParsedExpr, methodName: String): ParsedFunctionCall {
-        val argsRecord = record(
-            "fmt" to id("fmt"),
-            "config" to id("config")
-        )
-        return ParsedFunctionCall(
-            function = ParsedMemberAccess(
-                receiver = valueExpr,
-                member = methodName,
-                loc = GEN_LOC
-            ),
-            arguments = argsRecord,
-            loc = GEN_LOC
-        )
-    }
+    private fun errPat(varName: String = "e"): ParsedConstructorPattern =
+        constructorPat("Err", recordPat("error" to varPat(varName)))
 
-    /** Create a typed encode call using method-call syntax: value.encode_repr { fmt, config }. */
-    private fun typedEncodeCall(dataType: MezzeType, valueExpr: ParsedExpr): ParsedFunctionCall =
-        typedCodecCall(valueExpr, "encode_repr")
+    private fun somePat(varName: String): ParsedConstructorPattern =
+        constructorPat("Some", recordPat("val" to varPat(varName)))
 
-    /**
-     * Generate a direct DecodeFormat impl record lookup and method call for a value of the given type.
-     */
-    private fun generateDirectDecodeCall(formatType: MezzeType, type: MezzeType, valueExpr: ParsedExpr, fieldName: String): ParsedExpr {
-        val pathExpr = appendPath(id("path"), fieldName)
-        val formatImpl = decodeFormatImpl(formatType)
+    private fun nonePat(): ParsedConstructorPattern = constructorPat("None", null)
 
-        if (isBoolVariant(type)) {
-            return call(
-                member(formatImpl, "decode_bool"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-        }
-
-        return when (type) {
-            is MezzeType.IntType -> call(
-                member(formatImpl, "decode_int"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.FloatType -> call(
-                member(formatImpl, "decode_float"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.StringType -> call(
-                member(formatImpl, "decode_string"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.BoolType -> call(
-                member(formatImpl, "decode_bool"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.FracType -> call(
-                member(formatImpl, "decode_frac"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.CharType -> {
-                val decodeStrCall = call(member(formatImpl, "decode_string"), record("val" to valueExpr, "path" to pathExpr))
-                match(
-                    decodeStrCall,
-                    matchCase(okPat("str_val"), ok(call(id("__native_string_head"), record("s" to id("str_val"))))),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            }
-            is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.SeqType, is MezzeType.SetType,
-            is MezzeType.MapType, is MezzeType.VariantType, is MezzeType.TypeApplication -> {
-                typedDecodeCall(type, valueExpr)
-            }
-            else -> {
-                typedDecodeCall(type, valueExpr)
-            }
-        }
-    }
-
-    /** Create a typed decode call using method-call syntax: value.decode_repr { fmt, config }. */
-    private fun typedDecodeCall(targetType: MezzeType, valueExpr: ParsedExpr): ParsedFunctionCall =
-        typedCodecCall(valueExpr, "decode_repr")
-
-    /**
-     * Generate encode for variant types.
-     */
-    private fun generateVariantEncode(formatType: MezzeType, variantType: MezzeType.VariantType): ParsedImplAbilityDecl {
-        val constructors = variantType.constructors.entries.sortedBy { it.key }
-
-        val cases = constructors.map { (constructorName, payloadType) ->
-            if (payloadType == null) {
-                matchCase(
-                    constructorPat(constructorName, null),
-                    call(
-                        member(encodeFormatImpl(formatType), "encode_variant"),
-                        record(
-                            "tag" to str(constructorName),
-                            "payload" to none(),
-                            "path" to id("path")
-                        )
-                    )
-                )
-            } else {
-                generateVariantCaseWithPayload(formatType, constructorName, payloadType)
-            }
-        }
-
-        val body = match(id("it"), *cases.toTypedArray())
-        return createEncodeImpl(formatType, variantType, body)
-    }
-
-    /**
-     * Generate a match case for a variant constructor with a payload.
-     */
-    private fun generateVariantCaseWithPayload(formatType: MezzeType, constructorName: String, payloadType: MezzeType): ParsedMatchCase {
-        return when (payloadType) {
-            is MezzeType.RecordType -> {
-                val fieldNames = payloadType.fields.keys.sorted()
-
-                val patternEntries = fieldNames.map { fieldName ->
-                    ParsedRecordPatternEntry(fieldName, ParsedVariablePattern("__payload_$fieldName", GEN_LOC), GEN_LOC)
-                }
-                val recordPattern = ParsedRecordPattern(entries = patternEntries, loc = GEN_LOC)
-
-                val reconstructedRecord = record(
-                    *fieldNames.map { fieldName -> fieldName to id("__payload_$fieldName") }.toTypedArray()
-                )
-
-                val encodeCall = generateDirectEncodeCall(
-                    formatType, payloadType, reconstructedRecord, "__variant_payload"
-                )
-
-                matchCase(
-                    constructorPat(constructorName, recordPattern),
-                    match(
-                        encodeCall,
-                        matchCase(
-                            okPat("encoded_payload"),
-                            call(
-                                member(encodeFormatImpl(formatType), "encode_variant"),
-                                record(
-                                    "tag" to str(constructorName),
-                                    "payload" to some(id("encoded_payload")),
-                                    "path" to id("path")
-                                )
-                            )
-                        ),
-                        matchCase(errPat("e"), err(id("e")))
-                    )
-                )
-            }
-            else -> {
-                val encodeCall = generateDirectEncodeCall(
-                    formatType, payloadType, id("payload_val"), "__variant_payload"
-                )
-
-                matchCase(
-                    constructorPat(constructorName, recordPat("val" to varPat("payload_val"))),
-                    match(
-                        encodeCall,
-                        matchCase(
-                            okPat("encoded_payload"),
-                            call(
-                                member(encodeFormatImpl(formatType), "encode_variant"),
-                                record(
-                                    "tag" to str(constructorName),
-                                    "payload" to some(id("encoded_payload")),
-                                    "path" to id("path")
-                                )
-                            )
-                        ),
-                        matchCase(errPat("e"), err(id("e")))
-                    )
-                )
-            }
-        }
-    }
-
-    /**
-     * Build a fold-encode-append body: fold over a list, encode each element, accumulate into a new list.
-     * Used by List, Set, and SortedSet encode generation.
-     */
-    private fun buildFoldEncodeBody(
-        formatType: MezzeType,
-        elementType: MezzeType,
-        inputListExpr: ParsedExpr,
-        elemLabel: String,
-        wrapResult: (ParsedExpr) -> ParsedExpr
-    ): ParsedExpr {
-        val elementEncodeCall = generateDirectEncodeCall(formatType, elementType, id("elem"), elemLabel)
-
-        val foldBody = match(
-            id("acc"),
-            matchCase(
-                okPat("encoded_list"),
-                match(
-                    elementEncodeCall,
-                    matchCase(
-                        okPat("encoded"),
-                        ok(call(
-                            id("__native_list_append"),
-                            record(
-                                "xs" to id("encoded_list"),
-                                "ys" to call(
-                                    id("__native_list_cons"),
-                                    record(
-                                        "head" to id("encoded"),
-                                        "tail" to call(id("__native_list_empty"), record())
-                                    )
-                                )
-                            )
-                        ))
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
+    private fun recordPat(vararg entries: Pair<String, ParsedPattern?>): ParsedRecordPattern =
+        ParsedRecordPattern(
+            entries = entries.map { (n, p) -> ParsedRecordPatternEntry(n, p, GEN_LOC) },
+            loc = GEN_LOC,
         )
 
-        val foldCall = call(
-            id("__native_list_fold_left"),
-            record(
-                "xs" to inputListExpr,
-                "init" to ok(call(id("__native_list_empty"), record())),
-                "f" to lambda(listOf("acc", "elem"), foldBody)
-            )
-        )
+    // ---------------------------------------------------------------------
+    // MezzeType → ParsedTypeAnnotation
+    // ---------------------------------------------------------------------
 
-        return match(
-            foldCall,
-            matchCase(okPat("final_list"), wrapResult(id("final_list"))),
-            matchCase(errPat("e"), err(id("e")))
-        )
-    }
-
-    /**
-     * Generate encode for List types.
-     */
-    private fun generateListEncode(formatType: MezzeType, listType: MezzeType.ListType): ParsedImplAbilityDecl {
-        val body = buildFoldEncodeBody(
-            formatType, listType.elementType, id("it"), "__list_elem"
-        ) { finalList ->
-            call(
-                member(encodeFormatImpl(formatType), "encode_list"),
-                record("elems" to finalList, "path" to id("path"))
-            )
-        }
-        return createEncodeImpl(formatType, listType, body)
-    }
-
-    /**
-     * Generate encode for Seq - convert to List first using native function.
-     */
-    private fun generateArrayEncode(formatType: MezzeType, seqType: MezzeType.SeqType): ParsedImplAbilityDecl {
-        val toListCall = call(id("__native_seq_to_list"), record("xs" to id("it")))
-        val listType = MezzeType.ListType(seqType.elementType)
-        val body = generateDirectEncodeCall(formatType, listType, toListCall, "__seq_as_list")
-        return createEncodeImpl(formatType, seqType, body)
-    }
-
-    /**
-     * Generate encode for Set types.
-     */
-    private fun generateSetEncode(formatType: MezzeType, setType: MezzeType.SetType): ParsedImplAbilityDecl {
-        val toListCall = call(id("__native_set_to_list"), record("s" to id("it")))
-        val body = buildFoldEncodeBody(
-            formatType, setType.elementType, toListCall, "__set_elem"
-        ) { finalList ->
-            call(
-                member(encodeFormatImpl(formatType), "encode_set"),
-                record(
-                    "elems" to call(id("__native_set_from_list"), record("xs" to finalList)),
-                    "path" to id("path")
-                )
-            )
-        }
-        return createEncodeImpl(formatType, setType, body)
-    }
-
-    /**
-     * Generate encode for SortedSet.
-     */
-    private fun generateSortedSetEncode(formatType: MezzeType, sortedSetType: MezzeType.SortedSetType): ParsedImplAbilityDecl {
-        val toListCall = call(id("__native_sorted_set_to_list"), record("s" to id("it")))
-        val body = buildFoldEncodeBody(
-            formatType, sortedSetType.elementType, toListCall, "__sorted_set_elem"
-        ) { finalList ->
-            call(
-                member(encodeFormatImpl(formatType), "encode_set"),
-                record(
-                    "elems" to call(id("__native_set_from_list"), record("xs" to finalList)),
-                    "path" to id("path")
-                )
-            )
-        }
-        return createEncodeImpl(formatType, sortedSetType, body)
-    }
-
-    /**
-     * Build the fold body for map-like encode: fold over entries, encode key+value, accumulate into a list of {key, value}.
-     * Used by both Map and SortedMap encode generation.
-     */
-    private fun buildMapFoldEncodeBody(
-        formatType: MezzeType,
-        keyType: MezzeType,
-        valueType: MezzeType,
-        entriesExpr: ParsedExpr,
-        keyLabel: String,
-        valueLabel: String
-    ): ParsedExpr {
-        val keyEncodeCall = generateDirectEncodeCall(formatType, keyType, member(id("entry"), "key"), keyLabel)
-        val valueEncodeCall = generateDirectEncodeCall(formatType, valueType, member(id("entry"), "value"), valueLabel)
-
-        val foldBody = match(
-            id("acc"),
-            matchCase(
-                okPat("encoded_list"),
-                match(
-                    keyEncodeCall,
-                    matchCase(
-                        okPat("encoded_key"),
-                        match(
-                            valueEncodeCall,
-                            matchCase(
-                                okPat("encoded_value"),
-                                ok(call(
-                                    id("__native_list_append"),
-                                    record(
-                                        "xs" to id("encoded_list"),
-                                        "ys" to call(
-                                            id("__native_list_cons"),
-                                            record(
-                                                "head" to record("key" to id("encoded_key"), "value" to id("encoded_value")),
-                                                "tail" to call(id("__native_list_empty"), record())
-                                            )
-                                        )
-                                    )
-                                ))
-                            ),
-                            matchCase(errPat("e"), err(id("e")))
-                        )
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-
-        val foldCall = call(
-            id("__native_list_fold_left"),
-            record(
-                "xs" to entriesExpr,
-                "init" to ok(call(id("__native_list_empty"), record())),
-                "f" to lambda(listOf("acc", "entry"), foldBody)
-            )
-        )
-
-        return match(
-            foldCall,
-            matchCase(
-                okPat("final_list"),
-                call(
-                    member(encodeFormatImpl(formatType), "encode_map"),
-                    record("entries" to id("final_list"), "path" to id("path"))
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-    }
-
-    /**
-     * Generate encode for Map types.
-     */
-    private fun generateMapEncode(formatType: MezzeType, mapType: MezzeType.MapType): ParsedImplAbilityDecl {
-        val entriesCall = call(id("__native_map_entries"), record("m" to id("it")))
-        val body = buildMapFoldEncodeBody(
-            formatType, mapType.keyType, mapType.valueType, entriesCall, "__map_key", "__map_value"
-        )
-        return createEncodeImpl(formatType, mapType, body)
-    }
-
-    /**
-     * Generate encode for SortedMap.
-     */
-    private fun generateSortedMapEncode(formatType: MezzeType, sortedMapType: MezzeType.SortedMapType): ParsedImplAbilityDecl {
-        val entriesCall = call(id("__native_sorted_map_entries"), record("m" to id("it")))
-        val body = buildMapFoldEncodeBody(
-            formatType, sortedMapType.keyType, sortedMapType.valueType, entriesCall, "__sorted_map_key", "__sorted_map_value"
-        )
-        return createEncodeImpl(formatType, sortedMapType, body)
-    }
-
-    /**
-     * Generate encode for TypeApplication (Option, Result, etc.).
-     */
-    private fun generateTypeApplicationEncode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        return when (typeApp.constructor) {
-            "Option" -> generateOptionEncode(formatType, typeApp)
-            "Result" -> generateResultEncode(formatType, typeApp)
-            else -> throw IllegalArgumentException("Unknown type application: ${typeApp.constructor}")
-        }
-    }
-
-    /**
-     * Generate encode for Option type.
-     */
-    private fun generateOptionEncode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        val innerType = typeApp.args.firstOrNull() ?: MezzeType.VarType(TypeVar.freshWithName("a"))
-        val innerEncodeCall = generateDirectEncodeCall(formatType, innerType, id("inner"), "__option_inner")
-
-        val body = match(
-            id("it"),
-            matchCase(
-                nonePat(),
-                call(
-                    member(encodeFormatImpl(formatType), "encode_option"),
-                    record("val" to none(), "path" to id("path"))
-                )
-            ),
-            matchCase(
-                somePat("inner"),
-                match(
-                    innerEncodeCall,
-                    matchCase(
-                        okPat("encoded_inner"),
-                        call(
-                            member(encodeFormatImpl(formatType), "encode_option"),
-                            record("val" to some(id("encoded_inner")), "path" to id("path"))
-                        )
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            )
-        )
-        return createEncodeImpl(formatType, typeApp, body)
-    }
-
-    /**
-     * Generate encode for Result type.
-     */
-    private fun generateResultEncode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        val okType = typeApp.args.getOrNull(0) ?: MezzeType.VarType(TypeVar.freshWithName("ok"))
-        val errType = typeApp.args.getOrNull(1) ?: MezzeType.VarType(TypeVar.freshWithName("err"))
-
-        val okEncodeCall = generateDirectEncodeCall(formatType, okType, id("ok_val"), "__result_ok")
-        val errEncodeCall = generateDirectEncodeCall(formatType, errType, id("err_val"), "__result_err")
-
-        val body = match(
-            id("it"),
-            matchCase(
-                okPat("ok_val"),
-                match(
-                    okEncodeCall,
-                    matchCase(
-                        okPat("encoded_ok"),
-                        call(
-                            member(encodeFormatImpl(formatType), "encode_variant"),
-                            record(
-                                "tag" to str("Ok"),
-                                "payload" to some(id("encoded_ok")),
-                                "path" to id("path")
-                            )
-                        )
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            ),
-            matchCase(
-                errPat("err_val"),
-                match(
-                    errEncodeCall,
-                    matchCase(
-                        okPat("encoded_err"),
-                        call(
-                            member(encodeFormatImpl(formatType), "encode_variant"),
-                            record(
-                                "tag" to str("Err"),
-                                "payload" to some(id("encoded_err")),
-                                "path" to id("path")
-                            )
-                        )
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            )
-        )
-        return createEncodeImpl(formatType, typeApp, body)
-    }
-
-    /**
-     * Generate decode for primitive types.
-     */
-    private fun generatePrimitiveDecode(
-        formatType: MezzeType,
-        dataType: MezzeType,
-        hookName: String
-    ): ParsedImplAbilityDecl {
-        val body = call(
-            member(decodeFormatImpl(formatType), hookName),
-            record("val" to id("it"), "path" to id("path"))
-        )
-        return createDecodeImpl(formatType, dataType, body)
-    }
-
-    /**
-     * Generate decode for Char - decode String and validate single character.
-     */
-    private fun generateCharDecode(formatType: MezzeType): ParsedImplAbilityDecl {
-        val body = match(
-            call(
-                member(decodeFormatImpl(formatType), "decode_string"),
-                record("val" to id("it"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("str_val"),
-                ifExpr(
-                    condition = call(
-                        member(id("int"), "eq"),
-                        record(
-                            "a" to call(member(id("str"), "length"), record("s" to id("str_val"))),
-                            "b" to intLit(1)
-                        )
-                    ),
-                    thenBranch = ok(call(member(id("str"), "char_at"), record("s" to id("str_val"), "index" to intLit(0)))),
-                    elseBranch = call(
-                        member(id("codec"), "decode_error"),
-                        record(
-                            "path" to id("path"),
-                            "message" to str("Expected single character string for Char"),
-                            "expected" to str("Char"),
-                            "found" to some(call(
-                                member(id("str"), "concat"),
-                                record("a" to str("String of length "), "b" to call(
-                                    member(id("int"), "to_string"),
-                                    record("n" to call(member(id("str"), "length"), record("s" to id("str_val"))))
-                                ))
-                            ))
-                        )
-                    )
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createDecodeImpl(formatType, MezzeType.CharType, body)
-    }
-
-    /**
-     * Generate decode for record types.
-     */
-    private fun generateRecordDecode(formatType: MezzeType, recordType: MezzeType.RecordType): ParsedImplAbilityDecl {
-        val fields = recordType.fields.entries.sortedBy { it.key }
-
-        if (fields.isEmpty()) {
-            val body = ok(ParsedRecordLit(entries = emptyList(), loc = GEN_LOC))
-            return createDecodeImpl(formatType, recordType, body)
-        }
-
-        // Generate a native call body: __native_codec_decode_record { json = it, field_names = [...] }
-        // The native function handles JSON field extraction and primitive decoding in Java,
-        // avoiding the complex nested match AST that causes OOM during Truffle execution.
-        val fieldNameArray = array(fields.map { (fieldName, _) -> str(fieldName) })
-        val fieldTypeArray = array(fields.map { (_, fieldType) ->
-            str(when (fieldType) {
-                is MezzeType.IntType -> "Int"
-                is MezzeType.FloatType -> "Float"
-                is MezzeType.StringType -> "Str"
-                is MezzeType.BoolType -> "Bool"
-                else -> "Any"
-            })
-        })
-        val body = call(
-            id("__native_codec_decode_record"),
-            record(
-                "json" to id("it"),
-                "field_names" to fieldNameArray,
-                "field_types" to fieldTypeArray
-            )
-        )
-        return createDecodeImpl(formatType, recordType, body)
-    }
-
-    /**
-     * Build the body for record decoding with Result handling.
-     */
-    private fun buildRecordDecodeBody(formatType: MezzeType, fields: List<Map.Entry<String, MezzeType>>): ParsedExpr {
-        var resultExpr: ParsedExpr = ok(
-            ParsedRecordLit(
-                entries = fields.map { (fieldName, _) ->
-                    ParsedRecordEntry.Field(fieldName, id("${fieldName}_val"), GEN_LOC)
-                },
-                loc = GEN_LOC
-            )
-        )
-
-        for ((fieldName, fieldType) in fields.reversed()) {
-            val getFieldCall = call(
-                member(decodeFormatImpl(formatType), "decode_record_field"),
-                record(
-                    "val" to id("it"),
-                    "key" to transformFieldNameForDecode(formatType, fieldName),
-                    "path" to id("path")
-                )
-            )
-
-            val decodeCall = generateDirectDecodeCall(formatType, fieldType, id("${fieldName}_repr"), fieldName)
-
-            resultExpr = match(
-                getFieldCall,
-                matchCase(
-                    okPat("${fieldName}_repr"),
-                    match(
-                        decodeCall,
-                        matchCase(okPat("${fieldName}_val"), resultExpr),
-                        matchCase(errPat("e"), err(id("e")))
-                    )
-                ),
-                matchCase(errPat("e"), err(id("e")))
-            )
-        }
-
-        return resultExpr
-    }
-
-    /**
-     * Generate decode for variant types.
-     */
-    private fun generateVariantDecode(formatType: MezzeType, variantType: MezzeType.VariantType): ParsedImplAbilityDecl {
-        val constructors = variantType.constructors.entries.sortedBy { it.key }
-
-        val body = match(
-            call(
-                member(decodeFormatImpl(formatType), "decode_variant"),
-                record("val" to id("it"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("variant_info"),
-                buildVariantTagMatcher(formatType, constructors)
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-
-        return createDecodeImpl(formatType, variantType, body)
-    }
-
-    /**
-     * Build nested if-else for variant tag matching.
-     */
-    private fun buildVariantTagMatcher(formatType: MezzeType, constructors: List<Map.Entry<String, MezzeType?>>): ParsedExpr {
-        if (constructors.isEmpty()) {
-            return call(
-                member(id("codec"), "decode_error"),
-                record(
-                    "path" to id("path"),
-                    "message" to str("Unknown variant tag"),
-                    "expected" to str("valid tag"),
-                    "found" to some(member(id("variant_info"), "tag"))
-                )
-            )
-        }
-
-        val (constructorName, payloadType) = constructors.first()
-        val remaining = constructors.drop(1)
-
-        val thenBranch = if (payloadType == null) {
-            ok(variant(constructorName, null))
-        } else {
-            val variantConstruction = when (payloadType) {
-                is MezzeType.RecordType -> {
-                    variant(constructorName, id("decoded_payload"))
-                }
-                else -> {
-                    variant(constructorName, record("val" to id("decoded_payload")))
-                }
-            }
-
-            match(
-                member(id("variant_info"), "payload"),
-                matchCase(
-                    somePat("payload_repr"),
-                    match(
-                        typedDecodeCall(payloadType, id("payload_repr")),
-                        matchCase(
-                            okPat("decoded_payload"),
-                            ok(variantConstruction)
-                        ),
-                        matchCase(errPat("e"), err(id("e")))
-                    )
-                ),
-                matchCase(
-                    nonePat(),
-                    call(
-                        member(id("codec"), "decode_error"),
-                        record(
-                            "path" to id("path"),
-                            "message" to str("Expected payload for variant $constructorName"),
-                            "expected" to str("payload"),
-                            "found" to none()
-                        )
-                    )
-                )
-            )
-        }
-
-        return ifExpr(
-            condition = call(
-                member(id("str"), "eq"),
-                record("a" to member(id("variant_info"), "tag"), "b" to str(constructorName))
-            ),
-            thenBranch = thenBranch,
-            elseBranch = buildVariantTagMatcher(formatType, remaining)
-        )
-    }
-
-    /**
-     * Generate decode for List types.
-     */
-    private fun generateListDecode(formatType: MezzeType, listType: MezzeType.ListType): ParsedImplAbilityDecl {
-        val elementType = listType.elementType
-
-        val body = match(
-            call(
-                member(decodeFormatImpl(formatType), "decode_list"),
-                record("val" to id("it"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("repr_list"),
-                match(
-                    call(
-                        member(id("list"), "try_map_indexed"),
-                        record(
-                            "list" to id("repr_list"),
-                            "f" to lambda(listOf("elem_repr", "idx"),
-                                typedDecodeCall(elementType, id("elem_repr"))
-                            )
-                        )
-                    ),
-                    matchCase(okPat("decoded_list"), ok(id("decoded_list"))),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createDecodeImpl(formatType, listType, body)
-    }
-
-    /**
-     * Generate decode for Seq - decode as List then convert.
-     */
-    private fun generateArrayDecode(formatType: MezzeType, seqType: MezzeType.SeqType): ParsedImplAbilityDecl {
-        val listType = MezzeType.ListType(seqType.elementType)
-
-        val body = match(
-            typedDecodeCall(listType, id("it")),
-            matchCase(
-                okPat("decoded_list"),
-                ok(call(member(id("seq"), "from_list"), record("list" to id("decoded_list"))))
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createDecodeImpl(formatType, seqType, body)
-    }
-
-    /**
-     * Generate decode for Set types.
-     */
-    private fun generateSetDecode(formatType: MezzeType, setType: MezzeType.SetType): ParsedImplAbilityDecl {
-        val elementType = setType.elementType
-
-        val body = match(
-            call(
-                member(decodeFormatImpl(formatType), "decode_set"),
-                record("val" to id("it"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("repr_set"),
-                match(
-                    call(
-                        member(id("list"), "try_map_indexed"),
-                        record(
-                            "list" to call(member(id("set"), "to_list"), record("s" to id("repr_set"))),
-                            "f" to lambda(listOf("elem_repr", "idx"),
-                                typedDecodeCall(elementType, id("elem_repr"))
-                            )
-                        )
-                    ),
-                    matchCase(
-                        okPat("decoded_list"),
-                        ok(call(member(id("set"), "from_list"), record("list" to id("decoded_list"))))
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createDecodeImpl(formatType, setType, body)
-    }
-
-    /**
-     * Generate decode for SortedSet.
-     */
-    private fun generateSortedSetDecode(formatType: MezzeType, sortedSetType: MezzeType.SortedSetType): ParsedImplAbilityDecl {
-        val setType = MezzeType.SetType(sortedSetType.elementType)
-
-        val body = match(
-            typedDecodeCall(setType, id("it")),
-            matchCase(
-                okPat("decoded_set"),
-                ok(call(member(id("sortedset"), "from_set"), record("s" to id("decoded_set"))))
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createDecodeImpl(formatType, sortedSetType, body)
-    }
-
-    /**
-     * Generate decode for Map types.
-     */
-    private fun generateMapDecode(formatType: MezzeType, mapType: MezzeType.MapType): ParsedImplAbilityDecl {
-        val keyType = mapType.keyType
-        val valueType = mapType.valueType
-
-        val body = match(
-            call(
-                member(decodeFormatImpl(formatType), "decode_map"),
-                record("val" to id("it"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("repr_entries"),
-                match(
-                    call(
-                        member(id("list"), "try_map"),
-                        record(
-                            "list" to id("repr_entries"),
-                            "f" to lambda(listOf("entry"),
-                                match(
-                                    typedDecodeCall(keyType, member(id("entry"), "key")),
-                                    matchCase(
-                                        okPat("decoded_key"),
-                                        match(
-                                            typedDecodeCall(valueType, member(id("entry"), "value")),
-                                            matchCase(
-                                                okPat("decoded_value"),
-                                                ok(record("key" to id("decoded_key"), "val" to id("decoded_value")))
-                                            ),
-                                            matchCase(errPat("e"), err(id("e")))
-                                        )
-                                    ),
-                                    matchCase(errPat("e"), err(id("e")))
-                                )
-                            )
-                        )
-                    ),
-                    matchCase(
-                        okPat("decoded_entries"),
-                        ok(call(member(id("map"), "from_list"), record("list" to id("decoded_entries"))))
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createDecodeImpl(formatType, mapType, body)
-    }
-
-    /**
-     * Generate decode for SortedMap.
-     */
-    private fun generateSortedMapDecode(formatType: MezzeType, sortedMapType: MezzeType.SortedMapType): ParsedImplAbilityDecl {
-        val mapType = MezzeType.MapType(sortedMapType.keyType, sortedMapType.valueType)
-
-        val body = match(
-            typedDecodeCall(mapType, id("it")),
-            matchCase(
-                okPat("decoded_map"),
-                ok(call(member(id("sortedmap"), "from_map"), record("m" to id("decoded_map"))))
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createDecodeImpl(formatType, sortedMapType, body)
-    }
-
-    /**
-     * Generate decode for TypeApplication (Option, Result, etc.).
-     */
-    private fun generateTypeApplicationDecode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        return when (typeApp.constructor) {
-            "Option" -> generateOptionDecode(formatType, typeApp)
-            "Result" -> generateResultDecode(formatType, typeApp)
-            else -> throw IllegalArgumentException("Unknown type application: ${typeApp.constructor}")
-        }
-    }
-
-    /**
-     * Generate decode for Option type.
-     */
-    private fun generateOptionDecode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        val innerType = typeApp.args.firstOrNull() ?: throw IllegalArgumentException("Option requires type argument")
-
-        val body = match(
-            call(
-                member(decodeFormatImpl(formatType), "decode_option"),
-                record("val" to id("it"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("opt_repr"),
-                match(
-                    id("opt_repr"),
-                    matchCase(nonePat(), ok(none())),
-                    matchCase(
-                        somePat("inner_repr"),
-                        match(
-                            typedDecodeCall(innerType, id("inner_repr")),
-                            matchCase(okPat("decoded_inner"), ok(some(id("decoded_inner")))),
-                            matchCase(errPat("e"), err(id("e")))
-                        )
-                    )
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createDecodeImpl(formatType, typeApp, body)
-    }
-
-    /**
-     * Generate decode for Result type.
-     */
-    private fun generateResultDecode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        val okType = typeApp.args.getOrNull(0) ?: throw IllegalArgumentException("Result requires Ok type argument")
-        val errType = typeApp.args.getOrNull(1) ?: throw IllegalArgumentException("Result requires Err type argument")
-
-        val body = match(
-            call(
-                member(decodeFormatImpl(formatType), "decode_variant"),
-                record("val" to id("it"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("variant_info"),
-                ifExpr(
-                    condition = call(
-                        member(id("str"), "eq"),
-                        record("a" to member(id("variant_info"), "tag"), "b" to str("Ok"))
-                    ),
-                    thenBranch = match(
-                        member(id("variant_info"), "payload"),
-                        matchCase(
-                            somePat("payload_repr"),
-                            match(
-                                typedDecodeCall(okType, id("payload_repr")),
-                                matchCase(okPat("decoded_ok"), ok(ok(id("decoded_ok")))),
-                                matchCase(errPat("e"), err(id("e")))
-                            )
-                        ),
-                        matchCase(
-                            nonePat(),
-                            call(
-                                member(id("codec"), "decode_error"),
-                                record(
-                                    "path" to id("path"),
-                                    "message" to str("Expected payload for Ok variant"),
-                                    "expected" to str("payload"),
-                                    "found" to none()
-                                )
-                            )
-                        )
-                    ),
-                    elseBranch = ifExpr(
-                        condition = call(
-                            member(id("str"), "eq"),
-                            record("a" to member(id("variant_info"), "tag"), "b" to str("Err"))
-                        ),
-                        thenBranch = match(
-                            member(id("variant_info"), "payload"),
-                            matchCase(
-                                somePat("payload_repr"),
-                                match(
-                                    typedDecodeCall(errType, id("payload_repr")),
-                                    matchCase(okPat("decoded_err"), ok(err(id("decoded_err")))),
-                                    matchCase(errPat("e"), err(id("e")))
-                                )
-                            ),
-                            matchCase(
-                                nonePat(),
-                                call(
-                                    member(id("codec"), "decode_error"),
-                                    record(
-                                        "path" to id("path"),
-                                        "message" to str("Expected payload for Err variant"),
-                                        "expected" to str("payload"),
-                                        "found" to none()
-                                    )
-                                )
-                            )
-                        ),
-                        elseBranch = call(
-                            member(id("codec"), "decode_error"),
-                            record(
-                                "path" to id("path"),
-                                "message" to str("Expected Ok or Err variant for Result"),
-                                "expected" to str("Result"),
-                                "found" to some(member(id("variant_info"), "tag"))
-                            )
-                        )
-                    )
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createDecodeImpl(formatType, typeApp, body)
-    }
-
-    /**
-     * Convert MezzeType to ParsedTypeAnnotation for use in ParsedImplAbilityDecl.
-     */
     private fun mezzeTypeToAnnotation(type: MezzeType): ParsedTypeAnnotation {
-        // Use PrimitiveTypes to get the name for primitive types
-        PrimitiveTypes.toName(type)?.let { name ->
-            return ParsedNamedType(name, GEN_LOC)
-        }
-
+        PrimitiveTypes.toName(type)?.let { return ParsedNamedType(it, GEN_LOC) }
         return when (type) {
             is MezzeType.VarType -> ParsedNamedType(type.variable.name, GEN_LOC)
             is MezzeType.RecordType -> ParsedRecordType(
                 entries = type.fields.map { (name, fieldType) ->
                     ParsedRecordTypeEntry(name, mezzeTypeToAnnotation(fieldType), GEN_LOC)
                 },
-                loc = GEN_LOC
+                loc = GEN_LOC,
             )
-            is MezzeType.VariantType -> ParsedVariantType(
-                constructors = type.constructors.map { (name, payloadType) ->
-                    ParsedVariantTypeCtor(name, payloadType?.let { mezzeTypeToAnnotation(it) }, GEN_LOC)
-                },
-                loc = GEN_LOC
-            )
-            is MezzeType.ListType -> ParsedTypeApp("List", listOf(mezzeTypeToAnnotation(type.elementType)), GEN_LOC)
-            is MezzeType.SeqType -> ParsedSeqType(mezzeTypeToAnnotation(type.elementType), GEN_LOC)
-            is MezzeType.SetType -> ParsedTypeApp("Set", listOf(mezzeTypeToAnnotation(type.elementType)), GEN_LOC)
+            is MezzeType.VariantType -> {
+                val named = type.identity.displayNameOrNull()
+                if (named != null) ParsedNamedType(named, GEN_LOC)
+                else ParsedVariantType(
+                    constructors = type.constructors.map { (n, payload) ->
+                        ParsedVariantTypeCtor(n, payload?.let { mezzeTypeToAnnotation(it) }, GEN_LOC)
+                    },
+                    loc = GEN_LOC,
+                )
+            }
+            is MezzeType.ListType    -> ParsedTypeApp("List", listOf(mezzeTypeToAnnotation(type.elementType)), GEN_LOC)
+            is MezzeType.SeqType     -> ParsedSeqType(mezzeTypeToAnnotation(type.elementType), GEN_LOC)
+            is MezzeType.SetType     -> ParsedTypeApp("Set", listOf(mezzeTypeToAnnotation(type.elementType)), GEN_LOC)
             is MezzeType.SortedSetType -> ParsedTypeApp("SortedSet", listOf(mezzeTypeToAnnotation(type.elementType)), GEN_LOC)
-            is MezzeType.MapType -> ParsedTypeApp("Map", listOf(
-                mezzeTypeToAnnotation(type.keyType),
-                mezzeTypeToAnnotation(type.valueType)
-            ), GEN_LOC)
-            is MezzeType.SortedMapType -> ParsedTypeApp("SortedMap", listOf(
-                mezzeTypeToAnnotation(type.keyType),
-                mezzeTypeToAnnotation(type.valueType)
-            ), GEN_LOC)
+            is MezzeType.MapType     -> ParsedTypeApp(
+                "Map",
+                listOf(mezzeTypeToAnnotation(type.keyType), mezzeTypeToAnnotation(type.valueType)),
+                GEN_LOC,
+            )
+            is MezzeType.SortedMapType -> ParsedTypeApp(
+                "SortedMap",
+                listOf(mezzeTypeToAnnotation(type.keyType), mezzeTypeToAnnotation(type.valueType)),
+                GEN_LOC,
+            )
             is MezzeType.TypeApplication -> ParsedTypeApp(
                 type.constructor,
                 type.args.map { mezzeTypeToAnnotation(it) },
-                GEN_LOC
+                GEN_LOC,
             )
             is MezzeType.FunctionType -> ParsedFunctionType(
                 paramType = mezzeTypeToAnnotation(type.paramType),
                 returnType = mezzeTypeToAnnotation(type.returnType),
-                loc = GEN_LOC
+                loc = GEN_LOC,
             )
             else -> throw IllegalArgumentException("Cannot convert MezzeType to ParsedTypeAnnotation: $type")
         }
     }
 
-    /**
-     * Create an EncodeRepr impl declaration.
-     */
-    private fun createEncodeImpl(formatType: MezzeType, dataType: MezzeType, body: ParsedExpr): ParsedImplAbilityDecl {
-        val encodeBody = doWithLet("path", array(emptyList()), body)
-
-        return ParsedImplAbilityDecl(
-            target = ParsedImplTarget.Named(ParsedQualifiedRef("EncodeRepr", null, GEN_LOC)),
-            targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
-            operations = listOf(
-                ParsedImplOp(
-                    name = "encode_repr",
-                    paramType = null,
-                    returnType = null,
-                    implementation = lambda(listOf("it", "fmt", "config"), encodeBody),
-                    loc = GEN_LOC
-                )
-            ),
-            loc = GEN_LOC
-        )
+    companion object {
+        private val GEN_LOC = Loc("<generated>", 0, 0, 0, 0)
     }
-
-    /**
-     * Create a DecodeRepr impl declaration.
-     */
-    private fun createDecodeImpl(formatType: MezzeType, dataType: MezzeType, body: ParsedExpr): ParsedImplAbilityDecl {
-        val decodeBody = doWithLet("path", array(emptyList()), body)
-
-        // The ability is `ability DecodeRepr 'a for 'repr`.
-        // targetTypes is the types after `for` — the repr/format type.
-        // The data type 'a is passed as an associated type parameter.
-        // Use shallow type annotation to avoid infinite recursion for recursive types like Json
-        // (JArray contains [Json], JObject contains [{key: Str, value: Json}]).
-        val shallowFormatAnnotation = when {
-            formatType is MezzeType.VariantType && formatType.identity.displayNameOrNull() != null ->
-                ParsedNamedType(formatType.identity.displayNameOrNull()!!, GEN_LOC)
-            formatType is MezzeType.VariantType ->
-                mezzeTypeToAnnotation(formatType)  // fallback for unnamed variants
-            else -> mezzeTypeToAnnotation(formatType)
-        }
-        return ParsedImplAbilityDecl(
-            target = ParsedImplTarget.Named(ParsedQualifiedRef("DecodeRepr", null, GEN_LOC)),
-            targetTypes = listOf(shallowFormatAnnotation),
-            operations = listOf(
-                ParsedImplOp(
-                    name = "decode_repr",
-                    paramType = null,
-                    returnType = null,
-                    implementation = lambda(listOf("it", "fmt", "config"), decodeBody),
-                    loc = GEN_LOC
-                )
-            ),
-            loc = GEN_LOC
-        )
-    }
-
-    /**
-     * Eagerly emit `impl EncodeRepr for X` and `impl DecodeRepr for X` for every
-     * built-in primitive. The on-demand path in ConstraintSolver only seeds an
-     * impl when a constraint resolves to a concrete primitive at a call site —
-     * inside a polymorphic helper like `with_query : Map Str 'a with EncodeRepr 'a`
-     * the `'a` stays a TyVar and no impl ever gets generated, so the runtime
-     * crashes on `x.v.encode_repr {...}` against e.g. a `Str` payload. Seeding
-     * unconditionally closes that gap. Caller dedups by content hash.
-     */
-    fun seedPrimitiveImpls(): List<ParsedImplAbilityDecl> {
-        val dummyFormat = MezzeType.RecordType(emptyMap())
-        val primitives = listOf(
-            MezzeType.IntType,
-            MezzeType.FloatType,
-            MezzeType.StringType,
-            MezzeType.BoolType,
-            MezzeType.FracType,
-            MezzeType.CharType,
-            MezzeType.BytesType,
-        )
-        val out = ArrayList<ParsedImplAbilityDecl>(primitives.size * 2)
-        for (prim in primitives) {
-            out.add(generateEncodeImpl(dummyFormat, prim))
-            out.add(generateDecodeImpl(dummyFormat, prim))
-        }
-        return out
-    }
-
-    /**
-     * Generate a StreamEncode implementation for the given format and data type.
-     */
-    fun generateStreamEncodeImpl(formatType: MezzeType, dataType: MezzeType): ParsedImplAbilityDecl {
-        val cacheKey = "${formatType}_${dataType}"
-        streamEncodeCache[cacheKey]?.let { return it }
-
-        val impl = when (dataType) {
-            is MezzeType.IntType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_int")
-            is MezzeType.FloatType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_float")
-            is MezzeType.StringType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_string")
-            is MezzeType.BoolType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_bool")
-            is MezzeType.FracType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_frac")
-            is MezzeType.BytesType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_bytes")
-            is MezzeType.CharType -> generateCharStreamEncode(formatType)
-            is MezzeType.RecordType -> generateRecordStreamEncode(formatType, dataType)
-            is MezzeType.VariantType -> generateVariantStreamEncode(formatType, dataType)
-            is MezzeType.ListType -> generateListStreamEncode(formatType, dataType)
-            is MezzeType.TypeApplication -> generateTypeApplicationStreamEncode(formatType, dataType)
-            else -> throw IllegalArgumentException("Cannot generate StreamEncode for type: $dataType")
-        }
-
-        streamEncodeCache[cacheKey] = impl
-        return impl
-    }
-
-    /**
-     * Generate a StreamDecode implementation for the given format and data type.
-     */
-    fun generateStreamDecodeImpl(formatType: MezzeType, dataType: MezzeType): ParsedImplAbilityDecl {
-        val cacheKey = "${formatType}_${dataType}"
-        streamDecodeCache[cacheKey]?.let { return it }
-
-        val impl = when (dataType) {
-            is MezzeType.IntType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_int")
-            is MezzeType.FloatType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_float")
-            is MezzeType.StringType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_string")
-            is MezzeType.BoolType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_bool")
-            is MezzeType.FracType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_frac")
-            is MezzeType.BytesType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_bytes")
-            is MezzeType.CharType -> generateCharStreamDecode(formatType)
-            is MezzeType.RecordType -> generateRecordStreamDecode(formatType, dataType)
-            is MezzeType.VariantType -> generateVariantStreamDecode(formatType, dataType)
-            is MezzeType.ListType -> generateListStreamDecode(formatType, dataType)
-            is MezzeType.TypeApplication -> generateTypeApplicationStreamDecode(formatType, dataType)
-            else -> throw IllegalArgumentException("Cannot generate StreamDecode for type: $dataType")
-        }
-
-        streamDecodeCache[cacheKey] = impl
-        return impl
-    }
-
-    private fun generatePrimitiveStreamEncode(
-        formatType: MezzeType,
-        dataType: MezzeType,
-        hookName: String
-    ): ParsedImplAbilityDecl {
-        val body = call(
-            member(id("StreamFormat"), hookName),
-            record("val" to id("it"), "buffer" to id("buffer"), "path" to id("path"))
-        )
-        return createStreamEncodeImpl(formatType, dataType, body)
-    }
-
-    private fun generateCharStreamEncode(formatType: MezzeType): ParsedImplAbilityDecl {
-        val toStringCall = call(member(id("char"), "to_string"), record("c" to id("it")))
-        val body = call(
-            member(id("StreamFormat"), "stream_string"),
-            record("val" to toStringCall, "buffer" to id("buffer"), "path" to id("path"))
-        )
-        return createStreamEncodeImpl(formatType, MezzeType.CharType, body)
-    }
-
-    private fun generateRecordStreamEncode(formatType: MezzeType, recordType: MezzeType.RecordType): ParsedImplAbilityDecl {
-        val fields = recordType.fields.entries.sortedBy { it.key }
-
-        if (fields.isEmpty()) {
-            val body = match(
-                call(
-                    member(id("StreamFormat"), "stream_record_start"),
-                    record("buffer" to id("buffer"), "path" to id("path"))
-                ),
-                matchCase(
-                    okPat("buf1"),
-                    call(
-                        member(id("StreamFormat"), "stream_record_end"),
-                        record("buffer" to id("buf1"), "path" to id("path"))
-                    )
-                ),
-                matchCase(errPat("e"), err(id("e")))
-            )
-            return createStreamEncodeImpl(formatType, recordType, body)
-        }
-
-        val body = buildRecordStreamEncodeBody(fields)
-        return createStreamEncodeImpl(formatType, recordType, body)
-    }
-
-    private fun buildRecordStreamEncodeBody(fields: List<Map.Entry<String, MezzeType>>): ParsedExpr {
-        var resultExpr: ParsedExpr = call(
-            member(id("StreamFormat"), "stream_record_end"),
-            record("buffer" to id("buf_final"), "path" to id("path"))
-        )
-
-        for ((index, entry) in fields.reversed().withIndex()) {
-            val (fieldName, _) = entry
-            val isFirst = index == fields.size - 1
-            val bufVarIn = if (index == fields.size - 1) "buf_start" else "buf_${fields.size - 1 - index}"
-            val bufVarOut = if (index == 0) "buf_final" else "buf_${fields.size - index}"
-
-            val fieldStreamExpr = match(
-                call(
-                    member(id("StreamEncode"), "stream_encode"),
-                    record(
-                        "val" to member(id("it"), fieldName),
-                        "buffer" to call(member(id("bytebuffer"), "new"), record()),
-                        "path" to appendPath(id("path"), fieldName)
-                    )
-                ),
-                matchCase(
-                    okPat("field_buf"),
-                    match(
-                        call(
-                            member(id("StreamFormat"), "stream_record_field"),
-                            record(
-                                "key" to str(fieldName),
-                                "val" to id("field_buf"),
-                                "is_first" to variant(if (isFirst) "True" else "False"),
-                                "buffer" to id(bufVarIn),
-                                "path" to id("path")
-                            )
-                        ),
-                        matchCase(okPat(bufVarOut), resultExpr),
-                        matchCase(errPat("e"), err(id("e")))
-                    )
-                ),
-                matchCase(errPat("e"), err(id("e")))
-            )
-
-            resultExpr = fieldStreamExpr
-        }
-
-        return match(
-            call(
-                member(id("StreamFormat"), "stream_record_start"),
-                record("buffer" to id("buffer"), "path" to id("path"))
-            ),
-            matchCase(okPat("buf_start"), resultExpr),
-            matchCase(errPat("e"), err(id("e")))
-        )
-    }
-
-    private fun generateVariantStreamEncode(formatType: MezzeType, variantType: MezzeType.VariantType): ParsedImplAbilityDecl {
-        val constructors = variantType.constructors.entries.sortedBy { it.key }
-
-        val cases = constructors.map { (constructorName, payloadType) ->
-            if (payloadType == null) {
-                matchCase(
-                    constructorPat(constructorName, null),
-                    call(
-                        member(id("StreamFormat"), "stream_variant"),
-                        record(
-                            "tag" to str(constructorName),
-                            "payload" to none(),
-                            "buffer" to id("buffer"),
-                            "path" to id("path")
-                        )
-                    )
-                )
-            } else {
-                matchCase(
-                    constructorPat(constructorName, recordPat("val" to varPat("payload_val"))),
-                    match(
-                        call(
-                            member(id("StreamEncode"), "stream_encode"),
-                            record(
-                                "val" to id("payload_val"),
-                                "buffer" to call(member(id("bytebuffer"), "new"), record()),
-                                "path" to id("path")
-                            )
-                        ),
-                        matchCase(
-                            okPat("payload_buf"),
-                            call(
-                                member(id("StreamFormat"), "stream_variant"),
-                                record(
-                                    "tag" to str(constructorName),
-                                    "payload" to some(id("payload_buf")),
-                                    "buffer" to id("buffer"),
-                                    "path" to id("path")
-                                )
-                            )
-                        ),
-                        matchCase(errPat("e"), err(id("e")))
-                    )
-                )
-            }
-        }
-
-        val body = match(id("it"), *cases.toTypedArray())
-        return createStreamEncodeImpl(formatType, variantType, body)
-    }
-
-    private fun generateListStreamEncode(formatType: MezzeType, listType: MezzeType.ListType): ParsedImplAbilityDecl {
-        val body = match(
-            call(
-                member(id("StreamFormat"), "stream_list_start"),
-                record("buffer" to id("buffer"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("buf_start"),
-                match(
-                    call(
-                        member(id("list"), "fold_indexed"),
-                        record(
-                            "list" to id("it"),
-                            "init" to ok(record("buffer" to id("buf_start"), "is_first" to variant("True"))),
-                            "f" to lambda(listOf("acc", "elem", "idx"),
-                                match(
-                                    id("acc"),
-                                    matchCase(
-                                        okPat("state"),
-                                        match(
-                                            call(
-                                                member(id("StreamEncode"), "stream_encode"),
-                                                record(
-                                                    "val" to id("elem"),
-                                                    "buffer" to call(member(id("bytebuffer"), "new"), record()),
-                                                    "path" to appendIndex(id("path"), id("idx"))
-                                                )
-                                            ),
-                                            matchCase(
-                                                okPat("elem_buf"),
-                                                match(
-                                                    call(
-                                                        member(id("StreamFormat"), "stream_list_element"),
-                                                        record(
-                                                            "val" to id("elem_buf"),
-                                                            "is_first" to member(id("state"), "is_first"),
-                                                            "buffer" to member(id("state"), "buffer"),
-                                                            "path" to id("path")
-                                                        )
-                                                    ),
-                                                    matchCase(
-                                                        okPat("new_buf"),
-                                                        ok(record("buffer" to id("new_buf"), "is_first" to variant("False")))
-                                                    ),
-                                                    matchCase(errPat("e"), err(id("e")))
-                                                )
-                                            ),
-                                            matchCase(errPat("e"), err(id("e")))
-                                        )
-                                    ),
-                                    matchCase(errPat("e"), err(id("e")))
-                                )
-                            )
-                        )
-                    ),
-                    matchCase(
-                        okPat("final_state"),
-                        call(
-                            member(id("StreamFormat"), "stream_list_end"),
-                            record("buffer" to member(id("final_state"), "buffer"), "path" to id("path"))
-                        )
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-
-        return createStreamEncodeImpl(formatType, listType, body)
-    }
-
-    private fun generateTypeApplicationStreamEncode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        return when (typeApp.constructor) {
-            "Option" -> generateOptionStreamEncode(formatType, typeApp)
-            else -> throw IllegalArgumentException("Cannot generate StreamEncode for type application: ${typeApp.constructor}")
-        }
-    }
-
-    private fun generateOptionStreamEncode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        val body = match(
-            id("it"),
-            matchCase(
-                nonePat(),
-                call(
-                    member(id("StreamFormat"), "stream_none"),
-                    record("buffer" to id("buffer"), "path" to id("path"))
-                )
-            ),
-            matchCase(
-                somePat("inner"),
-                match(
-                    call(
-                        member(id("StreamEncode"), "stream_encode"),
-                        record(
-                            "val" to id("inner"),
-                            "buffer" to call(member(id("bytebuffer"), "new"), record()),
-                            "path" to id("path")
-                        )
-                    ),
-                    matchCase(
-                        okPat("inner_buf"),
-                        call(
-                            member(id("StreamFormat"), "stream_some"),
-                            record("val" to id("inner_buf"), "buffer" to id("buffer"), "path" to id("path"))
-                        )
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            )
-        )
-        return createStreamEncodeImpl(formatType, typeApp, body)
-    }
-
-    private fun generatePrimitiveStreamDecode(
-        formatType: MezzeType,
-        dataType: MezzeType,
-        hookName: String
-    ): ParsedImplAbilityDecl {
-        val body = call(
-            member(id("StreamDecodeFormat"), hookName),
-            record("bytes" to id("bytes"), "offset" to id("offset"), "path" to id("path"))
-        )
-        return createStreamDecodeImpl(formatType, dataType, body)
-    }
-
-    private fun generateCharStreamDecode(formatType: MezzeType): ParsedImplAbilityDecl {
-        val body = match(
-            call(
-                member(id("StreamDecodeFormat"), "stream_decode_string"),
-                record("bytes" to id("bytes"), "offset" to id("offset"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("result"),
-                ifExpr(
-                    condition = call(
-                        member(id("int"), "eq"),
-                        record(
-                            "a" to call(member(id("str"), "length"), record("s" to member(id("result"), "value"))),
-                            "b" to intLit(1)
-                        )
-                    ),
-                    thenBranch = ok(record(
-                        "val" to call(
-                            member(id("str"), "char_at"),
-                            record("s" to member(id("result"), "value"), "index" to intLit(0))
-                        ),
-                        "offset" to member(id("result"), "offset")
-                    )),
-                    elseBranch = call(
-                        member(id("codec"), "decode_error"),
-                        record(
-                            "path" to id("path"),
-                            "message" to str("Expected single character string for Char"),
-                            "expected" to str("Char"),
-                            "found" to some(str("multi-char string"))
-                        )
-                    )
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createStreamDecodeImpl(formatType, MezzeType.CharType, body)
-    }
-
-    private fun generateRecordStreamDecode(formatType: MezzeType, recordType: MezzeType.RecordType): ParsedImplAbilityDecl {
-        val fields = recordType.fields.entries.sortedBy { it.key }
-
-        if (fields.isEmpty()) {
-            val body = match(
-                call(
-                    member(id("StreamDecodeFormat"), "stream_decode_record_start"),
-                    record("bytes" to id("bytes"), "offset" to id("offset"), "path" to id("path"))
-                ),
-                matchCase(
-                    okPat("start_result"),
-                    ok(record(
-                        "val" to ParsedRecordLit(entries = emptyList(), loc = GEN_LOC),
-                        "offset" to member(id("start_result"), "offset")
-                    ))
-                ),
-                matchCase(errPat("e"), err(id("e")))
-            )
-            return createStreamDecodeImpl(formatType, recordType, body)
-        }
-
-        val body = buildRecordStreamDecodeBody(fields)
-        return createStreamDecodeImpl(formatType, recordType, body)
-    }
-
-    private fun buildRecordStreamDecodeBody(fields: List<Map.Entry<String, MezzeType>>): ParsedExpr {
-        var resultExpr: ParsedExpr = ok(record(
-            "val" to ParsedRecordLit(
-                entries = fields.map { (fieldName, _) ->
-                    ParsedRecordEntry.Field(fieldName, id("${fieldName}_val"), GEN_LOC)
-                },
-                loc = GEN_LOC
-            ),
-            "offset" to id("offset_final")
-        ))
-
-        for ((index, entry) in fields.reversed().withIndex()) {
-            val (fieldName, _) = entry
-            val offsetIn = if (index == fields.size - 1) "offset_start" else "offset_${fields.size - 1 - index}"
-            val offsetOut = if (index == 0) "offset_final" else "offset_${fields.size - index}"
-
-            resultExpr = match(
-                call(
-                    member(id("StreamDecodeFormat"), "stream_decode_record_field"),
-                    record(
-                        "bytes" to id("bytes"),
-                        "offset" to id(offsetIn),
-                        "key" to str(fieldName),
-                        "path" to id("path")
-                    )
-                ),
-                matchCase(
-                    okPat("field_result"),
-                    match(
-                        call(
-                            member(id("StreamDecode"), "stream_decode"),
-                            record(
-                                "bytes" to member(id("field_result"), "value"),
-                                "offset" to intLit(0),
-                                "path" to appendPath(id("path"), fieldName)
-                            )
-                        ),
-                        matchCase(
-                            okPat("decoded_field"),
-                            ParsedDo(
-                                statements = listOf(
-                                    letStmt("${fieldName}_val", member(id("decoded_field"), "value")),
-                                    letStmt(offsetOut, member(id("field_result"), "offset"))
-                                ),
-                                result = resultExpr,
-                                loc = GEN_LOC
-                            )
-                        ),
-                        matchCase(errPat("e"), err(id("e")))
-                    )
-                ),
-                matchCase(errPat("e"), err(id("e")))
-            )
-        }
-
-        return match(
-            call(
-                member(id("StreamDecodeFormat"), "stream_decode_record_start"),
-                record("bytes" to id("bytes"), "offset" to id("offset"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("start_result"),
-                ParsedDo(
-                    statements = listOf(letStmt("offset_start", member(id("start_result"), "offset"))),
-                    result = resultExpr,
-                    loc = GEN_LOC
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-    }
-
-    private fun generateVariantStreamDecode(formatType: MezzeType, variantType: MezzeType.VariantType): ParsedImplAbilityDecl {
-        val constructors = variantType.constructors.entries.sortedBy { it.key }
-
-        val body = match(
-            call(
-                member(id("StreamDecodeFormat"), "stream_decode_variant"),
-                record("bytes" to id("bytes"), "offset" to id("offset"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("variant_result"),
-                buildVariantStreamTagMatcher(constructors, "variant_result")
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-
-        return createStreamDecodeImpl(formatType, variantType, body)
-    }
-
-    private fun buildVariantStreamTagMatcher(constructors: List<Map.Entry<String, MezzeType?>>, resultVar: String): ParsedExpr {
-        if (constructors.isEmpty()) {
-            return call(
-                member(id("codec"), "decode_error"),
-                record(
-                    "path" to id("path"),
-                    "message" to str("Unknown variant tag"),
-                    "expected" to str("valid tag"),
-                    "found" to some(member(id(resultVar), "tag"))
-                )
-            )
-        }
-
-        val (constructorName, payloadType) = constructors.first()
-        val remaining = constructors.drop(1)
-
-        val thenBranch = if (payloadType == null) {
-            ok(record(
-                "val" to variant(constructorName, null),
-                "offset" to member(id(resultVar), "offset")
-            ))
-        } else {
-            match(
-                member(id(resultVar), "payload"),
-                matchCase(
-                    somePat("payload_bytes"),
-                    match(
-                        call(
-                            member(id("StreamDecode"), "stream_decode"),
-                            record(
-                                "bytes" to id("payload_bytes"),
-                                "offset" to intLit(0),
-                                "path" to id("path")
-                            )
-                        ),
-                        matchCase(
-                            okPat("decoded_payload"),
-                            ok(record(
-                                "val" to variant(constructorName, record("val" to member(id("decoded_payload"), "value"))),
-                                "offset" to member(id(resultVar), "offset")
-                            ))
-                        ),
-                        matchCase(errPat("e"), err(id("e")))
-                    )
-                ),
-                matchCase(
-                    nonePat(),
-                    call(
-                        member(id("codec"), "decode_error"),
-                        record(
-                            "path" to id("path"),
-                            "message" to str("Expected payload for variant $constructorName"),
-                            "expected" to str("payload"),
-                            "found" to none()
-                        )
-                    )
-                )
-            )
-        }
-
-        return ifExpr(
-            condition = call(
-                member(id("str"), "eq"),
-                record("a" to member(id(resultVar), "tag"), "b" to str(constructorName))
-            ),
-            thenBranch = thenBranch,
-            elseBranch = buildVariantStreamTagMatcher(remaining, resultVar)
-        )
-    }
-
-    private fun generateListStreamDecode(formatType: MezzeType, listType: MezzeType.ListType): ParsedImplAbilityDecl {
-        val body = match(
-            call(
-                member(id("StreamDecodeFormat"), "stream_decode_list_start"),
-                record("bytes" to id("bytes"), "offset" to id("offset"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("start_result"),
-                call(
-                    id("decode_list_elements"),
-                    record(
-                        "bytes" to id("bytes"),
-                        "offset" to member(id("start_result"), "offset"),
-                        "acc" to array(emptyList()),
-                        "idx" to intLit(0),
-                        "path" to id("path")
-                    )
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-
-        return createStreamDecodeImpl(formatType, listType, body)
-    }
-
-    private fun generateTypeApplicationStreamDecode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        return when (typeApp.constructor) {
-            "Option" -> generateOptionStreamDecode(formatType, typeApp)
-            else -> throw IllegalArgumentException("Cannot generate StreamDecode for type application: ${typeApp.constructor}")
-        }
-    }
-
-    private fun generateOptionStreamDecode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        val body = match(
-            call(
-                member(id("StreamDecodeFormat"), "stream_decode_option"),
-                record("bytes" to id("bytes"), "offset" to id("offset"), "path" to id("path"))
-            ),
-            matchCase(
-                okPat("opt_result"),
-                match(
-                    member(id("opt_result"), "value"),
-                    matchCase(
-                        nonePat(),
-                        ok(record("val" to none(), "offset" to member(id("opt_result"), "offset")))
-                    ),
-                    matchCase(
-                        somePat("inner_bytes"),
-                        match(
-                            call(
-                                member(id("StreamDecode"), "stream_decode"),
-                                record(
-                                    "bytes" to id("inner_bytes"),
-                                    "offset" to intLit(0),
-                                    "path" to id("path")
-                                )
-                            ),
-                            matchCase(
-                                okPat("decoded_inner"),
-                                ok(record(
-                                    "val" to some(member(id("decoded_inner"), "value")),
-                                    "offset" to member(id("opt_result"), "offset")
-                                ))
-                            ),
-                            matchCase(errPat("e"), err(id("e")))
-                        )
-                    )
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-        return createStreamDecodeImpl(formatType, typeApp, body)
-    }
-
-    /**
-     * Create a StreamEncode impl declaration.
-     */
-    private fun createStreamEncodeImpl(formatType: MezzeType, dataType: MezzeType, body: ParsedExpr): ParsedImplAbilityDecl {
-        return ParsedImplAbilityDecl(
-            target = ParsedImplTarget.Named(ParsedQualifiedRef("StreamEncode", null, GEN_LOC)),
-            targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
-            operations = listOf(
-                ParsedImplOp(
-                    name = "stream_encode",
-                    paramType = null,
-                    returnType = null,
-                    implementation = lambda(listOf("buffer", "path"), body),
-                    loc = GEN_LOC
-                )
-            ),
-            loc = GEN_LOC
-        )
-    }
-
-    /**
-     * Create a StreamDecode impl declaration.
-     */
-    private fun createStreamDecodeImpl(formatType: MezzeType, dataType: MezzeType, body: ParsedExpr): ParsedImplAbilityDecl {
-        return ParsedImplAbilityDecl(
-            target = ParsedImplTarget.Named(ParsedQualifiedRef("StreamDecode", null, GEN_LOC)),
-            targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
-            operations = listOf(
-                ParsedImplOp(
-                    name = "stream_decode",
-                    paramType = null,
-                    returnType = null,
-                    implementation = lambda(listOf("offset", "path"), body),
-                    loc = GEN_LOC
-                )
-            ),
-            loc = GEN_LOC
-        )
-    }
-
 }

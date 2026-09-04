@@ -550,32 +550,23 @@ internal class AbilityChecker(
         }
 
         if (isCodecAbility(abilityName, abilityHash)) {
-            if (typeArgs.size == 2) {
-                val dataType = typeArgs[0]
-                val formatType = typeArgs[1]
-                if (checkCodecAbilityImplementation(abilityName, formatType, dataType)) {
+            // New codec ability shape (`docs/codec/redesign-2026-09.md`):
+            //   Encode 'config for 'a          — 2 positional slots [config, data]
+            //   Decode 'config 'a for 'in      — 3 positional slots [config, data, in]
+            //   Format for 'config having 'out — 1 positional slot  [config]
+            // We only auto-derive the Encode / Decode pair; Format impls come
+            // from format modules and never need synthesis.
+            if (effectiveHash == WellKnownHashConstants.ABILITY_ENCODE && typeArgs.size == 2) {
+                val formatType = typeArgs[0]
+                val dataType = typeArgs[1]
+                if (checkCodecAbilityImplementation(abilityName, listOf(formatType, dataType), dataType)) {
                     return true
                 }
-            } else if (typeArgs.size == 1 && (effectiveHash == WellKnownHashConstants.ABILITY_ENCODEREPR || effectiveHash == WellKnownHashConstants.ABILITY_DECODEREPR)) {
-                val dataType = typeArgs[0]
-                if (codecGenerator.isSerializable(dataType) && !containsVarType(dataType)) {
-                    val hashBuilder = MezzeHashBuilder()
-                    hashBuilder.append("codec_impl")
-                    hashBuilder.append(abilityName)
-                    hashBuilder.append("_single_param_")
-                    // #317: hash the type via the canonical MezzeTypeHasher, not the lossy
-                    // ContentHashComputer.mezzeTypeToString (which collapses records/variants
-                    // to field-NAMES only, dropping field types → distinct types collide on
-                    // one implKey and the second codec impl is silently dropped).
-                    com.mezze.language.ast.hashing.appendType(hashBuilder, dataType)
-                    val implKey = Hash(hashBuilder.build().toFullHexString())
-                    if (!generatedCodecImpls.containsKey(implKey)) {
-                        generatedCodecImpls[implKey] = GeneratedCodecImpl(
-                            abilityName = abilityName,
-                            targetTypes = listOf(dataType),
-                            contentHash = implKey
-                        )
-                    }
+            } else if (effectiveHash == WellKnownHashConstants.ABILITY_DECODE && typeArgs.size == 3) {
+                val formatType = typeArgs[0]
+                val dataType = typeArgs[1]
+                val inType = typeArgs[2]
+                if (checkCodecAbilityImplementation(abilityName, listOf(formatType, dataType, inType), dataType)) {
                     return true
                 }
             }
@@ -628,16 +619,22 @@ internal class AbilityChecker(
     private fun isCodecAbility(abilityName: String, abilityHash: Hash? = null): Boolean =
         WellKnownHashConstants.isCodecAbility(abilityHash ?: registry.resolveAbilityHash(abilityName))
 
+    /**
+     * Register an auto-derived codec impl. [allTypes] is the full positional
+     * type tuple of the ability at the constraint site (Encode → [config,
+     * data], Decode → [config, data, in]); [dataType] is the value shape the
+     * emitter walks when it synthesizes the impl body.
+     */
     private fun checkCodecAbilityImplementation(
         abilityName: String,
-        formatType: MezzeType,
+        allTypes: List<MezzeType>,
         dataType: MezzeType
     ): Boolean {
         if (!codecGenerator.isSerializable(dataType)) {
             return false
         }
 
-        if (containsVarType(formatType) || containsVarType(dataType)) {
+        if (allTypes.any { containsVarType(it) }) {
             return false
         }
 
@@ -646,8 +643,7 @@ internal class AbilityChecker(
         hashBuilder.append(abilityName)
         // #317: canonical MezzeTypeHasher, not lossy mezzeTypeToString (see the
         // single-param codec site above for why the field-name-only string collides).
-        com.mezze.language.ast.hashing.appendType(hashBuilder, formatType)
-        com.mezze.language.ast.hashing.appendType(hashBuilder, dataType)
+        for (t in allTypes) com.mezze.language.ast.hashing.appendType(hashBuilder, t)
         val implKey = Hash(hashBuilder.build().toFullHexString())
 
         if (generatedCodecImpls.containsKey(implKey)) {
@@ -656,7 +652,7 @@ internal class AbilityChecker(
 
         generatedCodecImpls[implKey] = GeneratedCodecImpl(
             abilityName = abilityName,
-            targetTypes = listOf(formatType, dataType),
+            targetTypes = allTypes,
             contentHash = implKey
         )
         return true
@@ -847,16 +843,23 @@ internal class AbilityChecker(
         }
 
         return when (abilityName) {
-            "Decode", "DecodeRepr" -> {
+            // Codec Tier 3 (docs/codec/redesign-2026-09.md): `Decode 'config 'a for 'in`.
+            // Positional args are [config, data, in]; data is the target type,
+            // often driven by a LHS type annotation or inherent-method syntax
+            // (`Type.from_json { it = raw }`).
+            "Decode" -> {
                 val dataType = typeArgs.getOrNull(1)
                 if (dataType is MezzeType.VarType) {
                     """Cannot infer decode target type. Add a type annotation:
-  let result: MyType = decode {val = data, fmt = fmt}"""
+  let result: MyType = it.decode { config = config }
+  # or use inherent-method syntax:
+  MyType.from_json { it = raw }"""
                 } else {
                     "$typeNames does not implement '$abilityName'. Ensure the data type is serializable.${formatAbilityCandidates(abilityName)}"
                 }
             }
-            "Encode", "EncodeRepr" -> {
+            // Codec Tier 3: `Encode 'config for 'a`. Positional args are [config, data].
+            "Encode" -> {
                 val dataType = typeArgs.getOrNull(1)
                 if (dataType is MezzeType.VarType) {
                     "Cannot infer encode source type. Add a type annotation to the value being encoded."
@@ -962,31 +965,20 @@ internal class AbilityChecker(
 
     internal fun tryBidirectionalInference(abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): Substitution? {
         val resolvedHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
-        if (resolvedHash == WellKnownHashConstants.ABILITY_DECODEREPR && typeArgs.size == 1) {
-            val dataType = typeArgs[0]
-
-            if (dataType is MezzeType.VarType) {
-                val matchingImpls = generatedCodecImpls.values.filter { impl ->
-                    registry.resolveAbilityHash(impl.abilityName) == WellKnownHashConstants.ABILITY_DECODEREPR &&
-                    impl.targetTypes.isNotEmpty()
-                }
-
-                if (matchingImpls.size == 1) {
-                    val impl = matchingImpls.first()
-                    val inferredType = impl.targetTypes[0]
-                    return Substitution.single(dataType.variable, inferredType)
-                }
-            }
-        }
-        if (resolvedHash == WellKnownHashConstants.ABILITY_DECODE && typeArgs.size == 2) {
+        // New codec Tier 3: `Decode 'config 'a for 'in` — positional [config, data, in].
+        // When only 'a is unbound and there's exactly one derived Decode impl
+        // matching the concrete [config, in] pair, infer 'a from it.
+        if (resolvedHash == WellKnownHashConstants.ABILITY_DECODE && typeArgs.size == 3) {
             val formatType = typeArgs[0]
             val dataType = typeArgs[1]
+            val inType = typeArgs[2]
 
-            if (formatType !is MezzeType.VarType && dataType is MezzeType.VarType) {
+            if (formatType !is MezzeType.VarType && inType !is MezzeType.VarType && dataType is MezzeType.VarType) {
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
                     registry.resolveAbilityHash(impl.abilityName) == WellKnownHashConstants.ABILITY_DECODE &&
-                    impl.targetTypes.size >= 2 &&
-                    typeMatchesMezzeType(formatType, impl.targetTypes[0])
+                    impl.targetTypes.size >= 3 &&
+                    typeMatchesMezzeType(formatType, impl.targetTypes[0]) &&
+                    typeMatchesMezzeType(inType, impl.targetTypes[2])
                 }
 
                 if (matchingImpls.size == 1) {

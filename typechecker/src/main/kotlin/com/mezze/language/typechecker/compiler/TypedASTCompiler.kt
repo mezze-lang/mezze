@@ -1397,8 +1397,9 @@ class TypedASTCompiler(
 
                     // Transitive dict injection: the impl we'll dispatch to via the
                     // outer caller's __dict_<method> slot may itself need dict params
-                    // (e.g. `impl EncodeRepr for Str`'s body `fmt.encode_string {val=it}`
-                    // needs __dict_encode_string against whatever `fmt` resolves to).
+                    // (e.g. an auto-derived `impl Encode 'config for Str`'s body
+                    // `config.encode_str { val = it, ctx = ctx }` needs __dict_encode_str
+                    // against whatever `config` resolves to).
                     // We don't know the exact impl at this call site, but every impl
                     // candidate's transitive dict requirements can be unioned, and
                     // resolved against the concrete types of the user-visible record
@@ -1689,9 +1690,9 @@ class TypedASTCompiler(
             if (opHash != null) return opHash
         }
         // Second pass (#195 B3): descend into container types. When the caller
-        // passes `xs: [Str]` and the callee needs an `EncodeRepr` impl for the
-        // element type, the right impl is `EncodeRepr for Str` — extract it
-        // from the container's element/value type.
+        // passes `xs: [Str]` and the callee needs an `Encode 'config for 'a` impl
+        // for the element type, the right impl is `Encode <config> for Str` —
+        // extract it from the container's element/value type.
         for (concreteType in concreteTypes) {
             val elementType: MezzeType? = when (concreteType) {
                 is SeqType -> concreteType.elementType
@@ -1933,7 +1934,7 @@ class TypedASTCompiler(
         val parentParamNames = currentParamNames
 
         // #195 B3: scan the lambda body for VarType ability method calls
-        // (e.g. `x.encode_repr {...}` inside a `seq::fold` callback). The
+        // (e.g. `x.encode { config = config }` inside a `seq::fold` callback). The
         // lambda needs its own dict params for each method whose receiver is
         // a TyVar. These dicts can't come through the indirect-call signature
         // (it's `f : {acc, x} -> 'b`, no room for extra args), so we capture

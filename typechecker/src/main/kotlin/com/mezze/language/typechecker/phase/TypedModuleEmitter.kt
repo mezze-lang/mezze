@@ -65,32 +65,25 @@ internal fun emitTypedModuleAndLower(
         val codecGen = CodecGenerator()
         val extraImpls = mutableListOf<TypedAbilityImpl>()
 
-        for (parsedImpl in codecGen.seedPrimitiveImpls()) {
-            try {
-                builder.buildCodecImpl(parsedImpl, extraImpls)
-            } catch (_: Exception) {
-            }
-        }
-
+        // New codec ability shape (docs/codec/redesign-2026-09.md):
+        //   Encode 'config for 'a          — targetTypes = [config, data]
+        //   Decode 'config 'a for 'in      — targetTypes = [config, data, in]
+        // The primitive-seed pass the old codec used is gone: with the new
+        // Tier-3 abilities every derivation is triggered at a concrete call
+        // site, and the constraint solver registers all three positional
+        // types for us to consume here.
         for (ci in codecImpls) {
             try {
-                val formatType: MezzeType
-                val dataType: MezzeType
-                if (ci.targetTypes.size == 2) {
-                    formatType = ci.targetTypes[0]
-                    dataType = ci.targetTypes[1]
-                } else if (ci.targetTypes.size == 1) {
-                    dataType = ci.targetTypes[0]
-                    formatType = MezzeType.RecordType(emptyMap())
-                } else {
-                    continue
-                }
                 val abilityHash = registry.resolveAbilityHash(ci.abilityName)
                 val parsedImpl = when {
-                    WellKnownHashConstants.isEncodeFlavoredCodec(abilityHash) ->
-                        codecGen.generateEncodeImpl(formatType, dataType)
-                    WellKnownHashConstants.isDecodeFlavoredCodec(abilityHash) ->
-                        codecGen.generateDecodeImpl(formatType, dataType)
+                    WellKnownHashConstants.isEncodeFlavoredCodec(abilityHash) -> {
+                        if (ci.targetTypes.size != 2) continue
+                        codecGen.generateEncodeImpl(ci.targetTypes[0], ci.targetTypes[1])
+                    }
+                    WellKnownHashConstants.isDecodeFlavoredCodec(abilityHash) -> {
+                        if (ci.targetTypes.size != 3) continue
+                        codecGen.generateDecodeImpl(ci.targetTypes[0], ci.targetTypes[1], ci.targetTypes[2])
+                    }
                     else -> continue
                 }
                 builder.buildCodecImpl(parsedImpl, extraImpls)
