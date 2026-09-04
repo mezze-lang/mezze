@@ -7,3 +7,5 @@ cases/*/.mez/
 
 # Java .class from reference/*.java (compiled next to sources or into build/)
 reference/*.class
+*.log
+graal_dumps/
