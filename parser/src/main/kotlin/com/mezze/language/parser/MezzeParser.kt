@@ -29,16 +29,16 @@ class MezzeParser {
     // ── Anti-hang backstop ────────────────────────────────────────────────
     // Hard invariant: the parser must NEVER hang on ANY input, in ANY frontend
     // (CLI/LSP/WASM). Progress guards in every loop kill true infinite loops in
-    // O(1); these two ceilings are the belt-and-suspenders backstop that turns
-    // any residual or future non-progress (or exponential re-scan) into a clean
-    // located P0132 error instead of a freeze. Both are reset per parse in BOTH
-    // entry points and are ticked at the recursion entry points and inside every
-    // repetition loop, so the backstop is reachable from any spin. The step
-    // budget is deterministic (machine-independent); the deadline is the ultimate
-    // last resort for a pathological-but-progressing parse.
+    // O(1); this ceiling is the belt-and-suspenders backstop that turns any
+    // residual or future non-progress (or exponential re-scan) into a clean
+    // located P0132 error instead of a freeze. It is reset per parse in BOTH
+    // entry points and ticked at the recursion entry points and inside every
+    // repetition loop, so the backstop is reachable from any spin. Deliberately
+    // a DETERMINISTIC step count scaled to input size — NO wall-clock: the same
+    // input always trips (or doesn't) identically, independent of machine speed,
+    // load, or GC pauses. Nothing in the parser is governed by real time.
     private var parseSteps: Long = 0
     private var parseStepCeiling: Long = Long.MAX_VALUE
-    private var parseDeadlineNanos: Long = Long.MAX_VALUE
 
     companion object {
         // Well under the ~700–1000-level recursive-descent depth that overflows a
@@ -47,14 +47,10 @@ class MezzeParser {
 
         // Per-token step allowance. A well-formed token is consumed in O(1)
         // amortized ticks, so legitimate parses stay far under ceiling*tokens;
-        // exponential re-scan blows past it fast (2^n crosses the line early in
-        // wall-clock). Tuned generous — false trips on real code must be impossible.
+        // exponential re-scan or a non-progressing spin blows past it. Tuned
+        // generous — false trips on real code must be impossible.
         internal const val STEPS_PER_TOKEN = 4096L
         internal const val MIN_STEP_BUDGET = 16_000_000L
-        // Absolute wall-clock ceiling; real parses finish in milliseconds. Only
-        // relevant if something dodged both the progress guards and the step
-        // budget. Checked every 4096 steps to keep nanoTime() off the hot path.
-        internal const val PARSE_DEADLINE_MS = 10_000L
     }
 
     /** Reset the anti-hang budget + nesting depth. Called by BOTH entry points. */
@@ -62,20 +58,17 @@ class MezzeParser {
         nestDepth = 0
         parseSteps = 0
         parseStepCeiling = maxOf(MIN_STEP_BUDGET, tokenCount.toLong() * STEPS_PER_TOKEN)
-        parseDeadlineNanos = System.nanoTime() + PARSE_DEADLINE_MS * 1_000_000L
     }
 
     /**
      * One unit of parser work. Call at every recursion entry point and inside
      * every repetition loop. Throws a located [ParseException] (P0132) — never
-     * returns a spinning parser to its caller. Cheap: an increment + compare,
-     * with the clock consulted only once every 4096 steps.
+     * returns a spinning parser to its caller. Cheap and deterministic: an
+     * increment + compare against a fixed, input-scaled ceiling (no clock).
      */
     internal fun parseTick(stream: TokenStream) {
         parseSteps++
-        val overSteps = parseSteps > parseStepCeiling
-        val checkClock = (parseSteps and 0xFFFL) == 0L
-        if (overSteps || (checkClock && System.nanoTime() > parseDeadlineNanos)) {
+        if (parseSteps > parseStepCeiling) {
             throw ParseException(
                 "The parser gave up on this input after too much work — this is almost " +
                     "always malformed or pathological source (unbalanced or unterminated " +

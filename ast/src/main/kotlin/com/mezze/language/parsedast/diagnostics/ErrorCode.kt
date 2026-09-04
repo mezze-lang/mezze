@@ -64,7 +64,7 @@ enum class ErrorCode {
     P0129_RECORD_FIELD_USES_EQUALS, // `{ a: 1 }` in value position — record LITERAL fields bind with `=` (`{ a = 1 }`); `:` annotates a type
     P0130_PIPE_MISSING_RHS, // `a |>` with nothing (or nothing valid) after it — the pipe needs a right-hand expression
     P0131_NESTING_TOO_DEEP, // `((((((…))))))` — expression/type nesting exceeds the depth limit (guards against a parser stack overflow)
-    P0132_PARSER_LIMIT_EXCEEDED, // the parser hit its work/time budget on this input (pathological or malformed source) — a clean bail-out instead of ever hanging
+    P0132_PARSER_LIMIT_EXCEEDED, // the parser hit its deterministic work budget on this input (pathological or malformed source) — a clean bail-out instead of ever hanging
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,
