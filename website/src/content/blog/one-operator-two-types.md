@@ -149,6 +149,7 @@ What has not changed is the part worth keeping. `Money * Money` is still a type
 error:
 
 <!--mezze-editor
+# expect-error: Money * Money has no NumMul impl. Pressing Check is the point.
 use std::effects::log::{ Console, println }
 use std::abilities::numeric::{ NumAdd }
 
