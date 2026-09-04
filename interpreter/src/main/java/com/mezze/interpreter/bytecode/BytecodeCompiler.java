@@ -591,6 +591,11 @@ public final class BytecodeCompiler {
             if (src instanceof SourceIR.RawSeq rs && !supportsNode(rs.getXs(), argCount)) return false;
             if (src instanceof SourceIR.RawList rl && !supportsNode(rl.getXs(), argCount)) return false;
             if (src instanceof SourceIR.Opaque os && !supportsNode(os.getExpr(), argCount)) return false;
+            // Walk fallback so its MakeLambdaIR hashes get pre-compiled.
+            // Without this, emitNode falling back to chain.getFallback()
+            // encounters MakeLambdaIR refs whose function wasn't pre-compiled,
+            // causing "TrampolineRootNode executed before attachInner".
+            if (chain.getFallback() != null && !supportsNode(chain.getFallback(), argCount)) return false;
             return true;
         }
         if (node instanceof PerformOpIR p) {
@@ -3085,19 +3090,18 @@ public final class BytecodeCompiler {
                                     com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
         if (filter.callHash != null) {
             // #442 Day 9 — call form: user_pred(xSlot) produces Bool on
-            // the stack, becoming the IfThen condition. Stage the arg
-            // through a fresh local to isolate it from the callee's frame
-            // activity (see emitMapperStep for the full rationale).
+            // the stack, becoming the IfThen condition. Emit CallDirectN
+            // inline using xSlot directly — DO NOT stage through a
+            // StoreLocal(argCopy) because emitPredicateCheck may be called
+            // as the first child of an IfThen, and StoreLocal is a void
+            // operation that the BDSL builder rejects at position 0 of
+            // IfThen (which expects a value-producing condition child).
             var target = resolveCallTarget(filter.callHash);
             if (target == null && language != null) {
                 target = language.getOrMintUserStub(filter.callHash, "fused_pred_check");
             }
             if (target != null) {
-                var argCopy = b.createLocal();
-                b.beginStoreLocal(argCopy);
-                  b.emitLoadLocal(xSlot);
-                b.endStoreLocal();
-                emitCallOneArg(b, target, argCopy,
+                emitCallOneArg(b, target, xSlot,
                     filter.callScalarABI, filter.callFieldName);
                 return;
             }
