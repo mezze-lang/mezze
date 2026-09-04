@@ -36,6 +36,26 @@ let bench_count = {} -> do
 let bench_to_seq = {} ->
     seq::size { xs = iter::to_seq { it = iter::filter { it = iter::range { start = 0, end = n }, p = {x} -> x % 2 == 0 } } }
 
+let bench_find = {} ->
+    match iter::find { it = iter::range { start = 0, end = n }, p = {x} -> x > 9999990 } is
+        Some { val } -> val
+        None -> 0 - 1
+
+let bench_any = {} ->
+    match iter::any { it = iter::range { start = 0, end = n }, p = {x} -> x > 9999990 } is
+        True -> 1
+        False -> 0
+
+let bench_all = {} ->
+    match iter::all { it = iter::range { start = 0, end = n }, p = {x} -> x < 9999990 } is
+        True -> 1
+        False -> 0
+
+let bench_reduce = {} ->
+    match iter::reduce { it = iter::range { start = 1, end = n }, f = {acc, x} -> acc + x } is
+        Some { val } -> val
+        None -> 0 - 1
+
 let time_it = {label: Str, f: {} -> Int} -> perform Console in perform SystemTime in do
     ## 3 warmup
     let w0 = f {}
@@ -73,4 +93,8 @@ let main = {} -> perform Console in perform SystemTime in do
     let _3 = time_it { label = "filter+map+fold(0..10M)", f = bench_filter_map_fold }
     let _4 = time_it { label = "count(0..10M)         ", f = bench_count }
     let _5 = time_it { label = "filter+to_seq(0..10M) ", f = bench_to_seq }
+    let _6 = time_it { label = "find(0..10M)          ", f = bench_find }
+    let _7 = time_it { label = "any(0..10M)           ", f = bench_any }
+    let _8 = time_it { label = "all(0..10M)           ", f = bench_all }
+    let _9 = time_it { label = "reduce(0..10M)        ", f = bench_reduce }
     println { msg = "== done ==" }
