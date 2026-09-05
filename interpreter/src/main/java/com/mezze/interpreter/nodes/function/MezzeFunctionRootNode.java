@@ -295,14 +295,17 @@ public final class MezzeFunctionRootNode extends RootNode {
         private MezzeNode bodyNode;
 
         /**
-         * PIC for cross-function tail calls: cache a DirectCallNode for the
-         * most-recently-seen cross-fn target (inlineable by JIT). Only truly
-         * megamorphic sites (3+ targets) fall through to IndirectCallNode.
+         * Cross-fn tail-call bypass PIC: cache the first cross-fn target's
+         * INNER BDSL root (bypassing the target's trampoline) so that any
+         * TailCallException from the target's body propagates back to OUR
+         * loop, keeping mutual recursion stack-flat.
          */
         @Child
-        private DirectCallNode cachedCrossFnCall;
+        private DirectCallNode cachedCrossFnInner;
         @CompilerDirectives.CompilationFinal
-        private CallTarget cachedCrossFnTarget;
+        private CallTarget cachedCrossFnOuter;
+        @CompilerDirectives.CompilationFinal
+        private com.mezze.interpreter.bytecode.TrampolineRootNode cachedCrossFnTramp;
         @Child
         private com.oracle.truffle.api.nodes.IndirectCallNode crossFnTailCallNode;
 
@@ -389,20 +392,43 @@ public final class MezzeFunctionRootNode extends RootNode {
         }
 
         private Object invokeCrossFn(CallTarget target, Object[] args) {
-            if (target == cachedCrossFnTarget) {
-                return cachedCrossFnCall.call(args);
+            // Cross-fn bypass: call the target's inner BDSL root
+            // directly, so TailCallExceptions propagate back to our
+            // LoopNode instead of being caught by the target's trampoline.
+            if (target == cachedCrossFnOuter) {
+                Object[] normalized = cachedCrossFnTramp != null
+                        ? cachedCrossFnTramp.normalizeIfNeeded(args) : args;
+                return cachedCrossFnInner.call(normalized);
             }
-            if (cachedCrossFnTarget == null) {
+            if (cachedCrossFnOuter == null) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                cachedCrossFnTarget = target;
-                cachedCrossFnCall = insert(DirectCallNode.create(target));
-                return cachedCrossFnCall.call(args);
+                cachedCrossFnOuter = target;
+                var tramp = com.mezze.interpreter.bytecode.TrampolineRootNode.asTrampolineOrNull(target);
+                if (tramp != null) {
+                    cachedCrossFnTramp = tramp;
+                    cachedCrossFnInner = insert(DirectCallNode.create(tramp.getInnerTarget()));
+                    Object[] normalized = tramp.normalizeIfNeeded(args);
+                    return cachedCrossFnInner.call(normalized);
+                } else {
+                    cachedCrossFnInner = insert(DirectCallNode.create(target));
+                    return cachedCrossFnInner.call(args);
+                }
             }
-            // Megamorphic fallback
+            // Megamorphic fallback with bypass attempt
             if (crossFnTailCallNode == null) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 crossFnTailCallNode = insert(
                     com.oracle.truffle.api.nodes.IndirectCallNode.create());
+            }
+            return crossCallWithBypass(target, args);
+        }
+
+        @CompilerDirectives.TruffleBoundary
+        private Object crossCallWithBypass(CallTarget target, Object[] args) {
+            var tramp = com.mezze.interpreter.bytecode.TrampolineRootNode.asTrampolineOrNull(target);
+            if (tramp != null) {
+                Object[] normalized = tramp.normalizeIfNeeded(args);
+                return crossFnTailCallNode.call(tramp.getInnerTarget(), normalized);
             }
             return crossFnTailCallNode.call(target, args);
         }

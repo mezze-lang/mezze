@@ -951,6 +951,12 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     val argContext = context.notInTailPosition()
     val argumentResult = generateWithExpected(expr.arguments, calleeParamType, argContext)
 
+    // Tail-call marking: currently limited to SELF-tail-calls. General
+    // cross-function TCO requires effect-safety analysis because
+    // TailCallException unwinds the stack, which breaks effect handler
+    // continuation capture (perform/throw). The trampoline infrastructure
+    // supports cross-fn TCO (inner bypass), but the TC needs to confirm
+    // the callee is pure before enabling it. See feat/perf-2 for context.
     val isSelfTailCall = context.inTailPosition &&
         context.enclosingFunctionName != null &&
         expr.function is ParsedIdentifier &&

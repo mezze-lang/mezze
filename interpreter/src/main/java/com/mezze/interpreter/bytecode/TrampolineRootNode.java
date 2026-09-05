@@ -275,9 +275,30 @@ public final class TrampolineRootNode extends RootNode {
         return null;
     }
 
-    /** Package-private hook for the repeating node to re-normalise args on tail-call resume. */
-    Object[] normalizeIfNeeded(Object[] args) {
+    /**
+     * Normalize args from caller ABI to flat scalar layout. Public so the
+     * cross-fn tail-call bypass path in {@link TrampolineRepeatingNode}
+     * and {@link com.mezze.interpreter.nodes.function.MezzeFunctionRootNode}
+     * can pre-normalize args before calling the inner BDSL root directly.
+     */
+    public Object[] normalizeIfNeeded(Object[] args) {
         return parameterCount == 0 ? args : normalizeArgs(args);
+    }
+
+    /**
+     * Resolve a CallTarget to the inner BDSL root if it belongs to a
+     * TrampolineRootNode, for cross-fn tail-call bypass. Returns null
+     * if the target is not a trampoline or has no inner attached yet.
+     */
+    @CompilerDirectives.TruffleBoundary
+    public static TrampolineRootNode asTrampolineOrNull(CallTarget target) {
+        if (target instanceof RootCallTarget rct) {
+            var root = rct.getRootNode();
+            if (root instanceof TrampolineRootNode tramp && tramp.innerTarget != null) {
+                return tramp;
+            }
+        }
+        return null;
     }
 
     /**
@@ -432,18 +453,26 @@ public final class TrampolineRootNode extends RootNode {
         private DirectCallNode selfCall;
 
         /**
-         * PIC for cross-function tail calls. Instead of a single
-         * {@code IndirectCallNode} (opaque to JIT), we cache a
-         * {@code DirectCallNode} for the most-recently-seen cross-fn
-         * target. Mutual recursion (A ↔ B) hits the cached node on
-         * every second iteration; a single cross-fn target hits it
-         * every time. Only truly megamorphic cross-fn tail-call sites
-         * (3+ distinct targets) fall through to the indirect path.
+         * Cross-function tail-call bypass: instead of calling the
+         * target's outer trampoline (which would catch any
+         * TailCallException from the target's body before we see it),
+         * we call the target's INNER BDSL root directly. This way,
+         * any TailCallException thrown from the target's body
+         * propagates back to OUR trampoline, keeping the stack flat
+         * for mutual recursion (A {@code <->} B).
+         *
+         * <p>The cached fields resolve the first cross-fn target seen.
+         * If the target is a TrampolineRootNode, we cache its inner
+         * CallTarget and the TrampolineRootNode itself (for arg
+         * normalization). For non-trampoline targets, we fall through
+         * to the IndirectCallNode.
          */
         @Child
-        private DirectCallNode cachedCrossCall;
+        private DirectCallNode cachedCrossInner;
         @CompilerDirectives.CompilationFinal
-        private CallTarget cachedCrossTarget;
+        private CallTarget cachedCrossOuter;
+        @CompilerDirectives.CompilationFinal
+        private TrampolineRootNode cachedCrossTramp;
         @Child
         private IndirectCallNode crossCall;
 
@@ -474,24 +503,36 @@ public final class TrampolineRootNode extends RootNode {
             try {
                 if (target == outerTarget || target == innerTarget) {
                     result = selfCall.call(args);
-                } else if (target == cachedCrossTarget) {
-                    result = cachedCrossCall.call(args);
-                } else if (cachedCrossTarget == null) {
+                } else if (target == cachedCrossOuter) {
+                    // Cached cross-fn bypass: normalize + call inner
+                    Object[] normalized = cachedCrossTramp != null
+                            ? cachedCrossTramp.normalizeIfNeeded(args)
+                            : args;
+                    result = cachedCrossInner.call(normalized);
+                } else if (cachedCrossOuter == null) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();
-                    cachedCrossTarget = target;
-                    cachedCrossCall = insert(DirectCallNode.create(target));
-                    result = cachedCrossCall.call(args);
+                    cachedCrossOuter = target;
+                    TrampolineRootNode tramp = TrampolineRootNode.asTrampolineOrNull(target);
+                    if (tramp != null) {
+                        cachedCrossTramp = tramp;
+                        cachedCrossInner = insert(DirectCallNode.create(tramp.getInnerTarget()));
+                        Object[] normalized = tramp.normalizeIfNeeded(args);
+                        result = cachedCrossInner.call(normalized);
+                    } else {
+                        // Non-trampoline target: call directly (no bypass)
+                        cachedCrossInner = insert(DirectCallNode.create(target));
+                        result = cachedCrossInner.call(args);
+                    }
                 } else {
-                    result = crossCall.call(target, args);
+                    // Megamorphic: try to resolve inner for bypass
+                    result = crossCallWithBypass(target, args);
                 }
             } catch (TailCallException tce) {
-                // Tail-call resume: normalise the new args in case they
-                // still carry a caller-side ScalarABIMarker or record.
-                // The tail-caller doesn't know whether the target is BDSL
-                // (which wants flat args) or AST (which wants scalar/
-                // record shape). Since we're about to re-enter innerTarget
-                // (or another trampolined target of the same shape), the
-                // owner's paramCount + closureCount govern.
+                // Tail-call resume: any TailCallException here is either
+                // from our own inner (self-tail-call) or from a cross-fn
+                // target's inner body (because we bypassed the target's
+                // trampoline). In both cases, store the new target and
+                // continue — our loop drives the entire tail-call chain.
                 frame.setObject(targetSlot, tce.getCallTarget());
                 Object[] rawArgs = tce.getArguments();
                 if (tce.getCallTarget() == outerTarget
@@ -503,6 +544,22 @@ public final class TrampolineRootNode extends RootNode {
             }
             frame.setObject(resultSlot, result);
             return false;
+        }
+
+        /**
+         * Megamorphic cross-fn call: resolve the target's inner BDSL
+         * root if it's a trampoline, normalize, and call via
+         * IndirectCallNode. Falls back to calling the outer target
+         * directly if it's not a trampoline.
+         */
+        @CompilerDirectives.TruffleBoundary
+        private Object crossCallWithBypass(CallTarget target, Object[] args) {
+            TrampolineRootNode tramp = TrampolineRootNode.asTrampolineOrNull(target);
+            if (tramp != null) {
+                Object[] normalized = tramp.normalizeIfNeeded(args);
+                return crossCall.call(tramp.getInnerTarget(), normalized);
+            }
+            return crossCall.call(target, args);
         }
     }
 }
