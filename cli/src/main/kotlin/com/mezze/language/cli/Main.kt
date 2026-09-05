@@ -145,7 +145,8 @@ fun main(args: Array<String>) {
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
             "sync" -> handleSyncCommand(remainingArgs)
-            // `add`/`remove` still unwired — edit Mezze.toml + run `mez sync`.
+            "add" -> handleAddCommand(remainingArgs)
+            "remove" -> handleRemoveCommand(remainingArgs)
             else -> {
                 println("Error: Unknown command: $command")
                 println()
@@ -445,6 +446,14 @@ private fun handleIndexCommand(args: List<String>) {
 
 private fun handleSyncCommand(args: List<String>) {
     com.mezze.language.cli.commands.SyncCommand().execute(args)
+}
+
+private fun handleAddCommand(args: List<String>) {
+    com.mezze.language.cli.commands.AddCommand().executeAdd(args)
+}
+
+private fun handleRemoveCommand(args: List<String>) {
+    com.mezze.language.cli.commands.AddCommand().executeRemove(args)
 }
 
 private fun readStdin(): String {

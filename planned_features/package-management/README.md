@@ -122,7 +122,10 @@ identical to the lock.
   deps are a pure function of the package). Diamonds dedup, cycles terminate.
   Remaining: a full lockfile *graph* (today the lock records the registry deps
   encountered, not yet the complete transitive tree with integrity per edge).
-- **P4 — polish.** `mez add`, global dedup + `mez toolchain/store gc`, `mez vendor`.
+- **P4 — polish.** ✅ `mez add <name> --path ../x` / `--url <url>#sha256:…` (`--dev`)
+  and `mez remove <name>` — line-based Mezze.toml edits that preserve comments +
+  formatting, section-scoped so `[package] name` is never touched. Remaining:
+  global dedup + `mez store gc`, `mez vendor`.
 - **Later (not focus).** GitHub-release tarballs + `versions.json` as one convenient
   source of `url#sha256` deps.
 
