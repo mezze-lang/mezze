@@ -520,13 +520,15 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         /**
          * Cached path (steady-state): a {@link DirectCallNode} tied to
          * the compile-time CallTarget. Enables Truffle inlining +
-         * splitting once the interpreter warms up.
+         * splitting once the interpreter warms up. forceInlining lets PE
+         * see through the call to the callee's bytecodes, enabling
+         * boxing elimination via escape analysis.
          */
         @Specialization(guards = "callNode.getCallTarget() == target")
         public static Object doCached(
                 CallTarget target,
                 @Variadic Object[] args,
-                @Cached("create(target)") DirectCallNode callNode) {
+                @Cached("createForceInlined(target)") DirectCallNode callNode) {
             return callNode.call(args);
         }
 
@@ -541,6 +543,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Variadic Object[] args,
                 @Cached IndirectCallNode indirectCallNode) {
             return indirectCallNode.call(target, args);
+        }
+
+        static DirectCallNode createForceInlined(CallTarget target) {
+            DirectCallNode node = DirectCallNode.create(target);
+            node.forceInlining();
+            return node;
         }
     }
 
@@ -633,7 +641,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 boolean canBypass,
                 Object arg,
                 @Cached("resolve(target, canBypass)") CallTarget resolved,
-                @Cached("create(resolved)") DirectCallNode callNode) {
+                @Cached("createForceInlined(resolved)") DirectCallNode callNode) {
             return callNode.call(arg);
         }
 
@@ -648,6 +656,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         static CallTarget resolve(CallTarget t, boolean canBypass) {
             return resolveScalarTarget(t, canBypass);
+        }
+
+        static DirectCallNode createForceInlined(CallTarget target) {
+            DirectCallNode node = DirectCallNode.create(target);
+            node.forceInlining();
+            return node;
         }
     }
 
@@ -666,7 +680,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 Object arg0,
                 Object arg1,
                 @Cached("resolve(target, canBypass)") CallTarget resolved,
-                @Cached("create(resolved)") DirectCallNode callNode) {
+                @Cached("createForceInlined(resolved)") DirectCallNode callNode) {
             return callNode.call(arg0, arg1);
         }
 
@@ -682,6 +696,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         static CallTarget resolve(CallTarget t, boolean canBypass) {
             return resolveScalarTarget(t, canBypass);
+        }
+
+        static DirectCallNode createForceInlined(CallTarget target) {
+            DirectCallNode node = DirectCallNode.create(target);
+            node.forceInlining();
+            return node;
         }
     }
 
@@ -701,7 +721,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 Object arg1,
                 Object arg2,
                 @Cached("resolve(target, canBypass)") CallTarget resolved,
-                @Cached("create(resolved)") DirectCallNode callNode) {
+                @Cached("createForceInlined(resolved)") DirectCallNode callNode) {
             return callNode.call(arg0, arg1, arg2);
         }
 
@@ -718,6 +738,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         static CallTarget resolve(CallTarget t, boolean canBypass) {
             return resolveScalarTarget(t, canBypass);
+        }
+
+        static DirectCallNode createForceInlined(CallTarget target) {
+            DirectCallNode node = DirectCallNode.create(target);
+            node.forceInlining();
+            return node;
         }
     }
 

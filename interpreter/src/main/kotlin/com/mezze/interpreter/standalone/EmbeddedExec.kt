@@ -173,6 +173,14 @@ object EmbeddedExec {
                     option("engine.FirstTierCompilationThreshold", "16")
                     option("engine.LastTierCompilationThreshold", "100")
                     option("engine.SingleTierCompilationThreshold", "32")
+                    // Increase recursion inlining depth from the default (2)
+                    // to 4. Measured on fib(40) native: 680ms → 530ms (~22%).
+                    // The extra depth lets PE inline 2 levels of recursive
+                    // calls, enabling escape analysis to scalar-replace the
+                    // Long boxing + Object[] varargs at DirectCallNode.call().
+                    // No measurable impact on startup or non-recursive
+                    // benchmarks (seq fusion, noop).
+                    option("engine.InliningRecursionDepth", "4")
                 }
             }
             // MEZZE_ENGINE_OPTS="key1=val1,key2=val2" → pass arbitrary engine
