@@ -1,21 +1,24 @@
+## Codec core — 4-tier ability system for serialization / deserialization.
+##
+## Users touch Tier 4 (per-format sugar, `x.json{}` / `Type.from_json{}`) which
+## lives in each format module. Everything below is the machinery:
+##
+##   Tier 1 — `Format`                     : config → output-type link
+##   Tier 2 — `Encode<Shape>` / `Decode<Shape>` : per-shape primitives (6 + 6)
+##   Tier 3 — `Encode 'config for 'a`      : one-shot encode/decode ability
+##            `Decode 'config 'a for 'in`   the compiler auto-derives per pair
+##
+## Format authors write Tier 1 + Tier 2 impls for their config type. The
+## compiler synthesizes Tier 3 by walking value shape and composing Tier 2.
+## Tier 4 in the format module wraps Tier 3 with a blanket impl per format.
+##
+## See `docs/codec/redesign-2026-09.md` for the full design.
 use std::str
 use std::int
 use std::collections::seq
 use std::collections::bytes
-use std::abilities::convert::{ TryInto }
 
-## Error returned when encoding fails.
-pub type EncodeError = { path: [Str], message: Str }
-
-## Error returned when decoding fails.
-pub type DecodeError = {
-  path: [Str],
-  message: Str,
-  expected: Str,
-  found: Option Str,
-}
-
-## Field name transformation strategies for codecs.
+## Field-name transformation strategies applied uniformly at emit time.
 pub type FieldTransform = |
   Identity,
   SnakeCase,
@@ -24,152 +27,144 @@ pub type FieldTransform = |
   ScreamingSnakeCase,
 |
 
-## How to handle null/None values during encoding.
-pub type NullHandling = | OmitNull, IncludeNull |
+## Cross-format shared config. Every format's config type embeds this as a
+## `shared` field so HTTP / FileSystem integration can pass field-transform
+## preferences uniformly.
+pub type SharedConfig = { field_transform: FieldTransform }
 
-## Configuration for encoding and decoding.
-pub type CodecConfig = {
-  field_transform: FieldTransform,
-  null_handling: NullHandling,
-  sort_keys: Bool,
-  indent: Option Int,
+## Context threaded through encode / decode walks. `path` accumulates
+## record / list positions for error reporting; `shared` carries the
+## cross-format knobs. Records are structural in Mezze, so encode and
+## decode share the single type — direction-specific knobs will need
+## nominal wrappers (newtype) or extra discriminating fields when they
+## are added.
+pub type CodecCtx = { path: [Str], shared: SharedConfig }
+
+## Structured decode error. `path` locates the field / index, `message`
+## is human-readable, `expected` / `found` describe the mismatch.
+pub type DecodeError = {
+  path: [Str],
+  message: Str,
+  expected: Str,
+  found: Option Str,
 }
 
-## Default codec configuration (identity transform, include nulls, compact).
-pub let default_config: CodecConfig = {
-  field_transform = Identity,
-  null_handling = IncludeNull,
-  sort_keys = False,
-  indent = None,
+## Default shared config — no field-name transform.
+pub let default_shared: SharedConfig = { field_transform = Identity }
+
+## ---- Tier 1 — Format identity ------------------------------------------
+##
+## Associates a config type with the output type its encoders produce.
+## One tiny impl per (config, output) pair — the sole point where format
+## identity is declared to the codec system.
+ability Format for 'config having 'out where {
 }
 
-## Format ability — implement once per serialization format (JSON, CSV, etc).
-ability Format 'repr for 'fmt where {
-  encode_int: { val: Int, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_float: { val: Float, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_string: { val: Str, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_bool: { val: Bool, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_frac: { val: Frac, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_bytes: { val: Bytes, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_char: { val: Char, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_nat: { val: Nat, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_record: { fields: [{ key: Str, value: 'repr }], config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_variant: { tag: Str, payload: Option 'repr, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_list: { elems: ['repr], config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_set: { elems: Set 'repr, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_map: { entries: [{ key: 'repr, value: 'repr }], config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  encode_option: { val: Option 'repr, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
-  transform_field: { name: Str, config: CodecConfig } -> Str
+## ---- Tier 2 — Per-shape encode (6 abilities) ---------------------------
+
+## Encode primitive scalars. Every format must implement these to encode
+## anything; missing means "format can't produce output at all".
+ability EncodeScalar for 'config having 'out where {
+  encode_int:   { it: 'config, val: Int,   ctx: CodecCtx } -> 'out,
+  encode_float: { it: 'config, val: Float, ctx: CodecCtx } -> 'out,
+  encode_str:   { it: 'config, val: Str,   ctx: CodecCtx } -> 'out,
+  encode_bool:  { it: 'config, val: Bool,  ctx: CodecCtx } -> 'out,
+  encode_frac:  { it: 'config, val: Frac,  ctx: CodecCtx } -> 'out,
+  encode_bytes: { it: 'config, val: Bytes, ctx: CodecCtx } -> 'out,
+  encode_char:  { it: 'config, val: Char,  ctx: CodecCtx } -> 'out,
+  encode_nat:   { it: 'config, val: Nat,   ctx: CodecCtx } -> 'out,
 }
 
-## Decode format ability — extract values from an intermediate representation.
-ability DecodeFormat 'repr for 'fmt where {
-  decode_int: { val: 'repr, config: CodecConfig, path: [Str] } -> Result Int DecodeError,
-  decode_float: { val: 'repr, config: CodecConfig, path: [Str] } -> Result Float DecodeError,
-  decode_string: { val: 'repr, config: CodecConfig, path: [Str] } -> Result Str DecodeError,
-  decode_bool: { val: 'repr, config: CodecConfig, path: [Str] } -> Result Bool DecodeError,
-  decode_frac: { val: 'repr, config: CodecConfig, path: [Str] } -> Result Frac DecodeError,
-  decode_bytes: { val: 'repr, config: CodecConfig, path: [Str] } -> Result Bytes DecodeError,
-  decode_char: { val: 'repr, config: CodecConfig, path: [Str] } -> Result Char DecodeError,
-  decode_nat: { val: 'repr, config: CodecConfig, path: [Str] } -> Result Nat DecodeError,
-  decode_record_field: { val: 'repr, key: Str, config: CodecConfig, path: [Str] } -> Result 'repr DecodeError,
-  decode_variant: { val: 'repr, config: CodecConfig, path: [Str] } -> Result { tag: Str, payload: Option 'repr } DecodeError,
-  decode_list: { val: 'repr, config: CodecConfig, path: [Str] } -> Result ['repr] DecodeError,
-  decode_set: { val: 'repr, config: CodecConfig, path: [Str] } -> Result (Set 'repr) DecodeError,
-  decode_map: { val: 'repr, config: CodecConfig, path: [Str] } -> Result [{ key: 'repr, value: 'repr }] DecodeError,
-  decode_option: { val: 'repr, config: CodecConfig, path: [Str] } -> Result (Option 'repr) DecodeError,
-  transform_field: { name: Str, config: CodecConfig } -> Str
+## Encode a record shape given per-field key/value pairs already encoded
+## to `'out` by the walker.
+ability EncodeRecord for 'config having 'out where {
+  encode_record: { it: 'config, fields: [{ key: Str, value: 'out }], ctx: CodecCtx } -> 'out,
 }
 
-## Encode a value to an intermediate representation.
-## SCHEDULED FOR REDESIGN (task #86) — 'fmt and 'repr should become
-## an ability parameter + associated type. Bound here via `having` for
-## T0301 compliance until the codec redesign lands.
-ability EncodeRepr for 'a having 'fmt, 'repr where {
-  encode_repr: { fmt: 'fmt, config: CodecConfig } -> Result 'repr EncodeError
+## Encode a variant shape given tag and optional payload already encoded.
+ability EncodeVariant for 'config having 'out where {
+  encode_variant: { it: 'config, tag: Str, payload: Option 'out, ctx: CodecCtx } -> 'out,
 }
 
-## Encode a value directly to an output type (Bytes, Str, etc).
-## SCHEDULED FOR REDESIGN (task #86) — see EncodeRepr note above.
-ability Encode for 'a having 'fmt, 'out where {
-  encode: { fmt: 'fmt, config: CodecConfig } -> Result 'out EncodeError
+## Encode a list / sequence given per-element output already encoded.
+## Sets flow through this after `set::to_seq`.
+ability EncodeList for 'config having 'out where {
+  encode_list: { it: 'config, elems: ['out], ctx: CodecCtx } -> 'out,
 }
 
-## Decode a value from an intermediate representation.
-## SCHEDULED FOR REDESIGN (task #86) — see EncodeRepr note above.
-ability DecodeRepr 'a for 'repr having 'fmt where {
-  decode_repr: { fmt: 'fmt, config: CodecConfig } -> Result 'a DecodeError
+## Encode a map given per-entry key/value output already encoded.
+ability EncodeMap for 'config having 'out where {
+  encode_map: { it: 'config, entries: [{ key: 'out, value: 'out }], ctx: CodecCtx } -> 'out,
 }
 
-## Decode a value from an input type (Bytes, Str, etc).
-## SCHEDULED FOR REDESIGN (task #86) — see EncodeRepr note above.
-ability Decode 'a for 'in having 'fmt where {
-  decode: { fmt: 'fmt, config: CodecConfig } -> Result 'a DecodeError
+## Encode an option — `Some` wraps its inner encoded value, `None`
+## renders however the format prefers (JSON null, absent field, etc.).
+ability EncodeOption for 'config having 'out where {
+  encode_option: { it: 'config, val: Option 'out, ctx: CodecCtx } -> 'out,
 }
 
-## Streaming format — writes directly to ByteBuffer without intermediate AST.
-ability StreamFormat for 'fmt where {
-  stream_int: { val: Int, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_float: { val: Float, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_string: { val: Str, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_bool: { val: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_frac: { val: Frac, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_bytes: { val: Bytes, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_char: { val: Char, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_nat: { val: Nat, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_record_start: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_record_field: { key: Str, is_first: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_record_end: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_variant_start: { tag: Str, has_payload: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_variant_end: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_list_start: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_list_elem: { is_first: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_list_end: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_set_start: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_set_elem: { is_first: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_set_end: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_map_start: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_map_entry: { is_first: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_map_end: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_option_none: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  stream_option_some: { buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
-  transform_field: { name: Str, config: CodecConfig } -> Str
+## ---- Tier 2 — Per-shape decode (6 abilities) ---------------------------
+
+## Decode primitive scalars from the format's input representation.
+ability DecodeScalar for 'config having 'in where {
+  decode_int:   { it: 'config, val: 'in, ctx: CodecCtx } -> Result Int   DecodeError,
+  decode_float: { it: 'config, val: 'in, ctx: CodecCtx } -> Result Float DecodeError,
+  decode_str:   { it: 'config, val: 'in, ctx: CodecCtx } -> Result Str   DecodeError,
+  decode_bool:  { it: 'config, val: 'in, ctx: CodecCtx } -> Result Bool  DecodeError,
+  decode_frac:  { it: 'config, val: 'in, ctx: CodecCtx } -> Result Frac  DecodeError,
+  decode_bytes: { it: 'config, val: 'in, ctx: CodecCtx } -> Result Bytes DecodeError,
+  decode_char:  { it: 'config, val: 'in, ctx: CodecCtx } -> Result Char  DecodeError,
+  decode_nat:   { it: 'config, val: 'in, ctx: CodecCtx } -> Result Nat   DecodeError,
 }
 
-## Streaming decode format — reads directly from Bytes.
-ability StreamDecodeFormat for 'fmt where {
-  stream_decode_int: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Int, offset: Int } DecodeError,
-  stream_decode_float: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Float, offset: Int } DecodeError,
-  stream_decode_string: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Str, offset: Int } DecodeError,
-  stream_decode_bool: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Bool, offset: Int } DecodeError,
-  stream_decode_frac: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Frac, offset: Int } DecodeError,
-  stream_decode_bytes: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Bytes, offset: Int } DecodeError,
-  stream_decode_char: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Char, offset: Int } DecodeError,
-  stream_decode_nat: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Nat, offset: Int } DecodeError,
-  stream_decode_record_start: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { offset: Int } DecodeError,
-  stream_decode_record_field: { bytes: Bytes, offset: Int, key: Str, config: CodecConfig, path: [Str] } -> Result { value: Bytes, offset: Int } DecodeError,
-  stream_decode_variant: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { tag: Str, payload: Option Bytes, offset: Int } DecodeError,
-  stream_decode_list_start: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { offset: Int } DecodeError,
-  stream_decode_list_next: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Option Bytes, offset: Int } DecodeError,
-  stream_decode_set_start: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { offset: Int } DecodeError,
-  stream_decode_set_next: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Option Bytes, offset: Int } DecodeError,
-  stream_decode_map_start: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { offset: Int } DecodeError,
-  stream_decode_map_next: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { entry: Option { key: Bytes, value: Bytes }, offset: Int } DecodeError,
-  stream_decode_option: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Option Bytes, offset: Int } DecodeError,
-  transform_field: { name: Str, config: CodecConfig } -> Str
+## Decode a single record field by key from the input, leaving the walker
+## to further descend into the returned sub-value.
+ability DecodeRecord for 'config having 'in where {
+  decode_record_field: { it: 'config, val: 'in, key: Str, ctx: CodecCtx } -> Result 'in DecodeError,
 }
 
-## Streaming encode — writes a value directly to a ByteBuffer.
-## SCHEDULED FOR REDESIGN (task #86) — 'fmt bound via having until redesign.
-ability StreamEncode for 'a having 'fmt where {
-  stream_encode: { fmt: 'fmt, buffer: ByteBuffer, config: CodecConfig } -> Result ByteBuffer EncodeError
+## Decode a variant: pull tag + optional payload out of the input.
+ability DecodeVariant for 'config having 'in where {
+  decode_variant: { it: 'config, val: 'in, ctx: CodecCtx } -> Result { tag: Str, payload: Option 'in } DecodeError,
 }
 
-## Streaming decode — reads a value directly from Bytes.
-## SCHEDULED FOR REDESIGN (task #86) — 'fmt bound via having until redesign.
-ability StreamDecode 'a for 'bytes having 'fmt where {
-  stream_decode: { offset: Int, fmt: 'fmt, config: CodecConfig } -> Result { value: 'a, offset: Int } DecodeError
+## Decode a list into per-element input values; the walker recurses on each.
+ability DecodeList for 'config having 'in where {
+  decode_list: { it: 'config, val: 'in, ctx: CodecCtx } -> Result ['in] DecodeError,
 }
+
+## Decode a map into per-entry input pairs; the walker recurses on each side.
+ability DecodeMap for 'config having 'in where {
+  decode_map: { it: 'config, val: 'in, ctx: CodecCtx } -> Result [{ key: 'in, value: 'in }] DecodeError,
+}
+
+## Decode an option — `None` for absent / null, `Some` for present.
+ability DecodeOption for 'config having 'in where {
+  decode_option: { it: 'config, val: 'in, ctx: CodecCtx } -> Result (Option 'in) DecodeError,
+}
+
+## ---- Tier 3 — Encode / Decode primitives -------------------------------
+##
+## The compiler auto-derives `impl Encode 'config for 'a having 'out`
+## per (config, value-type) pair by walking the shape and composing Tier
+## 2 impls. User-facing API is the Tier-4 sugar in each format module
+## (`x.json{}` etc.); direct `.encode { config = ... }` works but is the
+## escape hatch, not the default.
+
+## One-shot encode of a value to a format's output type.
+ability Encode 'config for 'a having 'out where {
+  encode: { it: 'a, config: 'config } -> 'out,
+}
+
+## One-shot decode of a format's input to a target value type.
+## `'a` appears only in the return position; dispatch is target-driven,
+## typically via LHS type annotation or inherent method syntax
+## (`Type.decode { ... }`).
+ability Decode 'config 'a for 'in where {
+  decode: { it: 'in, config: 'config } -> Result 'a DecodeError,
+}
+
+## ---- Path helpers ------------------------------------------------------
 
 ## Empty path for top-level encoding/decoding.
 pub let empty_path: [Str] = []
@@ -181,34 +176,41 @@ pub let append_path = { path: [Str], field: Str } -> seq::add { xs = path, x = f
 pub let append_index = { path: [Str], index: Int } ->
   seq::add { xs = path, x = int::to_str { n = index } }
 
-## Formats a codec path as a dotted string.
-pub let format_path = { path: [Str] } -> if seq::is_empty { xs = path } then "<root>" else str::join { strings = path, separator = "." }
+## Formats a codec path as a dotted string. `<root>` when empty.
+pub let format_path = { path: [Str] } ->
+  if seq::is_empty { xs = path } then "<root>" else str::join { strings = path, separator = "." }
 
-## Creates an encode error Result.
-pub let encode_error = { path: [Str], message: Str } ->
-  Err { error = { path = path, message = message } }
-
-## Creates a decode error Result.
-pub let decode_error = { path: [Str], message: Str, expected: Str, found: Option Str } ->
-  Err {
-    error = {
+## Constructs a `DecodeError` Result — helper for Tier-2 impl bodies.
+pub let decode_error
+  : { path: [Str], message: Str, expected: Str, found: Option Str }
+  -> Result 'a DecodeError
+  = { path, message, expected, found } -> Err { error = {
       path = path,
       message = message,
       expected = expected,
       found = found,
-    },
-  }
+    } }
 
-impl TryInto Str DecodeError for Bytes where {
-  try_into = { it } -> match bytes::to_str { b = it } is
-    Ok { val = s } -> Ok { val = s }
-    Err { error = e } -> Err {
-      error = {
-        path = [],
-        message = e,
-        expected = "valid UTF-8",
-        found = None,
-      },
-    }
+## ---- Field-name transforms ---------------------------------------------
 
-}
+## Encode-side transform: source name → wire name.
+pub let transform_field_name = { name: Str, transform: FieldTransform } -> match transform is
+  Identity -> name
+  SnakeCase -> str::to_snake_case { s = name }
+  CamelCase -> str::to_camel_case { s = name }
+  KebabCase -> str::to_kebab_case { s = name }
+  ScreamingSnakeCase -> str::to_screaming_snake_case { s = name }
+
+## Decode-side transform: wire name → source name. `SnakeCase` inverts
+## to camel; the rest normalise onto camel identifiers.
+pub let inverse_transform_field_name = { name: Str, transform: FieldTransform } -> match transform is
+  Identity -> name
+  SnakeCase -> str::to_camel_case { s = name }
+  CamelCase -> str::to_snake_case { s = name }
+  KebabCase -> str::to_camel_case { s = name }
+  ScreamingSnakeCase -> str::to_camel_case { s = name }
+
+## Convenience for the compiler-emitted encode walker: apply the
+## configured field transform against the shared config alone.
+pub let apply_field_transform = { name: Str, shared: SharedConfig } ->
+  transform_field_name { name = name, transform = shared.field_transform }

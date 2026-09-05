@@ -322,6 +322,16 @@ class TypeChecker(
                 ?: registry.typeHashFor(name)
         }) {
 
+        // Shared codec-impl registry threaded through both the per-binding solvers
+        // (spawned inside ConstraintGenerator) and the module-level solver below.
+        // Codec impls the constraint solver auto-derives (e.g. `Encode JsonC Bool`
+        // for a bare `True.encode{…}`) are a side effect of ability checking; they
+        // must survive across the constraint generator's transient per-binding
+        // solvers so `TypedModuleEmitter` can synthesize them into `abilityImpls`.
+        // See AbilityChecker.generatedCodecImpls for the full rationale.
+        val sharedGeneratedCodecImpls =
+            mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typechecker.solving.AbilityChecker.GeneratedCodecImpl>()
+
         val constraintGenerator = ConstraintGenerator.create(
             registry = registry,
             performerToEffect = buildResult.performerToEffect,
@@ -329,6 +339,7 @@ class TypeChecker(
             abilityNames = abilityNames,
             effectNames = effectNames,
             isStdlibModule = ModulePathConventions.isStdlib(currentModulePath),
+            sharedGeneratedCodecImpls = sharedGeneratedCodecImpls,
         )
 
         val inScopeAliasNames = buildResult.registry.typeNames +
@@ -401,7 +412,7 @@ class TypeChecker(
             solveContext = solveContext.withUpdatedImplConstraints(implHash, extra)
         }
 
-        val solver = ConstraintSolver(solveContext, registry)
+        val solver = ConstraintSolver(solveContext, registry, sharedGeneratedCodecImpls = sharedGeneratedCodecImpls)
         val solveResult = withInScopeAliasNames(inScopeAliasNames) {
             solver.solve(allConstraints)
         }

@@ -365,7 +365,16 @@ public final class IONatives {
     /**
      * Parse JSON from string.
      * Takes: {s: String}
-     * Returns: Result Json Error
+     * Returns: Result Json ParseError
+     *
+     * ParseError shape (Phase 1 codec redesign, task #86):
+     *   { path: [Str], reason: Str, input_ref: Option Str }
+     *
+     * `path` is empty for top-level parse failures; higher-layer decoders
+     * add a path when they recurse into a JSON tree. `reason` carries the
+     * human message. `input_ref` is a truncated echo of the offending input
+     * (first 80 bytes) for diagnostic use; `None` when the input is not
+     * available or too binary to render.
      *
      * Uses DSL-JSON for high-performance byte-level parsing.
      */
@@ -376,14 +385,16 @@ public final class IONatives {
             MezzeVariant result = DslJsonCodec.parseString(s.trim());
             return createOk(result);
         } catch (Exception e) {
-            return createErr("JSON parse error: " + e.getMessage());
+            return createParseErr("JSON parse error: " + e.getMessage(), s);
         }
     }
 
     /**
      * Parse JSON from bytes.
      * Takes: {bytes: Bytes}
-     * Returns: Result Json Error
+     * Returns: Result Json ParseError
+     *
+     * See `jsonParse` for the ParseError shape.
      *
      * Uses DSL-JSON for high-performance byte-level parsing (no UTF-8 conversion needed).
      */
@@ -400,14 +411,17 @@ public final class IONatives {
         } else if (bytesValue instanceof byte[] b) {
             bytes = b;
         } else {
-            return createErr("Expected Bytes for field 'bytes'");
+            return createParseErr("Expected Bytes for field 'bytes'", null);
         }
 
         try {
             MezzeVariant result = DslJsonCodec.parseBytes(bytes);
             return createOk(result);
         } catch (Exception e) {
-            return createErr("JSON parse error: " + e.getMessage());
+            String inputRef = bytes.length == 0
+                ? null
+                : new String(bytes, 0, Math.min(bytes.length, 80), StandardCharsets.UTF_8);
+            return createParseErr("JSON parse error: " + e.getMessage(), inputRef);
         }
     }
 
@@ -722,6 +736,26 @@ public final class IONatives {
                 message,
                 "JSON",
                 MezzeVariant.none()
+            }
+        );
+        return MezzeVariant.err(error);
+    }
+
+    /**
+     * Build the Phase-1 ParseError record used by the format-neutral
+     * JSON parse natives. Shape: {path: [Str], reason: Str, input_ref: Option Str}.
+     *
+     * `input_ref` carries a short echo of the source bytes/string (used by
+     * error renderers to point at the offending input); pass `null` when
+     * no meaningful echo is available.
+     */
+    private static MezzeVariant createParseErr(String reason, String inputRef) {
+        MezzeRecord error = MezzeRecord.fromFields(
+            new String[]{"path", "reason", "input_ref"},
+            new Object[]{
+                MezzeList.empty(),
+                reason,
+                inputRef == null ? MezzeVariant.none() : MezzeVariant.some(inputRef)
             }
         );
         return MezzeVariant.err(error);

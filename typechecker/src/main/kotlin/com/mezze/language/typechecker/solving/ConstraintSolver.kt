@@ -25,7 +25,15 @@ class ConstraintSolver(
      * fails, which is what lets the `'out` var stay unresolved and the return
      * check reject (soundness). Only [ImplValidator] sets this.
      */
-    private val deferExistingAbilityImpls: Boolean = false
+    private val deferExistingAbilityImpls: Boolean = false,
+    /**
+     * Optional caller-owned codec-impl registry shared across sibling solvers of
+     * a single module typecheck. See the field-level note on
+     * [AbilityChecker.generatedCodecImpls] for why this must outlive one solver
+     * instance. Null means "use a private per-instance map" (safe for isolated
+     * solvers whose derivations don't need to reach the emit stage).
+     */
+    private val sharedGeneratedCodecImpls: MutableMap<com.mezze.language.typedast.Hash, AbilityChecker.GeneratedCodecImpl>? = null,
 ) {
     private fun constraintPriority(c: Constraint): Int = when (c) {
         is Constraint.Equality -> 0
@@ -97,7 +105,7 @@ class ConstraintSolver(
         poisonedVars.addAll(constraintOriginVars(constraint))
     }
 
-    private val abilityChecker = AbilityChecker(context, registry, deferExistingAbilityImpls)
+    private val abilityChecker = AbilityChecker(context, registry, deferExistingAbilityImpls, sharedGeneratedCodecImpls)
 
     internal fun getGeneratedCodecImpls(): Collection<AbilityChecker.GeneratedCodecImpl> = abilityChecker.getGeneratedCodecImpls()
 

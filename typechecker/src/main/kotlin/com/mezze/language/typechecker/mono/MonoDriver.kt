@@ -502,10 +502,20 @@ object MonoDriver {
             counters.methodUnifyFail++
             return
         }
-        val opParamType = opBody.params.firstOrNull()?.type ?: run {
-            counters.methodUnifyFail++
-            return
-        }
+        // Bug B (#86): unify against the arrow's paramType (the arg record),
+        // not the FIRST destructured param's type. For a blanket-impl body
+        // `{it: 'a} with … -> Json = { it } -> …`, `params[0].type` is a bare
+        // 'a (or a fresh var when ctxType didn't carry structure); unifying
+        // that against the call-site's arg record `{it: Point}` binds
+        // 'a→{it: Point} — the wrong substitution that surfaces as an
+        // ".encode field-not-found" runtime pattern in the spec body. Falls
+        // back to the old path when the arrow shape isn't a FunctionType.
+        val opParamType = (opBody.type as? MezzeType.FunctionType)?.paramType
+            ?: opBody.params.firstOrNull()?.type
+            ?: run {
+                counters.methodUnifyFail++
+                return
+            }
 
         // Use the actual VarType names appearing in the op's body — this
         // is what MonoDriver stamped as the synthetic decl's typeParams

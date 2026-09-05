@@ -256,10 +256,10 @@ internal class AnnotationValidator(
                 val resolvedUsageTypeVar = substitution.apply(MezzeType.VarType(usage.typeVar))
                 val hasMatchingTypeVar = matchingAnnotatedList.any { matchingAnnotated ->
                     matchingAnnotated.typeArgs.any { annotatedTypeArg ->
-                        when {
-                            annotatedTypeArg is MezzeType.VarType ->
+                        when (annotatedTypeArg) {
+                            is MezzeType.VarType ->
                                 resolveToSameType(usage.typeVar, annotatedTypeArg.variable)
-                            else -> resolvedUsageTypeVar == annotatedTypeArg
+                            else -> sameDeclaredOrEqual(resolvedUsageTypeVar, substitution.apply(annotatedTypeArg))
                         }
                     }
                 }
@@ -442,6 +442,28 @@ internal class AnnotationValidator(
         val result = mutableSetOf<TypeVar>()
         collectTypeVariables(type, result)
         return result
+    }
+
+    /**
+     * True when [a] and [b] denote the same declared named type OR are
+     * structurally equal. Needed for the 2-slot ability check where the body's
+     * primary type-var resolves to a fully-expanded shape (e.g. `JsonC`'s inner
+     * `shared` field expanded to its record body) while the annotation carries
+     * the same name with lazy `TypeApplication` inner fields — both are the
+     * same `JsonC` semantically but structural `==` differs.
+     */
+    private fun sameDeclaredOrEqual(a: MezzeType, b: MezzeType): Boolean {
+        if (a == b) return true
+        val aId = declaredIdentity(a)
+        val bId = declaredIdentity(b)
+        return aId != null && bId != null && aId == bId
+    }
+
+    private fun declaredIdentity(type: MezzeType): TypeIdentity.Declared? = when (type) {
+        is MezzeType.TypeApplication -> type.identity as? TypeIdentity.Declared
+        is MezzeType.RecordType -> type.identity as? TypeIdentity.Declared
+        is MezzeType.VariantType -> type.identity as? TypeIdentity.Declared
+        else -> null
     }
 
     private fun containsConcreteTypes(type: MezzeType): Boolean = when (type) {

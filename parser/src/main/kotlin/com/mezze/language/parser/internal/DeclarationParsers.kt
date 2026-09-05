@@ -936,6 +936,17 @@ internal val MezzeParser.performerParamParser: Parser<ParsedPerformerParam> get(
         }
     }
 
+/** Local destructuring helper for [performerOperationParser]. Kotlin's built-in
+ *  destructuring only supports up to 5 elements via componentN; a small typed
+ *  holder keeps the assignment self-documenting.
+ */
+private data class PerfOpTypeParts(
+    val paramType: ParsedTypeAnnotation,
+    val returnType: ParsedTypeAnnotation,
+    val effects: ParsedEffectRow?,
+    val abilityConstraints: List<ParsedFnAbilityConstraint>,
+)
+
 internal val MezzeParser.performerOperationParser: Parser<ParsedPerformerOp> get() = { stream ->
         val name = identifierParser(stream)
         when (name) {
@@ -950,13 +961,17 @@ internal val MezzeParser.performerOperationParser: Parser<ParsedPerformerOp> get
 
                         when (functionType) {
                             is ParseResult.Success -> {
-                                val (paramType, returnType, effects) = when (val ft = functionType.value) {
-                                    is ParsedFunctionType -> Triple(ft.paramType, ft.returnType, ft.effects)
+                                // Bug B (#86): capture `with <Ability>` constraints so
+                                // ability-impl operations reclassified from performers
+                                // (`impl ToJson for 'a where { json: … with Encode … -> Json = … }`)
+                                // don't lose their method-level `with` clauses.
+                                val (paramType, returnType, effects, abilityConstraints) = when (val ft = functionType.value) {
+                                    is ParsedFunctionType -> PerfOpTypeParts(ft.paramType, ft.returnType, ft.effects, ft.abilityConstraints)
                                     else -> {
                                         // If it's not a function type, treat it as param type with Unit return
                                         val file = currentFile ?: "<unknown>"
                                         val unitLoc = tokenLoc(name.value, file)
-                                        Triple(ft, ParsedNamedType("Unit", unitLoc), null)
+                                        PerfOpTypeParts(ft, ParsedNamedType("Unit", unitLoc), null, emptyList())
                                     }
                                 }
 
@@ -981,6 +996,7 @@ internal val MezzeParser.performerOperationParser: Parser<ParsedPerformerOp> get
                                                         returnType = returnType,
                                                         implementation = impl.value,
                                                         effects = effects,  // Now preserving effect annotations
+                                                        abilityConstraints = abilityConstraints,
                                                         loc = loc
                                                     ),
                                                     impl.remaining

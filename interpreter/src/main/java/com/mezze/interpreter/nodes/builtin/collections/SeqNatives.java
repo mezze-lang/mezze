@@ -282,6 +282,55 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(results);
     }
 
+    /**
+     * `try_map`: `xs: [T], f: T -> Result U E → Result [U] E`.
+     *
+     * Applies `f` to every element in order. Short-circuits on the FIRST `Err`
+     * — subsequent elements are not evaluated. Emitted by the codec generator
+     * for `[T]` / `Seq T` decode (each element decode returns a Result; a
+     * single element failure fails the whole list).
+     *
+     * The callback must return a `MezzeVariant` in the standard Result shape
+     * (`Ok { val = ... }` / `Err { error = ... }`). Anything else is
+     * propagated verbatim as a successful element.
+     */
+    @TruffleBoundary
+    public static MezzeVariant tryMap(MezzeSeq seq, MezzeFunction mapper,
+                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] closureValues = mapper.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = mapper.getCallTarget();
+        int size = seq.size();
+        Object[] result = new Object[size];
+        for (int i = 0; i < size; i++) {
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            args[closureLen] = MezzeRecord.wrapX(seq.get(i));
+            Object elemResult = callNode.call(target, args);
+            if (elemResult instanceof MezzeVariant v) {
+                if (v.isErr()) {
+                    return v; // short-circuit
+                }
+                if (v.isOk()) {
+                    Object payload = v.getPayloadValue();
+                    if (payload instanceof MezzeRecord r) {
+                        try {
+                            result[i] = r.getFieldByName("val");
+                        } catch (Exception e) {
+                            result[i] = payload;
+                        }
+                        continue;
+                    }
+                    result[i] = payload;
+                    continue;
+                }
+            }
+            // Non-Result callback return — treat as raw element.
+            result[i] = elemResult;
+        }
+        return MezzeVariant.ok(MezzeSeq.fromArray(result));
+    }
+
     @TruffleBoundary
     public static MezzeSeq flatMap(MezzeSeq seq, MezzeFunction mapper,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {

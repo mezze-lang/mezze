@@ -871,6 +871,64 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
             memberAccess.receiver is ParsedVariantConstruct &&
             context.typingContext.lookup(receiverName ?: "") is TypingContext.LookupResult.NotFound
 
+        // #86 sub-gap 2 (docs/codec/redesign-2026-09.md §Open questions Q1) —
+        // `TypeName.method { it = X, ...args }` where TypeName is a type decl
+        // (not an ability/effect and not a value binding): the receiver drives
+        // dispatch to an ability whose class-param appears in the RETURN, not on
+        // the receiver — this is the Tier-4 decode sugar `Person.from_json { it }`.
+        // Rewrite to `X.method {...args}` and thread TypeApplication(TypeName)
+        // through `pinFirstAbilityTypeArg` so tryGenerateMethodCall unifies it
+        // with the ability's first typeParam once the ability resolves.
+        if (isUnknownUppercaseName && receiverName != null && expr.arguments is ParsedRecordLit) {
+            val typeDecl = context.typeDeclarations[receiverName]
+            if (typeDecl != null) {
+                val matches = context.typingContext.findAbilitiesByMethodName(memberAccess.member)
+                if (matches.isNotEmpty()) {
+                    val argRecord = expr.arguments as ParsedRecordLit
+                    val itEntry = argRecord.entries
+                        .filterIsInstance<ParsedRecordEntry.Field>()
+                        .find { it.name == Keywords.IT }
+                    if (itEntry != null) {
+                        val itReceiver: ParsedExpr = itEntry.value ?: ParsedIdentifier(
+                            qualifier = null,
+                            localName = Keywords.IT,
+                            loc = itEntry.loc,
+                        )
+                        val remainingFields = argRecord.entries.filter { e ->
+                            e !is ParsedRecordEntry.Field || e.name != Keywords.IT
+                        }
+                        val syntheticArgs = ParsedRecordLit(remainingFields, argRecord.loc)
+                        val syntheticReceiverAccess = ParsedMemberAccess(
+                            receiver = itReceiver,
+                            member = memberAccess.member,
+                            loc = memberAccess.loc,
+                        )
+                        val syntheticCall = ParsedFunctionCall(
+                            function = syntheticReceiverAccess,
+                            arguments = syntheticArgs,
+                            loc = expr.loc,
+                        )
+                        // Build the pin type as a nominal TypeApplication of TypeName
+                        // with its declared identity — matches the shape the ability
+                        // solver expects when unifying against the class-param slot.
+                        val pinType = com.mezze.language.typechecker.util.WellKnownTypeApp.of(
+                            constructor = receiverName,
+                            args = emptyList(),
+                            typeHash = typeDecl.contentHash
+                                ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(typeDecl),
+                        )
+                        val pinContext = context.copy(pinFirstAbilityTypeArg = pinType)
+                        val methodResult = tryGenerateMethodCall(
+                            syntheticCall, syntheticReceiverAccess, pinContext,
+                        )
+                        if (methodResult != null) {
+                            return methodResult
+                        }
+                    }
+                }
+            }
+        }
+
         if (!isAbilityOrEffect && !isUnknownUppercaseName) {
             val methodCallResult = tryGenerateMethodCall(expr, memberAccess, context)
             if (methodCallResult != null) {

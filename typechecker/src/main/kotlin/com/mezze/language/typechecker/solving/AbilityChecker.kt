@@ -17,7 +17,7 @@ import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.typedast.Hash
 
-internal class AbilityChecker(
+class AbilityChecker internal constructor(
     private val context: TypingContext,
     private val registry: DeclarationRegistry,
     /**
@@ -27,7 +27,13 @@ internal class AbilityChecker(
      * operator body using a type whose impl isn't import-visible at this site
      * isn't spuriously rejected. A truly-absent impl still fails.
      */
-    private val deferExistingAbilityImpls: Boolean = false
+    private val deferExistingAbilityImpls: Boolean = false,
+    /**
+     * Optional caller-owned codec-impl registry shared with sibling solvers in
+     * the same module typecheck (see the field-level note on
+     * [generatedCodecImpls]). `null` uses a private per-instance map.
+     */
+    private val sharedGeneratedCodecImpls: MutableMap<Hash, GeneratedCodecImpl>? = null,
 ) {
     private val codecGenerator = CodecGenerator()
 
@@ -45,7 +51,22 @@ internal class AbilityChecker(
         val fromAnnotation: Boolean = false
     )
 
-    private val generatedCodecImpls = mutableMapOf<Hash, GeneratedCodecImpl>()
+    // Codec-impl derivation is a SIDE EFFECT of ability-constraint checking that
+    // must OUTLIVE a single AbilityChecker instance. During a module typecheck the
+    // constraint generator creates transient per-binding [ConstraintSolver]s (each
+    // with its own AbilityChecker) so it can incrementally solve one binding at a
+    // time; the impls a per-binding solver auto-derives (e.g. `Encode JsonC Bool`
+    // for a bare `True.encode {…}`) would be dropped when that solver is thrown
+    // away, and the outer module-level solver often can't rederive them because
+    // the equality that pinned the receiver's type var lives INSIDE the discarded
+    // per-binding substitution. Publishing every fresh impl to
+    // [sharedGeneratedCodecImpls] — a mutable map the module typecheck owns and
+    // hands to both per-binding and module-level solvers — makes the derivations
+    // visible to [TypedModuleEmitter] regardless of which solver instance
+    // synthesized them. Falls back to a private map when no shared map is
+    // installed (single-solver callers).
+    private val generatedCodecImpls: MutableMap<Hash, GeneratedCodecImpl> =
+        sharedGeneratedCodecImpls ?: mutableMapOf()
     private val typeVarAbilityConstraints = mutableMapOf<TypeVar, MutableList<TrackedAbilityConstraint>>()
     private val deferredInference = mutableMapOf<TypeVar, MezzeType>()
     private val associatedTypeResolutionConstraints = mutableMapOf<TypeVar, MutableList<Constraint.AssociatedTypeResolution>>()
@@ -550,32 +571,23 @@ internal class AbilityChecker(
         }
 
         if (isCodecAbility(abilityName, abilityHash)) {
-            if (typeArgs.size == 2) {
-                val dataType = typeArgs[0]
-                val formatType = typeArgs[1]
-                if (checkCodecAbilityImplementation(abilityName, formatType, dataType)) {
+            // New codec ability shape (`docs/codec/redesign-2026-09.md`):
+            //   Encode 'config for 'a          — 2 positional slots [config, data]
+            //   Decode 'config 'a for 'in      — 3 positional slots [config, data, in]
+            //   Format for 'config having 'out — 1 positional slot  [config]
+            // We only auto-derive the Encode / Decode pair; Format impls come
+            // from format modules and never need synthesis.
+            if (effectiveHash == WellKnownHashConstants.ABILITY_ENCODE && typeArgs.size == 2) {
+                val formatType = typeArgs[0]
+                val dataType = typeArgs[1]
+                if (checkCodecAbilityImplementation(abilityName, listOf(formatType, dataType), dataType)) {
                     return true
                 }
-            } else if (typeArgs.size == 1 && (effectiveHash == WellKnownHashConstants.ABILITY_ENCODEREPR || effectiveHash == WellKnownHashConstants.ABILITY_DECODEREPR)) {
-                val dataType = typeArgs[0]
-                if (codecGenerator.isSerializable(dataType) && !containsVarType(dataType)) {
-                    val hashBuilder = MezzeHashBuilder()
-                    hashBuilder.append("codec_impl")
-                    hashBuilder.append(abilityName)
-                    hashBuilder.append("_single_param_")
-                    // #317: hash the type via the canonical MezzeTypeHasher, not the lossy
-                    // ContentHashComputer.mezzeTypeToString (which collapses records/variants
-                    // to field-NAMES only, dropping field types → distinct types collide on
-                    // one implKey and the second codec impl is silently dropped).
-                    com.mezze.language.ast.hashing.appendType(hashBuilder, dataType)
-                    val implKey = Hash(hashBuilder.build().toFullHexString())
-                    if (!generatedCodecImpls.containsKey(implKey)) {
-                        generatedCodecImpls[implKey] = GeneratedCodecImpl(
-                            abilityName = abilityName,
-                            targetTypes = listOf(dataType),
-                            contentHash = implKey
-                        )
-                    }
+            } else if (effectiveHash == WellKnownHashConstants.ABILITY_DECODE && typeArgs.size == 3) {
+                val formatType = typeArgs[0]
+                val dataType = typeArgs[1]
+                val inType = typeArgs[2]
+                if (checkCodecAbilityImplementation(abilityName, listOf(formatType, dataType, inType), dataType)) {
                     return true
                 }
             }
@@ -615,7 +627,37 @@ internal class AbilityChecker(
                             else -> typeAnnotationToMezzeType(typeArg)
                         }
                     }
-                    checkAbilityImplementation(constraint.abilityName, resolvedTypeArgs, registry.resolveAbilityHash(constraint.abilityName))
+                    // #86 sub-gap 2: when the with-clause has fewer args than the
+                    // constrained ability's arity (e.g. `with Decode JsonC 'a`
+                    // supplies 2 of Decode's 3 typeParams — 'config/'a but not
+                    // 'in), the missing tail-slots correspond positionally to the
+                    // OUTER impl's own receiver-type ('in). For an outer impl
+                    // `FromJson 'a for Json`, the outer targets end with `Json`
+                    // — that's the same `'in` the op body's `it` binds. Pad
+                    // resolvedTypeArgs with the outer impl's trailing target
+                    // types so the recursive check gets a full class-arg tuple.
+                    // Without this, `Decode JsonC 'a` recursed with only
+                    // [JsonC, Point] (2 args) and missed the codec-derive path
+                    // which requires size 3 [config, data, in] — auto-derived
+                    // decode was never triggered by `Type.from_json`.
+                    val depAbility = registry.lookupAbility(constraint.abilityName)
+                    val depArity = depAbility?.typeParams?.size ?: resolvedTypeArgs.size
+                    val paddedTypeArgs = if (resolvedTypeArgs.size < depArity && annotations.size >= depArity - resolvedTypeArgs.size) {
+                        val padCount = depArity - resolvedTypeArgs.size
+                        val trailing = annotations.takeLast(padCount).map { ann ->
+                            when (ann) {
+                                is ParsedNamedType -> {
+                                    val bound = typeVarBindings[ann.name]
+                                    bound ?: typeAnnotationToMezzeType(ann)
+                                }
+                                else -> typeAnnotationToMezzeType(ann)
+                            }
+                        }
+                        resolvedTypeArgs + trailing
+                    } else {
+                        resolvedTypeArgs
+                    }
+                    checkAbilityImplementation(constraint.abilityName, paddedTypeArgs, registry.resolveAbilityHash(constraint.abilityName))
                 }
             } else {
                 true
@@ -628,17 +670,52 @@ internal class AbilityChecker(
     private fun isCodecAbility(abilityName: String, abilityHash: Hash? = null): Boolean =
         WellKnownHashConstants.isCodecAbility(abilityHash ?: registry.resolveAbilityHash(abilityName))
 
+    /**
+     * Register an auto-derived codec impl. [allTypes] is the full positional
+     * type tuple of the ability at the constraint site (Encode → [config,
+     * data], Decode → [config, data, in]); [dataType] is the value shape the
+     * emitter walks when it synthesizes the impl body.
+     *
+     * DP-10 (docs/codec/redesign-2026-09.md §Design principles): a missing
+     * Tier-2 capability for the target format is a **compile-time error at
+     * the offending field path**, never a runtime "field 'encode_variant'
+     * not found". Before registering, walk the value shape and verify every
+     * Tier-2 impl the emit would call is available for this config. If any
+     * are missing, THROW with the path — the ability system's usual
+     * "no impl" error surfaces the encode/decode site rather than a
+     * cryptic runtime crash inside the auto-derived body.
+     */
     private fun checkCodecAbilityImplementation(
         abilityName: String,
-        formatType: MezzeType,
+        allTypes: List<MezzeType>,
         dataType: MezzeType
     ): Boolean {
         if (!codecGenerator.isSerializable(dataType)) {
             return false
         }
 
-        if (containsVarType(formatType) || containsVarType(dataType)) {
+        if (allTypes.any { containsVarType(it) }) {
             return false
+        }
+
+        val effectiveHash = registry.resolveAbilityHash(abilityName)
+        val isEncode = effectiveHash == WellKnownHashConstants.ABILITY_ENCODE
+        val isDecode = effectiveHash == WellKnownHashConstants.ABILITY_DECODE
+        if (isEncode || isDecode) {
+            val configType = allTypes[0]
+            val missing = walkTier2Capabilities(dataType, configType, isEncode, path = emptyList())
+            if (missing != null) {
+                throw com.mezze.language.typechecker.TypeCheckError(
+                    message = "Cannot auto-derive ${if (isEncode) "Encode" else "Decode"} " +
+                        "${typeHeadName(configType)} for ${typeHeadName(dataType)}: " +
+                        "format lacks ${missing.abilityName} " +
+                        (if (missing.path.isEmpty()) "(at root)"
+                         else "at field path .${missing.path.joinToString(".")}"),
+                    loc = null,
+                    errorType = com.mezze.language.typechecker.ErrorType.ABILITY_ERROR,
+                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0408_NO_IMPLEMENTATION,
+                )
+            }
         }
 
         val hashBuilder = MezzeHashBuilder()
@@ -646,8 +723,7 @@ internal class AbilityChecker(
         hashBuilder.append(abilityName)
         // #317: canonical MezzeTypeHasher, not lossy mezzeTypeToString (see the
         // single-param codec site above for why the field-name-only string collides).
-        com.mezze.language.ast.hashing.appendType(hashBuilder, formatType)
-        com.mezze.language.ast.hashing.appendType(hashBuilder, dataType)
+        for (t in allTypes) com.mezze.language.ast.hashing.appendType(hashBuilder, t)
         val implKey = Hash(hashBuilder.build().toFullHexString())
 
         if (generatedCodecImpls.containsKey(implKey)) {
@@ -656,10 +732,129 @@ internal class AbilityChecker(
 
         generatedCodecImpls[implKey] = GeneratedCodecImpl(
             abilityName = abilityName,
-            targetTypes = listOf(formatType, dataType),
+            targetTypes = allTypes,
             contentHash = implKey
         )
         return true
+    }
+
+    /** Missing-Tier-2 report used by [walkTier2Capabilities]. */
+    private data class MissingTier2(val abilityName: String, val path: List<String>)
+
+    /**
+     * Walk the value shape and, for each shape that requires a Tier-2 impl
+     * from the format, verify the impl exists. Returns the first missing
+     * requirement (with field path) or null if every shape is covered.
+     *
+     * Mirrors [CodecGenerator]'s emit walk so the check is exactly what
+     * gets called at runtime — no false positives (asking for an impl the
+     * emitter wouldn't call) or false negatives (letting emit reach an
+     * unregistered `.encode_*` method).
+     */
+    private fun walkTier2Capabilities(
+        dataType: MezzeType,
+        configType: MezzeType,
+        isEncode: Boolean,
+        path: List<String>,
+    ): MissingTier2? {
+        val prefix = if (isEncode) "Encode" else "Decode"
+
+        fun require(abilityName: String): MissingTier2? {
+            val hash = registry.resolveAbilityHash(abilityName)
+            val impls = abilityImpls(abilityName, hash)
+            val hit = impls.any { impl ->
+                val ann = impl.targetTypeAnnotations?.firstOrNull() ?: return@any false
+                val bindings = mutableMapOf<String, MezzeType>()
+                TypeAnnotationMatcher.typeMatchesAnnotation(configType, ann, registry.typeDeclarations, impl.typeVars, bindings)
+            }
+            return if (hit) null else MissingTier2(abilityName, path)
+        }
+
+        // Bool-variant (`| True, False |`) folds into the scalar bool hook,
+        // per PrimitiveTypes.isBoolVariant — treat it as scalar, not variant.
+        if (com.mezze.language.ast.PrimitiveTypes.isBoolVariant(dataType)) {
+            return require("${prefix}Scalar")
+        }
+
+        return when (dataType) {
+            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+            is MezzeType.BoolType, is MezzeType.FracType, is MezzeType.CharType,
+            is MezzeType.BytesType -> require("${prefix}Scalar")
+
+            is MezzeType.RecordType -> require("${prefix}Record") ?: run {
+                for ((fieldName, fieldType) in dataType.fields) {
+                    val nested = walkTier2Capabilities(fieldType, configType, isEncode, path + fieldName)
+                    if (nested != null) return nested
+                }
+                null
+            }
+
+            is MezzeType.VariantType -> require("${prefix}Variant") ?: run {
+                for ((ctorName, payload) in dataType.constructors) {
+                    if (payload != null) {
+                        val nested = walkTier2Capabilities(payload, configType, isEncode, path + ctorName)
+                        if (nested != null) return nested
+                    }
+                }
+                null
+            }
+
+            is MezzeType.ListType -> require("${prefix}List") ?:
+                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "[]")
+            is MezzeType.SeqType -> require("${prefix}List") ?:
+                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "[]")
+            is MezzeType.SetType -> require("${prefix}List") ?:
+                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "{}")
+            is MezzeType.SortedSetType -> require("${prefix}List") ?:
+                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "{}")
+
+            is MezzeType.MapType -> require("${prefix}Map") ?: run {
+                val k = walkTier2Capabilities(dataType.keyType, configType, isEncode, path + "key")
+                if (k != null) return k
+                walkTier2Capabilities(dataType.valueType, configType, isEncode, path + "value")
+            }
+            is MezzeType.SortedMapType -> require("${prefix}Map") ?: run {
+                val k = walkTier2Capabilities(dataType.keyType, configType, isEncode, path + "key")
+                if (k != null) return k
+                walkTier2Capabilities(dataType.valueType, configType, isEncode, path + "value")
+            }
+
+            is MezzeType.TypeApplication -> when (dataType.constructor) {
+                BuiltinTypes.OPTION -> require("${prefix}Option") ?: run {
+                    val inner = dataType.args.firstOrNull() ?: return@run null
+                    walkTier2Capabilities(inner, configType, isEncode, path + "?")
+                }
+                // Builtin collection type-applications: some contexts produce
+                // `TypeApplication("Map"|"List"|"Seq"|"Set"|…, args)` rather than
+                // the structural `MezzeType.MapType`/`ListType`/… — the two are
+                // interchangeable identity-wise (see BuiltinTypes.getGenericName).
+                BuiltinTypes.LIST, BuiltinTypes.SEQ ->
+                    require("${prefix}List") ?: dataType.args.firstOrNull()?.let {
+                        walkTier2Capabilities(it, configType, isEncode, path + "[]")
+                    }
+                BuiltinTypes.SET, BuiltinTypes.SORTED_SET ->
+                    require("${prefix}List") ?: dataType.args.firstOrNull()?.let {
+                        walkTier2Capabilities(it, configType, isEncode, path + "{}")
+                    }
+                BuiltinTypes.MAP, BuiltinTypes.SORTED_MAP ->
+                    require("${prefix}Map") ?: run {
+                        val k = dataType.args.getOrNull(0)?.let {
+                            walkTier2Capabilities(it, configType, isEncode, path + "key")
+                        }
+                        if (k != null) return k
+                        dataType.args.getOrNull(1)?.let {
+                            walkTier2Capabilities(it, configType, isEncode, path + "value")
+                        }
+                    }
+                else -> null
+            }
+
+            // VarType / NewtypeType / FunctionType / EffectRow — the walker doesn't
+            // emit a Tier-2 call for these directly. NewtypeType falls back to a
+            // Tier-3 recursion at emit time; VarType is filtered by the
+            // containsVarType gate above. Nothing to check.
+            else -> null
+        }
     }
 
     internal fun containsVarType(type: MezzeType): Boolean {
@@ -847,16 +1042,23 @@ internal class AbilityChecker(
         }
 
         return when (abilityName) {
-            "Decode", "DecodeRepr" -> {
+            // Codec Tier 3 (docs/codec/redesign-2026-09.md): `Decode 'config 'a for 'in`.
+            // Positional args are [config, data, in]; data is the target type,
+            // often driven by a LHS type annotation or inherent-method syntax
+            // (`Type.from_json { it = raw }`).
+            "Decode" -> {
                 val dataType = typeArgs.getOrNull(1)
                 if (dataType is MezzeType.VarType) {
                     """Cannot infer decode target type. Add a type annotation:
-  let result: MyType = decode {val = data, fmt = fmt}"""
+  let result: MyType = it.decode { config = config }
+  # or use inherent-method syntax:
+  MyType.from_json { it = raw }"""
                 } else {
                     "$typeNames does not implement '$abilityName'. Ensure the data type is serializable.${formatAbilityCandidates(abilityName)}"
                 }
             }
-            "Encode", "EncodeRepr" -> {
+            // Codec Tier 3: `Encode 'config for 'a`. Positional args are [config, data].
+            "Encode" -> {
                 val dataType = typeArgs.getOrNull(1)
                 if (dataType is MezzeType.VarType) {
                     "Cannot infer encode source type. Add a type annotation to the value being encoded."
@@ -962,31 +1164,20 @@ internal class AbilityChecker(
 
     internal fun tryBidirectionalInference(abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): Substitution? {
         val resolvedHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
-        if (resolvedHash == WellKnownHashConstants.ABILITY_DECODEREPR && typeArgs.size == 1) {
-            val dataType = typeArgs[0]
-
-            if (dataType is MezzeType.VarType) {
-                val matchingImpls = generatedCodecImpls.values.filter { impl ->
-                    registry.resolveAbilityHash(impl.abilityName) == WellKnownHashConstants.ABILITY_DECODEREPR &&
-                    impl.targetTypes.isNotEmpty()
-                }
-
-                if (matchingImpls.size == 1) {
-                    val impl = matchingImpls.first()
-                    val inferredType = impl.targetTypes[0]
-                    return Substitution.single(dataType.variable, inferredType)
-                }
-            }
-        }
-        if (resolvedHash == WellKnownHashConstants.ABILITY_DECODE && typeArgs.size == 2) {
+        // New codec Tier 3: `Decode 'config 'a for 'in` — positional [config, data, in].
+        // When only 'a is unbound and there's exactly one derived Decode impl
+        // matching the concrete [config, in] pair, infer 'a from it.
+        if (resolvedHash == WellKnownHashConstants.ABILITY_DECODE && typeArgs.size == 3) {
             val formatType = typeArgs[0]
             val dataType = typeArgs[1]
+            val inType = typeArgs[2]
 
-            if (formatType !is MezzeType.VarType && dataType is MezzeType.VarType) {
+            if (formatType !is MezzeType.VarType && inType !is MezzeType.VarType && dataType is MezzeType.VarType) {
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
                     registry.resolveAbilityHash(impl.abilityName) == WellKnownHashConstants.ABILITY_DECODE &&
-                    impl.targetTypes.size >= 2 &&
-                    typeMatchesMezzeType(formatType, impl.targetTypes[0])
+                    impl.targetTypes.size >= 3 &&
+                    typeMatchesMezzeType(formatType, impl.targetTypes[0]) &&
+                    typeMatchesMezzeType(inType, impl.targetTypes[2])
                 }
 
                 if (matchingImpls.size == 1) {

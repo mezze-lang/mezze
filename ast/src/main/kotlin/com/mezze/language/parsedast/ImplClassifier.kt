@@ -69,7 +69,13 @@ object ImplClassifier {
                     paramType = normalizeParam(op.paramType),
                     returnType = normalizeParam(op.returnType),
                     implementation = op.implementation,
-                    abilityConstraints = emptyList(),
+                    // Bug B (#86): thread the op's method-level `with <Ability>`
+                    // constraints from the performer op through reclassification.
+                    // Blanket-impl bodies (`impl ToJson for 'a where { json: …
+                    // with Encode JsonC 'a -> … = … }`) need these downstream so
+                    // the AbilityChecker auto-derives the needed impl at
+                    // user-call time via `checkAbilityImplementation`.
+                    abilityConstraints = op.abilityConstraints,
                     loc = op.loc
                 )
             },

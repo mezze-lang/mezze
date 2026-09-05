@@ -6,8 +6,18 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * Tests for std/json module.
- * Migrated from V1 to V2 with unboxed values.
+ * Tests for std::codec::json — variant construction, parse/serialize, and
+ * the Tier-2/3 dispatch surface that JsonC ships.
+ *
+ * Migrated from the old codec (`fmt=json_fmt`, `JsonConfig`, `transform_fields`)
+ * to the new Tier-1..4 stack:
+ *   * `Json` variants are constructed directly as data.
+ *   * `to_str` / `serialize_to_str` sit on top of the format-neutral native
+ *     JSON serializer.
+ *   * Field-name transforms (`SnakeCase`, `CamelCase`, …) are applied at
+ *     ENCODE time by the compiler-emitted walker (see design doc §"Field-name
+ *     transform") — there is no longer a post-facto `transform_fields`
+ *     helper to test at the `Json`-value level.
  */
 class JsonModuleTest {
 
@@ -318,13 +328,12 @@ class JsonModuleTest {
         assertEquals(true, result)
     }
 
-    // === Field Transformation Tests ===
+    // === Field Transformation Tests (helpers in std::codec::core) ===
 
     @Test
     fun `test transform_field_name identity`() {
         val result = eval("""
-            use std::codec::json::{transform_field_name}
-            use std::codec::core::{FieldTransform}
+            use std::codec::core::{transform_field_name, FieldTransform}
 
             transform_field_name {name = "userName", transform = Identity}
         """)
@@ -334,8 +343,7 @@ class JsonModuleTest {
     @Test
     fun `test transform_field_name snake_case`() {
         val result = eval("""
-            use std::codec::json::{transform_field_name}
-            use std::codec::core::{FieldTransform}
+            use std::codec::core::{transform_field_name, FieldTransform}
 
             transform_field_name {name = "userName", transform = SnakeCase}
         """)
@@ -345,8 +353,7 @@ class JsonModuleTest {
     @Test
     fun `test transform_field_name camel_case`() {
         val result = eval("""
-            use std::codec::json::{transform_field_name}
-            use std::codec::core::{FieldTransform}
+            use std::codec::core::{transform_field_name, FieldTransform}
 
             transform_field_name {name = "user_name", transform = CamelCase}
         """)
@@ -356,8 +363,7 @@ class JsonModuleTest {
     @Test
     fun `test transform_field_name kebab_case`() {
         val result = eval("""
-            use std::codec::json::{transform_field_name}
-            use std::codec::core::{FieldTransform}
+            use std::codec::core::{transform_field_name, FieldTransform}
 
             transform_field_name {name = "userName", transform = KebabCase}
         """)
@@ -367,74 +373,22 @@ class JsonModuleTest {
     @Test
     fun `test transform_field_name screaming_snake_case`() {
         val result = eval("""
-            use std::codec::json::{transform_field_name}
-            use std::codec::core::{FieldTransform}
+            use std::codec::core::{transform_field_name, FieldTransform}
 
             transform_field_name {name = "userName", transform = ScreamingSnakeCase}
         """)
         assertEquals("USER_NAME", result)
     }
 
-    // === transform_fields Tests ===
-
-    @Test
-    fun `test transform_fields on object with snake_case`() {
-        val result = eval("""
-            use std::codec::json::{Json, transform_fields, to_str}
-            use std::codec::core::{FieldTransform}
-            use std::str
-
-            let obj: Json = JObject {fields = [
-                {key = "firstName", value = JString {val = "Alice"}},
-                {key = "lastName", value = JString {val = "Smith"}}
-            ]}
-            let transformed = transform_fields {json = obj, transform = SnakeCase}
-            let str = to_str {json = transformed}
-            str::contains {s = str, substring = "first_name"}
-        """)
-        assertEquals(true, result)
-    }
-
-    @Test
-    fun `test transform_fields on nested object`() {
-        val result = eval("""
-            use std::codec::json::{Json, transform_fields, to_str}
-            use std::codec::core::{FieldTransform}
-            use std::str
-
-            let inner: Json = JObject {fields = [{key = "createdAt", value = JString {val = "2024"}}]}
-            let outer: Json = JObject {fields = [{key = "userData", value = inner}]}
-            let transformed = transform_fields {json = outer, transform = SnakeCase}
-            let str = to_str {json = transformed}
-            str::contains {s = str, substring = "user_data"}
-        """)
-        assertEquals(true, result)
-    }
-
-    @Test
-    fun `test transform_fields with identity is no-op`() {
-        val result = eval("""
-            use std::codec::json::{Json, transform_fields, to_str}
-            use std::codec::core::{FieldTransform}
-            use std::str
-
-            let obj: Json = JObject {fields = [{key = "userName", value = JString {val = "Alice"}}]}
-            let transformed = transform_fields {json = obj, transform = Identity}
-            let str = to_str {json = transformed}
-            str::contains {s = str, substring = "userName"}
-        """)
-        assertEquals(true, result)
-    }
-
     // === Config Tests ===
 
     @Test
-    fun `test default_config`() {
+    fun `test json_default is Identity transform`() {
         val result = eval("""
-            use std::codec::json::{default_config}
+            use std::codec::json::{json_default}
             use std::codec::core::{FieldTransform}
 
-            match default_config.field_transform is
+            match json_default.shared.field_transform is
                 Identity -> True
                 _ -> False
         """)
@@ -442,18 +396,11 @@ class JsonModuleTest {
     }
 
     @Test
-    fun `test config constructor`() {
+    fun `test json_pretty preset`() {
         val result = eval("""
-            use std::codec::json::{config}
-            use std::codec::core::{FieldTransform}
+            use std::codec::json::{json_pretty}
 
-            let cfg = config {
-                pretty = True,
-                indent = 4,
-                field_transform = SnakeCase,
-                skip_null = True
-            }
-            cfg.pretty
+            json_pretty.pretty
         """)
         assertEquals(true, result)
     }
@@ -463,13 +410,11 @@ class JsonModuleTest {
     @Test
     fun `test serialize_to_str with pretty config`() {
         val result = eval("""
-            use std::codec::json::{Json, serialize_to_str, JsonConfig}
-            use std::codec::core::{FieldTransform}
+            use std::codec::json::{Json, serialize_to_str, json_pretty}
             use std::str
 
             let obj: Json = JObject {fields = [{key = "x", value = JInt {val = 1}}]}
-            let cfg: JsonConfig = {pretty = True, indent = 2, field_transform = Identity, skip_null = False}
-            let s = serialize_to_str {json = obj, config = cfg}
+            let s = serialize_to_str {json = obj, config = json_pretty}
             str::contains {s = s, substring = "\n"}
         """)
         assertEquals(true, result)
@@ -478,13 +423,11 @@ class JsonModuleTest {
     @Test
     fun `test serialize_to_str with compact config`() {
         val result = eval("""
-            use std::codec::json::{Json, serialize_to_str, JsonConfig}
-            use std::codec::core::{FieldTransform}
+            use std::codec::json::{Json, serialize_to_str, json_default}
             use std::str
 
             let obj: Json = JObject {fields = [{key = "x", value = JInt {val = 1}}]}
-            let cfg: JsonConfig = {pretty = False, indent = 2, field_transform = Identity, skip_null = False}
-            let s = serialize_to_str {json = obj, config = cfg}
+            let s = serialize_to_str {json = obj, config = json_default}
             str::contains {s = s, substring = "\n"}
         """)
         assertEquals(false, result)

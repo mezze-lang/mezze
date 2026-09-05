@@ -8,13 +8,14 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
- * Tests for ability constraints on functions.
+ * Tests for ability constraints on functions in the new codec surface.
  *
- * Ability constraints allow functions to require specific type class implementations.
- * For example, `with Encode Json 'a` requires the type parameter 'a to have an
- * Encode implementation for the Json format.
+ * Ability constraints let a function require Tier-3 `Encode`/`Decode` for
+ * the type parameter it operates on. Constraint shape: `with Encode JsonC 'a`
+ * — parameter `'a` must have an `Encode` impl for the concrete config type.
  *
- * Migrated from V1 to V2 with unboxed values.
+ * See `docs/codec/redesign-2026-09.md` §"Polymorphic constraint patterns".
+ * Auto-derivation kicks in per (config, 'a) at the caller site.
  */
 class AbilityConstraintTest {
     private val parser = MezzeParser()
@@ -39,111 +40,100 @@ class AbilityConstraintTest {
     @Test
     fun `function with Encode ability constraint compiles`() {
         val error = typeCheck("""
-            use std::codec::core::{EncodeRepr, CodecConfig, default_config}
-            use std::codec::json::{Json, JsonFmt, json_fmt, to_str}
+            use std::codec::core::{Encode}
+            use std::codec::json::{Json, JsonC, json_default, to_str}
 
-            let encode_to_json: { body: 'a } with EncodeRepr 'a -> Str = { body } -> do
-                let result = body.encode_repr { fmt = json_fmt, config = default_config }
-                match result is
-                    Ok { val } -> to_str { json = val }
-                    Err { error } -> "error"
+            let encode_to_json: { body: 'a } with Encode JsonC 'a -> Str = { body } -> do
+                let result: Json = body.encode { config = json_default }
+                to_str { json = result }
 
             let main = {} -> do
                 let user = { name = "Alice", age = 30 }
                 encode_to_json { body = user }
         """)
-        assertNull(error, "Expected type check to succeed but got: $error")
+        assertNull(error, "Expected type check to succeed but got: ${'$'}error")
     }
 
     @Test
     fun `post with json body and ability constraint compiles`() {
-        // Verifies an EncodeRepr-constrained helper can encode an arbitrary
-        // value and ship it through the chainable HTTP request surface.
+        // Verifies an Encode-constrained helper can encode an arbitrary value
+        // and ship it through the chainable HTTP request surface.
         val error = typeCheck("""
             use std::effects::http::{Http, HttpClient, Method, request}
-            use std::codec::core::{EncodeRepr, default_config}
-            use std::codec::json::{json_fmt, to_str}
+            use std::codec::core::{Encode}
+            use std::codec::json::{Json, JsonC, json_default, to_str}
             use std::collections::bytes
 
             type User = { name: Str, age: Int }
 
-            let post_encoded: { url: Str, body: 'a } with EncodeRepr 'a -> { } <Http> = { url, body } -> do
-                let encoded = body.encode_repr { fmt = json_fmt, config = default_config }
-                match encoded is
-                    Ok { val } -> do
-                        let body_bytes = bytes::from_str { s = to_str { json = val } }
-                        request { url = url }
-                            .with_method { val = Post }
-                            .with_body { val = body_bytes }
-                            .send {}
-                        {}
-                    Err { error = _ } -> {}
+            let post_encoded: { url: Str, body: 'a } with Encode JsonC 'a -> { } <Http> = { url, body } -> do
+                let encoded: Json = body.encode { config = json_default }
+                let body_bytes = bytes::from_str { s = to_str { json = encoded } }
+                request { url = url }
+                    .with_method { val = Post }
+                    .with_body { val = body_bytes }
+                    .send {}
+                {}
 
             let test = {} -> do
                 let user: User = { name = "Alice", age = 30 }
                 perform HttpClient in
                     post_encoded { url = "https://example.com/users", body = user }
         """)
-        assertNull(error, "Expected type check to succeed but got: $error")
+        assertNull(error, "Expected type check to succeed but got: ${'$'}error")
     }
 
     @Test
     fun `put with json body and ability constraint compiles`() {
         val error = typeCheck("""
             use std::effects::http::{Http, HttpClient, Method, request}
-            use std::codec::core::{EncodeRepr, default_config}
-            use std::codec::json::{json_fmt, to_str}
+            use std::codec::core::{Encode}
+            use std::codec::json::{Json, JsonC, json_default, to_str}
             use std::collections::bytes
 
             type User = { name: Str, age: Int }
 
-            let put_encoded: { url: Str, body: 'a } with EncodeRepr 'a -> { } <Http> = { url, body } -> do
-                let encoded = body.encode_repr { fmt = json_fmt, config = default_config }
-                match encoded is
-                    Ok { val } -> do
-                        let body_bytes = bytes::from_str { s = to_str { json = val } }
-                        request { url = url }
-                            .with_method { val = Put }
-                            .with_body { val = body_bytes }
-                            .send {}
-                        {}
-                    Err { error = _ } -> {}
+            let put_encoded: { url: Str, body: 'a } with Encode JsonC 'a -> { } <Http> = { url, body } -> do
+                let encoded: Json = body.encode { config = json_default }
+                let body_bytes = bytes::from_str { s = to_str { json = encoded } }
+                request { url = url }
+                    .with_method { val = Put }
+                    .with_body { val = body_bytes }
+                    .send {}
+                {}
 
             let test = {} -> do
                 let user: User = { name = "Alice", age = 30 }
                 perform HttpClient in
                     put_encoded { url = "https://example.com/users/1", body = user }
         """)
-        assertNull(error, "Expected type check to succeed but got: $error")
+        assertNull(error, "Expected type check to succeed but got: ${'$'}error")
     }
 
     @Test
     fun `patch with json body and ability constraint compiles`() {
         val error = typeCheck("""
             use std::effects::http::{Http, HttpClient, Method, request}
-            use std::codec::core::{EncodeRepr, default_config}
-            use std::codec::json::{json_fmt, to_str}
+            use std::codec::core::{Encode}
+            use std::codec::json::{Json, JsonC, json_default, to_str}
             use std::collections::bytes
 
             type UserPatch = { name: Option Str }
 
-            let patch_encoded: { url: Str, body: 'a } with EncodeRepr 'a -> { } <Http> = { url, body } -> do
-                let encoded = body.encode_repr { fmt = json_fmt, config = default_config }
-                match encoded is
-                    Ok { val } -> do
-                        let body_bytes = bytes::from_str { s = to_str { json = val } }
-                        request { url = url }
-                            .with_method { val = Patch }
-                            .with_body { val = body_bytes }
-                            .send {}
-                        {}
-                    Err { error = _ } -> {}
+            let patch_encoded: { url: Str, body: 'a } with Encode JsonC 'a -> { } <Http> = { url, body } -> do
+                let encoded: Json = body.encode { config = json_default }
+                let body_bytes = bytes::from_str { s = to_str { json = encoded } }
+                request { url = url }
+                    .with_method { val = Patch }
+                    .with_body { val = body_bytes }
+                    .send {}
+                {}
 
             let test = {} -> do
                 let patch: UserPatch = { name = Some { val = "Bob" } }
                 perform HttpClient in
                     patch_encoded { url = "https://example.com/users/1", body = patch }
         """)
-        assertNull(error, "Expected type check to succeed but got: $error")
+        assertNull(error, "Expected type check to succeed but got: ${'$'}error")
     }
 }

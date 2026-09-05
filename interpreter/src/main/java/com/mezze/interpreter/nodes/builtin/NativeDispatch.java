@@ -553,6 +553,8 @@ public final class NativeDispatch extends MezzeNode {
             urlEncodeComponent(getString(r, "s")));
         HANDLERS.put("__native_url_decode_component", (r, c) ->
             urlDecodeComponent(getString(r, "s")));
+        HANDLERS.put("__native_url_parse", (r, c) -> UrlNatives.urlParse(r));
+        HANDLERS.put("__native_url_render", (r, c) -> UrlNatives.urlRender(r));
         // String comparisons
         HANDLERS.put("__native_string_eq", (r, c) ->
             PrimitiveNatives.strEq(getString(r, "l"), getString(r, "r")));
@@ -734,6 +736,11 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.filter(getSeq(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_seq_flat_map", (r, c) ->
             SeqNatives.flatMap(getSeq(r, "xs"), getFunction(r, "f"), c));
+        // Result-short-circuiting map: `[T], T -> Result U E → Result [U] E`.
+        // Emitted by CodecGenerator for `[T]` decode (each element decode is
+        // fallible; a single failure fails the whole list).
+        HANDLERS.put("__native_seq_try_map", (r, c) ->
+            SeqNatives.tryMap(getSeq(r, "xs"), getFunction(r, "f"), c));
         HANDLERS.put("__native_seq_fold", (r, c) ->
             SeqNatives.fold(getSeq(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_seq_reduce", (r, c) ->

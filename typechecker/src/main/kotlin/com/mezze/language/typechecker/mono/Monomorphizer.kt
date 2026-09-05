@@ -809,17 +809,24 @@ class Monomorphizer(
      *
      * For each `AbilityImplRef` in the spec request, we look the impl up in
      * `implIndex` and enumerate its operations. Every `op_name` in those
-     * operations becomes an entry in `methodNameToOpHash`: the next time we
+     * operations becomes an entry in `opsByName`: the next time we
      * encounter a `TypedCall(TypedFieldAccess(_, op_name), arg, …)` in the
      * body, we rewrite it as if it were a top-level call to that op.
+     *
+     * Multiple impls may share an op name (e.g. `Shape for Square` +
+     * `Shape for Rect` both provide `area`). At each call site, [selectOpHash]
+     * disambiguates by matching the receiver's substituted type against the
+     * impl's receiver-position target. Without this per-site match, the
+     * last-writer-wins map would collapse both `a.area{}` and `b.area{}` in
+     * `let both = { a, b } -> a.area{} + b.area{}` onto the same op.
      *
      * The arg is left unchanged — the typechecker already desugared
      * `receiver.method {…}` into `method({it = receiver, …})`, so the arg
      * record already carries the receiver under field `it`.
      *
-     * If `methodNameToOpHash` is empty (no constraints, or impls absent from
-     * the index), the body is returned unchanged. Recursion mirrors the
-     * shape of `TypeSubstitution.applyExpr`.
+     * If `opsByName` is empty (no constraints, or impls absent from the
+     * index), the body is returned unchanged. Recursion mirrors the shape
+     * of `TypeSubstitution.applyExpr`.
      */
     /**
      * A spliced-in closure body (e.g. a fold folder `{ acc, x } -> acc + x.total {}`)
@@ -943,32 +950,56 @@ class Monomorphizer(
         return rw(expr)
     }
 
+    /** Per-method dispatch table used by [rewriteCalls]. Multiple impls may
+     *  provide the same op name (e.g. `Shape for Square` + `Shape for Rect`
+     *  both define `area`). At each call site we resolve by matching the
+     *  receiver's substituted type against the impl's `targetTypes` receiver
+     *  position — same shape as [tryResolveAbilityOp] in the compiler. */
+    private data class OpEntry(val impl: TypedAbilityImpl, val opHash: Hash)
+
     private fun rewriteConstrainedMethodCalls(
         expr: TypedExpr,
         abilityImpls: List<AbilityImplRef>,
     ): TypedExpr {
         if (abilityImpls.isEmpty()) return expr
-        val methodNameToOpHash = HashMap<String, Hash>()
+        val opsByName = HashMap<String, MutableList<OpEntry>>()
         for (ref in abilityImpls) {
             val impl = implIndex[ref.implHash] ?: continue
             for (opName in impl.operations.keys) {
                 // computeOpHash matches what TypedASTCompiler uses when it
                 // emits each impl operation as a standalone function — we're
                 // pointing at the same compiled function.
-                methodNameToOpHash[opName] = Hash.computeOpHash(impl.hash, opName)
+                opsByName.getOrPut(opName) { mutableListOf() }
+                    .add(OpEntry(impl, Hash.computeOpHash(impl.hash, opName)))
             }
         }
-        if (methodNameToOpHash.isEmpty()) return expr
-        return rewriteCalls(expr, methodNameToOpHash)
+        if (opsByName.isEmpty()) return expr
+        return rewriteCalls(expr, opsByName)
     }
 
-    private fun rewriteCalls(expr: TypedExpr, methodNameToOpHash: Map<String, Hash>): TypedExpr {
+    /** Pick the impl whose receiver target matches [receiverType]. The receiver
+     *  slot is the LAST entry in `targetTypes` (per the class-arg tuple with
+     *  self last, see project_classparam_runtime_dispatch_tuple). Returns null
+     *  on no match or genuine ambiguity — the caller falls through to the
+     *  unmodified TypedFieldAccess call, which the compiler resolves separately. */
+    private fun selectOpHash(entries: List<OpEntry>, receiverType: MezzeType): Hash? {
+        if (entries.size == 1) return entries.first().opHash
+        val matches = entries.filter { e ->
+            val recvTarget = e.impl.targetTypes.lastOrNull() ?: return@filter false
+            typeMatchesTarget(receiverType, recvTarget)
+        }
+        val unique = matches.map { it.opHash }.distinct()
+        return if (unique.size == 1) unique.first() else null
+    }
+
+    private fun rewriteCalls(expr: TypedExpr, opsByName: Map<String, List<OpEntry>>): TypedExpr {
         return when (expr) {
             is TypedCall -> {
                 val fn = expr.function
-                val rewrittenArg = rewriteCalls(expr.arg, methodNameToOpHash)
+                val rewrittenArg = rewriteCalls(expr.arg, opsByName)
                 if (fn is TypedFieldAccess) {
-                    val opHash = methodNameToOpHash[fn.field]
+                    val entries = opsByName[fn.field]
+                    val opHash = entries?.let { selectOpHash(it, fn.record.type) }
                     if (opHash != null) {
                         // Rewrite `receiver.method({it = receiver, …})` to a
                         // direct ByHash call. The function position becomes a
@@ -989,77 +1020,77 @@ class Monomorphizer(
                     // Not a constraint-driven method — still recurse into the
                     // receiver (it might contain another method call).
                     return expr.copy(
-                        function = fn.copy(record = rewriteCalls(fn.record, methodNameToOpHash)),
+                        function = fn.copy(record = rewriteCalls(fn.record, opsByName)),
                         arg = rewrittenArg,
                     )
                 }
                 expr.copy(
-                    function = rewriteCalls(fn, methodNameToOpHash),
+                    function = rewriteCalls(fn, opsByName),
                     arg = rewrittenArg,
                 )
             }
             is com.mezze.language.typedast.TypedLambda -> expr.copy(
-                body = rewriteCalls(expr.body, methodNameToOpHash),
+                body = rewriteCalls(expr.body, opsByName),
             )
             is com.mezze.language.typedast.TypedRecord -> expr.copy(
-                entries = expr.entries.map { rewriteRecordEntry(it, methodNameToOpHash) },
+                entries = expr.entries.map { rewriteRecordEntry(it, opsByName) },
             )
             is com.mezze.language.typedast.TypedRecordUpdate -> expr.copy(
-                record = rewriteCalls(expr.record, methodNameToOpHash),
-                updates = expr.updates.map { rewriteRecordEntry(it, methodNameToOpHash) },
+                record = rewriteCalls(expr.record, opsByName),
+                updates = expr.updates.map { rewriteRecordEntry(it, opsByName) },
             )
             is TypedFieldAccess -> expr.copy(
-                record = rewriteCalls(expr.record, methodNameToOpHash),
+                record = rewriteCalls(expr.record, opsByName),
             )
             is com.mezze.language.typedast.TypedVariantConstruct -> {
                 val payload = expr.payload
                 if (payload == null) expr
-                else expr.copy(payload = rewriteCalls(payload, methodNameToOpHash))
+                else expr.copy(payload = rewriteCalls(payload, opsByName))
             }
             is com.mezze.language.typedast.TypedMatch -> expr.copy(
-                scrutinee = rewriteCalls(expr.scrutinee, methodNameToOpHash),
+                scrutinee = rewriteCalls(expr.scrutinee, opsByName),
                 cases = expr.cases.map { c ->
                     c.copy(
-                        guard = c.guard?.let { rewriteCalls(it, methodNameToOpHash) },
-                        body = rewriteCalls(c.body, methodNameToOpHash),
+                        guard = c.guard?.let { rewriteCalls(it, opsByName) },
+                        body = rewriteCalls(c.body, opsByName),
                     )
                 },
             )
             is com.mezze.language.typedast.TypedIf -> expr.copy(
-                condition = rewriteCalls(expr.condition, methodNameToOpHash),
-                thenBranch = rewriteCalls(expr.thenBranch, methodNameToOpHash),
-                elseBranch = rewriteCalls(expr.elseBranch, methodNameToOpHash),
+                condition = rewriteCalls(expr.condition, opsByName),
+                thenBranch = rewriteCalls(expr.thenBranch, opsByName),
+                elseBranch = rewriteCalls(expr.elseBranch, opsByName),
             )
             is com.mezze.language.typedast.TypedBlock -> expr.copy(
                 statements = expr.statements.map { s ->
                     when (s) {
                         is com.mezze.language.typedast.TypedStatement.Let ->
-                            s.copy(value = rewriteCalls(s.value, methodNameToOpHash))
+                            s.copy(value = rewriteCalls(s.value, opsByName))
                         is com.mezze.language.typedast.TypedStatement.Expr ->
-                            s.copy(expr = rewriteCalls(s.expr, methodNameToOpHash))
+                            s.copy(expr = rewriteCalls(s.expr, opsByName))
                     }
                 },
-                result = rewriteCalls(expr.result, methodNameToOpHash),
+                result = rewriteCalls(expr.result, opsByName),
             )
             is com.mezze.language.typedast.TypedSeq -> expr.copy(
                 elements = expr.elements.map { el ->
                     when (el) {
                         is com.mezze.language.typedast.TypedSeqElement.Regular ->
-                            el.copy(expr = rewriteCalls(el.expr, methodNameToOpHash))
+                            el.copy(expr = rewriteCalls(el.expr, opsByName))
                         is com.mezze.language.typedast.TypedSeqElement.Spread ->
-                            el.copy(expr = rewriteCalls(el.expr, methodNameToOpHash))
+                            el.copy(expr = rewriteCalls(el.expr, opsByName))
                     }
                 },
             )
             is com.mezze.language.typedast.TypedPipe -> expr.copy(
-                left = rewriteCalls(expr.left, methodNameToOpHash),
-                right = rewriteCalls(expr.right, methodNameToOpHash),
+                left = rewriteCalls(expr.left, opsByName),
+                right = rewriteCalls(expr.right, opsByName),
             )
             is com.mezze.language.typedast.TypedPerform -> expr.copy(
-                body = rewriteCalls(expr.body, methodNameToOpHash),
+                body = rewriteCalls(expr.body, opsByName),
             )
             is com.mezze.language.typedast.TypedPerformOp -> expr.copy(
-                arg = rewriteCalls(expr.arg, methodNameToOpHash),
+                arg = rewriteCalls(expr.arg, opsByName),
             )
             // #225: a string interpolation `"$(… x.tag {} …)"` embeds exprs that
             // may contain constraint-driven method calls. Without recursing here,
@@ -1076,7 +1107,7 @@ class Monomorphizer(
                         is com.mezze.language.typedast.TypedStringPart.Literal -> part
                         is com.mezze.language.typedast.TypedStringPart.Interpolation ->
                             com.mezze.language.typedast.TypedStringPart.Interpolation(
-                                rewriteCalls(part.expr, methodNameToOpHash)
+                                rewriteCalls(part.expr, opsByName)
                             )
                     }
                 },
@@ -1088,12 +1119,12 @@ class Monomorphizer(
 
     private fun rewriteRecordEntry(
         entry: com.mezze.language.typedast.TypedRecordEntry,
-        methodNameToOpHash: Map<String, Hash>,
+        opsByName: Map<String, List<OpEntry>>,
     ): com.mezze.language.typedast.TypedRecordEntry = when (entry) {
         is com.mezze.language.typedast.TypedRecordEntry.Field ->
-            entry.copy(value = rewriteCalls(entry.value, methodNameToOpHash))
+            entry.copy(value = rewriteCalls(entry.value, opsByName))
         is com.mezze.language.typedast.TypedRecordEntry.Spread ->
-            entry.copy(expr = rewriteCalls(entry.expr, methodNameToOpHash))
+            entry.copy(expr = rewriteCalls(entry.expr, opsByName))
     }
 
     companion object {
