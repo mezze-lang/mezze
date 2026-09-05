@@ -993,7 +993,42 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     public static final class CallIndirect {
-        @Specialization
+
+        /**
+         * Monomorphic fast path: when a call site always dispatches to
+         * the same CallTarget (common for HOF callbacks like map/filter/
+         * fold), use a DirectCallNode instead of IndirectCallNode. Truffle
+         * can inline the DirectCallNode target into the compilation unit,
+         * while IndirectCallNode stays polymorphic and prevents inlining.
+         *
+         * Guard: fn.getCallTarget() == cachedTarget AND no partial args.
+         * Limit 3 = up to 3 distinct targets before generic fallback.
+         */
+        @Specialization(guards = {
+            "fn.getCallTarget() == cachedTarget",
+            "!fn.hasPartialArgs()"
+        }, limit = "3")
+        public static Object doDirect(
+                MezzeFunction fn,
+                @Variadic Object[] args,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("create(cachedTarget)") DirectCallNode callNode) {
+            // Skip partial-application check: the guard ensures no
+            // outstanding partial args. For HOF callbacks the arg record
+            // always fills all parameters (the typechecker guarantees
+            // this at monomorphic call sites).
+            Object[] closureValues = fn.getClosureValues();
+            int closureLen = closureValues.length;
+            if (closureLen == 0) {
+                return callNode.call(args);
+            }
+            Object[] combined = new Object[closureLen + args.length];
+            System.arraycopy(closureValues, 0, combined, 0, closureLen);
+            System.arraycopy(args, 0, combined, closureLen, args.length);
+            return callNode.call(combined);
+        }
+
+        @Specialization(replaces = "doDirect")
         public static Object doInvoke(
                 MezzeFunction fn,
                 @Variadic Object[] args,
