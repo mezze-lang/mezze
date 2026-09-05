@@ -159,7 +159,6 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @CompilerDirectives.TruffleBoundary
     private void loadModules() {
         MezzeContext context = MezzeContext.get(this);
-        var emptyRecord = com.mezze.interpreter.values.MezzeRecord.empty();
         try {
 
         // Pass 1: Register all functions by hash AND name (raw wrappers)
