@@ -132,6 +132,32 @@ private fun prettyPrintEffectRow(effectRow: MezzeType.EffectRow, typeVarMapping:
 }
 
 
+/**
+ * One record renderer for both printers — the record analogue of
+ * [printVariantType]. A record carrying a declared type name prints as that
+ * name (so `MockRule` in a hover shows `MockRule`, not its expanded fields),
+ * identically in the plain and alias-aware walks so they cannot drift. Only an
+ * anonymous record, or an explicit `showExpansion`, prints the field structure.
+ * The plain printer calls this with no aliases; the alias walk passes its map.
+ */
+private fun printRecordType(
+    type: MezzeType.RecordType,
+    typeAliases: Map<String, TypeAliasInfo>,
+    showExpansion: Boolean,
+    typeVarMapping: Map<TypeVar, String>
+): String {
+    val displayName = type.identity.displayNameOrNull()
+    if (displayName != null && !showExpansion) return displayName
+    val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
+        "$name: ${prettyPrintWithAliasCheck(fieldType, typeAliases, showExpansion, typeVarMapping)}"
+    }
+    return if (type.isOpen) {
+        if (fields.isEmpty()) "{ ... }" else "{ $fields, ... }"
+    } else {
+        if (fields.isEmpty()) "{}" else "{ $fields }"
+    }
+}
+
 fun prettyPrintType(type: MezzeType): String {
     val typeVarMapping = collectTypeVariables(type)
     return prettyPrintTypeWithMapping(type, typeVarMapping)
@@ -169,23 +195,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
 
     return when (type) {
     is MezzeType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
-    is MezzeType.RecordType -> {
-        // A record carrying a type-alias name prints as that name; otherwise
-        // print structurally.
-        val displayName = type.identity.displayNameOrNull()
-        if (displayName != null) {
-            displayName
-        } else {
-            val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
-                "$name: ${prettyPrintTypeWithMapping(fieldType, typeVarMapping)}"
-            }
-            if (type.isOpen) {
-                if (fields.isEmpty()) "{ ... }" else "{ $fields, ... }"
-            } else {
-                if (fields.isEmpty()) "{}" else "{ $fields }"
-            }
-        }
-    }
+    is MezzeType.RecordType -> printRecordType(type, emptyMap(), showExpansion = false, typeVarMapping)
     // One variant renderer for both printers: with no aliases printVariantType
     // still names Bool/Option/Result and declared variants (`Tree 'a`), and only
     // an anonymous inline variant expands structurally. Sharing it here is what
@@ -402,16 +412,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
 
     return when (type) {
     is MezzeType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
-    is MezzeType.RecordType -> {
-        val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
-            "$name: ${prettyPrintWithAliasCheck(fieldType, typeAliases, showExpansion, typeVarMapping)}"
-        }
-        if (type.isOpen) {
-            if (fields.isEmpty()) "{ ... }" else "{ $fields, ... }"
-        } else {
-            if (fields.isEmpty()) "{}" else "{ $fields }"
-        }
-    }
+    is MezzeType.RecordType -> printRecordType(type, typeAliases, showExpansion, typeVarMapping)
     is MezzeType.VariantType -> {
         printVariantType(type, typeAliases, showExpansion, typeVarMapping)
     }

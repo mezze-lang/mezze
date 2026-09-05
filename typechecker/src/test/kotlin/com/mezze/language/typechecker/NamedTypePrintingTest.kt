@@ -192,6 +192,34 @@ class NamedTypePrintingTest {
     }
 
     @Test
+    fun `declared RECORD type prints by name in a seq, not expanded (hover matches error)`() {
+        // The MockHttpClient `rules : [MockRule]` case: the hover/alias printer
+        // must name a declared record, not expand its fields — the same as the
+        // plain printer. printRecordType is the shared renderer that guarantees
+        // the two can't drift (the record analogue of printVariantType).
+        val source = """
+            type Rule = { url: Str, body: Str }
+
+            let mk: { url: Str, body: Str } -> Rule = { url, body } -> { url = url, body = body }
+            let rules = [mk { url = "*", body = "x" }]
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
+        val typeAliases = typeChecker.getTypeAliases()
+
+        val rulesType = result.getVariableType("rules")
+        assertNotNull(rulesType, "rules type should not be null")
+
+        val hover = prettyPrintTypeWithAliases(rulesType!!, typeAliases = typeAliases)
+        val plain = com.mezze.language.ast.prettyPrintType(rulesType)
+
+        assertTrue(hover.contains("[Rule]"), "hover should name the record: got `$hover`")
+        assertFalse(hover.contains("url:"), "hover must NOT expand the record's fields: got `$hover`")
+        assertEquals(plain, hover, "plain and hover printers must agree on a declared record")
+    }
+
+    @Test
     fun `test unit constructors print correctly with named types`() {
         val source = """
             type Option 'a = | None, Some { val: 'a } |
