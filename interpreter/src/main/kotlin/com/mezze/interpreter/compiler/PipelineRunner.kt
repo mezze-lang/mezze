@@ -202,12 +202,17 @@ object PipelineRunner {
             // Seed roots: entrypoints we can identify by name. FunctionIR has
             // no `pub` marker, so we can't reachability-prune at the module
             // level — we seed every top-level user function whose name
-            // suggests it's an entry (main / __entry__ / __toplevel* /
-            // Mezze.toml-configured entry). The walker still transitively
-            // catches everything they reach.
+            // suggests it's an entry (main / __toplevel* / Mezze.toml-
+            // configured entry). The walker still transitively catches
+            // everything they reach.
+            //
+            // __entry__ is EXCLUDED — it's always compiled separately via
+            // compileEntryFn (which uses a different BDSL entry-fn path
+            // handling RegisterGlobal). Eagerly compiling it here too
+            // wastes ~3-5ms on a duplicate that's never used.
             val roots = mutableSetOf<com.mezze.language.typedast.Hash>()
             for (fn in functions) {
-                if (fn.name == ENTRY_FN || fn.name == MAIN_FN || fn.name.startsWith(TOPLEVEL_PREFIX)) {
+                if (fn.name == MAIN_FN || fn.name.startsWith(TOPLEVEL_PREFIX)) {
                     roots.add(fn.hash)
                 }
                 if (entryHash != null && fn.hash == entryHash) roots.add(fn.hash)
