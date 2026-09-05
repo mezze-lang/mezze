@@ -1,0 +1,3 @@
+use std::effects::log::{println, Console}
+let main = {} -> perform Console in do
+    println {msg = "ok"}

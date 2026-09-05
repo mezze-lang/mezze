@@ -1,0 +1,11 @@
+use std::effects::log::{println, Console}
+
+let sum_tr = {n, acc} -> if n <= 0 then acc else sum_tr {n = n - 1, acc = acc + n}
+
+let countdown = {n} -> if n <= 0 then 0 else countdown {n = n - 1}
+
+let main = {} -> perform Console in do
+    let r1 = sum_tr {n = 10000000, acc = 0}
+    println {msg = "sum_tr(10M) = $(r1.to_str{})"}
+    let r2 = countdown {n = 10000000}
+    println {msg = "countdown(10M) = $(r2.to_str{})"}

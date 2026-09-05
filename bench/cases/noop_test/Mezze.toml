@@ -1,0 +1,12 @@
+[package]
+name = "noop_test"
+version = "0.1.0"
+
+[[app]]
+name = "noop_test"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

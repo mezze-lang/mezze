@@ -2336,10 +2336,19 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CallIndirectScalarIR ci) {
-            // Lower as CallIndirect(function, MakeRecord(argFieldNames, args)).
-            // This mirrors InvokeScalarNNode's fallback path when no
-            // typed-payload fast path applies — we get the record-ABI
-            // dispatch for free at the cost of one MezzeRecord allocation.
+            // Scalar-ABI indirect call. When the call has exactly one arg
+            // and is not a tail call, emit CallIndirectScalar1 — passes the
+            // arg value directly, bypassing MakeRecord allocation and
+            // trampoline normalization. Falls back to the generic
+            // CallIndirect(MakeRecord(...)) path for multi-arg or tail calls.
+            if (!ci.isTailCall() && ci.getArgs().size() == 1) {
+                String fieldName = ci.getArgFieldNames().get(0);
+                b.beginCallIndirectScalar1(fieldName);
+                emitNode(ci.getFunction(), b, argCount, localMap);
+                emitNode(ci.getArgs().get(0), b, argCount, localMap);
+                b.endCallIndirectScalar1();
+                return;
+            }
             String[] fieldNames = ci.getArgFieldNames().toArray(new String[0]);
             if (ci.isTailCall()) {
                 b.beginTailCallIndirect();

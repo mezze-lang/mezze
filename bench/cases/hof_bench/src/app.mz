@@ -1,0 +1,12 @@
+## HOF callback dispatch: pass a function and call it N times
+use std::effects::log::{println, Console}
+use std::int::{to_str}
+
+let apply_n = {f, n, acc} ->
+    if n <= 0 then acc
+    else apply_n {f = f, n = n - 1, acc = f {x = acc}}
+
+let main = {} -> perform Console in do
+    let inc = {x} -> x + 1
+    let r = apply_n {f = inc, n = 10000000, acc = 0}
+    println {msg = "apply_n(inc, 10M) = $(to_str {n = r})"}
