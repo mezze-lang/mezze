@@ -111,13 +111,14 @@ object ChainCanonicalizer {
             val fld = mr.fields[0]
             if (fld.name != "xs" && fld.name != "it") return null
             val (stages, source) = peelSource(fld.value, classifier, allFunctions)
-            // Opaque source = the expression is a parameter reference or local
-            // variable. The runtime value could be Seq, List, or any collection.
-            // BuiltinSumLongSeq only handles MezzeSeq; emitting it for Opaque
-            // would crash when `list::sum` dispatches through `seq::sum`'s
-            // compiled body. Reject — the unfused native path handles all types.
-            if (source is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(source, stages, SinkIR.Sum, node.src)
+            // seq_sum: we know the source is a Seq — promote Opaque → RawSeq.
+            // iter_sum: source could be any collection — must reject Opaque.
+            val effectiveSource = when {
+                source is SourceIR.Opaque && node.name == "__native_seq_sum" -> SourceIR.RawSeq(source.expr)
+                source is SourceIR.Opaque -> return null
+                else -> source
+            }
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Sum, node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // __native_seq_for_each / __native_iter_for_each
@@ -134,8 +135,12 @@ object ChainCanonicalizer {
             val fLambda = f as? MakeLambdaIR ?: return null
             // Captures OK — emit-side handles them via capture slot remap.
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-            if (source is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
+            val effectiveSource = when {
+                source is SourceIR.Opaque && node.name == "__native_seq_for_each" -> SourceIR.RawSeq(source.expr)
+                source is SourceIR.Opaque -> return null
+                else -> source
+            }
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.ForEach(fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // __native_iter_fold / __native_seq_fold — fold { it/xs, init, f }
@@ -154,8 +159,15 @@ object ChainCanonicalizer {
             val fLambda = f as? MakeLambdaIR ?: return null
             if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-            if (source is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
+            // seq_fold: we know the source is a Seq, so promote Opaque → RawSeq
+            // (analogous to list_fold_left line 177 promoting Opaque → RawList).
+            // iter_fold: source could be any iterator — must reject Opaque.
+            val effectiveSource = when {
+                source is SourceIR.Opaque && node.name == "__native_seq_fold" -> SourceIR.RawSeq(source.expr)
+                source is SourceIR.Opaque -> return null
+                else -> source
+            }
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // __native_list_fold_left { xs, init, f }
@@ -269,12 +281,16 @@ object ChainCanonicalizer {
         // handles it).
         //
         // Pattern 3: dict-method dispatch — CallIndirect(ReadField(ReadLocal, _),
-        // MakeRecord{2}). Same concern as pattern 2: the emitter checks
-        // ABILITY_OP_NAMES which isn't available here. Be conservative.
-        //
-        // Both patterns 2 and 3 are intentionally omitted to prevent
-        // non-arith functions (cons, map-insert) from creating un-emittable
-        // FusedChainIR nodes. The unfused fallback handles them correctly.
+        // MakeRecord{2 fields}). This is the desugaring of `acc + x` when the
+        // monomorphizer didn't specialize the arith op inline. The emitter's
+        // classifyFolderBody checks ABILITY_OP_NAMES to filter non-arith ops;
+        // if it rejects the body, FusedChainIR.fallback handles it safely.
+        // Accepting this shape here enables fold fusion for the common case
+        // where `+` desugars through ability dispatch (e.g. seq::fold).
+        is CallIndirectIR -> body.function is ReadFieldIR
+                && (body.function as ReadFieldIR).record is ReadLocalIR
+                && body.arg is MakeRecordIR
+                && (body.arg as MakeRecordIR).fields.size == 2
         else -> false
     }
 
@@ -358,8 +374,12 @@ object ChainCanonicalizer {
             val fld = mr.fields[0]
             if (fld.name != "xs" && fld.name != "it") return null
             val (stages, source) = peelSource(fld.value, classifier, allFunctions)
-            if (source is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(source, stages, SinkIR.Sum, node.src)
+            val effectiveSource = when {
+                source is SourceIR.Opaque && node.name == "__native_seq_sum" -> SourceIR.RawSeq(source.expr)
+                source is SourceIR.Opaque -> return null
+                else -> source
+            }
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Sum, node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // For-each
@@ -373,8 +393,12 @@ object ChainCanonicalizer {
             val srcInner = src ?: return null
             val fLambda = f as? MakeLambdaIR ?: return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-            if (source is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(source, stages, SinkIR.ForEach(fLambda), node.src)
+            val effectiveSource = when {
+                source is SourceIR.Opaque && node.name == "__native_seq_for_each" -> SourceIR.RawSeq(source.expr)
+                source is SourceIR.Opaque -> return null
+                else -> source
+            }
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.ForEach(fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // Fold (iter/seq)
@@ -391,8 +415,12 @@ object ChainCanonicalizer {
             val fLambda = f as? MakeLambdaIR ?: return null
             if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-            if (source is SourceIR.Opaque) return null
-            val candidate = FusedChainIR(source, stages, SinkIR.Fold(initExpr, fLambda), node.src)
+            val effectiveSource = when {
+                source is SourceIR.Opaque && node.name == "__native_seq_fold" -> SourceIR.RawSeq(source.expr)
+                source is SourceIR.Opaque -> return null
+                else -> source
+            }
+            val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // Fold (list — fold_left)
@@ -438,14 +466,16 @@ object ChainCanonicalizer {
                 val pLambda = p as? MakeLambdaIR ?: return null
                 // Captures OK — emit-side handles them via capture slot remap.
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-                // The emitter can only handle Range/RawSeq sources for Count.
-                // Opaque (e.g., ReadLocalIR from multi-field record arg eval
-                // ordering) can't be emitted — bail so native __iter_count runs.
-                if (source is SourceIR.Opaque) null
+                val effectiveSource = when {
+                    source is SourceIR.Opaque && node.name == "__native_seq_count" -> SourceIR.RawSeq(source.expr)
+                    source is SourceIR.Opaque -> null
+                    else -> source
+                }
+                if (effectiveSource == null) null
                 else {
                     // count(p) = filter(p) + count
                     val allStages = stages + StageIR.Filter(pLambda)
-                    val candidate = FusedChainIR(source, allStages, SinkIR.Count, node.src)
+                    val candidate = FusedChainIR(effectiveSource, allStages, SinkIR.Count, node.src)
                     if (isEffectSafe(candidate, allFunctions)) candidate else null
                 }
             }
@@ -471,10 +501,14 @@ object ChainCanonicalizer {
                 val fLambda = f as? MakeLambdaIR ?: return null
                 // Captures OK — emit-side handles them via capture slot remap.
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-                // Emitter can't drive a generic iter loop from Opaque.
-                if (source is SourceIR.Opaque) null
+                val effectiveSource = when {
+                    source is SourceIR.Opaque && node.name == "__native_seq_reduce" -> SourceIR.RawSeq(source.expr)
+                    source is SourceIR.Opaque -> null
+                    else -> source
+                }
+                if (effectiveSource == null) null
                 else {
-                    val candidate = FusedChainIR(source, stages, SinkIR.Reduce(fLambda), node.src)
+                    val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Reduce(fLambda), node.src)
                     if (isEffectSafe(candidate, allFunctions)) candidate else null
                 }
             }
@@ -549,9 +583,14 @@ object ChainCanonicalizer {
         val pLambda = p as? MakeLambdaIR ?: return null
         // Captures OK — emit-side handles them via capture slot remap.
         val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-        // Emitter can't handle Opaque source for predicate sinks.
-        if (source is SourceIR.Opaque) return null
-        val candidate = FusedChainIR(source, stages, wrap(pLambda), src)
+        // seq natives: promote Opaque → RawSeq (we know the source is a Seq).
+        // iter natives: source could be any iterator — must reject Opaque.
+        val effectiveSource = when {
+            source is SourceIR.Opaque && nativeName.startsWith("__native_seq") -> SourceIR.RawSeq(source.expr)
+            source is SourceIR.Opaque -> return null
+            else -> source
+        }
+        val candidate = FusedChainIR(effectiveSource, stages, wrap(pLambda), src)
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
 
