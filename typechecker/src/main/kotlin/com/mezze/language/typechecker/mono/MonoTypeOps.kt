@@ -98,6 +98,14 @@ internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean 
             else -> false
         }
     }
+    // RecordType-to-RecordType. Match structurally, gated on identity NOT being
+    // DISTINCT so two different Declared records with the same fields don't
+    // collide. Mirrors the compiler's typeMatchesTarget rule so mono dispatch
+    // agrees on the (anonymous impl target, alias-tagged receiver) combo.
+    if (concrete is MezzeType.RecordType && target is MezzeType.RecordType) {
+        if (identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT) return false
+        return concrete.fields == target.fields
+    }
     // VariantType vs VariantType: typeName or constructor-set overlap
     if (concrete is MezzeType.VariantType && target is MezzeType.VariantType) {
         val concreteName = concrete.identity.displayNameOrNull()

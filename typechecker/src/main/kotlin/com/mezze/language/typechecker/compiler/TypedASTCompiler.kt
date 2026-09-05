@@ -2875,6 +2875,22 @@ class TypedASTCompiler(
             concreteType is SortedMapType && targetType is SortedMapType -> true
             concreteType is RecordType && targetType is TypeApplication &&
                 concreteType.identity.displayNameOrNull() == targetType.constructor -> true
+            // RecordType-to-RecordType. Compare structurally, guarded by an
+            // identity DISTINCT reject so two DIFFERENT named records with the
+            // same field shape do NOT collide. Fields differ → miss.
+            //
+            // Fixes the (anonymous impl target, alias-tagged receiver) combo:
+            // `impl Summary for { user: Str }` registers an Anonymous target;
+            // `let p : Post = { user = "dev" }` where `type Post = { user: Str }`
+            // carries a Declared identity. identityVerdict(Declared, Anonymous)
+            // is UNDETERMINED, so the receiver reaches the field comparison and
+            // matches. Two distinct Declared records with the same fields (rare
+            // — the parser also rejects same-shape aliases) still hash-mismatch
+            // and are correctly rejected.
+            concreteType is RecordType && targetType is RecordType -> {
+                identityVerdict(concreteType.identity, targetType.identity) != IdentityVerdict.DISTINCT &&
+                    concreteType.fields == targetType.fields
+            }
             // Newtype receivers dispatch to `impl … for <NewtypeName>` whose target
             // is built as a TypeApplication (see ContextBuilder ParsedNewtypeDef →
             // WellKnownTypeApp.of). Prefer hash identity (module-distinct, #278);
