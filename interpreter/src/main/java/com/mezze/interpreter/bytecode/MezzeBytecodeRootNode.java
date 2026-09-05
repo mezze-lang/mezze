@@ -33,6 +33,7 @@ import com.mezze.interpreter.values.MezzeRecord.Shape;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.mezze.interpreter.values.MezzeVariant.TagRegistry;
 import com.oracle.truffle.api.CallTarget;
+import com.oracle.truffle.api.CompilerAsserts;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.bytecode.BytecodeRootNode;
@@ -2032,31 +2033,44 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             };
         }
 
-        @TruffleBoundary
+        /**
+         * PE-transparent result extraction. For SUM/COUNT the result is
+         * just the accumulator (a long) — no reason to cross a boundary.
+         * Only FIND needs @TruffleBoundary because it allocates a
+         * MezzeVariant (Some/None). sinkKind is PE-constant (derived
+         * from the config @ConstantOperand), so PE folds the switch and
+         * the FIND branch is dead-code-eliminated for sum/count/any/all.
+         */
         static Object flpResult(int sinkKind,
                 long acc, boolean found, long foundVal) {
-            return switch (sinkKind) {
-                case FLP_SINK_SUM, FLP_SINK_COUNT -> acc;
-                case FLP_SINK_ANY -> found;
-                case FLP_SINK_ALL -> !found;
-                case FLP_SINK_FIND -> {
-                    MezzeVariant.TagRegistry reg = MezzeVariant.TagRegistry.getGlobal();
-                    int someTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
-                            .computeVariantTag(com.mezze.language.ast.BuiltinTypes.SOME, null);
-                    int noneTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
-                            .computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
-                    if (found) {
-                        reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.SOME);
-                        MezzeRecord payload = MezzeRecord.fromFields(
-                                new String[]{"val"}, new Object[]{foundVal});
-                        yield MezzeVariant.singlePayload(reg, someTag, payload);
-                    } else {
-                        reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.NONE);
-                        yield MezzeVariant.noPayload(reg, noneTag);
-                    }
-                }
-                default -> acc;
-            };
+            if (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT) {
+                return acc;
+            } else if (sinkKind == FLP_SINK_ANY) {
+                return found;
+            } else if (sinkKind == FLP_SINK_ALL) {
+                return !found;
+            } else if (sinkKind == FLP_SINK_FIND) {
+                return flpResultFind(found, foundVal);
+            }
+            return acc;
+        }
+
+        @TruffleBoundary
+        private static Object flpResultFind(boolean found, long foundVal) {
+            MezzeVariant.TagRegistry reg = MezzeVariant.TagRegistry.getGlobal();
+            int someTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
+                    .computeVariantTag(com.mezze.language.ast.BuiltinTypes.SOME, null);
+            int noneTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
+                    .computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
+            if (found) {
+                reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.SOME);
+                MezzeRecord payload = MezzeRecord.fromFields(
+                        new String[]{"val"}, new Object[]{foundVal});
+                return MezzeVariant.singlePayload(reg, someTag, payload);
+            } else {
+                reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.NONE);
+                return MezzeVariant.noPayload(reg, noneTag);
+            }
         }
 
         public static boolean isLongStorage(MezzeSeq<?> seq) {
@@ -2091,6 +2105,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Bind Node node,
                 @Cached InlinedLoopConditionProfile loopProfile) {
             // Unpack config — each field is PE-constant.
+            CompilerAsserts.partialEvaluationConstant(config);
             int sinkKind      = config & 0xF;
             int mapOp         = ((config >> 4) & 0xF) - 1;
             int filterPreOp   = ((config >> 8) & 0xF) - 1;
