@@ -101,8 +101,13 @@ identical to the lock.
   module resolver already looks, so `use <dep>::…` typechecks + runs with **zero
   compiler changes**. Key realization: module resolution is file-based
   (`ModuleResolver.resolveModuleFile`), so `deps.sqlite` is only a parse/typecheck
-  *cache* — populating it is a P2/P3 optimization, **not** a prerequisite. This is
-  the milestone that makes package management real, and it's in.
+  *cache* — populating it is a P2/P3 optimization, **not** a prerequisite.
+  - **Transitive deps ✅** — one `mez sync` at the top walks the whole graph.
+    **Resolution roots at each package's own dir** (not the top project), so `sync`
+    links each dep into *its declarer's* `.deps/mezze/` recursively
+    (`app`→`utils`→`core` links `utils` into `app/.deps` and `core` into
+    `utils/.deps`). Diamonds dedup, cycles terminate. This is a *nested* deps model
+    (each package sees its own `.deps`), not npm-style flat hoisting.
 - **P2 — url#sha256 fetch → global store.** Wire the existing downloader into the
   `~/.mezze/store/<hash>` cache; compile from there into `deps.sqlite`.
 - **P3 — transitive deps + lockfile graph.** Resolve deps-of-deps; lock the full

@@ -71,17 +71,15 @@ class SyncCommand {
         packagesDir.mkdirs()
         cacheDir.mkdirs()
 
-        // --- local path dependencies: symlink so edits to the target are live ---
-        for ((depName, rawPath) in pathDeps) {
-            println("🔗 Linking $depName (path = \"$rawPath\")...")
-            try {
-                linkPathDependency(currentDir, packagesDir, depName, rawPath)
-            } catch (e: Exception) {
-                println("❌ Error linking $depName:")
-                println("   ${e.message}")
-            }
+        // --- local path dependencies: resolved TRANSITIVELY and hoisted flat into
+        // this project's .deps/mezze/ (module resolution is rooted here), each a
+        // symlink so edits to the target reflect immediately. ---
+        val localCount = if (pathDeps.isNotEmpty()) {
+            println("🔗 Resolving local path dependencies (transitive)...")
+            val n = syncPathDeps(currentDir, pathDeps)
             println()
-        }
+            n
+        } else 0
 
         // Download and extract packages
         val downloader = PackageDownloader(cacheDir)
@@ -180,7 +178,7 @@ class SyncCommand {
             }
 
             println()
-            println("🎉 Sync complete: ${pathDeps.size} local + ${lockedPackages.size} registry package(s).")
+            println("🎉 Sync complete: $localCount local + ${lockedPackages.size} registry package(s).")
             println()
             println("📂 Dependencies at: ${packagesDir.absolutePath}")
 
@@ -190,46 +188,74 @@ class SyncCommand {
     }
 
     /**
-     * Materialize a local path dependency into `.deps/mezze/<name>-<version>/`
-     * as a **symlink** to the target package — no copy, so edits to the target
-     * reflect immediately, and the module resolver finds it under the dir it
-     * already searches.
+     * Resolve local path dependencies **transitively**, hoisting every package in
+     * the graph flat into the top project's `.deps/mezze/` — module resolution is
+     * rooted at the top project, so a transitive dep (`app` -> `utils` -> `core`)
+     * must live there too for `utils`'s `use core::...` to resolve. Each entry is a
+     * symlink, so edits to any dep reflect immediately.
+     *
+     * Diamonds dedup by name (first wins — the top project's own declaration is
+     * enqueued first, so it takes precedence); differing paths for the same name
+     * warn; cycles terminate via the `done` set. Returns packages materialized.
      */
-    private fun linkPathDependency(
-        currentDir: File,
-        packagesDir: File,
-        depName: String,
-        rawPath: String,
-    ) {
-        val target = File(rawPath).let { if (it.isAbsolute) it else File(currentDir, rawPath) }.canonicalFile
-        if (!target.isDirectory) {
-            throw IllegalArgumentException("path '$rawPath' is not a directory (resolved: $target)")
-        }
-        val depManifest = File(target, "Mezze.toml")
-        if (!depManifest.exists()) {
-            throw IllegalArgumentException("no Mezze.toml in '$target' — not a Mezze package")
-        }
-        val version = readPackageVersion(depManifest) ?: "0.0.0"
+    private fun syncPathDeps(projectDir: File, topDeps: Map<String, String>): Int {
+        // Module resolution roots at EACH package's own dir, so a package's deps
+        // must live in that package's `.deps/mezze/` — not hoisted to the top. We
+        // therefore walk the graph and link each dep into its DECLARER's `.deps`,
+        // recursing into the dep's real dir. One `mez sync` sets up the whole
+        // local graph (it also writes a gitignored `.deps/` into each local dep).
+        val seen = HashSet<String>()                            // "<declarerCanonical>::<name>" — dedups diamonds, breaks cycles
+        val queue = ArrayDeque<Triple<String, String, File>>()  // (name, rawPath, declaring dir)
+        var materialized = 0
+        topDeps.forEach { (n, p) -> queue.add(Triple(n, p, projectDir)) }
 
-        // Drop any stale <name>-* entries (a version bump shouldn't leave dupes).
-        // Delete symlinks as links (never recurse into the target and wipe its source!).
-        packagesDir.listFiles { f -> f.name.startsWith("$depName-") }?.forEach { stale ->
-            val p = stale.toPath()
-            if (java.nio.file.Files.isSymbolicLink(p)) java.nio.file.Files.delete(p)
-            else stale.deleteRecursively()
-        }
+        while (queue.isNotEmpty()) {
+            val (name, rawPath, declaringDir) = queue.removeFirst()
+            if (!seen.add("${declaringDir.canonicalPath}::$name")) continue
 
-        java.nio.file.Files.createSymbolicLink(File(packagesDir, "$depName-$version").toPath(), target.toPath())
-        println("  ✅ $depName-$version -> ${target.path}")
+            val target = File(rawPath)
+                .let { if (it.isAbsolute) it else File(declaringDir, rawPath) }
+                .canonicalFile
+
+            val manifestFile = File(target, "Mezze.toml")
+            if (!target.isDirectory || !manifestFile.exists()) {
+                println("  ❌ $name: '$rawPath' (from ${declaringDir.name}) is not a Mezze package (resolved: $target)")
+                continue
+            }
+            val depToml = try {
+                Toml.decodeFromString(MezzeToml.serializer(), manifestFile.readText())
+            } catch (e: Exception) {
+                println("  ❌ $name: failed to parse ${target.name}/Mezze.toml — ${e.message}")
+                continue
+            }
+            val version = depToml.`package`.version
+
+            // Link into the DECLARING package's own .deps/mezze so that package's
+            // `use <name>::...` resolves.
+            val depsDir = File(declaringDir, ".deps/mezze").also { it.mkdirs() }
+            materializeSymlink(depsDir, name, target, version)
+            materialized++
+            val where = if (declaringDir == projectDir) "" else "  (into ${declaringDir.name}/.deps)"
+            println("  ✅ $name-$version -> ${target.path}$where")
+
+            // Recurse: this dep's own path deps live in ITS dir's .deps.
+            depToml.pathDependencies.forEach { (tn, tp) -> queue.add(Triple(tn, tp, target)) }
+        }
+        return materialized
     }
 
-    /** Best-effort read of `[package].version` from a dependency's Mezze.toml. */
-    private fun readPackageVersion(manifest: File): String? =
-        try {
-            Toml.decodeFromString(MezzeToml.serializer(), manifest.readText()).`package`.version
-        } catch (e: Exception) {
-            null
+    /**
+     * Symlink `<packagesDir>/<name>-<version>` -> target, replacing any stale
+     * `<name>-*` entry first. Symlinks are removed as links (never recurse into the
+     * target — that would delete the dep's own source).
+     */
+    private fun materializeSymlink(packagesDir: File, name: String, target: File, version: String) {
+        packagesDir.listFiles { f -> f.name.startsWith("$name-") }?.forEach { stale ->
+            val p = stale.toPath()
+            if (java.nio.file.Files.isSymbolicLink(p)) java.nio.file.Files.delete(p) else stale.deleteRecursively()
         }
+        java.nio.file.Files.createSymbolicLink(File(packagesDir, "$name-$version").toPath(), target.toPath())
+    }
 
     /**
      * Extract version from URL
