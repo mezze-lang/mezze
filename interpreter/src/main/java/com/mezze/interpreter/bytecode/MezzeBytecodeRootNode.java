@@ -1572,42 +1572,15 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
-    /** Extract the backing long[] from a LongSeqStorage-backed MezzeSeq.
-     *  Used by the fused loop to iterate with unboxed primitive access
-     *  instead of going through SeqGet (which boxes every element).
-     *  Returns Object — the caller stores it and the companion
-     *  SeqGetLong operation casts+accesses it. */
-    @Operation
-    public static final class SeqExtractLongArray {
-        @Specialization(guards = "isLongStorage(seq)")
-        public static long[] doLong(MezzeSeq<?> seq) {
-            return ((com.mezze.datastructures.seq.LongSeqStorage) seq.getStorage()).getArray();
-        }
-        @Specialization(guards = "!isLongStorage(seq)")
-        public static long[] doFallback(MezzeSeq<?> seq) {
-            // Materialize to long[] for uniform unboxed access.
-            int n = seq.size();
-            long[] arr = new long[n];
-            for (int i = 0; i < n; i++) {
-                Object e = seq.get(i);
-                arr[i] = e instanceof Long l ? l : ((Number) e).longValue();
-            }
-            return arr;
-        }
-        public static boolean isLongStorage(MezzeSeq<?> seq) {
-            return seq.getStorage() instanceof com.mezze.datastructures.seq.LongSeqStorage;
-        }
-    }
-
-    /** Unboxed long element access from a long[] extracted by SeqExtractLongArray.
-     *  The loop index is long (BDSL convention), cast to int internally. */
-    @Operation
-    public static final class SeqGetLong {
-        @Specialization
-        public static long doAccess(long[] array, long index) {
-            return array[(int) index];
-        }
-    }
+    // SeqExtractLongArray + SeqGetLong REMOVED: the useUnboxedLongArray
+    // code path in BytecodeCompiler was never activated (always false).
+    // The operations remained in the BDSL spec, and SeqExtractLongArray's
+    // doFallback → Long.longValue() → Number.longValue() virtual dispatch
+    // pulled BigDecimal.longValue() into the SVM runtime-compilation graph,
+    // tripping the blocklist. BDSL Uncached node paths don't respect
+    // @TruffleBoundary (neither @Operation nor @OperationProxy), so the
+    // only fix is to remove the dead operation. If unboxed long-array
+    // iteration is re-enabled, use FusedLongPipeline instead. (#native-image)
 
     // ── Fused Long Pipeline: single-operation tight loop for numeric chains ──
 

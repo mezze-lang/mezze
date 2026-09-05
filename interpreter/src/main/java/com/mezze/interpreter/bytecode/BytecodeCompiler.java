@@ -3714,9 +3714,6 @@ public final class BytecodeCompiler {
         // Unboxed long[] iteration is handled by FusedLongPipeline (Phase 4d-fast).
         // The generic fused loop below uses SeqGet (boxed) because the seq may
         // contain non-numeric elements (promises, variants, records, etc.).
-        com.oracle.truffle.api.bytecode.BytecodeLocal longArraySlot = null;
-        boolean useUnboxedLongArray = false;
-
         if (isRange) {
             endSlot = b.createLocal();
             b.beginStoreLocal(iSlot);
@@ -3738,26 +3735,6 @@ public final class BytecodeCompiler {
             cursorSlot = b.createLocal();
             b.beginStoreLocal(cursorSlot);
               emitNode(rawListExpr, b, argCount, localMap);
-            b.endStoreLocal();
-        } else if (useUnboxedLongArray) {
-            // Extract backing long[] for unboxed iteration.
-            // Store seq in a temporary to avoid double-evaluating rawXsExpr.
-            seqSlot = b.createLocal();
-            longArraySlot = b.createLocal();
-            sizeSlot = b.createLocal();
-            b.beginStoreLocal(seqSlot);
-              emitNode(rawXsExpr, b, argCount, localMap);
-            b.endStoreLocal();
-            b.beginStoreLocal(longArraySlot);
-              b.beginSeqExtractLongArray();
-                b.emitLoadLocal(seqSlot);
-              b.endSeqExtractLongArray();
-            b.endStoreLocal();
-            b.beginStoreLocal(sizeSlot);
-              b.beginSeqSize(); b.emitLoadLocal(seqSlot); b.endSeqSize();
-            b.endStoreLocal();
-            b.beginStoreLocal(iSlot);
-              b.emitLoadLongConstant(0L);
             b.endStoreLocal();
         } else {
             seqSlot = b.createLocal();
@@ -3865,10 +3842,6 @@ public final class BytecodeCompiler {
             b.beginListHead();
               b.emitLoadLocal(cursorSlot);
             b.endListHead();
-        } else if (useUnboxedLongArray) {
-            b.beginSeqGetLong();
-              b.emitLoadLocal(longArraySlot); b.emitLoadLocal(iSlot);
-            b.endSeqGetLong();
         } else {
             b.beginSeqGet();
               b.emitLoadLocal(seqSlot); b.emitLoadLocal(iSlot);
