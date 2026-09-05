@@ -391,7 +391,17 @@ object EmbeddedExec {
             // the .jsa, then the launcher uses it on real runs to shave
             // ~50% off cold start. (#215)
             if (System.getenv("MEZZE_CDS_DRYRUN") == "1") {
-                mark("CDS_DRYRUN — skipping context.eval()")
+                // Force-load BytecodeCompiler and its Truffle BDSL builder
+                // dependencies so they land in the CDS archive. First BDSL
+                // compilation pays ~20ms of class loading; with these
+                // classes pre-loaded from the archive that drops to ~5ms.
+                // We DON'T run context.eval() — that would execute user
+                // code with potential side effects (I/O, network, etc.).
+                try {
+                    Class.forName("com.mezze.interpreter.bytecode.BytecodeCompiler")
+                    Class.forName("com.mezze.interpreter.bytecode.MezzeBytecodeRootNodeGen")
+                } catch (_: Throwable) {}
+                mark("CDS_DRYRUN — BDSL classes warmed for archive")
                 return
             }
 
