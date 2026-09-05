@@ -395,22 +395,28 @@ public final class MezzeFunctionRootNode extends RootNode {
             // Cross-fn bypass: call the target's inner BDSL root
             // directly, so TailCallExceptions propagate back to our
             // LoopNode instead of being caught by the target's trampoline.
-            if (target == cachedCrossFnOuter) {
+            if (target == cachedCrossFnOuter && cachedCrossFnInner != null) {
+                // Null guard on cachedCrossFnInner: handles the rare race
+                // where another thread sees cachedCrossFnOuter written but
+                // cachedCrossFnInner not yet adopted — falls to megamorphic.
                 Object[] normalized = cachedCrossFnTramp != null
                         ? cachedCrossFnTramp.normalizeIfNeeded(args) : args;
                 return cachedCrossFnInner.call(normalized);
             }
             if (cachedCrossFnOuter == null) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                cachedCrossFnOuter = target;
                 var tramp = com.mezze.interpreter.bytecode.TrampolineRootNode.asTrampolineOrNull(target);
                 if (tramp != null) {
                     cachedCrossFnTramp = tramp;
                     cachedCrossFnInner = insert(DirectCallNode.create(tramp.getInnerTarget()));
+                    // Set cachedCrossFnOuter LAST so concurrent readers
+                    // that match it see cachedCrossFnInner already set.
+                    cachedCrossFnOuter = target;
                     Object[] normalized = tramp.normalizeIfNeeded(args);
                     return cachedCrossFnInner.call(normalized);
                 } else {
                     cachedCrossFnInner = insert(DirectCallNode.create(target));
+                    cachedCrossFnOuter = target;
                     return cachedCrossFnInner.call(args);
                 }
             }

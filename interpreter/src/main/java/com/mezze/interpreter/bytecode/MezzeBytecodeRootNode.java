@@ -738,11 +738,29 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = String[].class)
     public static final class MakeRecord {
+        /**
+         * Cached path: resolve the Shape once at specialization time.
+         * Since fieldNames is a constant operand (same array identity
+         * every execution), the shape is looked up once and reused —
+         * no ConcurrentHashMap hit on the hot path.
+         */
         @Specialization
-        public static MezzeRecord doAllObjects(String[] fieldNames, @Variadic Object[] values) {
-            return buildAllObjectRecord(fieldNames, values);
+        public static MezzeRecord doAllObjects(String[] fieldNames, @Variadic Object[] values,
+                @Cached(value = "resolveShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            Object[] objectFields = new Object[values.length];
+            System.arraycopy(values, 0, objectFields, 0, values.length);
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, objectFields);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
         }
     }
+
+    private static final long[] EMPTY_LONGS = new long[0];
+    private static final double[] EMPTY_DOUBLES = new double[0];
 
     /**
      * General record spread with interleaved sources and explicit
@@ -1239,11 +1257,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = String.class)
     @ConstantOperand(type = String[].class)
     public static final class MakeLambda {
-        /** `@TruffleBoundary` — MezzeFunction ctor may init a HashMap for
-         *  partialArgs (blocklisted under SVM). Called on every lambda
-         *  construction but is inherently allocating; boundary is free. #402. */
+        /** PE-transparent: MezzeFunction ctor is now just field assignments
+         *  (inlineAssumption removed), so PE can see through lambda creation
+         *  and potentially scalar-replace the MezzeFunction when the closure
+         *  is constant. This was @TruffleBoundary in #402 because the ctor
+         *  called Truffle.getRuntime().createAssumption() which hit SVM's
+         *  blocklist — that call is gone now. */
         @Specialization
-        @TruffleBoundary
         public static MezzeFunction doMake(CallTarget target, String name, String[] paramNames,
                                             @Variadic Object[] captures) {
             // #374 — must thread paramNames through so partial application
@@ -1270,9 +1290,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = String.class)
     @ConstantOperand(type = String.class)
     public static final class MakeLambdaByHash {
-        /** `@TruffleBoundary` — see {@link MakeLambda#doMake}. #402. */
+        /** PE-transparent: MezzeFunction ctor is just field assignments
+         *  now (see MakeLambda). The @Cached resolveByHash stays
+         *  @TruffleBoundary (HashMap lookup), but doMake itself is
+         *  PE-visible so the JIT can scalar-replace the MezzeFunction
+         *  when closure values are constant. */
         @Specialization
-        @TruffleBoundary
         public static MezzeFunction doMake(
                 String hashHex, String name, @Variadic Object[] captures,
                 @Cached(value = "resolveByHash(hashHex)", allowUncached = true) CallTarget cachedTarget) {
@@ -3317,10 +3340,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @TruffleBoundary
     private static MezzeRecord buildAllObjectRecord(String[] fieldNames, Object[] values) {
         Shape shape = com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
-        long[] longFields = new long[0];
-        double[] doubleFields = new double[0];
         Object[] objectFields = new Object[fieldNames.length];
         System.arraycopy(values, 0, objectFields, 0, fieldNames.length);
-        return new MezzeRecord(shape, longFields, doubleFields, objectFields);
+        return new MezzeRecord(shape, EMPTY_LONGS, EMPTY_DOUBLES, objectFields);
     }
 }

@@ -1,10 +1,8 @@
 package com.mezze.interpreter.values;
 
-import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.interop.ArityException;
 import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.TruffleObject;
@@ -50,13 +48,6 @@ public final class MezzeFunction implements TruffleObject {
     // Maps parameter name -> value
     private final java.util.Map<String, Object> partialArgs;
 
-    /**
-     * Assumption for inlining stability.
-     * Invalidated when the function is redefined, causing deoptimization
-     * of any inlined call sites.
-     */
-    private final Assumption inlineAssumption;
-
     private static final Object[] EMPTY_CLOSURE = new Object[0];
     private static final String[] EMPTY_PARAMS = new String[0];
 
@@ -76,7 +67,6 @@ public final class MezzeFunction implements TruffleObject {
         this.closureLength = this.closureValues.length;
         this.parameterNames = parameterNames != null ? parameterNames : EMPTY_PARAMS;
         this.partialArgs = partialArgs;
-        this.inlineAssumption = Truffle.getRuntime().createAssumption("inline:" + name);
     }
 
     /**
@@ -121,12 +111,20 @@ public final class MezzeFunction implements TruffleObject {
         return partialArgs;
     }
 
-    /** `@TruffleBoundary` — Map.isEmpty is blocklisted for SVM runtime
-     *  compilation; partial-app check runs in indirect-call slow path,
-     *  not JIT-critical. #402. */
-    @TruffleBoundary
+    /**
+     * PE-transparent null check + boundary isEmpty. For the vast majority
+     * of functions partialArgs is null (set once in the ctor) so PE folds
+     * the entire call to {@code false} — no boundary entry at all.
+     * Only partial-application paths reach {@link #partialArgsNotEmpty},
+     * which stays behind the boundary for SVM's Map.isEmpty blocklist (#402).
+     */
     public boolean hasPartialArgs() {
-        return partialArgs != null && !partialArgs.isEmpty();
+        return partialArgs != null && partialArgsNotEmpty();
+    }
+
+    @TruffleBoundary
+    private boolean partialArgsNotEmpty() {
+        return !partialArgs.isEmpty();
     }
 
     /**
@@ -215,23 +213,6 @@ public final class MezzeFunction implements TruffleObject {
         }
 
         return MezzeRecord.fromFields(names, values);
-    }
-
-    /**
-     * Get the assumption that guards inlined call sites.
-     * When this assumption is invalidated, all inlined versions
-     * of this function will deoptimize.
-     */
-    public Assumption getInlineAssumption() {
-        return inlineAssumption;
-    }
-
-    /**
-     * Invalidate the inline assumption (e.g., when function is redefined).
-     * This triggers deoptimization of all inlined call sites.
-     */
-    public void invalidateInlineAssumption() {
-        inlineAssumption.invalidate("function redefined: " + name);
     }
 
     // InteropLibrary exports

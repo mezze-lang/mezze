@@ -503,24 +503,31 @@ public final class TrampolineRootNode extends RootNode {
             try {
                 if (target == outerTarget || target == innerTarget) {
                     result = selfCall.call(args);
-                } else if (target == cachedCrossOuter) {
-                    // Cached cross-fn bypass: normalize + call inner
+                } else if (target == cachedCrossOuter && cachedCrossInner != null) {
+                    // Cached cross-fn bypass: normalize + call inner.
+                    // The cachedCrossInner null guard handles the rare
+                    // race where another thread sees cachedCrossOuter
+                    // written but cachedCrossInner not yet adopted — on
+                    // miss we fall through to the megamorphic path.
                     Object[] normalized = cachedCrossTramp != null
                             ? cachedCrossTramp.normalizeIfNeeded(args)
                             : args;
                     result = cachedCrossInner.call(normalized);
                 } else if (cachedCrossOuter == null) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();
-                    cachedCrossOuter = target;
                     TrampolineRootNode tramp = TrampolineRootNode.asTrampolineOrNull(target);
                     if (tramp != null) {
                         cachedCrossTramp = tramp;
                         cachedCrossInner = insert(DirectCallNode.create(tramp.getInnerTarget()));
+                        // Set cachedCrossOuter LAST so any concurrent
+                        // reader that matches it will see cachedCrossInner.
+                        cachedCrossOuter = target;
                         Object[] normalized = tramp.normalizeIfNeeded(args);
                         result = cachedCrossInner.call(normalized);
                     } else {
                         // Non-trampoline target: call directly (no bypass)
                         cachedCrossInner = insert(DirectCallNode.create(target));
+                        cachedCrossOuter = target;
                         result = cachedCrossInner.call(args);
                     }
                 } else {
