@@ -2752,22 +2752,40 @@ public final class BytecodeCompiler {
             }
         }
 
-        // ── Phase 4d-fast: try FusedLongPipeline (single-op tight loop) ──
-        if (rawXsExpr != null && rangeStart == null && rawListExpr == null) {
+        // ── Phase 4d-fast: try FusedLongPipeline / FusedLongRangePipeline ──
+        if (hasStages) {
             var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
             if (flp != null) {
-                b.beginFusedLongPipeline(flp.config);
-                  emitNode(rawXsExpr, b, argCount, localMap);              // child 0: seq
-                  emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);            // child 1: mapOperand
-                  emitFLPOperand(flp.filterPreLit, flp.filterPreNode, b, argCount, localMap);// child 2: filterPreRhs
-                  emitFLPOperand(flp.filterCmpLit, flp.filterCmpNode, b, argCount, localMap);// child 3: filterCmpRhs
-                  emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap); // child 4: sinkPredPreRhs
-                  emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap); // child 5: sinkPredCmpRhs
-                  emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);  // child 6: foldInit
-                b.endFusedLongPipeline();
-                if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongPipeline ("
-                        + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
-                return true;
+                if (rangeStart != null) {
+                    // Range source → FusedLongRangePipeline (no seq allocation at all)
+                    b.beginFusedLongRangePipeline(flp.config);
+                      emitNode(rangeStart, b, argCount, localMap);             // child 0: start
+                      emitNode(rangeEnd,   b, argCount, localMap);             // child 1: end
+                      emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);
+                      emitFLPOperand(flp.filterPreLit, flp.filterPreNode, b, argCount, localMap);
+                      emitFLPOperand(flp.filterCmpLit, flp.filterCmpNode, b, argCount, localMap);
+                      emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap);
+                      emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap);
+                      emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
+                    b.endFusedLongRangePipeline();
+                    if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongRangePipeline ("
+                            + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
+                    return true;
+                } else if (rawXsExpr != null && rawListExpr == null) {
+                    // Seq source → FusedLongPipeline (existing path)
+                    b.beginFusedLongPipeline(flp.config);
+                      emitNode(rawXsExpr, b, argCount, localMap);              // child 0: seq
+                      emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);
+                      emitFLPOperand(flp.filterPreLit, flp.filterPreNode, b, argCount, localMap);
+                      emitFLPOperand(flp.filterCmpLit, flp.filterCmpNode, b, argCount, localMap);
+                      emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap);
+                      emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap);
+                      emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
+                    b.endFusedLongPipeline();
+                    if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongPipeline ("
+                            + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
+                    return true;
+                }
             }
         }
 
@@ -2837,20 +2855,27 @@ public final class BytecodeCompiler {
                 || mode instanceof FusedSinkMode.Materialize) return null;
 
         int mapOp = -1; long mapLit = 0; NodeIR mapNode = null;
+        boolean selfMap = false; boolean filterFirst = false;
         int filterPreOp = -1; long filterPreLit = 0; NodeIR filterPreNode = null;
         int filterCmpOp = -1; long filterCmpLit = 0; NodeIR filterCmpNode = null;
+        // Track whether we've seen a filter before a map (for stage ordering).
+        boolean seenFilter = false;
 
         for (ClassifiedStage stage : stages) {
             if (stage instanceof ClassifiedStage.MapInline mi) {
                 if (mapOp >= 0) return null;
                 mapOp = mi.op().ordinal();
-                if (mi.rhsNode() != null && !(mi.rhsNode() instanceof LongLitIR)) {
+                // If we saw a filter before this map, the filter goes first.
+                if (seenFilter) filterFirst = true;
+                selfMap = mi.selfOp();
+                if (!selfMap && mi.rhsNode() != null && !(mi.rhsNode() instanceof LongLitIR)) {
                     mapNode = mi.rhsNode();
-                } else {
+                } else if (!selfMap) {
                     mapLit = mi.rhsLit();
                 }
             } else if (stage instanceof ClassifiedStage.FilterStep fs) {
                 if (filterCmpOp >= 0) return null;
+                seenFilter = true;
                 FilterPeel fp = fs.peel();
                 if (fp.callHash() != null) return null;
                 if (fp.preOp() != null) {
@@ -2915,7 +2940,7 @@ public final class BytecodeCompiler {
 
         int config = MezzeBytecodeRootNode.flpPackConfig(
                 sinkKind, mapOp, filterPreOp, filterCmpOp,
-                sinkPredPreOp, sinkPredCmpOp, foldOp);
+                sinkPredPreOp, sinkPredCmpOp, foldOp, selfMap, filterFirst);
         return new FLPSpec(config,
                 mapLit, mapNode, filterPreLit, filterPreNode,
                 filterCmpLit, filterCmpNode,
@@ -2969,8 +2994,6 @@ public final class BytecodeCompiler {
     }
 
     /**
-<<<<<<< Updated upstream
-=======
      * #437 — emit the shared range-fused Block/While loop body. Both
      * {@link #tryEmitFusedFold} and the sum-sink path
      * ({@link #tryEmitBuiltinSeqReducer}) delegate here so map/filter
@@ -3170,7 +3193,6 @@ public final class BytecodeCompiler {
     }
 
     /**
->>>>>>> Stashed changes
      * #442 Day 9 — emit the map step inside the range-fused loop body.
      * Three cases:
      *   - No mapper: emit nothing (fold step reads xSlot directly).

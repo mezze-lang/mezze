@@ -1630,18 +1630,22 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      *
      * <p>Layout: bits 0-3 sinkKind, 4-7 mapOp+1, 8-11 filterPreOp+1,
      * 12-15 filterCmpOp+1, 16-19 sinkPredPreOp+1, 20-23 sinkPredCmpOp+1,
-     * 24-27 foldOp+1. 0 in any 4-bit field means "absent".
+     * 24-27 foldOp+1, bit 28 selfMap, bit 29 filterFirst. 0 in any
+     * 4-bit field means "absent".
      */
     public static int flpPackConfig(
             int sinkKind, int mapOp, int filterPreOp, int filterCmpOp,
-            int sinkPredPreOp, int sinkPredCmpOp, int foldOp) {
+            int sinkPredPreOp, int sinkPredCmpOp, int foldOp,
+            boolean selfMap, boolean filterFirst) {
         return (sinkKind & 0xF)
              | (((mapOp + 1) & 0xF) << 4)
              | (((filterPreOp + 1) & 0xF) << 8)
              | (((filterCmpOp + 1) & 0xF) << 12)
              | (((sinkPredPreOp + 1) & 0xF) << 16)
              | (((sinkPredCmpOp + 1) & 0xF) << 20)
-             | (((foldOp + 1) & 0xF) << 24);
+             | (((foldOp + 1) & 0xF) << 24)
+             | (selfMap ? (1 << 28) : 0)
+             | (filterFirst ? (1 << 29) : 0);
     }
 
     /**
@@ -1678,6 +1682,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             int sinkPredPreOp = ((config >> 16) & 0xF) - 1;
             int sinkPredCmpOp = ((config >> 20) & 0xF) - 1;
             int foldOp        = ((config >> 24) & 0xF) - 1;
+            boolean selfMap   = (config & (1 << 28)) != 0;
 
             com.mezze.datastructures.seq.LongSeqStorage ls =
                     (com.mezze.datastructures.seq.LongSeqStorage) seq.getStorage();
@@ -1688,15 +1693,24 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             boolean found = false;
             long foundVal = 0;
 
+            boolean filterFirst = (config & (1 << 29)) != 0;
+
             loopProfile.profileCounted(node, n);
             for (int i = 0; loopProfile.inject(node, i < n); i++) {
                 long v = data[i];
 
-                // ── Map stage ──
-                if (mapOp >= 0) v = flpOp(mapOp, v, mapOperand);
+                // ── Filter-first path ──
+                if (filterFirst && filterCmpOp >= 0) {
+                    long fv = filterPreOp >= 0
+                            ? flpOp(filterPreOp, v, filterPreRhs) : v;
+                    if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
+                }
 
-                // ── Filter stage ──
-                if (filterCmpOp >= 0) {
+                // ── Map stage ──
+                if (mapOp >= 0) v = flpOp(mapOp, v, selfMap ? v : mapOperand);
+
+                // ── Filter-second path ──
+                if (!filterFirst && filterCmpOp >= 0) {
                     long fv = filterPreOp >= 0
                             ? flpOp(filterPreOp, v, filterPreRhs) : v;
                     if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
@@ -1753,6 +1767,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             int sinkPredPreOp = ((config >> 16) & 0xF) - 1;
             int sinkPredCmpOp = ((config >> 20) & 0xF) - 1;
             int foldOp        = ((config >> 24) & 0xF) - 1;
+            boolean selfMap    = (config & (1 << 28)) != 0;
+            boolean filterFirst = (config & (1 << 29)) != 0;
 
             int n = seq.size();
             long acc = foldInit;
@@ -1761,8 +1777,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             for (int i = 0; i < n; i++) {
                 Object raw = seq.get(i);
                 long v = raw instanceof Long l ? l : ((Number) raw).longValue();
-                if (mapOp >= 0) v = flpOp(mapOp, v, mapOperand);
-                if (filterCmpOp >= 0) {
+                if (filterFirst && filterCmpOp >= 0) {
+                    long fv = filterPreOp >= 0
+                            ? flpOp(filterPreOp, v, filterPreRhs) : v;
+                    if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
+                }
+                if (mapOp >= 0) v = flpOp(mapOp, v, selfMap ? v : mapOperand);
+                if (!filterFirst && filterCmpOp >= 0) {
                     long fv = filterPreOp >= 0
                             ? flpOp(filterPreOp, v, filterPreRhs) : v;
                     if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
@@ -1789,7 +1810,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return flpResult(sinkKind, acc, found, foundVal);
         }
 
-        private static long flpOp(int op, long a, long b) {
+        static long flpOp(int op, long a, long b) {
             return switch (op) {
                 case 0 -> a + b;   // ADD
                 case 1 -> a - b;   // SUB
@@ -1800,7 +1821,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             };
         }
 
-        private static boolean flpCmp(int op, long a, long b) {
+        static boolean flpCmp(int op, long a, long b) {
             return switch (op) {
                 case 5 -> a == b;   // EQ
                 case 6 -> a != b;   // NEQ
@@ -1813,7 +1834,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @TruffleBoundary
-        private static Object flpResult(int sinkKind,
+        static Object flpResult(int sinkKind,
                 long acc, boolean found, long foundVal) {
             return switch (sinkKind) {
                 case FLP_SINK_SUM, FLP_SINK_COUNT -> acc;
@@ -1841,6 +1862,106 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         public static boolean isLongStorage(MezzeSeq<?> seq) {
             return seq.getStorage() instanceof com.mezze.datastructures.seq.LongSeqStorage;
+        }
+    }
+
+    // ── Fused Long Range Pipeline: range(start, end) with inline ops, no seq allocation ──
+
+    /**
+     * Tight loop over a range [start, end) applying inline map/filter/fold
+     * operations entirely in long-space.  Eliminates the seq::range
+     * allocation that FusedLongPipeline requires — the loop variable IS
+     * the element.
+     *
+     * <p>Children (in order): start, end, mapOperand, filterPreRhs,
+     * filterCmpRhs, sinkPredPreRhs, sinkPredCmpRhs, foldInit.
+     *
+     * <p>Config (ConstantOperand) uses the same packing as FusedLongPipeline.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)   // config: packed ops (PE constant)
+    public static final class FusedLongRangePipeline {
+
+        @Specialization
+        public static Object doRange(
+                int config,
+                long start, long end,
+                long mapOperand, long filterPreRhs,
+                long filterCmpRhs, long sinkPredPreRhs,
+                long sinkPredCmpRhs, long foldInit,
+                @Bind Node node,
+                @Cached InlinedLoopConditionProfile loopProfile) {
+            // Unpack config — each field is PE-constant.
+            int sinkKind      = config & 0xF;
+            int mapOp         = ((config >> 4) & 0xF) - 1;
+            int filterPreOp   = ((config >> 8) & 0xF) - 1;
+            int filterCmpOp   = ((config >> 12) & 0xF) - 1;
+            int sinkPredPreOp = ((config >> 16) & 0xF) - 1;
+            int sinkPredCmpOp = ((config >> 20) & 0xF) - 1;
+            int foldOp        = ((config >> 24) & 0xF) - 1;
+            boolean selfMap    = (config & (1 << 28)) != 0;
+            boolean filterFirst = (config & (1 << 29)) != 0;
+
+            int n = (int) (end - start);
+            long acc = foldInit;
+            boolean found = false;
+            long foundVal = 0;
+
+            loopProfile.profileCounted(node, n);
+            for (int i = 0; loopProfile.inject(node, i < n); i++) {
+                long v = start + i;
+
+                // ── Filter-first path ──
+                if (filterFirst && filterCmpOp >= 0) {
+                    long fv = filterPreOp >= 0
+                            ? FusedLongPipeline.flpOp(filterPreOp, v, filterPreRhs) : v;
+                    if (!FusedLongPipeline.flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
+                }
+
+                // ── Map stage ──
+                if (mapOp >= 0) v = FusedLongPipeline.flpOp(mapOp, v, selfMap ? v : mapOperand);
+
+                // ── Filter-second path ──
+                if (!filterFirst && filterCmpOp >= 0) {
+                    long fv = filterPreOp >= 0
+                            ? FusedLongPipeline.flpOp(filterPreOp, v, filterPreRhs) : v;
+                    if (!FusedLongPipeline.flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
+                }
+
+                // ── Sink ──
+                if (sinkKind == FLP_SINK_SUM) {
+                    acc = FusedLongPipeline.flpOp(foldOp, acc, v);
+                } else if (sinkKind == FLP_SINK_COUNT) {
+                    acc++;
+                } else if (sinkKind == FLP_SINK_ANY) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0
+                                ? FusedLongPipeline.flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (FusedLongPipeline.flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) {
+                            found = true; break;
+                        }
+                    } else { found = true; break; }
+                } else if (sinkKind == FLP_SINK_ALL) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0
+                                ? FusedLongPipeline.flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (!FusedLongPipeline.flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) {
+                            found = true; break;
+                        }
+                    }
+                } else if (sinkKind == FLP_SINK_FIND) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0
+                                ? FusedLongPipeline.flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (FusedLongPipeline.flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) {
+                            found = true; foundVal = v; break;
+                        }
+                    }
+                }
+            }
+
+            // ── Post-loop result ──
+            return FusedLongPipeline.flpResult(sinkKind, acc, found, foundVal);
         }
     }
 
