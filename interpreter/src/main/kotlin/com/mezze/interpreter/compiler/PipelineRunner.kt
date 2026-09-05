@@ -137,17 +137,18 @@ object PipelineRunner {
             }
         }
 
-        // Eagerly compile performer factory functions so they're available via HashModuleLoaderNode.
-        // Performer factories are identified by their hash appearing in performer records.
+        // Performer factory / op functions — register LazyStubRootNode
+        // placeholders instead of eagerly BDSL-compiling them. This defers
+        // ~100ms of BytecodeCompiler work to first effect-handler use:
+        //   Before: 13 fns × ~8ms = 108ms at startup (every program pays)
+        //   After:  13 LazyStubs × ~0.2ms = 3ms at startup
         //
-        // Also promote the compiled CallTarget into the Language-level
-        // stdlibCallTargetCache. Without this, the factory only lives on the
-        // current MezzeContext's per-context user-IR registry; subsequent
-        // evals in the same JVM use a fresh MezzeContext (whose registry is
-        // empty), and ParameterizedHandlerLookupNode's lookup misses with
-        // "factory not found" — the impl factory is in stdlib but the
-        // precompiled-stdlib path only covers prelude modules, so anything
-        // under stdlib/std/effects/* slips through unless we cache here.
+        // Parameterized factories go into compiledFunctions so pass 1 of
+        // loadModules registers them in globals — the LookupParameterized
+        // path resolves lazily via getCachedStdlibCallTarget anyway. Op
+        // functions get stub CTs in stdlibCallTargetCache so construct-
+        // PerformerRecord wraps stubs into the handler record; the stub
+        // inflates transparently on first op call via compileUserIRForStub.
         val performerFactoryHashes = mutableSetOf<com.mezze.language.typedast.Hash>()
         val performerOpHashes = mutableSetOf<com.mezze.language.typedast.Hash>()
         for (pr in performerRecords) {
@@ -163,24 +164,32 @@ object PipelineRunner {
             }
         }
         for (fn in functions) {
-            // Parameterized performer factories — compile eagerly + cache the
-            // CallTarget so ParameterizedHandlerLookupNode finds it.
+            // Performer factory / op functions — defer BDSL compilation to
+            // first use via LazyStubRootNode. Saves ~100ms startup for
+            // programs that don't use effect handlers (all compute
+            // benchmarks, simple scripts). The stub inflates on first call
+            // by compiling the FunctionIR through compileUserIRForStub,
+            // which finds the IR in the per-context user registry
+            // (registerFunctionIR above) or StdlibRuntimeData.
+            //
+            // Parameterized factories: stub CT goes into compiledFunctions
+            // so pass 1 of loadModules registers it in globals —
+            // LookupParameterizedHandlerByHash skips globals and resolves
+            // lazily via getCachedStdlibCallTarget anyway.
+            //
+            // Non-parameterized ops: stub CT goes into compiledFunctions
+            // + stdlibCallTargetCache. constructPerformerRecord wraps the
+            // stub in a MezzeFunction; when the op is called at perform
+            // time the stub inflates transparently.
             if (fn.hash in performerFactoryHashes && fn.paramSlots.isNotEmpty()) {
-                val rootNode = language.compileOneJava(fn)
-                compiledFunctions[fn.hash] = rootNode.callTarget
-                language.getCachedStdlibCallTargetCache()[fn.hash] = rootNode.callTarget
+                val stub = com.mezze.interpreter.bytecode.LazyStubRootNode(language, fn.hash, fn.name)
+                compiledFunctions[fn.hash] = stub.callTarget
+                language.getCachedStdlibCallTargetCache()[fn.hash] = stub.callTarget
             }
-            // Non-parameterized impl op functions — compile eagerly + cache so
-            // HashModuleLoaderNode.constructPerformerRecord can resolve them
-            // on subsequent contexts. Without this, a fresh context after the
-            // first eval has an empty per-context user-IR registry, op funcs
-            // resolve to null, and the handler record becomes all-unit (empty-record)
-            // (or constructPerformerRecord skips publishing entirely under
-            // our "write-once" rule).
             if (fn.hash in performerOpHashes) {
-                val rootNode = language.compileOneJava(fn)
-                compiledFunctions[fn.hash] = rootNode.callTarget
-                language.getCachedStdlibCallTargetCache()[fn.hash] = rootNode.callTarget
+                val stub = com.mezze.interpreter.bytecode.LazyStubRootNode(language, fn.hash, fn.name)
+                compiledFunctions[fn.hash] = stub.callTarget
+                language.getCachedStdlibCallTargetCache()[fn.hash] = stub.callTarget
             }
         }
         mark("performer factories compiled (${compiledFunctions.size})")
@@ -203,11 +212,10 @@ object PipelineRunner {
                 }
                 if (entryHash != null && fn.hash == entryHash) roots.add(fn.hash)
             }
-            // Include performer factories/ops as reachable roots — they're
-            // installed dynamically by handler chain lookup, not called
-            // syntactically, so the walker won't otherwise reach them.
-            roots.addAll(performerFactoryHashes)
-            roots.addAll(performerOpHashes)
+            // Performer factories/ops are NOT included as roots — they're
+            // deferred to LazyStubRootNode and compile on first use.
+            // Including them here would negate the lazy-stub startup savings
+            // (performer compilation was the ~100ms bottleneck).
             if (roots.isEmpty() && functions.isNotEmpty()) roots.add(functions.last().hash)
             language.eagerCompileReachable(roots, functions)
             mark("eager BDSL emitted into SlotTable (slotTable.size=${language.getSlotTable().size()})")
