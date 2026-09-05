@@ -133,33 +133,32 @@ public abstract class InvokeNode extends MezzeNode {
     /**
      * Partial application: function with parameter names receiving incomplete record.
      * Returns a new function with the partial arguments captured.
+     *
+     * <p>The hot path (all params present, no partial app) goes through
+     * an {@link IndirectCallNode} that participates in Truffle's
+     * profiling and inlining infrastructure, instead of a
+     * {@code @TruffleBoundary} opaque call.
      */
     @Specialization(
         guards = {"hasOneArg()", "function.getParameterNames().length > 0"}
     )
     protected Object callWithPartialAppCheck(
             VirtualFrame frame,
-            MezzeFunction function
+            MezzeFunction function,
+            @Cached @Exclusive IndirectCallNode callNode
     ) {
         Object arg = argumentNodes[0].execute(frame);
 
         // Most calls pass a record - inject probability hint
         if (CompilerDirectives.injectBranchProbability(0.05, !(arg instanceof MezzeRecord))) {
             // Not a record - just call directly (this handles {} case) - RARE
-            return callFunctionDirect(function, arg);
+            return callWithArg(function, arg, callNode);
         }
         MezzeRecord record = (MezzeRecord) arg;
 
         // Partial args are rare - most functions are called with complete args
         if (CompilerDirectives.injectBranchProbability(0.1, function.hasPartialArgs())) {
-            if (function.hasAllParameters(record)) {
-                // Complete the partial application
-                MezzeRecord completeRecord = function.buildCompleteRecord(record);
-                return callFunctionWithRecord(function, completeRecord);
-            } else {
-                // Add more partial args
-                return function.withPartialArgs(record);
-            }
+            return handlePartialApplication(function, record, callNode);
         }
 
         // Check if this is a new partial application - usually all params present
@@ -168,27 +167,39 @@ public abstract class InvokeNode extends MezzeNode {
         }
 
         // All parameters present - call directly - MOST COMMON PATH
-        return callFunctionWithRecord(function, record);
+        return callWithArg(function, record, callNode);
     }
 
-    @TruffleBoundary
-    private Object callFunctionDirect(MezzeFunction function, Object arg) {
+    /**
+     * Build [closures..., arg] and call through the IndirectCallNode.
+     * Not {@code @TruffleBoundary}: PE can see through this and
+     * scalar-replace the array when the closure length is constant.
+     */
+    private static Object callWithArg(MezzeFunction function, Object arg,
+                                       IndirectCallNode callNode) {
         Object[] closureValues = function.getClosureValues();
         int closureLength = closureValues.length;
         Object[] arguments = new Object[closureLength + 1];
         System.arraycopy(closureValues, 0, arguments, 0, closureLength);
         arguments[closureLength] = arg;
-        return function.getCallTarget().call(arguments);
+        return callNode.call(function.getCallTarget(), arguments);
     }
 
+    /**
+     * Handle partial application paths (rare). Kept behind a boundary
+     * because buildCompleteRecord / hasAllParameters iterate record
+     * fields and are not PE-friendly.
+     */
     @TruffleBoundary
-    private Object callFunctionWithRecord(MezzeFunction function, MezzeRecord record) {
-        Object[] closureValues = function.getClosureValues();
-        int closureLength = closureValues.length;
-        Object[] arguments = new Object[closureLength + 1];
-        System.arraycopy(closureValues, 0, arguments, 0, closureLength);
-        arguments[closureLength] = record;
-        return function.getCallTarget().call(arguments);
+    private static Object handlePartialApplication(MezzeFunction function,
+                                                    MezzeRecord record,
+                                                    IndirectCallNode callNode) {
+        if (function.hasAllParameters(record)) {
+            MezzeRecord completeRecord = function.buildCompleteRecord(record);
+            return callWithArg(function, completeRecord, callNode);
+        } else {
+            return function.withPartialArgs(record);
+        }
     }
 
     /**
