@@ -384,6 +384,19 @@ public final class TrampolineRootNode extends RootNode {
         this.cachedShape = rec.getShape();
     }
 
+    /**
+     * Enable per-call-site cloning (splitting) so Truffle's auto-splitter
+     * can give each call site its own copy of this trampoline. Without
+     * this, all call sites share specialization state, which bleeds
+     * polymorphism across monomorphic sites and blocks inlining.
+     *
+     * <p>Mirrors {@code MezzeFunctionRootNode.isCloningAllowed()}.
+     */
+    @Override
+    public boolean isCloningAllowed() {
+        return true;
+    }
+
     @Override
     public String getName() {
         return name;
@@ -418,6 +431,19 @@ public final class TrampolineRootNode extends RootNode {
         @Child
         private DirectCallNode selfCall;
 
+        /**
+         * PIC for cross-function tail calls. Instead of a single
+         * {@code IndirectCallNode} (opaque to JIT), we cache a
+         * {@code DirectCallNode} for the most-recently-seen cross-fn
+         * target. Mutual recursion (A ↔ B) hits the cached node on
+         * every second iteration; a single cross-fn target hits it
+         * every time. Only truly megamorphic cross-fn tail-call sites
+         * (3+ distinct targets) fall through to the indirect path.
+         */
+        @Child
+        private DirectCallNode cachedCrossCall;
+        @CompilerDirectives.CompilationFinal
+        private CallTarget cachedCrossTarget;
         @Child
         private IndirectCallNode crossCall;
 
@@ -448,6 +474,13 @@ public final class TrampolineRootNode extends RootNode {
             try {
                 if (target == outerTarget || target == innerTarget) {
                     result = selfCall.call(args);
+                } else if (target == cachedCrossTarget) {
+                    result = cachedCrossCall.call(args);
+                } else if (cachedCrossTarget == null) {
+                    CompilerDirectives.transferToInterpreterAndInvalidate();
+                    cachedCrossTarget = target;
+                    cachedCrossCall = insert(DirectCallNode.create(target));
+                    result = cachedCrossCall.call(args);
                 } else {
                     result = crossCall.call(target, args);
                 }

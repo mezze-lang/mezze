@@ -15,6 +15,7 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.interop.NodeLibrary;
 import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
+import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.LoopNode;
 import com.oracle.truffle.api.nodes.Node;
@@ -293,6 +294,15 @@ public final class MezzeFunctionRootNode extends RootNode {
         @Child
         private MezzeNode bodyNode;
 
+        /**
+         * PIC for cross-function tail calls: cache a DirectCallNode for the
+         * most-recently-seen cross-fn target (inlineable by JIT). Only truly
+         * megamorphic sites (3+ targets) fall through to IndirectCallNode.
+         */
+        @Child
+        private DirectCallNode cachedCrossFnCall;
+        @CompilerDirectives.CompilationFinal
+        private CallTarget cachedCrossFnTarget;
         @Child
         private com.oracle.truffle.api.nodes.IndirectCallNode crossFnTailCallNode;
 
@@ -379,6 +389,16 @@ public final class MezzeFunctionRootNode extends RootNode {
         }
 
         private Object invokeCrossFn(CallTarget target, Object[] args) {
+            if (target == cachedCrossFnTarget) {
+                return cachedCrossFnCall.call(args);
+            }
+            if (cachedCrossFnTarget == null) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                cachedCrossFnTarget = target;
+                cachedCrossFnCall = insert(DirectCallNode.create(target));
+                return cachedCrossFnCall.call(args);
+            }
+            // Megamorphic fallback
             if (crossFnTailCallNode == null) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 crossFnTailCallNode = insert(
