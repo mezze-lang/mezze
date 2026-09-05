@@ -296,6 +296,19 @@ public final class BytecodeCompiler {
     private final java.util.HashMap<Integer, NodeIR> currentLetInits =
             new java.util.HashMap<>();
 
+    // ── Self-tail-loop context ──────────────────────────────────────
+    // When a function's only tail-calls are self-recursive scalar-ABI
+    // CallDirectIR, we compile the body as a BDSL While loop instead
+    // of throwing/catching TailCallException per iteration.  These
+    // fields are set during self-tail-loop compilation and cleared
+    // afterwards.  emitNode reads them to redirect param reads and
+    // rewrite self-tail-call sites.
+    private boolean inSelfTailLoop;
+    private BytecodeLocal[] selfTailParamLocals;
+    private BytecodeLocal selfTailContinueFlag;
+    private int selfTailCaptureCount;
+    private Hash selfTailHash;
+
     /**
      * Optional external CallTarget resolver — used when this compiler
      * is invoked from the runtime path where callee CallTargets already
@@ -1093,6 +1106,16 @@ public final class BytecodeCompiler {
         final int paramCount = ir.getParamSlots().size();
         final boolean needsTrampoline = hasTail || paramCount > 0;
 
+        // Self-tail-loop: when every tail-call site is a scalar-ABI
+        // CallDirectIR targeting this function's own hash, compile the
+        // body as a BDSL While loop instead of using the trampoline's
+        // LoopNode + TailCallException.  This eliminates exception
+        // allocation, throw/catch overhead, and re-entry through
+        // DirectCallNode per iteration — the entire loop compiles to
+        // a single Graal compilation unit.
+        final boolean selfTailLoop = hasTail && paramCount > 0
+                && allTailCallsAreSelfScalar(ir.getBody(), ir.getHash());
+
         // Two-phase construction to support self-recursion:
         //   1. Create (or reuse a pre-registered) trampoline WITHOUT its
         //      inner, register its CallTarget under ir.getHash() so
@@ -1222,7 +1245,79 @@ public final class BytecodeCompiler {
             b.beginTryCatch();
             //   try: normal return of the body
             b.beginReturn();
-            emitNode(ir.getBody(), b, argCount, localMap);
+
+            if (selfTailLoop) {
+                // ── Self-tail-loop: compile body as BDSL While loop ──
+                // Instead of throwing TailCallException per iteration,
+                // self-tail-calls update param locals and continue the
+                // loop.  The trampoline still handles ABI unpacking for
+                // the initial call but has hasTailCalls=false (no LoopNode).
+
+                // Allocate param locals (params are mutable in the loop).
+                var stlParams = new BytecodeLocal[paramCount];
+                java.util.List<String> pNames = ir.getParamNames();
+                for (int i = 0; i < paramCount; i++) {
+                    String pn = (i < pNames.size()) ? pNames.get(i) : ("_stl_p" + i);
+                    stlParams[i] = b.createLocal("_stl_" + pn, null);
+                }
+                BytecodeLocal stlFlag = b.createLocal("_stl_cont", null);
+                BytecodeLocal stlResult = b.createLocal("_stl_res", null);
+
+                b.beginBlock();
+
+                // Copy initial param values from args into param locals.
+                for (int i = 0; i < paramCount; i++) {
+                    b.beginStoreLocal(stlParams[i]);
+                    b.emitLoadArgument(captureCount + i);
+                    b.endStoreLocal();
+                }
+                // Initialize continue flag = 1 (loop).
+                b.beginStoreLocal(stlFlag);
+                b.emitLoadLongConstant(1L);
+                b.endStoreLocal();
+
+                // Set self-tail-loop context for emitNode.
+                this.inSelfTailLoop = true;
+                this.selfTailParamLocals = stlParams;
+                this.selfTailContinueFlag = stlFlag;
+                this.selfTailCaptureCount = captureCount;
+                this.selfTailHash = ir.getHash();
+
+                // While(0 < continueFlag, body)
+                b.beginWhile();
+                  // condition: 0 < flag → true when flag=1, false when flag=0
+                  b.beginDirectLessThan();
+                    b.emitLoadLongConstant(0L);
+                    b.emitLoadLocal(stlFlag);
+                  b.endDirectLessThan();
+                  // body
+                  b.beginBlock();
+                    // Assume this is the last iteration (set flag=0).
+                    // Self-tail-call sites flip it back to 1.
+                    b.beginStoreLocal(stlFlag);
+                      b.emitLoadLongConstant(0L);
+                    b.endStoreLocal();
+                    // Evaluate body; result stored in stlResult.
+                    b.beginStoreLocal(stlResult);
+                      emitNode(ir.getBody(), b, argCount, localMap);
+                    b.endStoreLocal();
+                  b.endBlock();
+                b.endWhile();
+
+                // Clean up context.
+                this.inSelfTailLoop = false;
+                this.selfTailParamLocals = null;
+                this.selfTailContinueFlag = null;
+                this.selfTailHash = null;
+
+                // Return the result.
+                b.emitLoadLocal(stlResult);
+
+                b.endBlock();
+            } else {
+                emitNode(ir.getBody(), b, argCount, localMap);
+            }
+
             b.endReturn();
             //   catch: extract MezzeSuspend and return it
             b.beginReturn();
@@ -1242,7 +1337,10 @@ public final class BytecodeCompiler {
         });
         RootNode inner = nodes.getNode(0);
         if (trampoline != null) {
-            trampoline.attachInner(inner, hasTail);
+            // For self-tail-loop, the loop is inside the BDSL root —
+            // tell the trampoline there are no tail calls so it uses
+            // the fast path (DirectCallNode, no LoopNode).
+            trampoline.attachInner(inner, hasTail && !selfTailLoop);
             return trampoline;
         }
         // No tail calls in body — return raw BDSL root, skip trampoline overhead.
@@ -1353,6 +1451,116 @@ public final class BytecodeCompiler {
         return false;
     }
 
+    /**
+     * Returns true iff every tail-call site in the subtree is a
+     * scalar-ABI {@link CallDirectIR} targeting {@code selfHash}.
+     * Vacuously true when there are no tail-calls at all — caller
+     * should gate on {@link #hasTailCall} first.
+     *
+     * <p>When this returns true the body can be compiled as a BDSL
+     * {@code While} loop: self-tail-calls become local-variable
+     * updates + loop continue, eliminating TailCallException overhead.
+     */
+    private boolean allTailCallsAreSelfScalar(NodeIR node, Hash selfHash) {
+        if (node == null) return true;
+        if (node instanceof CallDirectIR c) {
+            if (c.isTailCall()) {
+                return c.isScalarABI() && c.getTargetHash().equals(selfHash);
+            }
+            for (NodeIR arg : c.getArgs()) if (!allTailCallsAreSelfScalar(arg, selfHash)) return false;
+            return true;
+        }
+        if (node instanceof CallIndirectIR ci) {
+            if (ci.isTailCall()) return false;
+            return allTailCallsAreSelfScalar(ci.getFunction(), selfHash)
+                    && allTailCallsAreSelfScalar(ci.getArg(), selfHash);
+        }
+        if (node instanceof CallLocalIR cl) {
+            return allTailCallsAreSelfScalar(cl.getArg(), selfHash);
+        }
+        if (node instanceof CallIndirectScalarIR ci) {
+            if (ci.isTailCall()) return false;
+            if (!allTailCallsAreSelfScalar(ci.getFunction(), selfHash)) return false;
+            for (NodeIR arg : ci.getArgs()) if (!allTailCallsAreSelfScalar(arg, selfHash)) return false;
+            return true;
+        }
+        if (node instanceof PartialApplyDirectIR pa) {
+            if (pa.isTailCall()) return false;
+            for (FieldIR f : pa.getPartialFields()) if (!allTailCallsAreSelfScalar(f.getValue(), selfHash)) return false;
+            return true;
+        }
+        if (node instanceof DictMethodCallIR dm) {
+            return allTailCallsAreSelfScalar(dm.getArg(), selfHash);
+        }
+        if (node instanceof CallNativeIR cn) {
+            for (NodeIR arg : cn.getArgs()) if (!allTailCallsAreSelfScalar(arg, selfHash)) return false;
+            return allTailCallsAreSelfScalar(cn.getArg(), selfHash);
+        }
+        if (node instanceof InlineBinaryOpIR bin) {
+            return allTailCallsAreSelfScalar(bin.getLeft(), selfHash)
+                    && allTailCallsAreSelfScalar(bin.getRight(), selfHash);
+        }
+        if (node instanceof IfIR i) {
+            return allTailCallsAreSelfScalar(i.getCond(), selfHash)
+                    && allTailCallsAreSelfScalar(i.getThenBr(), selfHash)
+                    && allTailCallsAreSelfScalar(i.getElseBr(), selfHash);
+        }
+        if (node instanceof BlockIR blk) {
+            for (StmtIR s : blk.getStmts()) {
+                NodeIR child = (s instanceof StmtIR.Let l) ? l.getValue()
+                        : ((StmtIR.Expr) s).getNode();
+                if (!allTailCallsAreSelfScalar(child, selfHash)) return false;
+            }
+            return allTailCallsAreSelfScalar(blk.getResult(), selfHash);
+        }
+        if (node instanceof MakeRecordIR m) {
+            for (FieldIR f : m.getFields()) if (!allTailCallsAreSelfScalar(f.getValue(), selfHash)) return false;
+            return true;
+        }
+        if (node instanceof ReadFieldIR r) return allTailCallsAreSelfScalar(r.getRecord(), selfHash);
+        if (node instanceof RecordUpdateIR ru) {
+            if (!allTailCallsAreSelfScalar(ru.getRecord(), selfHash)) return false;
+            for (FieldIR f : ru.getUpdates()) if (!allTailCallsAreSelfScalar(f.getValue(), selfHash)) return false;
+            return true;
+        }
+        if (node instanceof MakeVariantIR mv) {
+            return mv.getPayload() == null || allTailCallsAreSelfScalar(mv.getPayload(), selfHash);
+        }
+        if (node instanceof MakeSeqIR seq) {
+            for (SeqElementIR e : seq.getElements()) {
+                if (e instanceof SeqElementIR.Regular reg && !allTailCallsAreSelfScalar(reg.getNode(), selfHash)) return false;
+                if (e instanceof SeqElementIR.Spread sp && !allTailCallsAreSelfScalar(sp.getNode(), selfHash)) return false;
+            }
+            return true;
+        }
+        if (node instanceof MakeLambdaIR) return true;
+        if (node instanceof MatchIR m) {
+            if (!allTailCallsAreSelfScalar(m.getScrutinee(), selfHash)) return false;
+            for (CaseIR c : m.getCases()) {
+                if (c.getGuard() != null && !allTailCallsAreSelfScalar(c.getGuard(), selfHash)) return false;
+                if (!allTailCallsAreSelfScalar(c.getBody(), selfHash)) return false;
+            }
+            return true;
+        }
+        if (node instanceof WriteLocalIR w) return allTailCallsAreSelfScalar(w.getValue(), selfHash);
+        if (node instanceof PerformOpIR p) return allTailCallsAreSelfScalar(p.getArg(), selfHash);
+        if (node instanceof HandleIR h) {
+            if (!allTailCallsAreSelfScalar(h.getBody(), selfHash)) return false;
+            for (HandlerBindIR hb : h.getHandlers()) {
+                if (hb.getParams() != null && !allTailCallsAreSelfScalar(hb.getParams(), selfHash)) return false;
+            }
+            return true;
+        }
+        if (node instanceof EffectBindingIR) return true;
+        if (node instanceof InterpolatedStringIR is) {
+            for (StringPartIR p : is.getParts()) {
+                if (p instanceof StringPartIR.Expr ep && !allTailCallsAreSelfScalar(ep.getNode(), selfHash)) return false;
+            }
+            return true;
+        }
+        return true;
+    }
+
     private void emitNode(NodeIR node, MezzeBytecodeRootNodeGen.Builder b,
                           int argCount, BytecodeLocal[] localMap) {
         if (node instanceof LongLitIR lit) {
@@ -1397,7 +1605,13 @@ public final class BytecodeCompiler {
             // user params). Anything at or above argCount is a local.
             int slot = r.getSlot();
             if (slot < argCount) {
-                b.emitLoadArgument(slot);
+                // Self-tail-loop: params live in BDSL locals (updated
+                // by the loop), not in immutable arguments.
+                if (inSelfTailLoop && slot >= selfTailCaptureCount) {
+                    b.emitLoadLocal(selfTailParamLocals[slot - selfTailCaptureCount]);
+                } else {
+                    b.emitLoadArgument(slot);
+                }
             } else {
                 b.emitLoadLocal(localMap[slot - argCount]);
             }
@@ -1414,7 +1628,12 @@ public final class BytecodeCompiler {
         if (node instanceof ReadArgIR r) {
             // ReadArgIR reads a captured/param slot by raw arg index.
             // The BDSL layout puts captures + params at args[0..argCount).
-            b.emitLoadArgument(r.getIndex());
+            int idx = r.getIndex();
+            if (inSelfTailLoop && idx >= selfTailCaptureCount) {
+                b.emitLoadLocal(selfTailParamLocals[idx - selfTailCaptureCount]);
+            } else {
+                b.emitLoadArgument(idx);
+            }
             return;
         }
         if (node instanceof ReadCaptureIR r) {
@@ -1786,7 +2005,35 @@ public final class BytecodeCompiler {
                     && !isBdslCallee(target);
             // Total child count: scalar marker (if needed) + actual args
             int totalChildren = (needsScalarMarker ? 1 : 0) + c.getArgs().size();
-            if (c.isTailCall()) {
+            if (c.isTailCall() && inSelfTailLoop
+                    && c.getTargetHash().equals(selfTailHash)) {
+                // ── Self-tail-loop: rewrite as param update + continue ──
+                // Evaluate all new arg values into temp locals first
+                // to avoid order-of-evaluation issues (arg expressions
+                // may reference the current param values).
+                java.util.List<NodeIR> args = c.getArgs();
+                BytecodeLocal[] temps = new BytecodeLocal[args.size()];
+                b.beginBlock();
+                for (int ai = 0; ai < args.size(); ai++) {
+                    temps[ai] = b.createLocal();
+                    b.beginStoreLocal(temps[ai]);
+                    emitNode(args.get(ai), b, argCount, localMap);
+                    b.endStoreLocal();
+                }
+                // Copy temps into param locals.
+                for (int ai = 0; ai < args.size(); ai++) {
+                    b.beginStoreLocal(selfTailParamLocals[ai]);
+                    b.emitLoadLocal(temps[ai]);
+                    b.endStoreLocal();
+                }
+                // Set continue flag = 1 (loop).
+                b.beginStoreLocal(selfTailContinueFlag);
+                b.emitLoadLongConstant(1L);
+                b.endStoreLocal();
+                // Produce a dummy value for the expression position.
+                b.emitLoadLongConstant(0L);
+                b.endBlock();
+            } else if (c.isTailCall()) {
                 b.beginTailCallDirectN(target);
                 if (needsScalarMarker) {
                     b.emitLoadObjectConstant(
