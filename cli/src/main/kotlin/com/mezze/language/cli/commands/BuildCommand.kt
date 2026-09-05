@@ -524,15 +524,15 @@ class BuildCommand {
             fi
 
             JAVA="${'$'}{MEZZE_JAVA:-java}"
-            # --add-modules=jdk.incubator.vector: required by VectorOps,
+            # --add-modules: jdk.incubator.vector is required by VectorOps,
             # which SIMD-optimizes LongSeqStorage.sum/min/max/indexOf and
-            # is class-loaded eagerly. Without it, the first call to
-            # seq::sum / seq::min / seq::max / seq::contains crashes with
-            # NoClassDefFoundError: jdk/incubator/vector/Vector.
+            # is class-loaded eagerly. jdk.internal.vm.ci is required by
+            # the Graal JIT compiler (Truffle). Both must be listed at both
+            # CDS dump time and runtime — a mismatch disables AppCDS.
             # G1 (default GC) is used here instead of ZGC so the AppCDS
             # class-data-sharing archive is honored — ZGC and CDS are
             # incompatible.
-            DEFAULT_OPTS="-Xmx4g $cdsFlag--enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector"
+            DEFAULT_OPTS="-Xmx4g $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
             OPTS="${'$'}{MEZZE_JAVA_OPTS:-${'$'}DEFAULT_OPTS}"
 
             exec "${'$'}JAVA" ${'$'}OPTS -jar "${'$'}JAR" "${'$'}@"
@@ -560,7 +560,7 @@ class BuildCommand {
                 exit /b 1
             )
             if "%MEZZE_JAVA%"=="" set "MEZZE_JAVA=java"
-            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-Xmx4g $cdsFlag--enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector"
+            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-Xmx4g $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
             "%MEZZE_JAVA%" %MEZZE_JAVA_OPTS% -jar "%JAR%" %*
         """.trimIndent() + "\r\n"
         launcher.writeText(script)
@@ -592,7 +592,7 @@ class BuildCommand {
             "-XX:ArchiveClassesAtExit=${jsaFile.absolutePath}",
             "--enable-native-access=ALL-UNNAMED",
             "--sun-misc-unsafe-memory-access=allow",
-            "--add-modules=jdk.incubator.vector",
+            "--add-modules=jdk.incubator.vector,jdk.internal.vm.ci",
             "-jar", jarFile.absolutePath,
         )
         val pb = ProcessBuilder(cmd)
