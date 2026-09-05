@@ -3443,9 +3443,18 @@ public final class BytecodeCompiler {
 
         boolean isRange = rangeStart != null;
         boolean isList = rawListExpr != null;
-        boolean useCompoundCond = mode instanceof FusedSinkMode.ShortCircuit;
+        boolean useShortCircuitBranch = mode instanceof FusedSinkMode.ShortCircuit;
 
         b.beginBlock();
+
+        // #442 — forward-branch exit for short-circuit sinks. When the
+        // predicate matches, we Branch past the While to exitLabel instead
+        // of checking !found on every iteration. This eliminates the
+        // DirectAnd+DirectNot per-loop overhead.
+        com.oracle.truffle.api.bytecode.BytecodeLabel exitLabel = null;
+        if (useShortCircuitBranch) {
+            exitLabel = b.createLabel();
+        }
 
         // ── Common locals ──
         var iSlot = b.createLocal();
@@ -3591,21 +3600,11 @@ public final class BytecodeCompiler {
         // ── While loop ──
         b.beginWhile();
 
-        // Condition: i < end [&& !found]
-        if (useCompoundCond) {
-            b.beginDirectAnd();
-              b.beginDirectLessThan();
-                b.emitLoadLocal(iSlot); b.emitLoadLocal(boundSlot);
-              b.endDirectLessThan();
-              b.beginDirectNot();
-                b.emitLoadLocal(foundSlot);
-              b.endDirectNot();
-            b.endDirectAnd();
-        } else {
-            b.beginDirectLessThan();
-              b.emitLoadLocal(iSlot); b.emitLoadLocal(boundSlot);
-            b.endDirectLessThan();
-        }
+        // Condition: i < end. Short-circuit sinks use Branch(exitLabel)
+        // instead of the old `i < end && !found` compound condition.
+        b.beginDirectLessThan();
+          b.emitLoadLocal(iSlot); b.emitLoadLocal(boundSlot);
+        b.endDirectLessThan();
 
         b.beginBlock();
 
@@ -3702,9 +3701,11 @@ public final class BytecodeCompiler {
                 b.endStoreLocal();
             }
             case FusedSinkMode.ShortCircuit sc -> {
-                // Any:  if (p(x))  → found = true
-                // All:  if (!p(x)) → found = true
-                // Find: if (p(x))  → found = true; result = x
+                // Any:  if (p(x))  → found = true; Branch(exit)
+                // All:  if (!p(x)) → found = true; Branch(exit)
+                // Find: if (p(x))  → found = true; result = x; Branch(exit)
+                // The Branch jumps past the While to exitLabel, eliminating
+                // the per-iteration !found check entirely.
                 b.beginIfThen();
                 if (sc.kind() == FusedSinkMode.ShortCircuitKind.ALL) {
                     b.beginDirectNot();
@@ -3722,6 +3723,7 @@ public final class BytecodeCompiler {
                           b.emitLoadLocal(xSlot);
                         b.endStoreLocal();
                     }
+                    b.emitBranch(exitLabel);
                   b.endBlock();
                 b.endIfThen();
             }
@@ -3789,6 +3791,12 @@ public final class BytecodeCompiler {
 
         b.endBlock();
         b.endWhile();
+
+        // #442 — land here when Branch(exitLabel) fires from a ShortCircuit
+        // sink. The foundSlot/resultSlot are already set by the branch site.
+        if (exitLabel != null) {
+            b.emitLabel(exitLabel);
+        }
 
         // ── Post-loop result (mode-specific) ──
         switch (mode) {
@@ -4004,6 +4012,9 @@ public final class BytecodeCompiler {
             // as an if-condition. Same rationale as classifyUnaryLiteralLambda's
             // Shape F. The canonicalizer's isEffectSafe gate validates the chain.
             if (caps.isEmpty()) {
+                if (System.getenv("MEZZE_CHAIN_CANON_EMIT_DEBUG") != null)
+                    System.err.println("[pred-classify] CALL fallback for body="
+                        + body.getClass().getSimpleName());
                 return new PredShape(ml.getFunctionHash(),
                         /*callScalarABI=*/ true, /*callFieldName=*/ null);
             }
@@ -4052,6 +4063,13 @@ public final class BytecodeCompiler {
             if (lifted != null) {
                 return new BinaryLitMatch(bin.getOp(), lifted, lp, lp ? null : bin.getLeft());
             }
+            // #442 Shape A′: RHS is any parameter-free expression (e.g.
+            // ReadGlobalByHash(n) - 10). The emitter will evaluate it inline
+            // in the fused loop; for side-effect-free expressions on globals/
+            // literals this is correct and avoids a full function call.
+            if (isParamFree(right, paramSlot)) {
+                return new BinaryLitMatch(bin.getOp(), right, lp, lp ? null : bin.getLeft());
+            }
         }
         // Shape B: CallDirect (scalar-ABI) to a KnownArithOps target.
         if (n instanceof CallDirectIR call
@@ -4067,6 +4085,10 @@ public final class BytecodeCompiler {
             NodeIR lifted = liftCaptureRhs(right, caps);
             if (lifted != null) {
                 return new BinaryLitMatch(op, lifted, lp, lp ? null : call.getArgs().get(0));
+            }
+            // #442 Shape B′: parameter-free RHS expression.
+            if (isParamFree(right, paramSlot)) {
+                return new BinaryLitMatch(op, right, lp, lp ? null : call.getArgs().get(0));
             }
         }
         // Shape C: CallIndirect(function=ReadField(?, opName), arg=MakeRecord{it, r=LongLit-or-Capture}).
@@ -4089,6 +4111,11 @@ public final class BytecodeCompiler {
             NodeIR lifted = liftCaptureRhs(rExpr, caps);
             if (lifted != null) {
                 return new BinaryLitMatch(op, lifted, lp, lp ? null : lhs);
+            }
+            // #442 Shape C′: parameter-free expression RHS — e.g.
+            // (x > (n - 10)) where RHS is CallIndirect(ReadField(n,__sub__),{it=n,r=10}).
+            if (isParamFree(rExpr, paramSlot)) {
+                return new BinaryLitMatch(op, rExpr, lp, lp ? null : lhs);
             }
         }
         return null;
@@ -4198,6 +4225,36 @@ public final class BytecodeCompiler {
         return new ReadLocalIR(cap.getSlot(), cap.getKind(), rc.getSrc(), null);
     }
 
+    /**
+     * #442 — returns true iff the expression tree rooted at {@code node}
+     * does NOT reference {@link ReadLocalIR} at {@code paramSlot}. Used to
+     * determine whether a comparison RHS can be emitted inline in the
+     * fused loop body (evaluated each iteration but independent of the
+     * loop variable). Conservatively returns false for IR shapes with
+     * children we don't walk (e.g. LetIR, MatchIR, BlockIR) — those are
+     * too complex to inline safely.
+     */
+    private static boolean isParamFree(NodeIR node, int paramSlot) {
+        if (node instanceof ReadLocalIR rl) return rl.getSlot() != paramSlot;
+        if (node instanceof LongLitIR || node instanceof DoubleLitIR
+                || node instanceof BoolLitIR || node instanceof StringLitIR
+                || node instanceof CharLitIR || node instanceof FracLitIR
+                || node instanceof UnitLitIR) return true;
+        if (node instanceof ReadGlobalByHashIR || node instanceof ReadGlobalFnByHashIR)
+            return true;
+        if (node instanceof ReadCaptureIR) return true;
+        if (node instanceof InlineBinaryOpIR bin)
+            return isParamFree(bin.getLeft(), paramSlot)
+                && isParamFree(bin.getRight(), paramSlot);
+        if (node instanceof CallDirectIR call) {
+            for (var arg : call.getArgs())
+                if (!isParamFree(arg, paramSlot)) return false;
+            return true;
+        }
+        // Conservative: anything else might hide a param reference.
+        return false;
+    }
+
     private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
                                                      MezzeLanguage language) {
         // #515 — accept captures for Shape A/B/C only. Call-form (Shape D)
@@ -4228,6 +4285,8 @@ public final class BytecodeCompiler {
             }
             NodeIR lifted = liftCaptureRhs(right, caps);
             if (lifted != null) return new UnaryLitShape(bin.getOp(), lifted);
+            // #442 Shape A′: parameter-free expression RHS.
+            if (isParamFree(right, paramSlot)) return new UnaryLitShape(bin.getOp(), right);
         }
         // Shape B: CallDirect (scalar-ABI) to a KnownArithOps target with
         // (ReadLocal(paramSlot), LongLit|ReadCapture) — mono-desugared arith.
@@ -4244,6 +4303,8 @@ public final class BytecodeCompiler {
             }
             NodeIR lifted = liftCaptureRhs(right, caps);
             if (lifted != null) return new UnaryLitShape(op, lifted);
+            // #442 Shape B′: parameter-free expression RHS.
+            if (isParamFree(right, paramSlot)) return new UnaryLitShape(op, right);
         }
         // Shape C: mono-not-fired — CallIndirectIR(function=ReadField(receiver,opName),
         //          arg=MakeRecord{it=receiver, r=LongLit|ReadCapture}). Same as
