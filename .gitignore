@@ -90,3 +90,9 @@ website/public/wasm/.br/
 
 # just test recipes tee here
 logs/
+
+# --- never track: build caches & deps (regenerated) ---
+node_modules/
+website/wasm-build/.binaryen-*/
+website/wasm-build/.graalvm-*/
+website/wasm-build/.jars/
