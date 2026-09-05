@@ -125,32 +125,24 @@ only needs `channel`.
 
 ---
 
-## The runtime decision
+## Runtime requirements
 
-This is the one that gates "simple install." Program execution today = a spawned
-**JVM** child (`RuntimeServer` over the wire protocol). Three ways to remove the
-Java prerequisite:
+The toolchain splits deliberately by what each command needs. **GraalVM is a core
+requirement that users install themselves — we do not bundle or fetch it.**
 
-- **(A) Native runtime child (recommended).** Ship `mez-runtime` as a
-  self-contained **native** binary with the **SVM JIT** (#402 already shows native
-  SVM-JIT beating the JVM 28×). `mez exec/dev/check/run` spawn / embed *that*, not
-  `java`. Zero external deps for the common path. The wire-protocol split (#220)
-  already decouples front-end from runtime, so this is "point WireRunner at a
-  native RuntimeServer" rather than a rewrite. `mez-shell-native` is likely the
-  seed of this.
-- **(B) Bundle a trimmed JRE** in `toolchains/<v>/jre/`, point `MEZZE_JAVA_HOME`
-  at it. Simple, but +40–60 MB per toolchain and keeps the JVM in the hot path.
-- **(C) Require system Java.** Rejected for the default install — breaks the
-  one-line promise.
+| Command | Needs |
+|---|---|
+| `mez check`, `mez fmt`, `mez init` | **nothing** — the standalone native `mez` binary |
+| `mez dev`, `mez build` | **GraalVM** (user-installed); `mez` detects it and tells the user to install it if missing (`EnvironmentCheck`) |
 
-**Recommendation:** (A) for `run / dev / exec / check` → no Java, ever. Keep the
-**JVM jar `mez build`** (JIT, warm perf, deploys as a polyglot jar) as an
-*optional* path that requires or bundles Java — it's a power-user/deploy artifact,
-so a Java dependency there is acceptable. `mez build --native` continues to need
-GraalVM at build time (document the Docker path, like the WASM build).
+`mez build` compiles a user program to either a **jar** (portable; needs a JVM to
+run) or a **native standalone binary** (no runtime deps). Both build paths require
+GraalVM present at build time.
 
-Action item before committing to (A): confirm the native SVM-JIT `RuntimeServer`
-runs the full stdlib + effects correctly and how far it is from shippable.
+**Implication for distribution: there is no runtime to bundle.** The install ships
+the native `mez` binary + stdlib, so `check` / `fmt` / `init` work the instant it
+lands; `dev` / `build` light up once the user has GraalVM. No trimmed JRE, no
+native wire-runtime project — the earlier "eliminate Java" framing was wrong.
 
 ---
 

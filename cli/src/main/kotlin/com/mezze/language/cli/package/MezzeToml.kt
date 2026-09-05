@@ -43,6 +43,15 @@ data class MezzeToml(
     val devDependencies: Map<String, String> = emptyMap(),
     /** Per-project toolchain pin — which `mez` version builds/runs this project. */
     val toolchain: ToolchainConfig? = null,
+    /**
+     * Local path dependencies — `name = "../relative/or/abs/path"` pointing at
+     * another Mezze package on disk. `mez sync` symlinks each into
+     * `.deps/mezze/<name>-<version>/`, where the module resolver already looks,
+     * so `use <name>::...` resolves against live source (edits reflect
+     * immediately). Registry deps (URL#sha256) stay in `[dependencies]`.
+     */
+    @SerialName("path-dependencies")
+    val pathDependencies: Map<String, String> = emptyMap(),
 )
 
 /**

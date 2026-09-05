@@ -152,11 +152,8 @@ fun main(args: Array<String>) {
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
             "toolchain" -> handleToolchainCommand(remainingArgs)
-            // Package management (add/remove/sync) is unwired pending #108.
-            // The implementations exist but the dependency-resolution backend
-            // (deps.sqlite, mezze_packages/) isn't connected to the rest of
-            // the pipeline, so users would see misleading "success" messages.
-            // Re-enable in dispatcher + showUsage when #108 lands.
+            "sync" -> handleSyncCommand(remainingArgs)
+            // `add`/`remove` still unwired — edit Mezze.toml + run `mez sync`.
             else -> {
                 println("Error: Unknown command: $command")
                 println()
@@ -456,6 +453,10 @@ private fun handleIndexCommand(args: List<String>) {
 
 private fun handleToolchainCommand(args: List<String>) {
     com.mezze.language.cli.toolchain.ToolchainCommand().execute(args)
+}
+
+private fun handleSyncCommand(args: List<String>) {
+    com.mezze.language.cli.commands.SyncCommand().execute(args)
 }
 
 private fun readStdin(): String {
