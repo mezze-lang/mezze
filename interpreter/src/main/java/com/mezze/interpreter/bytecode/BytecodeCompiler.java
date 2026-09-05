@@ -1260,8 +1260,6 @@ public final class BytecodeCompiler {
                     String pn = (i < pNames.size()) ? pNames.get(i) : ("_stl_p" + i);
                     stlParams[i] = b.createLocal("_stl_" + pn, null);
                 }
-                BytecodeLocal stlFlag = b.createLocal("_stl_cont", null);
-                BytecodeLocal stlResult = b.createLocal("_stl_res", null);
 
                 b.beginBlock();
 
@@ -1271,47 +1269,107 @@ public final class BytecodeCompiler {
                     b.emitLoadArgument(captureCount + i);
                     b.endStoreLocal();
                 }
-                // Initialize continue flag = 1 (loop).
-                b.beginStoreLocal(stlFlag);
-                b.emitLoadLongConstant(1L);
-                b.endStoreLocal();
 
-                // Set self-tail-loop context for emitNode.
+                // Set self-tail-loop context — enables param read
+                // remapping in emitNode (ReadArgIR → LoadLocal(stlParam)).
                 this.inSelfTailLoop = true;
                 this.selfTailParamLocals = stlParams;
-                this.selfTailContinueFlag = stlFlag;
                 this.selfTailCaptureCount = captureCount;
                 this.selfTailHash = ir.getHash();
 
-                // While(0 < continueFlag, body)
-                b.beginWhile();
-                  // condition: 0 < flag → true when flag=1, false when flag=0
-                  b.beginDirectLessThan();
-                    b.emitLoadLongConstant(0L);
-                    b.emitLoadLocal(stlFlag);
-                  b.endDirectLessThan();
-                  // body
-                  b.beginBlock();
-                    // Assume this is the last iteration (set flag=0).
-                    // Self-tail-call sites flip it back to 1.
+                // ── Try direct-while optimization ──
+                // When body = IfIR(cond, base, selfTailCall), emit a
+                // tight While loop using the source condition directly
+                // as the loop guard, eliminating the flag variable,
+                // inner conditional, identity param copies, and dummy
+                // values.  Saves ~16 BDSL ops per iteration.
+                boolean emittedDirect = false;
+                NodeIR body = ir.getBody();
+
+                if (body instanceof IfIR ifBody) {
+                    NodeIR cond = ifBody.getCond();
+                    NodeIR thenBr = ifBody.getThenBr();
+                    NodeIR elseBr = ifBody.getElseBr();
+
+                    CallDirectIR tailCall = null;
+                    NodeIR baseExpr = null;
+                    boolean tailInElse = false;
+
+                    if (elseBr instanceof CallDirectIR ec && ec.isTailCall()
+                            && ec.getTargetHash().equals(ir.getHash())
+                            && ec.getArgs().size() == paramCount) {
+                        tailCall = ec;
+                        baseExpr = thenBr;
+                        tailInElse = true;
+                    } else if (thenBr instanceof CallDirectIR tc && tc.isTailCall()
+                            && tc.getTargetHash().equals(ir.getHash())
+                            && tc.getArgs().size() == paramCount) {
+                        tailCall = tc;
+                        baseExpr = elseBr;
+                        tailInElse = false;
+                    }
+
+                    if (tailCall != null && stlIsSimpleExpr(baseExpr)) {
+                        emittedDirect = true;
+                        // selfTailContinueFlag stays null — no flag.
+
+                        b.beginWhile();
+
+                        // Condition: loop while base case is NOT met.
+                        if (tailInElse) {
+                            // if cond then base else tailCall → loop
+                            // while NOT cond.
+                            stlEmitInvertedCond(cond, b, argCount, localMap);
+                        } else {
+                            // if cond then tailCall else base → loop
+                            // while cond.
+                            emitNode(cond, b, argCount, localMap);
+                        }
+
+                        // Body: update params from tail-call args.
+                        stlEmitParamUpdate(tailCall.getArgs(), stlParams,
+                                b, argCount, localMap);
+
+                        b.endWhile();
+
+                        // After loop: base case expression.
+                        emitNode(baseExpr, b, argCount, localMap);
+                    }
+                }
+
+                if (!emittedDirect) {
+                    // ── Fallback: flag-based self-tail-loop ──
+                    BytecodeLocal stlFlag = b.createLocal("_stl_cont", null);
+                    BytecodeLocal stlResult = b.createLocal("_stl_res", null);
+                    this.selfTailContinueFlag = stlFlag;
+
                     b.beginStoreLocal(stlFlag);
-                      b.emitLoadLongConstant(0L);
+                    b.emitLoadLongConstant(1L);
                     b.endStoreLocal();
-                    // Evaluate body; result stored in stlResult.
-                    b.beginStoreLocal(stlResult);
-                      emitNode(ir.getBody(), b, argCount, localMap);
-                    b.endStoreLocal();
-                  b.endBlock();
-                b.endWhile();
+
+                    b.beginWhile();
+                      b.beginDirectLessThan();
+                        b.emitLoadLongConstant(0L);
+                        b.emitLoadLocal(stlFlag);
+                      b.endDirectLessThan();
+                      b.beginBlock();
+                        b.beginStoreLocal(stlFlag);
+                          b.emitLoadLongConstant(0L);
+                        b.endStoreLocal();
+                        b.beginStoreLocal(stlResult);
+                          emitNode(ir.getBody(), b, argCount, localMap);
+                        b.endStoreLocal();
+                      b.endBlock();
+                    b.endWhile();
+
+                    b.emitLoadLocal(stlResult);
+                }
 
                 // Clean up context.
                 this.inSelfTailLoop = false;
                 this.selfTailParamLocals = null;
                 this.selfTailContinueFlag = null;
                 this.selfTailHash = null;
-
-                // Return the result.
-                b.emitLoadLocal(stlResult);
 
                 b.endBlock();
             } else {
@@ -2006,26 +2064,15 @@ public final class BytecodeCompiler {
             // Total child count: scalar marker (if needed) + actual args
             int totalChildren = (needsScalarMarker ? 1 : 0) + c.getArgs().size();
             if (c.isTailCall() && inSelfTailLoop
+                    && selfTailContinueFlag != null
                     && c.getTargetHash().equals(selfTailHash)) {
-                // ── Self-tail-loop: rewrite as param update + continue ──
-                // Evaluate all new arg values into temp locals first
-                // to avoid order-of-evaluation issues (arg expressions
-                // may reference the current param values).
+                // ── Self-tail-loop (flag path): rewrite as param
+                // update + continue.  Identity args (param read back
+                // to itself) are elided.
                 java.util.List<NodeIR> args = c.getArgs();
-                BytecodeLocal[] temps = new BytecodeLocal[args.size()];
                 b.beginBlock();
-                for (int ai = 0; ai < args.size(); ai++) {
-                    temps[ai] = b.createLocal();
-                    b.beginStoreLocal(temps[ai]);
-                    emitNode(args.get(ai), b, argCount, localMap);
-                    b.endStoreLocal();
-                }
-                // Copy temps into param locals.
-                for (int ai = 0; ai < args.size(); ai++) {
-                    b.beginStoreLocal(selfTailParamLocals[ai]);
-                    b.emitLoadLocal(temps[ai]);
-                    b.endStoreLocal();
-                }
+                stlEmitParamUpdate(args, selfTailParamLocals,
+                        b, argCount, localMap);
                 // Set continue flag = 1 (loop).
                 b.beginStoreLocal(selfTailContinueFlag);
                 b.emitLoadLongConstant(1L);
@@ -5499,5 +5546,145 @@ public final class BytecodeCompiler {
         }
         emitIfLetChain(c, iletIdx + 1, cases, caseIdx, scrutineeLocal, b, argCount, localMap);
         b.endBlock();
+    }
+
+    // ── Self-tail-loop helpers ────────────────────────────────
+
+    /**
+     * Returns true if {@code node} is a call-free expression — safe to
+     * use as the base-case result in the direct-while self-tail-loop
+     * optimisation without risking a stale {@code selfTailContinueFlag}.
+     */
+    private static boolean stlIsSimpleExpr(NodeIR node) {
+        if (node instanceof ReadLocalIR || node instanceof ReadArgIR
+                || node instanceof ReadCaptureIR
+                || node instanceof ReadGlobalByHashIR
+                || node instanceof ReadGlobalFnByHashIR
+                || node instanceof LongLitIR || node instanceof DoubleLitIR
+                || node instanceof BoolLitIR || node instanceof StringLitIR
+                || node instanceof UnitLitIR || node instanceof CharLitIR
+                || node instanceof FracLitIR) {
+            return true;
+        }
+        if (node instanceof InlineBinaryOpIR bin) {
+            InlineOp op = bin.getOp();
+            if (op == InlineOp.NEG || op == InlineOp.NOT) {
+                return stlIsSimpleExpr(bin.getLeft());
+            }
+            return stlIsSimpleExpr(bin.getLeft())
+                    && stlIsSimpleExpr(bin.getRight());
+        }
+        if (node instanceof ReadFieldIR rf) {
+            return stlIsSimpleExpr(rf.getRecord());
+        }
+        if (node instanceof MakeRecordIR rec) {
+            for (FieldIR f : rec.getFields()) {
+                if (!stlIsSimpleExpr(f.getValue())) return false;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Emits the logical negation of {@code cond}. For comparison ops
+     * the inverse is emitted directly (LE→GT, etc.); otherwise wraps
+     * in {@code DirectNot}.
+     */
+    private void stlEmitInvertedCond(NodeIR cond,
+                                     MezzeBytecodeRootNodeGen.Builder b,
+                                     int argCount,
+                                     BytecodeLocal[] localMap) {
+        if (cond instanceof InlineBinaryOpIR bin) {
+            InlineOp inv = switch (bin.getOp()) {
+                case LE -> InlineOp.GT;
+                case LT -> InlineOp.GE;
+                case GE -> InlineOp.LT;
+                case GT -> InlineOp.LE;
+                case EQ -> InlineOp.NEQ;
+                case NEQ -> InlineOp.EQ;
+                default -> null;
+            };
+            if (inv != null) {
+                emitNode(new InlineBinaryOpIR(inv, bin.getLeft(),
+                        bin.getRight(), bin.getSrc()), b, argCount, localMap);
+                return;
+            }
+        }
+        // Fallback: wrap in DirectNot.
+        b.beginDirectNot();
+        emitNode(cond, b, argCount, localMap);
+        b.endDirectNot();
+    }
+
+    /**
+     * Emits param updates for a self-tail-call.  Identity args (an arg
+     * that just reads the same param back) are elided entirely.  When
+     * multiple params change, evaluation goes through temp locals to
+     * preserve order-of-evaluation.
+     */
+    private void stlEmitParamUpdate(java.util.List<NodeIR> args,
+                                    BytecodeLocal[] stlParams,
+                                    MezzeBytecodeRootNodeGen.Builder b,
+                                    int argCount,
+                                    BytecodeLocal[] localMap) {
+        int n = args.size();
+
+        // Identify identity args.
+        boolean[] identity = new boolean[n];
+        int changeCount = 0;
+        for (int i = 0; i < n; i++) {
+            identity[i] = stlIsIdentityArg(args.get(i), i);
+            if (!identity[i]) changeCount++;
+        }
+
+        if (changeCount == 0) {
+            // All identity — degenerate infinite loop, just emit a
+            // dummy so the While body has a value.
+            b.emitLoadLongConstant(0L);
+            return;
+        }
+
+        b.beginBlock();
+        if (changeCount == 1) {
+            // Single change — no order-of-evaluation risk.
+            for (int i = 0; i < n; i++) {
+                if (!identity[i]) {
+                    b.beginStoreLocal(stlParams[i]);
+                    emitNode(args.get(i), b, argCount, localMap);
+                    b.endStoreLocal();
+                }
+            }
+        } else {
+            // Multiple changes — evaluate into temps first.
+            BytecodeLocal[] temps = new BytecodeLocal[n];
+            for (int i = 0; i < n; i++) {
+                if (!identity[i]) {
+                    temps[i] = b.createLocal();
+                    b.beginStoreLocal(temps[i]);
+                    emitNode(args.get(i), b, argCount, localMap);
+                    b.endStoreLocal();
+                }
+            }
+            for (int i = 0; i < n; i++) {
+                if (!identity[i]) {
+                    b.beginStoreLocal(stlParams[i]);
+                    b.emitLoadLocal(temps[i]);
+                    b.endStoreLocal();
+                }
+            }
+        }
+        b.endBlock();
+    }
+
+    /**
+     * Returns true if {@code arg} at position {@code paramIndex} is
+     * an identity read of the corresponding self-tail-loop parameter.
+     */
+    private boolean stlIsIdentityArg(NodeIR arg, int paramIndex) {
+        int expected = selfTailCaptureCount + paramIndex;
+        if (arg instanceof ReadLocalIR r) return r.getSlot() == expected;
+        if (arg instanceof ReadArgIR r) return r.getIndex() == expected;
+        return false;
     }
 }
