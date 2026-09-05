@@ -315,9 +315,66 @@ public final class MezzeContext {
         handlersByHash.put(hash, value);
     }
 
+    /** Raw lookup — returns the entry as-is without inflating lazy PerformerInfo. */
+    @TruffleBoundary
+    public Object lookupHandlerRaw(com.mezze.language.typedast.Hash hash) {
+        return handlersByHash.get(hash);
+    }
+
     @TruffleBoundary
     public Object lookupHandler(com.mezze.language.typedast.Hash hash) {
-        return handlersByHash.get(hash);
+        Object entry = handlersByHash.get(hash);
+        // Lazy performer record inflation: if the entry is a PerformerInfo
+        // (stored by HashModuleLoaderNode during module load), build the
+        // record on first access. This defers ~55ms of BDSL compilation
+        // per performer to the first `perform Handler in ...` call.
+        if (entry instanceof com.mezze.interpreter.nodes.HashModuleLoaderNode.PerformerInfo info) {
+            var record = inflatePerformerRecord(info);
+            if (record != null) {
+                handlersByHash.put(hash, record);
+                // Also register under effectHash if present
+                if (info.effectHash != null) {
+                    handlersByHash.put(info.effectHash, record);
+                }
+                return record;
+            }
+            return null;
+        }
+        return entry;
+    }
+
+    /**
+     * Build a MezzeRecord from a PerformerInfo on demand.
+     * Mirrors HashModuleLoaderNode.constructPerformerRecord but runs here
+     * so performer record construction is lazy (deferred to first lookup).
+     */
+    @TruffleBoundary
+    private com.mezze.interpreter.values.MezzeRecord inflatePerformerRecord(
+            com.mezze.interpreter.nodes.HashModuleLoaderNode.PerformerInfo info) {
+        var lang = this.language;
+        int opCount = info.ops.length;
+        String[] opNames = new String[opCount];
+        Object[] opValues = new Object[opCount];
+        for (int i = 0; i < opCount; i++) {
+            var opHash = info.ops[i].hash;
+            opNames[i] = info.ops[i].name;
+            Object opFunc = lookupGlobal(opHash);
+            if (opFunc == null) {
+                var ct = lang.getCachedStdlibCallTarget(opHash);
+                if (ct != null) {
+                    opFunc = com.mezze.interpreter.values.MezzeFunction.create(ct, opHash.getHex());
+                }
+            }
+            if (opFunc == null) return null;
+            opValues[i] = opFunc;
+        }
+        var locations = new com.mezze.interpreter.values.MezzeRecord.FieldLocation[opCount];
+        for (int i = 0; i < opCount; i++) {
+            locations[i] = new com.mezze.interpreter.values.MezzeRecord.FieldLocation(
+                com.mezze.interpreter.values.MezzeRecord.FieldLocation.StorageType.OBJECT, i);
+        }
+        var shape = new com.mezze.interpreter.values.MezzeRecord.Shape(opNames, locations);
+        return com.mezze.interpreter.values.MezzeRecord.withAllObjects(shape, opValues);
     }
 
     @TruffleBoundary

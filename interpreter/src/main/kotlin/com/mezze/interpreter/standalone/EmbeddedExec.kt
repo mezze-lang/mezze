@@ -391,17 +391,26 @@ object EmbeddedExec {
             // the .jsa, then the launcher uses it on real runs to shave
             // ~50% off cold start. (#215)
             if (System.getenv("MEZZE_CDS_DRYRUN") == "1") {
-                // Force-load BytecodeCompiler and its Truffle BDSL builder
-                // dependencies so they land in the CDS archive. First BDSL
-                // compilation pays ~20ms of class loading; with these
-                // classes pre-loaded from the archive that drops to ~5ms.
+                // Force-load runtime classes so they land in the CDS
+                // archive. Without this, first use pays ~50ms of class
+                // loading (BytecodeCompiler ~20ms + MezzeRecord/Function
+                // ~30ms). CDS pre-verification drops those to ~5ms.
                 // We DON'T run context.eval() — that would execute user
                 // code with potential side effects (I/O, network, etc.).
                 try {
+                    // BDSL bytecode compiler and generated root node
                     Class.forName("com.mezze.interpreter.bytecode.BytecodeCompiler")
                     Class.forName("com.mezze.interpreter.bytecode.MezzeBytecodeRootNodeGen")
+                    // Core value types used by performer record construction
+                    Class.forName("com.mezze.interpreter.values.MezzeRecord")
+                    Class.forName("com.mezze.interpreter.values.MezzeRecord\$Shape")
+                    Class.forName("com.mezze.interpreter.values.MezzeRecord\$FieldLocation")
+                    Class.forName("com.mezze.interpreter.values.MezzeFunction")
+                    Class.forName("com.mezze.interpreter.runtime.MezzeContext")
+                    // Stdlib runtime data (CBOR snapshot of pre-lowered functions)
+                    Class.forName("com.mezze.language.stdlib.StdlibRuntimeData")
                 } catch (_: Throwable) {}
-                mark("CDS_DRYRUN — BDSL classes warmed for archive")
+                mark("CDS_DRYRUN — runtime classes warmed for archive")
                 return
             }
 

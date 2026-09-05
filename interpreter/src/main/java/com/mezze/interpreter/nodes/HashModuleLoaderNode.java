@@ -160,10 +160,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
     private void loadModules() {
         MezzeContext context = MezzeContext.get(this);
         var emptyRecord = com.mezze.interpreter.values.MezzeRecord.empty();
-        // Functions are pre-compiled (stdlib cached at Language level, user code fresh per test)
         try {
-
-        // Closure cache is now per-context (MezzeContext.closureCache) — no clearing needed.
 
         // Pass 1: Register all functions by hash AND name (raw wrappers)
         for (int i = 0; i < functionHashes.length; i++) {
@@ -172,92 +169,42 @@ public final class HashModuleLoaderNode extends MezzeNode {
             if (!context.hasGlobal(hash)) {
                 var function = MezzeFunction.create(target, hash.getHex());
                 context.defineGlobal(hash, function);
-                // Note: name-keyed globals dropped — name lookup goes via stdlibHashToName,
-                // not the per-context globals map. Keeping the typed Hash key prevents
-                // collisions with user-defined names that happen to look like hashes.
             }
         }
 
-        // Pass 2: Construct performer records.
+        // Pass 2: Deferred performer records.
         //
-        // Performer records live in MezzeContext.handlersByHash, NOT in
-        // globals. This is the single source of truth for `perform Handler in
-        // body` to resolve handlers — the BDSL Handle @Operation goes there
-        // and nowhere else. Keeping them out of `globals` means a later
-        // re-load can't overwrite a good handler record with a worse one if
-        // op-function resolution flakes between context resets.
-        //
-        // For parameterized performers (whose hash maps to a factory
-        // function that takes params), keep the factory function and skip —
-        // ParameterizedHandlerLookupNode invokes it with the actual params
-        // at perform time.
+        // Store PerformerInfo in the context's
+        // handlersByHash map. MezzeContext.lookupHandler inflates them on first
+        // access (lazy performer construction). This avoids ~55ms of BDSL
+        // compilation at startup for programs that don't perform any effects.
         for (PerformerInfo info : performerInfos) {
             if (info.ops.length == 0) continue;
             Hash performerHash = info.performerHash;
-            Hash effectHash = info.effectHash;
             // Skip parameterized factories: their hash maps to a MezzeFunction
             // in globals (pass 1 above). They're resolved per-call with params.
             Object globalEntry = context.lookupGlobal(performerHash);
             if (globalEntry instanceof MezzeFunction) {
                 continue;
             }
-            // Write-once: a good record under this hash already wins. Don't
-            // let a later load corrupt it.
-            if (context.lookupHandler(performerHash) instanceof MezzeRecord) {
+            // Write-once: a good record under this hash already wins.
+            Object existing = context.lookupHandlerRaw(performerHash);
+            if (existing instanceof MezzeRecord) {
                 continue;
             }
-            constructPerformerRecord(context, info);
+            // Store PerformerInfo for lazy inflation
+            context.defineHandler(performerHash, info);
+            if (info.effectHash != null) {
+                context.defineHandler(info.effectHash, info);
+            }
         }
-
         modulesLoaded = true;
         } catch (Exception e) {
             modulesLoaded = true;
         }
     }
 
-    @CompilerDirectives.TruffleBoundary
-    private void constructPerformerRecord(MezzeContext context, PerformerInfo info) {
-        int opCount = info.ops.length;
-        String[] opNames = new String[opCount];
-        Object[] opValues = new Object[opCount];
-        for (int i = 0; i < opCount; i++) {
-            Hash opHash = info.ops[i].hash;
-            opNames[i] = info.ops[i].name;
-            // Resolve the op function: first the context's globals (set by
-            // pass 1 from THIS loader), then the Language stdlib cache
-            // (compiled on demand from PrecompiledStdlib).
-            Object opFunc = context.lookupGlobal(opHash);
-            if (opFunc == null) {
-                var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
-                var ct = lang.getCachedStdlibCallTarget(opHash);
-                if (ct != null) {
-                    opFunc = MezzeFunction.create(ct, opHash.getHex());
-                }
-            }
-            if (opFunc == null) {
-                // Don't publish a partial handler. The op function isn't
-                // available yet on this context — a later module-load pass
-                // (with the missing function pre-registered) will see the
-                // entry still empty and try again. Better an explicit
-                // "Handler not found" at perform time than a silent dispatch
-                // to empty-record (unit) fields.
-                return;
-            }
-            opValues[i] = opFunc;
-        }
-        var locations = new com.mezze.interpreter.values.MezzeRecord.FieldLocation[opCount];
-        for (int i = 0; i < opCount; i++) {
-            locations[i] = new com.mezze.interpreter.values.MezzeRecord.FieldLocation(
-                com.mezze.interpreter.values.MezzeRecord.FieldLocation.StorageType.OBJECT, i);
-        }
-        var shape = new com.mezze.interpreter.values.MezzeRecord.Shape(opNames, locations);
-        var record = com.mezze.interpreter.values.MezzeRecord.withAllObjects(shape, opValues);
-        // Publish under performer hash AND effect hash in handlersByHash.
-        // This is the single source the BDSL Handle @Operation consults.
-        context.defineHandler(info.performerHash, record);
-        if (info.effectHash != null) {
-            context.defineHandler(info.effectHash, record);
-        }
-    }
+    // constructPerformerRecord logic has been moved to MezzeContext.inflatePerformerRecord
+    // for lazy on-demand construction. See lookupHandler() in MezzeContext.
 
 }
