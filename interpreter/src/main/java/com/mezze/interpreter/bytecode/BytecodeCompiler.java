@@ -1797,18 +1797,37 @@ public final class BytecodeCompiler {
                 }
                 b.endTailCallDirectN();
             } else if (!needsScalarMarker && totalChildren == 1) {
-                // Fixed-arity call: avoids @Variadic Object[] overhead
-                b.beginCallDirect1(target);
+                // Fixed-arity call: avoids @Variadic Object[] overhead.
+                // canBypass: true iff the call is scalar-ABI, the callee
+                // wraps a non-tail-call TrampolineRootNode, and the
+                // call site is not itself a tail call. This enables
+                // runtime resolve through the trampoline in CallDirect1's
+                // @Cached specialization — critical for self-recursive
+                // scalar-ABI calls where the emit-time bypass fails
+                // (inner target null during two-phase construction).
+                boolean canBypass = c.isScalarABI()
+                        && target instanceof com.oracle.truffle.api.RootCallTarget rct1
+                        && rct1.getRootNode() instanceof TrampolineRootNode tramp1
+                        && !tramp1.hasTailCalls();
+                b.beginCallDirect1(target, canBypass);
                 emitNode(c.getArgs().get(0), b, argCount, localMap);
                 b.endCallDirect1();
             } else if (!needsScalarMarker && totalChildren == 2) {
-                b.beginCallDirect2(target);
+                boolean canBypass = c.isScalarABI()
+                        && target instanceof com.oracle.truffle.api.RootCallTarget rct2
+                        && rct2.getRootNode() instanceof TrampolineRootNode tramp2
+                        && !tramp2.hasTailCalls();
+                b.beginCallDirect2(target, canBypass);
                 for (NodeIR arg : c.getArgs()) {
                     emitNode(arg, b, argCount, localMap);
                 }
                 b.endCallDirect2();
             } else if (!needsScalarMarker && totalChildren == 3) {
-                b.beginCallDirect3(target);
+                boolean canBypass = c.isScalarABI()
+                        && target instanceof com.oracle.truffle.api.RootCallTarget rct3
+                        && rct3.getRootNode() instanceof TrampolineRootNode tramp3
+                        && !tramp3.hasTailCalls();
+                b.beginCallDirect3(target, canBypass);
                 for (NodeIR arg : c.getArgs()) {
                     emitNode(arg, b, argCount, localMap);
                 }

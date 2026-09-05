@@ -224,6 +224,13 @@ object RuntimeServer {
         // inlining budgets, etc. without recompiling.
         if (jitCapable) {
             var hasTrace = false
+            // Aggressive compilation thresholds — same rationale as
+            // EmbeddedExec. Mezze's static types stabilize at invocation #1.
+            if (jitEnabled) {
+                engineBuilder.option("engine.FirstTierCompilationThreshold", "16")
+                engineBuilder.option("engine.LastTierCompilationThreshold", "100")
+                engineBuilder.option("engine.SingleTierCompilationThreshold", "32")
+            }
             System.getenv("MEZZE_ENGINE_OPTS")?.takeIf { it.isNotBlank() }?.let { raw ->
                 for (kv in raw.split(",")) {
                     val eq = kv.indexOf('=')
@@ -231,6 +238,7 @@ object RuntimeServer {
                         val k = kv.substring(0, eq).trim()
                         val v = kv.substring(eq + 1).trim()
                         if (k.contains("Trace")) hasTrace = true
+                        // compilation thresholds are set above; MEZZE_ENGINE_OPTS overrides
                         try { engineBuilder.option(k, v) }
                         catch (e: Exception) {
                             originalStderr.println("[mezze] ignoring unknown engine option: $k=$v (${e.message})")

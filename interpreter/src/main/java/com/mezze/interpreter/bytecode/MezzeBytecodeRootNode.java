@@ -545,35 +545,109 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Resolve a CallTarget through a trampoline wrapper when safe.
+     *
+     * <p>When the target wraps a {@link TrampolineRootNode} whose inner
+     * body has NO tail-calls, the trampoline is a pure ABI shim — its
+     * {@code execute()} just runs normalizeArgs (a no-op for scalar ABI)
+     * and then calls the inner via directInnerCall. Scalar-ABI callers
+     * (CallDirect1/2/3) pass flat args that skip normalizeArgs, so the
+     * trampoline hop costs one extra frame allocation + DirectCallNode
+     * dispatch for nothing.
+     *
+     * <p>This helper unwraps the trampoline at {@code @Cached}
+     * specialization time (first execution), when the inner target is
+     * guaranteed to be wired. This fixes the self-recursive case where
+     * the emit-time bypass in BytecodeCompiler fails because
+     * {@code tramp.getInnerTarget()} is null during BDSL construction
+     * (two-phase construction for self-referencing functions).
+     *
+     * <p>NOT safe for tail-call functions (the trampoline's LoopNode
+     * must catch TailCallException) or when the inner isn't wired yet
+     * (shouldn't happen at execution time, but guarded defensively).
+     */
+    /**
+     * Resolve a CallTarget through a trampoline wrapper when safe.
+     *
+     * <p>When the target wraps a {@link TrampolineRootNode} whose inner
+     * body has NO tail-calls, the trampoline is a pure ABI shim — its
+     * {@code execute()} just runs normalizeArgs (a no-op for scalar ABI)
+     * and then calls the inner via directInnerCall. Scalar-ABI callers
+     * (CallDirect1/2/3 with {@code canBypass=true}) pass flat args that
+     * skip normalizeArgs, so the trampoline hop costs one extra frame
+     * allocation + DirectCallNode dispatch for nothing.
+     *
+     * <p>This helper unwraps the trampoline at {@code @Cached}
+     * specialization time (first execution), when the inner target is
+     * guaranteed to be wired. This fixes the self-recursive case where
+     * the emit-time bypass in BytecodeCompiler fails because
+     * {@code tramp.getInnerTarget()} is null during BDSL construction
+     * (two-phase construction for self-referencing functions).
+     *
+     * <p><b>MUST NOT</b> be called for record-ABI calls — the trampoline's
+     * {@link TrampolineRootNode#normalizeArgs} unpacks the record into flat
+     * positional slots; bypassing it sends the raw record to
+     * LoadArgument(0), leaving other param slots uninitialized.
+     *
+     * @param canBypass compile-time flag from BytecodeCompiler; true only
+     *                  when the call site is scalar-ABI and the callee
+     *                  wraps a non-tail-call TrampolineRootNode
+     */
+    static CallTarget resolveScalarTarget(CallTarget target, boolean canBypass) {
+        if (!canBypass) return target;
+        if (target instanceof com.oracle.truffle.api.RootCallTarget rct
+                && rct.getRootNode() instanceof TrampolineRootNode tramp
+                && !tramp.hasTailCalls()
+                && tramp.getInnerTarget() != null) {
+            return tramp.getInnerTarget();
+        }
+        return target;
+    }
+
+    /**
      * Fixed-arity single-argument direct call. Avoids the {@code @Variadic}
      * overhead of {@link CallDirectN} — no intermediate {@code Object[]}
      * allocation by BDSL, just a single child operand on the stack.
      *
      * <p>Used for scalar-ABI calls with exactly one argument (the common
      * case: {@code fib {n = n - 1}} compiles to scalar ABI where the single
-     * param is passed directly). The {@code Object[1]} is allocated here
-     * but is a trivial scalar-replacement target for Graal's escape analysis
-     * when the call is inlined.
+     * param is passed directly).
+     *
+     * <p>The {@code canBypass} constant operand is set by BytecodeCompiler
+     * when the call site is scalar-ABI and the callee wraps a non-tail-call
+     * TrampolineRootNode. When true, the {@code @Cached resolve} unwraps
+     * the trampoline at specialization time — see
+     * {@link #resolveScalarTarget}. For self-recursive functions like fib,
+     * this eliminates the trampoline hop that the emit-time bypass can't
+     * remove (inner target null during BDSL construction). Saves one frame
+     * allocation + one DirectCallNode dispatch per non-inlined recursive
+     * call.
      */
     @Operation
     @ConstantOperand(type = CallTarget.class)
+    @ConstantOperand(type = boolean.class)
     public static final class CallDirect1 {
-        private static final Object[] ONE = new Object[1];
-
-        @Specialization(guards = "callNode.getCallTarget() == target")
+        @Specialization(guards = "callNode.getCallTarget() == resolved")
         public static Object doCached(
                 CallTarget target,
+                boolean canBypass,
                 Object arg,
-                @Cached("create(target)") DirectCallNode callNode) {
+                @Cached("resolve(target, canBypass)") CallTarget resolved,
+                @Cached("create(resolved)") DirectCallNode callNode) {
             return callNode.call(arg);
         }
 
         @Specialization(replaces = "doCached")
         public static Object doIndirect(
                 CallTarget target,
+                boolean canBypass,
                 Object arg,
                 @Cached IndirectCallNode indirectCallNode) {
-            return indirectCallNode.call(target, arg);
+            return indirectCallNode.call(resolve(target, canBypass), arg);
+        }
+
+        static CallTarget resolve(CallTarget t, boolean canBypass) {
+            return resolveScalarTarget(t, canBypass);
         }
     }
 
@@ -583,23 +657,31 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     @ConstantOperand(type = CallTarget.class)
+    @ConstantOperand(type = boolean.class)
     public static final class CallDirect2 {
-        @Specialization(guards = "callNode.getCallTarget() == target")
+        @Specialization(guards = "callNode.getCallTarget() == resolved")
         public static Object doCached(
                 CallTarget target,
+                boolean canBypass,
                 Object arg0,
                 Object arg1,
-                @Cached("create(target)") DirectCallNode callNode) {
+                @Cached("resolve(target, canBypass)") CallTarget resolved,
+                @Cached("create(resolved)") DirectCallNode callNode) {
             return callNode.call(arg0, arg1);
         }
 
         @Specialization(replaces = "doCached")
         public static Object doIndirect(
                 CallTarget target,
+                boolean canBypass,
                 Object arg0,
                 Object arg1,
                 @Cached IndirectCallNode indirectCallNode) {
-            return indirectCallNode.call(target, arg0, arg1);
+            return indirectCallNode.call(resolve(target, canBypass), arg0, arg1);
+        }
+
+        static CallTarget resolve(CallTarget t, boolean canBypass) {
+            return resolveScalarTarget(t, canBypass);
         }
     }
 
@@ -609,25 +691,33 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     @ConstantOperand(type = CallTarget.class)
+    @ConstantOperand(type = boolean.class)
     public static final class CallDirect3 {
-        @Specialization(guards = "callNode.getCallTarget() == target")
+        @Specialization(guards = "callNode.getCallTarget() == resolved")
         public static Object doCached(
                 CallTarget target,
+                boolean canBypass,
                 Object arg0,
                 Object arg1,
                 Object arg2,
-                @Cached("create(target)") DirectCallNode callNode) {
+                @Cached("resolve(target, canBypass)") CallTarget resolved,
+                @Cached("create(resolved)") DirectCallNode callNode) {
             return callNode.call(arg0, arg1, arg2);
         }
 
         @Specialization(replaces = "doCached")
         public static Object doIndirect(
                 CallTarget target,
+                boolean canBypass,
                 Object arg0,
                 Object arg1,
                 Object arg2,
                 @Cached IndirectCallNode indirectCallNode) {
-            return indirectCallNode.call(target, arg0, arg1, arg2);
+            return indirectCallNode.call(resolve(target, canBypass), arg0, arg1, arg2);
+        }
+
+        static CallTarget resolve(CallTarget t, boolean canBypass) {
+            return resolveScalarTarget(t, canBypass);
         }
     }
 

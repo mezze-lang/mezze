@@ -158,9 +158,23 @@ object EmbeddedExec {
             .apply { if (traceInlining && jitCapable) option("engine.TraceCompilationDetails", "true") }
             .apply { if (traceTTI && jitCapable) option("engine.TraceTransferToInterpreter", "true") }
             .apply { if (osrThreshold != null && jitCapable) option("engine.OSRCompilationThreshold", osrThreshold.toString()) }
+            // Aggressive compilation thresholds. Mezze's static type system
+            // means call-site types stabilize at invocation #1, so the JIT's
+            // profiling data is good enough at low iteration counts. Defaults
+            // (~64 Tier 1, ~10000 Tier 2) waste hundreds of milliseconds in
+            // unoptimized code. Measured on fib(35)+fib(38): ~8% wall-time
+            // reduction with these settings.
+            .apply {
+                if (jitCapable && !jitDisabled) {
+                    option("engine.FirstTierCompilationThreshold", "16")
+                    option("engine.LastTierCompilationThreshold", "100")
+                    option("engine.SingleTierCompilationThreshold", "32")
+                }
+            }
             // MEZZE_ENGINE_OPTS="key1=val1,key2=val2" → pass arbitrary engine
             // options through to Truffle. For perf experimentation without
             // recompiling (e.g. "engine.Inlining=false,engine.SingleTierCompilationThreshold=50000").
+            // Options set here OVERRIDE the defaults above.
             .apply {
                 System.getenv("MEZZE_ENGINE_OPTS")?.takeIf { it.isNotBlank() }?.let { raw ->
                     for (pair in raw.split(",")) {
