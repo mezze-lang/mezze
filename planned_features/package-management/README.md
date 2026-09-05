@@ -115,9 +115,13 @@ identical to the lock.
   shared content store `~/.mezze/store/<sha256>/` (deduped across all projects;
   nested tarballs flattened), and symlinks `.deps/mezze/<name>-<version>` into it —
   same usable shape as path deps. `MEZZE_STORE_DIR` overrides the store root.
-- **P3 — transitive deps + lockfile graph.** Resolve deps-of-deps; lock the full
-  graph; detect/handle hash conflicts (content-addressing makes most of these
-  non-conflicts).
+- **P3 — transitive deps. ✅ (resolution) DONE.** A single unified graph walk
+  resolves **both** local `path` and remote `url#sha256` deps, transitively: each
+  dep is linked into its declarer's `.deps/mezze/`, and a registry dep's own
+  sub-deps land in *its* content-store entry's `.deps/` (shared, since a package's
+  deps are a pure function of the package). Diamonds dedup, cycles terminate.
+  Remaining: a full lockfile *graph* (today the lock records the registry deps
+  encountered, not yet the complete transitive tree with integrity per edge).
 - **P4 — polish.** `mez add`, global dedup + `mez toolchain/store gc`, `mez vendor`.
 - **Later (not focus).** GitHub-release tarballs + `versions.json` as one convenient
   source of `url#sha256` deps.

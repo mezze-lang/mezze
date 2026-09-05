@@ -108,4 +108,34 @@ class SyncRegistryDepsTest {
         assertNull(depLink(app, "greet"), "a hash-mismatched dep must not be linked")
         assertFalse(File(store, wrong).exists(), "store must not contain the rejected hash")
     }
+
+    @Test
+    fun `transitive remote dep lands in the store entry's own deps`(@TempDir tmp: Path) {
+        val root = tmp.toFile()
+        val store = File(root, "store")
+
+        // leaf (no deps) -> tarball + hash
+        val leafSrc = File(root, "leaf-src").also { pkg(it, "leaf") }
+        val leafTar = File(root, "leaf.tar.gz").also { tarGz(leafSrc, it) }
+        val leafHash = sha256(leafTar)
+
+        // mid depends on leaf (registry) -> tarball + hash
+        val midSrc = File(root, "mid-src").also { pkg(it, "mid", mapOf("leaf" to "${leafTar.toURI()}#sha256:$leafHash")) }
+        val midTar = File(root, "mid.tar.gz").also { tarGz(midSrc, it) }
+        val midHash = sha256(midTar)
+
+        // app depends on mid (registry)
+        val app = File(root, "app").also { pkg(it, "app", mapOf("mid" to "${midTar.toURI()}#sha256:$midHash")) }
+
+        SyncCommand().execute(emptyList(), currentDir = app, storeRootOverride = store)
+
+        // app -> mid
+        assertNotNull(depLink(app, "mid"), "app should link mid")
+        assertTrue(File(store, "$midHash/Mezze.toml").exists())
+        // mid (in the store) -> leaf, linked into mid's OWN store-entry .deps (shared)
+        val midLeaf = File(store, "$midHash/.deps/mezze").listFiles()?.firstOrNull { it.name.startsWith("leaf-") }
+        assertNotNull(midLeaf, "mid's store entry should transitively link leaf")
+        assertEquals(File(store, leafHash).canonicalFile, midLeaf!!.canonicalFile)
+        assertTrue(File(store, "$leafHash/Mezze.toml").exists())
+    }
 }
