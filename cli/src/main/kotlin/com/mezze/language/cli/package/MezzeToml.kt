@@ -40,7 +40,16 @@ data class MezzeToml(
     val build: BuildConfig = BuildConfig(),
     val dependencies: Map<String, String> = emptyMap(),
     @SerialName("dev-dependencies")
-    val devDependencies: Map<String, String> = emptyMap()
+    val devDependencies: Map<String, String> = emptyMap(),
+    /**
+     * Local path dependencies — `name = "../relative/or/abs/path"` pointing at
+     * another Mezze package on disk. `mez sync` symlinks each into
+     * `.deps/mezze/<name>-<version>/`, where the module resolver already looks,
+     * so `use <name>::...` resolves against live source (edits reflect
+     * immediately). Registry deps (URL#sha256) stay in `[dependencies]`.
+     */
+    @SerialName("path-dependencies")
+    val pathDependencies: Map<String, String> = emptyMap()
 )
 
 /**

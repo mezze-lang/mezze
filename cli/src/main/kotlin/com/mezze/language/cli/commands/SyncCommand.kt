@@ -42,30 +42,46 @@ class SyncCommand {
             return
         }
 
-        // Combine dependencies and dev-dependencies
+        // Registry deps (URL#sha256) + local path deps.
         val allDependencies = manifest.dependencies + manifest.devDependencies
+        val pathDeps = manifest.pathDependencies
 
-        if (allDependencies.isEmpty()) {
+        if (allDependencies.isEmpty() && pathDeps.isEmpty()) {
             println("✅ No dependencies to sync.")
             println()
-            println("💡 Add dependencies with: mezze add <url>")
+            println("💡 Add a local dep under [path-dependencies] (name = \"../path\"),")
+            println("   or a registry dep under [dependencies] (name = \"<url>#sha256:<hash>\").")
             return
         }
 
-        println("📦 Syncing ${allDependencies.size} package(s)...")
+        println("📦 Syncing ${allDependencies.size + pathDeps.size} package(s)...")
         println()
 
-        // Create directories
-        val packagesDir = File(currentDir, "mezze_packages")
+        // Everything is materialized into `.deps/mezze/<name>-<version>/` — exactly
+        // where ModuleResolver.resolveModuleFile searches, so `use <name>::...`
+        // resolves with no further wiring.
+        val packagesDir = File(currentDir, ".deps/mezze")
         val cacheDir = File(System.getProperty("user.home"), ".mez/cache")
 
         if (isClean && packagesDir.exists()) {
-            println("🧹 Cleaning mezze_packages/...")
+            println("🧹 Cleaning .deps/mezze/...")
             packagesDir.deleteRecursively()
         }
 
         packagesDir.mkdirs()
         cacheDir.mkdirs()
+
+        // --- local path dependencies: symlink so edits to the target are live ---
+        for ((depName, rawPath) in pathDeps) {
+            println("🔗 Linking $depName (path = \"$rawPath\")...")
+            try {
+                linkPathDependency(currentDir, packagesDir, depName, rawPath)
+            } catch (e: Exception) {
+                println("❌ Error linking $depName:")
+                println("   ${e.message}")
+            }
+            println()
+        }
 
         // Download and extract packages
         val downloader = PackageDownloader(cacheDir)
@@ -164,14 +180,56 @@ class SyncCommand {
             }
 
             println()
-            println("🎉 Successfully synced ${lockedPackages.size} package(s)!")
+            println("🎉 Sync complete: ${pathDeps.size} local + ${lockedPackages.size} registry package(s).")
             println()
-            println("📂 Packages installed to: ${packagesDir.absolutePath}")
+            println("📂 Dependencies at: ${packagesDir.absolutePath}")
 
         } finally {
             downloader.close()
         }
     }
+
+    /**
+     * Materialize a local path dependency into `.deps/mezze/<name>-<version>/`
+     * as a **symlink** to the target package — no copy, so edits to the target
+     * reflect immediately, and the module resolver finds it under the dir it
+     * already searches.
+     */
+    private fun linkPathDependency(
+        currentDir: File,
+        packagesDir: File,
+        depName: String,
+        rawPath: String,
+    ) {
+        val target = File(rawPath).let { if (it.isAbsolute) it else File(currentDir, rawPath) }.canonicalFile
+        if (!target.isDirectory) {
+            throw IllegalArgumentException("path '$rawPath' is not a directory (resolved: $target)")
+        }
+        val depManifest = File(target, "Mezze.toml")
+        if (!depManifest.exists()) {
+            throw IllegalArgumentException("no Mezze.toml in '$target' — not a Mezze package")
+        }
+        val version = readPackageVersion(depManifest) ?: "0.0.0"
+
+        // Drop any stale <name>-* entries (a version bump shouldn't leave dupes).
+        // Delete symlinks as links (never recurse into the target and wipe its source!).
+        packagesDir.listFiles { f -> f.name.startsWith("$depName-") }?.forEach { stale ->
+            val p = stale.toPath()
+            if (java.nio.file.Files.isSymbolicLink(p)) java.nio.file.Files.delete(p)
+            else stale.deleteRecursively()
+        }
+
+        java.nio.file.Files.createSymbolicLink(File(packagesDir, "$depName-$version").toPath(), target.toPath())
+        println("  ✅ $depName-$version -> ${target.path}")
+    }
+
+    /** Best-effort read of `[package].version` from a dependency's Mezze.toml. */
+    private fun readPackageVersion(manifest: File): String? =
+        try {
+            Toml.decodeFromString(MezzeToml.serializer(), manifest.readText()).`package`.version
+        } catch (e: Exception) {
+            null
+        }
 
     /**
      * Extract version from URL
