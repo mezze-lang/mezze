@@ -13,7 +13,11 @@ import java.io.File
  */
 class SyncCommand {
 
-    fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
+    fun execute(
+        args: List<String>,
+        currentDir: File = File(System.getProperty("user.dir")),
+        storeRootOverride: File? = null,
+    ) {
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
@@ -63,6 +67,13 @@ class SyncCommand {
         val packagesDir = File(currentDir, ".deps/mezze")
         val cacheDir = File(System.getProperty("user.home"), ".mez/cache")
 
+        // Global content store: extracted packages keyed by sha256, shared across ALL
+        // projects (fetch once, ever). Each project's .deps/mezze just symlinks into it.
+        // Override with MEZZE_STORE_DIR (used by tests).
+        val storeRoot = storeRootOverride
+            ?: System.getenv("MEZZE_STORE_DIR")?.takeIf { it.isNotBlank() }?.let { File(it) }
+            ?: File(System.getProperty("user.home"), ".mezze/store")
+
         if (isClean && packagesDir.exists()) {
             println("🧹 Cleaning .deps/mezze/...")
             packagesDir.deleteRecursively()
@@ -88,70 +99,44 @@ class SyncCommand {
 
         try {
             for ((packageName, fullUrl) in allDependencies) {
-                println("📦 Processing $packageName...")
+                println("📦 $packageName (registry)...")
 
-                // Parse URL
                 val (url, checksum) = try {
                     parseDependencyUrl(fullUrl)
                 } catch (e: IllegalArgumentException) {
-                    println("❌ Error in $packageName:")
-                    println(e.message)
+                    println((e.message ?: "invalid dependency URL").prependIndent("  "))
                     println()
                     continue
                 }
 
-                // Extract version from URL
-                val version = extractVersionFromUrl(url)
-
-                // Download
-                val archiveFile = try {
-                    downloader.downloadPackage(packageName, url, checksum)
-                } catch (e: PackageDownloadException) {
-                    println(e.message)
-                    println()
-                    continue
-                } catch (e: Exception) {
-                    println("❌ Error downloading $packageName:")
-                    println(e.message)
-                    println()
-                    continue
-                }
-
-                // Extract
-                val packageDir = File(packagesDir, "$packageName-$version")
-
-                // Skip extraction if already extracted (unless --clean)
-                if (packageDir.exists() && !isClean) {
-                    println("  ✅ Already extracted $packageName")
+                // Content-addressed store entry — shared across all projects.
+                val storeDir = File(storeRoot, checksum)
+                if (File(storeDir, "Mezze.toml").exists() && !isClean) {
+                    println("  ♻️  cached (${checksum.take(12)}…)")
                 } else {
-                    if (packageDir.exists()) {
-                        packageDir.deleteRecursively()
-                    }
-
-                    packageDir.mkdirs()
-
-                    try {
-                        archiveHandler.extractTarGz(archiveFile, packageDir)
-                    } catch (e: ArchiveException) {
-                        println(e.message)
+                    val archiveFile = try {
+                        downloader.downloadPackage(packageName, url, checksum)
+                    } catch (e: Exception) {
+                        println((e.message ?: "download failed").prependIndent("  "))
                         println()
                         continue
                     }
-
-                    // Find package root (might be nested in a directory)
-                    val packageRoot = archiveHandler.findPackageRoot(packageDir)
-
-                    // Validate structure
                     try {
-                        archiveHandler.validatePackageStructure(packageRoot, packageName)
+                        extractIntoStore(archiveHandler, archiveFile, storeDir, packageName)
                     } catch (e: ArchiveException) {
-                        println(e.message)
+                        println((e.message ?: "extract failed").prependIndent("  "))
                         println()
-                        // Don't skip - package might still be usable
+                        continue
                     }
                 }
 
-                // Add to lock file
+                // Prefer the package's own declared version for the .deps entry name.
+                val version = readPackageVersion(File(storeDir, "Mezze.toml")) ?: extractVersionFromUrl(url)
+
+                // Symlink this project's .deps/mezze/<name>-<version> -> the store entry.
+                materializeSymlink(packagesDir, packageName, storeDir, version)
+                println("  ✅ $packageName-$version -> ${storeDir.path}")
+
                 lockedPackages.add(
                     LockedPackage(
                         name = packageName,
@@ -160,7 +145,6 @@ class SyncCommand {
                         checksum = "sha256:$checksum"
                     )
                 )
-
                 println()
             }
 
@@ -256,6 +240,36 @@ class SyncCommand {
         }
         java.nio.file.Files.createSymbolicLink(File(packagesDir, "$name-$version").toPath(), target.toPath())
     }
+
+    /**
+     * Extract a verified tarball into the content store at [storeDir], atomically:
+     * unpack to a temp dir, find the package root (handles a single nested top-level
+     * dir like GitHub archives), validate it has a Mezze.toml, then move it into
+     * place. On any failure the temp dir is cleaned and [storeDir] is left untouched.
+     */
+    private fun extractIntoStore(archive: ArchiveHandler, archiveFile: File, storeDir: File, packageName: String) {
+        val tmp = File(storeDir.parentFile, ".tmp-${storeDir.name}")
+        tmp.deleteRecursively()
+        tmp.mkdirs()
+        try {
+            archive.extractTarGz(archiveFile, tmp, showProgress = false)
+            val root = archive.findPackageRoot(tmp)
+            archive.validatePackageStructure(root, packageName)   // throws if no Mezze.toml
+            if (storeDir.exists()) storeDir.deleteRecursively()
+            storeDir.parentFile.mkdirs()
+            java.nio.file.Files.move(root.toPath(), storeDir.toPath())
+        } finally {
+            tmp.deleteRecursively()
+        }
+    }
+
+    /** Best-effort read of `[package].version` from a package's Mezze.toml. */
+    private fun readPackageVersion(manifest: File): String? =
+        try {
+            Toml.decodeFromString(MezzeToml.serializer(), manifest.readText()).`package`.version
+        } catch (e: Exception) {
+            null
+        }
 
     /**
      * Extract version from URL
