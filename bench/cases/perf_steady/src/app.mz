@@ -1,0 +1,17 @@
+use std::effects::log::{println, Console}
+use std::collections::iter
+
+# filter_map_fold — the fairest comparison
+let filter_map_fold = {n: Int} -> iter::range { start = 0, end = n }
+    .filter { p = {x: Int} -> x % 2 == 0 }
+    .map { f = {x: Int} -> x * 2 }
+    .fold { init = 0, f = {acc: Int, x: Int} -> acc + x }
+
+# warmup + 5 timed runs in one process (JIT warms after first few)
+let main = {} -> perform Console in do
+    let w1 = filter_map_fold { n = 100000000 }
+    let w2 = filter_map_fold { n = 100000000 }
+    let w3 = filter_map_fold { n = 100000000 }
+    let r4 = filter_map_fold { n = 100000000 }
+    let r5 = filter_map_fold { n = 100000000 }
+    println { msg = "fmf 100M = $(r5.to_str{})" }

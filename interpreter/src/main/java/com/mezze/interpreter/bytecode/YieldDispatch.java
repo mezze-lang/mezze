@@ -189,6 +189,10 @@ public final class YieldDispatch {
 
     private static volatile MezzeFunction CACHED_FALLTHROUGH_RESUME_FN = null;
 
+    public static MezzeFunction fallThroughResumeFnPublic() {
+        return fallThroughResumeFn();
+    }
+
     private static MezzeFunction fallThroughResumeFn() {
         MezzeFunction cached = CACHED_FALLTHROUGH_RESUME_FN;
         if (cached != null) return cached;

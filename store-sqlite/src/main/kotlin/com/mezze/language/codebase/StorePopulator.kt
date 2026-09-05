@@ -809,12 +809,15 @@ object StorePopulator {
                         collectEdgesFromNode(s.end, report)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectEdgesFromNode(s.xs, report)
+                    is com.mezze.language.truffleir.SourceIR.RawList -> collectEdgesFromNode(s.xs, report)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectEdgesFromNode(s.expr, report)
                 }
                 for (stage in node.stages) {
                     when (stage) {
                         is com.mezze.language.truffleir.StageIR.Map -> report(stage.f.functionHash.hex, EdgeKind.CALLS)
                         is com.mezze.language.truffleir.StageIR.Filter -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
+                        is com.mezze.language.truffleir.StageIR.Take -> collectEdgesFromNode(stage.n, report)
+                        is com.mezze.language.truffleir.StageIR.Drop -> collectEdgesFromNode(stage.n, report)
                     }
                 }
                 when (val sk = node.sink) {
@@ -823,7 +826,14 @@ object StorePopulator {
                         report(sk.f.functionHash.hex, EdgeKind.CALLS)
                     }
                     is com.mezze.language.truffleir.SinkIR.ForEach -> report(sk.f.functionHash.hex, EdgeKind.CALLS)
-                    com.mezze.language.truffleir.SinkIR.Sum -> {}
+                    is com.mezze.language.truffleir.SinkIR.Reduce -> report(sk.f.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.Any -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.All -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.Find -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
+                    com.mezze.language.truffleir.SinkIR.Sum,
+                    com.mezze.language.truffleir.SinkIR.Count,
+                    com.mezze.language.truffleir.SinkIR.ToSeq,
+                    com.mezze.language.truffleir.SinkIR.ToList -> {}
                 }
             }
         }

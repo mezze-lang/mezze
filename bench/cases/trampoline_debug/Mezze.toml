@@ -1,0 +1,12 @@
+[package]
+name = "trampoline_debug"
+version = "0.1.0"
+
+[[app]]
+name = "trampoline_debug"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

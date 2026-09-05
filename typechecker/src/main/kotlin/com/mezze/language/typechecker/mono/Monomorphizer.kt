@@ -16,6 +16,7 @@ import com.mezze.language.typedast.TypedExpr
 import com.mezze.language.typedast.TypedFieldAccess
 import com.mezze.language.typedast.TypedLetDecl
 import com.mezze.language.typedast.TypedVar
+import com.mezze.language.typedast.forEachChild
 import java.util.ArrayDeque
 
 /**
@@ -332,18 +333,23 @@ class Monomorphizer(
             // the rewrite of SEED sites (user call sites) via
             // `stripMapForSites` returned in Result — MonoDriver consumes
             // it to also strip fields at seed callers.
-            // #424 Piece 5 gated: dead-closure-param stripping breaks
-            // ~130 collection HOF tests (all fold/filter/all/reduce
-            // paths) with FrameSlotTypeException on unrelated slots.
-            // Root cause is that the stripped record ABI at some call
-            // sites disagrees with the callee's declared paramNames —
-            // strict investigation deferred. Off by default; opt in
-            // with MEZZE_MONO_STRIP=1 for local perf experiments.
+            // #424 Piece 5: strip dead closure params. Only params that
+            // Piece 3 (LambdaSubstitution) actually spliced are dead —
+            // params forwarded to natives (e.g. `p` in seq::filter →
+            // __native_seq_filter) are still live and must NOT be stripped.
+            // Gated behind MEZZE_MONO_STRIP=1 until we're confident the
+            // liveness scan catches all edge cases.
             val stripEnabled = System.getenv("MEZZE_MONO_STRIP") == "1"
             val stripMap = HashMap<Hash, Set<String>>()
             if (stripEnabled) {
                 for ((sh, spec) in specializations) {
-                    if (spec.closureArgs.isNotEmpty()) stripMap[sh] = spec.closureArgs.keys
+                    if (spec.closureArgs.isNotEmpty()) {
+                        val stillLive = referencedClosureParams(
+                            spec.specializedBody, spec.closureArgs.keys,
+                        )
+                        val dead = spec.closureArgs.keys - stillLive
+                        if (dead.isNotEmpty()) stripMap[sh] = dead
+                    }
                 }
             }
             val rewritten = HashMap<Hash, Specialization>(specializations.size)
@@ -508,6 +514,36 @@ class Monomorphizer(
     ): com.mezze.language.typedast.TypedRecordEntry = when (entry) {
         is com.mezze.language.typedast.TypedRecordEntry.Field -> entry.copy(value = go(entry.value))
         is com.mezze.language.typedast.TypedRecordEntry.Spread -> entry.copy(expr = go(entry.expr))
+    }
+
+    /** Collect closure-param names that are still referenced in [body].
+     *  A param is "still live" if any TypedVar with a Param/Local binding
+     *  and a name in [candidates] exists anywhere in the body tree.
+     *  This lets Piece 5 strip only the params that Piece 3 actually
+     *  made dead (beta-reduced away), leaving native-delegated params
+     *  (e.g. `p` in seq::filter → __native_seq_filter) untouched. */
+    private fun referencedClosureParams(
+        body: TypedExpr,
+        candidates: Set<String>,
+    ): Set<String> {
+        val found = HashSet<String>()
+        fun walk(e: TypedExpr) {
+            if (found.size == candidates.size) return
+            if (e is TypedVar
+                && e.name in candidates
+                && (e.binding is BindingRef.Param || e.binding is BindingRef.Local)
+            ) {
+                found.add(e.name)
+                return
+            }
+            e.forEachChild { walk(it) }
+        }
+        if (body is com.mezze.language.typedast.TypedLambda) {
+            walk(body.body)
+        } else {
+            walk(body)
+        }
+        return found
     }
 
     /** Post-pass: rewrite `TypedVar(BindingRef.ByHash(h), …)` inside a

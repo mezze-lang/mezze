@@ -154,13 +154,7 @@ pub let fold
   : { xs: ['a], init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> }
   -> 'b <...>
   = { xs, init, f } ->
-    fold_go {
-      xs = xs,
-      i = 0,
-      n = __native_seq_size { xs = xs },
-      acc = init,
-      f = f,
-    }
+    __native_seq_fold { xs = xs, init = init, f = f }
 
 ## Reduces elements using f, returning None if empty.
 pub let reduce

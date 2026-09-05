@@ -340,6 +340,11 @@ sealed interface PatternIR {
     val stages: List<StageIR>,
     val sink: SinkIR,
     override val src: SourceInfo,
+    /** Original IR node before canonicalization. When the BDSL emitter
+     *  can't classify the fused chain (e.g. non-trivial fold body or
+     *  complex predicate), it falls back to emitting this node instead
+     *  of crashing. Null only for legacy serialized data. */
+    val fallback: NodeIR? = null,
 ) : NodeIR
 
 /** Where the iterator's elements come from. */
@@ -350,6 +355,10 @@ sealed interface SourceIR {
     /** Any expression evaluating to a materialized Seq at runtime. Uses
      *  SeqSize/SeqGet indexed loop in the emit. */
     @Serializable data class RawSeq(val xs: NodeIR) : SourceIR
+    /** Any expression evaluating to a materialized List at runtime. The
+     *  emit path converts to Object[] via list.toArray() then iterates
+     *  by index — same indexed loop as RawSeq but with a toArray() step. */
+    @Serializable data class RawList(val xs: NodeIR) : SourceIR
     /** Fall-through — canonicalizer refuses to fuse (unknown expression,
      *  descriptor we couldn't peel through). Peel MUST reject on Opaque
      *  and let ability-dispatch handle it. */
@@ -361,6 +370,8 @@ sealed interface SourceIR {
 sealed interface StageIR {
     @Serializable data class Map(val f: MakeLambdaIR) : StageIR
     @Serializable data class Filter(val p: MakeLambdaIR) : StageIR
+    @Serializable data class Take(val n: NodeIR) : StageIR
+    @Serializable data class Drop(val n: NodeIR) : StageIR
 }
 
 /** How elements are combined. */
@@ -377,6 +388,20 @@ sealed interface SinkIR {
      * treats this identically to Fold with an ADD folder over init=0.
      */
     @Serializable data object Sum : SinkIR
+    /** Count — increments a counter per element. Result is Int. */
+    @Serializable data object Count : SinkIR
+    /** Reduce — fold without init; first element is the initial accumulator. */
+    @Serializable data class Reduce(val f: MakeLambdaIR) : SinkIR
+    /** Any — short-circuit: return true on first predicate match. */
+    @Serializable data class Any(val p: MakeLambdaIR) : SinkIR
+    /** All — short-circuit: return false on first predicate failure. */
+    @Serializable data class All(val p: MakeLambdaIR) : SinkIR
+    /** Find — short-circuit: return Some(x) on first predicate match, None otherwise. */
+    @Serializable data class Find(val p: MakeLambdaIR) : SinkIR
+    /** ToSeq — materialize into a Seq (builder pattern). */
+    @Serializable data object ToSeq : SinkIR
+    /** ToList — materialize into a List (builder pattern). */
+    @Serializable data object ToList : SinkIR
 }
 
 // Effects

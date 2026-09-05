@@ -1,0 +1,13 @@
+use std::effects::log::{println, Console}
+
+let fib = {n} -> if n < 2 then n else fib {n = n - 1} + fib {n = n - 2}
+
+let main = {} -> perform Console in do
+    # Warmup: fib(35) gives ~29M calls, triggers Tier 1 + Tier 2
+    let _ = fib {n = 35}
+    # Second warmup to let background compilation finish
+    let _ = fib {n = 35}
+    println { msg = "warmup done" }
+    # Measurement
+    let a = fib {n = 38}
+    println { msg = "fib(38) = $(a.to_str{})" }

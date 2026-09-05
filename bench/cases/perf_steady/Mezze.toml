@@ -1,0 +1,12 @@
+[package]
+name = "perf_steady"
+version = "0.1.0"
+
+[[app]]
+name = "perf_steady"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

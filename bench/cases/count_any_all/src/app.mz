@@ -1,0 +1,49 @@
+use std::effects::log::{println, Console}
+use std::collections::iter
+
+## count with predicate: number of even numbers in 0..n
+let compute_count = {n: Int} ->
+    iter::count { it = iter::range { start = 0, end = n }, p = {x: Int} -> x % 2 == 0 }
+
+## any: is there any element > 50 in 0..n?
+let compute_any = {n: Int} ->
+    iter::any { it = iter::range { start = 0, end = n }, p = {x: Int} -> x > 50 }
+
+## all: are all elements < 2000000 in 0..n?
+let compute_all = {n: Int} ->
+    iter::all { it = iter::range { start = 0, end = n }, p = {x: Int} -> x < 2000000 }
+
+## any with filter: any even number > 50?
+let compute_any_filter = {n: Int} ->
+    iter::any {
+        it = iter::filter { it = iter::range { start = 0, end = n }, p = {x: Int} -> x % 2 == 0 },
+        p = {x: Int} -> x > 50
+    }
+
+## all with map: are all doubled values < 4000000?
+let compute_all_map = {n: Int} ->
+    iter::all {
+        it = iter::map { it = iter::range { start = 0, end = n }, f = {x: Int} -> x * 2 },
+        p = {x: Int} -> x < 4000000
+    }
+
+## filter + map + fold: sum of doubled multiples-of-3
+let compute_filter_map_fold = {n: Int} -> do
+    let filtered = iter::filter { it = iter::range { start = 0, end = n }, p = {x: Int} -> x % 3 == 0 }
+    let mapped = iter::map { it = filtered, f = {x: Int} -> x * 2 }
+    iter::fold { it = mapped, init = 0, f = {acc: Int, x: Int} -> acc + x }
+
+let main = {} -> perform Console in do
+    let n = 1000000
+    let c = compute_count { n = n }
+    println { msg = "count evens = $(c.to_str{})" }
+    let a = compute_any { n = n }
+    println { msg = "any > 50 = $(a.to_str{})" }
+    let al = compute_all { n = n }
+    println { msg = "all < 2000000 = $(al.to_str{})" }
+    let af = compute_any_filter { n = n }
+    println { msg = "any even > 50 = $(af.to_str{})" }
+    let am = compute_all_map { n = n }
+    println { msg = "all doubled < 4000000 = $(am.to_str{})" }
+    let fmf = compute_filter_map_fold { n = n }
+    println { msg = "filter.map.fold = $(fmf.to_str{})" }

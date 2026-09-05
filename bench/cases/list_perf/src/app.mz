@@ -1,0 +1,84 @@
+## List performance benchmark
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::list
+use std::collections::seq
+
+let n = 100000
+
+## Build a list of n elements
+let build_list = {size: Int} -> do
+    let s = seq::range { start = 0, end = size }
+    list::from_seq { xs = s }
+
+let bench_list_sum = {xs: List Int} -> list::sum { xs = xs }
+
+let bench_list_fold = {xs: List Int} -> list::fold_left { xs = xs, init = 0, f = {acc, x} -> acc + x }
+
+let bench_list_map = {xs: List Int} -> list::size { xs = list::map { xs = xs, f = {x} -> x * 2 } }
+
+let bench_list_filter = {xs: List Int} -> list::size { xs = list::filter { xs = xs, p = {x} -> x % 2 == 0 } }
+
+let bench_list_any = {xs: List Int} -> match list::any { xs = xs, p = {x} -> x > (n - 10) } is
+    True -> 1
+    False -> 0
+
+let bench_list_all = {xs: List Int} -> match list::all { xs = xs, p = {x} -> x >= 0 } is
+    True -> 1
+    False -> 0
+
+let bench_list_find = {xs: List Int} -> match list::find { xs = xs, p = {x} -> x > (n - 10) } is
+    Some { val } -> val
+    None -> 0 - 1
+
+let bench_list_reverse = {xs: List Int} -> list::size { xs = list::reverse { xs = xs } }
+
+let bench_list_contains = {xs: List Int} -> match list::contains { xs = xs, x = n - 1 } is
+    True -> 1
+    False -> 0
+
+let time_it = {label: Str, f: {} -> Int} -> perform Console in perform SystemTime in do
+    ## 3 warmup
+    let w0 = f {}
+    let w1 = f {}
+    let w2 = f {}
+    ## 5 measured
+    let t0 = monotonic {}
+    let r0 = f {}
+    let e0 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t0 } }
+
+    let t1 = monotonic {}
+    let r1 = f {}
+    let e1 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t1 } }
+
+    let t2 = monotonic {}
+    let r2 = f {}
+    let e2 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t2 } }
+
+    let t3 = monotonic {}
+    let r3 = f {}
+    let e3 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t3 } }
+
+    let t4 = monotonic {}
+    let r4 = f {}
+    let e4 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t4 } }
+
+    let avg = (e0 + e1 + e2 + e3 + e4) / 5
+    let avg_ms = avg / 1000000
+    println { msg = "$(label): avg=$(avg_ms.to_str{})ms  [$(e0.to_str{}) $(e1.to_str{}) $(e2.to_str{}) $(e3.to_str{}) $(e4.to_str{})]ns  r=$(r0.to_str{})" }
+
+let main = {} -> perform Console in perform SystemTime in do
+    println { msg = "== Mezze List Perf N=$(n.to_str{}) ==" }
+    let xs = build_list { size = n }
+    println { msg = "list built: size=$(list::size { xs = xs }.to_str{})" }
+    let _1 = time_it { label = "list_sum       ", f = {} -> bench_list_sum { xs = xs } }
+    let _2 = time_it { label = "list_fold(+)   ", f = {} -> bench_list_fold { xs = xs } }
+    let _3 = time_it { label = "list_map(*2)   ", f = {} -> bench_list_map { xs = xs } }
+    let _4 = time_it { label = "list_filter(%) ", f = {} -> bench_list_filter { xs = xs } }
+    let _5 = time_it { label = "list_any       ", f = {} -> bench_list_any { xs = xs } }
+    let _6 = time_it { label = "list_all       ", f = {} -> bench_list_all { xs = xs } }
+    let _7 = time_it { label = "list_find      ", f = {} -> bench_list_find { xs = xs } }
+    let _8 = time_it { label = "list_reverse   ", f = {} -> bench_list_reverse { xs = xs } }
+    let _9 = time_it { label = "list_contains  ", f = {} -> bench_list_contains { xs = xs } }
+    println { msg = "== done ==" }

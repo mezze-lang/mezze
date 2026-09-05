@@ -1,0 +1,9 @@
+use std::effects::log::{println, Console}
+
+let sum_to = {n} -> do
+    let go = {acc, i} -> if i > n then acc else go {acc = acc + i, i = i + 1}
+    go {acc = 0, i = 1}
+
+let main = {} -> perform Console in do
+    let result = sum_to {n = 10000000}
+    println { msg = "sum(10M) = $(result.to_str{})" }

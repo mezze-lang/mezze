@@ -1,8 +1,10 @@
 package com.mezze.interpreter.nodes.continuation;
 
 import com.mezze.interpreter.values.MezzeRecord;
+import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.utilities.CyclicAssumption;
 
 import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicLong;
@@ -68,6 +70,7 @@ public final class HandlerChainRegistry {
      * driver's stack, or {@code null}. Used by {@code EffectBindingNode} to
      * locate the fiber that owns the resume/abort handle stack.
      */
+    @TruffleBoundary
     public static HandlerChainRegistry dispatching() {
         return DISPATCH.get();
     }
@@ -75,7 +78,12 @@ public final class HandlerChainRegistry {
     /**
      * Mark this fiber as the one being dispatched. Returns the previously
      * pinned fiber so the caller can restore it via {@link #exitDispatch}.
+     *
+     * {@code @TruffleBoundary} — ThreadLocal.get()/set() reachability
+     * closure in native-image drags in every ThreadLocal supplier on the
+     * classpath (including Helidon's HashMap/Vector allocators). #402.
      */
+    @TruffleBoundary
     public HandlerChainRegistry enterDispatch() {
         HandlerChainRegistry prev = DISPATCH.get();
         DISPATCH.set(this);
@@ -83,6 +91,7 @@ public final class HandlerChainRegistry {
     }
 
     /** Counterpart to {@link #enterDispatch()}. */
+    @TruffleBoundary
     public static void exitDispatch(HandlerChainRegistry previous) {
         DISPATCH.set(previous);
     }
@@ -116,22 +125,40 @@ public final class HandlerChainRegistry {
     private static final ThreadLocal<java.util.ArrayDeque<HandlerChainEntry>>
         HANDLER_CHAIN = ThreadLocal.withInitial(java.util.ArrayDeque::new);
 
+    // Phase 5 — handler-chain-stable assumption.
+    // Invalidated on every push/pop so PerformD's cached specialization
+    // can detect when the handler set changes. CyclicAssumption supports
+    // multiple invalidation/re-acquire cycles across the compilation
+    // lifetime.
+    private static final CyclicAssumption HANDLER_CHAIN_STABLE =
+        new CyclicAssumption("handler-chain-stable");
+
+    @TruffleBoundary
+    public static Assumption getHandlerChainStableAssumption() {
+        return HANDLER_CHAIN_STABLE.getAssumption();
+    }
+
     /**
      * Push a handler with the content hash of the effect it implements.
      * The effect hash is required for correct dispatch when two effects in
      * scope declare ops with the same simple name (#246).
      */
+    @TruffleBoundary
     public static void pushHandlerOnChain(
             com.mezze.interpreter.values.MezzeRecord handler,
             com.mezze.language.typedast.Hash effectHash) {
         HANDLER_CHAIN.get().push(new HandlerChainEntry(handler, effectHash));
+        HANDLER_CHAIN_STABLE.invalidate();
     }
 
+    @TruffleBoundary
     public static void popHandlerOffChain() {
         HANDLER_CHAIN.get().pop();
+        HANDLER_CHAIN_STABLE.invalidate();
     }
 
     /** Current depth of the per-thread handler chain. */
+    @TruffleBoundary
     public static int handlerChainDepth() {
         return HANDLER_CHAIN.get().size();
     }
@@ -163,16 +190,19 @@ public final class HandlerChainRegistry {
      *  ArrayDeque entries. Identity-compared, never dereferenced. */
     private static final BdslHandleFrame NO_SCOPE_FRAME = new BdslHandleFrame(null, null);
 
+    @TruffleBoundary
     public static void enterBdslHandle() {
         D8_HANDLE_STACK.get().push(NO_SCOPE_FRAME);
     }
 
+    @TruffleBoundary
     public static void enterBdslHandleWithScope(Object scope, Object prevScope) {
         D8_HANDLE_STACK.get().push(
             scope == null && prevScope == null ? NO_SCOPE_FRAME
                 : new BdslHandleFrame(scope, prevScope));
     }
 
+    @TruffleBoundary
     public static void exitBdslHandle() {
         D8_HANDLE_STACK.get().pop();
     }
@@ -180,6 +210,7 @@ public final class HandlerChainRegistry {
     /** Peek the scope frame at the innermost live BDSL Handle, or null if
      *  that Handle has no scope hooks (common case). Called by
      *  PopHandlerChain before it pops the stack. */
+    @TruffleBoundary
     public static BdslHandleFrame peekBdslHandleScope() {
         var s = D8_HANDLE_STACK.get();
         if (s.isEmpty()) return null;
@@ -189,6 +220,7 @@ public final class HandlerChainRegistry {
 
     /** Peek the handler record on the top of the per-thread chain — used
      *  by PopHandlerChain to reach finalize_scope before popping. */
+    @TruffleBoundary
     public static com.mezze.interpreter.values.MezzeRecord peekTopHandlerRecord() {
         var chain = HANDLER_CHAIN.get();
         if (chain.isEmpty()) return null;
@@ -199,6 +231,7 @@ public final class HandlerChainRegistry {
     /** True when at least one BDSL Handle catch boundary is live on this
      *  thread, i.e. a PushHandlerChain has fired without a matching
      *  PopHandlerChain (in either the otherwise or catch branch). */
+    @TruffleBoundary
     public static boolean insideBdslHandle() {
         return !D8_HANDLE_STACK.get().isEmpty();
     }
@@ -213,6 +246,7 @@ public final class HandlerChainRegistry {
      * chain polluted for the next test. Truncating to a depth snapshot
      * makes the cleanup unconditional.
      */
+    @TruffleBoundary
     public static void truncateHandlerChainTo(int depth) {
         var chain = HANDLER_CHAIN.get();
         while (chain.size() > depth) chain.pop();
@@ -290,6 +324,7 @@ public final class HandlerChainRegistry {
      * the same thread when done (typically in a finally block). For
      * one-shot scope use, {@link #runWithHandlerChain} is safer.
      */
+    @TruffleBoundary
     public static void installHandlerChainEntries(HandlerChainEntry[] chain) {
         ArrayDeque<HandlerChainEntry> stack = HANDLER_CHAIN.get();
         // Push in reverse so the innermost (chain[0]) ends up on top.
@@ -298,6 +333,7 @@ public final class HandlerChainRegistry {
         }
     }
 
+    @TruffleBoundary
     public static void clearHandlerChain() {
         HANDLER_CHAIN.get().clear();
     }
@@ -309,6 +345,7 @@ public final class HandlerChainRegistry {
      * the coop scheduler runs spawned bodies on its driver thread, which
      * itself sits inside an outer perform).
      */
+    @TruffleBoundary
     public static void popHandlerChain(int count) {
         if (count <= 0) return;
         ArrayDeque<HandlerChainEntry> stack = HANDLER_CHAIN.get();
@@ -363,6 +400,7 @@ public final class HandlerChainRegistry {
      * after use. The pool is best-effort: nested dispatch fibers allocate
      * fresh (no recursive pool).
      */
+    @TruffleBoundary
     public static HandlerChainRegistry acquireDispatchOnly() {
         HandlerChainRegistry cached = DISPATCH_POOL.get();
         if (cached != null) {
@@ -373,6 +411,7 @@ public final class HandlerChainRegistry {
     }
 
     /** Return a dispatch fiber to the per-thread cache (best-effort). */
+    @TruffleBoundary
     public static void releaseDispatchOnly(HandlerChainRegistry fiber) {
         if (fiber.effectHandleDepth != 0) {
             // Caller didn't pop their pushes — don't pool a dirty fiber.

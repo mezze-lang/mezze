@@ -991,12 +991,36 @@ public final class NativeDispatch extends MezzeNode {
             IterNatives.range(getLong(r, "start"), getLong(r, "end")));
         HANDLERS.put("__native_iter_range_step", (r, c) ->
             IterNatives.rangeStep(getLong(r, "start"), getLong(r, "end"), getLong(r, "step")));
+        HANDLERS.put("__native_iter_from_seq", (r, c) ->
+            IterNatives.fromSeq(getSeq(r, "xs")));
         HANDLERS.put("__native_iter_map", (r, c) ->
             IterNatives.map(getIter(r, "it"), getFunction(r, "f")));
         HANDLERS.put("__native_iter_filter", (r, c) ->
             IterNatives.filter(getIter(r, "it"), getFunction(r, "p")));
         HANDLERS.put("__native_iter_fold", (r, c) ->
             IterNatives.fold(getIter(r, "it"), getField(r, "init"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_iter_take", (r, c) ->
+            IterNatives.take(getIter(r, "it"), getLong(r, "n")));
+        HANDLERS.put("__native_iter_drop", (r, c) ->
+            IterNatives.drop(getIter(r, "it"), getLong(r, "n")));
+        HANDLERS.put("__native_iter_sum", (r, c) ->
+            IterNatives.sum(getIter(r, "it")));
+        HANDLERS.put("__native_iter_for_each", (r, c) ->
+            IterNatives.forEach(getIter(r, "it"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_iter_count", (r, c) ->
+            IterNatives.count(getIter(r, "it"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_iter_any", (r, c) ->
+            IterNatives.any(getIter(r, "it"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_iter_all", (r, c) ->
+            IterNatives.all(getIter(r, "it"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_iter_find", (r, c) ->
+            IterNatives.find(getIter(r, "it"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_iter_reduce", (r, c) ->
+            IterNatives.reduce(getIter(r, "it"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_iter_to_seq", (r, c) ->
+            IterNatives.toSeq(getIter(r, "it"), c));
+        HANDLERS.put("__native_iter_to_list", (r, c) ->
+            IterNatives.toList(getIter(r, "it"), c));
     }
 
     // ==================== List ====================

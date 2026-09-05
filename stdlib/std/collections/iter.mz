@@ -21,6 +21,10 @@ pub let range: { start: Int, end: Int } -> Iter Int = { start, end } ->
 pub let range_step: { start: Int, end: Int, step: Int } -> Iter Int = { start, end, step } ->
   __native_iter_range_step { start = start, end = end, step = step }
 
+## Creates a lazy iterator from a Seq.
+pub let from_seq: { xs: ['a] } -> Iter 'a = { xs } ->
+  __native_iter_from_seq { xs = xs }
+
 ## Applies `f` lazily to each element. Deferred until a sink runs.
 pub let map: { it: Iter 'a, f: { x: 'a } -> 'b <...> } -> Iter 'b <...> = { it, f } ->
   __native_iter_map { it = it, f = f }
@@ -29,6 +33,14 @@ pub let map: { it: Iter 'a, f: { x: 'a } -> 'b <...> } -> Iter 'b <...> = { it, 
 pub let filter: { it: Iter 'a, p: { x: 'a } -> Bool <...> } -> Iter 'a <...> = { it, p } ->
   __native_iter_filter { it = it, p = p }
 
+## Takes the first `n` elements from the iterator (lazy).
+pub let take: { it: Iter 'a, n: Int } -> Iter 'a = { it, n } ->
+  __native_iter_take { it = it, n = n }
+
+## Drops the first `n` elements from the iterator (lazy).
+pub let drop: { it: Iter 'a, n: Int } -> Iter 'a = { it, n } ->
+  __native_iter_drop { it = it, n = n }
+
 ## Left fold — the terminal sink that walks the descriptor and produces a
 ## value. This is the fusion entry point: the BDSL sink specializes on the
 ## descriptor tree at PE time.
@@ -36,3 +48,73 @@ pub let fold
   : { it: Iter 'a, init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> }
   -> 'b <...>
   = { it, init, f } -> __native_iter_fold { it = it, init = init, f = f }
+
+## Sum all elements (Int).
+pub let sum: { it: Iter Int } -> Int = { it } ->
+  __native_iter_sum { it = it }
+
+## Execute `f` for each element, discarding results.
+pub let for_each
+  : { it: Iter 'a, f: { x: 'a } -> {} <...> }
+  -> {} <...>
+  = { it, f } -> __native_iter_for_each { it = it, f = f }
+
+## Count elements satisfying `p`.
+pub let count
+  : { it: Iter 'a, p: { x: 'a } -> Bool <...> }
+  -> Int <...>
+  = { it, p } -> __native_iter_count { it = it, p = p }
+
+## True if any element satisfies `p`.
+pub let any
+  : { it: Iter 'a, p: { x: 'a } -> Bool <...> }
+  -> Bool <...>
+  = { it, p } -> __native_iter_any { it = it, p = p }
+
+## True if all elements satisfy `p`.
+pub let all
+  : { it: Iter 'a, p: { x: 'a } -> Bool <...> }
+  -> Bool <...>
+  = { it, p } -> __native_iter_all { it = it, p = p }
+
+## Find the first element satisfying `p`.
+pub let find
+  : { it: Iter 'a, p: { x: 'a } -> Bool <...> }
+  -> Option 'a <...>
+  = { it, p } -> __native_iter_find { it = it, p = p }
+
+## Reduce without an initial value. Returns None for empty iterators.
+pub let reduce
+  : { it: Iter 'a, f: { acc: 'a, x: 'a } -> 'a <...> }
+  -> Option 'a <...>
+  = { it, f } -> __native_iter_reduce { it = it, f = f }
+
+## Materialize the iterator into a Seq.
+pub let to_seq: { it: Iter 'a } -> ['a] = { it } ->
+  __native_iter_to_seq { it = it }
+
+## Materialize the iterator into a List.
+pub let to_list: { it: Iter 'a } -> List 'a = { it } ->
+  __native_iter_to_list { it = it }
+
+## Inherent methods for dot-chain syntax on Iter values.
+impl Iter 'a where {
+  map = { it, f } -> map { it = it, f = f },
+  filter = { it, p } -> filter { it = it, p = p },
+  take = { it, n } -> take { it = it, n = n },
+  drop = { it, n } -> drop { it = it, n = n },
+  fold = { it, init, f } -> fold { it = it, init = init, f = f },
+  for_each = { it, f } -> for_each { it = it, f = f },
+  count = { it, p } -> count { it = it, p = p },
+  any = { it, p } -> any { it = it, p = p },
+  all = { it, p } -> all { it = it, p = p },
+  find = { it, p } -> find { it = it, p = p },
+  reduce = { it, f } -> reduce { it = it, f = f },
+  to_seq = { it } -> to_seq { it = it },
+  to_list = { it } -> to_list { it = it },
+}
+
+## Inherent methods on Iter Int only.
+impl Iter Int where {
+  sum = { it } -> sum { it = it },
+}

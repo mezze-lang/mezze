@@ -440,21 +440,34 @@ object DeadLetEliminator {
                         val nXs = f(s.xs)
                         if (nXs !== s.xs) SourceIR.RawSeq(nXs) else s
                     }
+                    is SourceIR.RawList -> {
+                        val nXs = f(s.xs)
+                        if (nXs !== s.xs) SourceIR.RawList(nXs) else s
+                    }
                     is SourceIR.Opaque -> {
                         val nE = f(s.expr)
                         if (nE !== s.expr) SourceIR.Opaque(nE) else s
                     }
                 }
+                var stagesChanged = false
+                val newStages = node.stages.map { stage ->
+                    when (stage) {
+                        is StageIR.Map, is StageIR.Filter -> stage
+                        is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
+                        is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
+                    }
+                }
                 val newSink: SinkIR = when (val sk = node.sink) {
-                    SinkIR.Sum -> sk
+                    SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sk
                     is SinkIR.Fold -> {
                         val nInit = f(sk.init)
                         if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk
                     }
-                    is SinkIR.ForEach -> sk
+                    is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find -> sk
                 }
-                if (newSource !== node.source || newSink !== node.sink)
-                    node.copy(source = newSource, sink = newSink) else node
+                val newFallback = node.fallback?.let(f)
+                if (newSource !== node.source || newSink !== node.sink || stagesChanged || newFallback !== node.fallback)
+                    node.copy(source = newSource, stages = if (stagesChanged) newStages else node.stages, sink = newSink, fallback = newFallback) else node
             }
         }
 

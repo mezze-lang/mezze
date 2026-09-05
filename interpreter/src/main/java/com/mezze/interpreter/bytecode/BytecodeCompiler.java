@@ -154,6 +154,14 @@ public final class BytecodeCompiler {
     private static final String[] PERFORM_YIELD_RECORD_FIELDS =
             new String[] { "effect_hash", "op_name", "arg" };
 
+    /** Variant tags for Option Some/None, computed once via BuiltinTypes. */
+    private static final int SOME_TAG = com.mezze.language.ast.BuiltinTypes.INSTANCE
+            .computeVariantTag(com.mezze.language.ast.BuiltinTypes.SOME, null);
+    private static final int NONE_TAG = com.mezze.language.ast.BuiltinTypes.INSTANCE
+            .computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
+    /** Cached field name array for Option payload records ({val = x}). */
+    private static final String[] VAL_FIELD = new String[] { "val" };
+
     private final MezzeLanguage language;
 
     /**
@@ -228,6 +236,24 @@ public final class BytecodeCompiler {
             }
             return false;
         });
+    }
+
+    /**
+     * Remove an unattached trampoline that {@link #compile} registered
+     * before crashing mid-emit. Without this cleanup, subsequent
+     * {@code supports()} calls find the trampoline as "local" (already
+     * in {@link #compiledCallTargets}) and skip the {@link LazyStubRootNode}
+     * fallback — the {@code !localMl} guard in the {@code MakeLambdaIR}
+     * handler treats local entries as "will be attached later", which is
+     * false when the compile that registered them failed.
+     *
+     * <p>Called by {@code eagerCompileReachable} in the catch block.
+     */
+    public void evictUnattachedTrampoline(Hash hash) {
+        CallTarget ct = compiledCallTargets.get(hash);
+        if (ct != null && isUnattachedTrampoline(ct)) {
+            compiledCallTargets.remove(hash);
+        }
     }
 
     /**
@@ -524,7 +550,7 @@ public final class BytecodeCompiler {
         if (node instanceof ReadArgIR) return true;
         if (node instanceof ReadCaptureIR) return true;
         if (node instanceof EffectBindingIR) return true;
-        if (node instanceof FusedChainIR) {
+        if (node instanceof FusedChainIR chain) {
             // Canon-emit contract (#446): canonicalizer must only produce
             // shapes emit can handle. Accept unconditionally here; if emit
             // refuses at runtime, it throws and MezzeLanguage buckets it
@@ -532,6 +558,44 @@ public final class BytecodeCompiler {
             // when Phase 4b landed), supports() rejects at line 864 and
             // emit is never given a chance — which crashed all
             // fusion-producing user programs like bench/cases/sum_fold.
+            //
+            // #446 Phase 5 fix: walk into the FusedChainIR's embedded
+            // MakeLambdaIR nodes (in stages + sink) so their function hashes
+            // get pre-compiled into compiledCallTargets. Without this, the
+            // emitter resolves them via LazyStub → TrampolineRootNode whose
+            // inner is never attached, crashing with "executed before
+            // attachInner". The non-fused path pre-compiles these at the
+            // MakeLambdaIR supportsNode handler (below); the fused path
+            // must do the same.
+            for (var stage : chain.getStages()) {
+                if (stage instanceof StageIR.Map ms && !supportsNode(ms.getF(), argCount)) return false;
+                if (stage instanceof StageIR.Filter fs && !supportsNode(fs.getP(), argCount)) return false;
+            }
+            var sink = chain.getSink();
+            if (sink instanceof SinkIR.Fold fold) {
+                if (!supportsNode(fold.getF(), argCount)) return false;
+                if (!supportsNode(fold.getInit(), argCount)) return false;
+            }
+            if (sink instanceof SinkIR.ForEach fe && !supportsNode(fe.getF(), argCount)) return false;
+            if (sink instanceof SinkIR.Any a && !supportsNode(a.getP(), argCount)) return false;
+            if (sink instanceof SinkIR.All a && !supportsNode(a.getP(), argCount)) return false;
+            if (sink instanceof SinkIR.Find f && !supportsNode(f.getP(), argCount)) return false;
+            if (sink instanceof SinkIR.Reduce r && !supportsNode(r.getF(), argCount)) return false;
+            // Source expressions (range start/end, opaque/raw-seq source) also
+            // need to be walked so their sub-expressions compile cleanly.
+            var src = chain.getSource();
+            if (src instanceof SourceIR.RangeSeq rs) {
+                if (!supportsNode(rs.getStart(), argCount)) return false;
+                if (!supportsNode(rs.getEnd(), argCount)) return false;
+            }
+            if (src instanceof SourceIR.RawSeq rs && !supportsNode(rs.getXs(), argCount)) return false;
+            if (src instanceof SourceIR.RawList rl && !supportsNode(rl.getXs(), argCount)) return false;
+            if (src instanceof SourceIR.Opaque os && !supportsNode(os.getExpr(), argCount)) return false;
+            // Walk fallback so its MakeLambdaIR hashes get pre-compiled.
+            // Without this, emitNode falling back to chain.getFallback()
+            // encounters MakeLambdaIR refs whose function wasn't pre-compiled,
+            // causing "TrampolineRootNode executed before attachInner".
+            if (chain.getFallback() != null && !supportsNode(chain.getFallback(), argCount)) return false;
             return true;
         }
         if (node instanceof PerformOpIR p) {
@@ -1601,16 +1665,21 @@ public final class BytecodeCompiler {
         }
         if (node instanceof FusedChainIR chain) {
             // #446 Phase 4b — canonicalized iter chain from ChainCanonicalizer.
-            // Drive emitRangeFusedLoop directly from the structural form.
             // See emitCanonicalIterChain for the full policy.
             if (emitCanonicalIterChain(chain, b, argCount, localMap)) return;
-            // Fail loud if the canonicalizer produced a shape the emitter
-            // can't handle. The two must stay in lockstep: any shape the
-            // canonicalizer emits must be emittable here. Silent fall-
-            // through would miscompile (there's no CallDirect equivalent
-            // to reconstruct).
+            // The emitter can't handle this chain (complex fold body,
+            // un-classifiable predicate, etc.). Fall back to the original
+            // node preserved by the canonicalizer. This is the safe path:
+            // the original CallDirect/CallNative is emitted as if fusion
+            // never ran.
+            if (chain.getFallback() != null) {
+                emitNode(chain.getFallback(), b, argCount, localMap);
+                return;
+            }
+            // No fallback available (legacy serialized data or bug in
+            // the canonicalizer). Fail loud so we know which shape to add.
             throw new IllegalStateException(
-                "FusedChainIR reached BDSL emit but emitter refused it. " +
+                "FusedChainIR reached BDSL emit but emitter refused it and no fallback available. " +
                 "Source=" + chain.getSource().getClass().getSimpleName() +
                 " stages=" + chain.getStages().size() +
                 " sink=" + chain.getSink().getClass().getSimpleName());
@@ -2509,9 +2578,8 @@ public final class BytecodeCompiler {
      * #446 Phase 4b — emit a canonicalized {@link FusedChainIR} directly.
      * The canonicalizer has already resolved (source × stages × sink) into
      * a structural form, so this bypasses the pattern-matching peel and
-     * drives {@link #emitRangeFusedLoop} (for range sources) or the
-     * general seq-fused indexed loop (for RawSeq sources) from the
-     * classified stages/sink.
+     * drives {@link #emitFusedLoop} from the classified
+     * stages/sink.
      *
      * <p>Returns {@code true} when emission fired; {@code false} to fall
      * through to the throwing intercept, which surfaces canon/emit skew.
@@ -2547,85 +2615,23 @@ public final class BytecodeCompiler {
             com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
         boolean dbg = System.getenv("MEZZE_CHAIN_CANON_EMIT_DEBUG") != null;
 
-        // Only Fold sink is emittable today. ForEach needs a bool-returning
-        // step and no accSlot; wire it in Phase 4c.
-        // Classify the sink: Fold {init, folder} needs body classification;
-        // Sum is the canonical shorthand for Fold(0, {acc,x} -> acc+x).
-        InlineOp op;
-        NodeIR initExpr;
-        boolean isSumSink;
-        if (chain.getSink() instanceof SinkIR.Fold foldSink) {
-            isSumSink = false;
-            initExpr = foldSink.getInit();
-            MakeLambdaIR folderLambda = foldSink.getF();
-            if (!folderLambda.getCaptures().isEmpty()) {
-                if (dbg) System.err.println("[chain-canon-emit] reject: folder has captures");
-                return false;
-            }
-            var folderIR = language.lookupFunctionIR(folderLambda.getFunctionHash());
-            if (folderIR == null
-                    || !folderIR.getCaptureSlots().isEmpty()
-                    || folderIR.getParamSlots().size() != 2
-                    || !folderIR.getLocalSlots().isEmpty()) {
-                if (dbg) System.err.println("[chain-canon-emit] reject: folder shape mismatch");
-                return false;
-            }
-            var folderShape = classifyFolderBody(folderIR.getBody());
-            if (folderShape == null) {
-                if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable folder body: "
-                        + folderIR.getBody().getClass().getSimpleName());
-                return false;
-            }
-            int lSlot = folderShape.leftSlot;
-            int rSlot = folderShape.rightSlot;
-            boolean naturalOrder = (lSlot == 0 && rSlot == 1);
-            boolean swapped      = (lSlot == 1 && rSlot == 0);
-            if (!naturalOrder && !swapped) return false;
-            op = folderShape.op;
-            boolean commutative = (op == InlineOp.ADD || op == InlineOp.MUL
-                                || op == InlineOp.EQ || op == InlineOp.NEQ
-                                || op == InlineOp.AND || op == InlineOp.OR);
-            if (swapped && !commutative) return false;
-        } else if (chain.getSink() instanceof SinkIR.Sum) {
-            isSumSink = true;
-            op = InlineOp.ADD;
-            initExpr = new LongLitIR(0L, chain.getSrc());
-        } else {
-            if (dbg) System.err.println("[chain-canon-emit] reject: sink not Fold/Sum: " + chain.getSink().getClass().getSimpleName());
-            return false;
-        }
+        // ── Phase 4a: classify the sink into a FusedSinkMode ──
+        FusedSinkMode sinkMode = classifySinkMode(chain, dbg);
+        if (sinkMode == null) return false;
 
-        // Stages → single mapper + single filter (MVP). Multi-stage
-        // composition falls through until Phase 4c gives each stage its
-        // own emit slot in the loop body.
-        InlineOp mapperOp = null;
-        long mapperRhsLit = 0L;
-        NodeIR mapperRhsNode = null; // #515 captured RHS lifted to outer frame
-        Hash mapperCallHash = null;
-        boolean mapperCallScalarABI = false;
-        String mapperCallFieldName = null;
-        FilterPeel filterPeel = null;
-
-        int mapCount = 0, filterCount = 0;
+        // ── Phase 4b: classify pipeline stages ──
+        var classifiedStages = new java.util.ArrayList<ClassifiedStage>();
         for (var stage : chain.getStages()) {
             if (stage instanceof StageIR.Map mapStage) {
-                mapCount++;
-                if (mapCount > 1) {
-                    if (dbg) System.err.println("[chain-canon-emit] reject: multi-map stages (MVP)");
-                    return false;
-                }
                 var shape = classifyUnaryLiteralLambda(mapStage.getF(), language);
                 if (shape == null) {
                     if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable map lambda");
                     return false;
                 }
                 if (shape.callHash != null) {
-                    mapperCallHash = shape.callHash;
-                    mapperCallScalarABI = shape.callScalarABI;
-                    mapperCallFieldName = shape.callFieldName;
+                    classifiedStages.add(new ClassifiedStage.MapCall(
+                        shape.callHash, shape.callScalarABI, shape.callFieldName));
                 } else {
-                    // Restrict to arith ops — comparisons produce bool, not fusable
-                    // as a mapper (arith-op only).
                     switch (shape.op) {
                         case ADD, SUB, MUL, DIV, MOD -> {}
                         default -> {
@@ -2633,159 +2639,78 @@ public final class BytecodeCompiler {
                             return false;
                         }
                     }
-                    mapperOp = shape.op;
-                    mapperRhsLit = shape.rhsLit;
-                    mapperRhsNode = shape.rhsNode;
+                    classifiedStages.add(new ClassifiedStage.MapInline(
+                        shape.op, shape.rhsLit, shape.rhsNode, shape.selfOp));
                 }
             } else if (stage instanceof StageIR.Filter filterStage) {
-                filterCount++;
-                if (filterCount > 1) {
-                    if (dbg) System.err.println("[chain-canon-emit] reject: multi-filter stages (MVP)");
-                    return false;
-                }
                 var predShape = classifyUnaryPredicateLambda(filterStage.getP(), language);
                 if (predShape == null) {
                     if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable filter lambda");
                     return false;
                 }
-                filterPeel = new FilterPeel(
+                classifiedStages.add(new ClassifiedStage.FilterStep(new FilterPeel(
                     predShape.preOp, predShape.preRhs, predShape.preRhsNode,
                     predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
                     predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
-                    /*innerXs=*/ null /* unused for canon path */);
+                    /*innerXs=*/ null)));
+            } else if (stage instanceof StageIR.Take takeStage) {
+                classifiedStages.add(new ClassifiedStage.TakeStep(takeStage.getN()));
+            } else if (stage instanceof StageIR.Drop dropStage) {
+                classifiedStages.add(new ClassifiedStage.DropStep(dropStage.getN()));
             }
         }
+        java.util.Collections.reverse(classifiedStages);
+        boolean hasStages = !classifiedStages.isEmpty();
 
-        // Source classification.
+        // ── Phase 4c: classify source ──
         NodeIR rangeStart = null, rangeEnd = null;
         NodeIR rawXsExpr = null;
+        NodeIR rawListExpr = null;
+        boolean isSumSink = sinkMode instanceof FusedSinkMode.Accumulate a
+                && !a.ignoreElement() && a.op() == InlineOp.ADD;
         if (chain.getSource() instanceof SourceIR.RangeSeq rangeSrc) {
             rangeStart = rangeSrc.getStart();
             rangeEnd = rangeSrc.getEnd();
         } else if (chain.getSource() instanceof SourceIR.RawSeq rawSrc) {
             rawXsExpr = rawSrc.getXs();
-        } else if (chain.getSource() instanceof SourceIR.Opaque opaqueSrc && isSumSink
-                && mapperOp == null && mapperCallHash == null && filterPeel == null) {
-            // Sum sink over an unclassified seq expression with no stages —
-            // emit BuiltinSumLongSeq directly. This is the shape that
-            // seq::sum {xs=<ReadLocal>} produces after canon rewrites the
-            // desugared __native_seq_sum call.
-            b.beginBuiltinSumLongSeq();
-              emitNode(opaqueSrc.getExpr(), b, argCount, localMap);
-            b.endBuiltinSumLongSeq();
-            if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (Opaque+Sum)");
-            return true;
+        } else if (chain.getSource() instanceof SourceIR.RawList rawListSrc) {
+            rawListExpr = rawListSrc.getXs();
         } else {
-            // Opaque with stages, or ForEach — we don't have a materialized
-            // seq to index over. Refuse; canonicalizer emitted this in
-            // error or emitter needs a new shape.
+            // Opaque source — the runtime value could be Seq, List, Deque, etc.
+            // BuiltinSumLongSeq only handles MezzeSeq; passing other types
+            // crashes with UnsupportedSpecializationException.  Bail so the
+            // unfused native dispatch runs instead.
             if (dbg) System.err.println("[chain-canon-emit] reject: unhandled source/sink combo");
             return false;
         }
 
-        // #427 fast path — ADD folder over an inline range with NO map or
-        // filter collapses to a single BuiltinSumRangeLong op.
-        if (rangeStart != null && op == InlineOp.ADD
-                && mapperOp == null && mapperCallHash == null && filterPeel == null) {
-            b.beginBuiltinSumRangeLong();
-              emitNode(rangeStart, b, argCount, localMap);
-              emitNode(rangeEnd,   b, argCount, localMap);
-              emitNode(initExpr,   b, argCount, localMap);
-            b.endBuiltinSumRangeLong();
-            if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumRangeLong");
-            return true;
-        }
-
-        // Sum sink over a RawSeq with no stages — BuiltinSumLongSeq fast path.
-        if (rawXsExpr != null && isSumSink
-                && mapperOp == null && mapperCallHash == null && filterPeel == null) {
-            b.beginBuiltinSumLongSeq();
-              emitNode(rawXsExpr, b, argCount, localMap);
-            b.endBuiltinSumLongSeq();
-            if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (RawSeq+Sum)");
-            return true;
-        }
-
-        b.beginBlock();
-        var accSlot = b.createLocal();
-        var iSlot   = b.createLocal();
-        var xSlot   = b.createLocal();
-
-        if (rangeStart != null) {
-            emitRangeFusedLoop(b, argCount, localMap,
-                    accSlot, iSlot, xSlot,
-                    rangeStart, rangeEnd, initExpr,
-                    op, mapperOp, mapperRhsLit, mapperRhsNode,
-                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                    filterPeel);
-            b.endBlock();
-            if (dbg) System.err.println("[chain-canon-emit] emitted range-fused loop");
-            return true;
-        }
-
-        // RawSeq source — general SeqSize/SeqGet indexed loop with the
-        // classified stages inside. The pre-canon path had no in-loop
-        // filter/map for the seq case; we emit them here so canon covers
-        // fold(map(filter(seq, p), f), init, g) on a materialized seq too.
-        var seqSlot  = b.createLocal();
-        var sizeSlot = b.createLocal();
-        b.beginStoreLocal(seqSlot);
-        emitNode(rawXsExpr, b, argCount, localMap);
-        b.endStoreLocal();
-        b.beginStoreLocal(sizeSlot);
-        b.beginSeqSize();
-        b.emitLoadLocal(seqSlot);
-        b.endSeqSize();
-        b.endStoreLocal();
-        b.beginStoreLocal(iSlot);
-        b.emitLoadLongConstant(0L);
-        b.endStoreLocal();
-        b.beginStoreLocal(accSlot);
-        emitNode(initExpr, b, argCount, localMap);
-        b.endStoreLocal();
-        b.beginWhile();
-          b.beginDirectLessThan();
-          b.emitLoadLocal(iSlot);
-          b.emitLoadLocal(sizeSlot);
-          b.endDirectLessThan();
-          b.beginBlock();
-            b.beginStoreLocal(xSlot);
-            b.beginSeqGet();
-            b.emitLoadLocal(seqSlot);
-            b.emitLoadLocal(iSlot);
-            b.endSeqGet();
-            b.endStoreLocal();
-            if (filterPeel != null) {
-                b.beginIfThen();
-                  emitPredicateCheck(b, xSlot, filterPeel, argCount, localMap);
-                  b.beginBlock();
-                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
-                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                        argCount, localMap);
-                    b.beginStoreLocal(accSlot);
-                    emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                    b.endStoreLocal();
-                  b.endBlock();
-                b.endIfThen();
-            } else {
-                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
-                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                    argCount, localMap);
-                b.beginStoreLocal(accSlot);
-                emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                b.endStoreLocal();
+        // ── Fast paths — skip the generic loop for simple builtins ──
+        if (sinkMode instanceof FusedSinkMode.Accumulate a && !a.ignoreElement()) {
+            // #427 fast path: ADD folder over range with no stages → BuiltinSumRangeLong.
+            if (rangeStart != null && a.op() == InlineOp.ADD && !hasStages) {
+                b.beginBuiltinSumRangeLong();
+                  emitNode(rangeStart, b, argCount, localMap);
+                  emitNode(rangeEnd,   b, argCount, localMap);
+                  emitNode(a.initExpr(), b, argCount, localMap);
+                b.endBuiltinSumRangeLong();
+                if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumRangeLong");
+                return true;
             }
-            b.beginStoreLocal(iSlot);
-            b.beginDirectAdd();
-            b.emitLoadLocal(iSlot);
-            b.emitLoadLongConstant(1L);
-            b.endDirectAdd();
-            b.endStoreLocal();
-          b.endBlock();
-        b.endWhile();
-        b.emitLoadLocal(accSlot);
-        b.endBlock();
-        if (dbg) System.err.println("[chain-canon-emit] emitted seq-fused loop");
+            // Sum over RawSeq with no stages → BuiltinSumLongSeq.
+            if (rawXsExpr != null && isSumSink && !hasStages) {
+                b.beginBuiltinSumLongSeq();
+                  emitNode(rawXsExpr, b, argCount, localMap);
+                b.endBuiltinSumLongSeq();
+                if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (RawSeq+Sum)");
+                return true;
+            }
+        }
+
+        // ── Phase 4d: emit the generic fused loop ──
+        emitFusedLoop(classifiedStages, rangeStart, rangeEnd, rawXsExpr,
+                rawListExpr, sinkMode, b, argCount, localMap);
+        if (dbg) System.err.println("[chain-canon-emit] emitted fused loop ("
+                + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
         return true;
     }
 
@@ -2834,6 +2759,8 @@ public final class BytecodeCompiler {
     }
 
     /**
+<<<<<<< Updated upstream
+=======
      * #437 — emit the shared range-fused Block/While loop body. Both
      * {@link #tryEmitFusedFold} and the sum-sink path
      * ({@link #tryEmitBuiltinSeqReducer}) delegate here so map/filter
@@ -2890,40 +2817,75 @@ public final class BytecodeCompiler {
         b.beginStoreLocal(accSlot);
         initEmit.run();
         b.endStoreLocal();
+
+        // #515 — loop-unroll gate. Env-controlled so we can A/B on/off:
+        //   MEZZE_UNROLL=0 or 1   disable (scalar loop only)
+        //   MEZZE_UNROLL=N        unroll factor N (default 2)
+        // When unroll factor >= 2 we emit a main loop that runs N bodies
+        // per trip (each on i+0..i+N-1), then a scalar tail loop for the
+        // straggler <N iters. All bodies share the same predicate/mapper/
+        // fold semantics; we only replicate to reduce loop overhead and
+        // give the JIT wider ILP.
+        int unroll = 2;
+        String unrollEnv = System.getenv("MEZZE_UNROLL");
+        if (unrollEnv != null) {
+            try {
+                int parsed = Integer.parseInt(unrollEnv.trim());
+                if (parsed >= 0) unroll = parsed;
+            } catch (NumberFormatException ignore) { /* keep default */ }
+        }
+
+        if (unroll >= 2) {
+            // Compute end_unroll = end - (unroll - 1) so main loop only
+            // runs when at least `unroll` iters remain.
+            var endUnrollSlot = b.createLocal();
+            b.beginStoreLocal(endUnrollSlot);
+              b.beginDirectSubtract();
+              b.emitLoadLocal(endSlot);
+              b.emitLoadLongConstant((long)(unroll - 1));
+              b.endDirectSubtract();
+            b.endStoreLocal();
+
+            // Main unrolled loop.
+            b.beginWhile();
+              b.beginDirectLessThan();
+              b.emitLoadLocal(iSlot);
+              b.emitLoadLocal(endUnrollSlot);
+              b.endDirectLessThan();
+              b.beginBlock();
+                for (int k = 0; k < unroll; k++) {
+                    emitFusedBodyAt(b, iSlot, xSlot, accSlot, (long) k,
+                        op, mapperOp, mapperRhsLit, mapperRhsNode,
+                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                        filter, argCount, localMap);
+                }
+                // i = i + unroll
+                b.beginStoreLocal(iSlot);
+                  b.beginDirectAdd();
+                  b.emitLoadLocal(iSlot);
+                  b.emitLoadLongConstant((long) unroll);
+                  b.endDirectAdd();
+                b.endStoreLocal();
+              b.endBlock();
+            b.endWhile();
+        }
+
+        // Scalar (tail) loop — also the sole loop when unroll < 2.
         b.beginWhile();
           b.beginDirectLessThan();
           b.emitLoadLocal(iSlot);
           b.emitLoadLocal(endSlot);
           b.endDirectLessThan();
           b.beginBlock();
-            b.beginStoreLocal(xSlot);
-            b.emitLoadLocal(iSlot);
-            b.endStoreLocal();
-            if (filter != null) {
-                b.beginIfThen();
-                  emitPredicateCheck(b, xSlot, filter, argCount, localMap);
-                  b.beginBlock();
-                    emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
-                        mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                        argCount, localMap);
-                    b.beginStoreLocal(accSlot);
-                    emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                    b.endStoreLocal();
-                  b.endBlock();
-                b.endIfThen();
-            } else {
-                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
-                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                    argCount, localMap);
-                b.beginStoreLocal(accSlot);
-                emitInlineOpTwoLocals(op, accSlot, xSlot, b);
-                b.endStoreLocal();
-            }
+            emitFusedBodyAt(b, iSlot, xSlot, accSlot, 0L,
+                op, mapperOp, mapperRhsLit, mapperRhsNode,
+                mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                filter, argCount, localMap);
             b.beginStoreLocal(iSlot);
-            b.beginDirectAdd();
-            b.emitLoadLocal(iSlot);
-            b.emitLoadLongConstant(1L);
-            b.endDirectAdd();
+              b.beginDirectAdd();
+              b.emitLoadLocal(iSlot);
+              b.emitLoadLongConstant(1L);
+              b.endDirectAdd();
             b.endStoreLocal();
           b.endBlock();
         b.endWhile();
@@ -2931,11 +2893,74 @@ public final class BytecodeCompiler {
         if (System.getenv("MEZZE_FOLD_FUSE_DEBUG") != null) {
             System.err.println("[fold-fuse] emitted range-fused loop for op=" + op
                 + " mapper=" + (mapperCallHash != null ? "CALL " + mapperCallHash.getHex().substring(0, 8) : mapperOp)
-                + " pred=" + describeFilter(filter));
+                + " pred=" + describeFilter(filter)
+                + " unroll=" + unroll);
         }
     }
 
     /**
+     * #515 — emit one fused body step for element i+offset:
+     * <pre>
+     *   xSlot = i + offset           (or just i, when offset == 0)
+     *   if (pred(xSlot)) {
+     *     xSlot = map(xSlot)
+     *     acc   = acc <op> xSlot
+     *   }
+     * </pre>
+     * Shared by both the unrolled main loop (offset 0..unroll-1) and the
+     * scalar tail loop (offset 0). Predicate/mapper/fold operate on
+     * xSlot exactly as in the un-unrolled emit — this is a semantics-
+     * preserving replication.
+     */
+    private void emitFusedBodyAt(MezzeBytecodeRootNodeGen.Builder b,
+                                 com.oracle.truffle.api.bytecode.BytecodeLocal iSlot,
+                                 com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
+                                 com.oracle.truffle.api.bytecode.BytecodeLocal accSlot,
+                                 long offset,
+                                 InlineOp op,
+                                 InlineOp mapperOp, long mapperRhsLit, NodeIR mapperRhsNode,
+                                 Hash mapperCallHash,
+                                 boolean mapperCallScalarABI,
+                                 String mapperCallFieldName,
+                                 FilterPeel filter,
+                                 int argCount,
+                                 com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
+        // xSlot = i + offset  (offset==0 → xSlot = i)
+        b.beginStoreLocal(xSlot);
+          if (offset == 0L) {
+              b.emitLoadLocal(iSlot);
+          } else {
+              b.beginDirectAdd();
+              b.emitLoadLocal(iSlot);
+              b.emitLoadLongConstant(offset);
+              b.endDirectAdd();
+          }
+        b.endStoreLocal();
+
+        if (filter != null) {
+            b.beginIfThen();
+              emitPredicateCheck(b, xSlot, filter, argCount, localMap);
+              b.beginBlock();
+                emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
+                    mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                    argCount, localMap);
+                b.beginStoreLocal(accSlot);
+                emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+                b.endStoreLocal();
+              b.endBlock();
+            b.endIfThen();
+        } else {
+            emitMapperStep(b, xSlot, mapperOp, mapperRhsLit, mapperRhsNode,
+                mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
+                argCount, localMap);
+            b.beginStoreLocal(accSlot);
+            emitInlineOpTwoLocals(op, accSlot, xSlot, b);
+            b.endStoreLocal();
+        }
+    }
+
+    /**
+>>>>>>> Stashed changes
      * #442 Day 9 — emit the map step inside the range-fused loop body.
      * Three cases:
      *   - No mapper: emit nothing (fold step reads xSlot directly).
@@ -2961,6 +2986,9 @@ public final class BytecodeCompiler {
                                 com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
         if (mapperCallHash != null) {
             var target = resolveCallTarget(mapperCallHash);
+            if (target == null && language != null) {
+                target = language.getOrMintUserStub(mapperCallHash, "fused_map_step");
+            }
             if (target != null) {
                 // #442 Day 9 fix — stage the arg through a fresh local before
                 // the call. The naive `beginStoreLocal(xSlot); call(xSlot);
@@ -2981,8 +3009,8 @@ public final class BytecodeCompiler {
                 b.endStoreLocal();
                 return;
             }
-            // Fallthrough: hash didn't resolve — emit nothing, xSlot stays
-            // as-is. Safer than aborting emission mid-loop.
+            // Fallthrough: hash didn't resolve and stub couldn't be minted —
+            // emit nothing, xSlot stays as-is.
         }
         if (mapperOp != null) {
             // Inline op is safe as-is: the emitted op reads xSlot on the
@@ -3062,16 +3090,18 @@ public final class BytecodeCompiler {
                                     com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
         if (filter.callHash != null) {
             // #442 Day 9 — call form: user_pred(xSlot) produces Bool on
-            // the stack, becoming the IfThen condition. Stage the arg
-            // through a fresh local to isolate it from the callee's frame
-            // activity (see emitMapperStep for the full rationale).
+            // the stack, becoming the IfThen condition. Emit CallDirectN
+            // inline using xSlot directly — DO NOT stage through a
+            // StoreLocal(argCopy) because emitPredicateCheck may be called
+            // as the first child of an IfThen, and StoreLocal is a void
+            // operation that the BDSL builder rejects at position 0 of
+            // IfThen (which expects a value-producing condition child).
             var target = resolveCallTarget(filter.callHash);
+            if (target == null && language != null) {
+                target = language.getOrMintUserStub(filter.callHash, "fused_pred_check");
+            }
             if (target != null) {
-                var argCopy = b.createLocal();
-                b.beginStoreLocal(argCopy);
-                  b.emitLoadLocal(xSlot);
-                b.endStoreLocal();
-                emitCallOneArg(b, target, argCopy,
+                emitCallOneArg(b, target, xSlot,
                     filter.callScalarABI, filter.callFieldName);
                 return;
             }
@@ -3142,30 +3172,6 @@ public final class BytecodeCompiler {
             case GE  -> { b.beginDirectGreaterThanOrEqual(); emitPreOp.run(); emitCmpRhs.run(); b.endDirectGreaterThanOrEqual(); }
             default -> throw new IllegalStateException("emitCompareInnerRhs: unsupported cmp " + cmpOp);
         }
-    }
-
-    /**
-     * Overload for the folder path — init is an arbitrary NodeIR.
-     */
-    private void emitRangeFusedLoop(MezzeBytecodeRootNodeGen.Builder b,
-                                    int argCount,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal accSlot,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal iSlot,
-                                    com.oracle.truffle.api.bytecode.BytecodeLocal xSlot,
-                                    NodeIR rangeStart, NodeIR rangeEnd, NodeIR initExpr,
-                                    InlineOp op,
-                                    InlineOp mapperOp, long mapperRhsLit, NodeIR mapperRhsNode,
-                                    Hash mapperCallHash,
-                                    boolean mapperCallScalarABI,
-                                    String mapperCallFieldName,
-                                    FilterPeel filter) {
-        emitRangeFusedLoop(b, argCount, localMap, accSlot, iSlot, xSlot,
-                rangeStart, rangeEnd,
-                () -> emitNode(initExpr, b, argCount, localMap),
-                op, mapperOp, mapperRhsLit, mapperRhsNode,
-                mapperCallHash, mapperCallScalarABI, mapperCallFieldName,
-                filter);
     }
 
     /**
@@ -3252,6 +3258,646 @@ public final class BytecodeCompiler {
                               Hash callHash, boolean callScalarABI, String callFieldName,
                               NodeIR innerXs) {}
 
+    /**
+     * Phase 4c — classified pipeline stage, either a map transform or a
+     * filter predicate. Built from the canonicalizer's StageIR list.
+     */
+    private sealed interface ClassifiedStage {
+        record MapInline(InlineOp op, long rhsLit, NodeIR rhsNode, boolean selfOp) implements ClassifiedStage {}
+        record MapCall(Hash callHash, boolean scalarABI, String fieldName) implements ClassifiedStage {}
+        record FilterStep(FilterPeel peel) implements ClassifiedStage {}
+        record TakeStep(NodeIR n) implements ClassifiedStage {}
+        record DropStep(NodeIR n) implements ClassifiedStage {}
+    }
+
+    // ── Sink mode: the per-element action and post-loop result ──────────
+
+    /** Describes what the fused loop does at each element and what it returns. */
+    private sealed interface FusedSinkMode {
+        /** acc = init; per element: acc = acc <op> x. Covers Fold/Sum. */
+        record Accumulate(InlineOp op, NodeIR initExpr, boolean ignoreElement) implements FusedSinkMode {}
+        /** Call f(x) per element, discard result. */
+        record CallEach(com.oracle.truffle.api.CallTarget target, boolean scalarABI,
+                        String fieldName) implements FusedSinkMode {}
+        /** Short-circuit predicate: Any/All/Find. */
+        record ShortCircuit(FilterPeel predPeel, ShortCircuitKind kind) implements FusedSinkMode {}
+        /** Fold with first element as init; result wrapped in Option. */
+        record ReduceOpt(InlineOp op) implements FusedSinkMode {}
+        /** Collect elements into a Seq or List. */
+        record Materialize(MaterializeTarget target) implements FusedSinkMode {}
+
+        enum ShortCircuitKind { ANY, ALL, FIND }
+        enum MaterializeTarget { SEQ, LIST }
+    }
+
+    /**
+     * Classify the chain's sink into a {@link FusedSinkMode}, doing
+     * lambda/folder classification up front. Returns null on rejection.
+     */
+    private FusedSinkMode classifySinkMode(FusedChainIR chain, boolean dbg) {
+        if (chain.getSink() instanceof SinkIR.Fold foldSink) {
+            var folderOp = classifyBinaryFolder(foldSink.getF(), dbg, "folder");
+            if (folderOp == null) return null;
+            return new FusedSinkMode.Accumulate(folderOp, foldSink.getInit(), false);
+        }
+        if (chain.getSink() instanceof SinkIR.Sum) {
+            return new FusedSinkMode.Accumulate(InlineOp.ADD,
+                    new LongLitIR(0L, chain.getSrc()), false);
+        }
+        if (chain.getSink() instanceof SinkIR.Count) {
+            return new FusedSinkMode.Accumulate(InlineOp.ADD,
+                    new LongLitIR(0L, chain.getSrc()), /*ignoreElement=*/ true);
+        }
+        if (chain.getSink() instanceof SinkIR.ForEach forEachSink) {
+            return classifyForEachMode(forEachSink, dbg);
+        }
+        if (chain.getSink() instanceof SinkIR.Any anySink) {
+            return classifyPredicateMode(anySink.getP(), FusedSinkMode.ShortCircuitKind.ANY, dbg);
+        }
+        if (chain.getSink() instanceof SinkIR.All allSink) {
+            return classifyPredicateMode(allSink.getP(), FusedSinkMode.ShortCircuitKind.ALL, dbg);
+        }
+        if (chain.getSink() instanceof SinkIR.Find findSink) {
+            return classifyPredicateMode(findSink.getP(), FusedSinkMode.ShortCircuitKind.FIND, dbg);
+        }
+        if (chain.getSink() instanceof SinkIR.Reduce reduceSink) {
+            var reducerOp = classifyBinaryFolder(reduceSink.getF(), dbg, "reducer");
+            if (reducerOp == null) return null;
+            return new FusedSinkMode.ReduceOpt(reducerOp);
+        }
+        if (chain.getSink() instanceof SinkIR.ToSeq) {
+            return new FusedSinkMode.Materialize(FusedSinkMode.MaterializeTarget.SEQ);
+        }
+        if (chain.getSink() instanceof SinkIR.ToList) {
+            return new FusedSinkMode.Materialize(FusedSinkMode.MaterializeTarget.LIST);
+        }
+        if (dbg) System.err.println("[chain-canon-emit] reject: unsupported sink: "
+                + chain.getSink().getClass().getSimpleName());
+        return null;
+    }
+
+    /** Shared classification for Fold and Reduce combining functions. */
+    private InlineOp classifyBinaryFolder(MakeLambdaIR lambda, boolean dbg, String label) {
+        if (!lambda.getCaptures().isEmpty()) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: " + label + " has captures");
+            return null;
+        }
+        var ir = language.lookupFunctionIR(lambda.getFunctionHash());
+        if (ir == null || !ir.getCaptureSlots().isEmpty()
+                || ir.getParamSlots().size() != 2 || !ir.getLocalSlots().isEmpty()) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: " + label + " shape mismatch");
+            return null;
+        }
+        var shape = classifyFolderBody(ir.getBody());
+        if (shape == null) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable " + label + " body");
+            return null;
+        }
+        boolean natural = (shape.leftSlot == 0 && shape.rightSlot == 1);
+        boolean swapped = (shape.leftSlot == 1 && shape.rightSlot == 0);
+        if (!natural && !swapped) return null;
+        InlineOp op = shape.op;
+        boolean commutative = (op == InlineOp.ADD || op == InlineOp.MUL
+                || op == InlineOp.EQ || op == InlineOp.NEQ
+                || op == InlineOp.AND || op == InlineOp.OR);
+        if (swapped && !commutative) return null;
+        return op;
+    }
+
+    /** Classify a predicate-based sink (Any/All/Find). */
+    private FusedSinkMode classifyPredicateMode(
+            MakeLambdaIR predicateLambda,
+            FusedSinkMode.ShortCircuitKind kind, boolean dbg) {
+        var predShape = classifyUnaryPredicateLambda(predicateLambda, language);
+        if (predShape == null) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable "
+                    + kind + " predicate");
+            return null;
+        }
+        var predPeel = new FilterPeel(
+                predShape.preOp, predShape.preRhs, predShape.preRhsNode,
+                predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
+                predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
+                /*innerXs=*/ null);
+        return new FusedSinkMode.ShortCircuit(predPeel, kind);
+    }
+
+    /** Classify a ForEach body lambda into a CallEach mode. */
+    private FusedSinkMode classifyForEachMode(SinkIR.ForEach sink, boolean dbg) {
+        com.oracle.truffle.api.CallTarget target = null;
+        boolean scalarABI = false;
+        String fieldName = null;
+
+        var shape = classifyUnaryLiteralLambda(sink.getF(), language);
+        if (shape != null && shape.callHash != null) {
+            target = resolveCallTarget(shape.callHash);
+            if (target == null && language != null)
+                target = language.getOrMintUserStub(shape.callHash, "for_each_inner");
+            if (target != null) { scalarABI = shape.callScalarABI; fieldName = shape.callFieldName; }
+        }
+        if (target == null) {
+            var lambda = sink.getF();
+            if (lambda.getCaptures().isEmpty()) {
+                target = resolveCallTarget(lambda.getFunctionHash());
+                if (target == null && language != null)
+                    target = language.getOrMintUserStub(lambda.getFunctionHash(), "for_each_body");
+            }
+            if (target == null) {
+                if (dbg) System.err.println("[chain-canon-emit] reject: ForEach body not callable");
+                return null;
+            }
+            var ir = language.lookupFunctionIR(lambda.getFunctionHash());
+            if (ir != null && ir.getParamSlots().size() == 1) { scalarABI = true; fieldName = null; }
+        }
+        return new FusedSinkMode.CallEach(target, scalarABI, fieldName);
+    }
+
+    // ── Generic fused loop emitter ──────────────────────────────────────
+
+    /**
+     * Emit a single fused while-loop for any sink mode. The loop
+     * scaffold (source init, pipeline stages, counter increment) is
+     * shared; only the per-element sink body and post-loop result
+     * vary by mode.
+     *
+     * <pre>
+     *   [mode-specific locals]
+     *   i = start; end = ...
+     *   while (i < end [&& !found]) {
+     *     x = element(i)
+     *     [stages: filter/map/take/drop]
+     *     ── sink body (mode-specific) ──
+     *     [close stages; i++]
+     *   }
+     *   ── result (mode-specific) ──
+     * </pre>
+     */
+    private void emitFusedLoop(
+            java.util.List<ClassifiedStage> stages,
+            NodeIR rangeStart, NodeIR rangeEnd, NodeIR rawXsExpr,
+            NodeIR rawListExpr,
+            FusedSinkMode mode,
+            MezzeBytecodeRootNodeGen.Builder b,
+            int argCount,
+            com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
+
+        boolean isRange = rangeStart != null;
+        boolean isList = rawListExpr != null;
+        boolean useShortCircuitBranch = mode instanceof FusedSinkMode.ShortCircuit;
+
+        b.beginBlock();
+
+        // #442 — forward-branch exit for short-circuit sinks. When the
+        // predicate matches, we Branch past the While to exitLabel instead
+        // of checking !found on every iteration. This eliminates the
+        // DirectAnd+DirectNot per-loop overhead.
+        com.oracle.truffle.api.bytecode.BytecodeLabel exitLabel = null;
+        if (useShortCircuitBranch) {
+            exitLabel = b.createLabel();
+        }
+
+        // ── Common locals ──
+        var iSlot = b.createLocal();
+        var xSlot = b.createLocal();
+
+        // ── Mode-specific locals ──
+        com.oracle.truffle.api.bytecode.BytecodeLocal accSlot     = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal foundSlot   = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal resultSlot  = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal hasAccSlot  = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal builderSlot = null;
+
+        switch (mode) {
+            case FusedSinkMode.Accumulate a -> {
+                accSlot = b.createLocal();
+                b.beginStoreLocal(accSlot);
+                  emitNode(a.initExpr(), b, argCount, localMap);
+                b.endStoreLocal();
+            }
+            case FusedSinkMode.CallEach ignored -> { /* no extra state */ }
+            case FusedSinkMode.ShortCircuit sc -> {
+                foundSlot = b.createLocal();
+                b.beginStoreLocal(foundSlot);
+                  b.emitLoadObjectConstant(Boolean.FALSE);
+                b.endStoreLocal();
+                if (sc.kind() == FusedSinkMode.ShortCircuitKind.FIND) {
+                    resultSlot = b.createLocal();
+                }
+            }
+            case FusedSinkMode.ReduceOpt ignored -> {
+                accSlot = b.createLocal();
+                hasAccSlot = b.createLocal();
+                b.beginStoreLocal(hasAccSlot);
+                  b.emitLoadObjectConstant(Boolean.FALSE);
+                b.endStoreLocal();
+            }
+            case FusedSinkMode.Materialize ignored -> {
+                builderSlot = b.createLocal();
+            }
+        }
+
+        // ── Source init ──
+        com.oracle.truffle.api.bytecode.BytecodeLocal endSlot    = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal seqSlot    = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal sizeSlot   = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal cursorSlot = null;
+
+        if (isRange) {
+            endSlot = b.createLocal();
+            b.beginStoreLocal(iSlot);
+              emitNode(rangeStart, b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginStoreLocal(endSlot);
+              emitNode(rangeEnd, b, argCount, localMap);
+            b.endStoreLocal();
+        } else if (isList) {
+            // List source: direct cons-cell traversal.  Avoids the O(n)
+            // ListToArray conversion (allocation + double traversal) by
+            // walking the cons chain in place:
+            //   cursor = list
+            //   while (!ListIsEmpty(cursor)) {
+            //       x = ListHead(cursor)
+            //       ... body ...
+            //       cursor = ListTail(cursor)
+            //   }
+            cursorSlot = b.createLocal();
+            b.beginStoreLocal(cursorSlot);
+              emitNode(rawListExpr, b, argCount, localMap);
+            b.endStoreLocal();
+        } else {
+            seqSlot = b.createLocal();
+            sizeSlot = b.createLocal();
+            b.beginStoreLocal(seqSlot);
+              emitNode(rawXsExpr, b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginStoreLocal(sizeSlot);
+              b.beginSeqSize(); b.emitLoadLocal(seqSlot); b.endSeqSize();
+            b.endStoreLocal();
+            b.beginStoreLocal(iSlot);
+              b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+        }
+
+        // boundSlot is used by range/seq indexed loops. Cursor-based list
+        // loops use ListIsEmpty instead, so boundSlot stays null there.
+        var boundSlot = isRange ? endSlot : sizeSlot;
+
+        // ── Init builder for materializing sinks ──
+        // RangeSeq sources produce longs — use a long[] builder to avoid
+        // boxing. RawSeq sources use the generic ArrayList<Object> builder.
+        boolean useLongBuilder = isRange && mode instanceof FusedSinkMode.Materialize;
+        boolean hasFilter = stages.stream().anyMatch(s -> s instanceof ClassifiedStage.FilterStep);
+        if (mode instanceof FusedSinkMode.Materialize) {
+            // Size hint: range end - start (if range); else seq size.
+            // With filters, halve the estimate — most filters pass ~50%
+            // of elements; over-alloc wastes zeroing time (80MB→40MB for
+            // 10M range). The builder grows if underestimated.
+            b.beginStoreLocal(builderSlot);
+            if (useLongBuilder) {
+                b.beginNewLongSeqBuilder();
+                if (hasFilter) {
+                    // (end - start) / 2
+                    b.beginDirectDivide();
+                      b.beginDirectSubtract();
+                        b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                      b.endDirectSubtract();
+                      b.emitLoadLongConstant(2L);
+                    b.endDirectDivide();
+                } else {
+                    b.beginDirectSubtract();
+                      b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                    b.endDirectSubtract();
+                }
+                b.endNewLongSeqBuilder();
+            } else if (isList) {
+                // Cursor-based list: no size available upfront.
+                // Use a reasonable default — the builder grows if needed.
+                b.beginNewSeqBuilder();
+                  b.emitLoadLongConstant(64L);
+                b.endNewSeqBuilder();
+            } else {
+                b.beginNewSeqBuilder();
+                if (hasFilter) {
+                    b.beginDirectDivide();
+                      b.emitLoadLocal(sizeSlot);
+                      b.emitLoadLongConstant(2L);
+                    b.endDirectDivide();
+                } else {
+                    b.emitLoadLocal(sizeSlot);
+                }
+                b.endNewSeqBuilder();
+            }
+            b.endStoreLocal();
+        }
+
+        // ── Pre-allocate Take/Drop counter locals ──
+        var takeDropCounters = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
+        for (var stage : stages) {
+            if (stage instanceof ClassifiedStage.TakeStep
+                    || stage instanceof ClassifiedStage.DropStep) {
+                var ctr = b.createLocal();
+                b.beginStoreLocal(ctr);
+                  b.emitLoadLongConstant(0L);
+                b.endStoreLocal();
+                takeDropCounters.add(ctr);
+            }
+        }
+
+        // ── While loop ──
+        b.beginWhile();
+
+        // Condition: cursor-based lists use !ListIsEmpty(cursor);
+        // range/seq use the indexed i < bound.
+        if (isList) {
+            b.beginDirectNot();
+              b.beginListIsEmpty();
+                b.emitLoadLocal(cursorSlot);
+              b.endListIsEmpty();
+            b.endDirectNot();
+        } else {
+            b.beginDirectLessThan();
+              b.emitLoadLocal(iSlot); b.emitLoadLocal(boundSlot);
+            b.endDirectLessThan();
+        }
+
+        b.beginBlock();
+
+        // Load element into xSlot.
+        b.beginStoreLocal(xSlot);
+        if (isRange) {
+            b.emitLoadLocal(iSlot);
+        } else if (isList) {
+            b.beginListHead();
+              b.emitLoadLocal(cursorSlot);
+            b.endListHead();
+        } else {
+            b.beginSeqGet();
+              b.emitLoadLocal(seqSlot); b.emitLoadLocal(iSlot);
+            b.endSeqGet();
+        }
+        b.endStoreLocal();
+
+        // ── Pipeline stages (shared across all modes) ──
+        int filterDepth = 0;
+        int takeDropIdx = 0;
+        var takeCounterPostIncrement = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
+        for (var stage : stages) {
+            switch (stage) {
+                case ClassifiedStage.FilterStep fs -> {
+                    b.beginIfThen();
+                      emitPredicateCheck(b, xSlot, fs.peel(), argCount, localMap);
+                      b.beginBlock();
+                    filterDepth++;
+                }
+                case ClassifiedStage.MapInline mi -> {
+                    if (mi.selfOp()) {
+                        b.beginStoreLocal(xSlot);
+                        emitInlineOpTwoLocals(mi.op(), xSlot, xSlot, b);
+                        b.endStoreLocal();
+                    } else {
+                        emitMapperStep(b, xSlot, mi.op(), mi.rhsLit(), mi.rhsNode(),
+                            null, false, null, argCount, localMap);
+                    }
+                }
+                case ClassifiedStage.MapCall mc -> {
+                    emitMapperStep(b, xSlot, null, 0L, null,
+                        mc.callHash(), mc.scalarABI(), mc.fieldName(),
+                        argCount, localMap);
+                }
+                case ClassifiedStage.DropStep ds -> {
+                    var ctr = takeDropCounters.get(takeDropIdx++);
+                    b.beginStoreLocal(ctr);
+                      b.beginDirectAdd();
+                        b.emitLoadLocal(ctr); b.emitLoadLongConstant(1L);
+                      b.endDirectAdd();
+                    b.endStoreLocal();
+                    b.beginIfThen();
+                      b.beginDirectLessThan();
+                        emitNode(ds.n(), b, argCount, localMap); b.emitLoadLocal(ctr);
+                      b.endDirectLessThan();
+                      b.beginBlock();
+                    filterDepth++;
+                }
+                case ClassifiedStage.TakeStep ts -> {
+                    var ctr = takeDropCounters.get(takeDropIdx++);
+                    b.beginIfThen();
+                      b.beginDirectLessThan();
+                        b.emitLoadLocal(ctr); emitNode(ts.n(), b, argCount, localMap);
+                      b.endDirectLessThan();
+                      b.beginBlock();
+                    filterDepth++;
+                    takeCounterPostIncrement.add(ctr);
+                }
+            }
+        }
+
+        // ── Sink body (mode-specific) ──
+        switch (mode) {
+            case FusedSinkMode.Accumulate a -> {
+                if (a.ignoreElement()) {
+                    // Count: acc++
+                    b.beginStoreLocal(accSlot);
+                      b.beginDirectAdd();
+                        b.emitLoadLocal(accSlot); b.emitLoadLongConstant(1L);
+                      b.endDirectAdd();
+                    b.endStoreLocal();
+                } else {
+                    // Fold: acc = acc <op> x
+                    b.beginStoreLocal(accSlot);
+                      emitInlineOpTwoLocals(a.op(), accSlot, xSlot, b);
+                    b.endStoreLocal();
+                }
+            }
+            case FusedSinkMode.CallEach ce -> {
+                var argCopy = b.createLocal();
+                b.beginStoreLocal(argCopy);
+                  b.emitLoadLocal(xSlot);
+                b.endStoreLocal();
+                var discardSlot = b.createLocal();
+                b.beginStoreLocal(discardSlot);
+                  emitCallOneArg(b, ce.target(), argCopy, ce.scalarABI(), ce.fieldName());
+                b.endStoreLocal();
+            }
+            case FusedSinkMode.ShortCircuit sc -> {
+                // Any:  if (p(x))  → found = true; Branch(exit)
+                // All:  if (!p(x)) → found = true; Branch(exit)
+                // Find: if (p(x))  → found = true; result = x; Branch(exit)
+                // The Branch jumps past the While to exitLabel, eliminating
+                // the per-iteration !found check entirely.
+                b.beginIfThen();
+                if (sc.kind() == FusedSinkMode.ShortCircuitKind.ALL) {
+                    b.beginDirectNot();
+                      emitPredicateCheck(b, xSlot, sc.predPeel(), argCount, localMap);
+                    b.endDirectNot();
+                } else {
+                    emitPredicateCheck(b, xSlot, sc.predPeel(), argCount, localMap);
+                }
+                  b.beginBlock();
+                    b.beginStoreLocal(foundSlot);
+                      b.emitLoadObjectConstant(Boolean.TRUE);
+                    b.endStoreLocal();
+                    if (sc.kind() == FusedSinkMode.ShortCircuitKind.FIND) {
+                        b.beginStoreLocal(resultSlot);
+                          b.emitLoadLocal(xSlot);
+                        b.endStoreLocal();
+                    }
+                    b.emitBranch(exitLabel);
+                  b.endBlock();
+                b.endIfThen();
+            }
+            case FusedSinkMode.ReduceOpt r -> {
+                // First element → init; subsequent → acc = acc <op> x
+                b.beginIfThenElse();
+                  b.beginDirectNot();
+                    b.emitLoadLocal(hasAccSlot);
+                  b.endDirectNot();
+                  b.beginBlock();
+                    b.beginStoreLocal(accSlot);
+                      b.emitLoadLocal(xSlot);
+                    b.endStoreLocal();
+                    b.beginStoreLocal(hasAccSlot);
+                      b.emitLoadObjectConstant(Boolean.TRUE);
+                    b.endStoreLocal();
+                  b.endBlock();
+                  b.beginBlock();
+                    b.beginStoreLocal(accSlot);
+                      emitInlineOpTwoLocals(r.op(), accSlot, xSlot, b);
+                    b.endStoreLocal();
+                  b.endBlock();
+                b.endIfThenElse();
+            }
+            case FusedSinkMode.Materialize ignored -> {
+                if (useLongBuilder) {
+                    // long[] builder = LongSeqBuilderAdd(builder, x)
+                    // Must store back — array may grow (new allocation).
+                    b.beginStoreLocal(builderSlot);
+                      b.beginLongSeqBuilderAdd();
+                        b.emitLoadLocal(builderSlot);
+                        b.emitLoadLocal(xSlot);
+                      b.endLongSeqBuilderAdd();
+                    b.endStoreLocal();
+                } else {
+                    // builder.add(x) — discard the returned builder ref
+                    var discardSlot2 = b.createLocal();
+                    b.beginStoreLocal(discardSlot2);
+                      b.beginSeqBuilderAdd();
+                        b.emitLoadLocal(builderSlot);
+                        b.emitLoadLocal(xSlot);
+                      b.endSeqBuilderAdd();
+                    b.endStoreLocal();
+                }
+            }
+        }
+
+        // ── Close stages (shared) ──
+        for (var ctr : takeCounterPostIncrement) {
+            b.beginStoreLocal(ctr);
+              b.beginDirectAdd();
+                b.emitLoadLocal(ctr); b.emitLoadLongConstant(1L);
+              b.endDirectAdd();
+            b.endStoreLocal();
+        }
+        for (int j = 0; j < filterDepth; j++) {
+              b.endBlock();
+            b.endIfThen();
+        }
+        // Advance: cursor = ListTail(cursor) for lists; i++ otherwise.
+        if (isList) {
+            b.beginStoreLocal(cursorSlot);
+              b.beginListTail();
+                b.emitLoadLocal(cursorSlot);
+              b.endListTail();
+            b.endStoreLocal();
+        } else {
+            b.beginStoreLocal(iSlot);
+              b.beginDirectAdd();
+                b.emitLoadLocal(iSlot); b.emitLoadLongConstant(1L);
+              b.endDirectAdd();
+            b.endStoreLocal();
+        }
+
+        b.endBlock();
+        b.endWhile();
+
+        // #442 — land here when Branch(exitLabel) fires from a ShortCircuit
+        // sink. The foundSlot/resultSlot are already set by the branch site.
+        if (exitLabel != null) {
+            b.emitLabel(exitLabel);
+        }
+
+        // ── Post-loop result (mode-specific) ──
+        switch (mode) {
+            case FusedSinkMode.Accumulate ignored ->
+                b.emitLoadLocal(accSlot);
+            case FusedSinkMode.CallEach ignored ->
+                b.emitLoadObjectConstant(com.mezze.interpreter.values.MezzeRecord.empty());
+            case FusedSinkMode.ShortCircuit sc -> {
+                switch (sc.kind()) {
+                    case ANY -> b.emitLoadLocal(foundSlot);
+                    case ALL -> {
+                        b.beginDirectNot();
+                          b.emitLoadLocal(foundSlot);
+                        b.endDirectNot();
+                    }
+                    case FIND -> {
+                        b.beginConditional();
+                          b.emitLoadLocal(foundSlot);
+                          b.beginMakeVariantSinglePayload(SOME_TAG,
+                              com.mezze.language.ast.BuiltinTypes.SOME);
+                            b.beginMakeRecord(VAL_FIELD);
+                              b.emitLoadLocal(resultSlot);
+                            b.endMakeRecord();
+                          b.endMakeVariantSinglePayload();
+                          b.emitMakeVariantNoPayload(NONE_TAG,
+                              com.mezze.language.ast.BuiltinTypes.NONE);
+                        b.endConditional();
+                    }
+                }
+            }
+            case FusedSinkMode.ReduceOpt ignored -> {
+                b.beginConditional();
+                  b.emitLoadLocal(hasAccSlot);
+                  b.beginMakeVariantSinglePayload(SOME_TAG,
+                      com.mezze.language.ast.BuiltinTypes.SOME);
+                    b.beginMakeRecord(VAL_FIELD);
+                      b.emitLoadLocal(accSlot);
+                    b.endMakeRecord();
+                  b.endMakeVariantSinglePayload();
+                  b.emitMakeVariantNoPayload(NONE_TAG,
+                      com.mezze.language.ast.BuiltinTypes.NONE);
+                b.endConditional();
+            }
+            case FusedSinkMode.Materialize m -> {
+                if (useLongBuilder && m.target() == FusedSinkMode.MaterializeTarget.LIST) {
+                    // long[] → MezzeList: convert via MezzeSeq then to list.
+                    // The LongSeqBuilder stores unboxed longs; wrap into a
+                    // MezzeList by going through LongSeqStorage → MezzeSeq
+                    // → MezzeList.of(). We reuse the SeqBuilderToList
+                    // conversion by first materializing the seq, then
+                    // converting — but that costs an extra copy. Instead,
+                    // build a LongSeqBuilderToList that does it in one step.
+                    b.beginLongSeqBuilderToList();
+                      b.emitLoadLocal(builderSlot);
+                    b.endLongSeqBuilderToList();
+                } else if (useLongBuilder) {
+                    // long[] → MezzeSeq via LongSeqStorage (unboxed)
+                    b.beginLongSeqBuilderToSeq();
+                      b.emitLoadLocal(builderSlot);
+                    b.endLongSeqBuilderToSeq();
+                } else if (m.target() == FusedSinkMode.MaterializeTarget.SEQ) {
+                    b.beginSeqBuilderToSeq();
+                      b.emitLoadLocal(builderSlot);
+                    b.endSeqBuilderToSeq();
+                } else {
+                    b.beginSeqBuilderToList();
+                      b.emitLoadLocal(builderSlot);
+                    b.endSeqBuilderToList();
+                }
+            }
+        }
+
+        b.endBlock();
+    }
 
     /**
      * #437 — classify a MakeLambdaIR whose body is
@@ -3267,6 +3913,9 @@ public final class BytecodeCompiler {
          *  Set to a {@link ReadLocalIR} pointing at the outer frame slot
          *  the lambda's capture[idx].slot refers to. */
         final NodeIR rhsNode;
+        /** True when both operands are the parameter itself (e.g. {@code x * x}).
+         *  Emit side uses {@code xSlot <op> xSlot} instead of xSlot <op> rhs. */
+        final boolean selfOp;
         /** #442 Day 9 — non-null when the mapper body is a call to a pure
          *  user function (rather than {@code x <op> lit}). When set,
          *  {@code op} is null and {@code rhsLit} is ignored;
@@ -3278,15 +3927,20 @@ public final class BytecodeCompiler {
         final boolean callScalarABI;
         final String callFieldName;
         UnaryLitShape(InlineOp op, long rhsLit) {
-            this.op = op; this.rhsLit = rhsLit; this.rhsNode = null;
+            this.op = op; this.rhsLit = rhsLit; this.rhsNode = null; this.selfOp = false;
             this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
         }
         UnaryLitShape(InlineOp op, NodeIR rhsNode) {
-            this.op = op; this.rhsLit = 0L; this.rhsNode = rhsNode;
+            this.op = op; this.rhsLit = 0L; this.rhsNode = rhsNode; this.selfOp = false;
+            this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
+        }
+        /** Shape E: param <op> param (e.g. x * x). */
+        UnaryLitShape(InlineOp op, boolean selfOp) {
+            this.op = op; this.rhsLit = 0L; this.rhsNode = null; this.selfOp = selfOp;
             this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
         }
         UnaryLitShape(Hash callHash, boolean callScalarABI, String callFieldName) {
-            this.op = null; this.rhsLit = 0L; this.rhsNode = null;
+            this.op = null; this.rhsLit = 0L; this.rhsNode = null; this.selfOp = false;
             this.callHash = callHash;
             this.callScalarABI = callScalarABI;
             this.callFieldName = callFieldName;
@@ -3378,7 +4032,21 @@ public final class BytecodeCompiler {
         // are present. Simpler: adjust the check below to also accept
         // ReadLocal(paramSlot).
         var outer = matchBinaryOpAgainstConstOrCapture(body, caps, paramSlot);
-        if (outer == null) return null;
+        if (outer == null) {
+            // Shape F: general catch-all for any capture-free single-param
+            // predicate lambda whose body couldn't be classified inline.
+            // Call the lambda function directly — it returns Bool, usable
+            // as an if-condition. Same rationale as classifyUnaryLiteralLambda's
+            // Shape F. The canonicalizer's isEffectSafe gate validates the chain.
+            if (caps.isEmpty()) {
+                if (System.getenv("MEZZE_CHAIN_CANON_EMIT_DEBUG") != null)
+                    System.err.println("[pred-classify] CALL fallback for body="
+                        + body.getClass().getSimpleName());
+                return new PredShape(ml.getFunctionHash(),
+                        /*callScalarABI=*/ true, /*callFieldName=*/ null);
+            }
+            return null;
+        }
         // Outer must be a comparison op — predicate produces Bool.
         switch (outer.op) {
             case EQ, NEQ, LT, LE, GT, GE -> {}
@@ -3422,6 +4090,13 @@ public final class BytecodeCompiler {
             if (lifted != null) {
                 return new BinaryLitMatch(bin.getOp(), lifted, lp, lp ? null : bin.getLeft());
             }
+            // #442 Shape A′: RHS is any parameter-free expression (e.g.
+            // ReadGlobalByHash(n) - 10). The emitter will evaluate it inline
+            // in the fused loop; for side-effect-free expressions on globals/
+            // literals this is correct and avoids a full function call.
+            if (isParamFree(right, paramSlot)) {
+                return new BinaryLitMatch(bin.getOp(), right, lp, lp ? null : bin.getLeft());
+            }
         }
         // Shape B: CallDirect (scalar-ABI) to a KnownArithOps target.
         if (n instanceof CallDirectIR call
@@ -3437,6 +4112,10 @@ public final class BytecodeCompiler {
             NodeIR lifted = liftCaptureRhs(right, caps);
             if (lifted != null) {
                 return new BinaryLitMatch(op, lifted, lp, lp ? null : call.getArgs().get(0));
+            }
+            // #442 Shape B′: parameter-free RHS expression.
+            if (isParamFree(right, paramSlot)) {
+                return new BinaryLitMatch(op, right, lp, lp ? null : call.getArgs().get(0));
             }
         }
         // Shape C: CallIndirect(function=ReadField(?, opName), arg=MakeRecord{it, r=LongLit-or-Capture}).
@@ -3459,6 +4138,11 @@ public final class BytecodeCompiler {
             NodeIR lifted = liftCaptureRhs(rExpr, caps);
             if (lifted != null) {
                 return new BinaryLitMatch(op, lifted, lp, lp ? null : lhs);
+            }
+            // #442 Shape C′: parameter-free expression RHS — e.g.
+            // (x > (n - 10)) where RHS is CallIndirect(ReadField(n,__sub__),{it=n,r=10}).
+            if (isParamFree(rExpr, paramSlot)) {
+                return new BinaryLitMatch(op, rExpr, lp, lp ? null : lhs);
             }
         }
         return null;
@@ -3568,6 +4252,36 @@ public final class BytecodeCompiler {
         return new ReadLocalIR(cap.getSlot(), cap.getKind(), rc.getSrc(), null);
     }
 
+    /**
+     * #442 — returns true iff the expression tree rooted at {@code node}
+     * does NOT reference {@link ReadLocalIR} at {@code paramSlot}. Used to
+     * determine whether a comparison RHS can be emitted inline in the
+     * fused loop body (evaluated each iteration but independent of the
+     * loop variable). Conservatively returns false for IR shapes with
+     * children we don't walk (e.g. LetIR, MatchIR, BlockIR) — those are
+     * too complex to inline safely.
+     */
+    private static boolean isParamFree(NodeIR node, int paramSlot) {
+        if (node instanceof ReadLocalIR rl) return rl.getSlot() != paramSlot;
+        if (node instanceof LongLitIR || node instanceof DoubleLitIR
+                || node instanceof BoolLitIR || node instanceof StringLitIR
+                || node instanceof CharLitIR || node instanceof FracLitIR
+                || node instanceof UnitLitIR) return true;
+        if (node instanceof ReadGlobalByHashIR || node instanceof ReadGlobalFnByHashIR)
+            return true;
+        if (node instanceof ReadCaptureIR) return true;
+        if (node instanceof InlineBinaryOpIR bin)
+            return isParamFree(bin.getLeft(), paramSlot)
+                && isParamFree(bin.getRight(), paramSlot);
+        if (node instanceof CallDirectIR call) {
+            for (var arg : call.getArgs())
+                if (!isParamFree(arg, paramSlot)) return false;
+            return true;
+        }
+        // Conservative: anything else might hide a param reference.
+        return false;
+    }
+
     private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
                                                      MezzeLanguage language) {
         // #515 — accept captures for Shape A/B/C only. Call-form (Shape D)
@@ -3592,8 +4306,14 @@ public final class BytecodeCompiler {
             if (right instanceof LongLitIR r) {
                 return new UnaryLitShape(bin.getOp(), r.getValue());
             }
+            // Shape E: param <op> param — e.g. {x} -> x * x (squaring).
+            if (right instanceof ReadLocalIR rr && rr.getSlot() == paramSlot) {
+                return new UnaryLitShape(bin.getOp(), /*selfOp=*/ true);
+            }
             NodeIR lifted = liftCaptureRhs(right, caps);
             if (lifted != null) return new UnaryLitShape(bin.getOp(), lifted);
+            // #442 Shape A′: parameter-free expression RHS.
+            if (isParamFree(right, paramSlot)) return new UnaryLitShape(bin.getOp(), right);
         }
         // Shape B: CallDirect (scalar-ABI) to a KnownArithOps target with
         // (ReadLocal(paramSlot), LongLit|ReadCapture) — mono-desugared arith.
@@ -3610,6 +4330,8 @@ public final class BytecodeCompiler {
             }
             NodeIR lifted = liftCaptureRhs(right, caps);
             if (lifted != null) return new UnaryLitShape(op, lifted);
+            // #442 Shape B′: parameter-free expression RHS.
+            if (isParamFree(right, paramSlot)) return new UnaryLitShape(op, right);
         }
         // Shape C: mono-not-fired — CallIndirectIR(function=ReadField(receiver,opName),
         //          arg=MakeRecord{it=receiver, r=LongLit|ReadCapture}). Same as
@@ -3657,6 +4379,16 @@ public final class BytecodeCompiler {
                 }
                 return null;
             }
+        }
+        // Shape F: general catch-all for any capture-free single-param lambda
+        // whose body the shapes above couldn't classify (e.g. PerformOpIR-based
+        // effect calls). Instead of classifying the body's op/rhs, emit a call
+        // to the lambda's own compiled function. The lambda's BDSL handles
+        // effects, PerformOp, etc. — we just call it with the element value.
+        // The canonicalizer's isEffectSafe gate already validated the chain.
+        if (caps.isEmpty()) {
+            return new UnaryLitShape(ml.getFunctionHash(),
+                    /*callScalarABI=*/ true, /*callFieldName=*/ null);
         }
         return null;
     }

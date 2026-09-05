@@ -95,7 +95,12 @@ object RuntimeServer {
     @JvmStatic
     fun main(args: Array<String>) {
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
-        System.setProperty("polyglot.log.level", "OFF")
+        // Suppress chatty Truffle/polyglot log output UNLESS the user asked
+        // for trace-jit — compilation trace events route through the polyglot
+        // logger and would be eaten by level=OFF. (#515)
+        if (!args.contains("--trace-jit")) {
+            System.setProperty("polyglot.log.level", "OFF")
+        }
 
         // Save the real stdout BEFORE redirecting — control frames go here.
         // Anything written to System.out after we redirect gets wrapped in
@@ -168,7 +173,14 @@ object RuntimeServer {
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
         if (jitCapable) engineBuilder.option("engine.Compilation", jitEnabled.toString())
-        if (devFlags.traceJit && jitCapable) engineBuilder.option("engine.TraceCompilation", "true")
+        if (devFlags.traceJit && jitCapable) {
+            engineBuilder.option("engine.TraceCompilation", "true")
+            engineBuilder.option("engine.TraceCompilationDetails", "true")
+            // Route trace output to the original stderr (the parent inherits
+            // fd 2 from us) instead of through the wire's System.err redirect.
+            // Matches EmbeddedExec's .err(System.err) call. (#515)
+            engineBuilder.err(originalStderr)
+        }
         if (devFlags.profile != null) {
             engineBuilder.option("cpusampler", "true")
                 .option("cpusampler.OutputFile", devFlags.profile.absolutePath)

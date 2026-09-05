@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes.inline;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -33,6 +34,7 @@ public abstract class DirectSubtractNode extends MezzeNode {
     public abstract double executeDouble(VirtualFrame frame) throws UnexpectedResultException;
 
     @Specialization(rewriteOn = ArithmeticException.class)
+    @ForceQuickening
     public static long subLongs(long left, long right) {
         return Math.subtractExact(left, right);
     }

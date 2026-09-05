@@ -42,8 +42,8 @@ import com.oracle.truffle.api.bytecode.Operation;
 import com.oracle.truffle.api.bytecode.OperationProxy;
 import com.oracle.truffle.api.bytecode.Variadic;
 import com.oracle.truffle.api.dsl.Bind;
-import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.Cached;
+import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.VirtualFrame;
@@ -109,7 +109,7 @@ import com.oracle.truffle.api.nodes.RootNode;
  */
 @GenerateBytecode(
     languageClass = MezzeLanguage.class,
-    boxingEliminationTypes = {long.class, double.class, boolean.class},
+    boxingEliminationTypes = {},
     enableUncachedInterpreter = true,
     enableYield = true,
     enableSerialization = true,
@@ -1378,12 +1378,78 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
-    /** Get seq size as a long. Used by #407 fold-fusion inlined loops. */
+    /** Get seq size as a long. Used by #407 fold-fusion inlined loops.
+     *  Extended for Object[] to support list chain fusion (list.toArray()
+     *  produces Object[], then the fused loop iterates by index). */
     @Operation
     public static final class SeqSize {
         @Specialization
         public static long doSeq(MezzeSeq<?> seq) {
             return seq.size();
+        }
+        @Specialization
+        public static long doObjectArray(Object[] array) {
+            return array.length;
+        }
+    }
+
+    /** Convert a MezzeList to Object[] for indexed iteration in fused loops.
+     *  Single O(n) pass — the resulting array supports O(1) SeqGet access. */
+    @Operation
+    public static final class ListToArray {
+        @Specialization
+        public static Object[] doList(com.mezze.datastructures.list.MezzeList<?> list) {
+            return list.toArray();
+        }
+    }
+
+    // ===== Cons-cell traversal ops for list-source fused loops =====
+    // These avoid the O(n) ListToArray conversion by walking the list
+    // in place: cursor = list; while (!isEmpty(cursor)) { x = head(cursor); cursor = tail(cursor); }
+
+    /** Test whether a MezzeList cursor is empty (Nil).
+     *  Specialized on Cons → constant false for JIT devirtualization. */
+    @Operation
+    public static final class ListIsEmpty {
+        @Specialization
+        public static boolean doCons(com.mezze.datastructures.list.MezzeCons<?> list) {
+            return false;
+        }
+        @Specialization
+        public static boolean doLongCons(com.mezze.datastructures.list.MezzeLongCons list) {
+            return false;
+        }
+        @Specialization
+        public static boolean doNil(com.mezze.datastructures.list.MezzeNil<?> list) {
+            return true;
+        }
+    }
+
+    /** Read the head element of a non-empty MezzeList cursor.
+     *  Specialized on Cons/LongCons for direct field access. */
+    @Operation
+    public static final class ListHead {
+        @Specialization
+        public static Object doCons(com.mezze.datastructures.list.MezzeCons<?> list) {
+            return list.head();
+        }
+        @Specialization
+        public static Object doLongCons(com.mezze.datastructures.list.MezzeLongCons list) {
+            return list.head();
+        }
+    }
+
+    /** Advance a MezzeList cursor to its tail.
+     *  Specialized on Cons/LongCons for direct field access. */
+    @Operation
+    public static final class ListTail {
+        @Specialization
+        public static com.mezze.datastructures.list.MezzeList<?> doCons(com.mezze.datastructures.list.MezzeCons<?> list) {
+            return list.tail();
+        }
+        @Specialization
+        public static com.mezze.datastructures.list.MezzeList<?> doLongCons(com.mezze.datastructures.list.MezzeLongCons list) {
+            return list.tail();
         }
     }
 
@@ -1466,6 +1532,141 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 }
             }
             return MezzeSeq.of(result.toArray());
+        }
+    }
+
+    // ── Seq/List builder operations for fused materializing sinks ───────
+
+    /**
+     * Create a new mutable seq builder (backed by ArrayList) for use
+     * in fused ToSeq/ToList loops. Optional size-hint parameter enables
+     * pre-allocation when the output size is known (e.g. range source
+     * with no filter stages). Returns raw Object to satisfy Truffle's
+     * BDSL type constraints (no generics).
+     */
+    @Operation
+    public static final class NewSeqBuilder {
+        @Specialization
+        @SuppressWarnings("unchecked")
+        public static Object doNew(long sizeHint) {
+            return new java.util.ArrayList<>(sizeHint > 0 ? (int) sizeHint : 16);
+        }
+    }
+
+    /**
+     * Append an element to the mutable seq builder. Returns the
+     * builder itself (for balanced BDSL stack).
+     */
+    @Operation
+    public static final class SeqBuilderAdd {
+        @Specialization
+        @SuppressWarnings("unchecked")
+        public static Object doAdd(Object builder, Object element) {
+            ((java.util.ArrayList<Object>) builder).add(element);
+            return builder;
+        }
+    }
+
+    /**
+     * Finalize the seq builder into an immutable {@link MezzeSeq}.
+     * The builder should not be used after this call.
+     */
+    @Operation
+    public static final class SeqBuilderToSeq {
+        @Specialization
+        @SuppressWarnings("unchecked")
+        public static MezzeSeq<Object> doFinalize(Object builder) {
+            var list = (java.util.ArrayList<Object>) builder;
+            if (list.isEmpty()) return MezzeSeq.empty();
+            return MezzeSeq.of(list.toArray());
+        }
+    }
+
+    /**
+     * Finalize the seq builder into a {@link com.mezze.datastructures.list.MezzeList}.
+     * The builder should not be used after this call.
+     */
+    @Operation
+    public static final class SeqBuilderToList {
+        @Specialization
+        @SuppressWarnings("unchecked")
+        public static Object doFinalize(Object builder) {
+            var list = (java.util.ArrayList<Object>) builder;
+            if (list.isEmpty()) return com.mezze.datastructures.list.MezzeList.empty();
+            return com.mezze.datastructures.list.MezzeList.of(list.toArray());
+        }
+    }
+
+    // ── Long-specialized seq builder for fused RangeSeq→filter→to_seq ──
+    //
+    // The generic SeqBuilder uses ArrayList<Object>, forcing every long
+    // through autoboxing. For RangeSeq sources (which produce longs), we
+    // use a long[] directly — no boxing, no GC pressure, and the result
+    // lands in MezzeSeq's LongSeqStorage (unboxed).
+
+    /**
+     * Create a long[] builder with initial capacity. Returns a long[2]
+     * header: [count, capacity] followed by the data array stored as a
+     * two-element Object[]: {long[] data, long count}.
+     */
+    @Operation
+    public static final class NewLongSeqBuilder {
+        @Specialization
+        public static Object doNew(long sizeHint) {
+            int cap = sizeHint > 0 ? (int) Math.min(sizeHint, Integer.MAX_VALUE - 8) : 16;
+            return new long[cap + 1]; // slot 0 = count, slots 1..cap = data
+        }
+    }
+
+    /**
+     * Append a long to the builder. Returns the (possibly grown) builder.
+     */
+    @Operation
+    public static final class LongSeqBuilderAdd {
+        @Specialization
+        public static long[] doAdd(long[] builder, long element) {
+            int count = (int) builder[0];
+            if (count + 1 >= builder.length) {
+                int newCap = builder.length * 2;
+                long[] grown = new long[newCap];
+                System.arraycopy(builder, 0, grown, 0, count + 1);
+                builder = grown;
+            }
+            builder[count + 1] = element; // data starts at index 1
+            builder[0] = count + 1;
+            return builder;
+        }
+    }
+
+    /**
+     * Finalize long builder into a MezzeSeq with LongSeqStorage.
+     */
+    @Operation
+    public static final class LongSeqBuilderToSeq {
+        @Specialization
+        public static Object doFinalize(long[] builder) {
+            int count = (int) builder[0];
+            if (count == 0) return MezzeSeq.empty();
+            long[] data = new long[count];
+            System.arraycopy(builder, 1, data, 0, count);
+            return MezzeSeq.fromLongs(data);
+        }
+    }
+
+    /**
+     * Finalize long builder into a MezzeList.
+     * Converts the unboxed long[] accumulator into a boxed Object[] for
+     * {@link com.mezze.datastructures.list.MezzeList}.
+     */
+    @Operation
+    public static final class LongSeqBuilderToList {
+        @Specialization
+        public static Object doFinalize(long[] builder) {
+            int count = (int) builder[0];
+            if (count == 0) return com.mezze.datastructures.list.MezzeList.empty();
+            Object[] boxed = new Object[count];
+            for (int i = 0; i < count; i++) boxed[i] = builder[i + 1];
+            return com.mezze.datastructures.list.MezzeList.of(boxed);
         }
     }
 
@@ -1801,25 +2002,101 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = Hash.class)
     @ConstantOperand(type = String.class)
     public static final class PerformD {
-        // #347 — per-site inline cache of the handler's fieldIndex for opName.
-        // Warm path: skip the HashMap probe in MezzeRecord.getField(String)
-        // and index directly. Shape-validated inside YieldDispatch by
-        // comparing the cached name at that slot to the incoming opName.
-        // Uncached path passes -1 which forces the string lookup.
+        // Phase 5 — cached fast-path: resolve handler + op field index
+        // ONCE, cache with a handler-chain-stable Assumption. When the
+        // assumption holds (no push/pop between calls — i.e. inside a
+        // fused loop whose lambdas don't install handlers), the JIT
+        // inlines through the op dispatch with zero ThreadLocal probes.
+        //
+        // On assumption invalidation (handler pushed/popped), this
+        // specialization deactivates. The DSL re-instantiates it on the
+        // next call with a fresh assumption from the CyclicAssumption,
+        // re-resolving the handler.
+        @Specialization(assumptions = "handlerStable",
+                        guards = {"cachedHandler != null", "cachedTarget != null"},
+                        excludeForUncached = true)
+        public static Object doCached(Hash effectHash, String opName, Object arg,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("resolveFieldIndex(cachedHandler, opName)") int cachedFieldIndex,
+                @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
+                @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
+                @Cached("getHandlerStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
+                @Cached("create(cachedTarget)") DirectCallNode callNode,
+                @Cached("getResumeFn()") MezzeFunction resumeFn,
+                @Cached("getAbortFn()") MezzeFunction abortFn) {
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry dispatchFiber =
+                com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.acquireDispatchOnly();
+            dispatchFiber.pushEffectHandles(resumeFn, abortFn);
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry prevDispatch =
+                dispatchFiber.enterDispatch();
+            try {
+                Object[] opArgs = new Object[cachedCV.length + 1];
+                System.arraycopy(cachedCV, 0, opArgs, 0, cachedCV.length);
+                opArgs[cachedCV.length] = arg;
+                return callNode.call(opArgs);
+            } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
+                if (com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.insideBdslHandle()) {
+                    throw abort;
+                }
+                throw new com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException(
+                    new com.mezze.interpreter.nodes.continuation.OpCall(opName, arg, effectHash));
+            } finally {
+                com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.exitDispatch(prevDispatch);
+                dispatchFiber.popEffectHandles();
+                com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.releaseDispatchOnly(dispatchFiber);
+            }
+        }
+
+        // Fallback — full chain dispatch through YieldDispatch (with
+        // @TruffleBoundary). Handles: no handler in scope, assumption
+        // invalidated, handler-shape mismatch.
         @Specialization
-        public static Object doPerformD(Hash effectHash, String opName, Object arg,
-                                        @Cached(value = "initFieldIndex()", allowUncached = true, dimensions = 1)
-                                        int[] fieldIndexBox) {
+        public static Object doGeneric(Hash effectHash, String opName, Object arg,
+                                       @Cached(value = "initFieldIndex()", allowUncached = true, dimensions = 1)
+                                       int[] fieldIndexBox) {
             return YieldDispatch.dispatch(effectHash, opName, arg, fieldIndexBox);
         }
 
-        // A 1-element mutable box so YieldDispatch can update the cached
-        // index after a successful uncached lookup (poor man's per-site cache
-        // — Truffle's @Cached wants a value, not a reference to write, so we
-        // use a heap-allocated box). Alloc cost is amortized: one per emit
-        // site, held for the lifetime of the bytecode root.
         static int[] initFieldIndex() {
             return new int[] { -1 };
+        }
+
+        @TruffleBoundary
+        static MezzeRecord resolveHandler(Hash effectHash) {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .peekHandlerForEffect(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getHandlerStableAssumption() {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getHandlerChainStableAssumption();
+        }
+
+        static int resolveFieldIndex(MezzeRecord handler, String opName) {
+            return handler.getFieldIndex(opName);
+        }
+
+        static CallTarget resolveCallTarget(MezzeRecord handler, int fieldIndex) {
+            if (fieldIndex < 0) return null;
+            Object val = handler.getField(fieldIndex);
+            if (val instanceof MezzeFunction fn) return fn.getCallTarget();
+            return null;
+        }
+
+        static Object[] resolveClosureValues(MezzeRecord handler, int fieldIndex) {
+            if (fieldIndex < 0) return new Object[0];
+            Object val = handler.getField(fieldIndex);
+            if (val instanceof MezzeFunction fn) return fn.getClosureValues();
+            return new Object[0];
+        }
+
+        static MezzeFunction getResumeFn() {
+            return YieldDispatch.fallThroughResumeFnPublic();
+        }
+
+        static MezzeFunction getAbortFn() {
+            return com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.makeAbortFunction();
         }
     }
 
@@ -2317,11 +2594,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
     @TruffleBoundary
     private static MezzeRecord buildAllObjectRecord(String[] fieldNames, Object[] values) {
-        FieldLocation[] locations = new FieldLocation[fieldNames.length];
-        for (int i = 0; i < fieldNames.length; i++) {
-            locations[i] = new FieldLocation(StorageType.OBJECT, i);
-        }
-        Shape shape = new Shape(fieldNames, locations);
+        Shape shape = com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
         long[] longFields = new long[0];
         double[] doubleFields = new double[0];
         Object[] objectFields = new Object[fieldNames.length];

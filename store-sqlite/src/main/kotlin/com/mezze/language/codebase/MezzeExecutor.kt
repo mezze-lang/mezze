@@ -227,12 +227,15 @@ class MezzeExecutor(
                         collectDirectCallTargets(s.end, ownHashes, visited, resolves, out)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectDirectCallTargets(s.xs, ownHashes, visited, resolves, out)
+                    is com.mezze.language.truffleir.SourceIR.RawList -> collectDirectCallTargets(s.xs, ownHashes, visited, resolves, out)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectDirectCallTargets(s.expr, ownHashes, visited, resolves, out)
                 }
                 for (stage in node.stages) {
                     when (stage) {
                         is com.mezze.language.truffleir.StageIR.Map -> check(stage.f.functionHash)
                         is com.mezze.language.truffleir.StageIR.Filter -> check(stage.p.functionHash)
+                        is com.mezze.language.truffleir.StageIR.Take -> collectDirectCallTargets(stage.n, ownHashes, visited, resolves, out)
+                        is com.mezze.language.truffleir.StageIR.Drop -> collectDirectCallTargets(stage.n, ownHashes, visited, resolves, out)
                     }
                 }
                 when (val sk = node.sink) {
@@ -241,7 +244,14 @@ class MezzeExecutor(
                         check(sk.f.functionHash)
                     }
                     is com.mezze.language.truffleir.SinkIR.ForEach -> check(sk.f.functionHash)
-                    com.mezze.language.truffleir.SinkIR.Sum -> {}
+                    is com.mezze.language.truffleir.SinkIR.Reduce -> check(sk.f.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.Any -> check(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.All -> check(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.Find -> check(sk.p.functionHash)
+                    com.mezze.language.truffleir.SinkIR.Sum,
+                    com.mezze.language.truffleir.SinkIR.Count,
+                    com.mezze.language.truffleir.SinkIR.ToSeq,
+                    com.mezze.language.truffleir.SinkIR.ToList -> {}
                 }
             }
             // Leaves / effect-hash / read-global — not validated, no recursion.
@@ -389,12 +399,15 @@ class MezzeExecutor(
                         collectReferencedHashes(s.end, queue)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectReferencedHashes(s.xs, queue)
+                    is com.mezze.language.truffleir.SourceIR.RawList -> collectReferencedHashes(s.xs, queue)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectReferencedHashes(s.expr, queue)
                 }
                 for (stage in node.stages) {
                     when (stage) {
                         is com.mezze.language.truffleir.StageIR.Map -> queue.add(stage.f.functionHash.hex)
                         is com.mezze.language.truffleir.StageIR.Filter -> queue.add(stage.p.functionHash.hex)
+                        is com.mezze.language.truffleir.StageIR.Take -> collectReferencedHashes(stage.n, queue)
+                        is com.mezze.language.truffleir.StageIR.Drop -> collectReferencedHashes(stage.n, queue)
                     }
                 }
                 when (val sk = node.sink) {
@@ -403,7 +416,14 @@ class MezzeExecutor(
                         queue.add(sk.f.functionHash.hex)
                     }
                     is com.mezze.language.truffleir.SinkIR.ForEach -> queue.add(sk.f.functionHash.hex)
-                    com.mezze.language.truffleir.SinkIR.Sum -> {}
+                    is com.mezze.language.truffleir.SinkIR.Reduce -> queue.add(sk.f.functionHash.hex)
+                    is com.mezze.language.truffleir.SinkIR.Any -> queue.add(sk.p.functionHash.hex)
+                    is com.mezze.language.truffleir.SinkIR.All -> queue.add(sk.p.functionHash.hex)
+                    is com.mezze.language.truffleir.SinkIR.Find -> queue.add(sk.p.functionHash.hex)
+                    com.mezze.language.truffleir.SinkIR.Sum,
+                    com.mezze.language.truffleir.SinkIR.Count,
+                    com.mezze.language.truffleir.SinkIR.ToSeq,
+                    com.mezze.language.truffleir.SinkIR.ToList -> {}
                 }
             }
         }
