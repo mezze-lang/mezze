@@ -354,8 +354,6 @@ public final class BytecodeCompiler {
                     if (ir != null && ir.getCaptureSlots() != null
                             && !ir.getCaptureSlots().isEmpty()) {
                         EAGER_CLOSURE_BEARING_FALLBACK.incrementAndGet();
-                        System.err.println("[eager #391] closure-bearing eager CT hash="
-                                + hash.getHex() + " captures=" + ir.getCaptureSlots().size());
                     }
                 }
                 ct = slot.getCallTarget();
@@ -2716,12 +2714,176 @@ public final class BytecodeCompiler {
             }
         }
 
-        // ── Phase 4d: emit the generic fused loop ──
+        // ── Phase 4d-fast: try FusedLongPipeline (single-op tight loop) ──
+        if (rawXsExpr != null && rangeStart == null && rawListExpr == null) {
+            var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
+            if (flp != null) {
+                b.beginFusedLongPipeline(flp.config);
+                  emitNode(rawXsExpr, b, argCount, localMap);              // child 0: seq
+                  emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);            // child 1: mapOperand
+                  emitFLPOperand(flp.filterPreLit, flp.filterPreNode, b, argCount, localMap);// child 2: filterPreRhs
+                  emitFLPOperand(flp.filterCmpLit, flp.filterCmpNode, b, argCount, localMap);// child 3: filterCmpRhs
+                  emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap); // child 4: sinkPredPreRhs
+                  emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap); // child 5: sinkPredCmpRhs
+                  emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);  // child 6: foldInit
+                b.endFusedLongPipeline();
+                if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongPipeline ("
+                        + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
+                return true;
+            }
+        }
+
+        // ── Phase 4d: emit the generic fused loop (fallback) ──
         emitFusedLoop(classifiedStages, rangeStart, rangeEnd, rawXsExpr,
                 rawListExpr, sinkMode, b, argCount, localMap);
         if (dbg) System.err.println("[chain-canon-emit] emitted fused loop ("
                 + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
         return true;
+    }
+
+    /**
+     * FusedLongPipeline emit specification. {@code config} is the packed
+     * int that becomes a {@code @ConstantOperand}. Each numeric operand
+     * has a {@code lit} value (used when {@code node} is null) and an
+     * optional {@code node} (emitted as a dynamic child when non-null).
+     */
+    private static final class FLPSpec {
+        final int config;
+        final long mapLit;           final NodeIR mapNode;
+        final long filterPreLit;     final NodeIR filterPreNode;
+        final long filterCmpLit;     final NodeIR filterCmpNode;
+        final long sinkPredPreLit;   final NodeIR sinkPredPreNode;
+        final long sinkPredCmpLit;   final NodeIR sinkPredCmpNode;
+        final long foldInitLit;      final NodeIR foldInitNode;
+        FLPSpec(int config,
+                long mapLit, NodeIR mapNode,
+                long filterPreLit, NodeIR filterPreNode,
+                long filterCmpLit, NodeIR filterCmpNode,
+                long sinkPredPreLit, NodeIR sinkPredPreNode,
+                long sinkPredCmpLit, NodeIR sinkPredCmpNode,
+                long foldInitLit, NodeIR foldInitNode) {
+            this.config = config;
+            this.mapLit = mapLit;               this.mapNode = mapNode;
+            this.filterPreLit = filterPreLit;   this.filterPreNode = filterPreNode;
+            this.filterCmpLit = filterCmpLit;   this.filterCmpNode = filterCmpNode;
+            this.sinkPredPreLit = sinkPredPreLit; this.sinkPredPreNode = sinkPredPreNode;
+            this.sinkPredCmpLit = sinkPredCmpLit; this.sinkPredCmpNode = sinkPredCmpNode;
+            this.foldInitLit = foldInitLit;     this.foldInitNode = foldInitNode;
+        }
+    }
+
+    /** Emit a FLP operand: if node is non-null, emit the expression tree;
+     *  otherwise emit a LoadConstant with the literal value. */
+    private void emitFLPOperand(long lit, NodeIR node,
+                                MezzeBytecodeRootNodeGen.Builder b,
+                                int argCount,
+                                BytecodeLocal[] localMap) {
+        if (node != null) {
+            emitNode(node, b, argCount, localMap);
+        } else {
+            b.emitLoadConstant(lit);
+        }
+    }
+
+    /**
+     * Try to build a FusedLongPipeline spec for the classified stages +
+     * sink. Returns an {@link FLPSpec} or null if the pipeline can't be
+     * expressed as inline long ops. Accepts both compile-time constant
+     * operands (LongLitIR) and runtime expressions (any NodeIR that
+     * evaluates to long).
+     */
+    private FLPSpec tryBuildFusedLongPipeline(
+            java.util.List<ClassifiedStage> stages, FusedSinkMode mode) {
+        if (mode instanceof FusedSinkMode.CallEach
+                || mode instanceof FusedSinkMode.ReduceOpt
+                || mode instanceof FusedSinkMode.Materialize) return null;
+
+        int mapOp = -1; long mapLit = 0; NodeIR mapNode = null;
+        int filterPreOp = -1; long filterPreLit = 0; NodeIR filterPreNode = null;
+        int filterCmpOp = -1; long filterCmpLit = 0; NodeIR filterCmpNode = null;
+
+        for (ClassifiedStage stage : stages) {
+            if (stage instanceof ClassifiedStage.MapInline mi) {
+                if (mapOp >= 0) return null;
+                mapOp = mi.op().ordinal();
+                if (mi.rhsNode() != null && !(mi.rhsNode() instanceof LongLitIR)) {
+                    mapNode = mi.rhsNode();
+                } else {
+                    mapLit = mi.rhsLit();
+                }
+            } else if (stage instanceof ClassifiedStage.FilterStep fs) {
+                if (filterCmpOp >= 0) return null;
+                FilterPeel fp = fs.peel();
+                if (fp.callHash() != null) return null;
+                if (fp.preOp() != null) {
+                    filterPreOp = fp.preOp().ordinal();
+                    if (fp.preRhsNode() != null && !(fp.preRhsNode() instanceof LongLitIR)) {
+                        filterPreNode = fp.preRhsNode();
+                    } else {
+                        filterPreLit = fp.preRhs();
+                    }
+                }
+                if (fp.cmpOp() != null) {
+                    filterCmpOp = fp.cmpOp().ordinal();
+                    if (fp.cmpRhsNode() != null && !(fp.cmpRhsNode() instanceof LongLitIR)) {
+                        filterCmpNode = fp.cmpRhsNode();
+                    } else {
+                        filterCmpLit = fp.cmpRhs();
+                    }
+                }
+            } else {
+                return null;
+            }
+        }
+
+        int sinkKind;
+        int foldOp = -1; long foldInitLit = 0; NodeIR foldInitNode = null;
+        int sinkPredPreOp = -1; long sinkPredPreLit = 0; NodeIR sinkPredPreNode = null;
+        int sinkPredCmpOp = -1; long sinkPredCmpLit = 0; NodeIR sinkPredCmpNode = null;
+
+        if (mode instanceof FusedSinkMode.Accumulate a) {
+            sinkKind = a.ignoreElement()
+                    ? MezzeBytecodeRootNode.FLP_SINK_COUNT
+                    : MezzeBytecodeRootNode.FLP_SINK_SUM;
+            foldOp = a.op().ordinal();
+            if (a.initExpr() instanceof LongLitIR lit) {
+                foldInitLit = lit.getValue();
+            } else {
+                foldInitNode = a.initExpr();
+            }
+        } else if (mode instanceof FusedSinkMode.ShortCircuit sc) {
+            sinkKind = switch (sc.kind()) {
+                case ANY -> MezzeBytecodeRootNode.FLP_SINK_ANY;
+                case ALL -> MezzeBytecodeRootNode.FLP_SINK_ALL;
+                case FIND -> MezzeBytecodeRootNode.FLP_SINK_FIND;
+            };
+            FilterPeel sp = sc.predPeel();
+            if (sp.callHash() != null) return null;
+            sinkPredPreOp = sp.preOp() != null ? sp.preOp().ordinal() : -1;
+            sinkPredCmpOp = sp.cmpOp() != null ? sp.cmpOp().ordinal() : -1;
+            if (sp.preRhsNode() != null && !(sp.preRhsNode() instanceof LongLitIR)) {
+                sinkPredPreNode = sp.preRhsNode();
+            } else {
+                sinkPredPreLit = sp.preRhs();
+            }
+            if (sp.cmpRhsNode() != null && !(sp.cmpRhsNode() instanceof LongLitIR)) {
+                sinkPredCmpNode = sp.cmpRhsNode();
+            } else {
+                sinkPredCmpLit = sp.cmpRhs();
+            }
+        } else {
+            return null;
+        }
+
+        int config = MezzeBytecodeRootNode.flpPackConfig(
+                sinkKind, mapOp, filterPreOp, filterCmpOp,
+                sinkPredPreOp, sinkPredCmpOp, foldOp);
+        return new FLPSpec(config,
+                mapLit, mapNode, filterPreLit, filterPreNode,
+                filterCmpLit, filterCmpNode,
+                sinkPredPreLit, sinkPredPreNode,
+                sinkPredCmpLit, sinkPredCmpNode,
+                foldInitLit, foldInitNode);
     }
 
     /**
@@ -3511,6 +3673,11 @@ public final class BytecodeCompiler {
         com.oracle.truffle.api.bytecode.BytecodeLocal seqSlot    = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal sizeSlot   = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal cursorSlot = null;
+        // Unboxed long[] iteration is handled by FusedLongPipeline (Phase 4d-fast).
+        // The generic fused loop below uses SeqGet (boxed) because the seq may
+        // contain non-numeric elements (promises, variants, records, etc.).
+        com.oracle.truffle.api.bytecode.BytecodeLocal longArraySlot = null;
+        boolean useUnboxedLongArray = false;
 
         if (isRange) {
             endSlot = b.createLocal();
@@ -3533,6 +3700,26 @@ public final class BytecodeCompiler {
             cursorSlot = b.createLocal();
             b.beginStoreLocal(cursorSlot);
               emitNode(rawListExpr, b, argCount, localMap);
+            b.endStoreLocal();
+        } else if (useUnboxedLongArray) {
+            // Extract backing long[] for unboxed iteration.
+            // Store seq in a temporary to avoid double-evaluating rawXsExpr.
+            seqSlot = b.createLocal();
+            longArraySlot = b.createLocal();
+            sizeSlot = b.createLocal();
+            b.beginStoreLocal(seqSlot);
+              emitNode(rawXsExpr, b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginStoreLocal(longArraySlot);
+              b.beginSeqExtractLongArray();
+                b.emitLoadLocal(seqSlot);
+              b.endSeqExtractLongArray();
+            b.endStoreLocal();
+            b.beginStoreLocal(sizeSlot);
+              b.beginSeqSize(); b.emitLoadLocal(seqSlot); b.endSeqSize();
+            b.endStoreLocal();
+            b.beginStoreLocal(iSlot);
+              b.emitLoadLongConstant(0L);
             b.endStoreLocal();
         } else {
             seqSlot = b.createLocal();
@@ -3640,6 +3827,10 @@ public final class BytecodeCompiler {
             b.beginListHead();
               b.emitLoadLocal(cursorSlot);
             b.endListHead();
+        } else if (useUnboxedLongArray) {
+            b.beginSeqGetLong();
+              b.emitLoadLocal(longArraySlot); b.emitLoadLocal(iSlot);
+            b.endSeqGetLong();
         } else {
             b.beginSeqGet();
               b.emitLoadLocal(seqSlot); b.emitLoadLocal(iSlot);

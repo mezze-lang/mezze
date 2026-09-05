@@ -5,6 +5,7 @@ import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
+import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.bytecode.OperationProxy;
@@ -22,6 +23,7 @@ import com.oracle.truffle.api.bytecode.OperationProxy;
 public abstract class DirectNegateNode extends MezzeNode {
 
     @Specialization(rewriteOn = ArithmeticException.class)
+    @ForceQuickening
     public static long negateLong(long value) {
         return Math.negateExact(value);
     }

@@ -6,6 +6,7 @@ import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
+import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.bytecode.OperationProxy;
@@ -26,6 +27,7 @@ import java.util.Objects;
 public abstract class DirectNotEqualNode extends MezzeNode {
 
     @Specialization
+    @ForceQuickening
     public static boolean neqLongs(long left, long right) {
         return left != right;
     }
@@ -36,6 +38,7 @@ public abstract class DirectNotEqualNode extends MezzeNode {
     }
 
     @Specialization
+    @ForceQuickening
     public static boolean neqBooleans(boolean left, boolean right) {
         return left != right;
     }

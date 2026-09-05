@@ -96,7 +96,10 @@ object NativeBuildPath {
         }
         val outBinary = File(outputDir, outputName)
         outputDir.mkdirs()
-        val closure = computeReachableClosure(loweredFunctions)
+        val rawClosure = computeReachableClosure(loweredFunctions)
+        val closureMap = rawClosure.associateBy { it.hash }
+        val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer.canonicalize(closureMap)
+        val closure = rawClosure.map { canonicalized[it.hash] ?: it }
         val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
         shell.copyTo(outBinary, overwrite = true)
         outBinary.setExecutable(true, false)
@@ -170,7 +173,10 @@ object NativeBuildPath {
         // then pass them to packEmbeddedAppJar which would otherwise
         // recompute them. Hashing the jar bytes directly is non-determ
         // because JarEntry stamps with current time.
-        val closure = computeReachableClosure(loweredFunctions)
+        val rawClosure = computeReachableClosure(loweredFunctions)
+        val closureMap = rawClosure.associateBy { it.hash }
+        val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer.canonicalize(closureMap)
+        val closure = rawClosure.map { canonicalized[it.hash] ?: it }
         if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
         val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
 
@@ -453,7 +459,10 @@ object NativeBuildPath {
         timing: Boolean,
         relativeTime: () -> Long,
     ): File {
-        val closure = computeReachableClosure(loweredFunctions)
+        val rawClosure = computeReachableClosure(loweredFunctions)
+        val closureMap = rawClosure.associateBy { it.hash }
+        val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer.canonicalize(closureMap)
+        val closure = rawClosure.map { canonicalized[it.hash] ?: it }
         if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
 
         val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)

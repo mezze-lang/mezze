@@ -33,6 +33,7 @@ import com.mezze.interpreter.values.MezzeRecord.Shape;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.mezze.interpreter.values.MezzeVariant.TagRegistry;
 import com.oracle.truffle.api.CallTarget;
+import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.bytecode.BytecodeRootNode;
 import com.oracle.truffle.api.bytecode.ConstantOperand;
@@ -51,6 +52,7 @@ import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.RootNode;
+import com.oracle.truffle.api.profiles.InlinedLoopConditionProfile;
 
 /**
  * Bytecode DSL root node for Mezze — Phase 1 walking skeleton.
@@ -1390,6 +1392,270 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static long doObjectArray(Object[] array) {
             return array.length;
+        }
+    }
+
+    /** Extract the backing long[] from a LongSeqStorage-backed MezzeSeq.
+     *  Used by the fused loop to iterate with unboxed primitive access
+     *  instead of going through SeqGet (which boxes every element).
+     *  Returns Object — the caller stores it and the companion
+     *  SeqGetLong operation casts+accesses it. */
+    @Operation
+    public static final class SeqExtractLongArray {
+        @Specialization(guards = "isLongStorage(seq)")
+        public static long[] doLong(MezzeSeq<?> seq) {
+            return ((com.mezze.datastructures.seq.LongSeqStorage) seq.getStorage()).getArray();
+        }
+        @Specialization(guards = "!isLongStorage(seq)")
+        public static long[] doFallback(MezzeSeq<?> seq) {
+            // Materialize to long[] for uniform unboxed access.
+            int n = seq.size();
+            long[] arr = new long[n];
+            for (int i = 0; i < n; i++) {
+                Object e = seq.get(i);
+                arr[i] = e instanceof Long l ? l : ((Number) e).longValue();
+            }
+            return arr;
+        }
+        public static boolean isLongStorage(MezzeSeq<?> seq) {
+            return seq.getStorage() instanceof com.mezze.datastructures.seq.LongSeqStorage;
+        }
+    }
+
+    /** Unboxed long element access from a long[] extracted by SeqExtractLongArray.
+     *  The loop index is long (BDSL convention), cast to int internally. */
+    @Operation
+    public static final class SeqGetLong {
+        @Specialization
+        public static long doAccess(long[] array, long index) {
+            return array[(int) index];
+        }
+    }
+
+    // ── Fused Long Pipeline: single-operation tight loop for numeric chains ──
+
+    /**
+     * Sink kind constants for {@link FusedLongPipeline}.
+     */
+    public static final int FLP_SINK_SUM = 0, FLP_SINK_COUNT = 1,
+        FLP_SINK_ANY = 2, FLP_SINK_ALL = 3, FLP_SINK_FIND = 4;
+
+    /**
+     * Pack op ordinals and flags into a single int for FusedLongPipeline.
+     *
+     * <p>Layout: bits 0-3 sinkKind, 4-7 mapOp+1, 8-11 filterPreOp+1,
+     * 12-15 filterCmpOp+1, 16-19 sinkPredPreOp+1, 20-23 sinkPredCmpOp+1,
+     * 24-27 foldOp+1. 0 in any 4-bit field means "absent".
+     */
+    public static int flpPackConfig(
+            int sinkKind, int mapOp, int filterPreOp, int filterCmpOp,
+            int sinkPredPreOp, int sinkPredCmpOp, int foldOp) {
+        return (sinkKind & 0xF)
+             | (((mapOp + 1) & 0xF) << 4)
+             | (((filterPreOp + 1) & 0xF) << 8)
+             | (((filterCmpOp + 1) & 0xF) << 12)
+             | (((sinkPredPreOp + 1) & 0xF) << 16)
+             | (((sinkPredCmpOp + 1) & 0xF) << 20)
+             | (((foldOp + 1) & 0xF) << 24);
+    }
+
+    /**
+     * Single-operation fused pipeline over a long-backed Seq. Replaces
+     * the BDSL While loop for all-inline numeric chains.
+     *
+     * <p>Config is a {@code @ConstantOperand} so the JIT constant-folds
+     * all branch decisions. Numeric operands are dynamic children — for
+     * compile-time constants the emitter emits LoadConstant nodes that PE
+     * folds identically; for runtime expressions (e.g. {@code n - 10})
+     * the value is computed once before the loop and passed in.
+     *
+     * <p>Children (in order): seq, mapOperand, filterPreRhs, filterCmpRhs,
+     * sinkPredPreRhs, sinkPredCmpRhs, foldInit.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)   // config: packed ops (PE constant)
+    public static final class FusedLongPipeline {
+
+        @Specialization(guards = "isLongStorage(seq)")
+        public static Object doLong(
+                int config,
+                MezzeSeq<?> seq,
+                long mapOperand, long filterPreRhs,
+                long filterCmpRhs, long sinkPredPreRhs,
+                long sinkPredCmpRhs, long foldInit,
+                @Bind Node node,
+                @Cached InlinedLoopConditionProfile loopProfile) {
+            // Unpack config — each field is PE-constant.
+            int sinkKind      = config & 0xF;
+            int mapOp         = ((config >> 4) & 0xF) - 1;
+            int filterPreOp   = ((config >> 8) & 0xF) - 1;
+            int filterCmpOp   = ((config >> 12) & 0xF) - 1;
+            int sinkPredPreOp = ((config >> 16) & 0xF) - 1;
+            int sinkPredCmpOp = ((config >> 20) & 0xF) - 1;
+            int foldOp        = ((config >> 24) & 0xF) - 1;
+
+            com.mezze.datastructures.seq.LongSeqStorage ls =
+                    (com.mezze.datastructures.seq.LongSeqStorage) seq.getStorage();
+            long[] data = ls.getArray();
+            int n = ls.size();
+
+            long acc = foldInit;
+            boolean found = false;
+            long foundVal = 0;
+
+            loopProfile.profileCounted(node, n);
+            for (int i = 0; loopProfile.inject(node, i < n); i++) {
+                long v = data[i];
+
+                // ── Map stage ──
+                if (mapOp >= 0) v = flpOp(mapOp, v, mapOperand);
+
+                // ── Filter stage ──
+                if (filterCmpOp >= 0) {
+                    long fv = filterPreOp >= 0
+                            ? flpOp(filterPreOp, v, filterPreRhs) : v;
+                    if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
+                }
+
+                // ── Sink ──
+                if (sinkKind == FLP_SINK_SUM) {
+                    acc = flpOp(foldOp, acc, v);
+                } else if (sinkKind == FLP_SINK_COUNT) {
+                    acc++;
+                } else if (sinkKind == FLP_SINK_ANY) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0
+                                ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) {
+                            found = true; break;
+                        }
+                    } else { found = true; break; }
+                } else if (sinkKind == FLP_SINK_ALL) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0
+                                ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (!flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) {
+                            found = true; break;
+                        }
+                    }
+                } else if (sinkKind == FLP_SINK_FIND) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0
+                                ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) {
+                            found = true; foundVal = v; break;
+                        }
+                    }
+                }
+            }
+
+            // ── Post-loop result ──
+            return flpResult(sinkKind, acc, found, foundVal);
+        }
+
+        @Specialization(guards = "!isLongStorage(seq)")
+        @TruffleBoundary
+        public static Object doFallback(
+                int config,
+                MezzeSeq<?> seq,
+                long mapOperand, long filterPreRhs,
+                long filterCmpRhs, long sinkPredPreRhs,
+                long sinkPredCmpRhs, long foldInit) {
+            int sinkKind      = config & 0xF;
+            int mapOp         = ((config >> 4) & 0xF) - 1;
+            int filterPreOp   = ((config >> 8) & 0xF) - 1;
+            int filterCmpOp   = ((config >> 12) & 0xF) - 1;
+            int sinkPredPreOp = ((config >> 16) & 0xF) - 1;
+            int sinkPredCmpOp = ((config >> 20) & 0xF) - 1;
+            int foldOp        = ((config >> 24) & 0xF) - 1;
+
+            int n = seq.size();
+            long acc = foldInit;
+            boolean found = false;
+            long foundVal = 0;
+            for (int i = 0; i < n; i++) {
+                Object raw = seq.get(i);
+                long v = raw instanceof Long l ? l : ((Number) raw).longValue();
+                if (mapOp >= 0) v = flpOp(mapOp, v, mapOperand);
+                if (filterCmpOp >= 0) {
+                    long fv = filterPreOp >= 0
+                            ? flpOp(filterPreOp, v, filterPreRhs) : v;
+                    if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
+                }
+                if (sinkKind == FLP_SINK_SUM) { acc = flpOp(foldOp, acc, v); }
+                else if (sinkKind == FLP_SINK_COUNT) { acc++; }
+                else if (sinkKind == FLP_SINK_ANY) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0 ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) { found = true; break; }
+                    } else { found = true; break; }
+                } else if (sinkKind == FLP_SINK_ALL) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0 ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (!flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) { found = true; break; }
+                    }
+                } else if (sinkKind == FLP_SINK_FIND) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0 ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) { found = true; foundVal = v; break; }
+                    }
+                }
+            }
+            return flpResult(sinkKind, acc, found, foundVal);
+        }
+
+        private static long flpOp(int op, long a, long b) {
+            return switch (op) {
+                case 0 -> a + b;   // ADD
+                case 1 -> a - b;   // SUB
+                case 2 -> a * b;   // MUL
+                case 3 -> a / b;   // DIV
+                case 4 -> a % b;   // MOD
+                default -> a;
+            };
+        }
+
+        private static boolean flpCmp(int op, long a, long b) {
+            return switch (op) {
+                case 5 -> a == b;   // EQ
+                case 6 -> a != b;   // NEQ
+                case 7 -> a < b;    // LT
+                case 8 -> a <= b;   // LE
+                case 9 -> a > b;    // GT
+                case 10 -> a >= b;  // GE
+                default -> false;
+            };
+        }
+
+        @TruffleBoundary
+        private static Object flpResult(int sinkKind,
+                long acc, boolean found, long foundVal) {
+            return switch (sinkKind) {
+                case FLP_SINK_SUM, FLP_SINK_COUNT -> acc;
+                case FLP_SINK_ANY -> found;
+                case FLP_SINK_ALL -> !found;
+                case FLP_SINK_FIND -> {
+                    MezzeVariant.TagRegistry reg = MezzeVariant.TagRegistry.getGlobal();
+                    int someTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
+                            .computeVariantTag(com.mezze.language.ast.BuiltinTypes.SOME, null);
+                    int noneTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
+                            .computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
+                    if (found) {
+                        reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.SOME);
+                        MezzeRecord payload = MezzeRecord.fromFields(
+                                new String[]{"val"}, new Object[]{foundVal});
+                        yield MezzeVariant.singlePayload(reg, someTag, payload);
+                    } else {
+                        reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.NONE);
+                        yield MezzeVariant.noPayload(reg, noneTag);
+                    }
+                }
+                default -> acc;
+            };
+        }
+
+        public static boolean isLongStorage(MezzeSeq<?> seq) {
+            return seq.getStorage() instanceof com.mezze.datastructures.seq.LongSeqStorage;
         }
     }
 

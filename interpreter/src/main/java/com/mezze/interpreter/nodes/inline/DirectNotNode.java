@@ -4,6 +4,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
+import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.bytecode.OperationProxy;
@@ -18,6 +19,7 @@ import com.oracle.truffle.api.bytecode.OperationProxy;
 public abstract class DirectNotNode extends MezzeNode {
 
     @Specialization
+    @ForceQuickening
     public static boolean notBoolean(boolean value) {
         return !value;
     }

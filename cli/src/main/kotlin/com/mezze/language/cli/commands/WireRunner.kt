@@ -458,7 +458,15 @@ object WireRunner {
         // once here at the front door from the user-named entry; carried as a
         // hash through packing / runtime selection. entryName kept as display.
         val entryHash = entry.hash
-        val closure: List<FunctionIR> = NativeBuildPath.computeReachableClosure(result.loweredFunctions)
+        val rawClosure: List<FunctionIR> = NativeBuildPath.computeReachableClosure(result.loweredFunctions)
+        // #446 — canonicalize iter/seq/list HOF chains into FusedChainIR.
+        // StdlibPrecompiler runs this on stdlib functions at build time;
+        // we need to run it again on user code (and any reachable stdlib
+        // functions whose callers compose chains) so map+fold chains etc.
+        // in user code get fused.
+        val closureMap = rawClosure.associateBy { it.hash }
+        val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer.canonicalize(closureMap)
+        val closure = rawClosure.map { canonicalized[it.hash] ?: it }
         val (fnBytes, metaBytes) = NativeBuildPath.packEmbeddedAppCbor(
             closure = closure,
             appName = appName,

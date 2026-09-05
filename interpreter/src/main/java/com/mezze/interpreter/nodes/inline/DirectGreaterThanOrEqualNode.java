@@ -5,6 +5,7 @@ import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
+import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
@@ -30,6 +31,7 @@ public abstract class DirectGreaterThanOrEqualNode extends MezzeNode {
     public abstract boolean executeBoolean(VirtualFrame frame) throws UnexpectedResultException;
 
     @Specialization
+    @ForceQuickening
     public static boolean geLongs(long left, long right) {
         return left >= right;
     }

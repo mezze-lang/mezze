@@ -5,6 +5,7 @@ import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
+import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.bytecode.OperationProxy;
@@ -23,6 +24,7 @@ import com.oracle.truffle.api.bytecode.OperationProxy;
 public abstract class DirectDivideNode extends MezzeNode {
 
     @Specialization
+    @ForceQuickening
     public static long divLongs(long left, long right) {
         if (right == 0) {
             throw new com.mezze.interpreter.values.MezzeGuestException("Division by zero");
