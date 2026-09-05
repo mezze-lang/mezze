@@ -1403,6 +1403,56 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    // ===== Cons-cell traversal ops for list-source fused loops =====
+    // These avoid the O(n) ListToArray conversion by walking the list
+    // in place: cursor = list; while (!isEmpty(cursor)) { x = head(cursor); cursor = tail(cursor); }
+
+    /** Test whether a MezzeList cursor is empty (Nil).
+     *  Specialized on Cons → constant false for JIT devirtualization. */
+    @Operation
+    public static final class ListIsEmpty {
+        @Specialization
+        public static boolean doCons(com.mezze.datastructures.list.MezzeCons<?> list) {
+            return false;
+        }
+        @Specialization
+        public static boolean doLongCons(com.mezze.datastructures.list.MezzeLongCons list) {
+            return false;
+        }
+        @Specialization
+        public static boolean doNil(com.mezze.datastructures.list.MezzeNil<?> list) {
+            return true;
+        }
+    }
+
+    /** Read the head element of a non-empty MezzeList cursor.
+     *  Specialized on Cons/LongCons for direct field access. */
+    @Operation
+    public static final class ListHead {
+        @Specialization
+        public static Object doCons(com.mezze.datastructures.list.MezzeCons<?> list) {
+            return list.head();
+        }
+        @Specialization
+        public static Object doLongCons(com.mezze.datastructures.list.MezzeLongCons list) {
+            return list.head();
+        }
+    }
+
+    /** Advance a MezzeList cursor to its tail.
+     *  Specialized on Cons/LongCons for direct field access. */
+    @Operation
+    public static final class ListTail {
+        @Specialization
+        public static com.mezze.datastructures.list.MezzeList<?> doCons(com.mezze.datastructures.list.MezzeCons<?> list) {
+            return list.tail();
+        }
+        @Specialization
+        public static com.mezze.datastructures.list.MezzeList<?> doLongCons(com.mezze.datastructures.list.MezzeLongCons list) {
+            return list.tail();
+        }
+    }
+
     /** Drop N elements from the head of a seq, returning the tail. */
     @Operation
     @ConstantOperand(type = int.class)

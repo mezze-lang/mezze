@@ -3497,9 +3497,10 @@ public final class BytecodeCompiler {
         }
 
         // ── Source init ──
-        com.oracle.truffle.api.bytecode.BytecodeLocal endSlot  = null;
-        com.oracle.truffle.api.bytecode.BytecodeLocal seqSlot  = null;
-        com.oracle.truffle.api.bytecode.BytecodeLocal sizeSlot = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal endSlot    = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal seqSlot    = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal sizeSlot   = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal cursorSlot = null;
 
         if (isRange) {
             endSlot = b.createLocal();
@@ -3510,21 +3511,18 @@ public final class BytecodeCompiler {
               emitNode(rangeEnd, b, argCount, localMap);
             b.endStoreLocal();
         } else if (isList) {
-            // List source: convert to Object[] via ListToArray, then iterate
-            // by index. SeqGet already handles Object[] with O(1) access,
-            // and SeqSize handles Object[] via the doObjectArray specialization.
-            seqSlot = b.createLocal();
-            sizeSlot = b.createLocal();
-            b.beginStoreLocal(seqSlot);
-              b.beginListToArray();
-                emitNode(rawListExpr, b, argCount, localMap);
-              b.endListToArray();
-            b.endStoreLocal();
-            b.beginStoreLocal(sizeSlot);
-              b.beginSeqSize(); b.emitLoadLocal(seqSlot); b.endSeqSize();
-            b.endStoreLocal();
-            b.beginStoreLocal(iSlot);
-              b.emitLoadLongConstant(0L);
+            // List source: direct cons-cell traversal.  Avoids the O(n)
+            // ListToArray conversion (allocation + double traversal) by
+            // walking the cons chain in place:
+            //   cursor = list
+            //   while (!ListIsEmpty(cursor)) {
+            //       x = ListHead(cursor)
+            //       ... body ...
+            //       cursor = ListTail(cursor)
+            //   }
+            cursorSlot = b.createLocal();
+            b.beginStoreLocal(cursorSlot);
+              emitNode(rawListExpr, b, argCount, localMap);
             b.endStoreLocal();
         } else {
             seqSlot = b.createLocal();
@@ -3540,6 +3538,8 @@ public final class BytecodeCompiler {
             b.endStoreLocal();
         }
 
+        // boundSlot is used by range/seq indexed loops. Cursor-based list
+        // loops use ListIsEmpty instead, so boundSlot stays null there.
         var boundSlot = isRange ? endSlot : sizeSlot;
 
         // ── Init builder for materializing sinks ──
@@ -3569,6 +3569,12 @@ public final class BytecodeCompiler {
                     b.endDirectSubtract();
                 }
                 b.endNewLongSeqBuilder();
+            } else if (isList) {
+                // Cursor-based list: no size available upfront.
+                // Use a reasonable default — the builder grows if needed.
+                b.beginNewSeqBuilder();
+                  b.emitLoadLongConstant(64L);
+                b.endNewSeqBuilder();
             } else {
                 b.beginNewSeqBuilder();
                 if (hasFilter) {
@@ -3600,11 +3606,19 @@ public final class BytecodeCompiler {
         // ── While loop ──
         b.beginWhile();
 
-        // Condition: i < end. Short-circuit sinks use Branch(exitLabel)
-        // instead of the old `i < end && !found` compound condition.
-        b.beginDirectLessThan();
-          b.emitLoadLocal(iSlot); b.emitLoadLocal(boundSlot);
-        b.endDirectLessThan();
+        // Condition: cursor-based lists use !ListIsEmpty(cursor);
+        // range/seq use the indexed i < bound.
+        if (isList) {
+            b.beginDirectNot();
+              b.beginListIsEmpty();
+                b.emitLoadLocal(cursorSlot);
+              b.endListIsEmpty();
+            b.endDirectNot();
+        } else {
+            b.beginDirectLessThan();
+              b.emitLoadLocal(iSlot); b.emitLoadLocal(boundSlot);
+            b.endDirectLessThan();
+        }
 
         b.beginBlock();
 
@@ -3612,6 +3626,10 @@ public final class BytecodeCompiler {
         b.beginStoreLocal(xSlot);
         if (isRange) {
             b.emitLoadLocal(iSlot);
+        } else if (isList) {
+            b.beginListHead();
+              b.emitLoadLocal(cursorSlot);
+            b.endListHead();
         } else {
             b.beginSeqGet();
               b.emitLoadLocal(seqSlot); b.emitLoadLocal(iSlot);
@@ -3783,11 +3801,20 @@ public final class BytecodeCompiler {
               b.endBlock();
             b.endIfThen();
         }
-        b.beginStoreLocal(iSlot);
-          b.beginDirectAdd();
-            b.emitLoadLocal(iSlot); b.emitLoadLongConstant(1L);
-          b.endDirectAdd();
-        b.endStoreLocal();
+        // Advance: cursor = ListTail(cursor) for lists; i++ otherwise.
+        if (isList) {
+            b.beginStoreLocal(cursorSlot);
+              b.beginListTail();
+                b.emitLoadLocal(cursorSlot);
+              b.endListTail();
+            b.endStoreLocal();
+        } else {
+            b.beginStoreLocal(iSlot);
+              b.beginDirectAdd();
+                b.emitLoadLocal(iSlot); b.emitLoadLongConstant(1L);
+              b.endDirectAdd();
+            b.endStoreLocal();
+        }
 
         b.endBlock();
         b.endWhile();
