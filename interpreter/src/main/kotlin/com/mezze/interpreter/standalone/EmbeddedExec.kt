@@ -28,27 +28,31 @@ object EmbeddedExec {
         val embedded = com.mezze.interpreter.standalone.EmbeddedApp
         check(embedded.present) { "EmbeddedExec.run called but EmbeddedApp.present is false" }
 
-        // Strict-mode stdlib check (#202). In a user binary the snapshot
-        // is the only correct fast-path: SQLite isn't shipped, source
-        // recompile would be O(seconds) and depends on stdlib sources
-        // existing on disk. Fail loud now rather than letting the user
-        // app drift into the slow path silently.
+        // Stdlib snapshot check (#202, relaxed in #native-image).
         //
-        // Override with MEZZE_STDLIB_NONSTRICT=1 for debugging.
-        val nonStrict = System.getenv("MEZZE_STDLIB_NONSTRICT")?.let {
-            it == "1" || it.equals("true", ignoreCase = true)
-        } ?: false
-        if (!nonStrict &&
-            !com.mezze.language.stdlib.StdlibRuntimeData.present) {
-            System.err.println(
-                "Error: built-in stdlib snapshot is missing or failed to decode.\n" +
-                "  This binary was built without a working stdlib-snapshot.cbor,\n" +
-                "  or the resource was corrupted during packaging.\n" +
-                "  Rebuild with `mez build --native` against a fresh stdlib jar.\n" +
-                "  To bypass and use the slow source-compile path, set\n" +
-                "  MEZZE_STDLIB_NONSTRICT=1 (intended only for diagnostics)."
-            )
-            kotlin.system.exitProcess(70) // EX_SOFTWARE
+        // The embedded app's FunctionIR closure is self-contained:
+        // NativeBuildPath.computeReachableClosure includes every stdlib
+        // function the app transitively references. So the runtime
+        // doesn't need StdlibRuntimeData to be present — all needed
+        // functions are already in `embedded.functions`.
+        //
+        // On JVM, the stdlib snapshot IS available in the jar (bundled
+        // from mezze-runtime.jar). On native, it may be absent because
+        // native-classpath.zip's per-library jars don't carry the
+        // generated CBOR. Either way the app runs correctly.
+        //
+        // Log a diagnostic when missing (helps debug unexpected misses)
+        // but don't abort — the closure covers everything needed.
+        if (!com.mezze.language.stdlib.StdlibRuntimeData.present) {
+            val nonStrict = System.getenv("MEZZE_STDLIB_NONSTRICT")?.let {
+                it == "1" || it.equals("true", ignoreCase = true)
+            } ?: false
+            if (!nonStrict && System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println(
+                    "[mezze] stdlib snapshot not present — using embedded closure only. " +
+                    "This is expected for native binaries."
+                )
+            }
         }
 
         executeWithTruffle(

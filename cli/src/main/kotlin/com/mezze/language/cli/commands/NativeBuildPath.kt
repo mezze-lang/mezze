@@ -818,6 +818,15 @@ object NativeBuildPath {
         // only, no JIT). Drop the service registration from the sanitised
         // user fat-jar so the SVM runtime installed by the macro wins.
         "META-INF/services/com.oracle.truffle.api.TruffleRuntimeAccess",
+        // Strip stdlib CBOR from the native build classpath. The embedded
+        // app's FunctionIR closure is self-contained (computeReachableClosure
+        // includes every transitively-referenced stdlib function). Letting
+        // the CBOR survive causes StdlibRuntimeData.init{} to decode ~15 MB
+        // of FunctionIR data at native-image build time — all of it lands
+        // in the image heap, adding ~15 MB to the binary and ~100 ms to
+        // startup for data the runtime never reads. #native-image-size.
+        "META-INF/mezze/stdlib-snapshot.cbor",
+        "META-INF/mezze/stdlib-runtime.cbor",
     )
 
     /**
