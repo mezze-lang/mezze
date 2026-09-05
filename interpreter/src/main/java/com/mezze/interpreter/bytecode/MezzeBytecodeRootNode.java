@@ -1106,7 +1106,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
                 @Cached("resolveInner(cachedTarget)") CallTarget resolved,
                 @Cached("fn.getClosureValues().length") int closureLen,
-                @Cached("create(resolved)") DirectCallNode callNode) {
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
             if (closureLen == 0) {
                 return callNode.call(arg);
             }
@@ -1196,6 +1196,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             System.arraycopy(closureValues, 0, combined, 0, closureLen);
             combined[closureLen] = record;
             return callNode.call(target, combined);
+        }
+
+        static DirectCallNode createInlined(CallTarget target) {
+            DirectCallNode node = DirectCallNode.create(target);
+            node.forceInlining();
+            return node;
         }
 
         static boolean canBypassTarget(CallTarget target) {
