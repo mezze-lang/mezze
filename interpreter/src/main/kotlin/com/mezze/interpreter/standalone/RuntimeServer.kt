@@ -98,7 +98,8 @@ object RuntimeServer {
         // Suppress chatty Truffle/polyglot log output UNLESS the user asked
         // for trace-jit — compilation trace events route through the polyglot
         // logger and would be eaten by level=OFF. (#515)
-        if (!args.contains("--trace-jit")) {
+        val envTrace = System.getenv("MEZZE_ENGINE_OPTS")?.contains("Trace") == true
+        if (!args.contains("--trace-jit") && !envTrace) {
             System.setProperty("polyglot.log.level", "OFF")
         }
 
@@ -222,12 +223,14 @@ object RuntimeServer {
         // (mirrors EmbeddedExec). Useful for tuning compilation thresholds,
         // inlining budgets, etc. without recompiling.
         if (jitCapable) {
+            var hasTrace = false
             System.getenv("MEZZE_ENGINE_OPTS")?.takeIf { it.isNotBlank() }?.let { raw ->
                 for (kv in raw.split(",")) {
                     val eq = kv.indexOf('=')
                     if (eq > 0) {
                         val k = kv.substring(0, eq).trim()
                         val v = kv.substring(eq + 1).trim()
+                        if (k.contains("Trace")) hasTrace = true
                         try { engineBuilder.option(k, v) }
                         catch (e: Exception) {
                             originalStderr.println("[mezze] ignoring unknown engine option: $k=$v (${e.message})")
@@ -235,6 +238,10 @@ object RuntimeServer {
                     }
                 }
             }
+            // Route trace output to the original stderr (the parent inherits
+            // fd 2), bypassing the wire redirect, so compilation traces are
+            // visible in the user's terminal.
+            if (hasTrace) engineBuilder.err(originalStderr)
         }
         val engine = engineBuilder.build()
 

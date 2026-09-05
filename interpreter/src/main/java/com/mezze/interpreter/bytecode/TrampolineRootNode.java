@@ -94,6 +94,7 @@ public final class TrampolineRootNode extends RootNode {
      * and re-driven; skipping the trampoline would let the exception
      * escape past the caller.
      */
+    @CompilerDirectives.CompilationFinal
     private boolean hasTailCalls;
 
     /**
@@ -109,6 +110,17 @@ public final class TrampolineRootNode extends RootNode {
 
     @Child
     private LoopNode loop;
+
+    /**
+     * Fast-path direct call node for non-tail-call functions.
+     * When {@link #hasTailCalls} is false, execute() calls the inner
+     * directly through this node, bypassing the LoopNode + frame-slot
+     * machinery entirely. This eliminates ~7 frame-slot accesses per
+     * call for functions like fib that are recursive but NOT
+     * tail-recursive.
+     */
+    @Child
+    private DirectCallNode directInnerCall;
 
     private final int argsSlot;
     private final int targetSlot;
@@ -176,8 +188,13 @@ public final class TrampolineRootNode extends RootNode {
         if (this.innerTarget != null) return;
         this.innerTarget = inner.getCallTarget();
         this.hasTailCalls = hasTailCalls;
-        this.loop = insert(Truffle.getRuntime().createLoopNode(
-                new TrampolineRepeatingNode(this)));
+        if (hasTailCalls) {
+            this.loop = insert(Truffle.getRuntime().createLoopNode(
+                    new TrampolineRepeatingNode(this)));
+        } else {
+            // No tail calls → fast path: direct call, no LoopNode overhead.
+            this.directInnerCall = insert(DirectCallNode.create(this.innerTarget));
+        }
     }
 
     /** True iff the inner body has tail-calls; see {@link #hasTailCalls} field. */
@@ -219,6 +236,13 @@ public final class TrampolineRootNode extends RootNode {
         Object[] flatArgs = parameterCount == 0
                 ? rawArgs
                 : normalizeArgs(rawArgs);
+        // Fast path: no tail calls → direct call to inner, skip LoopNode
+        // + frame-slot gymnastics. Saves ~7 frame-slot accesses per call.
+        // The PE folds this branch away since hasTailCalls is
+        // @CompilationFinal and set once in attachInner.
+        if (!hasTailCalls) {
+            return directInnerCall.call(flatArgs);
+        }
         frame.setObject(argsSlot, flatArgs);
         frame.setObject(targetSlot, innerTarget);
         loop.execute(frame);
