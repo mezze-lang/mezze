@@ -37,6 +37,15 @@ object ScopedEffectConstants {
 
     /** Field name carried by `abort` and `resume` records. */
     const val VAL_FIELD = "val"
+
+    /**
+     * True for the scope lifecycle hooks (`initialize_scope`/`finalize_scope`).
+     * These are not effect operations a caller invokes — they run automatically
+     * around a scoped handler — so LSP display (hover, completion) should hide
+     * them from a handler's op list, showing only the real operations.
+     */
+    fun isScopeHook(name: String): Boolean =
+        name == INITIALIZE_SCOPE || name == FINALIZE_SCOPE
 }
 
 /**

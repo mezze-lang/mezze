@@ -595,7 +595,10 @@ object HoverInfo {
         val header = "impl $effectName for ${decl.performerName}"
 
         val effectOps = effectDecl?.operations?.associateBy { it.name } ?: emptyMap()
-        val ops = decl.operations.joinToString("\n") { op ->
+        // Hide the scope lifecycle hooks — they run automatically, they're not ops.
+        val ops = decl.operations
+            .filter { !com.mezze.language.ast.ScopedEffectConstants.isScopeHook(it.name) }
+            .joinToString("\n") { op ->
             val sig = effectOps[op.name]
             val param = op.paramType ?: sig?.paramType
             val ret = op.returnType ?: sig?.returnType
@@ -640,7 +643,9 @@ object HoverInfo {
         fun renderImpl(perf: ParsedPerformerDecl): String {
             val effectName = perf.effect.localName
             val sigByName = effectDeclFor(effectName)?.operations?.associateBy { it.name } ?: emptyMap()
-            val opLines = perf.operations.joinToString("\n") { op ->
+            val opLines = perf.operations
+                .filter { !com.mezze.language.ast.ScopedEffectConstants.isScopeHook(it.name) }
+                .joinToString("\n") { op ->
                 val sig = sigByName[op.name]
                 val param = op.paramType ?: sig?.paramType
                 val ret = op.returnType ?: sig?.returnType
