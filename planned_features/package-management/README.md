@@ -108,8 +108,13 @@ identical to the lock.
     (`app`→`utils`→`core` links `utils` into `app/.deps` and `core` into
     `utils/.deps`). Diamonds dedup, cycles terminate. This is a *nested* deps model
     (each package sees its own `.deps`), not npm-style flat hoisting.
-- **P2 — url#sha256 fetch → global store.** Wire the existing downloader into the
-  `~/.mezze/store/<hash>` cache; compile from there into `deps.sqlite`.
+- **P2 — remote `url#sha256` deps → global content store. ✅ DONE.**
+  `[dependencies]` `name = "<url>#sha256:<hash>"` → `mez sync` fetches (JDK
+  `HttpClient`; `file://` supported for local/offline/tests), **verifies the
+  sha256** (mismatch is refused — the core supply-chain guard), extracts into the
+  shared content store `~/.mezze/store/<sha256>/` (deduped across all projects;
+  nested tarballs flattened), and symlinks `.deps/mezze/<name>-<version>` into it —
+  same usable shape as path deps. `MEZZE_STORE_DIR` overrides the store root.
 - **P3 — transitive deps + lockfile graph.** Resolve deps-of-deps; lock the full
   graph; detect/handle hash conflicts (content-addressing makes most of these
   non-conflicts).
