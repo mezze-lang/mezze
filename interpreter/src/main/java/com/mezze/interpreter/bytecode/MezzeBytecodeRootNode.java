@@ -545,6 +545,93 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Fixed-arity single-argument direct call. Avoids the {@code @Variadic}
+     * overhead of {@link CallDirectN} — no intermediate {@code Object[]}
+     * allocation by BDSL, just a single child operand on the stack.
+     *
+     * <p>Used for scalar-ABI calls with exactly one argument (the common
+     * case: {@code fib {n = n - 1}} compiles to scalar ABI where the single
+     * param is passed directly). The {@code Object[1]} is allocated here
+     * but is a trivial scalar-replacement target for Graal's escape analysis
+     * when the call is inlined.
+     */
+    @Operation
+    @ConstantOperand(type = CallTarget.class)
+    public static final class CallDirect1 {
+        private static final Object[] ONE = new Object[1];
+
+        @Specialization(guards = "callNode.getCallTarget() == target")
+        public static Object doCached(
+                CallTarget target,
+                Object arg,
+                @Cached("create(target)") DirectCallNode callNode) {
+            return callNode.call(arg);
+        }
+
+        @Specialization(replaces = "doCached")
+        public static Object doIndirect(
+                CallTarget target,
+                Object arg,
+                @Cached IndirectCallNode indirectCallNode) {
+            return indirectCallNode.call(target, arg);
+        }
+    }
+
+    /**
+     * Fixed-arity two-argument direct call. Same rationale as
+     * {@link CallDirect1} but for two-param scalar-ABI functions.
+     */
+    @Operation
+    @ConstantOperand(type = CallTarget.class)
+    public static final class CallDirect2 {
+        @Specialization(guards = "callNode.getCallTarget() == target")
+        public static Object doCached(
+                CallTarget target,
+                Object arg0,
+                Object arg1,
+                @Cached("create(target)") DirectCallNode callNode) {
+            return callNode.call(arg0, arg1);
+        }
+
+        @Specialization(replaces = "doCached")
+        public static Object doIndirect(
+                CallTarget target,
+                Object arg0,
+                Object arg1,
+                @Cached IndirectCallNode indirectCallNode) {
+            return indirectCallNode.call(target, arg0, arg1);
+        }
+    }
+
+    /**
+     * Fixed-arity three-argument direct call. Covers closureCount=0 +
+     * 3 scalar params, or closureCount=1 + 2 scalar params, etc.
+     */
+    @Operation
+    @ConstantOperand(type = CallTarget.class)
+    public static final class CallDirect3 {
+        @Specialization(guards = "callNode.getCallTarget() == target")
+        public static Object doCached(
+                CallTarget target,
+                Object arg0,
+                Object arg1,
+                Object arg2,
+                @Cached("create(target)") DirectCallNode callNode) {
+            return callNode.call(arg0, arg1, arg2);
+        }
+
+        @Specialization(replaces = "doCached")
+        public static Object doIndirect(
+                CallTarget target,
+                Object arg0,
+                Object arg1,
+                Object arg2,
+                @Cached IndirectCallNode indirectCallNode) {
+            return indirectCallNode.call(target, arg0, arg1, arg2);
+        }
+    }
+
+    /**
      * Construct a record from a compile-time array of field names and a
      * runtime-variadic set of field values.
      *

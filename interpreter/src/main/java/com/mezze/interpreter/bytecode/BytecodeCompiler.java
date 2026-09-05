@@ -1784,6 +1784,8 @@ public final class BytecodeCompiler {
             boolean needsScalarMarker = c.isScalarABI()
                     && c.getArgs().size() == 1
                     && !isBdslCallee(target);
+            // Total child count: scalar marker (if needed) + actual args
+            int totalChildren = (needsScalarMarker ? 1 : 0) + c.getArgs().size();
             if (c.isTailCall()) {
                 b.beginTailCallDirectN(target);
                 if (needsScalarMarker) {
@@ -1794,6 +1796,23 @@ public final class BytecodeCompiler {
                     emitNode(arg, b, argCount, localMap);
                 }
                 b.endTailCallDirectN();
+            } else if (!needsScalarMarker && totalChildren == 1) {
+                // Fixed-arity call: avoids @Variadic Object[] overhead
+                b.beginCallDirect1(target);
+                emitNode(c.getArgs().get(0), b, argCount, localMap);
+                b.endCallDirect1();
+            } else if (!needsScalarMarker && totalChildren == 2) {
+                b.beginCallDirect2(target);
+                for (NodeIR arg : c.getArgs()) {
+                    emitNode(arg, b, argCount, localMap);
+                }
+                b.endCallDirect2();
+            } else if (!needsScalarMarker && totalChildren == 3) {
+                b.beginCallDirect3(target);
+                for (NodeIR arg : c.getArgs()) {
+                    emitNode(arg, b, argCount, localMap);
+                }
+                b.endCallDirect3();
             } else {
                 b.beginCallDirectN(target);
                 if (needsScalarMarker) {

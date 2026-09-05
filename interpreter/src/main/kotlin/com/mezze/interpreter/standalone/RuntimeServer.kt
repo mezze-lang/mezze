@@ -218,6 +218,24 @@ object RuntimeServer {
         // MezzeDapServer (below, after the engine is built) which drives the
         // same GraalVM Debugger over a SEPARATE socket. See
         // docs/lsp/dap-adapter-design.md.
+        // MEZZE_ENGINE_OPTS="key1=val1,key2=val2" — arbitrary engine options
+        // (mirrors EmbeddedExec). Useful for tuning compilation thresholds,
+        // inlining budgets, etc. without recompiling.
+        if (jitCapable) {
+            System.getenv("MEZZE_ENGINE_OPTS")?.takeIf { it.isNotBlank() }?.let { raw ->
+                for (kv in raw.split(",")) {
+                    val eq = kv.indexOf('=')
+                    if (eq > 0) {
+                        val k = kv.substring(0, eq).trim()
+                        val v = kv.substring(eq + 1).trim()
+                        try { engineBuilder.option(k, v) }
+                        catch (e: Exception) {
+                            originalStderr.println("[mezze] ignoring unknown engine option: $k=$v (${e.message})")
+                        }
+                    }
+                }
+            }
+        }
         val engine = engineBuilder.build()
 
         val context = Context.newBuilder(MezzeLanguage.ID)
