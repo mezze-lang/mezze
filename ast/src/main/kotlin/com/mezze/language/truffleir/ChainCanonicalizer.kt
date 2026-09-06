@@ -31,6 +31,21 @@ object ChainCanonicalizer {
     private val ENABLED: Boolean = System.getenv("MEZZE_CHAIN_CANONICALIZE") != "0"
 
     /**
+     * Coerce [node] to a [MakeLambdaIR] for chain-analysis purposes.
+     * - Already a MakeLambdaIR → return directly.
+     * - ReadGlobalFnByHashIR (named function reference, e.g. `double`) →
+     *   synthesize a zero-capture MakeLambdaIR pointing at the same hash.
+     *   The emitter's classifyUnaryLiteralLambda / classifyFolderBody will
+     *   look through it to the function's body for shape classification,
+     *   so no actual closure is created at runtime.
+     */
+    private fun asMakeLambda(node: NodeIR?): MakeLambdaIR? = when (node) {
+        is MakeLambdaIR -> node
+        is ReadGlobalFnByHashIR -> MakeLambdaIR(node.hash, emptyList(), node.src)
+        else -> null
+    }
+
+    /**
      * Rewrite each function's body. Bodies that don't contain any
      * canonicalizable iter chain are returned unchanged (reference-equal),
      * preserving hash stability for the FunctionIR content-addressing.
@@ -132,7 +147,7 @@ object ChainCanonicalizer {
                 "f"  -> f  = fld.value
             }
             val srcInner = src ?: return null
-            val fLambda = f as? MakeLambdaIR ?: return null
+            val fLambda = asMakeLambda(f) ?: return null
             // Captures OK — emit-side handles them via capture slot remap.
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             val effectiveSource = when {
@@ -156,7 +171,7 @@ object ChainCanonicalizer {
             }
             val srcInner = src ?: return null
             val initExpr = init ?: return null
-            val fLambda = f as? MakeLambdaIR ?: return null
+            val fLambda = asMakeLambda(f) ?: return null
             if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             // seq_fold: we know the source is a Seq, so promote Opaque → RawSeq
@@ -183,7 +198,7 @@ object ChainCanonicalizer {
             }
             val srcInner = src ?: return null
             val initExpr = init ?: return null
-            val fLambda = f as? MakeLambdaIR ?: return null
+            val fLambda = asMakeLambda(f) ?: return null
             if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             val effectiveSource = if (source is SourceIR.Opaque) SourceIR.RawList(source.expr) else source
@@ -279,7 +294,18 @@ object ChainCanonicalizer {
     private fun isFoldBodyEmittable(body: NodeIR): Boolean = when (body) {
         // Pattern 1: inline binary op with ReadLocal operands — the common
         // case for sum/product fold bodies after the compiler inlines arith.
-        is InlineBinaryOpIR -> body.left is ReadLocalIR && body.right is ReadLocalIR
+        is InlineBinaryOpIR -> {
+            val simple = body.left is ReadLocalIR && body.right is ReadLocalIR
+            if (simple) true
+            else {
+                // Pattern 1b: compound fold — acc <OP> f(x) where f(x) is
+                // an inline binary expression over the element param.
+                // E.g. { acc, x } -> acc + x * x
+                // The emitter decomposes this into map(f) + fold(OP).
+                (body.left is ReadLocalIR && isUnaryExpr(body.right))
+                        || (body.right is ReadLocalIR && isUnaryExpr(body.left))
+            }
+        }
         // Pattern 2: CallDirectIR to a known arith op (scalar-ABI, 2 ReadLocal
         // args). The BDSL emitter additionally checks KnownArithOps.lookup —
         // but that's in the interpreter module (Java). To avoid false positives
@@ -300,6 +326,18 @@ object ChainCanonicalizer {
                 && (body.function as ReadFieldIR).record is ReadLocalIR
                 && body.arg is MakeRecordIR
                 && (body.arg as MakeRecordIR).fields.size == 2
+        else -> false
+    }
+
+    /** Check if [node] is a unary expression over a single ReadLocal param —
+     *  i.e. `x <OP> x`, `x <OP> lit`, or `lit <OP> x`. Used to detect
+     *  compound fold bodies like `acc + x * x`. */
+    private fun isUnaryExpr(node: NodeIR): Boolean = when (node) {
+        is InlineBinaryOpIR -> {
+            val l = node.left; val r = node.right
+            (l is ReadLocalIR && (r is ReadLocalIR || r is LongLitIR))
+                    || (l is LongLitIR && r is ReadLocalIR)
+        }
         else -> false
     }
 
@@ -520,7 +558,7 @@ object ChainCanonicalizer {
                 "f" -> f = fld.value
             }
             val srcInner = src ?: return null
-            val fLambda = f as? MakeLambdaIR ?: return null
+            val fLambda = asMakeLambda(f) ?: return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             val effectiveSource = when {
                 source is SourceIR.Opaque && node.name == "__native_seq_for_each" -> SourceIR.RawSeq(source.expr)
@@ -541,7 +579,7 @@ object ChainCanonicalizer {
             }
             val srcInner = src ?: return null
             val initExpr = init ?: return null
-            val fLambda = f as? MakeLambdaIR ?: return null
+            val fLambda = asMakeLambda(f) ?: return null
             if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             val effectiveSource = when {
@@ -563,7 +601,7 @@ object ChainCanonicalizer {
             }
             val srcInner = src ?: return null
             val initExpr = init ?: return null
-            val fLambda = f as? MakeLambdaIR ?: return null
+            val fLambda = asMakeLambda(f) ?: return null
             if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions)
             // List context: Opaque terminal becomes RawList — we know the
@@ -592,7 +630,7 @@ object ChainCanonicalizer {
                     srcField -> src = fld.value; "p" -> p = fld.value
                 }
                 val srcInner = src ?: return null
-                val pLambda = p as? MakeLambdaIR ?: return null
+                val pLambda = asMakeLambda(p) ?: return null
                 // Captures OK — emit-side handles them via capture slot remap.
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions)
                 val effectiveSource = when {
@@ -627,7 +665,7 @@ object ChainCanonicalizer {
                     srcField -> src = fld.value; "f" -> f = fld.value
                 }
                 val srcInner = src ?: return null
-                val fLambda = f as? MakeLambdaIR ?: return null
+                val fLambda = asMakeLambda(f) ?: return null
                 // Captures OK — emit-side handles them via capture slot remap.
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions)
                 val effectiveSource = when {
@@ -647,7 +685,7 @@ object ChainCanonicalizer {
                     "xs" -> src = fld.value; "f" -> f = fld.value
                 }
                 val srcInner = src ?: return null
-                val fLambda = f as? MakeLambdaIR ?: return null
+                val fLambda = asMakeLambda(f) ?: return null
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions)
                 val effectiveSource = if (source is SourceIR.Opaque) SourceIR.RawList(source.expr) else source
                 val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Reduce(fLambda), node.src)
@@ -687,7 +725,7 @@ object ChainCanonicalizer {
             "xs" -> srcNode = fld.value; "p" -> p = fld.value
         }
         val srcInner = srcNode ?: return null
-        val pLambda = p as? MakeLambdaIR ?: return null
+        val pLambda = asMakeLambda(p) ?: return null
         val (stages, source) = peelSource(srcInner, classifier, allFunctions)
         val effectiveSource = if (source is SourceIR.Opaque) SourceIR.RawList(source.expr) else source
         val candidate = FusedChainIR(effectiveSource, stages, wrap(pLambda), src)
@@ -709,7 +747,7 @@ object ChainCanonicalizer {
             srcField -> srcNode = fld.value; "p" -> p = fld.value
         }
         val srcInner = srcNode ?: return null
-        val pLambda = p as? MakeLambdaIR ?: return null
+        val pLambda = asMakeLambda(p) ?: return null
         // Captures OK — emit-side handles them via capture slot remap.
         val (stages, source) = peelSource(srcInner, classifier, allFunctions)
         // seq natives: promote Opaque → RawSeq (we know the source is a Seq).
@@ -781,7 +819,7 @@ object ChainCanonicalizer {
     /** iter::fold / seq::fold — expects (src, init, f) + optional trailing dict. */
     private fun extractFold(call: CallDirectIR): Pair<SinkIR, NodeIR>? {
         val (src, init, fRaw) = extractThreeArgs(call, srcNames = SRC_NAMES) ?: return null
-        val fLambda = fRaw as? MakeLambdaIR ?: return null
+        val fLambda = asMakeLambda(fRaw) ?: return null
         // Captures OK — emit-side handles them via capture slot remap.
         return SinkIR.Fold(init, fLambda) to src
     }
@@ -817,7 +855,7 @@ object ChainCanonicalizer {
     /** iter::for_each — (src, f) + optional trailing dict. */
     private fun extractForEach(call: CallDirectIR): Pair<SinkIR, NodeIR>? {
         val (src, fRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = "f") ?: return null
-        val fLambda = fRaw as? MakeLambdaIR ?: return null
+        val fLambda = asMakeLambda(fRaw) ?: return null
         // Captures OK — emit-side handles them via capture slot remap.
         return SinkIR.ForEach(fLambda) to src
     }
@@ -853,7 +891,7 @@ object ChainCanonicalizer {
     /** iter::reduce — (src, f) + optional trailing dict. */
     private fun extractReduce(call: CallDirectIR): Pair<SinkIR, NodeIR>? {
         val (src, fRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = "f") ?: return null
-        val fLambda = fRaw as? MakeLambdaIR ?: return null
+        val fLambda = asMakeLambda(fRaw) ?: return null
         // Captures OK — emit-side handles them via capture slot remap.
         return SinkIR.Reduce(fLambda) to src
     }
@@ -864,7 +902,7 @@ object ChainCanonicalizer {
         wrap: (MakeLambdaIR) -> SinkIR,
     ): Pair<SinkIR, NodeIR>? {
         val (src, pRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = "p") ?: return null
-        val pLambda = pRaw as? MakeLambdaIR ?: return null
+        val pLambda = asMakeLambda(pRaw) ?: return null
         // Captures OK — emit-side handles them via capture slot remap.
         return wrap(pLambda) to src
     }
@@ -1068,7 +1106,7 @@ object ChainCanonicalizer {
                 "f"  -> f  = fld.value
             }
             val srcInner = src ?: return null
-            val fLambda = f as? MakeLambdaIR ?: return null
+            val fLambda = asMakeLambda(f) ?: return null
             // Captures are OK: emit-side classifier + emit remap captured
             // reads to the enclosing frame slots (captures[i].slot).
             return fLambda to srcInner
@@ -1078,7 +1116,7 @@ object ChainCanonicalizer {
         if (callee.kind != ChainHofClassifier.HofKind.MAP) return null
         val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = "f") ?: return null
         val (srcInner, fRaw) = extracted
-        val fLambda = fRaw as? MakeLambdaIR ?: return null
+        val fLambda = asMakeLambda(fRaw) ?: return null
         // Captures OK; see comment above.
         return fLambda to srcInner
     }
@@ -1099,7 +1137,7 @@ object ChainCanonicalizer {
                 "p"  -> p  = fld.value
             }
             val srcInner = src ?: return null
-            val pLambda = p as? MakeLambdaIR ?: return null
+            val pLambda = asMakeLambda(p) ?: return null
             // Captures OK; see comment on tryPeelIterMap.
             return pLambda to srcInner
         }
@@ -1108,7 +1146,7 @@ object ChainCanonicalizer {
         if (callee.kind != ChainHofClassifier.HofKind.FILTER) return null
         val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = "p") ?: return null
         val (srcInner, pRaw) = extracted
-        val pLambda = pRaw as? MakeLambdaIR ?: return null
+        val pLambda = asMakeLambda(pRaw) ?: return null
         // Captures OK; see comment above.
         return pLambda to srcInner
     }

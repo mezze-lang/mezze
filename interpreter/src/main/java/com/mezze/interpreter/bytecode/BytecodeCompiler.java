@@ -2864,13 +2864,45 @@ public final class BytecodeCompiler {
         final InlineOp op;
         final int leftSlot;
         final int rightSlot;
-        FolderShape(InlineOp op, int l, int r) { this.op = op; this.leftSlot = l; this.rightSlot = r; }
+        // Optional element pre-transform: elem = elemOp(elem, elemRhs).
+        // Set when the fold body is compound, e.g. { acc, x } -> acc + x * x.
+        // null means no pre-transform (simple fold).
+        final InlineOp elemOp;
+        final long elemRhs;
+        final boolean elemSelfOp; // true for x*x style (both operands are the same param)
+        FolderShape(InlineOp op, int l, int r) {
+            this(op, l, r, null, 0, false);
+        }
+        FolderShape(InlineOp op, int l, int r,
+                    InlineOp elemOp, long elemRhs, boolean elemSelfOp) {
+            this.op = op; this.leftSlot = l; this.rightSlot = r;
+            this.elemOp = elemOp; this.elemRhs = elemRhs; this.elemSelfOp = elemSelfOp;
+        }
     }
 
     private static FolderShape classifyFolderBody(NodeIR body) {
         if (body instanceof InlineBinaryOpIR bin) {
             if (bin.getLeft() instanceof ReadLocalIR l && bin.getRight() instanceof ReadLocalIR r) {
                 return new FolderShape(bin.getOp(), l.getSlot(), r.getSlot());
+            }
+            // Compound fold: acc <OP> f(x) where f(x) is a binary expr.
+            // E.g. { acc, x } -> acc + x * x  or  { acc, x } -> acc + x * 2
+            if (bin.getLeft() instanceof ReadLocalIR accRead
+                    && bin.getRight() instanceof InlineBinaryOpIR sub) {
+                var elemShape = classifyElemTransform(sub, accRead.getSlot());
+                if (elemShape != null) {
+                    return new FolderShape(bin.getOp(), accRead.getSlot(), elemShape.elemSlot,
+                            elemShape.op, elemShape.rhs, elemShape.selfOp);
+                }
+            }
+            // Swapped: f(x) <OP> acc (rare but possible for commutative ops)
+            if (bin.getRight() instanceof ReadLocalIR accRead2
+                    && bin.getLeft() instanceof InlineBinaryOpIR sub2) {
+                var elemShape = classifyElemTransform(sub2, accRead2.getSlot());
+                if (elemShape != null) {
+                    return new FolderShape(bin.getOp(), accRead2.getSlot(), elemShape.elemSlot,
+                            elemShape.op, elemShape.rhs, elemShape.selfOp);
+                }
             }
             return null;
         }
@@ -2902,8 +2934,85 @@ public final class BytecodeCompiler {
                 // "it" is required to equal recvRead; the arg record encoding
                 // always echoes the receiver as "it" — no need to verify.
             }
-            if (!(rExpr instanceof ReadLocalIR rSlot)) return null;
-            return new FolderShape(inlineOp, recvRead.getSlot(), rSlot.getSlot());
+            if (rExpr instanceof ReadLocalIR rSlot) {
+                return new FolderShape(inlineOp, recvRead.getSlot(), rSlot.getSlot());
+            }
+            // Compound fold: r is itself a dict-method dispatch, e.g.
+            // acc.add{it=acc, r=x.mul{it=x, r=x}} for `acc + x * x`.
+            var elemXform = classifyElemTransformDict(rExpr, recvRead.getSlot());
+            if (elemXform != null) {
+                return new FolderShape(inlineOp, recvRead.getSlot(), elemXform.elemSlot,
+                        elemXform.op, elemXform.rhs, elemXform.selfOp);
+            }
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * Classify a dict-method dispatch sub-expression as a unary element transform.
+     * Handles: x.mul{it=x, r=x} (self-op, e.g. x*x), x.mul{it=x, r=lit} (lit-op).
+     */
+    private static ElemTransform classifyElemTransformDict(NodeIR node, int accSlot) {
+        if (!(node instanceof CallIndirectIR sub)) return null;
+        if (!(sub.getFunction() instanceof ReadFieldIR subRf)) return null;
+        if (!(subRf.getRecord() instanceof ReadLocalIR subRecv)) return null;
+        if (subRecv.getSlot() == accSlot) return null; // element transform must not reference acc
+        var subOp = ABILITY_OP_NAMES.get(subRf.getFieldName());
+        if (subOp == null) return null;
+        if (!(sub.getArg() instanceof MakeRecordIR subMr)) return null;
+        if (subMr.getFields().size() != 2) return null;
+        NodeIR subR = null;
+        for (var fld : subMr.getFields()) {
+            if ("r".equals(fld.getName())) subR = fld.getValue();
+        }
+        if (subR == null) return null;
+        // Self-op: x.mul{it=x, r=x} — both operands are the same param
+        if (subR instanceof ReadLocalIR rr && rr.getSlot() == subRecv.getSlot()) {
+            return new ElemTransform(subOp, subRecv.getSlot(), 0, true);
+        }
+        // Lit-op: x.mul{it=x, r=<literal>}
+        if (subR instanceof LongLitIR rLit) {
+            return new ElemTransform(subOp, subRecv.getSlot(), rLit.getValue(), false);
+        }
+        return null;
+    }
+
+    /** Result of classifying an element pre-transform in a compound fold body. */
+    private record ElemTransform(InlineOp op, int elemSlot, long rhs, boolean selfOp) {}
+
+    /**
+     * Classify a sub-expression as a unary element transform: x <OP> x,
+     * x <OP> lit, or lit <OP> x. Used by classifyFolderBody to decompose
+     * compound fold bodies like { acc, x } -> acc + x * x.
+     *
+     * @param sub the sub-expression (right-hand side of the fold op)
+     * @param accSlot the accumulator param slot (to reject if the sub uses acc)
+     */
+    private static ElemTransform classifyElemTransform(InlineBinaryOpIR sub, int accSlot) {
+        NodeIR left = sub.getLeft(), right = sub.getRight();
+        // x <OP> x — self-op (e.g. x * x for squaring)
+        if (left instanceof ReadLocalIR ll && right instanceof ReadLocalIR rr
+                && ll.getSlot() == rr.getSlot() && ll.getSlot() != accSlot) {
+            return new ElemTransform(sub.getOp(), ll.getSlot(), 0, true);
+        }
+        // x <OP> lit
+        if (left instanceof ReadLocalIR ll2 && ll2.getSlot() != accSlot
+                && right instanceof LongLitIR rLit) {
+            return new ElemTransform(sub.getOp(), ll2.getSlot(), rLit.getValue(), false);
+        }
+        // lit <OP> x
+        if (left instanceof LongLitIR lLit && right instanceof ReadLocalIR rr2
+                && rr2.getSlot() != accSlot) {
+            // Rewrite as x <OP> lit for commutative ops; for non-commutative,
+            // this is rare and we bail out.
+            var op = sub.getOp();
+            if (op == InlineOp.ADD || op == InlineOp.MUL
+                    || op == InlineOp.EQ || op == InlineOp.NEQ
+                    || op == InlineOp.AND || op == InlineOp.OR) {
+                return new ElemTransform(op, rr2.getSlot(), lLit.getValue(), false);
+            }
+            return null;
         }
         return null;
     }
@@ -3024,7 +3133,8 @@ public final class BytecodeCompiler {
         NodeIR rawXsExpr = null;
         NodeIR rawListExpr = null;
         boolean isSumSink = sinkMode instanceof FusedSinkMode.Accumulate a
-                && !a.ignoreElement() && a.op() == InlineOp.ADD;
+                && !a.ignoreElement() && a.op() == InlineOp.ADD
+                && a.elemOp() == null;  // exclude compound folds (e.g. acc + x*x)
         if (chain.getSource() instanceof SourceIR.RangeSeq rangeSrc) {
             rangeStart = rangeSrc.getStart();
             rangeEnd = rangeSrc.getEnd();
@@ -3086,7 +3196,11 @@ public final class BytecodeCompiler {
         // ── Phase 4d-fast: try FusedLongPipeline / FusedLongRangePipeline ──
         // For no-stages cases (plain fold), also allow FLP for list sources
         // since ListToLongSeq+FLP outperforms cons-cell traversal.
-        if (hasStages || rawListExpr != null) {
+        // Also enter FLP when the fold body has a compound element transform
+        // (e.g. acc + x*x) — the element op is injected as a virtual map stage.
+        boolean hasFoldElemTransform = sinkMode instanceof FusedSinkMode.Accumulate a2
+                && a2.elemOp() != null;
+        if (hasStages || rawListExpr != null || hasFoldElemTransform) {
             var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
             if (flp != null) {
                 if (rangeStart != null) {
@@ -3265,6 +3379,16 @@ public final class BytecodeCompiler {
                 foldInitLit = lit.getValue();
             } else {
                 foldInitNode = a.initExpr();
+            }
+            // Compound fold body decomposition: if the fold lambda has an
+            // element pre-transform (e.g. acc + x*x → elemOp=MUL, elemSelfOp)
+            // and no explicit Map stage was in the pipeline, inject it as the map.
+            if (a.elemOp() != null && mapOp < 0) {
+                mapOp = a.elemOp().ordinal();
+                selfMap = a.elemSelfOp();
+                if (!selfMap) {
+                    mapLit = a.elemRhs();
+                }
             }
         } else if (mode instanceof FusedSinkMode.ShortCircuit sc) {
             sinkKind = switch (sc.kind()) {
@@ -3864,7 +3988,12 @@ public final class BytecodeCompiler {
     /** Describes what the fused loop does at each element and what it returns. */
     private sealed interface FusedSinkMode {
         /** acc = init; per element: acc = acc <op> x. Covers Fold/Sum. */
-        record Accumulate(InlineOp op, NodeIR initExpr, boolean ignoreElement) implements FusedSinkMode {}
+        record Accumulate(InlineOp op, NodeIR initExpr, boolean ignoreElement,
+                          InlineOp elemOp, long elemRhs, boolean elemSelfOp) implements FusedSinkMode {
+            Accumulate(InlineOp op, NodeIR initExpr, boolean ignoreElement) {
+                this(op, initExpr, ignoreElement, null, 0, false);
+            }
+        }
         /** Call f(x) per element, discard result. */
         record CallEach(com.oracle.truffle.api.CallTarget target, boolean scalarABI,
                         String fieldName) implements FusedSinkMode {}
@@ -3885,9 +4014,10 @@ public final class BytecodeCompiler {
      */
     private FusedSinkMode classifySinkMode(FusedChainIR chain, boolean dbg) {
         if (chain.getSink() instanceof SinkIR.Fold foldSink) {
-            var folderOp = classifyBinaryFolder(foldSink.getF(), dbg, "folder");
-            if (folderOp == null) return null;
-            return new FusedSinkMode.Accumulate(folderOp, foldSink.getInit(), false);
+            var folderShape = classifyBinaryFolder(foldSink.getF(), dbg, "folder");
+            if (folderShape == null) return null;
+            return new FusedSinkMode.Accumulate(folderShape.op, foldSink.getInit(), false,
+                    folderShape.elemOp, folderShape.elemRhs, folderShape.elemSelfOp);
         }
         if (chain.getSink() instanceof SinkIR.Sum) {
             return new FusedSinkMode.Accumulate(InlineOp.ADD,
@@ -3910,9 +4040,9 @@ public final class BytecodeCompiler {
             return classifyPredicateMode(findSink.getP(), FusedSinkMode.ShortCircuitKind.FIND, dbg);
         }
         if (chain.getSink() instanceof SinkIR.Reduce reduceSink) {
-            var reducerOp = classifyBinaryFolder(reduceSink.getF(), dbg, "reducer");
-            if (reducerOp == null) return null;
-            return new FusedSinkMode.ReduceOpt(reducerOp);
+            var reducerShape = classifyBinaryFolder(reduceSink.getF(), dbg, "reducer");
+            if (reducerShape == null) return null;
+            return new FusedSinkMode.ReduceOpt(reducerShape.op);
         }
         if (chain.getSink() instanceof SinkIR.ToSeq) {
             return new FusedSinkMode.Materialize(FusedSinkMode.MaterializeTarget.SEQ);
@@ -3926,7 +4056,7 @@ public final class BytecodeCompiler {
     }
 
     /** Shared classification for Fold and Reduce combining functions. */
-    private InlineOp classifyBinaryFolder(MakeLambdaIR lambda, boolean dbg, String label) {
+    private FolderShape classifyBinaryFolder(MakeLambdaIR lambda, boolean dbg, String label) {
         if (!lambda.getCaptures().isEmpty()) {
             if (dbg) System.err.println("[chain-canon-emit] reject: " + label + " has captures");
             return null;
@@ -3950,7 +4080,7 @@ public final class BytecodeCompiler {
                 || op == InlineOp.EQ || op == InlineOp.NEQ
                 || op == InlineOp.AND || op == InlineOp.OR);
         if (swapped && !commutative) return null;
-        return op;
+        return shape;
     }
 
     /** Classify a predicate-based sink (Any/All/Find). */
