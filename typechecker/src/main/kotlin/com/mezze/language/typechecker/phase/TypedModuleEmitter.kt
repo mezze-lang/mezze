@@ -115,7 +115,18 @@ internal fun emitTypedModuleAndLower(
         // matching derived decoder's op hash.
         val decodeResult = com.mezze.language.typechecker.emit.DecodeTargetResolver.process(emittedTypedModule!!)
         emittedTypedModule = decodeResult.module
-        val compileResult = compileModule(emittedTypedModule!!, loadedModules, substitution, decodeResult.decodeOpBySite)
+        // Cross-module from_json wrapper: also wire `from_json` calls that live in
+        // IMPORTED module bodies (a generic wrapper compiled here as an additional
+        // module) to THIS module's derived decoder. Keyed by the derived decode
+        // impls on the emitted module; a no-op when nothing was derived.
+        val derivedDecodeImpls = emittedTypedModule!!.abilityImpls
+            .filter { it.operations.containsKey("decode") && it.targetTypes.size == 3 }
+        val importedForDecode = loadedModules.values.mapNotNull { it.typedModule }
+        val importedDecodeOps = com.mezze.language.typechecker.emit.DecodeTargetResolver
+            .processImportedCalls(importedForDecode, derivedDecodeImpls)
+        val mergedDecodeOpBySite = if (importedDecodeOps.isEmpty()) decodeResult.decodeOpBySite
+            else decodeResult.decodeOpBySite + importedDecodeOps
+        val compileResult = compileModule(emittedTypedModule!!, loadedModules, substitution, mergedDecodeOpBySite)
         loweredFns = compileResult.functions
         loweredPerformers = compileResult.performerRecords
     } catch (e: Exception) {

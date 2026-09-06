@@ -52,6 +52,38 @@ object DecodeTargetResolver {
         return Result(stamped, opBySite)
     }
 
+    /**
+     * Cross-module `from_json` wrapper wiring.
+     *
+     * A generic wrapper like `decw : … with FromJson 'a Str -> Result 'a E`
+     * lives in module A but is called with a concrete target from module B. The
+     * `from_json` call inside decw's body is compiled as part of B's compilation
+     * (decw is an imported module), yet [process] only walked B's OWN decls — so
+     * decw's from_json call is never mapped to B's derived decoder and degrades to
+     * a raw field read (runtime crash).
+     *
+     * Walk the IMPORTED modules' decls with B's derived [decodeImpls] and return
+     * the extra `callLoc -> decode op hash` entries. Same resolution as [process]
+     * (usage/constraint reconstruction + the single-decoder fast path); no
+     * stamping needed — the compiler consults the returned map by call Loc when it
+     * compiles the imported bodies. Only fires when B actually derived a decoder
+     * (`decodeImpls` non-empty), so codec-free imports are untouched.
+     */
+    fun processImportedCalls(
+        importedModules: List<TypedModule>,
+        decodeImpls: List<TypedAbilityImpl>,
+    ): Map<Loc, Hash> {
+        if (decodeImpls.isEmpty() || importedModules.isEmpty()) return emptyMap()
+        val opBySite = HashMap<Loc, Hash>()
+        val refSink = HashMap<Loc, AbilityImplRef>()
+        for (m in importedModules) {
+            for (decl in m.decls) {
+                if (decl is TypedLetDecl) resolveDecl(decl, decodeImpls, opBySite, refSink)
+            }
+        }
+        return opBySite
+    }
+
     private fun stampExpr(e: TypedExpr, refBySite: Map<Loc, AbilityImplRef>): TypedExpr {
         val rebuilt = withChildren(e) { stampExpr(it, refBySite) }
         if (rebuilt is TypedCall && rebuilt.function.let { it is TypedFieldAccess && it.field in FROM_JSON }) {

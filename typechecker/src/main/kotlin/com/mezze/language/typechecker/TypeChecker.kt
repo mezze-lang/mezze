@@ -256,6 +256,25 @@ class TypeChecker(
                         val preludeContext = loadPreludeModulesInternal(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
                     }
+                    // Cross-module `from_json`/`to_json` wrapper hole: a wrapper such
+                    // as `decw : … with FromJson 'a Str -> …` compiles in its own
+                    // module, but a module that only imports the WRAPPER (not the
+                    // codec module) can't discharge the wrapper's `FromJson`/`Decode`
+                    // constraint — the impls never travel with the import, so the
+                    // ability check reports "does not implement FromJson". Make the
+                    // codec blanket IMPLS visible for constraint solving here (never
+                    // the ability decls — see loadCodecImplContext), but ONLY when
+                    // this module does NOT
+                    // already have codec in scope (an explicit `use std::codec::*`
+                    // already brings them, and re-injecting a second copy perturbs
+                    // the codec-derivation path). Scoped to a user-module typecheck —
+                    // never the precompiled prelude/stdlib — so derivation ordering
+                    // for codec-importing code is untouched.
+                    if (shouldInjectPrelude && !hasCodecInScope(importContext!!)) {
+                        loadCodecImplContext(importResolver)?.let {
+                            importContext = importContext!!.merge(it)
+                        }
+                    }
                     val inScopeNames = localTypeNames + importContext!!.explicitlyImportedTypeNames + builtinNames
                     mergeImportContext(parentContext, importContext!!, inScopeNames)
                 }
@@ -840,6 +859,59 @@ class TypeChecker(
         return module.decls.any { decl ->
             decl is ParsedUseDecl || decl is ParsedPubUseDecl
         }
+    }
+
+    /** Codec ability names whose blanket impls a from_json/to_json wrapper needs.
+     *  If ANY is already visible, the module imports codec explicitly and we must
+     *  NOT re-inject (a duplicate copy perturbs codec derivation). */
+    private val codecAbilityNames = setOf(
+        "FromJson", "ToJson", "ToJsonUtf8", "Encode", "Decode",
+        "EncodeScalar", "DecodeScalar", "EncodeRecord", "DecodeRecord",
+    )
+
+    private fun hasCodecInScope(ctx: ModuleImportContext): Boolean =
+        ctx.importedAbilities.keys.any { it in codecAbilityNames }
+
+    private var cachedCodecImplContext: ModuleImportContext? = null
+
+    /**
+     * Resolve the codec modules and keep ONLY their ability impls + ability decls
+     * (plus inherent-impl op metadata) — never their bindings or types, so the
+     * opt-in `std::codec::*` NAME surface is unchanged. Cached per TypeChecker.
+     * Returns null if the codec modules can't be resolved.
+     */
+    private fun loadCodecImplContext(importResolver: ImportResolver): ModuleImportContext? {
+        cachedCodecImplContext?.let { return it }
+        val src = "use std::codec::core\nuse std::codec::json\n"
+        val synthetic = com.mezze.language.parser.MezzeParser().parseParsedModule(src, file = "<codec-impls>")
+        val resolved = when (val r = importResolver.resolveImports(synthetic)) {
+            is ImportResolutionResult.Success -> {
+                val c = r.importContext
+                // NOTE: deliberately drop `importedAbilities` — registering the codec
+                // ability DECLS (`Format`, `Encode`, `Decode`, …) would shadow a
+                // user ability of the same name (a user `ability Format for 'a` +
+                // `42.format {}` must NOT resolve to the codec `Format`). We only
+                // need the codec IMPLS visible for constraint solving; the ability
+                // hashes come from `abilitiesByHash` / the registry. This keeps the
+                // injection a pure impl-visibility fallback that cannot collide with
+                // user names.
+                ModuleImportContext(
+                    importedBindings = emptyMap(),
+                    importedTypes = emptyMap(),
+                    importedAbilities = emptyMap(),
+                    importedEffects = emptyMap(),
+                    importedImpls = emptyMap(),
+                    importedAbilityImpls = c.importedAbilityImpls,
+                    abilitiesByHash = c.abilitiesByHash,
+                    inherentImplOpReturnTypes = c.inherentImplOpReturnTypes,
+                    inherentImplOpParamTypes = c.inherentImplOpParamTypes,
+                    inherentImplOpEffects = c.inherentImplOpEffects,
+                )
+            }
+            is ImportResolutionResult.Failure -> null
+        }
+        cachedCodecImplContext = resolved
+        return resolved
     }
 
     private fun loadPreludeModulesInternal(
