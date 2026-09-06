@@ -2323,10 +2323,20 @@ class TypedASTCompiler(
                 if (nestedDestructures.isNotEmpty()) {
                     val destructureStmts = mutableListOf<StmtIR>()
                     for (nd in nestedDestructures) {
+                        // A level nested two-or-more deep is not bound by the flat
+                        // PatternIR; first read its record off the parent temp slot.
+                        // Outer levels are earlier in the list, so the parent slot
+                        // is already populated by the time we reach a child.
+                        val rf = nd.readFrom
+                        if (rf != null) {
+                            val readParent = ReadLocalIR(rf.first, SlotKind.OBJECT, src)
+                            val readThis = ReadFieldIR(readParent, rf.second, -1, src)
+                            destructureStmts.add(StmtIR.Let(nd.tempSlot, SlotKind.OBJECT, "__nested_lvl", Hash.ZERO, readThis, src))
+                        }
                         for ((fieldName, bindingSlot) in nd.fieldBindings) {
                             val readTemp = ReadLocalIR(nd.tempSlot, SlotKind.OBJECT, src)
                             val readField = ReadFieldIR(readTemp, fieldName, -1, src)
-                            destructureStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, "__nested_$fieldName", Hash.ZERO, readField, src))
+                            destructureStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, "__nested_" + fieldName, Hash.ZERO, readField, src))
                         }
                     }
                     // Wrap guard (if present) with destructuring so guard can reference nested vars
@@ -2445,7 +2455,10 @@ class TypedASTCompiler(
      */
     private data class NestedDestructureInfo(
         val tempSlot: Int,
-        val fieldBindings: List<Pair<String, Int>>  // (fieldName, targetSlot)
+        val fieldBindings: List<Pair<String, Int>>,  // (fieldName, targetSlot)
+        // Non-null for a level nested two-or-more deep: (parentTempSlot, field)
+        // to read this level's record off the parent's temp slot. Chains depth.
+        val readFrom: Pair<Int, String>? = null
     )
 
     /**
@@ -2467,45 +2480,39 @@ class TypedASTCompiler(
     private fun collectNestedDestructuring(pattern: TypedPattern?, out: MutableList<NestedDestructureInfo>) {
         if (pattern == null) return
         when (pattern) {
-            is TypedVariantPattern -> {
-                val payload = pattern.payload
-                if (payload is TypedRecordPattern) {
-                    for (fp in payload.fields) {
-                        if (fp.pattern is TypedRecordPattern) {
-                            // Nested record: { val = { x = px, y = py } }
-                            // Allocate temp slot for the intermediate field value
-                            val tempSlot = forceAllocLocal("__tmp_${fp.name}")
-                            val nestedRecord = fp.pattern as TypedRecordPattern
-                            val fieldBindings = nestedRecord.fields.map { innerFp ->
-                                val bindingName = if (innerFp.pattern is TypedVarPattern) (innerFp.pattern as TypedVarPattern).name else innerFp.name
-                                val slot = scopeStack.lastOrNull()?.get(bindingName)
-                                    ?: localsByName[bindingName]
-                                    ?: forceAllocLocal(bindingName)
-                                Pair(innerFp.name, slot)
-                            }
-                            out.add(NestedDestructureInfo(tempSlot, fieldBindings))
-                        }
-                    }
-                }
+            is TypedVariantPattern -> (pattern.payload as? TypedRecordPattern)?.let {
+                collectNestedRecordFields(it, out, null)
             }
-            is TypedRecordPattern -> {
-                for (fp in pattern.fields) {
-                    if (fp.pattern is TypedRecordPattern) {
-                        // Nested record: { config = { port = p, host = h } }
-                        val tempSlot = forceAllocLocal("__tmp_${fp.name}")
-                        val nestedRecord = fp.pattern as TypedRecordPattern
-                        val fieldBindings = nestedRecord.fields.map { innerFp ->
-                            val bindingName = if (innerFp.pattern is TypedVarPattern) (innerFp.pattern as TypedVarPattern).name else innerFp.name
-                            val slot = scopeStack.lastOrNull()?.get(bindingName)
-                                ?: localsByName[bindingName]
-                                ?: forceAllocLocal(bindingName)
-                            Pair(innerFp.name, slot)
-                        }
-                        out.add(NestedDestructureInfo(tempSlot, fieldBindings))
-                    }
-                }
+            is TypedRecordPattern -> collectNestedRecordFields(pattern, out, null)
+            else -> {}
+        }
+    }
+
+    // For each field of [record] whose sub-pattern is itself a record, allocate a
+    // temp slot for the field value, bind its direct-variable inner fields, and
+    // RECURSE so arbitrarily deep nesting works. The flat PatternIR only reaches
+    // the outermost level, so a field nested two-or-more deep reads its value from
+    // its parent's temp slot via [parent] (parentTempSlot to read this field off).
+    private fun collectNestedRecordFields(
+        record: TypedRecordPattern,
+        out: MutableList<NestedDestructureInfo>,
+        parent: Int?,
+    ) {
+        for (fp in record.fields) {
+            val nested = fp.pattern as? TypedRecordPattern ?: continue
+            val tempSlot = forceAllocLocal("__tmp_${fp.name}")
+            val fieldBindings = nested.fields.map { innerFp ->
+                val bindingName = if (innerFp.pattern is TypedVarPattern) (innerFp.pattern as TypedVarPattern).name else innerFp.name
+                val slot = scopeStack.lastOrNull()?.get(bindingName)
+                    ?: localsByName[bindingName]
+                    ?: forceAllocLocal(bindingName)
+                Pair(innerFp.name, slot)
             }
-            else -> {} // Other patterns don't have nested records
+            // Top-level nested field: the flat PatternIR already bound tempSlot
+            // (parent == null). Deeper: read this field off the parent temp slot.
+            val readFrom = if (parent == null) null else Pair(parent, fp.name)
+            out.add(NestedDestructureInfo(tempSlot, fieldBindings, readFrom))
+            collectNestedRecordFields(nested, out, tempSlot)
         }
     }
 

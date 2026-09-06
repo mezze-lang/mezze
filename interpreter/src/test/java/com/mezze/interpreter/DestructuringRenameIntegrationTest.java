@@ -598,4 +598,68 @@ class DestructuringRenameIntegrationTest {
             assertEquals(false, ctx.get("isSmall"));
         }
     }
+    // ============ DEEP NESTED RECORD DESTRUCTURE IN MATCH ============
+    // Regression: a nested record pattern in a MATCH arm deeper than two levels
+    // (`{ a = { b = { c } } }`) silently bound nothing and the arm returned null.
+    // collectNestedDestructuring now recurses to any depth, chaining each level
+    // off its parent temp slot.
+
+    @Nested
+    class DeepNestedMatchDestructure {
+
+        @Test
+        void threeLevelsInMatch() {
+            var ctx = runAndGetContext("""
+                type L3 = { c: Str }
+                type L2 = { b: L3 }
+                type L1 = { a: L2 }
+                let r: L1 = { a = { b = { c = "olives" } } }
+                let result = match r is
+                  { a = { b = { c } } } -> c
+                """);
+            assertEquals("olives", ctx.get("result"));
+        }
+
+        @Test
+        void fourLevelsInMatch() {
+            var ctx = runAndGetContext("""
+                type L4 = { d: Str }
+                type L3 = { c: L4 }
+                type L2 = { b: L3 }
+                type L1 = { a: L2 }
+                let r: L1 = { a = { b = { c = { d = "deep" } } } }
+                let result = match r is
+                  { a = { b = { c = { d } } } } -> d
+                """);
+            assertEquals("deep", ctx.get("result"));
+        }
+
+        @Test
+        void threeLevelsUnderAVariantPayload() {
+            // Ok { val = { product = { product_name } } } — the shape a decoded
+            // JSON reply is matched with.
+            var ctx = runAndGetContext("""
+                type Inner = { product_name: Str }
+                type Mid = { product: Inner }
+                let r: Result Mid Str = Ok { val = { product = { product_name = "olives" } } }
+                let result = match r is
+                  Ok { val = { product = { product_name } } } -> product_name
+                  Err { error = _ } -> "?"
+                """);
+            assertEquals("olives", ctx.get("result"));
+        }
+
+        @Test
+        void twoLevelsStillWork() {
+            var ctx = runAndGetContext("""
+                type Inner = { product_name: Str }
+                type Mid = { product: Inner }
+                let r: Mid = { product = { product_name = "olives" } }
+                let result = match r is
+                  { product = { product_name } } -> product_name
+                """);
+            assertEquals("olives", ctx.get("result"));
+        }
+    }
+
 }
