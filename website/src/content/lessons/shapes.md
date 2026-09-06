@@ -25,7 +25,7 @@ let oil = { name = "olive oil", grams = 200 }
 # The match arms are the only place these cases
 # appear. Together they say what `qty` accepts.
 let show = { qty } -> match qty is
-  Grams { n } -> "$(int::to_str { n = n })g"
+  Grams { n } -> "$(int::to_str { n })g"
   Pinch -> "a pinch"
   # Binds the whole value, not just a case name.
   other -> "unknown: $(other.to_dbg {})"
