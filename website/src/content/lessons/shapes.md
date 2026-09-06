@@ -9,7 +9,7 @@ The same is true of variants. The arms of a match are enough to say what a value
 The last arm binds the whole value instead of naming a case, so anything not matched above still has somewhere to go — including `ToTaste`, which is never written down. Take that arm away and the type closes to exactly the cases listed, and passing anything else becomes a compile error that names both sides:
 
 <!--mezze-error
-error[T0201]: Field `a` expects | Grams { n: 'a, ... }, Pinch |
+error[T0201]: Field `qty` expects | Grams { n: 'a }, Pinch |
 but got | ToTaste | in call to `show`
 -->
 
@@ -22,8 +22,8 @@ use std::effects::log::{ Console, println }
 let oil = { name = "olive oil", grams = 200 }
 
 # The match arms are the only place these cases
-# appear. Together they say what `a` accepts.
-let show = { a } -> match a is
+# appear. Together they say what `qty` accepts.
+let show = { qty } -> match qty is
   Grams { n } -> "$(n.to_str {})g"
   Pinch -> "a pinch"
   # Binds the whole value, not just a case name.
@@ -33,10 +33,10 @@ let show = { a } -> match a is
 let name_of = { r : { name: Str, ... } } -> r.name
 
 let main = {} -> perform Console in do
-  println { msg = show { a = Grams { n = 400 } } }
-  println { msg = show { a = Pinch } }
+  println { msg = show { qty = Grams { n = 400 } } }
+  println { msg = show { qty = Pinch } }
   # Never mentioned above, and still handled.
-  println { msg = show { a = ToTaste } }
+  println { msg = show { qty = ToTaste } }
 
   # A whole ingredient, where only a name was asked for.
   println { msg = name_of { r = oil } }
