@@ -630,6 +630,29 @@ class MezzeParser {
         return current
     }
 
+    /**
+     * Collect the COMMENT tokens in the half-open range [from, to). Used by the
+     * multi-line pipe parser to keep the inline comment on a stage
+     * (`|> f { @ }   # note`) — the continuation peek advances over it to reach
+     * the next `|>`, and without capturing it here the comment would be lost.
+     * `##` doc comments are marked as such (matching [skipNewlinesCollectAnnotations]).
+     */
+    internal fun collectCommentsBetween(from: TokenStream, to: TokenStream): List<ParsedComment> {
+        if (to.position <= from.position) return emptyList()
+        val out = mutableListOf<ParsedComment>()
+        var cur = from
+        while (cur.position < to.position) {
+            val tok = cur.current() ?: break
+            if (tok.type == TokenType.COMMENT) {
+                val f = currentFile ?: "<unknown>"
+                val loc = Loc(f, tok.line, tok.column, tok.line, tok.column + tok.text.length - 1)
+                out.add(ParsedComment(tok.text, tok.text.startsWith("##"), loc))
+            }
+            cur = cur.advance()
+        }
+        return out
+    }
+
     internal data class AnnotationBlock(
         val regularComments: List<ParsedComment>,
         val docComment: String?,

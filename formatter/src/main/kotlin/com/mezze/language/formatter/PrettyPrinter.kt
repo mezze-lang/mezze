@@ -796,25 +796,38 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
     }
 
     private fun printPipe(expr: ParsedPipe) {
+        // Flatten `((a |> b) |> c)` to segments, pairing each stage with the
+        // inline comment that trailed it (`|> b   # note`). A ParsedPipe's
+        // trailingComments belong to its own `right`, i.e. the stage we add as
+        // we descend through `.left`. segments[0] (the head) has no `|>` and so
+        // never carries one.
         val segments = mutableListOf<ParsedExpr>()
+        val comments = mutableListOf<List<ParsedComment>>()
         var current: ParsedExpr = expr
         while (current is ParsedPipe) {
             segments.add(0, current.right)
+            comments.add(0, current.trailingComments)
             current = current.left
         }
         segments.add(0, current)
+        comments.add(0, emptyList())
 
         val estLen = currentColumn + segments.sumOf { estimateExprWidth(it) } + (segments.size - 1) * 4
-        val useMultiLine = estLen > config.MAX_LINE_LENGTH || segments.size > 3
+        // A stage comment can't sit inside a collapsed one-liner, so its
+        // presence forces the multi-line layout (where each stage owns a line).
+        val hasStageComment = comments.any { it.isNotEmpty() }
+        val useMultiLine = hasStageComment || estLen > config.MAX_LINE_LENGTH || segments.size > 3
 
         if (useMultiLine) {
             printExpr(segments[0])
+            comments[0].forEach { append("  "); append(it.text) }
             newLine()
             indent {
                 for (i in 1 until segments.size) {
                     printIndent()
                     append("|> ")
                     printExpr(segments[i])
+                    comments[i].forEach { append("  "); append(it.text) }
                     if (i < segments.size - 1) newLine()
                 }
             }

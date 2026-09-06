@@ -129,7 +129,17 @@ data class ParsedBinaryOp(
 data class ParsedPipe(
     val left: ParsedExpr,
     val right: ParsedExpr,
-    override val loc: Loc
+    override val loc: Loc,
+    /**
+     * Comments trailing this stage — the inline note on `|> f { @ }   # here`,
+     * which sits between this stage's `right` and the next `|>`. Pipes nest
+     * left-associatively, so each node owns the comment after its own stage.
+     * `right` is a bare [ParsedExpr] with no comment fields, so without this
+     * the multi-line-pipe continuation had to skip the comment to find the
+     * next `|>` and the formatter then dropped or relocated it. Not hashed —
+     * comments never affect a decl's content hash (as with [ParsedDo]).
+     */
+    val trailingComments: List<ParsedComment> = emptyList(),
 ) : ParsedExpr
 
 /** Pipe placeholder: `@` — the value being piped */

@@ -2031,16 +2031,35 @@ internal val MezzeParser.pipeExpression: Parser<ParsedExpr>
             // continuation rule matches what dot chains already do
             // (see TokenType.NEWLINE branch in postfixExpression).
             val (probe, opAfterNewlines) = run {
-                if (currentStream.current()?.type == TokenType.NEWLINE) {
+                // Peek across the line break to the next stage. A stage may carry
+                // an INLINE trailing comment — `|> f { x = @ }   # note` — so the
+                // token after it is COMMENT, then NEWLINE, then `|>`. Skip both,
+                // exactly as skipNewlines does; checking NEWLINE alone stopped the
+                // chain at the comment, orphaning every stage after the first
+                // commented one (and the enclosing do-block then mis-reported its
+                // last `let` as the result). If no `|>` follows, nothing is
+                // consumed — we return the original stream untouched, so a comment
+                // that really belongs to the next statement is left for it.
+                val cur = currentStream.current()?.type
+                if (cur == TokenType.NEWLINE || cur == TokenType.COMMENT) {
                     var ahead = currentStream
-                    while (ahead.current()?.type == TokenType.NEWLINE) {
+                    while (ahead.current()?.type == TokenType.NEWLINE || ahead.current()?.type == TokenType.COMMENT) {
                         ahead = ahead.advance()
                     }
                     val a = ahead.current()
                     if (a?.type == TokenType.PIPE_OP) ahead to a else currentStream to currentStream.current()
                 } else currentStream to currentStream.current()
             }
+
+            // Any comments the peek stepped over sit between this stage and the
+            // next `|>` — they trail the stage we just built (`result`). Collect
+            // them so they can ride on that ParsedPipe rather than being dropped
+            // (the peek only advances to find the operator; the tokens it skips
+            // are otherwise lost). Harmless when the peek found no `|>`: probe ==
+            // currentStream, so the range is empty.
             val op = opAfterNewlines
+            val stageComments: List<ParsedComment> =
+                if (op?.type == TokenType.PIPE_OP) collectCommentsBetween(currentStream, probe) else emptyList()
 
             if (op?.type == TokenType.PIPE_OP) {
                 val opStream = probe.advance()
@@ -2094,12 +2113,20 @@ internal val MezzeParser.pipeExpression: Parser<ParsedExpr>
                                 )
                             }
                             else -> {
-                                // Valid: exactly one @, in an argument position
+                                // Valid: exactly one @, in an argument position.
+                                // The comments skipped before THIS `|>` trail the
+                                // PREVIOUS stage (`result`) — attach them there so
+                                // they print on that stage's line, not the new one.
+                                val left = if (stageComments.isNotEmpty() && result.value is ParsedPipe)
+                                    (result.value as ParsedPipe).copy(
+                                        trailingComments = (result.value as ParsedPipe).trailingComments + stageComments
+                                    )
+                                else result.value
                                 ParseResult.Success(
                                     ParsedPipe(
-                                        left = result.value,
+                                        left = left,
                                         right = right.value,
-                                        loc = result.value.loc.spanTo(right.value.loc)
+                                        loc = left.loc.spanTo(right.value.loc)
                                     ),
                                     right.remaining
                                 )

@@ -116,4 +116,65 @@ class DoBlockCommentTest {
         val output = formatter.format(input)
         assertEquals(input + "\n", output, "do block did not round-trip:\n$output")
     }
+
+    /**
+     * A multi-line pipe whose stages carry INLINE trailing comments —
+     * `|> f { x = @ }   # note` — used to break the whole do block: the pipe
+     * continuation peeked only past NEWLINE (not COMMENT) to find the next
+     * `|>`, so it stopped at the first commented stage and orphaned the rest.
+     * The block then reported its last `let` as the missing result. Two
+     * commented stages were enough; one was not. Now the chain parses and each
+     * stage keeps its comment (ParsedPipe.trailingComments).
+     */
+    @Test
+    fun `a pipe with inline stage comments parses and keeps them`() {
+        val input = """
+            use std::str
+            let main = {} -> do
+              let name = "  a , b "
+                |> str::to_upper { s = @ }   # shout
+                |> str::trim { s = @ }       # tidy
+              name
+        """.trimIndent()
+        val output = formatter.format(input)
+        // Neither comment is lost, and the block survives (name is the result,
+        // not a "must end with a result expression" error).
+        assertTrue(output.contains("# shout"), "first inline stage comment dropped:\n$output")
+        assertTrue(output.contains("# tidy"), "second inline stage comment dropped:\n$output")
+        assertTrue(output.contains("name"), "do block lost its result:\n$output")
+        // A non-final stage keeps its comment ON its own line, not hoisted away.
+        assertTrue(output.lines().any { it.contains("to_upper") && it.contains("# shout") },
+            "the non-final stage comment moved off its stage:\n$output")
+    }
+
+    @Test
+    fun `formatting a pipe with inline stage comments is idempotent`() {
+        val input = """
+            use std::str
+            let main = {} -> do
+              let name = "  a , b "
+                |> str::to_upper { s = @ }   # shout
+                |> str::trim { s = @ }       # tidy
+              name
+        """.trimIndent()
+        val once = formatter.format(input)
+        val twice = formatter.format(once)
+        assertEquals(once, twice, "not idempotent:\n---once---\n$once\n---twice---\n$twice")
+    }
+
+    @Test
+    fun `an own-line comment between pipe stages is preserved`() {
+        val input = """
+            use std::str
+            let main = {} -> do
+              let n = "a"
+                |> str::to_upper { s = @ }
+                # between the stages
+                |> str::to_lower { s = @ }
+              n
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("# between the stages"),
+            "own-line comment between stages was dropped:\n$output")
+    }
 }
