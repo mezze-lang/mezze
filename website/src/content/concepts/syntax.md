@@ -60,7 +60,7 @@ anything that evaluates to a `Str` fits, including a whole method chain.
 
 ## Square brackets are sequences
 
-`[1, 2, 3]` is a seq literal, and `[Int]` is its type. The same brackets, one
+`[1, 2, 3]` is a sequence literal, and `[Int]` is its type. The same brackets, one
 holding values and one holding a type.
 
 ## Vertical bars are variants
