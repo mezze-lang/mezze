@@ -1823,7 +1823,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * Sink kind constants for {@link FusedLongPipeline}.
      */
     public static final int FLP_SINK_SUM = 0, FLP_SINK_COUNT = 1,
-        FLP_SINK_ANY = 2, FLP_SINK_ALL = 3, FLP_SINK_FIND = 4;
+        FLP_SINK_ANY = 2, FLP_SINK_ALL = 3, FLP_SINK_FIND = 4,
+        FLP_SINK_TO_SEQ = 5, FLP_SINK_TO_LIST = 6;
 
     /**
      * Pack op ordinals and flags into a single int for FusedLongPipeline.
@@ -1895,6 +1896,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
             boolean filterFirst = (config & (1 << 29)) != 0;
 
+            // Materialize sinks: pre-allocate to source size, fill, trim.
+            long[] matData = null;
+            int matCount = 0;
+            if (sinkKind == FLP_SINK_TO_SEQ || sinkKind == FLP_SINK_TO_LIST) {
+                matData = new long[n > 0 ? n : 0];
+            }
+
             loopProfile.profileCounted(node, n);
             for (int i = 0; loopProfile.inject(node, i < n); i++) {
                 long v = data[i];
@@ -1921,6 +1929,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     acc = flpOp(foldOp, acc, v);
                 } else if (sinkKind == FLP_SINK_COUNT) {
                     acc++;
+                } else if (sinkKind == FLP_SINK_TO_SEQ || sinkKind == FLP_SINK_TO_LIST) {
+                    matData[matCount++] = v;
                 } else if (sinkKind == FLP_SINK_ANY) {
                     if (sinkPredCmpOp >= 0) {
                         long sv = sinkPredPreOp >= 0
@@ -1949,6 +1959,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             }
 
             // ── Post-loop result ──
+            if (sinkKind == FLP_SINK_TO_SEQ) {
+                return FusedLongRangePipeline.flpResultToSeq(matData, matCount);
+            } else if (sinkKind == FLP_SINK_TO_LIST) {
+                return FusedLongRangePipeline.flpResultToList(matData, matCount);
+            }
             return flpResult(sinkKind, acc, found, foundVal);
         }
 
@@ -2121,6 +2136,15 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             boolean found = false;
             long foundVal = 0;
 
+            // Materialize sinks: pre-allocate array to range size (upper bound),
+            // fill during loop, trim post-loop. Avoids per-element bounds checks
+            // and growth copies that the generic SeqBuilder path requires.
+            long[] matData = null;
+            int matCount = 0;
+            if (sinkKind == FLP_SINK_TO_SEQ || sinkKind == FLP_SINK_TO_LIST) {
+                matData = new long[n > 0 ? n : 0];
+            }
+
             loopProfile.profileCounted(node, n);
             for (int i = 0; loopProfile.inject(node, i < n); i++) {
                 long v = start + i;
@@ -2147,6 +2171,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     acc = FusedLongPipeline.flpOp(foldOp, acc, v);
                 } else if (sinkKind == FLP_SINK_COUNT) {
                     acc++;
+                } else if (sinkKind == FLP_SINK_TO_SEQ || sinkKind == FLP_SINK_TO_LIST) {
+                    matData[matCount++] = v;
                 } else if (sinkKind == FLP_SINK_ANY) {
                     if (sinkPredCmpOp >= 0) {
                         long sv = sinkPredPreOp >= 0
@@ -2175,7 +2201,29 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             }
 
             // ── Post-loop result ──
+            if (sinkKind == FLP_SINK_TO_SEQ) {
+                return flpResultToSeq(matData, matCount);
+            } else if (sinkKind == FLP_SINK_TO_LIST) {
+                return flpResultToList(matData, matCount);
+            }
             return FusedLongPipeline.flpResult(sinkKind, acc, found, foundVal);
+        }
+
+        /** Materialize a long[] into a MezzeSeq with LongSeqStorage. */
+        @TruffleBoundary
+        private static Object flpResultToSeq(long[] data, int count) {
+            if (count == 0) return MezzeSeq.empty();
+            long[] trimmed = count == data.length ? data : java.util.Arrays.copyOf(data, count);
+            return MezzeSeq.fromLongs(trimmed);
+        }
+
+        /** Materialize a long[] into a MezzeList. */
+        @TruffleBoundary
+        private static Object flpResultToList(long[] data, int count) {
+            if (count == 0) return com.mezze.datastructures.list.MezzeList.empty();
+            Object[] boxed = new Object[count];
+            for (int i = 0; i < count; i++) boxed[i] = data[i];
+            return com.mezze.datastructures.list.MezzeList.of(boxed);
         }
     }
 

@@ -3154,8 +3154,7 @@ public final class BytecodeCompiler {
     private FLPSpec tryBuildFusedLongPipeline(
             java.util.List<ClassifiedStage> stages, FusedSinkMode mode) {
         if (mode instanceof FusedSinkMode.CallEach
-                || mode instanceof FusedSinkMode.ReduceOpt
-                || mode instanceof FusedSinkMode.Materialize) return null;
+                || mode instanceof FusedSinkMode.ReduceOpt) return null;
 
         int mapOp = -1; long mapLit = 0; NodeIR mapNode = null;
         boolean selfMap = false; boolean filterFirst = false;
@@ -3237,6 +3236,11 @@ public final class BytecodeCompiler {
             } else {
                 sinkPredCmpLit = sp.cmpRhs();
             }
+        } else if (mode instanceof FusedSinkMode.Materialize mat) {
+            sinkKind = switch (mat.target()) {
+                case SEQ -> MezzeBytecodeRootNode.FLP_SINK_TO_SEQ;
+                case LIST -> MezzeBytecodeRootNode.FLP_SINK_TO_LIST;
+            };
         } else {
             return null;
         }
