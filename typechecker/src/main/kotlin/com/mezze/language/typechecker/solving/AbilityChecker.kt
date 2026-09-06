@@ -1287,8 +1287,23 @@ class AbilityChecker internal constructor(
 
     private fun convertAnnotationToType(annotation: ParsedTypeAnnotation): MezzeType? {
         return when (annotation) {
-            is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
-            is ParsedTypeApp -> { val args = annotation.args.mapNotNull { convertAnnotationToType(it) }; if (args.size != annotation.args.size) null else WellKnownTypeApp.of(annotation.constructor, args) }
+            is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name)
+                // #312: an UNBOUND type-var name (`'a`) is a free type variable —
+                // model it as VarType, NOT a bogus TypeApplication(constructor="'a")
+                // whose name lives only in `constructor`. This is the sibling
+                // producer to substituteAnnotationWithImplBindings (same #312 leak):
+                // a generic impl's target slot (`impl FromJson 'a for Str`) is a
+                // bare type-var, so binding a call-site var to it must yield a fresh
+                // free var, not a rigid TypeApplication that then clashes with the
+                // caller's concrete target type.
+                ?: if (annotation.name.isTypeVarName()) MezzeType.VarType(TypeVar.freshWithName(annotation.name))
+                   else WellKnownTypeApp.of(annotation.name, emptyList())
+            is ParsedTypeApp ->
+                // A nullary type-var constructor (`'a` with no args) is likewise a
+                // free type variable, never a TypeApplication.
+                if (annotation.args.isEmpty() && annotation.constructor.isTypeVarName())
+                    MezzeType.VarType(TypeVar.freshWithName(annotation.constructor))
+                else { val args = annotation.args.mapNotNull { convertAnnotationToType(it) }; if (args.size != annotation.args.size) null else WellKnownTypeApp.of(annotation.constructor, args) }
             is ParsedSeqType -> convertAnnotationToType(annotation.elementType)?.let { MezzeType.SeqType(it) }
             is ParsedRecordType -> { val fields = mutableMapOf<String, MezzeType>(); for (e in annotation.entries) { val ft = convertAnnotationToType(e.type) ?: return null; fields[e.name] = ft }; MezzeType.RecordType(fields) }
             is ParsedVariantType -> MezzeType.VariantType(annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertAnnotationToType(dt) } })

@@ -158,6 +158,17 @@ class TypedASTCompiler(
 
     private val census = CallSiteCensus()
 
+    /**
+     * decode op hash → the `Decode` impl that op belongs to. Lets a `from_json`
+     * call site recover its concrete INPUT type (the impl's `for 'in`, last in
+     * the class-arg tuple) from the per-site decoder DecodeTargetResolver picked,
+     * even when the from_json receiver stayed a bare var (nested generic callback).
+     */
+    private val decodeImplByOpHash = mutableMapOf<Hash, TypedAbilityImpl>()
+
+    /** Codec entry points that dispatch their inner `.decode` on the target type. */
+    private val FROM_JSON_METHODS = setOf("from_json", "from_json_with")
+
     init {
         // Build ability operation index
         for (impl in abilityImpls) {
@@ -166,6 +177,7 @@ class TypedASTCompiler(
                 abilityOpIndex.getOrPut(opName) { mutableListOf() }.add(
                     AbilityOp(impl.hash, impl.targetTypes, opHash)
                 )
+                if (opName == "decode") decodeImplByOpHash[opHash] = impl
             }
         }
     }
@@ -1351,7 +1363,29 @@ class TypedASTCompiler(
             // every hash-based dispatch path (tryInlineOp, tryResolveAbilityOp,
             // dict-passing) falls through, ending in name-based ReadFieldIR ->
             // runtime crash under BDSL. See project_346_stale_typevar_root_cause.
-            val receiverType = substitution.apply(fn.record.type)
+            val rawReceiverType = substitution.apply(fn.record.type)
+
+            // A `from_json` whose receiver type never solved (its value flows in
+            // through a generic combinator callback binder, e.g.
+            // `flat_map { f = { val } -> … val.from_json {} }`) reaches here as a
+            // bare VarType: `tryResolveAbilityOp` then finds no `from_json` op, so
+            // the whole `opHash != null` path — the ONLY place the per-site decoder
+            // (decodeOpBySite) is wired — is skipped, and the call degrades to a
+            // `ReadFieldByName("from_json")` that crashes CallIndirect at runtime.
+            // But DecodeTargetResolver already pinned this site's decoder; that
+            // decode impl's `for 'in` (its class-arg tuple's last slot) IS the
+            // from_json input type. Recover it structurally and use it as the
+            // receiver type, so from_json resolves and dispatch proceeds exactly as
+            // for a directly-typed receiver. Keyed on structure (the decoder's input
+            // type), never on names.
+            val fromJsonInputType: MezzeType? =
+                if (rawReceiverType is VarType && methodName in FROM_JSON_METHODS)
+                    decodeOpBySite[expr.loc]
+                        ?.let { decodeImplByOpHash[it] }
+                        ?.targetTypes?.lastOrNull()
+                        ?.takeIf { it !is VarType }
+                else null
+            val receiverType = fromJsonInputType ?: rawReceiverType
 
             // Try inline ops for primitives
             val inlineOp = tryInlineOp(methodName, receiverType)
