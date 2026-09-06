@@ -1014,6 +1014,59 @@ class AbilityChecker internal constructor(
         return checkAbilityImplementation(abilityName, listOf(type))
     }
 
+    /**
+     * Render the `impl … where { ... }` skeleton suggested in an ability error,
+     * keyed on the ability's DECLARED SHAPE (never on hard-coded names):
+     *
+     *  - Non-class-param ability (no params before `for`, no `having`) →
+     *    `impl <Ability> for <receiver> where { ... }` (Ord, Eq, Show, …).
+     *  - Class-param / having ability (e.g. `NumMul 'r for 'l having 'out`) →
+     *    `impl <Ability> <class-args…> for <receiver> having <assoc> = ... where { ... }`,
+     *    with `...` as the placeholder for each associated type's value. Class
+     *    args are omitted from the head when there are none; the `having` clause
+     *    is omitted when the ability declares no associated types.
+     *
+     * [receiverRendered] is the `for` target; [classArgsRendered] are the
+     * ability's class-args (the params before `for`), already pretty-printed and
+     * in declared order. [withBody] appends the ` where { ... }` tail (used for
+     * the actionable "implement:" suggestion; the terser "Available impls" list
+     * omits it).
+     */
+    private fun renderImplSkeleton(
+        abilityName: String,
+        receiverRendered: String,
+        classArgsRendered: List<String>,
+        withBody: Boolean = true,
+    ): String {
+        val decl = registry.lookupAbility(abilityName)
+        // typeParams = class-args + receiver (receiver last); associatedTypes = the
+        // `having` names as written (e.g. "'out"). A missing decl falls back to the
+        // observed args so a class-param impl still renders its class-args + having.
+        val declaredClassArgCount = decl?.let { it.typeParams.size - 1 }?.takeIf { it >= 0 }
+        val assocTypes = decl?.associatedTypes ?: emptyList()
+
+        val classArgs = if (declaredClassArgCount != null) {
+            classArgsRendered.take(declaredClassArgCount)
+        } else {
+            classArgsRendered
+        }
+
+        val body = if (withBody) " where { ... }" else ""
+
+        val isClassParam = classArgs.isNotEmpty() || assocTypes.isNotEmpty()
+        if (!isClassParam) {
+            return "impl $abilityName for $receiverRendered$body"
+        }
+
+        val head = if (classArgs.isEmpty()) {
+            "impl $abilityName for $receiverRendered"
+        } else {
+            "impl $abilityName ${classArgs.joinToString(" ")} for $receiverRendered"
+        }
+        val having = if (assocTypes.isEmpty()) "" else " having " + assocTypes.joinToString(", ") { "$it = ..." }
+        return "$head$having$body"
+    }
+
     internal fun generateAbilityErrorMessage(abilityName: String, typeArgs: List<MezzeType>, loc: Loc? = null): String {
         val hasFunctionType = typeArgs.any { it is MezzeType.FunctionType }
         val typeNames = typeArgs.map { prettyPrintType(it) }.joinToString(", ")
@@ -1037,7 +1090,11 @@ class AbilityChecker internal constructor(
                     "Try adding `use std::${stdModuleForType(primaryType)}::{ * }` (or import the specific symbol used)." +
                     formatAbilityCandidates(abilityName)
             } else {
-                "Cannot use '$operator' with $typeNames. To enable this, implement: impl $abilityName for $primaryType where { ... }${formatAbilityCandidates(abilityName)}"
+                // typeArgs here is `[receiver, class-args…]` (see solveAbilityRequired's
+                // `[receiver] + typeArgs`), so the receiver leads and the class-args follow.
+                val classArgsRendered = typeArgs.drop(1).map { prettyPrintType(it) }
+                val skeleton = renderImplSkeleton(abilityName, primaryType, classArgsRendered)
+                "Cannot use '$operator' with $typeNames. To enable this, implement: $skeleton${formatAbilityCandidates(abilityName)}"
             }
         }
 
@@ -1071,7 +1128,11 @@ class AbilityChecker internal constructor(
                     "on `Option`, `Result`, or any type implementing `Tryable`. " +
                     "If you meant a plain binding, use `let x = ...` instead."
             }
-            else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName for $primaryType where { ... }${formatAbilityCandidates(abilityName)}"
+            else -> {
+                val classArgsRendered = typeArgs.drop(1).map { prettyPrintType(it) }
+                val skeleton = renderImplSkeleton(abilityName, primaryType, classArgsRendered)
+                "$typeNames does not implement '$abilityName'. To enable this, implement: $skeleton${formatAbilityCandidates(abilityName)}"
+            }
         }
     }
 
@@ -1124,7 +1185,23 @@ class AbilityChecker internal constructor(
         if (rendered.isEmpty()) return ""
         val shown = rendered.take(5)
         val suffix = if (rendered.size > shown.size) ", … (${rendered.size - shown.size} more)" else ""
-        return "\n  Available impls: " + shown.joinToString("; ") { "impl $abilityName for $it" } + suffix
+        // Each entry is the impl's rendered target tuple = `[class-args…, receiver]`
+        // (`allTypeArgs = abilityTypeArgs + targetTypes`, receiver LAST). Split it
+        // back into class-args + receiver so the impl form renders correctly for
+        // class-param abilities (`impl NumMul Int for Int having 'out = ...`) while
+        // single-target abilities stay `impl Ord for Int`. Split by the ability's
+        // declared class-arg count (leading N slots = class-args, remainder =
+        // receiver) so a receiver that itself contains a comma stays intact.
+        val classArgCount = registry.lookupAbility(abilityName)
+            ?.let { it.typeParams.size - 1 }?.takeIf { it >= 0 } ?: 0
+        val implList = shown.joinToString("; ") { targetTuple ->
+            val parts = targetTuple.split(", ")
+            val n = classArgCount.coerceAtMost((parts.size - 1).coerceAtLeast(0))
+            val classArgs = parts.take(n)
+            val receiver = parts.drop(n).joinToString(", ")
+            renderImplSkeleton(abilityName, receiver, classArgs, withBody = false)
+        }
+        return "\n  Available impls: $implList$suffix"
     }
 
     private fun renderAnnotation(a: ParsedTypeAnnotation): String = when (a) {

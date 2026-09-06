@@ -385,7 +385,8 @@ class PatternConstraintGenerator {
             Constraint.MustBeOpen(
                 type = scrutineeType,
                 context = "Record pattern is a partial view; keep the scrutinee row open (#403)",
-                loc = sourceLoc
+                loc = sourceLoc,
+                closeableIfPatternInferred = !pattern.isOpen && scrutineeType is MezzeType.VarType
             )
         )
 

@@ -132,6 +132,15 @@ class ConstraintSolver(
     private val mustBeOpenBindings = mutableSetOf<String>()
     private val patternBasedRowVars = mutableSetOf<RowVar>()
 
+    // #403 payload carve-out: payload vars of CLOSED record patterns on a fresh
+    // scrutinee (anonymous variant payload inferred purely from the pattern). Such
+    // a payload's field-access tail is an inference artifact, NOT a promise of
+    // row-polymorphism — it must CLOSE to the pattern's fields unless a genuinely
+    // wider value flowed in. Tracked so solveMustBeOpen / resolveMustBeOpenRowVars
+    // can DECLINE to exempt the tail from closing (the exact inverse of the normal
+    // MustBeOpen behaviour, which exempts it). See solveMustBeOpen.
+    private val closeablePatternInferredTypes = mutableSetOf<TypeVar>()
+
     // #61 error-recovery: type vars left unresolved by an already-reported
     // failure. A later constraint that fails but depends only on poisoned vars
     // is a cascade of the same root cause, so we suppress its (duplicate) error
@@ -924,6 +933,19 @@ class ConstraintSolver(
         constraint.bindingName?.let { mustBeOpenBindings.add(it) }
 
         if (type is MezzeType.VarType) {
+            // #403 payload carve-out: a CLOSED record pattern on a fresh scrutinee
+            // does NOT keep its payload row open — the tail is a pattern-inference
+            // artifact, closed by closeGeneratedRowVars like any other generated
+            // record tail (declining to exempt it below IS the close). Record the
+            // var so the post-solve pass agrees, and skip the exemption. A wider
+            // value that genuinely flows in unifies the payload with a RECORD
+            // carrying the extra fields; that record's OWN row var (if any) governs
+            // openness independently, so the wider-value case is unaffected.
+            if (constraint.closeableIfPatternInferred) {
+                closeablePatternInferredTypes.add(type.variable)
+                return ConstraintResult.Success(Substitution.empty)
+            }
+
             mustBeOpenTypes.add(type.variable)
 
             val resolved = currentSubst.apply(type)

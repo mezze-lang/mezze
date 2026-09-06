@@ -1,3 +1,3 @@
 UNCATEGORIZED
-Cannot use '+' with Frac, Float. To enable this, implement: impl NumAdd for Frac where { ... }
-  Available impls: impl NumAdd for Frac, Frac; impl NumAdd for Int, Int; impl NumAdd for Float, Int; impl NumAdd for Nat, Int; impl NumAdd for Float, Float, … (5 more)
+Cannot use '+' with Frac, Float. To enable this, implement: impl NumAdd Float for Frac having 'out = ... where { ... }
+  Available impls: impl NumAdd Frac for Frac having 'out = ...; impl NumAdd Int for Int having 'out = ...; impl NumAdd Float for Int having 'out = ...; impl NumAdd Nat for Int having 'out = ...; impl NumAdd Float for Float having 'out = ..., … (5 more)

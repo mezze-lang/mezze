@@ -139,7 +139,13 @@ sealed interface Constraint {
         val type: MezzeType,
         val bindingName: String? = null,
         override val context: String? = null,
-        override val loc: Loc? = null
+        override val loc: Loc? = null,
+        // #403 payload carve-out: set when this MustBeOpen guards a CLOSED record
+        // pattern whose scrutinee is a FRESH inference var (an anonymous variant
+        // payload inferred purely from this pattern). Such a row must be CLOSED to
+        // exactly the pattern's fields UNLESS a genuinely wider value flows into it
+        // — see solveMustBeOpen for the discrimination.
+        val closeableIfPatternInferred: Boolean = false
     ) : Constraint {
         override fun mapTypes(f: (MezzeType) -> MezzeType) = copy(type = f(type))
     }

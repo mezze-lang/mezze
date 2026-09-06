@@ -97,7 +97,7 @@ class ClosedVariantInExpressionTest {
 
             let process = {r} -> match r is
                 Err {error} -> match error is
-                    AppError {message} -> message
+                    AppError {message, ...} -> message
                     _ -> "unknown"
                 Ok {val} -> "success"
 
