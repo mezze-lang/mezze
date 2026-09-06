@@ -2635,6 +2635,36 @@ public final class BytecodeCompiler {
                             return;
                         }
                     }
+                    // ── Single-field { s } string natives ──
+                    if (mr.getFields().size() == 1) {
+                        NodeIR sNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("s".equals(fld.getName())) sNode = fld.getValue();
+                        }
+                        if (sNode != null) {
+                            // str::size { s } → InlineStringSize (PE-transparent, no boundary)
+                            if ("__native_string_size".equals(recName)) {
+                                b.beginInlineStringSize();
+                                emitNode(sNode, b, argCount, localMap);
+                                b.endInlineStringSize();
+                                return;
+                            }
+                            // str::trim/to_upper/to_lower/reverse/trim_start/trim_end → InlineStringUnary
+                            int unaryOp = -1;
+                            if ("__native_string_trim".equals(recName))            unaryOp = MezzeBytecodeRootNode.InlineStringUnary.TRIM;
+                            else if ("__native_string_to_upper".equals(recName))   unaryOp = MezzeBytecodeRootNode.InlineStringUnary.TO_UPPER;
+                            else if ("__native_string_to_lower".equals(recName))   unaryOp = MezzeBytecodeRootNode.InlineStringUnary.TO_LOWER;
+                            else if ("__native_string_reverse".equals(recName))    unaryOp = MezzeBytecodeRootNode.InlineStringUnary.REVERSE;
+                            else if ("__native_string_trim_start".equals(recName)) unaryOp = MezzeBytecodeRootNode.InlineStringUnary.TRIM_START;
+                            else if ("__native_string_trim_end".equals(recName))   unaryOp = MezzeBytecodeRootNode.InlineStringUnary.TRIM_END;
+                            if (unaryOp >= 0) {
+                                b.beginInlineStringUnary(unaryOp);
+                                emitNode(sNode, b, argCount, localMap);
+                                b.endInlineStringUnary();
+                                return;
+                            }
+                        }
+                    }
                 }
                 var withNode = com.mezze.interpreter.nodes.builtin.NativeDispatch
                         .recordHandlerWithNodeOf(recName);

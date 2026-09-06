@@ -354,6 +354,52 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Inline string size: bypasses MakeRecord + NativeDispatch for
+     * str::size { s }.  No {@code @TruffleBoundary} — {@code String.length()}
+     * is a trivial field access, fully PE-transparent.
+     */
+    @Operation
+    public static final class InlineStringSize {
+        @Specialization
+        public static long doSize(String s) {
+            return (long) s.length();
+        }
+    }
+
+    /**
+     * Inline unary string operations: TRIM(0), TO_UPPER(1), TO_LOWER(2),
+     * REVERSE(3), TRIM_START(4), TRIM_END(5).
+     * Bypasses MakeRecord + NativeDispatch for single-arg string natives.
+     * {@code @TruffleBoundary} because JDK string transformations can reach
+     * blocklisted internals under SVM runtime compilation (#402).
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    public static final class InlineStringUnary {
+        /** TRIM = 0 */       public static final int TRIM       = 0;
+        /** TO_UPPER = 1 */   public static final int TO_UPPER   = 1;
+        /** TO_LOWER = 2 */   public static final int TO_LOWER   = 2;
+        /** REVERSE = 3 */    public static final int REVERSE    = 3;
+        /** TRIM_START = 4 */ public static final int TRIM_START = 4;
+        /** TRIM_END = 5 */   public static final int TRIM_END   = 5;
+
+        @Specialization
+        @TruffleBoundary
+        public static String doOp(int op, String s) {
+            return switch (op) {
+                case TRIM       -> s.trim();
+                case TO_UPPER   -> s.toUpperCase();
+                case TO_LOWER   -> s.toLowerCase();
+                case REVERSE    -> new StringBuilder(s).reverse().toString();
+                case TRIM_START -> s.stripLeading();
+                case TRIM_END   -> s.stripTrailing();
+                default -> throw CompilerDirectives.shouldNotReachHere(
+                        "InlineStringUnary: unknown op " + op);
+            };
+        }
+    }
+
+    /**
      * #394 — type-driven Inspect. Emitted for {@code x.to_dbg {}} /
      * {@code x.to_str {}} from {@link com.mezze.language.truffleir.InspectIR},
      * carrying the receiver's static shape as a constant {@code PrintType}. The
