@@ -225,18 +225,28 @@ infra-destroy: _stack
 
 # Push the compressed WASM runtime to the R2 bucket (Pages rejects >25 MiB).
 # Both mezze.js and mezze.js.wasm go together — they must share an origin.
+#
+# Uploaded under wasm/<stamp>/, where <stamp> is the content hash of the
+# UNCOMPRESSED runtime (tools/wasm-stamp.mjs). The objects are served
+# `immutable` for a year, so the URL MUST change when the bytes do — otherwise a
+# returning visitor keeps the cached old runtime forever (which is exactly the
+# cache-busting failure this fixes). `deploy` stamps the same value into
+# PUBLIC_WASM_STAMP so the HTML requests this path; the stamp is deterministic,
+# so the two agree even when the recipes run separately.
 [group('deploy')]
 push-wasm:
     @cd infra && pulumi stack select {{stack}} >/dev/null 2>&1
     node {{site}}/tools/compress-wasm.mjs
-    sops exec-env secrets.yaml 'set -euo pipefail; B=$(cd infra && pulumi stack output runtimeBucket); for f in mezze.js mezze.js.wasm; do echo "  uploading $f"; if [ "$f" = mezze.js.wasm ]; then CT=application/wasm; else CT=text/javascript; fi; npx --yes wrangler@latest r2 object put "$B/wasm/$f" --file "{{site}}/public/wasm/.br/$f" --remote --content-encoding br --content-type "$CT" --cache-control "public, max-age=31536000, immutable"; done'
+    sops exec-env secrets.yaml 'set -euo pipefail; B=$(cd infra && pulumi stack output runtimeBucket); S=$(node {{site}}/tools/wasm-stamp.mjs); echo "  stamp: $S"; for f in mezze.js mezze.js.wasm; do echo "  uploading wasm/$S/$f"; if [ "$f" = mezze.js.wasm ]; then CT=application/wasm; else CT=text/javascript; fi; npx --yes wrangler@latest r2 object put "$B/wasm/$S/$f" --file "{{site}}/public/wasm/.br/$f" --remote --content-encoding br --content-type "$CT" --cache-control "public, max-age=31536000, immutable"; done'
 
 # Full pipeline: build the runtime, upload it, then build+deploy the site against it.
 # Order matters: the runtime must be live at PUBLIC_WASM_BASE before the HTML ships.
+# PUBLIC_WASM_STAMP is the content hash push-wasm just uploaded under wasm/<stamp>/;
+# stamping it into the build makes the HTML request that exact (cache-busted) path.
 [group('deploy')]
 deploy: wasm hovers push-wasm
     @cd infra && pulumi stack select {{stack}} >/dev/null 2>&1
-    sops exec-env secrets.yaml 'set -euo pipefail; URL=$(cd infra && pulumi stack output runtimeUrl); echo "  runtime: $URL"; PUBLIC_WASM_BASE="$URL" npm --prefix {{site}} run build; rm -rf {{site}}/dist/wasm; npx --yes wrangler@latest pages deploy {{site}}/dist --project-name {{project}} --branch main'
+    sops exec-env secrets.yaml 'set -euo pipefail; URL=$(cd infra && pulumi stack output runtimeUrl); S=$(node {{site}}/tools/wasm-stamp.mjs); echo "  runtime: $URL  stamp: $S"; PUBLIC_WASM_BASE="$URL" PUBLIC_WASM_STAMP="$S" npm --prefix {{site}} run build; rm -rf {{site}}/dist/wasm; npx --yes wrangler@latest pages deploy {{site}}/dist --project-name {{project}} --branch main'
 
 # Deploy without a fresh build (uses whatever is in website/dist/)
 [group('deploy')]
