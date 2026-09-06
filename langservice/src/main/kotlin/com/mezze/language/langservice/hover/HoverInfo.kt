@@ -28,6 +28,16 @@ import com.mezze.language.langservice.lookup.TypedAstScopeWalker
 object HoverInfo {
 
     /**
+     * How long an operation line may get before it is wrapped at the arrow.
+     *
+     * The web tooltip is 34rem, roughly 55 monospace characters at the size it
+     * renders; editors vary but none of them are generous. Sized to the
+     * smallest consumer so a signature is never re-wrapped by whoever displays
+     * it, which is what produced breaks in the middle of a type name.
+     */
+    private const val OP_LINE_BUDGET = 55
+
+    /**
      * Everything hover reads about a document, with no editor types attached.
      *
      * Mirrors the fields of the LSP's DocumentState that hover actually uses;
@@ -209,6 +219,15 @@ object HoverInfo {
             return prettyPrintTypeWithAliases(type, state.typeAliases)
         }
 
+        // A solved type that tells the reader nothing about a value's shape:
+        // an unbound inference var, or an open record still empty of fields.
+        // These are the cases worth rebuilding from field-access uses.
+        fun isUninformative(t: MezzeType): Boolean = when (t) {
+            is MezzeType.VarType -> true
+            is MezzeType.RecordType -> t.rowVar != null && t.fields.isEmpty()
+            else -> false
+        }
+
         // Helper to wrap in syntax-highlighted code block
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
 
@@ -234,14 +253,48 @@ object HoverInfo {
                         codeBlock("$kindLabel ${b.name} : ${formatType(b.type)}")
                     }
 
+            // An inferred open record (e.g. a `from_json` decode target) carries
+            // an unresolved row var as its own solved type — the shape lives in
+            // the FIELD ACCESSES that read it, not on the record node. Rebuild it
+            // from those uses so the hover shows `{ product: { product_name: Str } }`
+            // rather than a bare `'a`. Scans field accesses whose receiver IS
+            // `target` (reference identity), recursing so nested reads deepen it.
+            //
+            // CLOSED: these are exactly the fields the program reads, and a
+            // projecting decoder produces exactly those and drops the rest of the
+            // reply — so the decoded value HAS exactly this shape, not “at least”.
+            // (The stored type can't carry this — a concrete decode-target record
+            // breaks the codec derivation and its codegen, so it stays a bare var
+            // everywhere the compiler CONSUMES it; this rebuild is display-only.)
+            fun reconstructClosedRecord(target: com.mezze.language.typedast.TypedExpr, depth: Int): MezzeType? {
+                if (depth > 8) return null
+                val fields = LinkedHashMap<String, MezzeType>()
+                for (e in TypedAstLookup.allExprs(typedModule)) {
+                    if (e is com.mezze.language.typedast.TypedFieldAccess && e.record === target) {
+                        val ft = e.type
+                        val better = if (isUninformative(ft)) reconstructClosedRecord(e, depth + 1) ?: ft else ft
+                        fields.putIfAbsent(e.field, better)
+                    }
+                }
+                if (fields.isEmpty()) return null
+                return MezzeType.RecordType(fields = fields, rowVar = null)
+            }
+            // The type is a value receiver whose real shape we may be able to
+            // rebuild: an unbound var, or an open record with nothing concrete in
+            // it yet. A record that already lists fields is left as-is.
+            fun typeForReceiver(expr: com.mezze.language.typedast.TypedExpr): MezzeType =
+                if (isUninformative(expr.type)) reconstructClosedRecord(expr, 0) ?: expr.type else expr.type
+
             when (val lookup = TypedAstLookup.findAtPosition(typedModule, line, col)) {
+
                 is TypedAstLookup.LookupResult.Expr -> {
                     val expr = lookup.expr
                     val typeStr = formatType(expr.type)
                     return when (expr) {
                         is com.mezze.language.typedast.TypedVar -> {
                             val abilityHover = result?.let { renderAbilityMethodHover(expr.name, it, state, expr.type) }
-                            val hover = abilityHover ?: codeBlock("${expr.name} : $typeStr")
+                            val varTypeStr = formatType(typeForReceiver(expr))
+                            val hover = abilityHover ?: codeBlock("${expr.name} : $varTypeStr")
                             val (doc, meta) = resolveDoc(state, result, expr.name)
                             appendDoc(hover, doc, meta)
                         }
@@ -254,7 +307,7 @@ object HoverInfo {
                             val abilityHover = result?.let {
                                 renderAbilityMethodHover(expr.field, it, state, expr.type, expr.record.type)
                             }
-                            abilityHover ?: codeBlock(".${expr.field} : $typeStr")
+                            abilityHover ?: codeBlock(".${expr.field} : ${formatType(typeForReceiver(expr))}")
                         }
                         is com.mezze.language.typedast.TypedCall -> codeBlock("$typeStr")
                         // A cursor on a match / if-let pattern binder lands here
@@ -518,7 +571,7 @@ object HoverInfo {
         val header = "ability ${decl.name}$genericsStr$forClause"
 
         val ops = decl.operations.joinToString("\n") { op ->
-            "  ${op.name}: ${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
+            opLine(op.name, formatTypeAnnotation(op.paramType), formatTypeAnnotation(op.returnType))
         }
 
         val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
@@ -536,7 +589,7 @@ object HoverInfo {
         val header = "effect ${decl.name}"
 
         val ops = decl.operations.joinToString("\n") { op ->
-            "  ${op.name}: ${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
+            opLine(op.name, formatTypeAnnotation(op.paramType), formatTypeAnnotation(op.returnType))
         }
 
         val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
@@ -570,15 +623,64 @@ object HoverInfo {
             val sig = abilityOps[op.name]
             val param = op.paramType ?: sig?.paramType
             val ret = op.returnType ?: sig?.returnType
-            val ty = if (param != null && ret != null)
-                "${formatTypeAnnotation(param)} -> ${formatTypeAnnotation(ret)}" else "…"
-            "  ${op.name}: $ty"
+            if (param != null && ret != null)
+                opLine(op.name, formatTypeAnnotation(param), formatTypeAnnotation(ret))
+            else "  ${op.name}: …"
         }
         val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
         val link = fromModule?.takeIf { it.isNotEmpty() }
             ?.let { "\n\nability `$abilityName` defined in `$it`" }
             ?: "\n\nimplements ability `$abilityName`"
         return appendDoc(codeBlock("$header$body") + link, decl.docComment, decl.metadata)
+    }
+
+    /**
+     * One operation line inside an impl hover, wrapped at the arrow when it
+     * would otherwise run long.
+     *
+     * The tooltip is 34rem wide, which is about 55 monospace characters at the
+     * size it renders. `request: { req: Request, config: HttpConfig } -> Result
+     * Response HttpError` is 76, so it wrapped — and wrapped wherever the line
+     * happened to run out, which for a type signature reads as damage. The
+     * arrow is the one place a reader already expects a break, so put it there
+     * and indent the continuation under the parameter.
+     */
+    private fun opLine(name: String, param: String, ret: String): String {
+        val oneLine = "  $name: $param -> $ret"
+        return if (oneLine.length <= OP_LINE_BUDGET) oneLine
+        else "  $name: $param\n      -> $ret"
+    }
+
+    /**
+     * The `impl <Effect> for <Handler>` line, as written in the source.
+     *
+     * A handler declaration carries two things the header used to drop, both
+     * of which the reader needs at the point they are looking:
+     *
+     *   `impl Http for MockHttpClient { rules: [MockRule] } where { … }`
+     *   `impl Exception for ExceptionToResult having 'error = 'e where { … }`
+     *
+     * The parameters are what a caller supplies at the `perform` site, so a
+     * hover that omits them says nothing about the `{ rules = … }` sitting in
+     * the code beside it. The `having` bindings are what give the operation
+     * signatures below their meaning — without them the ops mention `'error`
+     * with nothing anywhere to say what it is bound to.
+     */
+    private fun performerHeader(decl: ParsedPerformerDecl, name: String): String {
+        val params =
+            if (decl.params.isEmpty()) ""
+            else decl.params.joinToString(", ", " { ", " }") {
+                "${it.name}: ${formatTypeAnnotation(it.type)}"
+            }
+        val having =
+            if (decl.associatedTypeBindings.isEmpty()) ""
+            else decl.associatedTypeBindings.entries.joinToString(", ", " having ") {
+                // The key may already carry its leading quote depending on
+                // where it was parsed; normalise so this never renders `''error`.
+                val tv = if (it.key.startsWith("'")) it.key else "'${it.key}"
+                "$tv = ${formatTypeAnnotation(it.value)}"
+            }
+        return "impl ${decl.effect.localName} for $name$params$having"
     }
 
     /**
@@ -592,7 +694,7 @@ object HoverInfo {
     ): String {
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
         val effectName = decl.effect.localName
-        val header = "impl $effectName for ${decl.performerName}"
+        val header = performerHeader(decl, decl.performerName)
 
         val effectOps = effectDecl?.operations?.associateBy { it.name } ?: emptyMap()
         // Hide the scope lifecycle hooks — they run automatically, they're not ops.
@@ -602,9 +704,9 @@ object HoverInfo {
             val sig = effectOps[op.name]
             val param = op.paramType ?: sig?.paramType
             val ret = op.returnType ?: sig?.returnType
-            val ty = if (param != null && ret != null)
-                "${formatTypeAnnotation(param)} -> ${formatTypeAnnotation(ret)}" else "…"
-            "  ${op.name}: $ty"
+            if (param != null && ret != null)
+                opLine(op.name, formatTypeAnnotation(param), formatTypeAnnotation(ret))
+            else "  ${op.name}: …"
         }
         val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
         val link = fromModule?.takeIf { it.isNotEmpty() }
@@ -650,11 +752,11 @@ object HoverInfo {
                 val param = op.paramType ?: sig?.paramType
                 val ret = op.returnType ?: sig?.returnType
                 if (param != null && ret != null)
-                    "  ${op.name}: ${formatTypeAnnotation(param)} -> ${formatTypeAnnotation(ret)}"
+                    opLine(op.name, formatTypeAnnotation(param), formatTypeAnnotation(ret))
                 else "  ${op.name}"
             }
-            return if (opLines.isBlank()) "impl $effectName for $name"
-                else "impl $effectName for $name where {\n$opLines\n}"
+            val header = performerHeader(perf, name)
+            return if (opLines.isBlank()) header else "$header where {\n$opLines\n}"
         }
 
         // Local impls whose target is this name.

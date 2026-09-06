@@ -12,7 +12,7 @@ import org.junit.jupiter.api.BeforeEach
  * The surface is method-driven:
  *   request { url }.with_method { val = Post }.with_json { val = j }.send {}
  *   client { base_url = "..." }.with_auth { val = "..." }.get { path = "..." }
- *   resp.json {} / .text {} / .is_ok {} / .header { name }
+ *   resp.to_json {} / .text {} / .is_ok {} / .header { name }
  *
  * All tests use MockHttpClient so they don't touch the network.
  */

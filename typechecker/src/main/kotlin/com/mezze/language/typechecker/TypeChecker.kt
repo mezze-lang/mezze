@@ -275,7 +275,12 @@ class TypeChecker(
             importedImpls = importContext?.importedImpls ?: emptyMap(),
             importedAbilities = importContext?.importedAbilities ?: emptyMap(),
             importedTypes = importContext?.importedTypes ?: emptyMap(),
-            importedEffects = importContext?.importedEffects ?: emptyMap(),
+            // Fold in by-hash effects (effectsByHash): an effect that was
+            // not imported by name but IS needed for machinery — e.g. the
+            // effect of an imported performer, registered so its
+            // PerformerTypeInfo builds and `perform X { … }` config is checked.
+            importedEffects = (importContext?.importedEffects ?: emptyMap()) +
+                (importContext?.effectsByHash?.values?.associateBy { it.name } ?: emptyMap()),
             currentModulePath = currentModulePath
         )
         val context = buildResult.context
@@ -496,7 +501,15 @@ class TypeChecker(
                     TypeCheckWarning(message = it.message, loc = it.loc, code = it.code)
                 })
                 // #84 linter: unused imports (never-referenced `use` names).
-                warnings.addAll(UnusedImportLinter.lint(parsedModule).map {
+                // Pass ability name → method names so an ability imported only
+                // to make its methods callable (`x.from_json {}`) is not
+                // mis-reported as unused. Both imported and locally-declared
+                // abilities, since either can be imported/used this way.
+                val abilityOps: Map<String, Set<String>> =
+                    ((importContext?.importedAbilities ?: emptyMap()).values +
+                        parsedModule.decls.filterIsInstance<ParsedAbilityDecl>())
+                        .associate { decl -> decl.name to decl.operations.map { it.name }.toSet() }
+                warnings.addAll(UnusedImportLinter.lint(parsedModule, abilityOps).map {
                     TypeCheckWarning(message = it.message, loc = it.loc, code = it.code)
                 })
 

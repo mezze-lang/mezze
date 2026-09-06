@@ -61,7 +61,7 @@ class EnvironmentEffectModuleTest {
         val source = """
             use std::effects::env::{Env, MockEnv}
             let main = {} ->
-                perform MockEnv { vars = [{ key = "FOO", value = "bar" }] } in do
+                perform MockEnv { vars = [{ k = "FOO", v = "bar" }] } in do
                     let v = Env.lookup { name = "FOO" }
                     v
         """.trimIndent()

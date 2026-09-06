@@ -103,7 +103,14 @@ graal_fetch polyglot polyglot
 graal_fetch truffle truffle-api
 graal_fetch truffle truffle-dsl-processor
 
-# Kotlin runtime and serialization, straight from the Gradle cache.
+# Kotlin runtime, serialization, and the JSON backend, straight from the
+# Gradle cache.
+#
+# dsl-json backs `std::codec::json`. Without it the image builds fine and then
+# every parse dies at runtime with `NoClassDefFoundError: DslJson` — the same
+# class of silent breakage the snapshot check below exists to prevent, which is
+# why the codec was unusable in the browser while working on the JVM.
+#
 # Capture gradle's output into a variable first: piping it straight into
 # `tail -1` lets tail close the pipe while gradle is still writing, which
 # SIGPIPEs gradle and — under `set -o pipefail` — aborts the whole script.
@@ -111,7 +118,7 @@ runtime_cp="$(cd "$REPO" && ./gradlew --quiet :cli:printRuntimeClasspath)"
 printf '%s\n' "$runtime_cp" \
   | grep -E '^/.*:/' | tail -1 \
   | tr ':' '\n' \
-  | grep -E '/(kotlin-stdlib|kotlinx-serialization)[^/]*[.]jar$' \
+  | grep -E '/(kotlin-stdlib|kotlinx-serialization|dsl-json)[^/]*[.]jar$' \
   | while read -r j; do [[ -f "$j" ]] && cp -n "$j" "$STAGE/" 2>/dev/null || true; done
 
 # Fail loudly here rather than shipping an image with no stdlib: the build

@@ -1,28 +1,33 @@
 ---
-title: "Type aliases"
-blurb: "Naming a shape you use more than once."
+title: "Aliases and newtypes"
+blurb: "Naming a shape, or making a genuinely new one."
 ---
-`type Reading = { city: Str, temp: Int }` gives a name to a shape.
+The ingredient shape has appeared on every page now, so it has earned a name. `type Ingredient = { … }` gives it one — and nothing more. The alias is **transparent**: an `Ingredient` *is* that record, so any value with the right fields fits, whether or not it was written with the name in mind. It is documentation the compiler checks, not a box to put things in.
 
-The alias is **transparent**: a `Reading` *is* that record, not a wrapper around it. Any value with the right fields fits, whether or not it was built with the name in mind.
+`newtype Grams = Int` is the other choice, and it does make a new type. A `Grams` is **not** an `Int`. Pass one where a count or a price is expected and it will not compile, which is the entire point — this kitchen has too many numbers for them all to be interchangeable.
 
-So an alias is documentation the compiler checks, not a new type to convert in and out of.
+You pay for it at the boundary: getting the number back means matching `Grams.(n)`. Reach for a newtype when confusing two values would be a real bug, and an alias when you only wanted a shorter way to say the same shape.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
 
-# An alias names a shape so you say it once.
-type Reading = { city: Str, temp: Int }
+# The shape has earned a name. An Ingredient IS
+# that record — anything with the fields fits.
+type Ingredient = { name: Str, grams: Int, euros: Float }
 
-# A Reading IS that record, not a wrapper —
-# anything with the right fields fits.
-let describe: { r: Reading } -> Str = { r } ->
-  "$(r.city): $(r.temp.to_str {})°C"
+# A newtype is different: Grams is NOT an Int, so it
+# cannot be swapped with a count or a price by mistake.
+newtype Grams = Int
+
+let weigh = { g } -> match g is
+  Grams.(n) -> n
+
+let label = { i : Ingredient } -> "$(i.name) $(i.grams.to_str {})g"
 
 let main = {} -> perform Console in do
-  let lisbon = { city = "Lisbon", temp = 21 }
-  println { msg = describe { r = lisbon } }
+  # Never mentions Ingredient, and is one.
+  println { msg = label { i = { name = "tahini", grams = 60, euros = 4.50 } } }
 
-  let cairo = { city = "Cairo", temp = 35 }
-  println { msg = describe { r = cairo } }
+  let flour = Grams.(500)
+  println { msg = "flour: $(weigh { g = flour }.to_str {})g" }
 -->

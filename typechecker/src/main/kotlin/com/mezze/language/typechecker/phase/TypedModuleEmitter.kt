@@ -109,7 +109,13 @@ internal fun emitTypedModuleAndLower(
     }
 
     if (!isStdlibModule && emittedTypedModule != null) try {
-        val compileResult = compileModule(emittedTypedModule!!, loadedModules, substitution)
+        // Per-call-site decoder wiring: `from_json` keeps a bare-var target through
+        // solving, so codegen can't tell two different-shape decodes apart. Recover
+        // each call's concrete target structurally (from usage) and map it to the
+        // matching derived decoder's op hash.
+        val decodeResult = com.mezze.language.typechecker.emit.DecodeTargetResolver.process(emittedTypedModule!!)
+        emittedTypedModule = decodeResult.module
+        val compileResult = compileModule(emittedTypedModule!!, loadedModules, substitution, decodeResult.decodeOpBySite)
         loweredFns = compileResult.functions
         loweredPerformers = compileResult.performerRecords
     } catch (e: Exception) {
@@ -168,6 +174,7 @@ private fun compileModule(
     typedModule: TypedModule,
     loadedModules: Map<ModulePath, TypedModuleResult>,
     substitution: Substitution,
+    decodeOpBySite: Map<com.mezze.language.parsedast.Loc, com.mezze.language.typedast.Hash> = emptyMap(),
 ): CompileResult {
     val wrapped = EntryFunctionBuilder.wrapTopLevel(typedModule)
 
@@ -242,7 +249,8 @@ private fun compileModule(
         monoCallSiteRewrites = monoResult.bySiteLoc,
         monoStripBySiteLoc = monoResult.stripBySiteLoc,
         preloweredFunctions = stdlibFns,
-        substitution = substitution
+        substitution = substitution,
+        decodeOpBySite = decodeOpBySite,
     )
     compiler.setDeclIndex(declIndex)
 

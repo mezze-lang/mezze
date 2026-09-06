@@ -80,7 +80,8 @@ enum class ErrorCode {
     T0211_CALLBACK_PARAM_NAMES_MISMATCH, // `f = { acc, i } -> ...` where sig wants `{ acc, x }` — lambda param names ARE record destructuring, must match the caller's field names
     T0212_NOT_A_NEWTYPE, // `Foo.(x)` where Foo isn't a newtype (ability, effect, variant, record, primitive, or unknown)
     T0213_UNKNOWN_TYPE, // an uppercase type name in a type position resolves to no declaration/builtin (e.g. `{ val: Gadget }` with no `type Gadget`)
-    T0214_TYPECHECK_LIMIT_EXCEEDED, // the typechecker hit an internal recursion/work limit on this program (pathological or malformed) — a clean bail-out instead of ever crashing/hanging
+    T0214_TYPECHECK_LIMIT_EXCEEDED,
+    T0215_AMBIGUOUS_ABILITY_TYPE, // an ability method whose type is decided by neither the parameters nor the result — no call site can pin it, so it could never dispatch // the typechecker hit an internal recursion/work limit on this program (pathological or malformed) — a clean bail-out instead of ever crashing/hanging
 
     // ─── Typechecker: inference & binding (T03xx) ────────────────────────
     T0301_UNBOUND_TYPE_VAR,

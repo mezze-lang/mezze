@@ -1,30 +1,26 @@
 ---
 title: "Values and types"
-blurb: "Bindings, inference, and a live editor."
+blurb: "A few facts, and the types nobody wrote."
 ---
-This editor is **live**. Change anything and press Run, or hover a name to see the type the compiler inferred for it — no annotations required.
+Over these nine pages you will build a small shop-and-kitchen program. It starts with one ingredient, described as loosely as possible: four separate facts, none of them saying what they are.
 
-Everything starts with `let`. None of these bindings say what they are, yet all of them have exact types: `Str`, `Float`, `Bool`, and `[Int]` for the seq.
+They have exact types all the same — `Str`, `Int`, `Float`, `Bool` — because the compiler reads them off the values. Hover any name to see what it inferred. You will not write a type annotation until page six, and even then only because it makes the code clearer to a person.
 
-Interpolation with `$(...)` takes a `Str` and nothing else. Strict at first glance; it means a stray value never quietly becomes text in a log line.
+The one strictness here is `$(...)`. It interpolates a `Str` and refuses anything else, so a number has to say `to_str {}` out loud. That is deliberate: it means a stray value never quietly becomes text in a line someone reads later.
 
-A seq holds one type, and methods chain straight off it with a dot. You will see that same `.method {}` shape on every kind of value here.
+This editor is live. Change a value and press Run.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
 
-# This editor is live. Change anything and press
-# Run, or hover a name to see its inferred type.
-let name = "Mezze"
-let release = 0.1
-let ready = False
-let versions = [1, 2, 3]
+# One ingredient, as a handful of separate facts.
+# Nothing here says what they are. Hover to see.
+let name = "chickpeas"
+let grams = 400
+let euros = 1.90
+let vegetarian = True
 
 let main = {} -> perform Console in do
-  # Interpolation takes a Str and nothing else, so
-  # every value says how it becomes one.
-  println { msg = "$(name) $(release.to_str {}), ready: $(ready.to_str {})" }
-
-  # A seq holds one type. Methods chain off it.
-  println { msg = "$(versions.size {}.to_str {}) releases so far" }
+  println { msg = "$(name): $(grams.to_str {})g, €$(euros.to_str {})" }
+  println { msg = "vegetarian: $(vegetarian.to_str {})" }
 -->

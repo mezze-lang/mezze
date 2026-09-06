@@ -40,6 +40,10 @@ class TypedASTCompiler(
      * keep the existing dict-passing path. Empty by default → mono is off.
      */
     private val monoCallSiteRewrites: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap(),
+    /** callLoc -> `decode` op hash of the derived codec impl matching that
+     *  `from_json` call's USAGE-inferred target (DecodeTargetResolver). Wires the
+     *  right decoder per call site where the target is a bare var in the type. */
+    private val decodeOpBySite: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap(),
     /** #424 Piece 5 — for each seed call site, arg-record field names to
      *  strip before compiling to a call. Fields correspond to closure
      *  params that were dead-code eliminated from the specialized decl. */
@@ -1357,17 +1361,24 @@ class TypedASTCompiler(
                     else tryResolveAbilityOpByArgs(methodName, expr.arg)
                 } else null
 
-            // #394: `x.to_dbg {}` / `x.to_str {}` on a concrete receiver, with
-            // NO resolvable user impl (opHash == null) — the auto-derived
-            // Inspect. Lower directly to InspectIR with the receiver's static
-            // shape baked in as a compile-time PrintType. Gated on opHash ==
-            // null so a user-declared ability method NAMED to_str/to_dbg (e.g.
-            // `ability Stringify where { to_str: ... }`) still dispatches to the
-            // user's impl. A VarType receiver has no printable shape yet and falls
-            // through to the normal (mono/dict) path.
+            // #394: `x.to_dbg {}` / `x.to_str {}` with NO resolvable user impl
+            // (opHash == null) — the auto-derived Inspect. Lower directly to
+            // InspectIR with the receiver's shape baked in as a compile-time
+            // PrintType. Gated on opHash == null so a user-declared ability
+            // method NAMED to_str/to_dbg (e.g. `ability Stringify where {
+            // to_str: ... }`) still dispatches to the user's impl.
+            //
+            // A VarType receiver takes this path too, as PrintType.Dynamic:
+            // the printer then reads the shape from the runtime value. It must
+            // NOT fall through to the mono/dict path, because Inspect is
+            // derived rather than implemented — no dictionary slot is ever
+            // populated for it, so dispatch found a record where it wanted the
+            // impl function and died inside CallIndirect with
+            // `UnsupportedSpecializationException … [MezzeRecord, Object[]]`.
+            // Reachable from any `to_dbg` on a value whose type stayed
+            // polymorphic, e.g. a match arm binding on an undeclared variant.
             if (opHash == null
-                && (methodName == Keywords.TO_DBG || methodName == Keywords.TO_STR)
-                && receiverType !is VarType) {
+                && (methodName == Keywords.TO_DBG || methodName == Keywords.TO_STR)) {
                 val printType = PrintTypeBuilder(printTypeDefs).build(receiverType)
                 val receiverIR = compileReceiverExpr(fn.record)
                 return com.mezze.language.truffleir.InspectIR(
@@ -1408,9 +1419,17 @@ class TypedASTCompiler(
                             }
                         }
                     }
+                    // The `decode` dict for a `from_json` call dispatches on the
+                    // TARGET type (the `'a` in `Result 'a`), which stays a bare var at
+                    // this site. resolveOpHashFromConcreteTypes only sees the receiver/
+                    // args (all Str/Json), so it can't tell two decoders apart and picks
+                    // one for both. DecodeTargetResolver recovered the concrete target
+                    // per call site from usage; use its decoder hash directly.
+                    val perSiteDecode = decodeOpBySite[expr.loc]
                     for (dictMethodName in opDictMethods.sorted()) {
                         val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(dictMethodName)
-                        val resolvedHash = resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
+                        val resolvedHash = if (dictMethodName == "decode" && perSiteDecode != null) perSiteDecode
+                            else resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
                         if (resolvedHash != null) {
                             fields.add(FieldIR(dictParamName, ReadGlobalFnByHashIR(resolvedHash, src)))
                         } else {
@@ -2868,7 +2887,25 @@ class TypedASTCompiler(
                 concreteType.constructors.keys.first() == targetType.constructor -> true
             concreteType is VariantType && targetType is TypeApplication -> {
                 concreteType.identity.displayNameOrNull() == targetType.constructor ||
-                    VariantAliases.aliasFor(concreteType.constructors.keys) == targetType.constructor
+                    VariantAliases.aliasFor(concreteType.constructors.keys) == targetType.constructor ||
+                    // The receiver may have had its identity stripped: AliasStripper
+                    // sets Anonymous when the declaring name is not in the caller's
+                    // scope, which is what lets two same-shaped variants from
+                    // different modules unify structurally (#148 rule 6).
+                    //
+                    // Dispatch still has to find the impl. `Json` from
+                    // std::codec::json arrives as a bare seven-constructor variant
+                    // while `impl FromJson 'a for Json` targets
+                    // TypeApplication(Json), so `j.from_json {}` failed with
+                    // `Field not found: from_json` — though the identical call
+                    // through an annotated binding worked.
+                    //
+                    // The constructor SET survives stripping, and for a variant it
+                    // is what the declaration is. Comparing the target's declared
+                    // arms against the receiver's recovers the link without
+                    // restoring a nominal wall that unification relies on being
+                    // absent.
+                    variantDeclHasConstructors(targetType.constructor, concreteType.constructors.keys)
             }
             // A structural container receiver (SeqType/MapType/…) matches an
             // `impl … for Seq`/`Map`/… whose target is TypeApplication("Seq"/…).
@@ -3012,6 +3049,22 @@ class TypedASTCompiler(
      *  (all a use site carries) to a printable shape. */
     private var printTypeDefs: Map<String, MezzeType> = emptyMap()
     fun setPrintTypeDefs(defs: Map<String, MezzeType>) { printTypeDefs = defs }
+
+    /**
+     * True when the variant declared as [name] has exactly [constructors].
+     *
+     * Used to re-link a receiver whose nominal identity AliasStripper removed —
+     * see the VariantType/TypeApplication arm of [typeMatchesTarget]. The
+     * constructor set is what a variant declaration IS, so an exact match on it
+     * identifies the declaration as reliably as the name would have.
+     *
+     * Exact, not subset: a variant with the same arms plus one more is a
+     * different declaration and must not borrow this one's impls.
+     */
+    private fun variantDeclHasConstructors(name: String, constructors: Set<String>): Boolean {
+        val declared = printTypeDefs[name] as? VariantType ?: return false
+        return declared.constructors.keys == constructors
+    }
 
     /** Look up param names for a known callee hash. Returns null if unknown.
      *  Covers: self-recursive calls (currentFunctionHash, freshly available),

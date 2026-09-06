@@ -224,6 +224,15 @@ fun ErrorCode.explain(): String = when (this) {
         "safety backstop: the checker is guaranteed to stop with THIS error instead of " +
         "ever crashing or hanging the compiler, editor, or playground."
 
+    ErrorCode.T0215_AMBIGUOUS_ABILITY_TYPE ->
+        "An ability method was called, but which impl to use is decided by a type " +
+        "that appears in neither the function's parameters nor its result. Nothing at " +
+        "a call site can pin that type down, so the method could never be dispatched. " +
+        "This most often happens with a method that dispatches on what it RETURNS — " +
+        " and friends — where the target type has to be written somewhere. " +
+        "Annotate the binding or the function's return type to say which type you " +
+        "mean, and the call resolves."
+
     ErrorCode.T0301_UNBOUND_TYPE_VAR ->
         "A type variable in an annotation is not bound by any parameter. " +
         "All type variables must appear in the function's parameter types."

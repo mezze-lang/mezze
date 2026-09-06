@@ -122,6 +122,21 @@ object TypedAstLookup {
         return best
     }
 
+    /**
+     * Every TypedExpr in the module, pre-order. Used by hover to reconstruct
+     * the shape of an inferred open record from the field accesses that read
+     * it: the record's own solved type is an unresolved row var, but each
+     * `receiver.field` access carries the field and its solved type, so the
+     * record can be reassembled from its uses.
+     */
+    fun allExprs(module: TypedModule): List<TypedExpr> {
+        val out = ArrayList<TypedExpr>()
+        for (decl in module.decls) {
+            if (decl is TypedLetDecl) walkExprs(decl.value) { out.add(it) }
+        }
+        return out
+    }
+
     /** True if `a` starts strictly before `b` (wider span on the left). */
     private fun startsBefore(a: Loc, b: Loc): Boolean {
         if (a.startLine != b.startLine) return a.startLine < b.startLine

@@ -2,9 +2,9 @@
 ##
 ## Users touch Tier 4 sugar:
 ##
-##   user.json {}                                # default config, variant tree
-##   user.json_with { config = json_pretty }     # explicit preset
-##   user.json_utf8 {}                            # bytes directly
+##   user.to_json {}                                # default config, variant tree
+##   user.to_json_with { config = json_pretty }     # explicit preset
+##   user.to_json_utf8 {}                            # bytes directly
 ##   User.from_json { it = raw }                  # decode
 ##
 ## Format authors: everything below is boilerplate. The moving parts are the
@@ -433,24 +433,28 @@ impl EncodeScalar for JsonUtf8C having 'out = Bytes where {
 
 ## Encode any value to a `Json` tree via `.json{}` / `.json_with{}`.
 ability ToJson for 'a where {
-  json:      { it: 'a }                -> Json,
-  json_with: { it: 'a, config: JsonC } -> Json,
+  to_json:          { it: 'a }                -> Json,
+  to_json_with:     { it: 'a, config: JsonC } -> Json,
+  to_json_str:      { it: 'a }                -> Str,
+  to_json_str_with: { it: 'a, config: JsonC } -> Str,
 }
 
 impl ToJson for 'a where {
-  json:      { it: 'a }                with Encode JsonC 'a -> Json = { it }         -> it.encode { config = json_default },
-  json_with: { it: 'a, config: JsonC } with Encode JsonC 'a -> Json = { it, config } -> it.encode { config = config },
+  to_json:          { it: 'a }                with Encode JsonC 'a -> Json = { it }         -> it.encode { config = json_default },
+  to_json_with:     { it: 'a, config: JsonC } with Encode JsonC 'a -> Json = { it, config } -> it.encode { config = config },
+  to_json_str:      { it: 'a }                with Encode JsonC 'a -> Str  = { it }         -> to_str { json = it.encode { config = json_default } },
+  to_json_str_with: { it: 'a, config: JsonC } with Encode JsonC 'a -> Str  = { it, config } -> serialize_to_str { json = it.encode { config = config }, config = config },
 }
 
 ## Encode any value directly to UTF-8 bytes.
 ability ToJsonUtf8 for 'a where {
-  json_utf8:      { it: 'a }                    -> Bytes,
-  json_utf8_with: { it: 'a, config: JsonUtf8C } -> Bytes,
+  to_json_utf8:      { it: 'a }                    -> Bytes,
+  to_json_utf8_with: { it: 'a, config: JsonUtf8C } -> Bytes,
 }
 
 impl ToJsonUtf8 for 'a where {
-  json_utf8:      { it: 'a }                    with Encode JsonUtf8C 'a -> Bytes = { it }         -> it.encode { config = json_utf8_default },
-  json_utf8_with: { it: 'a, config: JsonUtf8C } with Encode JsonUtf8C 'a -> Bytes = { it, config } -> it.encode { config = config },
+  to_json_utf8:      { it: 'a }                    with Encode JsonUtf8C 'a -> Bytes = { it }         -> it.encode { config = json_utf8_default },
+  to_json_utf8_with: { it: 'a, config: JsonUtf8C } with Encode JsonUtf8C 'a -> Bytes = { it, config } -> it.encode { config = config },
 }
 
 ## Decode a value from a `Json` tree via `Type.from_json{}` inherent syntax.
@@ -459,6 +463,22 @@ impl ToJsonUtf8 for 'a where {
 ability FromJson 'a for 'in where {
   from_json:      { it: 'in }                  -> Result 'a DecodeError,
   from_json_with: { it: 'in, config: JsonC }   -> Result 'a DecodeError,
+}
+
+## Decode straight from JSON text: parse, then decode, one step. The parse
+## error is mapped into DecodeError so the whole journey is a single Result:
+##
+##   "{\"code\":\"1\"}".from_json {}         # Result { code: Str } DecodeError
+##
+impl FromJson 'a for Str where {
+  from_json: { it: Str } with Decode JsonC 'a -> Result 'a DecodeError = { it } ->
+    match parse_str { s = it } is
+      Ok { val } -> val.decode { config = json_default }
+      Err { error } -> Err { error = { path = error.path, message = error.reason, expected = "valid JSON", found = error.input_ref } },
+  from_json_with: { it: Str, config: JsonC } with Decode JsonC 'a -> Result 'a DecodeError = { it, config } ->
+    match parse_str { s = it } is
+      Ok { val } -> val.decode { config = config }
+      Err { error } -> Err { error = { path = error.path, message = error.reason, expected = "valid JSON", found = error.input_ref } },
 }
 
 impl FromJson 'a for Json where {

@@ -1069,6 +1069,29 @@ class ConstraintSolver(
                 // invitation to invent (which let `r.zzz` read a nonexistent field).
                 val isUserOpenRow = recordType.rowVar?.isUserSpecified() == true
                 if (recordType.rowVar != null && !constraint.strictFieldCheck && !isUserOpenRow) {
+                    // Record the growth AS A ROW BINDING: the row var maps to an
+                    // extension carrying the new field and a fresh tail, and
+                    // Substitution.apply splices it into every record holding
+                    // this row — however that record is reached.
+                    //
+                    // The var-rebind loop below predates the row channel and is
+                    // kept for callers that read a variable's stored binding
+                    // directly instead of applying the substitution. On its own
+                    // it was the bug: it rebinds the FIRST variable whose binding
+                    // compares equal to this record, and when several variables
+                    // chain to the same record — or the record is reached through
+                    // a constraint rather than a binding — the extension landed
+                    // nowhere and the fall-through returned an EMPTY
+                    // substitution. The second field accessed on an inferred
+                    // record typechecked and then vanished: a decoder derived
+                    // from the type carried only the first field, and the
+                    // program died at runtime with `Field not found`.
+                    val rowBinding = mapOf(
+                        recordType.rowVar!! to MezzeType.RecordType(
+                            fields = mapOf(fieldName to expectedFieldType),
+                            rowVar = RowVar.fresh()
+                        )
+                    )
                     val extendedFields = recordType.fields + (fieldName to expectedFieldType)
                     val extendedRecord = MezzeType.RecordType(
                         fields = extendedFields,
@@ -1078,11 +1101,16 @@ class ConstraintSolver(
                     for ((typeVar, mappedType) in currentSubst.mappings) {
                         val resolvedMappedType = currentSubst.apply(mappedType)
                         if (resolvedMappedType == recordType) {
-                            return ConstraintResult.Success(Substitution.single(typeVar, extendedRecord))
+                            return ConstraintResult.Success(
+                                Substitution(
+                                    mappings = mapOf(typeVar to extendedRecord),
+                                    recordRowMappings = rowBinding
+                                )
+                            )
                         }
                     }
 
-                    return ConstraintResult.Success(Substitution.empty)
+                    return ConstraintResult.Success(Substitution(recordRowMappings = rowBinding))
                 } else {
                     val availableFields = recordType.fields.keys.toList()
                     val suggestion = StringDistance.suggestOrList(

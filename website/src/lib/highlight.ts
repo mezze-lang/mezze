@@ -23,7 +23,17 @@ const RE = new RegExp(
   [
     '(#\\{[^}]*\\})',                                  // #{ metadata }
     '(##?(?:[ \\t][^\\n]*)?$)',                          // comments
-    '("(?:[^"\\\\]|\\\\.)*")',                          // strings, which may span lines
+    // Strings, which may span lines. The `\$\([^)]*\)` alternative keeps an
+    // interpolation together even when it contains its own quotes: without it
+    // `"€$(price_of { item = "olive-oil" })"` ended at the quote before
+    // `olive-oil`, and every token after that was coloured as if the string
+    // had closed. Nested parens inside one interpolation are not handled —
+    // `[^)]*` stops at the first `)` — which is the same limit highlightString
+    // already has.
+    // The interpolation branch has to come FIRST: `[^"\\]` would otherwise
+    // match the bare `$` and the scan would fall back to ending at the next
+    // quote, which is the bug this is here to fix.
+    '("(?:\\$\\([^)]*\\)|[^"\\\\]|\\\\.)*")',
     "('[a-zA-Z_][a-zA-Z0-9_]*)",                         // 'typevars
     '(<[A-Z][A-Za-z0-9_]*(?:\\s*,\\s*[A-Za-z0-9_.]+)*>)', // <Effect> rows
     '\\b(True|False)\\b',                                // booleans

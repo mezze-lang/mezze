@@ -70,9 +70,35 @@ export interface MezzeRuntime {
  */
 const BASE = (import.meta.env.PUBLIC_WASM_BASE ?? '').replace(/\/$/, '')
 
-const SRC = `${BASE}/wasm/mezze.js`
+/**
+ * Content hash of the runtime, as a path segment: `/wasm/<hash>/mezze.js`.
+ *
+ * The bucket serves the runtime `immutable` for a year, which is only honest
+ * if the URL changes when the bytes do. It did not: the path was a constant,
+ * so a browser that had ever loaded the site kept its old runtime and would
+ * not revalidate — the site broke for returning visitors and nobody else.
+ *
+ * The stamp is a PATH segment rather than a `?v=` query because of how the
+ * generated loader finds its binary:
+ *
+ *     const wasmPath = config.wasm_path || runtime.getCurrentFile() + ".wasm"
+ *
+ * It appends `.wasm` to its own URL, so `mezze.js?v=abc` would send it after
+ * `mezze.js?v=abc.wasm`. A directory segment leaves the filename intact and
+ * the derived URL correct, with no change to the generated file — and its
+ * `config` is constructed at the tail of that file, so there is no hook to
+ * pass `wasm_path` in.
+ *
+ * PUBLIC_WASM_STAMP is set at build time by the deploy pipeline, which hashes
+ * the same bytes it uploads. Unset locally: dev serves public/wasm/ flat, and
+ * a dev server has no year-long cache to defeat.
+ */
+const STAMP = (import.meta.env.PUBLIC_WASM_STAMP ?? '').replace(/^\/|\/$/g, '')
+const DIR = STAMP ? `${BASE}/wasm/${STAMP}` : `${BASE}/wasm`
+
+const SRC = `${DIR}/mezze.js`
 /** The bulk of the download — the wrapper fetches this itself at runtime. */
-const WASM = `${BASE}/wasm/mezze.js.wasm`
+const WASM = `${DIR}/mezze.js.wasm`
 const POLL_MS = 100
 const TIMEOUT_MS = 90_000
 

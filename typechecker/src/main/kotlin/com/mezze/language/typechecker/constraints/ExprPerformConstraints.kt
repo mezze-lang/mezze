@@ -125,6 +125,17 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     }
 
     val continuationConstraints = mutableListOf<Constraint>()
+    // Constraints and ability obligations from the HANDLER ARGUMENTS themselves
+    // (`perform MockHttpClient { rules = [ … ] } in`). Generating the param
+    // record produced these, but only its TYPE was being consumed — its
+    // constraints and ability constraints were dropped on the floor. An
+    // expression inside a handler argument that needs a derived impl — e.g.
+    // `{ code = "abc" }.encode { … }` or `.to_json {}` inside a mock rule —
+    // therefore never triggered the derivation, and failed at runtime with
+    // `Field not found: encode`. Same expression anywhere else worked, which is
+    // what made this look like an interaction with `from_json`.
+    val handlerParamConstraints = mutableListOf<Constraint>()
+    val handlerParamAbilityConstraints = mutableListOf<Constraint.AbilityRequired>()
     var performResultType: MezzeType = exprResult.type
 
     for (handler in expr.handlers) {
@@ -137,6 +148,8 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
             if (performerFields is MezzeType.RecordType) {
                 val actualParamsResult = generate(handlerParams, context)
                 val actualParamsType = actualParamsResult.type
+                handlerParamConstraints.addAll(actualParamsResult.constraints)
+                handlerParamAbilityConstraints.addAll(actualParamsResult.abilityConstraints)
 
                 continuationConstraints.add(
                     Constraint.Equality(
@@ -236,7 +249,7 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         }
     }
 
-    val rawConstraints = exprResult.constraints + continuationConstraints
+    val rawConstraints = exprResult.constraints + handlerParamConstraints + continuationConstraints
     // #376: record handledEffects on every body Equality (accumulating onto any
     // effects already stamped by an enclosing perform, for the nested case).
     // This discharge-tracking is retained on the constraint; its former reader,
@@ -295,7 +308,7 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         // the reverse.
         effectRowVars = exprResult.effectRowVars,
         performed = true,
-        abilityConstraints = exprResult.abilityConstraints,
+        abilityConstraints = exprResult.abilityConstraints + handlerParamAbilityConstraints,
         associatedTypeConstraints = exprResult.associatedTypeConstraints,
         undefinedVariables = exprResult.undefinedVariables,
         usedVariables = exprResult.usedVariables,

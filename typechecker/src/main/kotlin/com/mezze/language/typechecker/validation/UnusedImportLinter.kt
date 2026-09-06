@@ -20,9 +20,30 @@ object UnusedImportLinter {
 
     data class Finding(val message: String, val loc: Loc, val code: WarningCode)
 
-    fun lint(module: ParsedModule): List<Finding> {
+    /**
+     * @param abilityOperations local ability name → the method names it
+     *   declares. An ability is imported to make its methods callable, and the
+     *   methods are called by their OWN name (`x.from_json {}`), never by the
+     *   ability's — so a purely syntactic scan sees the ability name nowhere and
+     *   wrongly reports it unused, then "fixing" it breaks the build. Supplied
+     *   by the typechecker, which has resolved the imports; an empty map (a
+     *   caller with no resolution, e.g. a parser-only lint) simply falls back to
+     *   the syntactic check.
+     */
+    fun lint(
+        module: ParsedModule,
+        abilityOperations: Map<String, Set<String>> = emptyMap(),
+    ): List<Finding> {
         val referenced = HashSet<String>()
         for (decl in module.decls) collectReferenced(decl, referenced)
+
+        // An ability whose method was called counts as used, even though its own
+        // name never appears. `referenced` already contains every `.member` name
+        // (collected below), so a dedicated method-name pass is unnecessary —
+        // matching an ability's ops against it is enough.
+        for ((abilityName, ops) in abilityOperations) {
+            if (ops.any { it in referenced }) referenced.add(abilityName)
+        }
 
         val out = mutableListOf<Finding>()
         for (decl in module.decls) {
@@ -161,7 +182,13 @@ object UnusedImportLinter {
             is ParsedBinaryOp -> { collectExprRefs(expr.left, into); collectExprRefs(expr.right, into) }
             is ParsedPipe -> { collectExprRefs(expr.left, into); collectExprRefs(expr.right, into) }
             is ParsedParens -> collectExprRefs(expr.expr, into)
-            is ParsedMemberAccess -> collectExprRefs(expr.receiver, into)
+            is ParsedMemberAccess -> {
+                // The member name matters: `x.from_json {}` is how an ability's
+                // method is referenced, and the import-usage check keys ability
+                // liveness off exactly these names.
+                into.add(expr.member)
+                collectExprRefs(expr.receiver, into)
+            }
             is ParsedRecordLit -> for (e in expr.entries) when (e) {
                 is ParsedRecordEntry.Field -> e.value?.let { collectExprRefs(it, into) }
                 is ParsedRecordEntry.Spread -> collectExprRefs(e.expr, into)

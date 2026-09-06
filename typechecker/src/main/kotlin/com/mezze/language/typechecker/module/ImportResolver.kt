@@ -602,6 +602,23 @@ class ImportResolver(
                 val performerImpl = index.performersByName[item.name]
                 if (performerImpl != null && !impls.containsKey(item.name)) {
                     impls[item.name] = performerImpl
+                    // A performer is `impl SomeEffect for X`, and registering its
+                    // PerformerTypeInfo (which is what lets a `perform X { … }`
+                    // handler-config record be type-checked) requires the EFFECT
+                    // decl to be in scope. But the user only imported the
+                    // performer name — not the effect — so pull the effect decl
+                    // out of the same module and register it by hash (not by
+                    // name, so it stays un-referenceable without its own import).
+                    // Without this, `perform X { field = … }` silently skips the
+                    // whole config subtree: an ability obligation inside it (a
+                    // `.encode {}` / `.to_json {}`) is never generated, so no
+                    // codec is derived and it fails at runtime with
+                    // `Field not found: encode`.
+                    index.effectDeclarations[performerImpl.effect.localName]?.let { effectDecl ->
+                        effectDecl.contentHash?.let { hash ->
+                            if (hash !in effectsByHash) effectsByHash[hash] = effectDecl
+                        }
+                    }
                 }
             }
 

@@ -1186,7 +1186,29 @@ class ConstraintGenerator(
             if (resolved.isEmpty() || resolved.any { collectFreeTypeVars(it).isNotEmpty() }) return false
             return isDischarged?.invoke(c.abilityName, resolved, c.abilityHash) ?: false
         }
+        // Store what solving worked out, not the variables it started from.
+        //
+        // A constraint carried over from `type.abilityConstraints` arrived with
+        // its ORIGINAL type variables. Solving may since have bound them —
+        // `describe`'s `FromJson 'k350 'w474` is really
+        // `FromJson { code: Str, ... } Json` — but that answer lived only in
+        // the substitution, and was applied when PRINTING a signature and
+        // nowhere else. The stored type kept the bare vars, so a later pass
+        // re-derived a weaker answer from them and the honest one was lost.
+        //
+        // Applying the substitution here makes the stored constraint say what
+        // the solver concluded. A still-open variable substitutes to itself, so
+        // genuine polymorphism is unchanged.
+        fun resolveArgs(c: MezzeType.FunctionAbilityConstraint) =
+            // Close solver-generated open-record tails in the resolved arg (a
+            // decode/encode target grown by field access). The concrete fields
+            // are unchanged — only the invented `...` tail is dropped — so the
+            // codec derivation (already done) and dispatch are unaffected, while
+            // the printed signature reads as the exact record, not `{ …, … }`.
+            c.copy(typeArgs = c.typeArgs.map { closeGeneratedRowVars(substitution.apply(it)) })
+
         val allConstraints = (type.abilityConstraints + functionAbilityConstraints)
+            .map { c -> resolveArgs(c) }
             .filterNot { c -> isFullyDischarged(c) }
             .sortedByDescending { it.associatedTypeBindings.size }
             .distinctBy { c -> c.abilityName to c.typeArgs.map(::argKey).distinct() }

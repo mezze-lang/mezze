@@ -586,7 +586,7 @@ class CodecRoundTripTest {
     }
 
     // ========================================================================
-    // Bug B (#86) — Tier-4 sugar (`x.json {}` / `x.json_with { config = … }`)
+    // Bug B (#86) — Tier-4 sugar (`x.to_json {}` / `x.to_json_with { config = … }`)
     //
     // Blanket-impl body dispatch: `it.encode {…}` inside `impl ToJson for 'a`
     // now marks `encode` as needing dict-passing driven off the enclosing
@@ -628,7 +628,7 @@ class CodecRoundTripTest {
         val src = """
             use std::codec::json::{ Json, ToJson, json_default }
             let n: Int = 42
-            n.json {}
+            n.to_json {}
         """.trimIndent()
         assertEquals(42L, jIntVal(eval(src)))
     }
@@ -638,7 +638,7 @@ class CodecRoundTripTest {
         val src = """
             use std::codec::json::{ Json, ToJson, json_default }
             let s: Str = "hello"
-            s.json {}
+            s.to_json {}
         """.trimIndent()
         assertEquals("hello", jStringVal(eval(src)))
     }
@@ -648,7 +648,7 @@ class CodecRoundTripTest {
         val src = """
             use std::codec::json::{ Json, ToJson, json_default }
             let b: Bool = True
-            b.json {}
+            b.to_json {}
         """.trimIndent()
         assertEquals(true, jBoolVal(eval(src)))
     }
@@ -658,7 +658,7 @@ class CodecRoundTripTest {
         val src = """
             use std::codec::json::{ Json, ToJson, json_default }
             let f: Float = 1.5
-            f.json {}
+            f.to_json {}
         """.trimIndent()
         assertEquals(1.5, jFloatVal(eval(src)), 1e-9)
     }
@@ -669,14 +669,14 @@ class CodecRoundTripTest {
             use std::codec::json::{ Json, ToJson, json_default }
             type Point = { x: Int, y: Int }
             let p: Point = { x = 3, y = 4 }
-            p.json {}
+            p.to_json {}
         """.trimIndent()
         // Verify by round-tripping through to_str.
         val src2 = """
             use std::codec::json::{ Json, ToJson, json_default, to_str }
             type Point = { x: Int, y: Int }
             let p: Point = { x = 3, y = 4 }
-            to_str { json = p.json {} }
+            to_str { json = p.to_json {} }
         """.trimIndent()
         // Field order is stable within Encode Record impls.
         val s = eval(src2) as String
@@ -693,7 +693,7 @@ class CodecRoundTripTest {
             type Address = { city: Str, zip: Int }
             type Person = { id: Int, addr: Address }
             let p: Person = { id = 1, addr = { city = "NYC", zip = 10001 } }
-            to_str { json = p.json {} }
+            to_str { json = p.to_json {} }
         """.trimIndent()
         assertEquals(
             "{\"addr\":{\"city\":\"NYC\",\"zip\":10001},\"id\":1}",
@@ -706,7 +706,7 @@ class CodecRoundTripTest {
         val src = """
             use std::codec::json::{ Json, ToJson, json_default, to_str }
             let n: Int = 42
-            to_str { json = n.json {} }
+            to_str { json = n.to_json {} }
         """.trimIndent()
         assertEquals("42", eval(src) as String)
     }
@@ -719,7 +719,7 @@ class CodecRoundTripTest {
             use std::codec::core::{ Decode, DecodeError }
             type Point = { x: Int, y: Int }
             let original: Point = { x = 3, y = 4 }
-            let encoded: Json = original.json {}
+            let encoded: Json = original.to_json {}
             let s: Str = to_str { json = encoded }
             match parse_str { s = s } is
               Ok { val = j } -> do
@@ -734,7 +734,7 @@ class CodecRoundTripTest {
     }
 
     // ========================================================================
-    // Bug C (#86 sub-gap 1) — `.json_with { config = <expr> }` sugar
+    // Bug C (#86 sub-gap 1) — `.to_json_with { config = <expr> }` sugar
     //
     // Root cause was in `expandTypeApplication` /
     // `expandTypeApplicationToRecord` (typechecker/solving/Unification.kt):
@@ -762,7 +762,7 @@ class CodecRoundTripTest {
             use std::codec::json::{ Json, ToJson, json_default, to_str }
             type Point = { x: Int, y: Int }
             let p: Point = { x = 3, y = 4 }
-            to_str { json = p.json_with { config = json_default } }
+            to_str { json = p.to_json_with { config = json_default } }
         """.trimIndent()
         assertEquals("{\"x\":3,\"y\":4}", eval(src) as String)
     }
@@ -773,7 +773,7 @@ class CodecRoundTripTest {
             use std::codec::json::{ Json, ToJson, json_pretty, to_str }
             type Point = { x: Int, y: Int }
             let p: Point = { x = 3, y = 4 }
-            to_str { json = p.json_with { config = json_pretty } }
+            to_str { json = p.to_json_with { config = json_pretty } }
         """.trimIndent()
         // to_str uses the pretty flag but the config passed determines the
         // synthesized encoder's shape; result is still a compact JObject
@@ -788,7 +788,7 @@ class CodecRoundTripTest {
         val src = """
             use std::codec::json::{ Json, ToJson, json_default, to_str }
             let n: Int = 42
-            to_str { json = n.json_with { config = json_default } }
+            to_str { json = n.to_json_with { config = json_default } }
         """.trimIndent()
         assertEquals("42", eval(src) as String)
     }
@@ -800,7 +800,7 @@ class CodecRoundTripTest {
             type Addr = { city: Str, zip: Int }
             type Person = { id: Int, addr: Addr }
             let p: Person = { id = 1, addr = { city = "NYC", zip = 10001 } }
-            to_str { json = p.json_with { config = json_default } }
+            to_str { json = p.to_json_with { config = json_default } }
         """.trimIndent()
         assertEquals(
             "{\"addr\":{\"city\":\"NYC\",\"zip\":10001},\"id\":1}",
@@ -868,7 +868,7 @@ class CodecRoundTripTest {
             use std::codec::core::{ DecodeError }
             type Point = { x: Int, y: Int }
             let original: Point = { x = 3, y = 4 }
-            let encoded: Json = original.json {}
+            let encoded: Json = original.to_json {}
             let s: Str = to_str { json = encoded }
             match parse_str { s = s } is
               Ok { val = j } -> do

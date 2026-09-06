@@ -115,7 +115,18 @@ object AliasStripper {
                     payload?.let { stripImpl(it, inScope, registry, recursionGuard) }
                 },
                 rowVar = expanded.rowVar,
-                identity = TypeIdentity.Anonymous
+                // Keep the identity the expansion came from. Stripping is about
+                // not PRINTING a name the reader cannot see; it is not about
+                // forgetting which declaration a value belongs to.
+                //
+                // Setting Anonymous here made `Json` — declared in
+                // std::codec::json and expanded here because the name is not in
+                // the user's scope — unrecognisable at dispatch: the impl target
+                // is `TypeApplication(Json)` and the receiver arrived as a bare
+                // seven-constructor VariantType with nothing to match on. So
+                // `j.from_json {}` failed with `Field not found: from_json`
+                // while the same call through an annotated binding worked.
+                identity = expanded.identity
             )
         } finally {
             recursionGuard.remove(type.constructor)

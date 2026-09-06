@@ -13,13 +13,33 @@ data class Substitution(
     // type vars, and the value is always an EffectRow (never an
     // arbitrary MezzeType). Record/variant row vars go through their
     // own machinery — this map is effect-row-only.
-    val rowVarMappings: Map<RowVar, MezzeType.EffectRow> = emptyMap()
+    val rowVarMappings: Map<RowVar, MezzeType.EffectRow> = emptyMap(),
+    // Row-var bindings for RECORD rows. The mapped value is an EXTENSION:
+    // the fields the row gained, plus the tail row var that stays open (or
+    // null once closed). Applying the substitution to `{a: Int, ...r}` with
+    // `r ↦ {b: Str, ...r2}` splices to `{a: Int, b: Str, ...r2}`, chasing
+    // tails transitively.
+    //
+    // Before this channel existed, growing an open record was expressed by
+    // hunting for THE type variable whose binding compared equal to the
+    // record and rebinding it — and when no variable matched (several vars
+    // chaining to one record, or the record reached through a constraint
+    // rather than a binding), the extension was silently dropped. A second
+    // field accessed on an inferred record then typechecked but never
+    // reached the record's type: `val.code` worked while `val.status_verbose`
+    // failed at runtime with `Field not found`, because the decoder derived
+    // from that type only ever saw the first field.
+    //
+    // Extension fields never OVERRIDE fields already present on the record —
+    // by the time a row is bound the shared fields were already unified, so
+    // preferring the existing entry is both safe and cheap.
+    val recordRowMappings: Map<RowVar, MezzeType.RecordType> = emptyMap()
 ) {
     fun apply(type: MezzeType): MezzeType {
-        if (mappings.isEmpty() && rowVarMappings.isEmpty()) {
+        if (mappings.isEmpty() && rowVarMappings.isEmpty() && recordRowMappings.isEmpty()) {
             return type
         }
-        if (mappings.isEmpty() && isConcreteType(type)) {
+        if (mappings.isEmpty() && recordRowMappings.isEmpty() && isConcreteType(type)) {
             return type
         }
 
@@ -99,6 +119,10 @@ data class Substitution(
                 type.abilityConstraints.any { c -> c.typeArgs.any { needsSubstitution(it) } }
 
             is MezzeType.RecordType ->
+                // A bound row var needs application even when every field is
+                // concrete — that binding is precisely what splices in the
+                // fields the row gained after this record was built.
+                (type.rowVar != null && type.rowVar in recordRowMappings) ||
                 type.fields.values.any { needsSubstitution(it) }
 
             is MezzeType.VariantType ->
@@ -219,11 +243,31 @@ data class Substitution(
                 }
             )
 
-            is MezzeType.RecordType -> MezzeType.RecordType(
-                fields = type.fields.mapValues { (_, fieldType) -> applyWithVisited(fieldType, visitedVars, chainCache) },
-                rowVar = type.rowVar,
-                identity = type.identity
-            )
+            is MezzeType.RecordType -> {
+                var fields = type.fields.mapValues { (_, fieldType) ->
+                    applyWithVisited(fieldType, visitedVars, chainCache)
+                }
+                // Splice row extensions, chasing tails: r ↦ {b, ...r2}, r2 ↦ {c}
+                // yields {…, b, c}. The seen-set guards a cyclic tail chain, and
+                // existing fields win — shared fields were unified when the row
+                // was bound, so the entry already present is the resolved one.
+                var row = type.rowVar
+                val seenRows = HashSet<RowVar>()
+                while (row != null && seenRows.add(row)) {
+                    val ext = recordRowMappings[row] ?: break
+                    for ((name, extType) in ext.fields) {
+                        if (name !in fields) {
+                            fields = fields + (name to applyWithVisited(extType, visitedVars, chainCache))
+                        }
+                    }
+                    row = ext.rowVar
+                }
+                MezzeType.RecordType(
+                    fields = fields,
+                    rowVar = row,
+                    identity = type.identity
+                )
+            }
 
             is MezzeType.VariantType -> {
                 val appliedConstructors = type.constructors.mapValues { (_, dataType) ->
@@ -324,7 +368,8 @@ data class Substitution(
     fun compose(other: Substitution): Substitution {
         return Substitution(
             mappings = other.mappings + mappings,
-            rowVarMappings = other.rowVarMappings + rowVarMappings
+            rowVarMappings = other.rowVarMappings + rowVarMappings,
+            recordRowMappings = other.recordRowMappings + recordRowMappings
         )
     }
 
@@ -397,6 +442,22 @@ data class Substitution(
 // This is NOT tail BINDING (that is the #268-Stage-2 dead end: binding record
 // /variant tails corrupts field-type resolution during solving); it is the
 // existing drop-and-close, deduped.
+//
+// THE SEAM: this is the ONE place record/variant open tails close. Every
+// finalization boundary that produces a STORED or DISPLAYED type routes through
+// closeGeneratedRowVars — binding types + identifier/member types (TypedAstBuilder)
+// and ability-constraint args (ConstraintGenerator.addAbilityConstraintsToFunctionType).
+// So signatures, hover, and error messages all show closed records `{ a: T }`,
+// never `{ a: T, … }`, without per-site patching. Add a new display path? Call
+// this — do NOT special-case a close at the call site.
+//
+// EXCEPTION, by necessity: an inferred codec target (`from_json`/`.decode`
+// result) is NOT closed on the VALUE type the interpreter dispatches on. It must
+// stay a bare var there — a concrete record makes the FromJson ability check
+// reject it (no `impl FromJson for {…}`) and makes codegen read a record where
+// the input is a string (`Expected record for field 'from_json'`). The record
+// shape is display-only: it prints on the constraint arg (closed here), never on
+// the value the runtime decodes. See project_hover_inferred_open_record_reconstruction.
 private fun closeLabeledRowVar(existingRowVar: RowVar?, mustBeOpenRowVars: Set<RowVar>): RowVar? =
     if (existingRowVar != null
         && !existingRowVar.isUserSpecified()

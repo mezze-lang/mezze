@@ -2,30 +2,50 @@
 title: "Your own effects"
 blurb: "Effects are library code, not syntax."
 ---
-Effects are not built in. `effect Config` declares one: a name, and the operations it offers.
+`Http` is not built into the language. It is a declaration in a library, and you can write your own the same way.
 
-The handler decides what it means. `Defaults` answers from a lookup; another handler could read a file or a flag, and `greet` would not change.
+The shop needs one. A delivery arrives and stock has to be recorded — that is an operation the shop *has*, so `effect Inventory` declares it: a name and the operations it offers, nothing about how they work.
 
-Exceptions, early return and retries are all ordinary code here. There is no syntax to wait for.
+The handlers supply that. `ToFile` appends a line to a CSV; `DryRun` says what it would have done and touches nothing. `delivery` is written against neither — it restocks, and has no idea whether a file exists. Which is what makes the dry run possible at all: not a flag inside the function, but a different answer to the same question.
+
+Everything you would reach for syntax to do — exceptions, retries, early return, async — is this shape underneath. There is no keyword to wait for.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
+use std::effects::filesystem::{ MemoryFS, append_text, read_text_or }
 
-# Effects are not built in — declare your own.
-effect Config where {
-  get: { key: Str } -> Str <Config>
+# An operation the shop has. Declared, not defined.
+effect Inventory where {
+  restock: { item: Str, price: Str } -> {} <Inventory>
 }
 
-# A handler gives the operation its meaning.
-impl Config for Defaults where {
-  get = { key } -> if key == "host" then "localhost" else "?"
+# One handler writes a line to a file.
+impl Inventory for ToFile where {
+  restock = { item, price } -> do
+    append_text { path = "inventory.csv", text = "$(item),$(price)\n" }
+    {}
 }
 
-let greet = {} -> do
-  let host = Config.get { key = "host" }
-  "connecting to $(host)"
+# Another says what it would do, and does nothing.
+impl Inventory for DryRun where {
+  restock = { item, price } ->
+    println { msg = "  would record $(item) at €$(price)" }
+}
 
-let main = {} ->
-  perform Console in perform Defaults in
-    println { msg = greet {} }
+# The delivery restocks. It knows nothing about files.
+let delivery = {} -> do
+  Inventory.restock { item = "olive-oil", price = "8.99" }
+  Inventory.restock { item = "tahini", price = "4.50" }
+
+let main = {} -> perform Console in do
+  println { msg = "dry run:" }
+  perform DryRun in delivery {}
+
+  println { msg = "for real:" }
+  # An in-memory filesystem: nothing touches the disk.
+  perform MemoryFS in perform ToFile in do
+    delivery {}
+    println { msg = read_text_or { path = "inventory.csv", def = "" } }
 -->
+
+That is the tour. Ten pages, one small program, and every type on it inferred rather than written.

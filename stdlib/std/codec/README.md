@@ -36,9 +36,9 @@ type User = { name: Str, age: Int, tags: [Str] }
 let alice : User = { name = "Alice", age = 30, tags = ["admin", "user"] }
 
 # Encode
-let j        : Json  = alice.json {}                         # variant tree
-let pretty   : Json  = alice.json_with { config = json_pretty }
-let bytes    : Bytes = alice.json_utf8 {}                    # UTF-8 straight
+let j        : Json  = alice.to_json {}                         # variant tree
+let pretty   : Json  = alice.to_json_with { config = json_pretty }
+let bytes    : Bytes = alice.to_json_utf8 {}                    # UTF-8 straight
 
 # Decode — target-type-driven via inherent method syntax
 let parsed : Result User DecodeError = User.from_json { it = j }
@@ -173,7 +173,7 @@ The old `EncodeRepr` / `DecodeRepr` / `Encode` / `Decode` / `JsonFmt` /
 codec module was rewritten as part of task #86. If you're porting old code:
 
 - `body.encode_repr { fmt = json_fmt, config = default_config }` →
-  `body.json {}` (default) or `body.encode { config = json_default }`
+  `body.to_json {}` (default) or `body.encode { config = json_default }`
   (polymorphic helper form).
 - `body.decode_repr { fmt = json_fmt, ... }` →
   `Type.from_json { it = body }` (target-type-driven).

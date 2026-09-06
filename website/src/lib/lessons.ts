@@ -16,13 +16,12 @@ export const ORDER = [
   'functions',
   'records',
   'variants',
+  'shapes',
   'aliases',
-  'open-records',
-  'effects',
+  'methods',
   'abilities',
-  'custom-abilities',
+  'effects',
   'custom-effects',
-  'full-program',
 ] as const
 
 export interface Lesson {

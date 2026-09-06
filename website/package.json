@@ -11,7 +11,7 @@
     "astro": "astro",
     "build:wasm": "./wasm-build/build.sh",
     "build:all": "npm run build:wasm && npm run build",
-    "test": "node --experimental-wasm-exnref test/completion.test.mjs && node --experimental-wasm-exnref test/samples.test.mjs && node --test test/gate.test.mjs && node --test test/report.test.mjs && node --experimental-strip-types --test test/snippet.test.mjs"
+    "test": "node --experimental-wasm-exnref test/completion.test.mjs && node --experimental-wasm-exnref test/samples.test.mjs && node --test test/gate.test.mjs && node --test test/report.test.mjs && node --experimental-strip-types --test test/snippet.test.mjs && node --experimental-strip-types --test test/highlight.test.mjs"
   },
   "dependencies": {
     "@astrojs/check": "^0.9.10",

@@ -41,7 +41,7 @@ function runtime() {
 /** [name, source] for every mezze-editor block under src/content. */
 async function samples() {
   const out = []
-  for (const dir of ['src/content/concepts', 'src/content/taste', 'src/content/blog']) {
+  for (const dir of ['src/content/concepts', 'src/content/lessons', 'src/content/blog']) {
     let files = []
     try { files = await readdir(dir) } catch { continue }
     for (const f of files.filter((f) => f.endsWith('.md'))) {
@@ -66,6 +66,13 @@ describe('site samples', () => {
     // asks the reader to press Check on one. It opts out with a comment on its
     // first line, which is invisible to the page but visible here.
     const expectError = /^#\s*expect-error\b/m.test(src.split('\n')[0] ?? '')
+    // A sample may carry a diagnostic that is a compiler bug rather than a
+    // fault in the sample. `# expect-warning: <text>` on the first line names
+    // one, and only that exact warning is tolerated — anything else still
+    // fails. See docs/bugs/BUG_ability_import_false_unused.md: an ability
+    // imported for method dispatch is reported unused, and removing it as the
+    // warning instructs stops the sample compiling.
+    const tolerated = (src.split('\n')[0] ?? '').match(/^#\s*expect-warning:\s*(.+)$/)?.[1]?.trim()
     if (expectError) {
       test(`${name} fails to typecheck, as the page says it does`, () => {
         const ds = globalThis.checkMezze(src)?.diagnostics ?? []
@@ -80,7 +87,8 @@ describe('site samples', () => {
       const res = globalThis.checkMezze(src)
       const ds = res?.diagnostics ?? []
       assert.deepEqual(
-        ds.map((d) => `${d.severity ?? '?'}: ${d.message}`),
+        ds.filter((d) => !(tolerated && d.message.includes(tolerated)))
+          .map((d) => `${d.severity ?? '?'}: ${d.message}`),
         [],
         `${name} is not clean`,
       )

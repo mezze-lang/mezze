@@ -1,33 +1,46 @@
 ---
 title: "Variants"
-blurb: "Open and closed sets of cases."
+blurb: "One value, one of several situations."
 ---
-A **variant** lists its cases between pipes, separated by commas. Some carry a payload, some do not.
+Knowing an ingredient is not the same as knowing you can cook with it. Stock is the awkward part: sometimes it is a quantity on the shelf, sometimes a date it comes back, sometimes nothing at all because the line was dropped.
 
-A trailing `...` leaves the variant **open** — a value may be a case listed here or one added elsewhere. Without it the type is closed.
+A record cannot say that honestly. You would end up with a `grams` that means nothing when the item is out, a `day` that means nothing when it is in, and a comment explaining which to trust. A **variant** says *or* where a record says *and*, and each case carries only what is actually true in that situation — `OutUntil` has a day and no grams, `Discontinued` has neither.
 
-Closed means `match` must cover every case: delete the `Point` arm and press Check. An open variant needs a catch-all instead, since the compiler cannot know every case.
+`match` gets you back in, and the payoff is `can_cook` rather than a string: the cases decide something. Because the type is closed, the compiler checks you considered all of them. Delete the `Discontinued` arm and press Check — it names what is missing instead of letting the answer quietly default to something plausible.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
 
-# Cases sit between pipes, separated by commas.
-type Shape = |
-  Circle { radius: Int },
-  Rect { w: Int, h: Int },
-  Point
+# What we know about an ingredient's availability.
+# Each case carries what is true in that situation.
+type Stock = |
+  InStock { grams: Int },
+  Low { grams: Int },
+  OutUntil { day: Str },
+  Discontinued
 |
 
-# A trailing `...` leaves a variant open.
-type Level = | Low, High, ... |
+# The cases decide something, not just how it reads.
+let can_cook = { s } -> match s is
+  InStock { grams } -> grams > 100
+  Low { grams } -> grams > 100
+  OutUntil { day = _ } -> False
+  Discontinued -> False
 
-let area = { shape } -> match shape is
-  Circle { radius } -> radius * radius * 3
-  Rect { w, h } -> w * h
-  Point -> 0
+let note = { s } -> match s is
+  InStock { grams } -> "$(grams.to_str {})g on the shelf"
+  Low { grams } -> "only $(grams.to_str {})g left"
+  OutUntil { day } -> "back on $(day)"
+  Discontinued -> "gone for good"
 
-let main = {} -> perform Console in do
-  # Closed, so match must cover every case.
-  let c = area { shape = Circle { radius = 5 } }
-  println { msg = "circle: $(c.to_str {})" }
+let main = {} -> perform Console in
+  [
+    { name = "chickpeas", stock = InStock { grams = 400 } },
+    { name = "tahini",    stock = Low { grams = 60 } },
+    { name = "sumac",     stock = OutUntil { day = "Tuesday" } },
+    { name = "mastic",    stock = Discontinued },
+  ].for_each { f = { x } -> do
+      let mark = if can_cook { s = x.stock } then "cook" else "skip"
+      println { msg = "$(mark)  $(x.name): $(note { s = x.stock })" }
+  }
 -->

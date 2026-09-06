@@ -2,24 +2,21 @@
 title: "Functions"
 blurb: "Named parameters, always."
 ---
-A function is `{ params } -> body`. Every parameter is **named** — Mezze has no positional arguments at all.
+The recipe serves four. Cooking for two means scaling every quantity, which is the first thing worth naming: `scale`.
 
-So a call reads the way it is written, and the order is yours: both calls below do the same thing.
+A function is `{ params } -> body`, and every parameter is **named**. Mezze has no positional arguments at all, so there is no argument order to remember and no way to pass the servings where the grams should go. Both calls below are the same call.
 
-Add a parameter later and existing calls keep compiling. That is the trade positional arguments cannot make.
+The gain is at the edges. Add a parameter next month — a wastage factor, say — and every existing call still compiles, because none of them depended on position. That is a trade positional arguments cannot make.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
 
-# Every parameter is named. Mezze has no
-# positional arguments at all.
-let rect = { width, height } -> width * height
+# The recipe serves four; scale it to any number.
+let scale = { grams, servings } -> grams * servings / 4
 
 let main = {} -> perform Console in do
-  let a = rect { width = 3, height = 4 }
-  println { msg = a.to_str {} }
+  println { msg = "for two:  $(scale { grams = 400, servings = 2 }.to_str {})g" }
 
-  # Same call, fields the other way round.
-  let b = rect { height = 4, width = 3 }
-  println { msg = b.to_str {} }
+  # The same call, written the other way round.
+  println { msg = "for six:  $(scale { servings = 6, grams = 400 }.to_str {})g" }
 -->

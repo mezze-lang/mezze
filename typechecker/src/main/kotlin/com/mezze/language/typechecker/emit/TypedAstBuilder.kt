@@ -640,7 +640,12 @@ class TypedAstBuilder(
                 val name = expr.localName
                 val qualifier = expr.qualifier
 
-                val type = resolveIdentifierType(name, qualifier)
+                // Close solver-generated record/variant tails (an inferred
+                // decode target grown field-by-field, an unannotated-param shape)
+                // so `x` reads as the exact record its uses pin, not `{ …, … }`.
+                // mustBeOpenRowVars still protects a genuinely-open row (a user
+                // `…`, a polymorphic param), same policy as the let-decl close.
+                val type = closeGeneratedRowVars(resolveIdentifierType(name, qualifier), mustBeOpenRowVars)
 
                 val binding = resolveBinding(name, qualifier)
 
@@ -715,13 +720,16 @@ class TypedAstBuilder(
             is ParsedMemberAccess -> {
                 val receiver = buildExpr(expr.receiver, file)
                 val memberName = expr.member
-                val receiverType = substitution.apply(receiver.type)
+                // Close generated tails here too: the receiver record and the
+                // field read off it both carry the same inferred shape, so a
+                // `a.b.c` chain reads as closed records at every level.
+                val receiverType = closeGeneratedRowVars(substitution.apply(receiver.type), mustBeOpenRowVars)
 
                 val fieldType = when (receiverType) {
                     is MezzeType.RecordType -> receiverType.fields[memberName]
                         ?: substitution.apply(contextType)
                     else -> substitution.apply(contextType)
-                }
+                }.let { closeGeneratedRowVars(it, mustBeOpenRowVars) }
 
                 TypedFieldAccess(
                     record = receiver,

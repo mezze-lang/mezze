@@ -196,6 +196,15 @@ object TypedASTHasher {
                 appendExpr(b, expr.function)
                 appendExpr(b, expr.arg)
                 b.appendBoolean(expr.isTailCall)
+                // Include the resolved ability-impl targets so two calls that are
+                // structurally identical but dispatch to DIFFERENT impls (e.g. a
+                // `from_json` decoding into `{n}` vs `{name}` — the target is on
+                // the RETURN side, invisible in function/arg) hash distinctly and
+                // are not deduped into one. Null instantiation (the common case)
+                // appends nothing, so existing hashes are unchanged.
+                expr.instantiation?.abilityImpls?.let { refs ->
+                    for (r in refs) b.append(r.implHash.hex)
+                }
             }
             is TypedRecord -> {
                 b.append(byteArrayOf(HashTags.RECORD))

@@ -3,7 +3,7 @@ title: One operator, two types
 blurb: Numeric operators used to demand both sides match. Now they carry the argument type and the result type, so Int * Float works and so does Length * Length = Area.
 date: 2026-09-01
 colour: olive
-draft: true
+draft: false
 ---
 
 Mezze's arithmetic operators desugar to abilities. `*` calls `NumMul`, `+`

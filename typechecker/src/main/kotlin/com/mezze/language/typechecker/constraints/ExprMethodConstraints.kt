@@ -470,7 +470,24 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     // value constraints used below.
     argumentResult = pushParamTypeIntoArgs(expr.arguments, argumentResult, strippedMethodType.paramType, context)
 
-    val resultType = MezzeType.VarType(TypeVar.fresh())
+    // #334, extended to ability methods: when the method's declared return is a
+    // NAMED TypeApplication (`Result 'a 'e`, `Option 'a`, …), make the call
+    // result BE that named type — a fresh instantiation preserving the
+    // constructor and Declared identity, args freshened — not a bare var pinned
+    // to it only during solving.
+    //
+    // The inherent-method path already does this. The ability path did not, so
+    // `body.from_json {}` (return `Result 'a DecodeError`) produced a bare
+    // VarType, and a `.map` chained on it saw no `Result` identity to
+    // disambiguate among its nine same-named overloads (Result/Seq/Bytes/…). It
+    // fell through and mis-dispatched to Bytes — `expected Bytes, but got
+    // Result`. A method dispatching on its RETURN (`from_json`) makes this the
+    // common case, not a corner one.
+    val abilityMethodReturn = strippedMethodType.returnType
+    val resultType: MezzeType =
+        if (abilityMethodReturn is MezzeType.TypeApplication)
+            instantiateTypeWithFreshVars(abilityMethodReturn)
+        else MezzeType.VarType(TypeVar.fresh())
     val constraints = mutableListOf<Constraint>()
     constraints.addAll(receiverResult.constraints)
     constraints.addAll(argumentResult.constraints)
