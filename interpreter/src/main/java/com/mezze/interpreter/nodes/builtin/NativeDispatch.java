@@ -729,41 +729,44 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_zip_with_index", (r, c) ->
             SeqNatives.zipWithIndex(getSeq(r, "xs")));
 
-        // HOF operations
-        HANDLERS.put("__native_seq_map", (r, c) ->
+        // HOF operations — use HANDLERS_WITH_NODE (PE-visible path) so
+        // Graal PE can inline through the callback and EA can scalarize
+        // per-element record allocations (wrapAccX, wrapX). The third
+        // arg (MezzeNode) is unused by these handlers.
+        HANDLERS_WITH_NODE.put("__native_seq_map", (r, c, n) ->
             SeqNatives.map(getSeq(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_seq_filter", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_filter", (r, c, n) ->
             SeqNatives.filter(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_seq_flat_map", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_flat_map", (r, c, n) ->
             SeqNatives.flatMap(getSeq(r, "xs"), getFunction(r, "f"), c));
         // Result-short-circuiting map: `[T], T -> Result U E → Result [U] E`.
         // Emitted by CodecGenerator for `[T]` decode (each element decode is
         // fallible; a single failure fails the whole list).
-        HANDLERS.put("__native_seq_try_map", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_try_map", (r, c, n) ->
             SeqNatives.tryMap(getSeq(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_seq_fold", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_fold", (r, c, n) ->
             SeqNatives.fold(getSeq(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_seq_reduce", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_reduce", (r, c, n) ->
             SeqNatives.reduce(getSeq(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_seq_find", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_find", (r, c, n) ->
             SeqNatives.find(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_seq_find_index", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_find_index", (r, c, n) ->
             SeqNatives.findIndex(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_seq_any", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_any", (r, c, n) ->
             SeqNatives.any(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_seq_all", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_all", (r, c, n) ->
             SeqNatives.all(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_seq_none", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_none", (r, c, n) ->
             SeqNatives.none(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_seq_count", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_count", (r, c, n) ->
             SeqNatives.count(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_seq_partition", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_partition", (r, c, n) ->
             SeqNatives.partition(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_seq_sort_by", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_sort_by", (r, c, n) ->
             SeqNatives.sortBy(getSeq(r, "xs"), getFunction(r, "cmp"), c));
-        HANDLERS.put("__native_seq_take_while", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_take_while", (r, c, n) ->
             SeqNatives.takeWhile(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_seq_drop_while", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_drop_while", (r, c, n) ->
             SeqNatives.dropWhile(getSeq(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_seq_zip", (r, c) ->
             SeqNatives.zip(getSeq(r, "xs"), getSeq(r, "ys")));
@@ -775,9 +778,9 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.min(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_max", (r, c) ->
             SeqNatives.max(getSeq(r, "xs")));
-        HANDLERS.put("__native_seq_min_by", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_min_by", (r, c, n) ->
             SeqNatives.minBy(getSeq(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_seq_max_by", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_max_by", (r, c, n) ->
             SeqNatives.maxBy(getSeq(r, "xs"), getFunction(r, "f"), c));
         HANDLERS.put("__native_seq_sum", (r, c) ->
             SeqNatives.sum(getSeq(r, "xs")));
@@ -796,28 +799,28 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_product_float", (r, c) ->
             SeqNatives.productFloat(getSeq(r, "xs")));
 
-        // Group By
-        HANDLERS.put("__native_seq_group_by", (r, c) ->
+        // Group By — HOF, PE-visible
+        HANDLERS_WITH_NODE.put("__native_seq_group_by", (r, c, n) ->
             SeqNatives.groupBy(getSeq(r, "xs"), getFunction(r, "f"), c));
 
         // Enumerate/ForEach/Scan
         HANDLERS.put("__native_seq_enumerate", (r, c) ->
             SeqNatives.enumerate(getSeq(r, "xs")));
-        HANDLERS.put("__native_seq_for_each", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_for_each", (r, c, n) ->
             SeqNatives.forEach(getSeq(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_seq_scan", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_scan", (r, c, n) ->
             SeqNatives.scan(getSeq(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
 
         // Split Operations
         HANDLERS.put("__native_seq_split_at", (r, c) ->
             SeqNatives.splitAt(getSeq(r, "xs"), getLong(r, "i")));
-        HANDLERS.put("__native_seq_span", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_span", (r, c, n) ->
             SeqNatives.span(getSeq(r, "xs"), getFunction(r, "p"), c));
 
         // Dedup
         HANDLERS.put("__native_seq_dedup", (r, c) ->
             SeqNatives.dedup(getSeq(r, "xs")));
-        HANDLERS.put("__native_seq_dedup_by", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_dedup_by", (r, c, n) ->
             SeqNatives.dedupBy(getSeq(r, "xs"), getFunction(r, "f"), c));
 
         // Singleton/Nth/Fill
@@ -827,13 +830,13 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.nth(getSeq(r, "xs"), getLong(r, "i")));
         HANDLERS.put("__native_seq_fill", (r, c) ->
             SeqNatives.fill(getLong(r, "n"), getField(r, "x")));
-        HANDLERS.put("__native_seq_fill_with", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_fill_with", (r, c, n) ->
             SeqNatives.fillWith(getLong(r, "n"), getFunction(r, "f"), c));
 
         // Group Consecutive
         HANDLERS.put("__native_seq_group_consecutive", (r, c) ->
             SeqNatives.groupConsecutive(getSeq(r, "xs")));
-        HANDLERS.put("__native_seq_group_consecutive_by", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_group_consecutive_by", (r, c, n) ->
             SeqNatives.groupConsecutiveBy(getSeq(r, "xs"), getFunction(r, "f"), c));
 
         // Windows/Chunks/Rotate
@@ -849,11 +852,11 @@ public final class NativeDispatch extends MezzeNode {
         // Binary Search
         HANDLERS.put("__native_seq_binary_search", (r, c) ->
             SeqNatives.binarySearch(getSeq(r, "xs"), getField(r, "x")));
-        HANDLERS.put("__native_seq_binary_search_by", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_binary_search_by", (r, c, n) ->
             SeqNatives.binarySearchBy(getSeq(r, "xs"), getField(r, "x"), getFunction(r, "cmp"), c));
 
         // Sort By Key
-        HANDLERS.put("__native_seq_sort_by_key", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_sort_by_key", (r, c, n) ->
             SeqNatives.sortByKey(getSeq(r, "xs"), getFunction(r, "f"), c));
 
         // Additional Search/Replace Operations
@@ -875,7 +878,7 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.join(getSeq(r, "xs"), getString(r, "sep")));
 
         // Advanced Zip Operations
-        HANDLERS.put("__native_seq_zip_with", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_seq_zip_with", (r, c, n) ->
             SeqNatives.zipWith(getSeq(r, "xs"), getSeq(r, "ys"), getFunction(r, "f")));
         HANDLERS.put("__native_seq_zip3", (r, c) ->
             SeqNatives.zip3(getSeq(r, "xs"), getSeq(r, "ys"), getSeq(r, "zs")));
