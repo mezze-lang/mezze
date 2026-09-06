@@ -78,26 +78,12 @@ public final class NativeDispatch extends MezzeNode {
         return java.util.Collections.unmodifiableSet(HANDLERS.keySet());
     }
 
-    /**
-     * Extended handler interface that receives the node for context access.
-     * Used by async handlers that need TruffleLanguage.Env for thread creation.
-     */
-    @FunctionalInterface
-    public interface NativeHandlerWithNode {
-        Object handle(MezzeRecord args, IndirectCallNode callNode, MezzeNode node);
-    }
-
-    // Static dispatch tables - initialized once
+    // Static dispatch table - initialized once
     private static final Map<String, NativeHandler> HANDLERS = new HashMap<>();
-    private static final Map<String, NativeHandlerWithNode> HANDLERS_WITH_NODE = new HashMap<>();
 
     static {
         initHandlers();
     }
-
-    // Cached handler with node access
-    @CompilationFinal
-    private NativeHandlerWithNode cachedHandlerWithNode;
 
     public NativeDispatch(String functionName, MezzeNode argumentNode) {
         this.functionName = functionName;
@@ -105,7 +91,6 @@ public final class NativeDispatch extends MezzeNode {
         this.callNode = IndirectCallNode.create();
         // Pre-cache the handler at construction time
         this.cachedHandler = HANDLERS.get(functionName);
-        this.cachedHandlerWithNode = HANDLERS_WITH_NODE.get(functionName);
     }
 
     @Override
@@ -116,12 +101,6 @@ public final class NativeDispatch extends MezzeNode {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             throw new NativeTypeMismatchException(functionName + " expects record argument, got: " +
                 (arg == null ? "null" : arg.getClass().getName()));
-        }
-
-        // FAST PATH: Check handlers with node access first (for async operations)
-        NativeHandlerWithNode handlerWithNode = cachedHandlerWithNode;
-        if (handlerWithNode != null) {
-            return handlerWithNode.handle(record, callNode, this);
         }
 
         // FAST PATH: Direct handler invocation via cached reference
@@ -146,43 +125,12 @@ public final class NativeDispatch extends MezzeNode {
      * All native functions use the __native_ prefix.
      */
     public static boolean isNativeFunction(String name) {
-        return HANDLERS.containsKey(name) || HANDLERS_WITH_NODE.containsKey(name);
+        return HANDLERS.containsKey(name);
     }
 
     /**
-     * BDSL entry point (used by CallNativeRecord op). Same logic as
-     * {@link #execute}: prefers with-node handlers, then plain handlers.
-     * The {@code node} parameter is the surrounding BDSL root — needed
-     * by async handlers that consult TruffleLanguage.Env.
-     *
-     * <p>`@TruffleBoundary` — the record-ABI dispatch resolves the handler
-     * lambda via a HashMap lookup, and the lambda impls can reach anything
-     * in the JDK (String.replaceFirst → Pattern.quote → Formatter etc.).
-     * PE would need to trace every possible handler; native-image's SVM
-     * TruffleFeature bails on the resulting blocklisted-method reachability.
-     * Making record-ABI dispatch opaque lets PE stop here.
-     *
-     * <p>The scalar-ABI path (CallNativeScalar / DirectNativeOp*) is the
-     * hot path for numeric/bool primitives (#266-268) and is unaffected —
-     * those specialise on primitive types and inline through PE. Record-ABI
-     * is legacy for stringy/allocating ops, which have to boundary anyway.
-     *
-     * <p>See #402.
-     */
-    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
-    public static Object dispatchByName(String name, MezzeRecord record,
-            IndirectCallNode callNode, MezzeNode node) {
-        NativeHandlerWithNode wn = HANDLERS_WITH_NODE.get(name);
-        if (wn != null) return wn.handle(record, callNode, node);
-        NativeHandler h = HANDLERS.get(name);
-        if (h != null) return h.handle(record, callNode);
-        CompilerDirectives.transferToInterpreterAndInvalidate();
-        throw new NativeTypeMismatchException("Unknown native function: " + name);
-    }
-
-    /**
-     * Resolve a plain (no-node) record-ABI native handler at emit time.
-     * Returns null if the native has a with-node handler or is unknown.
+     * Resolve a record-ABI native handler at emit time.
+     * Returns null if the native is unknown.
      * #350: lets BDSL bake the handler as a ConstantOperand — no runtime
      * HashMap lookup, no string in the hot path.
      */
@@ -190,41 +138,10 @@ public final class NativeDispatch extends MezzeNode {
         return HANDLERS.get(name);
     }
 
-    /**
-     * Resolve a with-node record-ABI native handler at emit time.
-     * Returns null if the native has only a plain handler or is unknown.
-     * #350: sibling of {@link #recordHandlerOf} for async / HOF-callback
-     * handlers that read TruffleLanguage.Env from a Node argument.
-     */
-    public static NativeHandlerWithNode recordHandlerWithNodeOf(String name) {
-        return HANDLERS_WITH_NODE.get(name);
-    }
-
     // ==================== Handler Registration ====================
 
     private static void initHandlers() {
         registerAllHandlers();
-        validateNoDuplicateHandlers();
-    }
-
-    /**
-     * Sanity check after registration: same key must not appear in both
-     * dispatch maps, otherwise the per-instance cache silently prefers
-     * the with-node handler (line 101-104) and the plain handler is
-     * unreachable. This is a class-load-time check — never triggered in
-     * a healthy build, but catches misregistration during development
-     * before it becomes a silent dispatch bug. Same pattern as #246: a
-     * string-keyed dispatch site where the loser is invisible.
-     */
-    private static void validateNoDuplicateHandlers() {
-        java.util.Set<String> overlap = new java.util.HashSet<>(HANDLERS.keySet());
-        overlap.retainAll(HANDLERS_WITH_NODE.keySet());
-        if (!overlap.isEmpty()) {
-            throw new IllegalStateException(
-                "Native function name registered in both HANDLERS and "
-                + "HANDLERS_WITH_NODE — dispatch silently prefers with-node "
-                + "and shadows the other: " + overlap);
-        }
     }
 
     private static void registerAllHandlers() {
