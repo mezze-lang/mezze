@@ -3202,7 +3202,8 @@ public final class BytecodeCompiler {
                 && a2.elemOp() != null;
         boolean hasShortCircuitSink = sinkMode instanceof FusedSinkMode.ShortCircuit;
         boolean hasReduceSink = sinkMode instanceof FusedSinkMode.ReduceOpt;
-        if (hasStages || rawListExpr != null || hasFoldElemTransform || hasShortCircuitSink || hasReduceSink) {
+        boolean hasMaterializeSink = sinkMode instanceof FusedSinkMode.Materialize;
+        if (hasStages || rawListExpr != null || hasFoldElemTransform || hasShortCircuitSink || hasReduceSink || hasMaterializeSink) {
             var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
             if (flp != null) {
                 if (rangeStart != null) {

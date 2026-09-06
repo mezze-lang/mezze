@@ -701,17 +701,33 @@ object ChainCanonicalizer {
                 val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Reduce(fLambda), node.src)
                 if (isEffectSafe(candidate, allFunctions)) candidate else null
             }
-            "__native_iter_to_seq", "__native_iter_to_list" -> {
+            "__native_iter_to_seq", "__native_iter_to_list",
+            "__native_seq_to_list", "__native_seq_to_seq" -> {
+                val srcField = if (node.name.startsWith("__native_iter")) "it" else "xs"
                 var src: NodeIR? = null
-                for (fld in mr.fields) { if (fld.name == "it") src = fld.value }
+                for (fld in mr.fields) { if (fld.name == srcField) src = fld.value }
                 val srcInner = src ?: return null
-                val sink = if (node.name == "__native_iter_to_seq") SinkIR.ToSeq else SinkIR.ToList
+                val sink = if (node.name.endsWith("_to_seq")) SinkIR.ToSeq else SinkIR.ToList
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-                if (source is SourceIR.Opaque) null
+                val effectiveSource = when {
+                    source is SourceIR.Opaque && node.name.startsWith("__native_seq") -> SourceIR.RawSeq(source.expr)
+                    source is SourceIR.Opaque -> null
+                    else -> source
+                }
+                if (effectiveSource == null) null
                 else {
-                    val candidate = FusedChainIR(source, stages, sink, node.src)
+                    val candidate = FusedChainIR(effectiveSource, stages, sink, node.src)
                     if (isEffectSafe(candidate, allFunctions)) candidate else null
                 }
+            }
+            "__native_list_to_seq" -> {
+                var src: NodeIR? = null
+                for (fld in mr.fields) { if (fld.name == "xs") src = fld.value }
+                val srcInner = src ?: return null
+                val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+                val effectiveSource = if (source is SourceIR.Opaque) SourceIR.RawList(source.expr) else source
+                val candidate = FusedChainIR(effectiveSource, stages, SinkIR.ToSeq, node.src)
+                if (isEffectSafe(candidate, allFunctions)) candidate else null
             }
             else -> null
         }
