@@ -19,6 +19,7 @@ import com.mezze.language.truffleir.InlineBinaryOpIR;
 import com.mezze.language.truffleir.InterpolatedStringIR;
 import com.mezze.language.truffleir.StringPartIR;
 import com.mezze.language.truffleir.InlineOp;
+import com.mezze.language.truffleir.NativeSignatures;
 import com.mezze.language.truffleir.FusedChainIR;
 import com.mezze.language.truffleir.SourceIR;
 import com.mezze.language.truffleir.StageIR;
@@ -1115,7 +1116,6 @@ public final class BytecodeCompiler {
         // a single Graal compilation unit.
         final boolean selfTailLoop = hasTail && paramCount > 0
                 && allTailCallsAreSelfScalar(ir.getBody(), ir.getHash());
-
         // Two-phase construction to support self-recursion:
         //   1. Create (or reuse a pre-registered) trampoline WITHOUT its
         //      inner, register its CallTarget under ir.getHash() so
@@ -1277,16 +1277,28 @@ public final class BytecodeCompiler {
                 this.selfTailCaptureCount = captureCount;
                 this.selfTailHash = ir.getHash();
 
+                // ── Try fused long tail-loop ──
+                // When body = IfIR(cond, ReadArgIR, selfTailCall) and
+                // all params are longs with simple arithmetic updates,
+                // emit a single FusedLongTailLoop BDSL operation that
+                // executes the entire loop in Java — zero per-iteration
+                // BDSL dispatch, frame reads, or temp copies.
+                boolean emittedDirect = false;
+                NodeIR body = ir.getBody();
+
+                if (paramCount == 2 && body instanceof IfIR ifBody) {
+                    emittedDirect = tryEmitFusedLongTailLoop(
+                            ifBody, ir, paramCount, captureCount,
+                            b, argCount, localMap);
+                }
+
                 // ── Try direct-while optimization ──
                 // When body = IfIR(cond, base, selfTailCall), emit a
                 // tight While loop using the source condition directly
                 // as the loop guard, eliminating the flag variable,
                 // inner conditional, identity param copies, and dummy
                 // values.  Saves ~16 BDSL ops per iteration.
-                boolean emittedDirect = false;
-                NodeIR body = ir.getBody();
-
-                if (body instanceof IfIR ifBody) {
+                if (!emittedDirect && body instanceof IfIR ifBody) {
                     NodeIR cond = ifBody.getCond();
                     NodeIR thenBr = ifBody.getThenBr();
                     NodeIR elseBr = ifBody.getElseBr();
@@ -5592,6 +5604,211 @@ public final class BytecodeCompiler {
         }
         emitIfLetChain(c, iletIdx + 1, cases, caseIdx, scrutineeLocal, b, argCount, localMap);
         b.endBlock();
+    }
+
+    // ── Fused long tail-loop ────────────────────────────────
+
+    /**
+     * Attempts to emit a {@code FusedLongTailLoop} BDSL operation for a
+     * 2-parameter self-tail-loop where:
+     * <ul>
+     *   <li>The condition is a comparison of one param with a constant</li>
+     *   <li>Each param update is param OP constant (or param OP otherParam)</li>
+     *   <li>The base case returns one of the params</li>
+     * </ul>
+     * Returns true if emission succeeded; the caller should skip the
+     * direct-while fallback in that case.
+     */
+    private boolean tryEmitFusedLongTailLoop(
+            IfIR ifBody, FunctionIR ir, int paramCount, int captureCount,
+            MezzeBytecodeRootNodeGen.Builder b, int argCount,
+            BytecodeLocal[] localMap) {
+        NodeIR cond = ifBody.getCond();
+        NodeIR thenBr = ifBody.getThenBr();
+        NodeIR elseBr = ifBody.getElseBr();
+
+        // Identify tail-call branch and base-case branch.
+        // invertCond: the FusedLongTailLoop loops while condition is FALSE
+        // (condition triggers the base case). When the tail call is in
+        // the then-branch, we must negate the condition.
+        CallDirectIR tailCall = null;
+        NodeIR baseExpr = null;
+        boolean invertCond = false;
+
+        if (elseBr instanceof CallDirectIR ec && ec.isTailCall()
+                && ec.getTargetHash().equals(ir.getHash())
+                && ec.getArgs().size() == paramCount) {
+            tailCall = ec; baseExpr = thenBr;
+        } else if (thenBr instanceof CallDirectIR tc && tc.isTailCall()
+                && tc.getTargetHash().equals(ir.getHash())
+                && tc.getArgs().size() == paramCount) {
+            tailCall = tc; baseExpr = elseBr;
+            invertCond = true;
+        }
+        if (tailCall == null) return false;
+
+        // Helper: resolve IR node to param index (0-based), or -1.
+        // Params appear as ReadLocalIR(slot < argCount, slot >= captureCount)
+        // or ReadArgIR(index >= captureCount).
+        int ac = captureCount + paramCount; // argCount
+        java.util.function.ToIntFunction<NodeIR> paramIdx = n -> {
+            if (n instanceof ReadLocalIR rl && rl.getSlot() < ac && rl.getSlot() >= captureCount)
+                return rl.getSlot() - captureCount;
+            if (n instanceof ReadArgIR ra && ra.getIndex() >= captureCount && ra.getIndex() < ac)
+                return ra.getIndex() - captureCount;
+            return -1;
+        };
+
+        // Base case must read one of the params.
+        int resultIdx = paramIdx.applyAsInt(baseExpr);
+        if (resultIdx < 0) return false;
+
+        // Condition must be InlineBinaryOpIR(cmpOp, param, LongLitIR)
+        // or InlineBinaryOpIR(cmpOp, LongLitIR, param).
+        if (!(cond instanceof InlineBinaryOpIR condBin)) return false;
+        int condCmpOp = fltlClassifyCmp(condBin.getOp());
+        if (condCmpOp < 0) return false;
+
+        boolean condOnP0;
+        long condRhsVal;
+        int leftPI = paramIdx.applyAsInt(condBin.getLeft());
+        int rightPI = paramIdx.applyAsInt(condBin.getRight());
+        if (leftPI >= 0 && condBin.getRight() instanceof LongLitIR clit) {
+            condOnP0 = (leftPI == 0);
+            condRhsVal = clit.getValue();
+        } else if (rightPI >= 0 && condBin.getLeft() instanceof LongLitIR clit) {
+            condOnP0 = (rightPI == 0);
+            condCmpOp = fltlSwapCmp(condCmpOp);
+            condRhsVal = clit.getValue();
+        } else {
+            return false;
+        }
+
+        // If tail call was in the then-branch, negate the condition.
+        if (invertCond) condCmpOp = fltlNegateCmp(condCmpOp);
+
+        // Classify each arg update.
+        int[] updateOp = new int[2];
+        long[] updateRhs = new long[2];
+        boolean[] rhsIsOther = new boolean[2];
+
+        for (int i = 0; i < paramCount; i++) {
+            NodeIR arg = tailCall.getArgs().get(i);
+            int pi = paramIdx.applyAsInt(arg);
+            if (pi == i) { updateOp[i] = -1; continue; } // identity
+            if (pi >= 0) return false; // reads OTHER param directly — too complex
+
+            // Extract (op, leftNode, rightNode) from either
+            // InlineBinaryOpIR or CallNativeIR (scalar-ABI 2-arg).
+            int op;
+            NodeIR leftNode, rightNode;
+            if (arg instanceof InlineBinaryOpIR upBin) {
+                op = fltlClassifyArithOp(upBin.getOp());
+                leftNode = upBin.getLeft();
+                rightNode = upBin.getRight();
+            } else if (arg instanceof CallNativeIR cnir
+                    && cnir.isScalarABI() && cnir.getArgs().size() == 2) {
+                op = fltlClassifyNativeArithOp(cnir.getName());
+                leftNode = cnir.getArgs().get(0);
+                rightNode = cnir.getArgs().get(1);
+            } else {
+                return false;
+            }
+            if (op < 0) return false;
+
+            // Left must be THIS param
+            int lpi = paramIdx.applyAsInt(leftNode);
+            if (lpi != i) return false;
+
+            // Right: LongLitIR or OTHER param
+            if (rightNode instanceof LongLitIR rlit) {
+                updateOp[i] = op;
+                updateRhs[i] = rlit.getValue();
+                rhsIsOther[i] = false;
+            } else {
+                int rpi = paramIdx.applyAsInt(rightNode);
+                if (rpi < 0 || rpi == i) return false;
+                updateOp[i] = op;
+                updateRhs[i] = 0;
+                rhsIsOther[i] = true;
+            }
+        }
+
+        // All checks passed — emit FusedLongTailLoop.
+        int config = MezzeBytecodeRootNode.fltlPack(
+                condCmpOp, condOnP0,
+                updateOp[0], updateOp[1],
+                resultIdx,
+                rhsIsOther[0], rhsIsOther[1]);
+
+        b.beginFusedLongTailLoop(config);
+        // p0Init
+        b.emitLoadArgument(captureCount);
+        // p1Init
+        b.emitLoadArgument(captureCount + 1);
+        // condRhs
+        b.emitLoadLongConstant(condRhsVal);
+        // p0UpdateRhs (0 if identity or other-param)
+        b.emitLoadLongConstant(updateRhs[0]);
+        // p1UpdateRhs
+        b.emitLoadLongConstant(updateRhs[1]);
+        b.endFusedLongTailLoop();
+
+        return true;
+    }
+
+    private static int fltlClassifyCmp(InlineOp op) {
+        return switch (op) {
+            case EQ  -> 5;
+            case NEQ -> 6;
+            case LT  -> 7;
+            case LE  -> 8;
+            case GT  -> 9;
+            case GE  -> 10;
+            default  -> -1;
+        };
+    }
+
+    private static int fltlSwapCmp(int cmpOp) {
+        // Swap sides: a < b ↔ b > a
+        return switch (cmpOp) {
+            case 7 -> 9;   // LT ↔ GT
+            case 8 -> 10;  // LE ↔ GE
+            case 9 -> 7;   // GT ↔ LT
+            case 10 -> 8;  // GE ↔ LE
+            default -> cmpOp; // EQ, NEQ are symmetric
+        };
+    }
+
+    private static int fltlNegateCmp(int cmpOp) {
+        // Negate: !(a == b) → a != b, !(a < b) → a >= b, etc.
+        return switch (cmpOp) {
+            case 5 -> 6;   // EQ → NEQ
+            case 6 -> 5;   // NEQ → EQ
+            case 7 -> 10;  // LT → GE
+            case 8 -> 9;   // LE → GT
+            case 9 -> 8;   // GT → LE
+            case 10 -> 7;  // GE → LT
+            default -> cmpOp;
+        };
+    }
+
+    private static int fltlClassifyArithOp(InlineOp op) {
+        return switch (op) {
+            case ADD -> 0;
+            case SUB -> 1;
+            case MUL -> 2;
+            case DIV -> 3;
+            case MOD -> 4;
+            default  -> -1;
+        };
+    }
+
+    /** Classify a CallNativeIR name via its NativeSignature's inlineOp. */
+    private static int fltlClassifyNativeArithOp(String name) {
+        var sig = NativeSignatures.INSTANCE.signatureOf(name);
+        if (sig == null || sig.getInlineOp() == null) return -1;
+        return fltlClassifyArithOp(sig.getInlineOp());
     }
 
     // ── Self-tail-loop helpers ────────────────────────────────
