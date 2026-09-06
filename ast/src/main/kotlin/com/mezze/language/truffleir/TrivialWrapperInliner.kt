@@ -421,9 +421,12 @@ object TrivialWrapperInliner {
                         val substituted = substituteParams(
                             wrapper.body, rewrittenArgs, wrapper.captureSlots.size)
                         stats.sitesInlined++
+                        // Collapse CallNativeIR → InlineBinaryOpIR when
+                        // the native has an inlineOp equivalent.
+                        val collapsed = maybeCollapseInlineOp(substituted)
                         // Recurse in case the wrapper body referenced
                         // another wrapper (chain of trivial forwarders).
-                        return rewrite(substituted, wrappers, stats)
+                        return rewrite(collapsed, wrappers, stats)
                     } else {
                         stats.sitesSkippedHeavyArg++
                     }
@@ -437,6 +440,27 @@ object TrivialWrapperInliner {
             }
         }
         return recurseChildren(node) { rewrite(it, wrappers, stats) }
+    }
+
+    /** Collapse a CallNativeIR to InlineBinaryOpIR when the native
+     *  declares an inlineOp. Mirrors TypedASTCompiler.maybeCollapseInlineOp
+     *  but runs in the ast module (no typechecker dependency). */
+    private fun maybeCollapseInlineOp(node: NodeIR): NodeIR {
+        if (node !is CallNativeIR) return node
+        val sig = NativeSignatures.signatureOf(node.name) ?: return node
+        val op = sig.inlineOp ?: return node
+        val positional: List<NodeIR>? = when {
+            node.isScalarABI && node.args.size == sig.params.size -> node.args
+            node.arg is MakeRecordIR -> {
+                val record = node.arg as MakeRecordIR
+                val fields = record.fields.filterIsInstance<FieldIR>()
+                if (fields.size != sig.params.size) null
+                else sig.params.map { p -> fields.find { it.name == p.name }?.value ?: return node }
+            }
+            else -> null
+        }
+        if (positional == null || positional.size != 2) return node
+        return InlineBinaryOpIR(op, positional[0], positional[1], node.src)
     }
 
     /**
