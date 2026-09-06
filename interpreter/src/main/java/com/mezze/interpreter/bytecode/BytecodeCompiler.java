@@ -1094,7 +1094,6 @@ public final class BytecodeCompiler {
         final int argCount = ir.getCaptureSlots().size() + ir.getParamSlots().size();
         final int localCount = ir.getLocalSlots().size();
 
-
         // Wrap the raw BDSL root in a trampoline when EITHER:
         //   (a) the body has tail calls (need the LoopNode + catch loop),
         //   OR
@@ -2045,11 +2044,19 @@ public final class BytecodeCompiler {
             // target the trampoline itself — correctness is preserved
             // (the trampoline handles both ABIs via normalizeArgs), we
             // just lose the ~13-15 ns bypass on this specific edge case.
+            // Bypass the trampoline when the callee is a pure scalar
+            // function: route directly to the inner BDSL root, skipping
+            // normalizeArgs overhead (~13-15 ns). Guard: closureCount==0
+            // because normalizeArgs also injects captured closures into
+            // the argument array — skipping it when closures exist causes
+            // AIOOBE (the inner root expects [closures..., params...] but
+            // receives only [params...]).
             if (c.isScalarABI()
                     && target instanceof com.oracle.truffle.api.RootCallTarget rct
                     && rct.getRootNode() instanceof TrampolineRootNode tramp
                     && !tramp.hasTailCalls()
                     && !c.isTailCall()
+                    && tramp.getClosureCount() == 0
                     && tramp.getInnerTarget() != null) {
                 target = tramp.getInnerTarget();
             }
@@ -2120,7 +2127,8 @@ public final class BytecodeCompiler {
                 boolean canBypass = c.isScalarABI()
                         && target instanceof com.oracle.truffle.api.RootCallTarget rct1
                         && rct1.getRootNode() instanceof TrampolineRootNode tramp1
-                        && !tramp1.hasTailCalls();
+                        && !tramp1.hasTailCalls()
+                        && tramp1.getClosureCount() == 0;
                 b.beginCallDirect1(target, canBypass);
                 emitNode(c.getArgs().get(0), b, argCount, localMap);
                 b.endCallDirect1();
@@ -2128,7 +2136,8 @@ public final class BytecodeCompiler {
                 boolean canBypass = c.isScalarABI()
                         && target instanceof com.oracle.truffle.api.RootCallTarget rct2
                         && rct2.getRootNode() instanceof TrampolineRootNode tramp2
-                        && !tramp2.hasTailCalls();
+                        && !tramp2.hasTailCalls()
+                        && tramp2.getClosureCount() == 0;
                 b.beginCallDirect2(target, canBypass);
                 for (NodeIR arg : c.getArgs()) {
                     emitNode(arg, b, argCount, localMap);
@@ -2138,7 +2147,8 @@ public final class BytecodeCompiler {
                 boolean canBypass = c.isScalarABI()
                         && target instanceof com.oracle.truffle.api.RootCallTarget rct3
                         && rct3.getRootNode() instanceof TrampolineRootNode tramp3
-                        && !tramp3.hasTailCalls();
+                        && !tramp3.hasTailCalls()
+                        && tramp3.getClosureCount() == 0;
                 b.beginCallDirect3(target, canBypass);
                 for (NodeIR arg : c.getArgs()) {
                     emitNode(arg, b, argCount, localMap);
@@ -2508,7 +2518,17 @@ public final class BytecodeCompiler {
             for (var cap : ml.getCaptures()) {
                 int slot = cap.getSlot();
                 if (slot < argCount) {
-                    b.emitLoadArgument(slot);
+                    // Self-tail-loop remapping: when a captured slot is a
+                    // param (>= captureCount), read from the loop-local
+                    // copy instead of the original argument. Without this,
+                    // closures created inside a self-tail-loop always
+                    // capture the INITIAL param value from the first
+                    // iteration, not the current iteration's value.
+                    if (inSelfTailLoop && slot >= selfTailCaptureCount) {
+                        b.emitLoadLocal(selfTailParamLocals[slot - selfTailCaptureCount]);
+                    } else {
+                        b.emitLoadArgument(slot);
+                    }
                 } else {
                     // Use LoadLocalOrNull — a null-tolerant read that
                     // returns null on an Illegal (unwritten) slot,

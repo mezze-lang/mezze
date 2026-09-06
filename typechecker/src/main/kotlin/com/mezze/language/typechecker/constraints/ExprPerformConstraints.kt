@@ -311,10 +311,17 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         abilityConstraints = exprResult.abilityConstraints + handlerParamAbilityConstraints,
         associatedTypeConstraints = exprResult.associatedTypeConstraints,
         undefinedVariables = exprResult.undefinedVariables,
+        // Tail-call locations detected inside the perform body must propagate out
+        // so the aggregation in TypeChecker sees them. Without this, a self-tail-call
+        // in a do-block `let` inside `perform ... in do { ... }` is lost and the
+        // bytecode compiler never emits a self-tail-loop.
+        tailCalls = exprResult.tailCalls,
         usedVariables = exprResult.usedVariables,
         referencedBindings = exprResult.referencedBindings,
         methodCallResolutions = exprResult.methodCallResolutions,
         callReturnTypes = exprResult.callReturnTypes + (expr.loc to resultType),
+        matchCaseBindings = exprResult.matchCaseBindings,
+        matchScrutineeTypes = exprResult.matchScrutineeTypes,
         // Carry the body's nested-perform entries and add this perform's. Mirrors
         // callReturnTypes: generatePerform encapsulates body generation, so body
         // side-tables must be threaded through its return or they are lost.

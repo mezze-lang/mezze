@@ -866,6 +866,12 @@ class TypedASTCompiler(
         val prevFunctionHash = currentFunctionHash
         currentFunctionHash = hash
 
+        // Save recursiveLetLambdas for restore, but do NOT scope here.
+        // The compileCall lookup guards on isTailCall, preventing cross-fn
+        // CallDirectIR; and compileVar's MakeLambdaIR path needs to see
+        // outer entries to avoid the closure-captures-null problem.
+        val prevRecursiveLets = recursiveLetLambdas.toMap()
+
         // Check if this function needs dictionary params (pre-scanned).
         // Dictionary params are hidden params appended after regular params,
         // named __dict_<methodName>. They carry the ability op function
@@ -924,6 +930,8 @@ class TypedASTCompiler(
         currentCaptureCount = prevCaptureCount
         currentDictParams = prevDictParams
         currentFunctionHash = prevFunctionHash
+        recursiveLetLambdas.clear()
+        recursiveLetLambdas.putAll(prevRecursiveLets)
 
         val fnIR = FunctionIR(
             hash = hash,
@@ -1793,6 +1801,21 @@ class TypedASTCompiler(
                         census.indirect++
                         emitCallIndirect(ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                     } else {
+                        // Recursive-let self-TAIL-call from within the lambda
+                        // body: emit CallDirectIR so the bytecode compiler can
+                        // apply self-tail-loop (rewrite as param update + continue).
+                        //
+                        // ONLY for tail calls: a non-tail self-call emits
+                        // CallDirectIR without captures, but the trampoline
+                        // expects [captures..., params...] → AIOOBE. Non-tail
+                        // self-calls fall through to CallIndirectIR, which
+                        // compileVar resolves via MakeLambdaIR (creating a
+                        // closure with correct captures).
+                        val recursiveLet = recursiveLetLambdas[fn.name]
+                        if (recursiveLet != null && expr.isTailCall) {
+                            census.byHashPlain++
+                            return emitCallDirect(recursiveLet.hash, argIR, true, src)
+                        }
                         // If depth > 0 and not found locally, check if it's a top-level
                         // declaration. Use CallDirectIR for better performance.
                         //

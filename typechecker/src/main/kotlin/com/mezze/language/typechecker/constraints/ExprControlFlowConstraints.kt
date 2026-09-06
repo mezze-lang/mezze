@@ -414,11 +414,18 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     currentContext
                 }
 
+                // Set enclosingFunctionName for local self-recursive lambdas
+                // so that tail calls within the lambda body are detected.
+                // This mirrors what ConstraintGenerator.generateLetBinding
+                // does for top-level let bindings.
+                val localFnName = if (isRecursiveLetCandidate)
+                    (stmt.pattern as ParsedVariablePattern).name else null
+
                 val exprContext = if (annotatedType != null) {
                     preBindContext.withExpectedType(annotatedType)
                 } else {
                     preBindContext
-                }
+                }.copy(enclosingFunctionName = localFnName)
                 val exprResult = generate(stmt.value, exprContext)
 
                 if (preBindType != null && annotatedType == null) {

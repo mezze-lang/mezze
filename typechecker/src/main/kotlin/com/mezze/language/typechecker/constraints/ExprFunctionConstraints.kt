@@ -1119,7 +1119,9 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
             effectRow.rowVar?.let { collector.effectRowVars.add(it) }
             collector.performed = collector.performed || effectRow.performed
 
-            if (tailCallLocation != null) collector.tailCalls.add(tailCallLocation)
+            if (tailCallLocation != null) {
+                collector.tailCalls.add(tailCallLocation)
+            }
 
             if (functionType.abilityConstraints.isNotEmpty()) {
                 val methodLevelConstraints = functionType.abilityConstraints.mapNotNull { constraint ->
