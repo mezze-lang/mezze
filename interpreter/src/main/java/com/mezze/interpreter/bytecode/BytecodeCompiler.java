@@ -5663,20 +5663,25 @@ public final class BytecodeCompiler {
         int resultIdx = paramIdx.applyAsInt(baseExpr);
         if (resultIdx < 0) return false;
 
-        // Condition must be InlineBinaryOpIR(cmpOp, param, LongLitIR)
-        // or InlineBinaryOpIR(cmpOp, LongLitIR, param).
-        if (!(cond instanceof InlineBinaryOpIR condBin)) return false;
-        int condCmpOp = fltlClassifyCmp(condBin.getOp());
+        // Condition must be a comparison (param CMP constant) or
+        // (constant CMP param). Accepted IR shapes: InlineBinaryOpIR,
+        // CallNativeIR (scalar-ABI 2-arg), or CallIndirectIR wrapping
+        // ReadField(<op>, receiver) + MakeRecord{r = ...} (VarType path).
+        InlineOp condOp = fltlExtractOp(cond);
+        if (condOp == null) return false;
+        int condCmpOp = fltlClassifyCmp(condOp);
         if (condCmpOp < 0) return false;
+        NodeIR condLeft = fltlExtractChild(cond, 0);
+        NodeIR condRight = fltlExtractChild(cond, 1);
 
         boolean condOnP0;
         long condRhsVal;
-        int leftPI = paramIdx.applyAsInt(condBin.getLeft());
-        int rightPI = paramIdx.applyAsInt(condBin.getRight());
-        if (leftPI >= 0 && condBin.getRight() instanceof LongLitIR clit) {
+        int leftPI = paramIdx.applyAsInt(condLeft);
+        int rightPI = paramIdx.applyAsInt(condRight);
+        if (leftPI >= 0 && condRight instanceof LongLitIR clit) {
             condOnP0 = (leftPI == 0);
             condRhsVal = clit.getValue();
-        } else if (rightPI >= 0 && condBin.getLeft() instanceof LongLitIR clit) {
+        } else if (rightPI >= 0 && condLeft instanceof LongLitIR clit) {
             condOnP0 = (rightPI == 0);
             condCmpOp = fltlSwapCmp(condCmpOp);
             condRhsVal = clit.getValue();
@@ -5698,23 +5703,15 @@ public final class BytecodeCompiler {
             if (pi == i) { updateOp[i] = -1; continue; } // identity
             if (pi >= 0) return false; // reads OTHER param directly — too complex
 
-            // Extract (op, leftNode, rightNode) from either
-            // InlineBinaryOpIR or CallNativeIR (scalar-ABI 2-arg).
-            int op;
-            NodeIR leftNode, rightNode;
-            if (arg instanceof InlineBinaryOpIR upBin) {
-                op = fltlClassifyArithOp(upBin.getOp());
-                leftNode = upBin.getLeft();
-                rightNode = upBin.getRight();
-            } else if (arg instanceof CallNativeIR cnir
-                    && cnir.isScalarABI() && cnir.getArgs().size() == 2) {
-                op = fltlClassifyNativeArithOp(cnir.getName());
-                leftNode = cnir.getArgs().get(0);
-                rightNode = cnir.getArgs().get(1);
-            } else {
-                return false;
-            }
+            // Extract (op, leftNode, rightNode) from InlineBinaryOpIR,
+            // CallNativeIR (scalar-ABI 2-arg), or CallIndirectIR
+            // (VarType ability-dispatch: ReadField + MakeRecord).
+            InlineOp extractedOp = fltlExtractOp(arg);
+            if (extractedOp == null) return false;
+            int op = fltlClassifyArithOp(extractedOp);
             if (op < 0) return false;
+            NodeIR leftNode = fltlExtractChild(arg, 0);
+            NodeIR rightNode = fltlExtractChild(arg, 1);
 
             // Left must be THIS param
             int lpi = paramIdx.applyAsInt(leftNode);
@@ -5809,6 +5806,60 @@ public final class BytecodeCompiler {
         var sig = NativeSignatures.INSTANCE.signatureOf(name);
         if (sig == null || sig.getInlineOp() == null) return -1;
         return fltlClassifyArithOp(sig.getInlineOp());
+    }
+
+    /**
+     * Unified extraction of the {@link InlineOp} from any binary-op IR shape:
+     * <ol>
+     *   <li>{@code InlineBinaryOpIR} — direct inline op</li>
+     *   <li>{@code CallNativeIR} (scalar-ABI, 2-arg) — via NativeSignatures</li>
+     *   <li>{@code CallIndirectIR(ReadField(receiver, opName), MakeRecord{r=...})}
+     *       — VarType ability-dispatch path (the receiver IS the left operand;
+     *       "r" field IS the right operand). Uses {@link #inlineOpFor} to map
+     *       the field name to an InlineOp.</li>
+     * </ol>
+     * Returns the InlineOp, or null if the node doesn't match any shape.
+     */
+    private InlineOp fltlExtractOp(NodeIR node) {
+        if (node instanceof InlineBinaryOpIR bin) {
+            return bin.getOp();
+        }
+        if (node instanceof CallNativeIR cnir
+                && cnir.isScalarABI() && cnir.getArgs().size() == 2) {
+            var sig = NativeSignatures.INSTANCE.signatureOf(cnir.getName());
+            return (sig != null) ? sig.getInlineOp() : null;
+        }
+        if (node instanceof CallIndirectIR ci
+                && ci.getFunction() instanceof ReadFieldIR rf
+                && ci.getArg() instanceof MakeRecordIR) {
+            return inlineOpFor(rf.getFieldName());
+        }
+        return null;
+    }
+
+    /**
+     * Retrieve the left (index=0) or right (index=1) child from a
+     * binary-op IR node matched by {@link #fltlExtractBinOp}.
+     */
+    private static NodeIR fltlExtractChild(NodeIR node, int childIdx) {
+        if (node instanceof InlineBinaryOpIR bin) {
+            return childIdx == 0 ? bin.getLeft() : bin.getRight();
+        }
+        if (node instanceof CallNativeIR cnir && cnir.isScalarABI()) {
+            return cnir.getArgs().get(childIdx);
+        }
+        if (node instanceof CallIndirectIR ci
+                && ci.getFunction() instanceof ReadFieldIR rf) {
+            if (childIdx == 0) return rf.getRecord(); // receiver = left operand
+            // Right operand is the "r" field of the MakeRecord arg
+            if (ci.getArg() instanceof MakeRecordIR mr) {
+                for (FieldIR f : mr.getFields()) {
+                    if ("r".equals(f.getName())) return f.getValue();
+                }
+            }
+            return null;
+        }
+        return null;
     }
 
     // ── Self-tail-loop helpers ────────────────────────────────

@@ -476,10 +476,19 @@ graalvmNative {
             // (--macro:truffle-svm for JIT — see flags file).
             args.addAll(sharedFlags["cli-only-flags"].orEmpty())
 
-            // G1GC only supported on Linux
+            // G1GC requires Oracle GraalVM (not CE). Probe via
+            // `native-image --version` output — Oracle ships "Oracle GraalVM",
+            // CE ships "GraalVM CE".
             val os = System.getProperty("os.name").lowercase()
             if (os.contains("linux")) {
-                args.add("--gc=G1")
+                val niVersionOut = try {
+                    ProcessBuilder("native-image", "--version")
+                        .redirectErrorStream(true).start()
+                        .inputStream.bufferedReader().readText()
+                } catch (_: Exception) { "" }
+                if (niVersionOut.contains("Oracle GraalVM")) {
+                    args.add("--gc=G1")
+                }
             }
 
 

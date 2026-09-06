@@ -533,12 +533,12 @@ class BuildCommand {
             # saved). Short-lived CLI programs rarely GC at all; Serial's
             # single-threaded stop-the-world is never noticeable. CDS and
             # Serial GC are compatible (only ZGC is not).
-            # TieredStopAtLevel=1: skip C2 compilation of Java framework
-            # code. Truffle JIT uses JVMCI/Graal independently — C2 only
-            # adds startup overhead without benefiting Mezze code. Saves
-            # ~100-130ms on cold start; no regression on compute-heavy
-            # workloads (tested up to 1B iterations).
-            DEFAULT_OPTS="-Xmx4g -XX:+UseSerialGC -XX:+TieredCompilation -XX:TieredStopAtLevel=1 $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
+            # NOTE: Do NOT use -XX:TieredStopAtLevel=1 here. While it saves
+            # ~100ms startup, it disables the Graal/JVMCI JIT compiler that
+            # Truffle uses for Mezze code — causing a 10-20× regression on
+            # compute-heavy workloads (e.g. 12ms → 139ms for a 20M-iteration
+            # tail loop). The Graal JIT requires at least tier 4 (C2 level).
+            DEFAULT_OPTS="-Xmx4g -XX:+UseSerialGC $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
             OPTS="${'$'}{MEZZE_JAVA_OPTS:-${'$'}DEFAULT_OPTS}"
 
             exec "${'$'}JAVA" ${'$'}OPTS -jar "${'$'}JAR" "${'$'}@"
@@ -566,7 +566,7 @@ class BuildCommand {
                 exit /b 1
             )
             if "%MEZZE_JAVA%"=="" set "MEZZE_JAVA=java"
-            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-Xmx4g -XX:+UseSerialGC -XX:+TieredCompilation -XX:TieredStopAtLevel=1 $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
+            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-Xmx4g -XX:+UseSerialGC $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
             "%MEZZE_JAVA%" %MEZZE_JAVA_OPTS% -jar "%JAR%" %*
         """.trimIndent() + "\r\n"
         launcher.writeText(script)
@@ -598,8 +598,11 @@ class BuildCommand {
             javaBin,
             "-XX:ArchiveClassesAtExit=${jsaFile.absolutePath}",
             "-XX:+UseSerialGC",
-            "-XX:+TieredCompilation",
-            "-XX:TieredStopAtLevel=1",
+            // CDS training is a dry-run that exits immediately — TieredStopAtLevel=1
+            // speeds up the training but must stay out of the production launcher
+            // (it kills the Graal JIT). Using it here only is fine: CDS archives
+            // don't encode tiered-compilation state.
+            "-XX:+TieredCompilation", "-XX:TieredStopAtLevel=1",
             "--enable-native-access=ALL-UNNAMED",
             "--sun-misc-unsafe-memory-access=allow",
             "--add-modules=jdk.incubator.vector,jdk.internal.vm.ci",
