@@ -113,14 +113,11 @@ class AbilityDispatchExhaustiveTest {
             "\"$(s.lower {})/$(s.upper {})\""));
     }
 
-    @Test
-    @Disabled("PRE-EXISTING (not from this session — reproduces with the Inspect "
-        + "lowering disabled too): an ability impl body that calls the auto-derived "
-        + "`to_str`/`to_dbg` on a FIELD (`it.v.to_str {}`) compiles the whole impl to "
-        + "return the op function uncalled (`<function d>`) instead of running the body. "
-        + "A user ability method on a field (`it.name.shout {}`) works; only Inspect "
-        + "on a field inside an impl body is affected.")
-    void toStrOnFieldInsideImplBody_knownBug() {
+    @Test void toStrOnFieldInsideImplBody() {
+        // Fixed: `to_str`/`to_dbg` on a field inside an impl body no longer
+        // demand a phantom `__dict_to_str` (they are InspectIR/receiver-typed,
+        // never dict-dispatched), so the impl runs instead of returning the op
+        // function uncalled.
         assertEquals("5", run(
             "ability D for 'a where { d: { it: 'a } -> Str }\n" +
             "type N = { v: Int }\n" +
@@ -128,4 +125,14 @@ class AbilityDispatchExhaustiveTest {
             "let x: N = { v = 5 }\n" +
             "x.d {}"));
     }
+
+    @Test void toDbgOnFieldInsideImplBody() {
+        assertEquals("5", run(
+            "ability D for 'a where { d: { it: 'a } -> Str }\n" +
+            "type N = { v: Int }\n" +
+            "impl D for N where { d = { it } -> it.v.to_dbg {} }\n" +
+            "let x: N = { v = 5 }\n" +
+            "x.d {}"));
+    }
+
 }

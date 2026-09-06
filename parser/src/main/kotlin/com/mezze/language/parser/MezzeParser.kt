@@ -773,6 +773,7 @@ class MezzeParser {
             is ParseResult.Success -> {
                 val results = mutableListOf(first.value)
                 var currentStream = first.remaining
+                var fatal: ParseResult.Failure? = null
 
                 while (true) {
                     when (val sep = separator(currentStream)) {
@@ -784,6 +785,11 @@ class MezzeParser {
                                     currentStream = next.remaining
                                 }
                                 is ParseResult.Failure -> {
+                                    // A FATAL entry failure means the parser committed
+                                    // to this position and produced a targeted error
+                                    // (e.g. `field:` should be `field =`) — surface it
+                                    // rather than treating it as a trailing separator.
+                                    if (next.isFatal) fatal = next
                                     // Trailing separator is allowed - update position past separator
                                     currentStream = afterSep
                                     break
@@ -794,9 +800,11 @@ class MezzeParser {
                     }
                 }
 
-                ParseResult.Success(results, currentStream)
+                fatal ?: ParseResult.Success(results, currentStream)
             }
-            is ParseResult.Failure -> ParseResult.Success(emptyList(), stream)
+            // A fatal first-entry failure is a committed, targeted error; propagate
+            // it rather than masking it as "zero entries".
+            is ParseResult.Failure -> if (first.isFatal) first else ParseResult.Success(emptyList(), stream)
         }
     }
 

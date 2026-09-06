@@ -6,6 +6,9 @@ import kotlin.test.assertTrue
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertFails
+import kotlin.test.assertFalse
+import kotlin.test.assertContains
 
 /**
  * Tests for parsing standalone record patterns in match expressions
@@ -299,4 +302,25 @@ class RecordPatternParsingTest {
         assertEquals(0, recordPattern.entries.size)
         assertTrue(!recordPattern.isOpen)
     }
+    @Test
+    fun `nested record destructure with = parses`() {
+        // `let { a = { b } } = r` — a record pattern binds a field to a
+        // sub-pattern with =, mirroring `Ok { val = x }`.
+        val code = "let f = { r } -> do\n  let { product = { product_name } } = r\n  product_name"
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
+    }
+
+    @Test
+    fun `field colon in a record pattern gives a clear error, not a cryptic one`() {
+        // Common slip: writing `:` (type-annotation syntax) instead of `=`.
+        val code = "let f = { r } -> do\n  let { product: { product_name } } = r\n  product_name"
+        val error = assertFails { parser.parseParsedModule(code) }
+        val msg = error.message ?: ""
+        assertContains(msg, "`=`")
+        assertContains(msg, "`:`")
+        assertFalse(msg.contains("Do block is empty"),
+            "should not fall through to the cryptic empty-do-block error: $msg")
+    }
+
 }

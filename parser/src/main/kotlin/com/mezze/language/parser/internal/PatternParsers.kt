@@ -612,11 +612,29 @@ internal val MezzeParser.recordPatternEntryParser: Parser<ParsedRecordPatternEnt
                             }
                         }
                         is ParseResult.Failure -> {
-                            // Punning: field
-                            ParseResult.Success(
-                                ParsedRecordPatternEntry(fieldName, null, fieldLoc),
-                                stream1
-                            )
+                            // A record PATTERN binds a field to a sub-pattern with `=`
+                            // (`{ product = { name } }`), like `Ok { val = x }` — `:`
+                            // is for type annotations. Catch the common `field:` slip
+                            // with a clear, fatal error instead of falling through to
+                            // punning and leaving the `:` to derail downstream into a
+                            // cryptic "Do block is empty".
+                            if (stream1.current()?.type == TokenType.COLON) {
+                                ParseResult.Failure(
+                                    "Record patterns bind a field with `=`, not `:` — " +
+                                        "write `{ " + fieldName + " = <pattern> }` (`:` is for " +
+                                        "type annotations). Shorthand `{ " + fieldName + " }` also works.",
+                                    stream1.getSourcePosition(),
+                                    stream1.getSourceLine(),
+                                    stream1.getSourceColumn(),
+                                    isFatal = true,
+                                )
+                            } else {
+                                // Punning: field
+                                ParseResult.Success(
+                                    ParsedRecordPatternEntry(fieldName, null, fieldLoc),
+                                    stream1
+                                )
+                            }
                         }
                     }
                 }

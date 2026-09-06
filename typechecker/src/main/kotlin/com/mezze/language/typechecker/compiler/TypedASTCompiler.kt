@@ -435,7 +435,21 @@ class TypedASTCompiler(
                         // are auto-derived per user type). Outside a
                         // constrained arrow, fall back to the pre-existing
                         // "multiple candidates → dict" rule.
+                        // `to_str` / `to_dbg` with no user ability op are the
+                        // InspectIR path (auto-derived, receiver's shape baked at
+                        // compile time) — never dict-dispatched. Marking them makes
+                        // the enclosing op demand a `__dict_to_str` the caller never
+                        // passes, so `x.op {}` returns the op function uncalled. Do
+                        // NOT mark them unless a real ability op of that name exists.
+                        // `to_str` / `to_dbg` are resolved by the InspectIR path
+                        // (or a receiver-typed free fn), NEVER by a runtime dict —
+                        // there are many same-named `to_str` (one per type), which
+                        // would otherwise trip the multiple-candidates rule below and
+                        // demand a `__dict_to_str` the caller never passes.
+                        val isInspectSugar =
+                            methodName == Keywords.TO_STR || methodName == Keywords.TO_DBG
                         val shouldMark = when {
+                            isInspectSugar -> false
                             arrowIsConstrained -> true
                             opCandidates != null && opCandidates.size > 1 -> true
                             else -> false
