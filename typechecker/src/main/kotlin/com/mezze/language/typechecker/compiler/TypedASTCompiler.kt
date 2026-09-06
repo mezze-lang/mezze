@@ -1357,7 +1357,7 @@ class TypedASTCompiler(
                     }
                 }
             }
-            is BindingRef.Native -> CallNativeIR(binding.name, UnitLitIR(src), src)
+            is BindingRef.Native -> CallNativeIR(binding.name, UnitLitIR(src), src, isPure = isPureNative(binding.name))
         }
     }
 
@@ -1775,10 +1775,16 @@ class TypedASTCompiler(
                                 src = src,
                                 args = positional,
                                 argKinds = sig.argKinds,
+                                isPure = sig.pure,
+                                inlineOp = sig.inlineOp,
                             )
                         }
                     }
-                    CallNativeIR(binding.name, argIR, src)
+                    val nativeSig = NativeSignatures.signatureOf(binding.name)
+                    CallNativeIR(binding.name, argIR, src,
+                        isPure = nativeSig?.pure == true,
+                        inlineOp = nativeSig?.inlineOp,
+                    )
                 }
                 is BindingRef.Local -> {
                     // Resolve using the same scope logic as compileVar
@@ -3413,7 +3419,7 @@ class TypedASTCompiler(
         is InlineBinaryOpIR -> isInlinable(node.left, paramCount) && isInlinable(node.right, paramCount)
         is IfIR -> isInlinable(node.cond, paramCount) && isInlinable(node.thenBr, paramCount) && isInlinable(node.elseBr, paramCount)
         is MakeRecordIR -> node.fields.all { it is FieldIR && isInlinable(it.value, paramCount) }
-        is CallNativeIR -> isPureNative(node.name) && isInlinable(node.arg, paramCount) &&
+        is CallNativeIR -> (node.isPure || isPureNative(node.name)) && isInlinable(node.arg, paramCount) &&
             node.args.all { isInlinable(it, paramCount) }
         is CallDirectIR -> !node.isTailCall && node.args.all { isInlinable(it, paramCount) }
         else -> false
@@ -3515,14 +3521,18 @@ class TypedASTCompiler(
      */
     private fun maybeCollapseInlineOp(node: NodeIR): NodeIR {
         if (node !is CallNativeIR) return node
-        val sig = NativeSignatures.signatureOf(node.name) ?: return node
-        val op = sig.inlineOp ?: return node
+        // Prefer the IR-embedded inlineOp (survives serialization); fall
+        // back to the live registry for backwards compat.
+        val op = node.inlineOp
+            ?: NativeSignatures.signatureOf(node.name)?.inlineOp
+            ?: return node
         // Fetch positional args uniformly. Scalar-ABI already has them in
         // `args`; record-ABI needs unpacking via the signature's param
         // order so we don't hardcode "l"/"r" here.
+        val sig = NativeSignatures.signatureOf(node.name)
         val positional: List<NodeIR>? = when {
-            node.isScalarABI && node.args.size == sig.params.size -> node.args
-            node.arg is MakeRecordIR -> {
+            node.isScalarABI && node.args.size == 2 -> node.args
+            sig != null && node.arg is MakeRecordIR -> {
                 val record = node.arg as MakeRecordIR
                 val fields = record.fields.filterIsInstance<FieldIR>()
                 if (fields.size != sig.params.size) null

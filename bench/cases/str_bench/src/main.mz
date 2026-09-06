@@ -1,0 +1,24 @@
+use std::str
+use std::int
+use std::effects::log::{println, Console}
+
+let bench_str_size_go = { i: Int, acc: Int, s: Str } -> if i == 0 then acc
+    else bench_str_size_go { i = i - 1, acc = acc + str::size { s = s }, s = s }
+
+let bench_str_size = { s: Str, iters: Int } ->
+    bench_str_size_go { i = iters, acc = 0, s = s }
+
+let main = {} -> perform Console in do
+    let s = "hello world, this is a benchmark string"
+    let n = 100000000
+
+    ## warmup
+    let _ = bench_str_size { s = s, iters = n }
+    let _ = bench_str_size { s = s, iters = n }
+    let _ = bench_str_size { s = s, iters = n }
+
+    ## measured
+    let r1 = bench_str_size { s = s, iters = n }
+    let r2 = bench_str_size { s = s, iters = n }
+    let r3 = bench_str_size { s = s, iters = n }
+    println { msg = "str_size 100M x3 checksum=$(int::to_str { n = r1 + r2 + r3 })" }

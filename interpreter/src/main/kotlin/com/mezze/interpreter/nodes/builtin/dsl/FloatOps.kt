@@ -35,115 +35,115 @@ object FloatOps {
 
     // ==================== unary Float -> Float ====================
     private val ABS = NativeOp("__native_float_abs",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatAbs(args.double(0)) }
 
     private val NEG = NativeOp("__native_float_neg",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatNegate(args.double(0)) }
 
     private val SQRT = NativeOp("__native_float_sqrt",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatSqrt(args.double(0)) }
 
     private val FLOOR = NativeOp("__native_float_floor",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatFloor(args.double(0)) }
 
     private val CEIL = NativeOp("__native_float_ceil",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatCeil(args.double(0)) }
 
     // Round returns long in PrimitiveNatives; basic-path coerces to double.
     private val ROUND = NativeOp("__native_float_round",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatRound(args.double(0)).toDouble() }
 
     // Sign — extended-path uses Math.signum directly.
     private val SIGN = NativeOp("__native_float_sign",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> Math.signum(args.double(0)) }
 
     // ==================== unary Float -> Float (trig/exp/log) ====================
     // Extended-path versions call Math.* directly, not PrimitiveNatives.
     private val SIN = NativeOp("__native_float_sin",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatSin(args.double(0)) }
 
     private val COS = NativeOp("__native_float_cos",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatCos(args.double(0)) }
 
     private val TAN = NativeOp("__native_float_tan",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatTan(args.double(0)) }
 
     private val ASIN = NativeOp("__native_float_asin",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> Math.asin(args.double(0)) }
 
     private val ACOS = NativeOp("__native_float_acos",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> Math.acos(args.double(0)) }
 
     private val ATAN = NativeOp("__native_float_atan",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> Math.atan(args.double(0)) }
 
     private val LN = NativeOp("__native_float_ln",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> Math.log(args.double(0)) }
 
     private val LOG10 = NativeOp("__native_float_log10",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> Math.log10(args.double(0)) }
 
     private val EXP = NativeOp("__native_float_exp",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> Math.exp(args.double(0)) }
 
     // ==================== binary Float, Float -> Float ====================
     private val ADD = NativeOp("__native_float_add",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatAdd(args.double(0), args.double(1)) }
 
     private val SUBTRACT = NativeOp("__native_float_subtract",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatSubtract(args.double(0), args.double(1)) }
 
     private val MULTIPLY = NativeOp("__native_float_multiply",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatMultiply(args.double(0), args.double(1)) }
 
     private val DIVIDE = NativeOp("__native_float_divide",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatDivide(args.double(0), args.double(1)) }
 
     private val MOD = NativeOp("__native_float_mod",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> args.double(0) % args.double(1) }
 
     private val MIN = NativeOp("__native_float_min",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatMin(args.double(0), args.double(1)) }
 
     private val MAX = NativeOp("__native_float_max",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatMax(args.double(0), args.double(1)) }
 
     private val POW = NativeOp("__native_float_pow",
-        listOf(Param("base", SlotKind.DOUBLE), Param("exp", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("base", SlotKind.DOUBLE), Param("exp", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.floatPow(args.double(0), args.double(1)) }
 
     // atan2 takes (y, x) — order matters, matches Math.atan2 + stdlib.
     private val ATAN2 = NativeOp("__native_float_atan2",
-        listOf(Param("y", SlotKind.DOUBLE), Param("x", SlotKind.DOUBLE)), SlotKind.DOUBLE
+        listOf(Param("y", SlotKind.DOUBLE), Param("x", SlotKind.DOUBLE)), SlotKind.DOUBLE, pure = true,
     ) { args -> Math.atan2(args.double(0), args.double(1)) }
 
     // ==================== ternary clamp ====================
     private val CLAMP = NativeOp("__native_float_clamp",
         listOf(Param("n", SlotKind.DOUBLE), Param("min", SlotKind.DOUBLE), Param("max", SlotKind.DOUBLE)),
-        SlotKind.DOUBLE
+        SlotKind.DOUBLE, pure = true,
     ) { args ->
         val n = args.double(0); val mn = args.double(1); val mx = args.double(2)
         Math.max(mn, Math.min(mx, n))
@@ -151,55 +151,55 @@ object FloatOps {
 
     // ==================== Float -> Bool predicates ====================
     private val IS_NAN = NativeOp("__native_float_is_nan",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.BOOLEAN
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.BOOLEAN, pure = true,
     ) { args -> java.lang.Double.isNaN(args.double(0)) }
 
     private val IS_INFINITE = NativeOp("__native_float_is_infinite",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.BOOLEAN
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.BOOLEAN, pure = true,
     ) { args -> java.lang.Double.isInfinite(args.double(0)) }
 
     private val IS_FINITE = NativeOp("__native_float_is_finite",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.BOOLEAN
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.BOOLEAN, pure = true,
     ) { args -> java.lang.Double.isFinite(args.double(0)) }
 
     // ==================== Float, Float -> Bool comparisons ====================
     private val EQ = NativeOp("__native_float_eq",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.floatEq(args.double(0), args.double(1)) }
 
     private val NEQ = NativeOp("__native_float_neq",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.floatNeq(args.double(0), args.double(1)) }
 
     private val LT = NativeOp("__native_float_lt",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.floatLt(args.double(0), args.double(1)) }
 
     private val LE = NativeOp("__native_float_le",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.floatLte(args.double(0), args.double(1)) }
 
     private val GT = NativeOp("__native_float_gt",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.floatGt(args.double(0), args.double(1)) }
 
     private val GE = NativeOp("__native_float_ge",
-        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.DOUBLE), Param("r", SlotKind.DOUBLE)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.floatGte(args.double(0), args.double(1)) }
 
     // ==================== conversions ====================
     private val FROM_INT = NativeOp("__native_float_from_int",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.LONG)), SlotKind.DOUBLE, pure = true,
     ) { args -> args.long(0).toDouble() }
 
     private val FROM_NAT = NativeOp("__native_float_from_nat",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.LONG)), SlotKind.DOUBLE, pure = true,
     ) { args -> args.long(0).toDouble() }
 
     // to_int returns Option<Int> — None for NaN/Infinity. Result is an
     // Object (MezzeVariant), so declared return kind is OBJECT.
     private val TO_INT = NativeOp("__native_float_to_int",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.OBJECT
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.OBJECT, pure = true,
     ) { args ->
         val n = args.double(0)
         if (java.lang.Double.isNaN(n) || java.lang.Double.isInfinite(n)) {
@@ -210,7 +210,7 @@ object FloatOps {
     }
 
     private val TO_STR = NativeOp("__native_float_to_str",
-        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.OBJECT
+        listOf(Param("n", SlotKind.DOUBLE)), SlotKind.OBJECT, pure = true,
     ) { args -> java.lang.Double.toString(args.double(0)) }
 
     // __native_float_from_string stays on the legacy record path.

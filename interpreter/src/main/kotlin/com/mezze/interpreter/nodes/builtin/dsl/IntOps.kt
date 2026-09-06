@@ -13,8 +13,6 @@ import com.mezze.language.truffleir.SlotKind
  *    stays on the record path.
  *  - `__native_int_to_frac` — returns a MezzeRecord (Frac), kept on
  *    legacy path with the rest of Frac (which takes record args too).
- *  - `__native_int_from_string` — uses an internal helper in
- *    NativeDispatch (intFromString), kept on legacy to avoid drift.
  */
 object IntOps {
     /** Forces class load when referenced; used by NativeBootstrap. */
@@ -22,15 +20,15 @@ object IntOps {
 
     // ==================== unary Int -> Int ====================
     private val ABS = NativeOp("__native_int_abs",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("n", SlotKind.LONG)), SlotKind.LONG, pure = true,
     ) { args -> PrimitiveNatives.intAbs(args.long(0)) }
 
     private val NEG = NativeOp("__native_int_neg",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("n", SlotKind.LONG)), SlotKind.LONG, pure = true,
     ) { args -> PrimitiveNatives.intNegate(args.long(0)) }
 
     private val SIGN = NativeOp("__native_int_sign",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("n", SlotKind.LONG)), SlotKind.LONG, pure = true,
     ) { args -> PrimitiveNatives.intSign(args.long(0)) }
 
     // ==================== binary Int, Int -> Int ====================
@@ -60,38 +58,38 @@ object IntOps {
     ) { args -> PrimitiveNatives.intModulo(args.long(0), args.long(1)) }
 
     private val MIN = NativeOp("__native_int_min",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG, pure = true,
     ) { args -> PrimitiveNatives.intMin(args.long(0), args.long(1)) }
 
     private val MAX = NativeOp("__native_int_max",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG, pure = true,
     ) { args -> PrimitiveNatives.intMax(args.long(0), args.long(1)) }
 
     private val POW = NativeOp("__native_int_pow",
-        listOf(Param("base", SlotKind.LONG), Param("exp", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("base", SlotKind.LONG), Param("exp", SlotKind.LONG)), SlotKind.LONG, pure = true,
     ) { args -> NativeHelpers.intPow(args.long(0), args.long(1)) }
 
     private val GCD = NativeOp("__native_int_gcd",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG, pure = true,
     ) { args -> NativeHelpers.intGcd(args.long(0), args.long(1)) }
 
     private val LCM = NativeOp("__native_int_lcm",
-        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG, pure = true,
     ) { args -> NativeHelpers.intLcm(args.long(0), args.long(1)) }
 
     // ==================== ternary clamp ====================
     private val CLAMP = NativeOp("__native_int_clamp",
         listOf(Param("n", SlotKind.LONG), Param("min", SlotKind.LONG), Param("max", SlotKind.LONG)),
-        SlotKind.LONG
+        SlotKind.LONG, pure = true,
     ) { args -> PrimitiveNatives.intClamp(args.long(0), args.long(1), args.long(2)) }
 
     // ==================== Int -> Bool predicates ====================
     private val IS_EVEN = NativeOp("__native_int_is_even",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.BOOLEAN
+        listOf(Param("n", SlotKind.LONG)), SlotKind.BOOLEAN, pure = true,
     ) { args -> args.long(0) % 2L == 0L }
 
     private val IS_ODD = NativeOp("__native_int_is_odd",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.BOOLEAN
+        listOf(Param("n", SlotKind.LONG)), SlotKind.BOOLEAN, pure = true,
     ) { args -> args.long(0) % 2L != 0L }
 
     // ==================== Int, Int -> Bool comparisons ====================
@@ -127,24 +125,33 @@ object IntOps {
 
     // ==================== conversions ====================
     private val FROM_NAT = NativeOp("__native_int_from_nat",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.LONG
+        listOf(Param("n", SlotKind.LONG)), SlotKind.LONG, pure = true,
     ) { args -> args.long(0) }
 
     private val TO_FLOAT = NativeOp("__native_int_to_float",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.DOUBLE
+        listOf(Param("n", SlotKind.LONG)), SlotKind.DOUBLE, pure = true,
     ) { args -> PrimitiveNatives.intToFloat(args.long(0)) }
 
     // to_nat returns Option<Nat> — None when n is negative.
     private val TO_NAT = NativeOp("__native_int_to_nat",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.OBJECT
+        listOf(Param("n", SlotKind.LONG)), SlotKind.OBJECT, pure = true,
     ) { args ->
         val n = args.long(0)
         if (n >= 0) MezzeVariant.some(n) else MezzeVariant.none()
     }
 
     private val TO_STR = NativeOp("__native_int_to_str",
-        listOf(Param("n", SlotKind.LONG)), SlotKind.OBJECT
+        listOf(Param("n", SlotKind.LONG)), SlotKind.OBJECT, pure = true,
     ) { args -> PrimitiveNatives.intToString(args.long(0)) }
+
+    // from_str: parse string → Option Int. Trims whitespace to match
+    // NativeDispatch.intFromString.
+    private val FROM_STR = NativeOp("__native_int_from_string",
+        listOf(Param("s", SlotKind.OBJECT)), SlotKind.OBJECT, pure = true,
+    ) { args ->
+        try { MezzeVariant.some(java.lang.Long.parseLong(args.string(0).trim())) }
+        catch (_: NumberFormatException) { MezzeVariant.none() }
+    }
 
     // ==================== typed registrations for BDSL ====================
     // These bypass the untyped NativeHandler dispatch for the hot ops.

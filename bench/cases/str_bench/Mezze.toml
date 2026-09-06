@@ -1,0 +1,12 @@
+[package]
+name = "str_bench"
+version = "0.1.0"
+
+[[app]]
+name = "str_bench"
+path = "src/main.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

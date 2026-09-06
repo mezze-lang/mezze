@@ -136,6 +136,14 @@ sealed interface StringPartIR {
     override val src: SourceInfo,
     val args: List<NodeIR> = emptyList(),
     val argKinds: List<SlotKind> = emptyList(),
+    /** True when the native handler is side-effect-free. Carried on the IR
+     *  so the compiler can inline across serialization boundaries (the
+     *  interpreter module is not on the CLI classpath, so NativeSignatures
+     *  is empty during `mez build` — this flag preserves the info). */
+    val isPure: Boolean = false,
+    /** When set, `maybeCollapseInlineOp` can convert this node into an
+     *  `InlineBinaryOpIR` without querying NativeSignatures. */
+    val inlineOp: InlineOp? = null,
 ) : NodeIR {
     val isScalarABI: Boolean get() = argKinds.isNotEmpty()
 }

@@ -15,31 +15,31 @@ object BoolOps {
     @JvmField val MARKER: Unit = Unit
 
     private val AND = NativeOp("__native_bool_and",
-        listOf(Param("l", SlotKind.BOOLEAN), Param("r", SlotKind.BOOLEAN)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.BOOLEAN), Param("r", SlotKind.BOOLEAN)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.boolAnd(args.bool(0), args.bool(1)) }
 
     private val OR = NativeOp("__native_bool_or",
-        listOf(Param("l", SlotKind.BOOLEAN), Param("r", SlotKind.BOOLEAN)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.BOOLEAN), Param("r", SlotKind.BOOLEAN)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.boolOr(args.bool(0), args.bool(1)) }
 
     private val XOR = NativeOp("__native_bool_xor",
-        listOf(Param("l", SlotKind.BOOLEAN), Param("r", SlotKind.BOOLEAN)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.BOOLEAN), Param("r", SlotKind.BOOLEAN)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.boolXor(args.bool(0), args.bool(1)) }
 
     private val NOT = NativeOp("__native_bool_not",
-        listOf(Param("b", SlotKind.BOOLEAN)), SlotKind.BOOLEAN
+        listOf(Param("b", SlotKind.BOOLEAN)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.boolNot(args.bool(0)) }
 
     private val EQ = NativeOp("__native_bool_eq",
-        listOf(Param("l", SlotKind.BOOLEAN), Param("r", SlotKind.BOOLEAN)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.BOOLEAN), Param("r", SlotKind.BOOLEAN)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.boolEq(args.bool(0), args.bool(1)) }
 
     private val NEQ = NativeOp("__native_bool_neq",
-        listOf(Param("l", SlotKind.BOOLEAN), Param("r", SlotKind.BOOLEAN)), SlotKind.BOOLEAN
+        listOf(Param("l", SlotKind.BOOLEAN), Param("r", SlotKind.BOOLEAN)), SlotKind.BOOLEAN, pure = true,
     ) { args -> PrimitiveNatives.boolNeq(args.bool(0), args.bool(1)) }
 
     private val TO_STR = NativeOp("__native_bool_to_str",
-        listOf(Param("b", SlotKind.BOOLEAN)), SlotKind.OBJECT
+        listOf(Param("b", SlotKind.BOOLEAN)), SlotKind.OBJECT, pure = true,
     ) { args -> if (args.bool(0)) "True" else "False" }
 
     // ==================== typed registrations for BDSL ====================

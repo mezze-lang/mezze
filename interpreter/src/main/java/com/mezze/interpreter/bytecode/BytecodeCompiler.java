@@ -2686,12 +2686,73 @@ public final class BytecodeCompiler {
                     "CallNativeIR:record-ABI references unregistered native '"
                     + recName + "' — supports() should have rejected this");
             }
+            // ── BDSL inline bypasses for scalar-ABI ──
+            // These mirror the record-ABI bypasses above but work on
+            // positional args.  They fire BEFORE the typed-handler
+            // lookups because string natives (Object args) have no
+            // typed handler and would fall through to CallNativeScalar
+            // whose @TruffleBoundary makes every call PE-opaque.
+            String name = cn.getName();
+            int arity = cn.getArgs().size();
+            if (arity == 1) {
+                NodeIR arg0 = cn.getArgs().get(0);
+                // str::size → InlineStringSize (PE-transparent)
+                if ("__native_string_size".equals(name)) {
+                    b.beginInlineStringSize();
+                    emitNode(arg0, b, argCount, localMap);
+                    b.endInlineStringSize();
+                    return;
+                }
+                // {int,float,nat,bool}::to_str → InlineScalarInspect
+                if ("__native_int_to_str".equals(name)
+                        || "__native_float_to_str".equals(name)
+                        || "__native_nat_to_str".equals(name)
+                        || "__native_bool_to_str".equals(name)) {
+                    b.beginInlineScalarInspect(false);
+                    emitNode(arg0, b, argCount, localMap);
+                    b.endInlineScalarInspect();
+                    return;
+                }
+                // str::trim/to_upper/to_lower/reverse/trim_start/trim_end
+                int unaryOp = -1;
+                if ("__native_string_trim".equals(name))            unaryOp = MezzeBytecodeRootNode.InlineStringUnary.TRIM;
+                else if ("__native_string_to_upper".equals(name))   unaryOp = MezzeBytecodeRootNode.InlineStringUnary.TO_UPPER;
+                else if ("__native_string_to_lower".equals(name))   unaryOp = MezzeBytecodeRootNode.InlineStringUnary.TO_LOWER;
+                else if ("__native_string_reverse".equals(name))    unaryOp = MezzeBytecodeRootNode.InlineStringUnary.REVERSE;
+                else if ("__native_string_trim_start".equals(name)) unaryOp = MezzeBytecodeRootNode.InlineStringUnary.TRIM_START;
+                else if ("__native_string_trim_end".equals(name))   unaryOp = MezzeBytecodeRootNode.InlineStringUnary.TRIM_END;
+                if (unaryOp >= 0) {
+                    b.beginInlineStringUnary(unaryOp);
+                    emitNode(arg0, b, argCount, localMap);
+                    b.endInlineStringUnary();
+                    return;
+                }
+            } else if (arity == 2) {
+                // str::concat → DirectAdd
+                if ("__native_string_concat".equals(name)) {
+                    b.beginDirectAdd();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    b.endDirectAdd();
+                    return;
+                }
+                // str::contains/starts_with/ends_with → InlineStringPredicate
+                int predOp = -1;
+                if ("__native_string_contains".equals(name))        predOp = MezzeBytecodeRootNode.InlineStringPredicate.CONTAINS;
+                else if ("__native_string_starts_with".equals(name)) predOp = MezzeBytecodeRootNode.InlineStringPredicate.STARTS_WITH;
+                else if ("__native_string_ends_with".equals(name))  predOp = MezzeBytecodeRootNode.InlineStringPredicate.ENDS_WITH;
+                if (predOp >= 0) {
+                    b.beginInlineStringPredicate(predOp);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    b.endInlineStringPredicate();
+                    return;
+                }
+            }
             // Typed fast paths — bypass Object[] alloc + PositionalArgs
             // + NativeHandler indirection when the signature matches
             // one we registered typed via TypedNativeHandlers. Ordered
             // by argument count so we short-circuit early.
-            String name = cn.getName();
-            int arity = cn.getArgs().size();
             if (arity == 2) {
                 var typedLLL = TypedNativeHandlers.lookupLLL(name);
                 if (typedLLL != null) {
