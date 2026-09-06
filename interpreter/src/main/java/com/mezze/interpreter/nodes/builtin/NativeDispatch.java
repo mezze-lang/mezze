@@ -729,44 +729,45 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_zip_with_index", (r, c) ->
             SeqNatives.zipWithIndex(getSeq(r, "xs")));
 
-        // HOF operations — use HANDLERS_WITH_NODE (PE-visible path) so
-        // Graal PE can inline through the callback and EA can scalarize
-        // per-element record allocations (wrapAccX, wrapX). The third
-        // arg (MezzeNode) is unused by these handlers.
-        HANDLERS_WITH_NODE.put("__native_seq_map", (r, c, n) ->
+        // HOF operations — dispatched through HANDLERS (behind
+        // @TruffleBoundary in CallNativeRecord) to prevent SVM
+        // blocklist violations in native-image builds with
+        // --macro:truffle-svm. FLP fusion bypasses handler dispatch
+        // for the hot HOF chains, so this has no JVM perf impact.
+        HANDLERS.put("__native_seq_map", (r, c) ->
             SeqNatives.map(getSeq(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_filter", (r, c, n) ->
+        HANDLERS.put("__native_seq_filter", (r, c) ->
             SeqNatives.filter(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_flat_map", (r, c, n) ->
+        HANDLERS.put("__native_seq_flat_map", (r, c) ->
             SeqNatives.flatMap(getSeq(r, "xs"), getFunction(r, "f"), c));
         // Result-short-circuiting map: `[T], T -> Result U E → Result [U] E`.
         // Emitted by CodecGenerator for `[T]` decode (each element decode is
         // fallible; a single failure fails the whole list).
-        HANDLERS_WITH_NODE.put("__native_seq_try_map", (r, c, n) ->
+        HANDLERS.put("__native_seq_try_map", (r, c) ->
             SeqNatives.tryMap(getSeq(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_fold", (r, c, n) ->
+        HANDLERS.put("__native_seq_fold", (r, c) ->
             SeqNatives.fold(getSeq(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_reduce", (r, c, n) ->
+        HANDLERS.put("__native_seq_reduce", (r, c) ->
             SeqNatives.reduce(getSeq(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_find", (r, c, n) ->
+        HANDLERS.put("__native_seq_find", (r, c) ->
             SeqNatives.find(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_find_index", (r, c, n) ->
+        HANDLERS.put("__native_seq_find_index", (r, c) ->
             SeqNatives.findIndex(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_any", (r, c, n) ->
+        HANDLERS.put("__native_seq_any", (r, c) ->
             SeqNatives.any(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_all", (r, c, n) ->
+        HANDLERS.put("__native_seq_all", (r, c) ->
             SeqNatives.all(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_none", (r, c, n) ->
+        HANDLERS.put("__native_seq_none", (r, c) ->
             SeqNatives.none(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_count", (r, c, n) ->
+        HANDLERS.put("__native_seq_count", (r, c) ->
             SeqNatives.count(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_partition", (r, c, n) ->
+        HANDLERS.put("__native_seq_partition", (r, c) ->
             SeqNatives.partition(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_sort_by", (r, c, n) ->
+        HANDLERS.put("__native_seq_sort_by", (r, c) ->
             SeqNatives.sortBy(getSeq(r, "xs"), getFunction(r, "cmp"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_take_while", (r, c, n) ->
+        HANDLERS.put("__native_seq_take_while", (r, c) ->
             SeqNatives.takeWhile(getSeq(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_drop_while", (r, c, n) ->
+        HANDLERS.put("__native_seq_drop_while", (r, c) ->
             SeqNatives.dropWhile(getSeq(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_seq_zip", (r, c) ->
             SeqNatives.zip(getSeq(r, "xs"), getSeq(r, "ys")));
@@ -778,9 +779,9 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.min(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_max", (r, c) ->
             SeqNatives.max(getSeq(r, "xs")));
-        HANDLERS_WITH_NODE.put("__native_seq_min_by", (r, c, n) ->
+        HANDLERS.put("__native_seq_min_by", (r, c) ->
             SeqNatives.minBy(getSeq(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_max_by", (r, c, n) ->
+        HANDLERS.put("__native_seq_max_by", (r, c) ->
             SeqNatives.maxBy(getSeq(r, "xs"), getFunction(r, "f"), c));
         HANDLERS.put("__native_seq_sum", (r, c) ->
             SeqNatives.sum(getSeq(r, "xs")));
@@ -800,27 +801,27 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.productFloat(getSeq(r, "xs")));
 
         // Group By — HOF, PE-visible
-        HANDLERS_WITH_NODE.put("__native_seq_group_by", (r, c, n) ->
+        HANDLERS.put("__native_seq_group_by", (r, c) ->
             SeqNatives.groupBy(getSeq(r, "xs"), getFunction(r, "f"), c));
 
         // Enumerate/ForEach/Scan
         HANDLERS.put("__native_seq_enumerate", (r, c) ->
             SeqNatives.enumerate(getSeq(r, "xs")));
-        HANDLERS_WITH_NODE.put("__native_seq_for_each", (r, c, n) ->
+        HANDLERS.put("__native_seq_for_each", (r, c) ->
             SeqNatives.forEach(getSeq(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS_WITH_NODE.put("__native_seq_scan", (r, c, n) ->
+        HANDLERS.put("__native_seq_scan", (r, c) ->
             SeqNatives.scan(getSeq(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
 
         // Split Operations
         HANDLERS.put("__native_seq_split_at", (r, c) ->
             SeqNatives.splitAt(getSeq(r, "xs"), getLong(r, "i")));
-        HANDLERS_WITH_NODE.put("__native_seq_span", (r, c, n) ->
+        HANDLERS.put("__native_seq_span", (r, c) ->
             SeqNatives.span(getSeq(r, "xs"), getFunction(r, "p"), c));
 
         // Dedup
         HANDLERS.put("__native_seq_dedup", (r, c) ->
             SeqNatives.dedup(getSeq(r, "xs")));
-        HANDLERS_WITH_NODE.put("__native_seq_dedup_by", (r, c, n) ->
+        HANDLERS.put("__native_seq_dedup_by", (r, c) ->
             SeqNatives.dedupBy(getSeq(r, "xs"), getFunction(r, "f"), c));
 
         // Singleton/Nth/Fill
@@ -830,13 +831,13 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.nth(getSeq(r, "xs"), getLong(r, "i")));
         HANDLERS.put("__native_seq_fill", (r, c) ->
             SeqNatives.fill(getLong(r, "n"), getField(r, "x")));
-        HANDLERS_WITH_NODE.put("__native_seq_fill_with", (r, c, n) ->
+        HANDLERS.put("__native_seq_fill_with", (r, c) ->
             SeqNatives.fillWith(getLong(r, "n"), getFunction(r, "f"), c));
 
         // Group Consecutive
         HANDLERS.put("__native_seq_group_consecutive", (r, c) ->
             SeqNatives.groupConsecutive(getSeq(r, "xs")));
-        HANDLERS_WITH_NODE.put("__native_seq_group_consecutive_by", (r, c, n) ->
+        HANDLERS.put("__native_seq_group_consecutive_by", (r, c) ->
             SeqNatives.groupConsecutiveBy(getSeq(r, "xs"), getFunction(r, "f"), c));
 
         // Windows/Chunks/Rotate
@@ -852,11 +853,11 @@ public final class NativeDispatch extends MezzeNode {
         // Binary Search
         HANDLERS.put("__native_seq_binary_search", (r, c) ->
             SeqNatives.binarySearch(getSeq(r, "xs"), getField(r, "x")));
-        HANDLERS_WITH_NODE.put("__native_seq_binary_search_by", (r, c, n) ->
+        HANDLERS.put("__native_seq_binary_search_by", (r, c) ->
             SeqNatives.binarySearchBy(getSeq(r, "xs"), getField(r, "x"), getFunction(r, "cmp"), c));
 
         // Sort By Key
-        HANDLERS_WITH_NODE.put("__native_seq_sort_by_key", (r, c, n) ->
+        HANDLERS.put("__native_seq_sort_by_key", (r, c) ->
             SeqNatives.sortByKey(getSeq(r, "xs"), getFunction(r, "f"), c));
 
         // Additional Search/Replace Operations
@@ -878,7 +879,7 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.join(getSeq(r, "xs"), getString(r, "sep")));
 
         // Advanced Zip Operations
-        HANDLERS_WITH_NODE.put("__native_seq_zip_with", (r, c, n) ->
+        HANDLERS.put("__native_seq_zip_with", (r, c) ->
             SeqNatives.zipWith(getSeq(r, "xs"), getSeq(r, "ys"), getFunction(r, "f")));
         HANDLERS.put("__native_seq_zip3", (r, c) ->
             SeqNatives.zip3(getSeq(r, "xs"), getSeq(r, "ys"), getSeq(r, "zs")));
@@ -1075,31 +1076,32 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_list_unzip", (r, c) ->
             ListNatives.unzip(getList(r, "xs")));
 
-        // HOF operations — use HANDLERS_WITH_NODE (PE-visible path) so
-        // Graal PE can inline through the callback and EA can scalarize
-        // per-element record allocations (wrapAccX, wrapX). The third
-        // arg (MezzeNode) is unused by these handlers.
-        HANDLERS_WITH_NODE.put("__native_list_map", (r, c, n) ->
+        // HOF operations — dispatched through HANDLERS (behind
+        // @TruffleBoundary in CallNativeRecord) to prevent SVM
+        // blocklist violations in native-image builds with
+        // --macro:truffle-svm. FLP fusion bypasses handler dispatch
+        // for the hot HOF chains, so this has no JVM perf impact.
+        HANDLERS.put("__native_list_map", (r, c) ->
             ListNatives.map(getList(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS_WITH_NODE.put("__native_list_filter", (r, c, n) ->
+        HANDLERS.put("__native_list_filter", (r, c) ->
             ListNatives.filter(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_list_fold_left", (r, c, n) ->
+        HANDLERS.put("__native_list_fold_left", (r, c) ->
             ListNatives.foldLeft(getList(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
-        HANDLERS_WITH_NODE.put("__native_list_fold_right", (r, c, n) ->
+        HANDLERS.put("__native_list_fold_right", (r, c) ->
             ListNatives.foldRight(getList(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
-        HANDLERS_WITH_NODE.put("__native_list_reduce", (r, c, n) ->
+        HANDLERS.put("__native_list_reduce", (r, c) ->
             ListNatives.reduce(getList(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS_WITH_NODE.put("__native_list_find", (r, c, n) ->
+        HANDLERS.put("__native_list_find", (r, c) ->
             ListNatives.find(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_list_find_index", (r, c, n) ->
+        HANDLERS.put("__native_list_find_index", (r, c) ->
             ListNatives.findIndex(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_list_any", (r, c, n) ->
+        HANDLERS.put("__native_list_any", (r, c) ->
             ListNatives.any(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_list_all", (r, c, n) ->
+        HANDLERS.put("__native_list_all", (r, c) ->
             ListNatives.all(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_list_partition", (r, c, n) ->
+        HANDLERS.put("__native_list_partition", (r, c) ->
             ListNatives.partition(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS_WITH_NODE.put("__native_list_sort_by", (r, c, n) ->
+        HANDLERS.put("__native_list_sort_by", (r, c) ->
             ListNatives.sortBy(getList(r, "xs"), getFunction(r, "cmp"), c));
 
         // Min/Max/Sum/Product
@@ -2855,11 +2857,11 @@ public final class NativeDispatch extends MezzeNode {
 
     private static void registerAsyncHandlers() {
         // === Loom (Virtual Threads) - scales to millions ===
-        // Operations that need TruffleContext for cross-thread execution use HANDLERS_WITH_NODE
-        HANDLERS_WITH_NODE.put("__native_async_spawn", (r, c, n) -> AsyncNatives.spawn(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_async_spawn_tracked", (r, c, n) -> AsyncNatives.spawnTracked(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_async_scoped", (r, c, n) -> AsyncNatives.scoped(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_async_scope_spawn", (r, c, n) -> AsyncNatives.scopeSpawn(r, c, n));
+        // Operations that need TruffleContext for cross-thread execution
+        HANDLERS.put("__native_async_spawn", (r, c) -> AsyncNatives.spawn(r, c, null));
+        HANDLERS.put("__native_async_spawn_tracked", (r, c) -> AsyncNatives.spawnTracked(r, c, null));
+        HANDLERS.put("__native_async_scoped", (r, c) -> AsyncNatives.scoped(r, c, null));
+        HANDLERS.put("__native_async_scope_spawn", (r, c) -> AsyncNatives.scopeSpawn(r, c, null));
 
         // Loom scope lifecycle (scoped effects)
         HANDLERS.put("__native_async_init_scope", (r, c) -> AsyncNatives.initScope(r));
@@ -2888,14 +2890,14 @@ public final class NativeDispatch extends MezzeNode {
         // capabilities; whichever it invokes transitions the promise to that
         // state. Setup raising auto-fails the promise. Backing for
         // std::effects::async::promise_from + promise_of / promise_failed sugar.
-        HANDLERS_WITH_NODE.put("__native_promise_from", (r, c, n) -> PromiseNatives.promiseFrom(r, c, n));
+        HANDLERS.put("__native_promise_from", (r, c) -> PromiseNatives.promiseFrom(r, c, null));
 
         // === OS Threads - true parallelism, limited scale ===
         // Only ops that genuinely create platform threads keep their own
         // natives. Stateless ops (await/race/all/etc.) and parallel
         // collection ops are now pure-Mezze in stdlib/std/effects/async.mz,
         // dispatching to __native_async_* / __native_promise_* against MezzePromise values.
-        HANDLERS_WITH_NODE.put("__native_async_spawn_tracked_os", (r, c, n) -> AsyncNatives.osSpawnTracked(r, c, n));
+        HANDLERS.put("__native_async_spawn_tracked_os", (r, c) -> AsyncNatives.osSpawnTracked(r, c, null));
 
         // OS thread scope lifecycle (scoped effects)
         HANDLERS.put("__native_async_init_scope_os", (r, c) -> AsyncNatives.osInitScope(r));
@@ -2973,7 +2975,7 @@ public final class NativeDispatch extends MezzeNode {
         // === Agent ===
         HANDLERS.put("__native_agent_new", (r, c) -> ConcurrencyNatives.agentNew(r));
         HANDLERS.put("__native_agent_deref", (r, c) -> ConcurrencyNatives.agentDeref(r));
-        HANDLERS_WITH_NODE.put("__native_agent_send", (r, c, n) -> ConcurrencyNatives.agentSend(r, n));
+        HANDLERS.put("__native_agent_send", (r, c) -> ConcurrencyNatives.agentSend(r, null));
         HANDLERS.put("__native_agent_await", (r, c) -> ConcurrencyNatives.agentAwait(r));
         HANDLERS.put("__native_agent_error", (r, c) -> ConcurrencyNatives.agentError(r));
 
@@ -3012,14 +3014,14 @@ public final class NativeDispatch extends MezzeNode {
 
         // === Parallel effect: 1-primitive (join) + init/finalize scope ===
         // LoomParallel: Loom virtual threads per fork.
-        HANDLERS_WITH_NODE.put("__native_loom_parallel_init", (r, c, n) -> ParallelNatives.loomParallelInit(r, n));
+        HANDLERS.put("__native_loom_parallel_init", (r, c) -> ParallelNatives.loomParallelInit(r, null));
         HANDLERS.put("__native_loom_parallel_finalize", (r, c) -> ParallelNatives.loomParallelFinalize(r));
-        HANDLERS_WITH_NODE.put("__native_loom_parallel_join", (r, c, n) -> ParallelNatives.loomParallelJoin(r, c, n));
+        HANDLERS.put("__native_loom_parallel_join", (r, c) -> ParallelNatives.loomParallelJoin(r, c, null));
         // OSThreadParallel: platform-thread-per-fork (#465). Shares init/finalize
         // with LoomParallel; join spawns virtual(false) Truffle threads.
-        HANDLERS_WITH_NODE.put("__native_osthread_parallel_init", (r, c, n) -> ParallelNatives.osthreadParallelInit(r, n));
+        HANDLERS.put("__native_osthread_parallel_init", (r, c) -> ParallelNatives.osthreadParallelInit(r, null));
         HANDLERS.put("__native_osthread_parallel_finalize", (r, c) -> ParallelNatives.osthreadParallelFinalize(r));
-        HANDLERS_WITH_NODE.put("__native_osthread_parallel_join", (r, c, n) -> ParallelNatives.osthreadParallelJoin(r, c, n));
+        HANDLERS.put("__native_osthread_parallel_join", (r, c) -> ParallelNatives.osthreadParallelJoin(r, c, null));
         HANDLERS.put("__native_parallel_min_chunk_hint", (r, c) -> ParallelNatives.minChunkHint(r));
         // Parallel numeric fast paths (#69) — handler-neutral: use ForkJoinPool.commonPool() over long[].
         HANDLERS.put("__native_parallel_sum_long", (r, c) -> ParallelNatives.parallelSumLong(r));

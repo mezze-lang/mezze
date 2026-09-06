@@ -1619,37 +1619,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
-    /**
-     * Sibling of {@link CallNativeRecord} for handlers that need a
-     * {@link com.mezze.interpreter.nodes.MezzeNode} — typically async /
-     * HOF-callback handlers that read {@code TruffleLanguage.Env}.
-     * BDSL doesn't wrap ops in MezzeNodes so we pass null; those
-     * handlers can reach the Env via {@code TruffleLanguage.get(node)}
-     * using the {@code @Bind} node argument.
-     */
-    @Operation
-    @ConstantOperand(type = com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandlerWithNode.class)
-    public static final class CallNativeRecordWithNode {
-        @Specialization
-        public static Object doInvoke(
-                com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandlerWithNode handler,
-                Object arg,
-                @Cached(value = "createIndirect()", allowUncached = true)
-                    com.oracle.truffle.api.nodes.IndirectCallNode callNode,
-                @Bind com.oracle.truffle.api.nodes.Node node) {
-            if (!(arg instanceof com.mezze.interpreter.values.MezzeRecord record)) {
-                com.oracle.truffle.api.CompilerDirectives.transferToInterpreterAndInvalidate();
-                throw new RuntimeException("native handler expects record argument, got: "
-                        + (arg == null ? "null" : arg.getClass().getName()));
-            }
-            return handler.handle(record, callNode, null);
-        }
-        /** `@TruffleBoundary` — IndirectCallNode.create → Node.<init>. #402. */
-        @TruffleBoundary
-        static com.oracle.truffle.api.nodes.IndirectCallNode createIndirect() {
-            return com.oracle.truffle.api.nodes.IndirectCallNode.create();
-        }
-    }
+    // CallNativeRecordWithNode REMOVED — the SVM blocklist checker does
+    // not respect @TruffleBoundary on BDSL-generated operations (neither
+    // on the @Specialization method nor on subordinate helpers). All
+    // handlers previously in HANDLERS_WITH_NODE now live in HANDLERS and
+    // dispatch through {@link CallNativeRecord} whose @TruffleBoundary
+    // IS respected. See #402, NativeDispatch.registerSeqHandlers().
 
     /**
      * Typed fast path for (long, long) -> long natives: int add, sub,

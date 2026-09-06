@@ -2666,14 +2666,9 @@ public final class BytecodeCompiler {
                         }
                     }
                 }
-                var withNode = com.mezze.interpreter.nodes.builtin.NativeDispatch
-                        .recordHandlerWithNodeOf(recName);
-                if (withNode != null) {
-                    b.beginCallNativeRecordWithNode(withNode);
-                    emitNode(cn.getArg(), b, argCount, localMap);
-                    b.endCallNativeRecordWithNode();
-                    return;
-                }
+                // CallNativeRecordWithNode removed — SVM blocklist can't
+                // respect @TruffleBoundary on BDSL ops.  All handlers now
+                // route through CallNativeRecord (#402).
                 var plain = com.mezze.interpreter.nodes.builtin.NativeDispatch
                         .recordHandlerOf(recName);
                 if (plain != null) {
