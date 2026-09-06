@@ -168,6 +168,9 @@ object EmbeddedExec {
             // (~64 Tier 1, ~10000 Tier 2) waste hundreds of milliseconds in
             // unoptimized code. Measured on fib(35)+fib(38): ~8% wall-time
             // reduction with these settings.
+            // NOTE: boxingEliminationTypes = {} (disabled) — with boxing
+            // elimination ON, these low thresholds cause a deopt storm.
+            // If boxing elimination is re-enabled, raise to 200/1000/500.
             .apply {
                 if (jitCapable && !jitDisabled) {
                     option("engine.FirstTierCompilationThreshold", "16")
@@ -180,7 +183,7 @@ object EmbeddedExec {
                     // Long boxing + Object[] varargs at DirectCallNode.call().
                     // No measurable impact on startup or non-recursive
                     // benchmarks (seq fusion, noop).
-                    option("engine.InliningRecursionDepth", "4")
+                    option("compiler.InliningRecursionDepth", "4")
                 }
             }
             // MEZZE_ENGINE_OPTS="key1=val1,key2=val2" → pass arbitrary engine

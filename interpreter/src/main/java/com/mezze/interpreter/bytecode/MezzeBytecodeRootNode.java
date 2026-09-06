@@ -112,6 +112,16 @@ import com.oracle.truffle.api.profiles.InlinedLoopConditionProfile;
  */
 @GenerateBytecode(
     languageClass = MezzeLanguage.class,
+    // Boxing elimination DISABLED — BDSL quickenings (LOAD_ARGUMENT$LONG,
+    // POP$LONG, TAG_LEAVE$LONG) mutate the bytecode array in-flight,
+    // invalidating compilation assumptions. With recursive call patterns
+    // (fib), this causes an infinite compile→deopt storm where compiled
+    // code address stays 0x0 and is never installed, regardless of
+    // compilation threshold. The Truffle compiler and quickening system
+    // race on different threads — even with thresholds high enough for
+    // quickenings to stabilize, the invalidation cycle persists.
+    // Requires upstream Truffle fix (quickening-aware compilation
+    // assumption) or BDSL-level manual typed locals.
     boxingEliminationTypes = {},
     enableUncachedInterpreter = true,
     enableYield = true,
