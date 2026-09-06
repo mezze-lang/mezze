@@ -184,7 +184,6 @@ public final class ListNatives {
         return MezzeList.of(elements);
     }
 
-    @TruffleBoundary
     public static MezzeList map(MezzeList list, MezzeFunction mapper,
 
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -204,7 +203,6 @@ public final class ListNatives {
         return MezzeList.of(result);
     }
 
-    @TruffleBoundary
     public static MezzeList filter(MezzeList list, MezzeFunction predicate,
 
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -290,7 +288,6 @@ public final class ListNatives {
         return false;
     }
 
-    @TruffleBoundary
     public static MezzeVariant find(MezzeList list, MezzeFunction predicate,
 
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -313,7 +310,6 @@ public final class ListNatives {
         return MezzeVariant.none();
     }
 
-    @TruffleBoundary
     public static MezzeVariant findIndex(MezzeList list, MezzeFunction predicate,
 
                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -338,7 +334,6 @@ public final class ListNatives {
 
     // ==================== Predicate Operations ====================
 
-    @TruffleBoundary
     public static boolean any(MezzeList list, MezzeFunction predicate,
 
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -359,7 +354,6 @@ public final class ListNatives {
         return false;
     }
 
-    @TruffleBoundary
     public static boolean all(MezzeList list, MezzeFunction predicate,
 
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -382,7 +376,6 @@ public final class ListNatives {
 
     // ==================== Partition ====================
 
-    @TruffleBoundary
     public static MezzeRecord partition(MezzeList list, MezzeFunction predicate,
 
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -556,6 +549,7 @@ public final class ListNatives {
      * Uses toArray() for O(n) random-access instead of list.get(i) which
      * was O(n²) for cons-list. toArray() is a single O(n) pass, then the
      * fold loop is O(n) — total O(n) instead of O(n²).
+     *
      */
     private static Object foldTwoArg(MezzeList list, Object init, MezzeFunction folder,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
@@ -569,7 +563,7 @@ public final class ListNatives {
         int step = reverse ? -1 : 1;
         int end = reverse ? -1 : size;
         Object acc = init;
-        // Reuse args array across iterations — avoids 100K allocations per fold.
+        // Reuse args array across iterations — avoids 1M allocations per fold.
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
         for (int i = from; i != end; i += step) {

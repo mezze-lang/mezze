@@ -1072,28 +1072,31 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_list_unzip", (r, c) ->
             ListNatives.unzip(getList(r, "xs")));
 
-        // HOF operations
-        HANDLERS.put("__native_list_map", (r, c) ->
+        // HOF operations — use HANDLERS_WITH_NODE (PE-visible path) so
+        // Graal PE can inline through the callback and EA can scalarize
+        // per-element record allocations (wrapAccX, wrapX). The third
+        // arg (MezzeNode) is unused by these handlers.
+        HANDLERS_WITH_NODE.put("__native_list_map", (r, c, n) ->
             ListNatives.map(getList(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_list_filter", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_list_filter", (r, c, n) ->
             ListNatives.filter(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_list_fold_left", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_list_fold_left", (r, c, n) ->
             ListNatives.foldLeft(getList(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_list_fold_right", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_list_fold_right", (r, c, n) ->
             ListNatives.foldRight(getList(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_list_reduce", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_list_reduce", (r, c, n) ->
             ListNatives.reduce(getList(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_list_find", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_list_find", (r, c, n) ->
             ListNatives.find(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_list_find_index", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_list_find_index", (r, c, n) ->
             ListNatives.findIndex(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_list_any", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_list_any", (r, c, n) ->
             ListNatives.any(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_list_all", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_list_all", (r, c, n) ->
             ListNatives.all(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_list_partition", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_list_partition", (r, c, n) ->
             ListNatives.partition(getList(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_list_sort_by", (r, c) ->
+        HANDLERS_WITH_NODE.put("__native_list_sort_by", (r, c, n) ->
             ListNatives.sortBy(getList(r, "xs"), getFunction(r, "cmp"), c));
 
         // Min/Max/Sum/Product
