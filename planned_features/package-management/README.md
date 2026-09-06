@@ -4,6 +4,12 @@ How a Mezze project declares, resolves, and uses dependencies. Status: **in
 progress** (branch `feat/package-management`). Local-first — GitHub releases are a
 later convenience, not the focus.
 
+> **North-star model:** [content-addressed-model.md](./content-addressed-model.md) —
+> the one invariant everything below descends from (content-addressed definitions +
+> a universal memo store, so dependency resolution *cannot* fail). What's built so
+> far is the working file-based *foundation* of that model; the "deps.sqlite content
+> caching" follow-ups are steps toward it.
+
 ## Goal
 
 - **Registry-less** — a dependency is content, identified by hash. No central index
