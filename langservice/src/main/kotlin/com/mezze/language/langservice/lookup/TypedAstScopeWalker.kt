@@ -76,6 +76,13 @@ object TypedAstScopeWalker {
             is TypedMatch -> {
                 findPatternBinding(expr.scrutinee, line, col)?.let { return it }
                 for (case in expr.cases) {
+                    // An INTERMEDIATE destructure binder (`val = { … }`, `product = { … }`)
+                    // is not a leaf in case.bindings, and a leaf binding's loc can span
+                    // the whole nested pattern — so check the specific, NARROW field-binder
+                    // FIRST, then the leaf bindings.
+                    for (pat in case.patterns) {
+                        findFieldBinderAt(expr.scrutineeSourceType, pat, case.bindings, line, col)?.let { return it }
+                    }
                     for (b in case.bindings) {
                         if (containsPosition(b.loc, line, col)) {
                             val ty = bindingType(expr.scrutineeSourceType, case.patterns, b)
@@ -366,6 +373,106 @@ object TypedAstScopeWalker {
      */
     private fun bindingType(scrutinee: MezzeType, patterns: List<TypedPattern>, b: PatternBinding): MezzeType =
         if (b.type is MezzeType.VarType) deriveBindingType(scrutinee, patterns, b.name) ?: b.type else b.type
+
+
+    /**
+     * The cursor is on an INTERMEDIATE destructure binder in a match pattern —
+     * a field whose sub-pattern is itself a record (`val = { … }`,
+     * `product = { … }`). Its type is that field's type given the scrutinee, NOT
+     * the innermost leaf's. Walk the pattern against the resolved scrutinee and,
+     * when the cursor lands on such a field's location, return its record type.
+     */
+    private fun findFieldBinderAt(
+        scrutinee: MezzeType, pattern: TypedPattern, bindings: List<PatternBinding>, line: Int, col: Int
+    ): ScopeBinding? {
+        // Resolved types for every leaf variable in this pattern (`product_name` ->
+        // Str), so an intermediate binder's rebuilt record shows concrete leaves
+        // rather than the pattern node's stored var. The scrutinee's own field
+        // types are often bare vars (a decode target stays a var), so prefer each
+        // leaf's CONCRETE binding type from case.bindings and only fall back to
+        // the scrutinee-derived type for anything missing.
+        val leafTypes = HashMap<String, MezzeType>()
+        derivePatternTypes(scrutinee, pattern, leafTypes)
+        for (b in bindings) if (b.type !is MezzeType.VarType) leafTypes[b.name] = b.type
+        when (pattern) {
+            is TypedVariantPattern -> {
+                val payload = pattern.payload ?: return null
+                val payloadFields: Map<String, MezzeType>? = when (scrutinee) {
+                    is MezzeType.VariantType -> (scrutinee.constructors[pattern.tag] as? MezzeType.RecordType)?.fields
+                    is MezzeType.TypeApplication -> resultOptionPayloadFields(scrutinee, pattern.tag)
+                    else -> null
+                }
+                if (payload is TypedRecordPattern) {
+                    return findFieldBinderInRecord(payloadFields, payload, line, col, leafTypes)
+                }
+            }
+            is TypedRecordPattern -> {
+                val fields = (scrutinee as? MezzeType.RecordType)?.fields
+                return findFieldBinderInRecord(fields, pattern, line, col, leafTypes)
+            }
+            else -> {}
+        }
+        return null
+    }
+
+
+    /**
+     * Build a CLOSED record type from a record PATTERN (the shape being
+     * destructured), using resolved field types where the scrutinee has them and
+     * recursing into nested record patterns. Used to give an intermediate match
+     * binder (`val`, `product`) its real record type when the scrutinee's own
+     * field type is still a bare var (a decode target). [scrutineeField] is the
+     * scrutinee's type for this record if known.
+     */
+    private fun recordTypeFromPattern(pattern: TypedRecordPattern, scrutineeField: MezzeType?, leafTypes: Map<String, MezzeType>): MezzeType {
+        val srcFields = (scrutineeField as? MezzeType.RecordType)?.fields
+        val fields = LinkedHashMap<String, MezzeType>()
+        for (f in pattern.fields) {
+            val ft = srcFields?.get(f.name)
+            val inner = f.pattern
+            // A leaf's CONCRETE type lives on its case.bindings entry (keyed by the
+            // bound name), not on the pattern node or the scrutinee — both of which
+            // stay bare vars for a decode target. Prefer it. For a shorthand field
+            // `{ product_name }` (inner == null) the bound name IS the field name.
+            val leafConcrete = leafTypes[f.name]?.takeIf { it !is MezzeType.VarType }
+            fields[f.name] = when {
+                inner is TypedRecordPattern -> recordTypeFromPattern(inner, ft, leafTypes)
+                inner is TypedVarPattern && leafTypes[inner.name]?.let { it !is MezzeType.VarType } == true -> leafTypes.getValue(inner.name)
+                leafConcrete != null -> leafConcrete
+                inner is TypedVarPattern && inner.type !is MezzeType.VarType -> inner.type
+                ft != null && ft !is MezzeType.VarType -> ft
+                inner is TypedVarPattern -> inner.type
+                ft != null -> ft
+                else -> MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(f.name))
+            }
+        }
+        return MezzeType.RecordType(fields = fields, rowVar = null)
+    }
+
+    private fun findFieldBinderInRecord(
+        fields: Map<String, MezzeType>?, record: TypedRecordPattern, line: Int, col: Int,
+        leafTypes: Map<String, MezzeType>
+    ): ScopeBinding? {
+        for (f in record.fields) {
+            val inner = f.pattern ?: continue          // shorthand leaf — handled elsewhere
+            if (inner !is TypedRecordPattern) continue  // only intermediate record binders
+            val ft = fields?.get(f.name)
+            // Cursor directly on this field's name? Its type is the record the
+            // nested pattern describes. The scrutinee's own field type is often a
+            // bare var here (a decode target stays a var), so rebuild the record
+            // from the nested pattern + resolved leaf types instead.
+            if (containsPosition(f.loc, line, col)) {
+                val ty = recordTypeFromPattern(inner, ft, leafTypes)
+                return ScopeBinding(f.name, ty, f.loc, ScopeBinding.Kind.MATCH_BINDING)
+            }
+            // Otherwise descend, following the field type.
+            if (ft != null) {
+                val nestedFields = (ft as? MezzeType.RecordType)?.fields
+                findFieldBinderInRecord(nestedFields, inner, line, col, leafTypes)?.let { return it }
+            }
+        }
+        return null
+    }
 
     private fun deriveBindingType(scrutinee: MezzeType, patterns: List<TypedPattern>, name: String): MezzeType? {
         val out = HashMap<String, MezzeType>()

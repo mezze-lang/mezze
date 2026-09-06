@@ -76,3 +76,68 @@ class InferredRecordHoverTest {
         assertTrue(h!!.contains("Str"), "the leaf `.product_name` is `Str`:\n$h")
     }
 }
+
+/**
+ * The same closed-shape rebuild, but for an INTERMEDIATE binder in a MATCH
+ * destructure rather than a `.map` callback: `Ok { val = { product = { product_name } } }`.
+ *
+ * Hovering `val` or `product` here used to show the innermost leaf's type
+ * (`Str`) — the leaf binding's loc spans the whole nested pattern and won.
+ * Now the narrow field binder wins first and rebuilds its record from the
+ * nested pattern + the leaves' concrete binding types, so each level reads as
+ * the closed record it destructures. The scrutinee's own field types are bare
+ * vars (a decode target stays a var), so the concrete leaf (`product_name: Str`)
+ * comes from `case.bindings`, not the scrutinee.
+ */
+class MatchDestructureHoverTest {
+
+    private val src = """
+        use std::codec::json::{ FromJson }
+        let name_of = { body } -> match body.from_json {} is
+          Ok { val = { product = { product_name } } } -> product_name
+          Err { error = _ } -> "?"
+    """.trimIndent()
+
+    private fun hover(needle: String): String? {
+        val parser = MezzeParser()
+        val module = parser.parseParsedModule(src, "t.mz")
+        val tc = TypeChecker()
+        val result = tc.typeCheck(module, Paths.get("."))
+        val ctx = HoverInfo.Context(
+            content = src, typeCheckResult = result,
+            typeAliases = tc.getTypeAliases(), parsedModule = module,
+        )
+        val lines = src.lines()
+        val li = lines.indexOfFirst { it.contains("Ok { val") }
+        return HoverInfo.at(ctx, li, lines[li].indexOf(needle))
+    }
+
+    @Test
+    fun `the outer binder shows the full nested closed record`() {
+        val h = hover("val =")
+        assertNotNull(h, "expected a hover for `val`")
+        assertTrue(
+            h!!.contains("product") && h.contains("product_name") && h.contains("Str"),
+            "hover for `val` should rebuild `{ product: { product_name: Str } }`, not `Str`:\n$h",
+        )
+        assertTrue(!h.contains("'"), "leaves are concrete, no bare vars:\n$h")
+        assertTrue(!h.contains("..."), "the destructured record is closed:\n$h")
+    }
+
+    @Test
+    fun `the middle binder shows its sub-record`() {
+        val h = hover("product = {")
+        assertNotNull(h, "expected a hover for `product`")
+        assertTrue(
+            h!!.contains("product_name") && h.contains("Str") && !h.contains("'"),
+            "hover for `product` should show `{ product_name: Str }`:\n$h",
+        )
+    }
+
+    @Test
+    fun `the leaf binder shows its concrete scalar`() {
+        val h = hover("product_name } }")
+        assertNotNull(h)
+        assertTrue(h!!.contains("Str") && !h.contains("'"), "the leaf is `Str`:\n$h")
+    }
+}
