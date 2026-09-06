@@ -9,7 +9,7 @@ The same is true of variants. The arms of a match are enough to say what a value
 The last arm binds the whole value instead of naming a case, so anything not matched above still has somewhere to go — including `ToTaste`, which is never written down. Take that arm away and the type closes to exactly the cases listed, and passing anything else becomes a compile error that names both sides:
 
 <!--mezze-error
-error[T0201]: Field `qty` expects | Grams { n: 'a }, Pinch |
+error[T0201]: Field `qty` expects | Grams { n: Int }, Pinch |
 but got | ToTaste | in call to `show`
 -->
 
@@ -17,6 +17,7 @@ Records have the matching idea: `{ name: Str, ... }` accepts *at least* a name, 
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
+use std::int
 
 # No type declared. The record IS its shape.
 let oil = { name = "olive oil", grams = 200 }
@@ -24,7 +25,7 @@ let oil = { name = "olive oil", grams = 200 }
 # The match arms are the only place these cases
 # appear. Together they say what `qty` accepts.
 let show = { qty } -> match qty is
-  Grams { n } -> "$(n.to_str {})g"
+  Grams { n } -> "$(int::to_str { n = n })g"
   Pinch -> "a pinch"
   # Binds the whole value, not just a case name.
   other -> "unknown: $(other.to_dbg {})"
