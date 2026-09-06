@@ -2541,23 +2541,46 @@ public final class BytecodeCompiler {
             // path (still allocs a MezzeRecord in the caller) but routes
             // the surrounding function through BDSL.
             if (!cn.isScalarABI()) {
-                // ── Fast paths: bypass record alloc for known 2-field natives ──
-                // str::concat { l, r } → DirectAdd (addStrings specialization)
+                // ── Fast paths: bypass record alloc for known record-ABI natives ──
+                // Emit inline BDSL operations directly, skipping MakeRecord
+                // allocation and NativeDispatch HashMap lookup.
                 String recName = cn.getName();
-                if ("__native_string_concat".equals(recName)
-                        && cn.getArg() instanceof MakeRecordIR mr && mr.getFields().size() == 2) {
-                    NodeIR lNode = null, rNode = null;
-                    for (FieldIR fld : mr.getFields()) {
-                        if ("l".equals(fld.getName())) lNode = fld.getValue();
-                        else if ("r".equals(fld.getName())) rNode = fld.getValue();
+                if (cn.getArg() instanceof MakeRecordIR mr) {
+                    // str::concat { l, r } → DirectAdd (addStrings specialization)
+                    if ("__native_string_concat".equals(recName) && mr.getFields().size() == 2) {
+                        NodeIR lNode = null, rNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("l".equals(fld.getName())) lNode = fld.getValue();
+                            else if ("r".equals(fld.getName())) rNode = fld.getValue();
+                        }
+                        if (lNode != null && rNode != null) {
+                            b.beginDirectAdd();
+                            emitNode(lNode, b, argCount, localMap);
+                            emitNode(rNode, b, argCount, localMap);
+                            b.endDirectAdd();
+                            return;
+                        }
                     }
-                    if (lNode != null && rNode != null) {
-                        b.beginDirectAdd();
-                        emitNode(lNode, b, argCount, localMap);
-                        emitNode(rNode, b, argCount, localMap);
-                        b.endDirectAdd();
-                        return;
+                    // int::to_str { n } → InlineScalarInspect (doLong → Long.toString)
+                    if ("__native_int_to_str".equals(recName) && mr.getFields().size() == 1) {
+                        NodeIR nNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("n".equals(fld.getName())) nNode = fld.getValue();
+                        }
+                        if (nNode != null) {
+                            b.beginInlineScalarInspect(false);
+                            emitNode(nNode, b, argCount, localMap);
+                            b.endInlineScalarInspect();
+                            return;
+                        }
                     }
+                    // str::contains { s, sub } → inline String.contains
+                    // str::starts_with { s, prefix } → inline String.startsWith
+                    // str::ends_with { s, suffix } → inline String.endsWith
+                    // These are 2-field string predicates; emit DirectEqual-style
+                    // but actually we need a dedicated operation. For now, fall
+                    // through to the record-ABI path for these. TODO: add
+                    // InlineStringPredicate BDSL ops.
                 }
                 var withNode = com.mezze.interpreter.nodes.builtin.NativeDispatch
                         .recordHandlerWithNodeOf(recName);
