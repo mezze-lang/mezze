@@ -5,110 +5,65 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 /**
- * Data classes representing Mezze.lock file structure
+ * `Mezze.lock` — the **complete resolved dependency graph**. One entry per package
+ * with its source, integrity (sha256 for registry deps), and its direct dependency
+ * edges, so the whole transitive tree is pinned and reviewable. Written fresh by
+ * `mez sync` as a full snapshot; JSON, stable-sorted for clean diffs.
  *
- * Example Mezze.lock:
  * ```json
- * {
- *   "version": 1,
+ * { "version": 2, "root": "app",
  *   "packages": [
- *     {
- *       "name": "json",
- *       "version": "1.2.3",
- *       "url": "https://github.com/mezze-lang/json/releases/download/v1.2.3/json.tar.gz",
- *       "checksum": "sha256:abc123..."
- *     }
- *   ]
- * }
+ *     { "name": "app",  "version": "0.1.0", "source": "root",
+ *       "dependencies": ["utils"] },
+ *     { "name": "utils","version": "0.1.0", "source": "path", "path": "/abs/utils",
+ *       "dependencies": ["json"] },
+ *     { "name": "json", "version": "1.2.3", "source": "registry",
+ *       "url": "https://…/json.tar.gz", "checksum": "sha256:abc…", "dependencies": [] }
+ *   ] }
  * ```
  */
 @Serializable
 data class MezzeLock(
-    val version: Int = 1,
-    val packages: List<LockedPackage> = emptyList()
+    val version: Int = 2,
+    val root: String = "",
+    val packages: List<LockedNode> = emptyList(),
 )
 
 @Serializable
-data class LockedPackage(
+data class LockedNode(
     val name: String,
     val version: String,
-    val url: String,
-    val checksum: String
+    /** "root" | "path" | "registry" */
+    val source: String = "registry",
+    /** resolved path — path deps only (informational; local + mutable, no integrity) */
+    val path: String? = null,
+    /** tarball URL — registry deps only */
+    val url: String? = null,
+    /** "sha256:…" integrity — registry deps only */
+    val checksum: String? = null,
+    /** direct dependency names — the graph edges */
+    val dependencies: List<String> = emptyList(),
 )
 
-/**
- * Read Mezze.lock file from disk
- */
 fun readLockFile(lockFile: File): MezzeLock? {
-    if (!lockFile.exists()) {
-        return null
-    }
-
+    if (!lockFile.exists()) return null
     return try {
-        val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
-        json.decodeFromString<MezzeLock>(lockFile.readText())
+        Json { ignoreUnknownKeys = true }.decodeFromString<MezzeLock>(lockFile.readText())
     } catch (e: Exception) {
         throw IllegalStateException(
-            "❌ Failed to parse Mezze.lock\n\n" +
-            "The lock file is corrupted or has invalid JSON syntax.\n" +
-            "Error: ${e.message}\n\n" +
-            "💡 Try deleting Mezze.lock and running 'mezze sync' to regenerate it.",
-            e
+            "❌ Failed to parse Mezze.lock — corrupted or invalid JSON.\n" +
+                "   ${e.message}\n" +
+                "💡 Delete Mezze.lock and run 'mez sync' to regenerate it.",
+            e,
         )
     }
 }
 
-/**
- * Write Mezze.lock file to disk
- */
 fun writeLockFile(lockFile: File, lock: MezzeLock) {
-    val json = Json {
-        ignoreUnknownKeys = true
-        prettyPrint = true
-        // Indent with 2 spaces for readability
-    }
-
+    val json = Json { prettyPrint = true }
     try {
-        lockFile.writeText(json.encodeToString(MezzeLock.serializer(), lock))
+        lockFile.writeText(json.encodeToString(MezzeLock.serializer(), lock) + "\n")
     } catch (e: Exception) {
-        throw IllegalStateException(
-            "❌ Failed to write Mezze.lock\n\n" +
-            "Could not save lock file to: ${lockFile.absolutePath}\n" +
-            "Error: ${e.message}\n\n" +
-            "💡 Check file permissions and disk space.",
-            e
-        )
+        throw IllegalStateException("❌ Failed to write Mezze.lock to ${lockFile.absolutePath}\n   ${e.message}", e)
     }
-}
-
-/**
- * Merge new packages into existing lock file
- */
-fun mergeLockFile(existing: MezzeLock?, newPackages: List<LockedPackage>): MezzeLock {
-    if (existing == null) {
-        return MezzeLock(version = 1, packages = newPackages)
-    }
-
-    // Create a map of existing packages by name
-    val existingMap = existing.packages.associateBy { it.name }.toMutableMap()
-
-    // Update or add new packages
-    for (pkg in newPackages) {
-        existingMap[pkg.name] = pkg
-    }
-
-    return MezzeLock(
-        version = 1,
-        packages = existingMap.values.sortedBy { it.name }
-    )
-}
-
-/**
- * Remove packages from lock file
- */
-fun removeLockFilePackages(existing: MezzeLock, packageNames: Set<String>): MezzeLock {
-    return MezzeLock(
-        version = 1,
-        packages = existing.packages.filter { it.name !in packageNames }
-    )
 }

@@ -120,8 +120,12 @@ identical to the lock.
   dep is linked into its declarer's `.deps/mezze/`, and a registry dep's own
   sub-deps land in *its* content-store entry's `.deps/` (shared, since a package's
   deps are a pure function of the package). Diamonds dedup, cycles terminate.
-  Remaining: a full lockfile *graph* (today the lock records the registry deps
-  encountered, not yet the complete transitive tree with integrity per edge).
+- **Lockfile graph. ✅ DONE.** `Mezze.lock` (v2) is the **complete resolved graph**:
+  one node per package (root + path + registry) with `source`, integrity
+  (`sha256:…` for registry), and its direct-dep `dependencies` edges — written fresh
+  each `mez sync` (stable-sorted JSON for clean diffs). `mez sync --locked` verifies
+  the resolved graph matches the committed lock instead of writing it (reproducible
+  CI mode), failing if they've drifted.
 - **P4 — polish.** ✅ `mez add <name> --path ../x` / `--url <url>#sha256:…` (`--dev`)
   and `mez remove <name>` — line-based Mezze.toml edits that preserve comments +
   formatting, section-scoped so `[package] name` is never touched. Remaining:

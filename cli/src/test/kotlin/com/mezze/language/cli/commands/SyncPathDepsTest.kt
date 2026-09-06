@@ -120,4 +120,27 @@ class SyncPathDepsTest {
         assertDoesNotThrow { sync(app) }
         assertNull(link(app, "nope"), "a non-existent dep must not be linked")
     }
+
+    @Test
+    fun `sync writes the complete dependency graph to Mezze_lock`(@TempDir tmp: Path) {
+        val root = tmp.toFile()
+        lib(root, "core")
+        lib(root, "utils", pathDeps = mapOf("core" to "../core"))
+        val app = lib(root, "app", pathDeps = mapOf("utils" to "../utils"))
+
+        sync(app)
+
+        val lock = com.mezze.language.cli.`package`.readLockFile(File(app, "Mezze.lock"))
+        assertNotNull(lock, "Mezze.lock should be written")
+        assertEquals("app", lock!!.root)
+        assertEquals(setOf("app", "utils", "core"), lock.packages.map { it.name }.toSet(), "whole transitive graph")
+
+        val appNode = lock.packages.first { it.name == "app" }
+        assertEquals("root", appNode.source)
+        assertEquals(listOf("utils"), appNode.dependencies, "root's edges")
+
+        val utilsNode = lock.packages.first { it.name == "utils" }
+        assertEquals("path", utilsNode.source)
+        assertEquals(listOf("core"), utilsNode.dependencies, "utils -> core edge recorded")
+    }
 }
