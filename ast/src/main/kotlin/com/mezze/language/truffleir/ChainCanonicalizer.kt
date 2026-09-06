@@ -119,7 +119,8 @@ object ChainCanonicalizer {
         // the BDSL emit can drive BuiltinSumLongSeq / BuiltinSumRangeLong
         // through the canonical path.
         if (node is CallNativeIR
-            && (node.name == "__native_seq_sum" || node.name == "__native_iter_sum")
+            && (node.name == "__native_seq_sum" || node.name == "__native_iter_sum"
+                || node.name == "__native_list_sum")
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
             if (mr.fields.size != 1) return null
@@ -127,9 +128,15 @@ object ChainCanonicalizer {
             if (fld.name != "xs" && fld.name != "it") return null
             val (stages, source) = peelSource(fld.value, classifier, allFunctions)
             // seq_sum: we know the source is a Seq — promote Opaque → RawSeq.
+            // list_sum: source is a List — promote Opaque → RawList.
+            //   BUT only when there are stages to fuse — bare list::sum is
+            //   faster as a native call (direct cons-cell walk) than via
+            //   ListToLongSeq + FLP (O(n) array copy overhead).
             // iter_sum: source could be any collection — must reject Opaque.
             val effectiveSource = when {
                 source is SourceIR.Opaque && node.name == "__native_seq_sum" -> SourceIR.RawSeq(source.expr)
+                source is SourceIR.Opaque && node.name == "__native_list_sum" ->
+                    if (stages.isNotEmpty()) SourceIR.RawList(source.expr) else return null
                 source is SourceIR.Opaque -> return null
                 else -> source
             }
@@ -535,7 +542,8 @@ object ChainCanonicalizer {
     ): FusedChainIR? {
         if (node.isScalarABI) return null
         // Sum
-        if (node.name == "__native_seq_sum" || node.name == "__native_iter_sum") {
+        if (node.name == "__native_seq_sum" || node.name == "__native_iter_sum"
+            || node.name == "__native_list_sum") {
             val mr = node.arg as? MakeRecordIR ?: return null
             if (mr.fields.size != 1) return null
             val fld = mr.fields[0]
@@ -543,6 +551,8 @@ object ChainCanonicalizer {
             val (stages, source) = peelSource(fld.value, classifier, allFunctions)
             val effectiveSource = when {
                 source is SourceIR.Opaque && node.name == "__native_seq_sum" -> SourceIR.RawSeq(source.expr)
+                source is SourceIR.Opaque && node.name == "__native_list_sum" ->
+                    if (stages.isNotEmpty()) SourceIR.RawList(source.expr) else return null
                 source is SourceIR.Opaque -> return null
                 else -> source
             }
