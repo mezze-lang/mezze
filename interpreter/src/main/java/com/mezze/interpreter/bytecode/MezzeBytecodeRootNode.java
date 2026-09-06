@@ -1831,13 +1831,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      *
      * <p>Layout: bits 0-3 sinkKind, 4-7 mapOp+1, 8-11 filterPreOp+1,
      * 12-15 filterCmpOp+1, 16-19 sinkPredPreOp+1, 20-23 sinkPredCmpOp+1,
-     * 24-27 foldOp+1, bit 28 selfMap, bit 29 filterFirst. 0 in any
-     * 4-bit field means "absent".
+     * 24-27 foldOp+1, bit 28 selfMap, bit 29 filterFirst, bit 30 hasTake.
+     * 0 in any 4-bit field means "absent".
      */
     public static int flpPackConfig(
             int sinkKind, int mapOp, int filterPreOp, int filterCmpOp,
             int sinkPredPreOp, int sinkPredCmpOp, int foldOp,
-            boolean selfMap, boolean filterFirst) {
+            boolean selfMap, boolean filterFirst, boolean hasTake) {
         return (sinkKind & 0xF)
              | (((mapOp + 1) & 0xF) << 4)
              | (((filterPreOp + 1) & 0xF) << 8)
@@ -1846,7 +1846,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
              | (((sinkPredCmpOp + 1) & 0xF) << 20)
              | (((foldOp + 1) & 0xF) << 24)
              | (selfMap ? (1 << 28) : 0)
-             | (filterFirst ? (1 << 29) : 0);
+             | (filterFirst ? (1 << 29) : 0)
+             | (hasTake ? (1 << 30) : 0);
     }
 
     /**
@@ -1860,7 +1861,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * the value is computed once before the loop and passed in.
      *
      * <p>Children (in order): seq, mapOperand, filterPreRhs, filterCmpRhs,
-     * sinkPredPreRhs, sinkPredCmpRhs, foldInit.
+     * sinkPredPreRhs, sinkPredCmpRhs, foldInit, takeLimit.
      */
     @Operation
     @ConstantOperand(type = int.class)   // config: packed ops (PE constant)
@@ -1873,6 +1874,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
                 long sinkPredCmpRhs, long foldInit,
+                long takeLimit,
                 @Bind Node node,
                 @Cached InlinedLoopConditionProfile loopProfile) {
             // Unpack config — each field is PE-constant.
@@ -1889,6 +1891,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     (com.mezze.datastructures.seq.LongSeqStorage) seq.getStorage();
             long[] data = ls.getArray();
             int n = ls.size();
+
+            // Take stage: clamp iteration count to takeLimit.
+            boolean hasTake = (config & (1 << 30)) != 0;
+            if (hasTake) n = (int) Math.min(n, takeLimit);
 
             long acc = foldInit;
             boolean found = false;
@@ -1984,7 +1990,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 MezzeSeq<?> seq,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
-                long sinkPredCmpRhs, long foldInit) {
+                long sinkPredCmpRhs, long foldInit,
+                long takeLimit) {
             int sinkKind      = config & 0xF;
             int mapOp         = ((config >> 4) & 0xF) - 1;
             int filterPreOp   = ((config >> 8) & 0xF) - 1;
@@ -1996,6 +2003,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             boolean filterFirst = (config & (1 << 29)) != 0;
 
             int n = seq.size();
+            boolean hasTake = (config & (1 << 30)) != 0;
+            if (hasTake) n = (int) Math.min(n, takeLimit);
             long acc = foldInit;
             boolean found = false;
             long foundVal = 0;
@@ -2141,7 +2150,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * the element.
      *
      * <p>Children (in order): start, end, mapOperand, filterPreRhs,
-     * filterCmpRhs, sinkPredPreRhs, sinkPredCmpRhs, foldInit.
+     * filterCmpRhs, sinkPredPreRhs, sinkPredCmpRhs, foldInit, takeLimit.
      *
      * <p>Config (ConstantOperand) uses the same packing as FusedLongPipeline.
      */
@@ -2156,6 +2165,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
                 long sinkPredCmpRhs, long foldInit,
+                long takeLimit,
                 @Bind Node node,
                 @Cached InlinedLoopConditionProfile loopProfile) {
             // Unpack config — each field is PE-constant.
@@ -2171,6 +2181,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             boolean filterFirst = (config & (1 << 29)) != 0;
 
             int n = (int) (end - start);
+
+            // Take stage: clamp iteration count to takeLimit.
+            boolean hasTake = (config & (1 << 30)) != 0;
+            if (hasTake) n = (int) Math.min(n, takeLimit);
+
             long acc = foldInit;
             boolean found = false;
             long foundVal = 0;

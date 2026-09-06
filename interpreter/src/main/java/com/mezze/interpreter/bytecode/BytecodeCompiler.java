@@ -3216,6 +3216,7 @@ public final class BytecodeCompiler {
                       emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap);
                       emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap);
                       emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
+                      emitFLPOperand(flp.takeLimitLit, flp.takeLimitNode, b, argCount, localMap);
                     b.endFusedLongRangePipeline();
                     if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongRangePipeline ("
                             + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
@@ -3230,6 +3231,7 @@ public final class BytecodeCompiler {
                       emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap);
                       emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap);
                       emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
+                      emitFLPOperand(flp.takeLimitLit, flp.takeLimitNode, b, argCount, localMap);
                     b.endFusedLongPipeline();
                     if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongPipeline ("
                             + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
@@ -3250,6 +3252,7 @@ public final class BytecodeCompiler {
                       emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap);
                       emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap);
                       emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
+                      emitFLPOperand(flp.takeLimitLit, flp.takeLimitNode, b, argCount, localMap);
                     b.endFusedLongPipeline();
                     if (dbg) System.err.println("[chain-canon-emit] emitted ListToLongSeq+FusedLongPipeline ("
                             + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
@@ -3280,13 +3283,15 @@ public final class BytecodeCompiler {
         final long sinkPredPreLit;   final NodeIR sinkPredPreNode;
         final long sinkPredCmpLit;   final NodeIR sinkPredCmpNode;
         final long foldInitLit;      final NodeIR foldInitNode;
+        final long takeLimitLit;     final NodeIR takeLimitNode;
         FLPSpec(int config,
                 long mapLit, NodeIR mapNode,
                 long filterPreLit, NodeIR filterPreNode,
                 long filterCmpLit, NodeIR filterCmpNode,
                 long sinkPredPreLit, NodeIR sinkPredPreNode,
                 long sinkPredCmpLit, NodeIR sinkPredCmpNode,
-                long foldInitLit, NodeIR foldInitNode) {
+                long foldInitLit, NodeIR foldInitNode,
+                long takeLimitLit, NodeIR takeLimitNode) {
             this.config = config;
             this.mapLit = mapLit;               this.mapNode = mapNode;
             this.filterPreLit = filterPreLit;   this.filterPreNode = filterPreNode;
@@ -3294,6 +3299,7 @@ public final class BytecodeCompiler {
             this.sinkPredPreLit = sinkPredPreLit; this.sinkPredPreNode = sinkPredPreNode;
             this.sinkPredCmpLit = sinkPredCmpLit; this.sinkPredCmpNode = sinkPredCmpNode;
             this.foldInitLit = foldInitLit;     this.foldInitNode = foldInitNode;
+            this.takeLimitLit = takeLimitLit;   this.takeLimitNode = takeLimitNode;
         }
     }
 
@@ -3325,6 +3331,9 @@ public final class BytecodeCompiler {
         boolean selfMap = false; boolean filterFirst = false;
         int filterPreOp = -1; long filterPreLit = 0; NodeIR filterPreNode = null;
         int filterCmpOp = -1; long filterCmpLit = 0; NodeIR filterCmpNode = null;
+        // Take stage support: at most one take, and it must come BEFORE any
+        // filter stage so we can implement it as a simple iteration-count clamp.
+        boolean hasTake = false; long takeLimitLit = 0; NodeIR takeLimitNode = null;
         // Track whether we've seen a filter before a map (for stage ordering).
         boolean seenFilter = false;
 
@@ -3360,6 +3369,15 @@ public final class BytecodeCompiler {
                     } else {
                         filterCmpLit = fp.cmpRhs();
                     }
+                }
+            } else if (stage instanceof ClassifiedStage.TakeStep ts) {
+                if (hasTake) return null;          // only one take supported
+                if (seenFilter) return null;       // take-after-filter needs counter, not supported
+                hasTake = true;
+                if (ts.n() instanceof LongLitIR lit) {
+                    takeLimitLit = lit.getValue();
+                } else {
+                    takeLimitNode = ts.n();
                 }
             } else {
                 return null;
@@ -3427,13 +3445,14 @@ public final class BytecodeCompiler {
 
         int config = MezzeBytecodeRootNode.flpPackConfig(
                 sinkKind, mapOp, filterPreOp, filterCmpOp,
-                sinkPredPreOp, sinkPredCmpOp, foldOp, selfMap, filterFirst);
+                sinkPredPreOp, sinkPredCmpOp, foldOp, selfMap, filterFirst, hasTake);
         return new FLPSpec(config,
                 mapLit, mapNode, filterPreLit, filterPreNode,
                 filterCmpLit, filterCmpNode,
                 sinkPredPreLit, sinkPredPreNode,
                 sinkPredCmpLit, sinkPredCmpNode,
-                foldInitLit, foldInitNode);
+                foldInitLit, foldInitNode,
+                takeLimitLit, takeLimitNode);
     }
 
     /**
