@@ -328,6 +328,32 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Inline string predicate: CONTAINS(0), STARTS_WITH(1), ENDS_WITH(2).
+     * Bypasses MakeRecord + NativeDispatch for str::contains / str::starts_with /
+     * str::ends_with.  `@TruffleBoundary` because the JDK implementations can
+     * reach blocklisted internal String helpers under SVM runtime compilation (#402).
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    public static final class InlineStringPredicate {
+        /** CONTAINS = 0 */  public static final int CONTAINS    = 0;
+        /** STARTS_WITH = 1 */ public static final int STARTS_WITH = 1;
+        /** ENDS_WITH = 2 */  public static final int ENDS_WITH   = 2;
+
+        @Specialization
+        @TruffleBoundary
+        public static boolean doStrStr(int op, String haystack, String needle) {
+            return switch (op) {
+                case CONTAINS    -> haystack.contains(needle);
+                case STARTS_WITH -> haystack.startsWith(needle);
+                case ENDS_WITH   -> haystack.endsWith(needle);
+                default -> throw com.oracle.truffle.api.CompilerDirectives.shouldNotReachHere(
+                        "InlineStringPredicate: unknown op " + op);
+            };
+        }
+    }
+
+    /**
      * #394 — type-driven Inspect. Emitted for {@code x.to_dbg {}} /
      * {@code x.to_str {}} from {@link com.mezze.language.truffleir.InspectIR},
      * carrying the receiver's static shape as a constant {@code PrintType}. The

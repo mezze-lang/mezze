@@ -2561,8 +2561,11 @@ public final class BytecodeCompiler {
                             return;
                         }
                     }
-                    // int::to_str { n } → InlineScalarInspect (doLong → Long.toString)
-                    if ("__native_int_to_str".equals(recName) && mr.getFields().size() == 1) {
+                    // {int,float,nat}::to_str { n } → InlineScalarInspect
+                    if (("__native_int_to_str".equals(recName)
+                            || "__native_float_to_str".equals(recName)
+                            || "__native_nat_to_str".equals(recName))
+                            && mr.getFields().size() == 1) {
                         NodeIR nNode = null;
                         for (FieldIR fld : mr.getFields()) {
                             if ("n".equals(fld.getName())) nNode = fld.getValue();
@@ -2574,13 +2577,64 @@ public final class BytecodeCompiler {
                             return;
                         }
                     }
-                    // str::contains { s, sub } → inline String.contains
-                    // str::starts_with { s, prefix } → inline String.startsWith
-                    // str::ends_with { s, suffix } → inline String.endsWith
-                    // These are 2-field string predicates; emit DirectEqual-style
-                    // but actually we need a dedicated operation. For now, fall
-                    // through to the record-ABI path for these. TODO: add
-                    // InlineStringPredicate BDSL ops.
+                    // bool::to_str { b } → InlineScalarInspect (doBool → "True"/"False")
+                    if ("__native_bool_to_str".equals(recName) && mr.getFields().size() == 1) {
+                        NodeIR bNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("b".equals(fld.getName())) bNode = fld.getValue();
+                        }
+                        if (bNode != null) {
+                            b.beginInlineScalarInspect(false);
+                            emitNode(bNode, b, argCount, localMap);
+                            b.endInlineScalarInspect();
+                            return;
+                        }
+                    }
+                    // str::contains { s, substring } → InlineStringPredicate(CONTAINS)
+                    if ("__native_string_contains".equals(recName) && mr.getFields().size() == 2) {
+                        NodeIR sNode = null, subNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("s".equals(fld.getName())) sNode = fld.getValue();
+                            else if ("substring".equals(fld.getName())) subNode = fld.getValue();
+                        }
+                        if (sNode != null && subNode != null) {
+                            b.beginInlineStringPredicate(MezzeBytecodeRootNode.InlineStringPredicate.CONTAINS);
+                            emitNode(sNode, b, argCount, localMap);
+                            emitNode(subNode, b, argCount, localMap);
+                            b.endInlineStringPredicate();
+                            return;
+                        }
+                    }
+                    // str::starts_with { s, prefix } → InlineStringPredicate(STARTS_WITH)
+                    if ("__native_string_starts_with".equals(recName) && mr.getFields().size() == 2) {
+                        NodeIR sNode = null, prefixNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("s".equals(fld.getName())) sNode = fld.getValue();
+                            else if ("prefix".equals(fld.getName())) prefixNode = fld.getValue();
+                        }
+                        if (sNode != null && prefixNode != null) {
+                            b.beginInlineStringPredicate(MezzeBytecodeRootNode.InlineStringPredicate.STARTS_WITH);
+                            emitNode(sNode, b, argCount, localMap);
+                            emitNode(prefixNode, b, argCount, localMap);
+                            b.endInlineStringPredicate();
+                            return;
+                        }
+                    }
+                    // str::ends_with { s, suffix } → InlineStringPredicate(ENDS_WITH)
+                    if ("__native_string_ends_with".equals(recName) && mr.getFields().size() == 2) {
+                        NodeIR sNode = null, suffixNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("s".equals(fld.getName())) sNode = fld.getValue();
+                            else if ("suffix".equals(fld.getName())) suffixNode = fld.getValue();
+                        }
+                        if (sNode != null && suffixNode != null) {
+                            b.beginInlineStringPredicate(MezzeBytecodeRootNode.InlineStringPredicate.ENDS_WITH);
+                            emitNode(sNode, b, argCount, localMap);
+                            emitNode(suffixNode, b, argCount, localMap);
+                            b.endInlineStringPredicate();
+                            return;
+                        }
+                    }
                 }
                 var withNode = com.mezze.interpreter.nodes.builtin.NativeDispatch
                         .recordHandlerWithNodeOf(recName);
