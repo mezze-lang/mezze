@@ -4865,6 +4865,11 @@ public final class BytecodeCompiler {
             if (right instanceof LongLitIR rr) {
                 return new UnaryLitShape(op, rr.getValue());
             }
+            // Shape B-self: param <op> param — e.g. {x} -> x * x via mono-desugared CallDirect.
+            // Mirrors Shape E above for InlineBinaryOp.
+            if (right instanceof ReadLocalIR rr2 && rr2.getSlot() == paramSlot) {
+                return new UnaryLitShape(op, /*selfOp=*/ true);
+            }
             NodeIR lifted = liftCaptureRhs(right, caps);
             if (lifted != null) return new UnaryLitShape(op, lifted);
             // #442 Shape B′: parameter-free expression RHS.
@@ -4887,6 +4892,11 @@ public final class BytecodeCompiler {
             }
             if (rExpr == null) return null;
             if (rExpr instanceof LongLitIR ll2) return new UnaryLitShape(op, ll2.getValue());
+            // Shape C-self: r=param — e.g. {x} -> x * x via un-monomorphized ability dispatch.
+            // The record is {it=x, r=x} where both refer to the single param.
+            if (rExpr instanceof ReadLocalIR rr && rr.getSlot() == paramSlot) {
+                return new UnaryLitShape(op, /*selfOp=*/ true);
+            }
             NodeIR lifted = liftCaptureRhs(rExpr, caps);
             if (lifted != null) return new UnaryLitShape(op, lifted);
         }
