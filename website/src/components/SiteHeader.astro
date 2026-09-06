@@ -11,10 +11,18 @@ const isCurrent = (href: string) => path === href || path.startsWith(href + '/')
   <div class="site-bar-inner">
     <a href="/" class="brand"><Mascot size={19} static /><span class="brand-name">{site.name}</span></a>
     <nav>
-      {site.nav.map((i) => (
-        <a href={i.href} class:list={{ on: isCurrent(i.href) }}
-           aria-current={isCurrent(i.href) ? 'page' : undefined}>{i.label}</a>
-      ))}
+      {site.nav.map((i) => {
+        // A `short` label swaps in when the bar is tight (chrome.css narrow
+        // rule). Both are rendered; CSS shows one. Without a `short`, the full
+        // label is the only child and always shows.
+        const short = 'short' in i ? i.short : null
+        return (
+          <a href={i.href} class:list={{ on: isCurrent(i.href) }}
+             aria-current={isCurrent(i.href) ? 'page' : undefined}>
+            {short ? <><span class="nav-full">{i.label}</span><span class="nav-short">{short}</span></> : i.label}
+          </a>
+        )
+      })}
     </nav>
     <span class="site-bar-actions">
       {subscribe.formId && (

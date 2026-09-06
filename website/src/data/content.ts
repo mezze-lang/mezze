@@ -22,7 +22,10 @@ export const site = {
   name: 'mezze',
   tagline: 'A functional language with first class effects running on GraalVM.',
   nav: [
-    { label: 'Taste', href: '/taste' },
+    // `short` is the label to fall back to when the bar runs out of room
+    // (see SiteHeader + the narrow-width rule in chrome.css). Full name in the
+    // nav, "Taste" on a phone.
+    { label: 'Taste of Mezze', short: 'Taste', href: '/taste' },
     { label: 'Concepts', href: '/concepts' },
     { label: 'Blog', href: '/blog' },
   ],

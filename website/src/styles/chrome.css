@@ -17,6 +17,9 @@
 .site-bar nav a { color: inherit; text-decoration: none; }
 .site-bar nav a:hover { color: var(--primary); }
 .site-bar nav a.on { color: var(--primary); font-weight: 600; }
+/* A nav link may carry both a full and a short label (see SiteHeader). The
+   full one shows by default; the narrow rule below swaps to the short. */
+.site-bar nav a .nav-short { display: none; }
 .site-bar-actions { margin-left: auto; display: flex; align-items: center; gap: .55rem; }
 
 .brand {
@@ -50,6 +53,10 @@
   }
   .site-bar nav::-webkit-scrollbar { display: none; }
   .site-bar nav a { white-space: nowrap; }
+  /* Tight bar: a link with a short label drops to it. "Taste of Mezze"
+     becomes "Taste" here, which is the main thing making the row overflow. */
+  .site-bar nav a .nav-full { display: none; }
+  .site-bar nav a .nav-short { display: inline; }
   .site-bar-actions { gap: .45rem; }
   /* The pill is the widest optional item; trim its padding before anything
      starts losing letters. */
