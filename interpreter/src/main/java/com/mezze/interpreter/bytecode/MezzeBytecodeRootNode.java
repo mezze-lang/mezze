@@ -2237,6 +2237,29 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * Convert a MezzeList of longs to a MezzeSeq backed by LongSeqStorage.
+     * Used to route list sources through FusedLongPipeline for scalar-fast
+     * fold/sum/count/any/all/find/to_seq/to_list. The conversion is O(n)
+     * with pointer-chasing, but the subsequent FLP iteration is O(n) with
+     * contiguous long[] access — net win over cons-cell traversal with
+     * boxing per element.
+     *
+     * Falls back to the empty seq for nil.
+     */
+    @Operation
+    public static final class ListToLongSeq {
+        @Specialization
+        @TruffleBoundary
+        public static MezzeSeq<?> doLongList(com.mezze.datastructures.list.MezzeLongCons list) {
+            return MezzeSeq.fromLongs(list.toLongArray());
+        }
+        @Specialization
+        public static MezzeSeq<?> doNil(com.mezze.datastructures.list.MezzeNil<?> list) {
+            return MezzeSeq.empty();
+        }
+    }
+
     // ===== Cons-cell traversal ops for list-source fused loops =====
     // These avoid the O(n) ListToArray conversion by walking the list
     // in place: cursor = list; while (!isEmpty(cursor)) { x = head(cursor); cursor = tail(cursor); }

@@ -3053,10 +3053,22 @@ public final class BytecodeCompiler {
                 if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (RawSeq+Sum)");
                 return true;
             }
+            // Sum over RawList with no stages → ListToLongSeq + BuiltinSumLongSeq.
+            if (rawListExpr != null && isSumSink && !hasStages) {
+                b.beginBuiltinSumLongSeq();
+                  b.beginListToLongSeq();
+                    emitNode(rawListExpr, b, argCount, localMap);
+                  b.endListToLongSeq();
+                b.endBuiltinSumLongSeq();
+                if (dbg) System.err.println("[chain-canon-emit] emitted ListToLongSeq+BuiltinSumLongSeq");
+                return true;
+            }
         }
 
         // ── Phase 4d-fast: try FusedLongPipeline / FusedLongRangePipeline ──
-        if (hasStages) {
+        // For no-stages cases (plain fold), also allow FLP for list sources
+        // since ListToLongSeq+FLP outperforms cons-cell traversal.
+        if (hasStages || rawListExpr != null) {
             var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
             if (flp != null) {
                 if (rangeStart != null) {
@@ -3074,7 +3086,7 @@ public final class BytecodeCompiler {
                     if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongRangePipeline ("
                             + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
                     return true;
-                } else if (rawXsExpr != null && rawListExpr == null) {
+                } else if (rawXsExpr != null) {
                     // Seq source → FusedLongPipeline (existing path)
                     b.beginFusedLongPipeline(flp.config);
                       emitNode(rawXsExpr, b, argCount, localMap);              // child 0: seq
@@ -3086,6 +3098,26 @@ public final class BytecodeCompiler {
                       emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
                     b.endFusedLongPipeline();
                     if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongPipeline ("
+                            + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
+                    return true;
+                } else if (rawListExpr != null) {
+                    // List source → ListToLongSeq + FusedLongPipeline.
+                    // Convert MezzeList to MezzeSeq (long-backed) first, then
+                    // run FLP for scalar-fast fold/sum/count. The O(n) conversion
+                    // pays for itself: FLP iteration over contiguous long[] is
+                    // much faster than cons-cell traversal with boxing.
+                    b.beginFusedLongPipeline(flp.config);
+                      b.beginListToLongSeq();
+                        emitNode(rawListExpr, b, argCount, localMap);
+                      b.endListToLongSeq();
+                      emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);
+                      emitFLPOperand(flp.filterPreLit, flp.filterPreNode, b, argCount, localMap);
+                      emitFLPOperand(flp.filterCmpLit, flp.filterCmpNode, b, argCount, localMap);
+                      emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap);
+                      emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap);
+                      emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
+                    b.endFusedLongPipeline();
+                    if (dbg) System.err.println("[chain-canon-emit] emitted ListToLongSeq+FusedLongPipeline ("
                             + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
                     return true;
                 }
