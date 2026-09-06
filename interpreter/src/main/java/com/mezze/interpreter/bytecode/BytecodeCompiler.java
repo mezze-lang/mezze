@@ -3200,7 +3200,9 @@ public final class BytecodeCompiler {
         // (e.g. acc + x*x) — the element op is injected as a virtual map stage.
         boolean hasFoldElemTransform = sinkMode instanceof FusedSinkMode.Accumulate a2
                 && a2.elemOp() != null;
-        if (hasStages || rawListExpr != null || hasFoldElemTransform) {
+        boolean hasShortCircuitSink = sinkMode instanceof FusedSinkMode.ShortCircuit;
+        boolean hasReduceSink = sinkMode instanceof FusedSinkMode.ReduceOpt;
+        if (hasStages || rawListExpr != null || hasFoldElemTransform || hasShortCircuitSink || hasReduceSink) {
             var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
             if (flp != null) {
                 if (rangeStart != null) {
@@ -3317,8 +3319,7 @@ public final class BytecodeCompiler {
      */
     private FLPSpec tryBuildFusedLongPipeline(
             java.util.List<ClassifiedStage> stages, FusedSinkMode mode) {
-        if (mode instanceof FusedSinkMode.CallEach
-                || mode instanceof FusedSinkMode.ReduceOpt) return null;
+        if (mode instanceof FusedSinkMode.CallEach) return null;
 
         int mapOp = -1; long mapLit = 0; NodeIR mapNode = null;
         boolean selfMap = false; boolean filterFirst = false;
@@ -3415,6 +3416,11 @@ public final class BytecodeCompiler {
                 case SEQ -> MezzeBytecodeRootNode.FLP_SINK_TO_SEQ;
                 case LIST -> MezzeBytecodeRootNode.FLP_SINK_TO_LIST;
             };
+        } else if (mode instanceof FusedSinkMode.ReduceOpt red) {
+            sinkKind = MezzeBytecodeRootNode.FLP_SINK_REDUCE;
+            foldOp = red.op().ordinal();
+            // foldInit is unused for reduce (acc = first element), but
+            // the operand slot is still passed — 0 is harmless.
         } else {
             return null;
         }

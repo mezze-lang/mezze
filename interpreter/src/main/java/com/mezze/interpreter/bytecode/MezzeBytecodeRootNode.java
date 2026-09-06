@@ -1824,7 +1824,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     public static final int FLP_SINK_SUM = 0, FLP_SINK_COUNT = 1,
         FLP_SINK_ANY = 2, FLP_SINK_ALL = 3, FLP_SINK_FIND = 4,
-        FLP_SINK_TO_SEQ = 5, FLP_SINK_TO_LIST = 6;
+        FLP_SINK_TO_SEQ = 5, FLP_SINK_TO_LIST = 6, FLP_SINK_REDUCE = 7;
 
     /**
      * Pack op ordinals and flags into a single int for FusedLongPipeline.
@@ -1896,6 +1896,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
             boolean filterFirst = (config & (1 << 29)) != 0;
 
+            // Reduce sink: init from first post-filter/map element inside the loop.
+            boolean reduceNeedInit = sinkKind == FLP_SINK_REDUCE;
+            if (reduceNeedInit && n == 0) return flpResultReduceEmpty();
+
             // Materialize sinks: pre-allocate to source size, fill, trim.
             long[] matData = null;
             int matCount = 0;
@@ -1927,6 +1931,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 // ── Sink ──
                 if (sinkKind == FLP_SINK_SUM) {
                     acc = flpOp(foldOp, acc, v);
+                } else if (sinkKind == FLP_SINK_REDUCE) {
+                    if (reduceNeedInit) { acc = v; reduceNeedInit = false; }
+                    else { acc = flpOp(foldOp, acc, v); }
                 } else if (sinkKind == FLP_SINK_COUNT) {
                     acc++;
                 } else if (sinkKind == FLP_SINK_TO_SEQ || sinkKind == FLP_SINK_TO_LIST) {
@@ -1959,6 +1966,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             }
 
             // ── Post-loop result ──
+            if (sinkKind == FLP_SINK_REDUCE && reduceNeedInit) {
+                return flpResultReduceEmpty();
+            }
             if (sinkKind == FLP_SINK_TO_SEQ) {
                 return FusedLongRangePipeline.flpResultToSeq(matData, matCount);
             } else if (sinkKind == FLP_SINK_TO_LIST) {
@@ -1989,6 +1999,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             long acc = foldInit;
             boolean found = false;
             long foundVal = 0;
+            boolean reduceNeedInit = sinkKind == FLP_SINK_REDUCE;
+            if (reduceNeedInit && n == 0) return flpResultReduceEmpty();
             for (int i = 0; i < n; i++) {
                 Object raw = seq.get(i);
                 long v = raw instanceof Long l ? l : ((Number) raw).longValue();
@@ -2004,6 +2016,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
                 }
                 if (sinkKind == FLP_SINK_SUM) { acc = flpOp(foldOp, acc, v); }
+                else if (sinkKind == FLP_SINK_REDUCE) {
+                    if (reduceNeedInit) { acc = v; reduceNeedInit = false; }
+                    else { acc = flpOp(foldOp, acc, v); }
+                }
                 else if (sinkKind == FLP_SINK_COUNT) { acc++; }
                 else if (sinkKind == FLP_SINK_ANY) {
                     if (sinkPredCmpOp >= 0) {
@@ -2022,6 +2038,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     }
                 }
             }
+            if (sinkKind == FLP_SINK_REDUCE && reduceNeedInit) return flpResultReduceEmpty();
             return flpResult(sinkKind, acc, found, foundVal);
         }
 
@@ -2060,6 +2077,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 long acc, boolean found, long foundVal) {
             if (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT) {
                 return acc;
+            } else if (sinkKind == FLP_SINK_REDUCE) {
+                return flpResultReduceSome(acc);
             } else if (sinkKind == FLP_SINK_ANY) {
                 return found;
             } else if (sinkKind == FLP_SINK_ALL) {
@@ -2086,6 +2105,26 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.NONE);
                 return MezzeVariant.noPayload(reg, noneTag);
             }
+        }
+
+        @TruffleBoundary
+        private static Object flpResultReduceEmpty() {
+            MezzeVariant.TagRegistry reg = MezzeVariant.TagRegistry.getGlobal();
+            int noneTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
+                    .computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
+            reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.NONE);
+            return MezzeVariant.noPayload(reg, noneTag);
+        }
+
+        @TruffleBoundary
+        private static Object flpResultReduceSome(long acc) {
+            MezzeVariant.TagRegistry reg = MezzeVariant.TagRegistry.getGlobal();
+            int someTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
+                    .computeVariantTag(com.mezze.language.ast.BuiltinTypes.SOME, null);
+            reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.SOME);
+            MezzeRecord payload = MezzeRecord.fromFields(
+                    new String[]{"val"}, new Object[]{acc});
+            return MezzeVariant.singlePayload(reg, someTag, payload);
         }
 
         public static boolean isLongStorage(MezzeSeq<?> seq) {
@@ -2136,6 +2175,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             boolean found = false;
             long foundVal = 0;
 
+            // Reduce sink: init from first post-filter/map element inside the loop.
+            boolean reduceNeedInit = sinkKind == FLP_SINK_REDUCE;
+            if (reduceNeedInit && n == 0) return FusedLongPipeline.flpResultReduceEmpty();
+
             // Materialize sinks: pre-allocate array to range size (upper bound),
             // fill during loop, trim post-loop. Avoids per-element bounds checks
             // and growth copies that the generic SeqBuilder path requires.
@@ -2169,6 +2212,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 // ── Sink ──
                 if (sinkKind == FLP_SINK_SUM) {
                     acc = FusedLongPipeline.flpOp(foldOp, acc, v);
+                } else if (sinkKind == FLP_SINK_REDUCE) {
+                    if (reduceNeedInit) { acc = v; reduceNeedInit = false; }
+                    else { acc = FusedLongPipeline.flpOp(foldOp, acc, v); }
                 } else if (sinkKind == FLP_SINK_COUNT) {
                     acc++;
                 } else if (sinkKind == FLP_SINK_TO_SEQ || sinkKind == FLP_SINK_TO_LIST) {
@@ -2201,6 +2247,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             }
 
             // ── Post-loop result ──
+            if (sinkKind == FLP_SINK_REDUCE && reduceNeedInit) {
+                return FusedLongPipeline.flpResultReduceEmpty();
+            }
             if (sinkKind == FLP_SINK_TO_SEQ) {
                 return flpResultToSeq(matData, matCount);
             } else if (sinkKind == FLP_SINK_TO_LIST) {
