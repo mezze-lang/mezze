@@ -1286,10 +1286,16 @@ public final class BytecodeCompiler {
                 boolean emittedDirect = false;
                 NodeIR body = ir.getBody();
 
-                if (paramCount == 2 && body instanceof IfIR ifBody) {
-                    emittedDirect = tryEmitFusedLongTailLoop(
-                            ifBody, ir, paramCount, captureCount,
-                            b, argCount, localMap);
+                if (body instanceof IfIR ifBody) {
+                    if (paramCount == 1) {
+                        emittedDirect = tryEmitFusedLongTailLoop1P(
+                                ifBody, ir, captureCount,
+                                b, argCount, localMap);
+                    } else if (paramCount == 2) {
+                        emittedDirect = tryEmitFusedLongTailLoop(
+                                ifBody, ir, paramCount, captureCount,
+                                b, argCount, localMap);
+                    }
                 }
 
                 // ── Try direct-while optimization ──
@@ -5750,6 +5756,126 @@ public final class BytecodeCompiler {
         // p1UpdateRhs
         b.emitLoadLongConstant(updateRhs[1]);
         b.endFusedLongTailLoop();
+
+        return true;
+    }
+
+    /**
+     * Try to emit a FusedLongTailLoop1P for a 1-param tail-recursive function.
+     * Handles patterns like:
+     * <pre>
+     *   countdown = { n } -> if n == 0 then 0 else countdown { n = n - 1 }
+     *   count_up  = { n } -> if n >= 100 then n else count_up { n = n + 1 }
+     * </pre>
+     * Base case can return the param (resultIsParam=true) or a long literal.
+     */
+    private boolean tryEmitFusedLongTailLoop1P(
+            IfIR ifBody, FunctionIR ir, int captureCount,
+            MezzeBytecodeRootNodeGen.Builder b, int argCount,
+            BytecodeLocal[] localMap) {
+        NodeIR cond = ifBody.getCond();
+        NodeIR thenBr = ifBody.getThenBr();
+        NodeIR elseBr = ifBody.getElseBr();
+
+        // Identify tail-call branch and base-case branch.
+        CallDirectIR tailCall = null;
+        NodeIR baseExpr = null;
+        boolean invertCond = false;
+
+        if (elseBr instanceof CallDirectIR ec && ec.isTailCall()
+                && ec.getTargetHash().equals(ir.getHash())
+                && ec.getArgs().size() == 1) {
+            tailCall = ec; baseExpr = thenBr;
+        } else if (thenBr instanceof CallDirectIR tc && tc.isTailCall()
+                && tc.getTargetHash().equals(ir.getHash())
+                && tc.getArgs().size() == 1) {
+            tailCall = tc; baseExpr = elseBr;
+            invertCond = true;
+        }
+        if (tailCall == null) return false;
+
+        // Param resolver: single param at slot captureCount.
+        int paramSlot = captureCount;
+        java.util.function.ToIntFunction<NodeIR> paramIdx = n -> {
+            if (n instanceof ReadLocalIR rl && rl.getSlot() == paramSlot) return 0;
+            if (n instanceof ReadArgIR ra && ra.getIndex() == paramSlot) return 0;
+            return -1;
+        };
+
+        // Base case: param read OR long literal.
+        boolean resultIsParam;
+        long baseLitVal = 0;
+        if (paramIdx.applyAsInt(baseExpr) == 0) {
+            resultIsParam = true;
+        } else if (baseExpr instanceof LongLitIR lit) {
+            resultIsParam = false;
+            baseLitVal = lit.getValue();
+        } else {
+            return false;
+        }
+
+        // Condition: param CMP literal or literal CMP param.
+        InlineOp condOp = fltlExtractOp(cond);
+        if (condOp == null) return false;
+        int condCmpOp = fltlClassifyCmp(condOp);
+        if (condCmpOp < 0) return false;
+        NodeIR condLeft = fltlExtractChild(cond, 0);
+        NodeIR condRight = fltlExtractChild(cond, 1);
+
+        long condRhsVal;
+        if (paramIdx.applyAsInt(condLeft) == 0 && condRight instanceof LongLitIR clit) {
+            condRhsVal = clit.getValue();
+        } else if (paramIdx.applyAsInt(condRight) == 0 && condLeft instanceof LongLitIR clit) {
+            condCmpOp = fltlSwapCmp(condCmpOp);
+            condRhsVal = clit.getValue();
+        } else {
+            return false;
+        }
+
+        if (invertCond) condCmpOp = fltlNegateCmp(condCmpOp);
+
+        // Classify update expression: param op literal.
+        NodeIR updateArg = tailCall.getArgs().get(0);
+        int pi = paramIdx.applyAsInt(updateArg);
+        int p0Op;
+        long p0Rhs;
+        if (pi == 0) {
+            // Identity update (no change to param — infinite loop guard above
+            // via condition, but structurally valid).
+            p0Op = -1;
+            p0Rhs = 0;
+        } else {
+            InlineOp extractedOp = fltlExtractOp(updateArg);
+            if (extractedOp == null) return false;
+            p0Op = fltlClassifyArithOp(extractedOp);
+            if (p0Op < 0) return false;
+            NodeIR leftNode = fltlExtractChild(updateArg, 0);
+            NodeIR rightNode = fltlExtractChild(updateArg, 1);
+
+            // Left must be the param.
+            if (paramIdx.applyAsInt(leftNode) != 0) return false;
+
+            // Right must be a literal.
+            if (rightNode instanceof LongLitIR rlit) {
+                p0Rhs = rlit.getValue();
+            } else {
+                return false;
+            }
+        }
+
+        // All checks passed — emit FusedLongTailLoop1P.
+        int config = MezzeBytecodeRootNode.fltl1pPack(condCmpOp, p0Op, resultIsParam);
+
+        b.beginFusedLongTailLoop1P(config);
+        // p0Init
+        b.emitLoadArgument(captureCount);
+        // condRhs
+        b.emitLoadLongConstant(condRhsVal);
+        // p0UpdateRhs
+        b.emitLoadLongConstant(p0Rhs);
+        // baseResult
+        b.emitLoadLongConstant(baseLitVal);
+        b.endFusedLongTailLoop1P();
 
         return true;
     }

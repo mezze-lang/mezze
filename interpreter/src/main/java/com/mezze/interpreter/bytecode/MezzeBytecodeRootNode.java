@@ -2310,6 +2310,63 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    // Config packing for FusedLongTailLoop1P:
+    //   bits 0-3:   condCmpOp      (cmp op for loop condition)
+    //   bits 4-7:   p0UpdateOp     (arith op for p0, +1 bias: 0=identity)
+    //   bit  8:     resultIsParam  (1=return p0, 0=return baseResult child)
+
+    static int fltl1pPack(int condCmpOp, int p0Op, boolean resultIsParam) {
+        return (condCmpOp & 0xF)
+             | (((p0Op + 1) & 0xF) << 4)
+             | ((resultIsParam ? 1 : 0) << 8);
+    }
+
+    /**
+     * Fused single-parameter long tail-loop — compiles the common pattern:
+     * <pre>
+     *   let f = { n } ->
+     *     if n cmpOp condRhs
+     *       then baseResult       (literal or n)
+     *       else f { n = n op rhs }
+     * </pre>
+     * into a single BDSL operation with a tight Java while loop.
+     * Handles 1-param tail-recursive functions (e.g. countdown, collatz).
+     *
+     * <p>Children (in order): p0Init, condRhs, p0UpdateRhs, baseResult.
+     * Config encodes the comparison op, update op, and whether the result
+     * is the final param value or the base literal.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)  // config: packed ops (PE constant)
+    public static final class FusedLongTailLoop1P {
+
+        @Specialization
+        public static long doLoop(
+                int config,
+                long p0Init,
+                long condRhs, long p0Rhs,
+                long baseResult,
+                @Bind Node node,
+                @Cached InlinedLoopConditionProfile loopProfile) {
+            CompilerAsserts.partialEvaluationConstant(config);
+            int condCmpOp       = config & 0xF;
+            int p0Op            = ((config >> 4) & 0xF) - 1;
+            boolean resultParam = (config & (1 << 8)) != 0;
+
+            long p0 = p0Init;
+
+            // Loop while condition is NOT met (condition triggers base case).
+            for (long i = 0; loopProfile.inject(node,
+                    !FusedLongPipeline.flpCmp(condCmpOp, p0, condRhs)); i++) {
+                p0 = p0Op >= 0
+                        ? FusedLongPipeline.flpOp(p0Op, p0, p0Rhs)
+                        : p0;
+            }
+
+            return resultParam ? p0 : baseResult;
+        }
+    }
+
     /** Convert a MezzeList to Object[] for indexed iteration in fused loops.
      *  Single O(n) pass — the resulting array supports O(1) SeqGet access. */
     @Operation
