@@ -2541,10 +2541,24 @@ public final class BytecodeCompiler {
             // path (still allocs a MezzeRecord in the caller) but routes
             // the surrounding function through BDSL.
             if (!cn.isScalarABI()) {
-                // #350: resolve the handler at emit time (no string dispatch
-                // at runtime). supports() has already verified one of the
-                // two record-ABI handler maps has this name.
+                // ── Fast paths: bypass record alloc for known 2-field natives ──
+                // str::concat { l, r } → DirectAdd (addStrings specialization)
                 String recName = cn.getName();
+                if ("__native_string_concat".equals(recName)
+                        && cn.getArg() instanceof MakeRecordIR mr && mr.getFields().size() == 2) {
+                    NodeIR lNode = null, rNode = null;
+                    for (FieldIR fld : mr.getFields()) {
+                        if ("l".equals(fld.getName())) lNode = fld.getValue();
+                        else if ("r".equals(fld.getName())) rNode = fld.getValue();
+                    }
+                    if (lNode != null && rNode != null) {
+                        b.beginDirectAdd();
+                        emitNode(lNode, b, argCount, localMap);
+                        emitNode(rNode, b, argCount, localMap);
+                        b.endDirectAdd();
+                        return;
+                    }
+                }
                 var withNode = com.mezze.interpreter.nodes.builtin.NativeDispatch
                         .recordHandlerWithNodeOf(recName);
                 if (withNode != null) {
