@@ -35,8 +35,8 @@ let main = {} -> perform Console in do
     println { msg = name_of { body = lookup { code } } }
 
   # The same function, from a fixture. The encoder is inferred too — from `reply`-s shape.
-  let reply = { product = { product_name = "Pitted Black Olives (mock)" } }
-  let rules = [ mock_get { body = reply.to_json_str {}, url = "*" } ]
+  let product = { product = { product_name = "Pitted Black Olives (mock)" } }
+  let rules = [ mock_get { body = product.to_json_str {}, url = "*" } ]
   perform MockHttpClient { rules = rules } in
     println { msg = name_of { body = lookup { code } } }
 -->

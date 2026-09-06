@@ -23,7 +23,7 @@ with no declaration in common.
 That cuts both ways, and it is worth knowing which way you want. Structural
 typing means less ceremony and no import just to name a shape. It also means
 two unrelated concepts that happen to share fields are interchangeable. When
-you want them kept apart, that is what [newtypes](#aliases-and-newtypes) are
+you want them kept apart, that is what [newtypes](#aliases) are
 for.
 
 ## Copy, do not mutate

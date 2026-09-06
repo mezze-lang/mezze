@@ -132,6 +132,41 @@ const all = (await pages()).map((p) => {
     history.replaceState(null, '', '#' + el.dataset.anchor)
   }))
 
+  // Resolve a bare hash (a page slug like `effects`/`aliases`, or a scoped
+  // heading id like `effects--handlers`) to the page it lives on and the
+  // anchor to scroll to. Prose links across the reference — written
+  // `[Effects](#effects)` — land here.
+  const routeTo = (raw: string): boolean => {
+    const hash = raw.replace(/^#/, '')
+    if (!hash) return false
+    const p = pages.findIndex((el) => el.dataset.slug === hash)
+    if (p >= 0) { show(p); return true }
+    const s = subs.find((el) => el.dataset.anchor === hash)
+    if (s) { show(Number(s.dataset.idx), s.dataset.anchor); return true }
+    // A heading id the author did not scope (an old `#handlers`): match the
+    // first whose scoped id ends with it.
+    const loose = subs.find((el) => (el.dataset.anchor ?? '').endsWith('--' + hash))
+    if (loose) { show(Number(loose.dataset.idx), loose.dataset.anchor); return true }
+    return false
+  }
+
+  // In-content links are ordinary <a href="#...">. The router only ran on
+  // load, so without this a click just rewrote the hash and nothing moved:
+  // the target page is hidden and its slug lives on data-slug, not an id.
+  document.querySelector('.c-body')?.addEventListener('click', (e) => {
+    const a = (e.target as HTMLElement).closest('a[href^="#"]') as HTMLAnchorElement | null
+    if (!a) return
+    const hash = a.getAttribute('href') ?? ''
+    if (routeTo(hash)) {
+      e.preventDefault()
+      history.replaceState(null, '', hash)
+    }
+  })
+
+  // Back/forward and any other hash change re-route, rather than leaving the
+  // reader frozen on the first view.
+  window.addEventListener('hashchange', () => routeTo(location.hash))
+
   // Scroll-spy: highlight whichever heading the reader is under.
   //
   // Computed from scroll position rather than left to IntersectionObserver

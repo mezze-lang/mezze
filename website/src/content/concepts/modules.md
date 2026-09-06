@@ -58,7 +58,7 @@ error[V0702]: 'double' exists in module 'money' but is not public.
 Add 'pub' to export it.
 -->
 
-That is the useful pairing with [newtypes](#aliases-and-newtypes). Export the
+That is the useful pairing with [newtypes](#aliases). Export the
 type and the operations that make sense on it, keep the representation
 private, and callers cannot depend on money being an `Int` because they can
 never see that it is.

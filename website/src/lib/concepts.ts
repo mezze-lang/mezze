@@ -24,8 +24,8 @@ export const TREE: Node[] = [
   { slug: 'variants' },
   { slug: 'aliases' },
   { slug: 'functions' },
-  { slug: 'abilities' },
   { slug: 'effects' },
+  { slug: 'abilities' },
   { slug: 'modules' },
 ]
 

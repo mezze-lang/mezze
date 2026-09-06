@@ -61,40 +61,6 @@ form has the field names to check itself against and can see immediately that
 only position, and position is exactly the information that a reader, human or
 otherwise, cannot recover from the call.
 
-## The arrow carries the effects
-
-A function's type is not only what goes in and what comes out. It also records
-what calling it *does*:
-
-<!--mezze-code
-{ url: Str } -> Str <Http>
--->
-
-The part in angle brackets is the effect row, and it belongs to the arrow
-rather than to either type beside it. Calling this reaches the network; the
-`Str` that comes back is an ordinary `Str`.
-
-An effect a function does not handle raises to that function's own arrow, and
-calling it raises the effect again to the caller:
-
-<!--mezze-code
-let outer = {} -> do
-  let inner = {} -> do
-    fetch { url = "https://example.com" }   # performs Http, not handled here
-  # inner : {} -> Str <Http>                  raised to inner's arrow
-  inner {}                                  # calling inner incurs it
-# outer : {} -> Str <Http>                    raised again to outer's arrow
--->
-
-Neither `inner` nor `outer` mentions the network, and both types say
-`<Http>`. That is the guarantee: between the operation and the handler that
-catches it, every arrow in the chain declares it.
-
-A function that performs nothing has no row at all, and that absence is worth
-as much as the row. `{ x: Int } -> Int` is a promise, not an omission.
-
-[Effects](#effects) covers handlers, the `*` marker and the rest of the model.
-
 ## Currying comes free
 
 Currying means calling a function with some of its arguments and getting back
@@ -140,8 +106,20 @@ inside-out the way nested calls do. `|>` takes the value on its left and
 feeds it into the call on its right, with `@` marking where it lands:
 
 <!--mezze-code
-7 |> rect { width = @, height = 2 }
+"  alice , bob , carol  "
+  |> str::split { s = @, delimiter = "," }         # @ is the string to split
+  |> seq::map { xs = @, f = { x } -> x.trim {} }   # @ is the sequence to map
+  |> str::join { strings = @, separator = ", " }   # @ is the pieces to join
+  |> str::concat { l = "members: ", r = @ }        # @ is the second field now
 -->
+
+Read top to bottom, each line is one step: split the line on commas, trim each
+piece, join them back, tag the result. The nested-call form of the same thing
+reads inside-out — `concat { l = ..., r = join { strings = map { ... }, ... } }` —
+and you assemble it from the middle.
+
+Notice where `@` sits. On the first three steps it is the leading field; on the
+last it is the second. That is the whole point of the placeholder.
 
 Languages that have pipes usually have to pick a convention. Some are
 "data first", so the piped value always becomes argument one; others are
@@ -149,6 +127,98 @@ Languages that have pipes usually have to pick a convention. Some are
 neither suits every function, and libraries end up ordering their parameters
 around whichever one their language chose.
 
-Mezze does not have to choose. The placeholder goes wherever the value
-belongs, so `|>` works with any function without that function having been
-designed for it.
+Mezze does not have to choose. `@` goes wherever the value belongs, so `|>`
+works with any function without that function having been designed for it.
+
+## Working for any type
+
+A function does not have to name concrete types. Where a parameter could be
+anything, its type is a *type variable* — an apostrophe and a name, `'a`,
+standing for "some one type, the same everywhere it appears". Write a function
+that only moves values around and it is already polymorphic; you do not ask
+for it, and you do not annotate it:
+
+<!--mezze-editor
+use std::effects::log::{ Console, println }
+
+let swap = { pair } -> { first = pair.second, second = pair.first }
+
+let main = {} -> perform Console in do
+  let flipped = swap { pair = { first = 1, second = "two" } }
+  println { msg = flipped.first }
+-->
+
+Hover `swap` and its type reads `{ pair: { second: 'b, first: 'a } } -> { first: 'b, second: 'a }`.
+Two different variables, because the two fields need not match; `'a` and `'b`
+are inferred, not written. The one call above fixes them to `Int` and `Str`,
+and a different call fixes them to something else. One definition, every pair.
+
+The moment the body actually *does* something to the value, that need becomes
+part of the type. Compare two of them, and the type variable picks up a
+constraint:
+
+<!--mezze-editor
+use std::effects::log::{ Console, println }
+
+let larger = { a, b } -> if a > b then a else b
+
+let main = {} -> perform Console in do
+  println { msg = larger { a = 3, b = 9 }.to_str {} }
+  println { msg = larger { a = "apple", b = "pear" } }
+-->
+
+Hover `larger`: `{ a: 'a, b: 'a } with Ord 'a -> 'a`. Both fields are the same
+`'a` this time — you compared them, so they must be the same type — and `with
+Ord 'a` appeared on its own. `>` comes from the `Ord` ability, so the compiler
+records that `larger` works for any type *that has `Ord`*, and nothing else.
+Call it on ordered types and it runs; call it on a type without `Ord` and the
+error is about the missing ability, at the call, not deep inside the body.
+
+None of that was annotated. As everywhere else, the annotation is optional and
+the inference is the same either way — a public function usually writes the
+signature down so its constraints read at a glance:
+
+<!--mezze-code
+let larger : { a: 'a, b: 'a } with Ord 'a -> 'a = { a, b } -> if a > b then a else b
+-->
+
+`with` states the constraint, and it is the only form that can. This is also
+exactly how the standard library is built: `list::map` is
+`{ xs: List 'a, f: { x: 'a } -> 'b } -> List 'b` — any element type in, any
+element type out — and `math::max` is `{ l: 'a, r: 'a } with Ord 'a -> 'a`, the
+same shape as `larger`. [Abilities](#abilities) is where `Ord` and constraints
+like it come from.
+
+## The arrow carries the effects
+
+A function's type is not only what goes in and what comes out. It also records
+what calling it *does*:
+
+<!--mezze-code
+{ url: Str } -> Str <Http>
+-->
+
+The part in angle brackets is the effect row, and it belongs to the arrow
+rather than to either type beside it. Calling this reaches the network; the
+`Str` that comes back is an ordinary `Str`.
+
+An effect a function does not handle raises to that function's own arrow, and
+calling it raises the effect again to the caller:
+
+<!--mezze-code
+let outer = {} -> do
+  let inner = {} -> do
+    fetch { url = "https://example.com" }   # performs Http, not handled here
+  # inner : {} -> Str <Http>                  raised to inner's arrow
+  inner {}                                  # calling inner incurs it
+# outer : {} -> Str <Http>                    raised again to outer's arrow
+-->
+
+Neither `inner` nor `outer` mentions the network, and both types say
+`<Http>`. That is the guarantee: between the operation and the handler that
+catches it, every arrow in the chain declares it.
+
+A function that performs nothing has no row at all, and that absence is worth
+as much as the row. `{ x: Int } -> Int` is a promise, not an omission.
+
+[Effects](#effects) covers handlers, the `*` marker and the rest of the model.
