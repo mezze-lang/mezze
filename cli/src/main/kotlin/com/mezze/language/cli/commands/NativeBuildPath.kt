@@ -714,6 +714,29 @@ object NativeBuildPath {
         // but still correct.
         val isLinux = System.getProperty("os.name").lowercase().contains("linux")
         if (isLinux && isOracleGraalVm(nativeImage)) cmd.add("--gc=G1")
+
+        // glibc >= 2.42 broke static libm: ifunc dispatchers in
+        // libm-2.42.a reference `_dl_x86_cpu_features`, a symbol only
+        // in the dynamic linker. Provide a zero-initialized stub so
+        // ifunc dispatchers select the generic math path.
+        if (isLinux && !isOracleGraalVm(nativeImage)) {
+            val stubDir = File(outBinary.parentFile, "native-stubs")
+            stubDir.mkdirs()
+            val stubSrc = File(stubDir, "dl_cpu_features_stub.c")
+            stubSrc.writeText(
+                "/* glibc 2.42+ static libm ifunc stub */\n" +
+                "__attribute__((visibility(\"default\")))\n" +
+                "char _dl_x86_cpu_features[512] __attribute__((aligned(64)));\n"
+            )
+            val stubObj = File(stubDir, "dl_cpu_features_stub.o")
+            val ccBin = System.getenv("CC") ?: "cc"
+            val rc = ProcessBuilder(ccBin, "-c", "-fPIC",
+                "-o", stubObj.absolutePath, stubSrc.absolutePath)
+                .redirectErrorStream(true).start().waitFor()
+            if (rc == 0 && stubObj.exists()) {
+                cmd.add("-H:NativeLinkerOption=${stubObj.absolutePath}")
+            }
+        }
         return cmd
     }
 

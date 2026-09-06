@@ -476,9 +476,8 @@ graalvmNative {
             // (--macro:truffle-svm for JIT — see flags file).
             args.addAll(sharedFlags["cli-only-flags"].orEmpty())
 
-            // G1GC requires Oracle GraalVM (not CE). Probe via
-            // `native-image --version` output — Oracle ships "Oracle GraalVM",
-            // CE ships "GraalVM CE".
+            // Probe `native-image --version` to detect Oracle vs CE and
+            // glibc version issues.
             val os = System.getProperty("os.name").lowercase()
             if (os.contains("linux")) {
                 val niVersionOut = try {
@@ -486,8 +485,36 @@ graalvmNative {
                         .redirectErrorStream(true).start()
                         .inputStream.bufferedReader().readText()
                 } catch (_: Exception) { "" }
+
+                // G1GC requires Oracle GraalVM (not CE).
                 if (niVersionOut.contains("Oracle GraalVM")) {
                     args.add("--gc=G1")
+                }
+
+                // glibc >= 2.42 broke static libm: ifunc dispatchers in
+                // libm-2.42.a reference `_dl_x86_cpu_features`, a symbol
+                // only defined inside the dynamic linker. native-image
+                // links libm.a explicitly, causing "undefined reference".
+                // Fix: compile a stub that provides a zero-initialized
+                // _dl_x86_cpu_features — ifunc dispatchers select the
+                // generic (non-SIMD) math path. The Mezze runtime never
+                // calls transcendental math in hot paths.
+                val stubDir = layout.buildDirectory.dir(
+                    "native-stubs").get().asFile
+                stubDir.mkdirs()
+                val stubSrc = File(stubDir, "dl_cpu_features_stub.c")
+                stubSrc.writeText(
+                    "/* glibc 2.42+ static libm ifunc stub */\n" +
+                    "__attribute__((visibility(\"default\")))\n" +
+                    "char _dl_x86_cpu_features[512] __attribute__((aligned(64)));\n"
+                )
+                val stubObj = File(stubDir, "dl_cpu_features_stub.o")
+                val ccBin = System.getenv("CC") ?: "cc"
+                val stubRc = ProcessBuilder(ccBin, "-c", "-fPIC",
+                    "-o", stubObj.absolutePath, stubSrc.absolutePath)
+                    .redirectErrorStream(true).start().waitFor()
+                if (stubRc == 0 && stubObj.exists()) {
+                    args.add("-H:NativeLinkerOption=${stubObj.absolutePath}")
                 }
             }
 
