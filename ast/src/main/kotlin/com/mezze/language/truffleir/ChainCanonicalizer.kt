@@ -211,6 +211,15 @@ object ChainCanonicalizer {
                 val foldResult = tryCanonicalizeNativeFoldSumForEach(peeked, classifier, allFunctions)
                 if (foldResult != null) return foldResult
             }
+            // Compose through callee whose body is already a FusedChainIR.
+            // This happens when the stdlib canonicalizer ran on a trivial
+            // wrapper (e.g. seq::sum → FusedChainIR(RawSeq(ReadLocalIR(0)),
+            // [], Sum)). TrivialWrapperInliner can't inline these because
+            // countParamReads doesn't handle FusedChainIR. We substitute
+            // the call args into the FusedChainIR source and re-peel, which
+            // lets filter+sum / map+sum chains fuse end-to-end.
+            val composed = composeThroughFusedCallee(node, classifier, allFunctions)
+            if (composed != null) return composed
         }
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
@@ -353,6 +362,126 @@ object ChainCanonicalizer {
             }
         }
         return nativeCall.copy(arg = MakeRecordIR(newFields, mr.src))
+    }
+
+    /**
+     * Compose through a CallDirectIR whose callee body is already a
+     * [FusedChainIR]. This handles the phase-ordering gap where the
+     * stdlib canonicalizer rewrote a trivial wrapper (e.g. seq::sum)
+     * into FusedChainIR during precompile — making it invisible to
+     * both TrivialWrapperInliner (countParamReads doesn't handle
+     * FusedChainIR) and peekThroughMonoWrapper (expects CallNativeIR).
+     *
+     * We substitute the call args into the FusedChainIR's source
+     * expression, prepend any existing stages, then re-peel the source
+     * to discover filter/map stages from the caller's arg expression.
+     *
+     * Example: seq::sum body = FusedChainIR(RawSeq(ReadLocal(0)), [], Sum)
+     *   Call: seq::sum(filter_result)
+     *   → substitute ReadLocal(0) → filter_result
+     *   → FusedChainIR(RawSeq(filter_result), [], Sum)
+     *   → re-peel filter_result discovers Filter stage
+     *   → FusedChainIR(RawSeq(range_expr), [Filter(p)], Sum) ← FUSED!
+     */
+    private fun composeThroughFusedCallee(
+        call: CallDirectIR,
+        classifier: ChainHofClassifier,
+        allFunctions: Map<Hash, FunctionIR>,
+    ): FusedChainIR? {
+        val target = allFunctions[call.targetHash] ?: return null
+        if (target.captureSlots.isNotEmpty() || target.localSlots.isNotEmpty()) return null
+        val fused = target.body as? FusedChainIR ?: return null
+        val paramCount = target.paramSlots.size
+
+        // Build slot → value map from the call's args.
+        val slotValues: Map<Int, NodeIR>
+        if (call.isScalarABI) {
+            if (call.args.size < paramCount) return null
+            slotValues = (0 until paramCount).associateWith { call.args[it] }
+        } else {
+            val callRecord = call.args.singleOrNull() as? MakeRecordIR ?: return null
+            val fieldMap = callRecord.fields.associate { it.name to it.value }
+            val resolved = HashMap<Int, NodeIR>(paramCount)
+            for (slot in 0 until paramCount) {
+                val paramName = target.paramNames.getOrNull(slot) ?: return null
+                resolved[slot] = fieldMap[paramName] ?: return null
+            }
+            slotValues = resolved
+        }
+
+        // Substitute ReadLocalIR slots in the source expression.
+        val newSource = substituteSourceSlots(fused.source, slotValues, paramCount)
+
+        // Substitute any MakeLambdaIR captures in stages that reference
+        // param slots — but for trivial wrappers the stages typically
+        // reference the same slots. For safety, also substitute in sink.
+        val newSink = substituteSinkSlots(fused.sink, slotValues, paramCount)
+
+        // Re-peel the substituted source to discover upstream stages
+        // (e.g. filter, map) that now appear in the caller's arg expression.
+        val sourceExpr = when (newSource) {
+            is SourceIR.RawSeq -> newSource.xs
+            is SourceIR.RawList -> newSource.xs
+            is SourceIR.RangeSeq -> null  // already terminal
+            is SourceIR.Opaque -> newSource.expr
+        }
+
+        if (sourceExpr != null) {
+            val (peeledStages, peeledSource) = peelSource(sourceExpr, classifier, allFunctions)
+            val combinedStages = peeledStages + fused.stages
+            // If we peeled to a known source, use it. Otherwise preserve
+            // the substituted source type (RawSeq stays RawSeq, etc.).
+            val finalSource = if (peeledSource is SourceIR.Opaque && newSource is SourceIR.RawSeq) {
+                SourceIR.RawSeq(peeledSource.expr)
+            } else if (peeledSource is SourceIR.Opaque && newSource is SourceIR.RawList) {
+                SourceIR.RawList(peeledSource.expr)
+            } else {
+                peeledSource
+            }
+            val candidate = FusedChainIR(finalSource, combinedStages, newSink, call.src)
+            return if (isEffectSafe(candidate, allFunctions)) candidate else null
+        }
+
+        // RangeSeq or no re-peel needed: just substitute and return.
+        val candidate = FusedChainIR(newSource, fused.stages, newSink, call.src)
+        return if (isEffectSafe(candidate, allFunctions)) candidate else null
+    }
+
+    /** Substitute ReadLocalIR(slot) references in a SourceIR. */
+    private fun substituteSourceSlots(
+        source: SourceIR,
+        slotValues: Map<Int, NodeIR>,
+        paramCount: Int,
+    ): SourceIR = when (source) {
+        is SourceIR.RawSeq -> SourceIR.RawSeq(substituteSlots(source.xs, slotValues, paramCount))
+        is SourceIR.RawList -> SourceIR.RawList(substituteSlots(source.xs, slotValues, paramCount))
+        is SourceIR.RangeSeq -> SourceIR.RangeSeq(
+            substituteSlots(source.start, slotValues, paramCount),
+            substituteSlots(source.end, slotValues, paramCount),
+        )
+        is SourceIR.Opaque -> SourceIR.Opaque(substituteSlots(source.expr, slotValues, paramCount))
+    }
+
+    /** Substitute ReadLocalIR(slot) references in a SinkIR. */
+    private fun substituteSinkSlots(
+        sink: SinkIR,
+        slotValues: Map<Int, NodeIR>,
+        paramCount: Int,
+    ): SinkIR = when (sink) {
+        is SinkIR.Fold -> SinkIR.Fold(substituteSlots(sink.init, slotValues, paramCount), sink.f)
+        // Other sinks have no expressions that reference param slots.
+        SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sink
+        is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find -> sink
+    }
+
+    /** Recursively substitute ReadLocalIR(slot) → slotValues[slot]. */
+    private fun substituteSlots(node: NodeIR, slotValues: Map<Int, NodeIR>, paramCount: Int): NodeIR {
+        if (node is ReadLocalIR && node.slot < paramCount) {
+            return slotValues[node.slot] ?: node
+        }
+        return recurseChildren(node) { child ->
+            substituteSlots(child, slotValues, paramCount)
+        }
     }
 
     /**
