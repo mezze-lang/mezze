@@ -31,6 +31,7 @@ class SyncCommand {
         }
 
         val isClean = args.contains("--clean")
+        val isLocked = args.contains("--locked")   // verify against Mezze.lock instead of writing it
 
         // Read Mezze.toml
         val tomlContent = mezzeToml.readText()
@@ -81,22 +82,44 @@ class SyncCommand {
 
         val downloader = PackageDownloader(cacheDir)
         val archive = ArchiveHandler()
-        val locked = mutableListOf<LockedPackage>()
+        val nodes = mutableListOf<LockedNode>()
 
         try {
-            val count = resolveDeps(currentDir, manifest, storeRoot, isClean, downloader, archive, locked)
+            val count = resolveDeps(currentDir, manifest, storeRoot, isClean, downloader, archive, nodes)
+
+            // Complete graph lock: the root package + every resolved node, deduped + sorted.
+            val rootEdges = (manifest.pathDependencies.keys + manifest.dependencies.keys + manifest.devDependencies.keys).sorted()
+            val rootNode = LockedNode(manifest.`package`.name, manifest.`package`.version, source = "root", dependencies = rootEdges)
+            val graph = (listOf(rootNode) + nodes).distinctBy { it.name }.sortedBy { it.name }
+            val freshLock = MezzeLock(version = 2, root = manifest.`package`.name, packages = graph)
 
             val lockFile = File(currentDir, "Mezze.lock")
-            try {
-                writeLockFile(lockFile, mergeLockFile(readLockFile(lockFile), locked))
-                println()
-                println("✅ Updated Mezze.lock")
-            } catch (e: Exception) {
-                println("⚠️  Warning: Failed to update Mezze.lock — ${e.message}")
+            if (isLocked) {
+                val existing = readLockFile(lockFile)
+                when {
+                    existing == null ->
+                        println("❌ --locked: no Mezze.lock to verify. Run 'mez sync' first.")
+                    existing.packages != freshLock.packages -> {
+                        println("❌ --locked: Mezze.lock is out of date with the resolved graph.")
+                        println("   Run 'mez sync' (without --locked) to update it.")
+                    }
+                    else -> {
+                        println()
+                        println("🔒 Mezze.lock verified — graph matches (${graph.size} package(s)).")
+                    }
+                }
+            } else {
+                try {
+                    writeLockFile(lockFile, freshLock)
+                    println()
+                    println("🔒 Locked ${graph.size} package(s) in Mezze.lock")
+                } catch (e: Exception) {
+                    println("⚠️  Warning: Failed to update Mezze.lock — ${e.message}")
+                }
             }
 
             println()
-            println("🎉 Sync complete: $count package(s) (${locked.size} registry).")
+            println("🎉 Sync complete: $count package(s).")
             println("📂 Dependencies at: ${packagesDir.absolutePath}")
         } finally {
             downloader.close()
@@ -125,7 +148,7 @@ class SyncCommand {
         isClean: Boolean,
         downloader: PackageDownloader,
         archive: ArchiveHandler,
-        locked: MutableList<LockedPackage>,
+        nodes: MutableList<LockedNode>,
     ): Int {
         val seen = HashSet<String>()                              // "<declarerCanonical>::<name>"
         val queue = ArrayDeque<Triple<File, String, DepSpec>>()   // (declaringDir, name, spec)
@@ -155,9 +178,14 @@ class SyncCommand {
             val where = if (declaringDir == rootDir) "" else "  (into ${declaringDir.name}/.deps)"
             println("  ✅ $name-$version -> ${target.path}$where")
 
-            if (spec is DepSpec.Registry) {
-                locked.add(LockedPackage(name = name, version = version, url = spec.url, checksum = "sha256:${spec.sha256}"))
-            }
+            // Record this node in the graph lock, with its own direct-dep edges.
+            val edges = (depToml.pathDependencies.keys + depToml.dependencies.keys).sorted()
+            nodes.add(
+                when (spec) {
+                    is DepSpec.Path -> LockedNode(name, version, source = "path", path = target.path, dependencies = edges)
+                    is DepSpec.Registry -> LockedNode(name, version, source = "registry", url = spec.url, checksum = "sha256:${spec.sha256}", dependencies = edges)
+                }
+            )
 
             // Recurse: this dep's own deps resolve against ITS dir. Dev-deps are the
             // top project's only — a dependency's dev-deps are not the consumer's.
