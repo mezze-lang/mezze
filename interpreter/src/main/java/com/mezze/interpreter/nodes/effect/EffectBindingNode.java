@@ -69,10 +69,14 @@ public final class EffectBindingNode extends MezzeNode {
         // (or empty) handle stack.
         HandlerChainRegistry fiber = HandlerChainRegistry.dispatching();
         if (fiber == null) {
-            throw new RuntimeException(
-                "'" + which.displayName() + "' referenced outside any op handler body. "
-                + "These names are only available inside `op = { ... } -> body` "
-                + "of an `impl X for Y where`.");
+            // Zero-cost effect path: PerformD.doCached skips the dispatch
+            // fiber when the handler chain is stable. Return the global
+            // fall-through resume/abort singletons — functionally identical
+            // to what the dispatch fiber would carry. Resume = identity
+            // (returns arg's val field), abort = throws AbortPerformException.
+            return (which == EffectBindingKind.RESUME)
+                ? com.mezze.interpreter.bytecode.YieldDispatch.fallThroughResumeFnPublic()
+                : com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.makeAbortFunction();
         }
         Object handle = (which == EffectBindingKind.RESUME)
             ? fiber.currentResume()

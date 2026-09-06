@@ -2961,18 +2961,23 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
                 @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
                 @Cached("getHandlerStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
-                @Cached("create(cachedTarget)") DirectCallNode callNode,
-                @Cached("getResumeFn()") MezzeFunction resumeFn,
-                @Cached("getAbortFn()") MezzeFunction abortFn) {
-            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry dispatchFiber =
-                com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.acquireDispatchOnly();
-            dispatchFiber.pushEffectHandles(resumeFn, abortFn);
-            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry prevDispatch =
-                dispatchFiber.enterDispatch();
+                @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
+            // Zero-cost effect dispatch: no dispatch fiber, no
+            // @TruffleBoundary crossings on the normal path. When the
+            // handler chain is stable (assumption holds), the handler,
+            // call target, and closure values are all compilation
+            // constants — Graal PE inlines through the handler's op
+            // function. EffectBindingNode returns the fall-through
+            // resume/abort singletons when no dispatch fiber is set,
+            // so handlers that read resume/abort still work correctly.
+            // This eliminates 4 @TruffleBoundary crossings per effect
+            // op-call (acquireDispatchOnly, enterDispatch, exitDispatch,
+            // releaseDispatchOnly) that existed solely to shuttle
+            // the same global singletons to EffectBindingNode.
+            Object[] opArgs = new Object[cachedCV.length + 1];
+            System.arraycopy(cachedCV, 0, opArgs, 0, cachedCV.length);
+            opArgs[cachedCV.length] = arg;
             try {
-                Object[] opArgs = new Object[cachedCV.length + 1];
-                System.arraycopy(cachedCV, 0, opArgs, 0, cachedCV.length);
-                opArgs[cachedCV.length] = arg;
                 return callNode.call(opArgs);
             } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
                 if (com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.insideBdslHandle()) {
@@ -2980,10 +2985,6 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 }
                 throw new com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException(
                     new com.mezze.interpreter.nodes.continuation.OpCall(opName, arg, effectHash));
-            } finally {
-                com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.exitDispatch(prevDispatch);
-                dispatchFiber.popEffectHandles();
-                com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.releaseDispatchOnly(dispatchFiber);
             }
         }
 
@@ -3031,12 +3032,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return new Object[0];
         }
 
-        static MezzeFunction getResumeFn() {
-            return YieldDispatch.fallThroughResumeFnPublic();
-        }
-
-        static MezzeFunction getAbortFn() {
-            return com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.makeAbortFunction();
+        static DirectCallNode createInlined(CallTarget target) {
+            DirectCallNode n = DirectCallNode.create(target);
+            n.forceInlining();
+            return n;
         }
     }
 
