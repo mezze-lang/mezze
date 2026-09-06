@@ -2697,7 +2697,17 @@ public final class BytecodeCompiler {
                 return true;
             }
             // Sum over RawSeq with no stages → BuiltinSumLongSeq.
-            if (rawXsExpr != null && isSumSink && !hasStages) {
+            // GUARD: BuiltinSumLongSeq (SeqSumLongScalarNode) starts from a
+            // hard-coded `long acc = 0` and only accumulates Long/Integer
+            // elements — it never reads the fold's `init` and silently drops
+            // Float/double elements. So it is only correct when the init is
+            // exactly the long identity `0`. For a non-zero init (drops the
+            // init → wrong total) or a Float fold (double init/elements read
+            // as 0 → returns 0.0), fall through to the generic emitFusedLoop,
+            // which threads init and dispatches the add polymorphically.
+            boolean longZeroInit = a.initExpr() instanceof LongLitIR ll
+                    && ll.getValue() == 0L;
+            if (rawXsExpr != null && isSumSink && !hasStages && longZeroInit) {
                 b.beginBuiltinSumLongSeq();
                   emitNode(rawXsExpr, b, argCount, localMap);
                 b.endBuiltinSumLongSeq();

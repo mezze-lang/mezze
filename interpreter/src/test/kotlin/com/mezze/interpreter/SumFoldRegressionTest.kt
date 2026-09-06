@@ -119,6 +119,62 @@ class SumFoldRegressionTest {
         assertEquals(40L, eval(src))
     }
 
+    // ── Float / non-zero-init fold over a literal seq ──────────────────
+    // These lock in the fix for the RawSeq add-fold fast path. It routed
+    // ANY `acc + x` fold to BuiltinSumLongSeq (SeqSumLongScalarNode), which
+    // starts from a hard-coded `long acc = 0`, ignores the fold's `init`,
+    // and drops non-Long elements. So a Float fold returned 0.0 and an
+    // Int fold with a non-zero init dropped the init. The fast path is now
+    // gated on a `long 0` init; everything else takes the generic loop.
+
+    @Test
+    fun `float add fold over literal seq — was 0_0 via BuiltinSumLongSeq`() {
+        val src = """
+            use std::collections::seq
+
+            let main = {} -> do
+              seq::fold { xs = [1.0, 2.0], init = 0.0, f = {acc, x} -> acc + x }
+            main {}
+        """.trimIndent()
+        assertEquals(3.0, eval(src))
+    }
+
+    @Test
+    fun `float add fold with non-zero init over literal seq`() {
+        val src = """
+            use std::collections::seq
+
+            let main = {} -> do
+              seq::fold { xs = [1.0, 2.0, 3.0], init = 100.0, f = {acc, x} -> acc + x }
+            main {}
+        """.trimIndent()
+        assertEquals(106.0, eval(src))
+    }
+
+    @Test
+    fun `int add fold with non-zero init over literal seq — init must not be dropped`() {
+        val src = """
+            use std::collections::seq
+
+            let main = {} -> do
+              seq::fold { xs = [1, 2, 3], init = 10, f = {acc, x} -> acc + x }
+            main {}
+        """.trimIndent()
+        assertEquals(16L, eval(src))
+    }
+
+    @Test
+    fun `int add fold with zero init still uses the fast path and is correct`() {
+        val src = """
+            use std::collections::seq
+
+            let main = {} -> do
+              seq::fold { xs = [10, 20, 30], init = 0, f = {acc, x} -> acc + x }
+            main {}
+        """.trimIndent()
+        assertEquals(60L, eval(src))
+    }
+
     @Test
     fun `iter take then fold — take first 5 from range`() {
         val src = """
