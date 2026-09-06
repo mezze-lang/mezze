@@ -368,6 +368,11 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
     for (stmt in expr.statements) {
         when (stmt) {
             is ParsedStatement.Let -> {
+                // Context BEFORE this let extends the scope — the context the RHS is
+                // type-checked in, and the one against which the RHS's solvability is
+                // judged (below, for solvableLetBindings).
+                val preLetContext = currentContext
+
                 val annotatedType = stmt.typeAnnotation?.let { annotation ->
                     convertParsedTypeAnnotation(annotation)
                 }
@@ -564,6 +569,22 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 if (stmt.pattern is ParsedVariablePattern && stmt.value is ParsedRecordLit) {
                     val varName = (stmt.pattern as ParsedVariablePattern).name
                     currentContext = currentContext.withRecordLiteralBinding(varName)
+                }
+
+                // Mark a `let x = <rhs>` (bare variable binding) whose RHS is a
+                // solve-pinned value (a polymorphic call result, a parenthesized
+                // such value, …) so a later `x.to_str {}` may defer its inherent-
+                // method impl pick — exactly as the inline `(rhs).to_str {}` does.
+                // The RHS predicate is receiverHasSolvableType applied to the value
+                // itself; a destructure pattern (`let { n } = r`) is NOT a bare
+                // variable and a `let x = p` aliasing a free param is not solvable,
+                // so neither is marked and both correctly refine their receiver.
+                // See ConstraintContext.solvableLetBindings.
+                if (stmt.pattern is ParsedVariablePattern &&
+                    receiverHasSolvableType(stmt.value, preLetContext)
+                ) {
+                    val varName = (stmt.pattern as ParsedVariablePattern).name
+                    currentContext = currentContext.withSolvableLetBinding(varName)
                 }
 
                 // #84 linter: remember this let's bound names to check for use

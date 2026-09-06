@@ -646,18 +646,56 @@ internal fun ExpressionConstraintGenerator.isReceiverUnresolved(receiver: Parsed
  */
 internal fun ExpressionConstraintGenerator.receiverHasSolvableType(receiver: ParsedExpr, context: ConstraintContext): Boolean {
     return when (receiver) {
-        // A call `f {..}`, a parenthesized `(e)`, or a field access `r.f` all
-        // produce a value whose type is pinned by solving (the field access via
-        // its record's field type), so deferring inherent-method dispatch to
-        // emit time is safe. Without ParsedMemberAccess here, `point.x.neg {}`
-        // fell through to a structural field-access constraint → T0205.
-        is ParsedFunctionCall, is ParsedParens, is ParsedMemberAccess -> true
+        // A call `f {..}` or a parenthesized `(e)` produces a value whose type is
+        // pinned by solving, so deferring inherent-method dispatch to emit time is
+        // safe.
+        is ParsedFunctionCall, is ParsedParens -> true
+        // A field access `r.f` is solvable ONLY when its BASE is — recurse. A chain
+        // rooted at a concrete value (`point.x.neg {}`, point a monomorphic local)
+        // is solvable: getReceiverConcreteType resolves it and the caller never even
+        // reaches this guard. But a chain rooted at an unpinnable LAMBDA PARAM
+        // (`{ r } -> r.n.to_str {}`) is NOT: nothing pins `r`, so `n` stays a free
+        // var with no runtime impl to dispatch to. Treating it as "solvable" made
+        // the call take the homogeneous-deferral path, which types it from a
+        // representative signature and DROPS the receiver-refinement — `n` was
+        // accepted as ANY value (incl. a function) then crashed at runtime
+        // (SOUNDNESS bug). Not-solvable falls through to structural field-access,
+        // which emits the `{ to_str: {} -> _ }` refinement, matching the top-level
+        // `{ x } -> x.to_str {}` reference behaviour.
+        is ParsedMemberAccess -> receiverHasSolvableType(receiver.receiver, context)
         is ParsedIdentifier -> {
             if (receiver.qualifier != null) return false
             // A lambda param is monomorphic-but-unpinnable; not solvable.
             if (receiver.localName in context.currentScopeBindings) return false
             val lookup = context.typingContext.lookup(receiver.localName)
-            (lookup as? TypingContext.LookupResult.Found)?.binding is TypingContext.Binding.Monomorphic
+            val binding = (lookup as? TypingContext.LookupResult.Found)?.binding
+            if (binding !is TypingContext.Binding.Monomorphic) return false
+            // Reaching here, the receiver's static type is a VarType (a concrete
+            // one was resolved by getReceiverConcreteType upstream and never hit
+            // this guard). Two kinds of var-typed monomorphic binding exist, and
+            // they need OPPOSITE treatment:
+            //
+            //  - SOLVABLE — a do-block `let x = <rhs>` whose RHS is a value whose
+            //    type the GLOBAL solve pins even though it's a bare var now: a
+            //    polymorphic call result (`let x = help {..}`, help's `having 'out`
+            //    resolves only globally). Deferring the impl pick to emit is safe
+            //    and REQUIRED — the inline `help {..}.to_str {}` works, so the
+            //    let-bound form must too. These names are recorded in
+            //    solvableLetBindings when the do-block let is generated (keyed off
+            //    the same solvable-expression predicate, applied to the RHS).
+            //
+            //  - UNPINNABLE — a PATTERN/DESTRUCTURE binding of a field/payload
+            //    extracted from a free-typed param (`match r is { n } -> …`,
+            //    `Grams { n } -> …`, `do let { n } = r`), or a `let` aliasing a free
+            //    param: nothing ever pins the var, so there is no runtime impl to
+            //    defer to. Treating it as solvable would take the homogeneous-
+            //    deferral path, which types the call from a representative signature
+            //    and DROPS the receiver-refinement — accepting ANY value (incl. a
+            //    function) then crashing at runtime (SOUNDNESS bug). These names are
+            //    NOT in solvableLetBindings, so they fall through to structural
+            //    field-access, which emits the `{ to_str: {} -> _ }` refinement,
+            //    matching the top-level `{ x } -> x.to_str {}` reference behaviour.
+            receiver.localName in context.solvableLetBindings
         }
         else -> false
     }

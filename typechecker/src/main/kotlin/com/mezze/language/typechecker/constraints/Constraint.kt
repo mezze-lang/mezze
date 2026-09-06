@@ -532,6 +532,22 @@ data class ConstraintContext(
     // so tryGenerateMethodCall can pin the first typeParam's fresh var to it once
     // the ability resolves. Consumed and cleared inside tryGenerateMethodCall.
     val pinFirstAbilityTypeArg: MezzeType? = null,
+    // Names of do-block `let x = <rhs>` bindings whose RHS is a value-producing
+    // expression whose type is PINNED BY SOLVING even though it reads as a bare
+    // VarType at generation time — a polymorphic call result (`let x = help {..}`,
+    // help's `having 'out` resolves to a concrete type only in the global solve),
+    // a parenthesized such value, etc. (the same "solvable expression" predicate
+    // receiverHasSolvableType applies to inline receivers). Consulted ONLY by
+    // receiverHasSolvableType for inherent-method dispatch: such a receiver may
+    // defer its impl pick to emit (`x.to_str {}` after `let x = help {..}`),
+    // matching the inline `help {..}.to_str {}` behaviour. This is the discriminator
+    // between that SOLVABLE let and an UNPINNABLE pattern/destructure-extracted
+    // binding of a field/payload from a free-typed param (`let { n } = r`,
+    // `match r is { n } -> …`, `Grams { n } -> …`), whose var nothing ever pins and
+    // which must instead fall through to the structural receiver-refinement. A
+    // binding whose RHS is itself a bare identifier aliasing a free param is NOT in
+    // this set (receiverHasSolvableType(rhs) is false there), so it correctly refines.
+    val solvableLetBindings: Set<String> = emptySet(),
 ) {
     fun extend(name: String, type: MezzeType): ConstraintContext {
         return copy(typingContext = typingContext.extendMono(name, type))
@@ -540,6 +556,11 @@ data class ConstraintContext(
     /** #392: merge solved match-arm binding types into the dispatch side table. */
     fun withMatchBindingConcreteTypes(types: Map<String, MezzeType>): ConstraintContext {
         return copy(matchBindingConcreteTypes = matchBindingConcreteTypes + types)
+    }
+
+    /** Record a do-block `let` whose RHS is a solve-pinned value (see field doc). */
+    fun withSolvableLetBinding(name: String): ConstraintContext {
+        return copy(solvableLetBindings = solvableLetBindings + name)
     }
 
     fun withExpectedType(type: MezzeType): ConstraintContext {
