@@ -1191,12 +1191,36 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             collectClosureArgEffects(argumentResult.type) - inherentCaughtByOp
         } else emptySet()
 
+    // Emit the inherent method's OWN ability constraints (e.g. an HTTP
+    // `.decode {}` whose impl body forwards to a `with FromJson 'a Str` free
+    // function inherits that constraint). generateInherentMethodCall previously
+    // propagated ONLY the receiver's/args' constraints, so a target-directed
+    // codec op reached through an inherent method never emitted its FromJson
+    // obligation — the concrete decode target never pinned 'a and the codec
+    // derivation never fired (runtime `UnsupportedSpecialization`). freshMethodType
+    // was freshened as ONE type, so each constraint's data var already equals the
+    // return var; pinning the return at the call site pins the codec target.
+    val inherentMethodAbilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+    (freshMethodType as? MezzeType.FunctionType)?.abilityConstraints?.forEach { c ->
+        val head = c.typeArgs.firstOrNull()
+        if (head is MezzeType.VarType) {
+            inherentMethodAbilityConstraints.add(Constraint.AbilityRequired(
+                typeVar = head.variable,
+                abilityName = c.abilityName,
+                abilityHash = c.abilityHash ?: context.abilityDeclarations[c.abilityName]?.contentHash,
+                typeArgs = c.typeArgs.drop(1),
+                context = "Inherent-method constraint: ${c.abilityName} on ${methodInfo?.targetTypeName}.${methodInfo?.methodName}",
+                loc = expr.loc,
+            ))
+        }
+    }
+
     return ConstraintResult(
         type = callType,
         constraints = constraints,
         effects = (receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects + inherentHarvestedEffects) - inherentCaughtByOp,
         effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
-        abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints,
+        abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints + inherentMethodAbilityConstraints,
         associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
         undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
         usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,

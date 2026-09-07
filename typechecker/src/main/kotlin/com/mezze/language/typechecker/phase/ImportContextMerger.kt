@@ -110,11 +110,13 @@ internal fun mergeImportContext(
             val opReturnTypes = importContext.inherentImplOpReturnTypes[implKey].orEmpty()
             val opParamTypes = importContext.inherentImplOpParamTypes[implKey].orEmpty()
             val opEffects = importContext.inherentImplOpEffects[implKey].orEmpty()
+            val opConstraints = importContext.inherentImplOpConstraints[implKey].orEmpty()
             context = contextBuilder.registerImportedInherentImpl(
                 context, implDecl, implKey,
                 opReturnTypes = opReturnTypes,
                 opParamTypes = opParamTypes,
-                opEffects = opEffects
+                opEffects = opEffects,
+                opConstraints = opConstraints
             )
         } else {
             val abilityDeclHashForImpl = implDecl.abilityName?.let { name ->

@@ -216,7 +216,12 @@ data class ModuleImportContext(
     val inherentImplOpParamTypes: Map<Hash, Map<String, MezzeType>> = emptyMap(),
     // #181: without pre-inferred effect rows, imported impl methods that perform
     // effects appear pure across module boundaries.
-    val inherentImplOpEffects: Map<Hash, Map<String, MezzeType.EffectRow>> = emptyMap()
+    val inherentImplOpEffects: Map<Hash, Map<String, MezzeType.EffectRow>> = emptyMap(),
+    // Cross-module `.decode {}` (target-directed codec): an imported inherent
+    // impl op whose inferred type carries a `with FromJson 'a Str` (etc.)
+    // constraint must re-surface that constraint at the call site, or the
+    // concrete decode target never pins 'a and the codec derivation never fires.
+    val inherentImplOpConstraints: Map<Hash, Map<String, List<MezzeType.FunctionAbilityConstraint>>> = emptyMap()
 ) {
     companion object {
         fun empty() = ModuleImportContext(
@@ -242,7 +247,8 @@ data class ModuleImportContext(
             abilitiesByHash = abilitiesByHash + other.abilitiesByHash,
             inherentImplOpReturnTypes = inherentImplOpReturnTypes + other.inherentImplOpReturnTypes,
             inherentImplOpParamTypes = inherentImplOpParamTypes + other.inherentImplOpParamTypes,
-            inherentImplOpEffects = inherentImplOpEffects + other.inherentImplOpEffects
+            inherentImplOpEffects = inherentImplOpEffects + other.inherentImplOpEffects,
+            inherentImplOpConstraints = inherentImplOpConstraints + other.inherentImplOpConstraints
         )
     }
 

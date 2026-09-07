@@ -139,6 +139,13 @@ class ImportResolver(
                     if (opEffects.isNotEmpty()) {
                         context = context.copy(inherentImplOpEffects = opEffects)
                     }
+                    // Harvest inferred ability constraints (`with FromJson 'a Str`,
+                    // etc.) so a `.decode {}`-style target-directed op re-surfaces
+                    // them at the call site (else the decode target never pins).
+                    val opConstraints = harvestInherentImplOpConstraints(v2Module)
+                    if (opConstraints.isNotEmpty()) {
+                        context = context.copy(inherentImplOpConstraints = opConstraints)
+                    }
                 }
 
                 ProcessResult.Success(
@@ -214,6 +221,10 @@ class ImportResolver(
                     val opEffects = harvestInherentImplOpEffects(v2ModuleSel)
                     if (opEffects.isNotEmpty()) {
                         context = context.copy(inherentImplOpEffects = opEffects)
+                    }
+                    val opConstraints = harvestInherentImplOpConstraints(v2ModuleSel)
+                    if (opConstraints.isNotEmpty()) {
+                        context = context.copy(inherentImplOpConstraints = opConstraints)
                     }
                 }
 
@@ -954,6 +965,33 @@ class ImportResolver(
             if (opMap.isNotEmpty()) {
                 result[impl.hash] = opMap
             }
+        }
+        return result
+    }
+
+    /**
+     * Harvest the inferred ability constraints on each inherent impl op (e.g.
+     * `decode = { it } -> decode_result { resp = it }` inherits `with FromJson
+     * 'a Str` from decode_result). These live on the op's post-solve
+     * FunctionType.abilityConstraints and reference the SAME type vars as the
+     * op's return type (the lambda's body type IS its return), so re-attaching
+     * them to the registered method type keeps the constraint tied to the
+     * return var — pinning the return at the call site then pins the codec
+     * target and the derivation fires. Only the auto-derived inherent impls
+     * (abilityHash == ZERO) are inherent methods.
+     */
+    private fun harvestInherentImplOpConstraints(
+        v2Module: TypedAstModule
+    ): Map<Hash, Map<String, List<MezzeType.FunctionAbilityConstraint>>> {
+        val result = mutableMapOf<Hash, Map<String, List<MezzeType.FunctionAbilityConstraint>>>()
+        for (impl in v2Module.abilityImpls) {
+            if (impl.abilityHash != Hash.ZERO) continue
+            val opMap = mutableMapOf<String, List<MezzeType.FunctionAbilityConstraint>>()
+            for ((opName, opExpr) in impl.operations) {
+                val constraints = (opExpr.type as? MezzeType.FunctionType)?.abilityConstraints
+                if (!constraints.isNullOrEmpty()) opMap[opName] = constraints
+            }
+            if (opMap.isNotEmpty()) result[impl.hash] = opMap
         }
         return result
     }

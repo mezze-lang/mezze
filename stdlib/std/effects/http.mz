@@ -1,5 +1,5 @@
-use std::codec::json::{ Json, to_str, parse_str }
-use std::codec::core::{ DecodeError }
+use std::codec::json::{ Json, to_str, parse_str, FromJson, JsonC }
+use std::codec::core::{ DecodeError as CodecDecodeError, Decode }
 use std::codec::url::{ url_encode_component }
 use std::collections::map
 use std::collections::seq
@@ -7,6 +7,7 @@ use std::collections::bytes
 use std::str
 use std::int
 use std::bool
+use std::result::{ flat_map, map_err }
 
 ## HTTP request methods.
 pub type Method = | Get, Post, Put, Delete, Patch, Head, Options |
@@ -211,7 +212,7 @@ pub let body_str: { resp: Response } -> Result Str Str = { resp } ->
   bytes::to_str { b = resp.body }
 
 ## Decode response body as JSON.
-pub let body_json: { resp: Response } -> Result Json DecodeError = { resp } -> do
+pub let body_json: { resp: Response } -> Result Json CodecDecodeError = { resp } -> do
   match body_str { resp = resp } is
     Ok { val } -> match parse_str { s = val } is
       Ok { val = j } -> Ok { val = j }
@@ -899,6 +900,65 @@ pub let on_err
     Err { error } -> f { err = error }
 
 
+## Decode the Ok Response body as UTF-8, staying inside `Result`. Unlike
+## `text_or` (which needs a `def` and collapses to a bare `Str`), this keeps
+## the error channel: a network `Err` passes through unchanged, and a body that
+## is not valid UTF-8 becomes an `HttpError.DecodeError`. So the whole fetch is
+## still one `Result Str HttpError` to `match` or chain on.
+##
+##   request { url }.send {}.text {}    # Result Str HttpError
+pub let text_result: { resp: Result Response HttpError } -> Result Str HttpError = { resp } ->
+  match resp is
+    Ok { val } -> match body_str { resp = val } is
+      Ok { val = s } -> Ok { val = s }
+      Err { error = msg } -> Err { error = DecodeError { url = val.url, message = msg } }
+    Err { error } -> Err { error = error }
+
+
+## Decode the Ok Response body as JSON, staying inside `Result`. A network `Err`
+## passes through; a body that is not valid JSON becomes an
+## `HttpError.DecodeError`. Returns a raw `Json` value — use `.decode {}` to go
+## straight to a typed value.
+##
+##   request { url }.send {}.json {}    # Result Json HttpError
+pub let json_result: { resp: Result Response HttpError } -> Result Json HttpError = { resp } ->
+  match resp is
+    Ok { val } -> match body_json { resp = val } is
+      Ok { val = j } -> Ok { val = j }
+      Err { error = e } -> Err { error = DecodeError { url = val.url, message = e.message } }
+    Err { error } -> Err { error = error }
+
+
+## Decode the Ok Response body straight into a typed value via `from_json`,
+## staying inside `Result`. The target type is inferred from the use site (the
+## same target-directed decode as `body.from_json {}`), so no schema is
+## declared. A network `Err` passes through; JSON that does not fit the inferred
+## shape becomes an `HttpError.DecodeError`. This is the typed counterpart to
+## `.json {}` and the `Result`-keeping counterpart to `json_or`.
+##
+##   let user: Result { name: Str } HttpError =
+##     request { url }.send {}.decode {}
+pub let decode_result: { resp: Result Response HttpError } with FromJson 'a Str -> Result 'a HttpError = { resp } ->
+  # Everything flows through the generic result combinators — NEVER a
+  # hand-written `Ok { val = d } -> Ok { val = d }` re-wrap in this function. A
+  # re-wrap here drops the target-directed decode's runtime dispatch (it crashes
+  # with UnsupportedSpecialization); map_err / flat_map do the Ok pass-through
+  # inside separately-compiled generic functions where the target threads.
+  flat_map {
+    result = flat_map {
+      result = resp,
+      f = { val } -> map_err {
+        result = body_str { resp = val },
+        f = { error } -> DecodeError { url = val.url, message = error },
+      },
+    },
+    f = { val } -> map_err {
+      result = val.from_json {},
+      f = { error } -> DecodeError { url = "", message = error.message },
+    },
+  }
+
+
 ## Chainable finishers on the `Result Response HttpError` from `.send {}`.
 ## A specialized inherent impl on the concrete Result — the generic
 ## `impl Result 'a 'e` (map/get_or/…) still applies to every other
@@ -908,6 +968,13 @@ impl Result Response HttpError where {
   json_or = { it: 'it, def: Json } -> json_or { resp = it, def = def },
   on_ok = { it, f } -> on_ok { resp = it, f = f },
   on_err = { it, f } -> on_err { resp = it, f = f },
+
+  ## Body decoders that KEEP the Result (error channel preserved), as opposed to
+  ## the `*_or` finishers that collapse to a bare value. `.decode {}` is
+  ## target-directed — the type it returns is inferred from the use site.
+  text = { it } -> text_result { resp = it },
+  json = { it } -> json_result { resp = it },
+  decode = { it } -> decode_result { resp = it },
 
   ## dot-chain parity: inherent method for every receiver-taking free
   ## function not already covered by an ability, so `x.op {}` works.

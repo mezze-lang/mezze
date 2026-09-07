@@ -687,7 +687,8 @@ class ContextBuilder {
         @Suppress("UNUSED_PARAMETER") file: String = "<import>",
         opReturnTypes: Map<String, MezzeType> = emptyMap(),
         opParamTypes: Map<String, MezzeType> = emptyMap(),
-        opEffects: Map<String, MezzeType.EffectRow> = emptyMap()
+        opEffects: Map<String, MezzeType.EffectRow> = emptyMap(),
+        opConstraints: Map<String, List<MezzeType.FunctionAbilityConstraint>> = emptyMap()
     ): TypingContext {
         val targetTypeName = implDecl.targetTypes.map { getTypeName(it) }.firstOrNull() ?: return ctx
 
@@ -713,16 +714,22 @@ class ContextBuilder {
             // return (e.g. `get_or: {…, def: 'a} -> 'a`) is re-split into two
             // distinct instances — and `top.get_or{def=..}` then records `'a`
             // instead of the pinned argument type. One pass preserves the sharing.
+            // Inferred ability constraints (`with FromJson 'a Str`, etc.) harvested
+            // from the imported op's post-solve type. Included IN the FunctionType so
+            // alignToTarget's var-remap keeps them consistent with param/return; the
+            // constraint's data var already equals the return var (the lambda body IS
+            // the return), so pinning the return at the call site pins the codec target.
+            val opConstraintsForOp = opConstraints[op.name].orEmpty()
             val methodType: MezzeType.FunctionType =
                 if (targetVarsInOrder.isNotEmpty() && paramType is MezzeType.RecordType) {
                     val alignedWhole = alignToTarget(
-                        MezzeType.FunctionType(paramType = paramType, returnType = rawReturnType, effects = opEffects[op.name]),
+                        MezzeType.FunctionType(paramType = paramType, returnType = rawReturnType, effects = opEffects[op.name], abilityConstraints = opConstraintsForOp),
                         targetVarsInOrder, targetTypeVarsByName
                     )
                     alignedWhole as? MezzeType.FunctionType
-                        ?: MezzeType.FunctionType(paramType = paramType, returnType = rawReturnType, effects = opEffects[op.name])
+                        ?: MezzeType.FunctionType(paramType = paramType, returnType = rawReturnType, effects = opEffects[op.name], abilityConstraints = opConstraintsForOp)
                 } else {
-                    MezzeType.FunctionType(paramType = paramType, returnType = rawReturnType, effects = opEffects[op.name])
+                    MezzeType.FunctionType(paramType = paramType, returnType = rawReturnType, effects = opEffects[op.name], abilityConstraints = opConstraintsForOp)
                 }
 
             result = result.extendWithAnonymousMethod(TypingContext.InherentMethodInfo(
