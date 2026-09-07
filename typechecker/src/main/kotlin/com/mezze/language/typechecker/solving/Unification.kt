@@ -651,6 +651,17 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
         // `...` only admits EXTRA fields beyond the declared ones, it doesn't make
         // them optional. (Openness policy — the caller's job, run before the shared
         // payload loop below.)
+        //
+        // KNOWN SOUNDNESS HOLE (#11, NOT fixed here — needs directional info this
+        // symmetric unifier lacks): when BOTH sides are open, a field demanded by
+        // one side but absent from the other is silently absorbed, so an open value
+        // `{ x: Int, ... }` wrongly satisfies a demand `{ y: Int, ... }` and
+        // null-derefs at runtime ("Field not found: y"). A symmetric strict rule
+        // here CANNOT distinguish that launder from the LEGITIMATE case of a value
+        // carrying extra fields beyond an open demand (`{ x, y, ... }` satisfying
+        // `{ y, ... }`) — both look like "field on one open side, absent from the
+        // other". The correct fix threads expected-vs-actual (subsumption) direction
+        // into record unification or fixes it at the arg-check call site.
         for (fieldName in allFields) {
             val missingOnClosedRight = fieldName in fields1 && fieldName !in fields2 && rec2.rowVar == null
             val missingOnClosedLeft = fieldName in fields2 && fieldName !in fields1 && rec1.rowVar == null
@@ -738,6 +749,23 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     val constructors1 = var1.constructors.keys
     val constructors2 = var2.constructors.keys
 
+    // #12 (soundness): two variants whose identities are provably DISTINCT (both
+    // Declared, content hashes differ) are distinct declarations and MUST NOT
+    // unify — even when one or both are OPEN. Without this the open branches below
+    // absorb each side's unique ctors into the other's row var and vacuously
+    // succeed, so an `ErrB` value silently satisfies an `ErrA` param (last-wins
+    // coercion). The closed/nominal path already applies this veto further down;
+    // hoisting it here covers the both-open and one-open branches too. Anonymous
+    // open variants return UNDETERMINED (not DISTINCT), so genuine row polymorphism
+    // is untouched.
+    if (identityVerdict(var1.identity, var2.identity) == IdentityVerdict.DISTINCT) {
+        return UnificationResult.Failure(
+            message = "Cannot unify ${describeVariant(var1)} with ${describeVariant(var2)} (distinct declarations — content hash differs)",
+            type1 = var1,
+            type2 = var2
+        )
+    }
+
     if (var1.rowVar != null && var2.rowVar != null) {
         val allConstructors = (constructors1 + constructors2).toSet()
         // #258: a constructor present on BOTH open variants with a payload-arity
@@ -791,6 +819,19 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
             registry = registry,
             outer1 = var1,
             outer2 = var2,
+            // #10 (soundness): a ctor present on BOTH sides with a payload-arity
+            // disagreement (payloadless on one, payloaded on the other) is a hard
+            // conflict — same guard the both-open and nominal branches use. The
+            // one-open branch was missing it, so a payloadless `| Tag |` unified
+            // with a demand for `| Tag { val: Int }, ... |` and null-deref'd at
+            // runtime ("Expected record for field 'val', got: null").
+            arityConflict = { name ->
+                if (name in constructors1 && name in constructors2 &&
+                    (var1.constructors[name] == null) != (var2.constructors[name] == null)
+                ) {
+                    UnificationResult.Failure("Constructor '$name' data mismatch", var1, var2)
+                } else null
+            },
             mismatchMessage = { name, _, _, inner -> "Constructor '$name' type mismatch: $inner" },
         )
     }

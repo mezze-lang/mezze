@@ -175,4 +175,36 @@ class OpenRecordValidationTest {
             let g = {} -> f { user = { name = "Alice", age = "30", city = "NYC" } }
         """)
     }
+
+    // ========================================================================
+    // #11 SOUNDNESS (DEFERRED — see @Disabled note): an OPEN value `{ x: Int, ... }`
+    // must NOT satisfy a demand for a DIFFERENT declared field `{ y: Int, ... }`.
+    // The open∥open unification branch silently absorbs the demanded `y` into the
+    // value's row var → runtime `Field not found: y`. NOT fixed: unifyRecords is
+    // SYMMETRIC and cannot distinguish this launder from the legitimate case of a
+    // value carrying extra fields beyond an open demand (`{ x, y, ... }` vs
+    // `{ y, ... }`) — both are "field on one open side, absent from the other".
+    // A correct fix needs expected-vs-actual (subsumption) direction threaded into
+    // record unification or applied at the arg-check call site.
+    // ========================================================================
+
+    @org.junit.jupiter.api.Disabled("Known: open∥open record unification launders a demanded field; needs directional subsumption (see comment)")
+    @Test
+    fun `open value does not satisfy demand for a field it does not declare`() {
+        shouldFail("""
+            let readY : { r: { y: Int, ... } } -> Int = { r } -> r.y
+            let f = { v: { x: Int, ... } } -> readY { r = v }
+        """, "y")
+    }
+
+    @Test
+    fun `open value with the demanded field plus extras still succeeds`() {
+        // Control: the value DOES declare y (plus extra x) — must still pass.
+        // (This is exactly the legitimate case a symmetric strict rule would break,
+        // which is why #11 is deferred to a directional fix.)
+        shouldPass("""
+            let readY : { r: { y: Int, ... } } -> Int = { r } -> r.y
+            let f = { v: { x: Int, y: Int, ... } } -> readY { r = v }
+        """)
+    }
 }

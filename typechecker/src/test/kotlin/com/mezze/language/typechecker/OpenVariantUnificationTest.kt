@@ -807,4 +807,70 @@ class OpenVariantUnificationTest {
             let t: Tree Int = Empty
         """.trimIndent())
     }
+
+    // =========================================================================
+    // #10 SOUNDNESS: a payloadLESS ctor `| Tag |` must NOT unify with a demand
+    // for a payloadED same-name ctor `| Tag { val: Int, ... }, ... |`.
+    // Was accepted (one-open branch dropped the payload-arity check) → null-deref
+    // at runtime (`Expected record for field 'val', got: null`). The both-open and
+    // nominal branches already reject this via arityConflict.
+    // =========================================================================
+
+    @Test
+    fun `payloadless ctor must not unify with a payloaded same-name ctor demand`() {
+        // `a {}` yields `| Tag |` (closed, no payload); `b` demands
+        // `| Tag { val: Int, ... }, ... |`. Passing a's result to b is unsound.
+        assertTypeCheckFails("""
+            let a = { } -> Tag
+            let b = { x } -> match x is
+              Tag { val } -> val
+              _ -> 0
+            let main = { } -> b { x = a { } }
+        """.trimIndent())
+    }
+
+    @Test
+    fun `payloaded ctor still unifies with an open variant demanding it`() {
+        // Control: the sound direction (both payloaded, matching) must still pass.
+        assertTypeChecks("""
+            let a = { } -> Tag { val = 5 }
+            let b = { x } -> match x is
+              Tag { val } -> val
+              _ -> 0
+            let main = { } -> b { x = a { } }
+        """.trimIndent())
+    }
+
+    // =========================================================================
+    // #12 SOUNDNESS: two OPEN variants with DISTINCT declared identities must NOT
+    // unify — the closed versions correctly reject via the identity/hash veto, but
+    // the both-open (and one-open) branch skipped that veto, so an `ErrB` value
+    // silently satisfied an `ErrA` param (last-wins coercion). Anonymous open
+    // variants (genuine row polymorphism) MUST still unify.
+    // =========================================================================
+
+    @Test
+    fun `two distinct-identity open variants must not unify`() {
+        assertTypeCheckFails("""
+            type ErrA = | A, ... |
+            type ErrB = | B, ... |
+            let f = { x: ErrA } -> x
+            let g = { y: ErrB } -> f { x = y }
+        """.trimIndent())
+    }
+
+    @Test
+    fun `two anonymous open variants still unify (row polymorphism preserved)`() {
+        // Control: bare open variants with no declared identity must still unify —
+        // this is the row-poly the veto must NOT break.
+        assertTypeChecks("""
+            let f = { x } -> match x is
+              A -> 1
+              _ -> 0
+            let g = { y } -> match y is
+              B -> 2
+              _ -> 0
+            let both = { z } -> f { x = z } + g { y = z }
+        """.trimIndent())
+    }
 }
