@@ -2574,6 +2574,18 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof PerformOpIR p) {
+            // Mut.mutate { act = X } fast path: emit PerformMutMutateAct
+            // with the act lambda directly, skipping the {act = X} wrapper
+            // record. OpCallNode.executeMutMutateActFast builds a minimal
+            // EA-scalarizable wrapper at runtime. See #257 marker fast path.
+            if (isMutMutateWithActLambda(p)) {
+                com.mezze.language.truffleir.MakeRecordIR mr =
+                    (com.mezze.language.truffleir.MakeRecordIR) p.getArg();
+                b.beginPerformMutMutateAct(p.getEffectHash());
+                emitNode(mr.getFields().get(0).getValue(), b, argCount, localMap);
+                b.endPerformMutMutateAct();
+                return;
+            }
             // Path D (docs/perf/bdsl-effects-path-d-2026-07.md): every
             // perform lowers to a BDSL PerformD op — a direct
             // chain-dispatch native call, no Loom fiber, no reflection.

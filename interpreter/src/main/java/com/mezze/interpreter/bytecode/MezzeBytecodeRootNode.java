@@ -4186,11 +4186,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
     /**
      * Fast path for {@code perform Mut mutate { act = <lambda> }}: pop
-     * the raw act lambda (no wrapper record on the operand stack). The
-     * cached OpCallNode was built via
-     * {@link com.mezze.interpreter.nodes.effect.OpCallNode#createMutMutateActFast}
-     * and knows to wrap the value into the one-field {act = ...} record
-     * before dispatching.
+     * the raw act lambda (no wrapper record on the operand stack).
+     * Builds a one-field {@code {act = fn}} wrapper with a constant
+     * Shape (EA-scalarizable) and dispatches through the same
+     * Assumption-guarded cached path as {@link PerformD} — zero
+     * ThreadLocal probes, handler/target are compilation constants,
+     * PE inlines through the handler's mutate impl.
      *
      * <p>Preserves the AST's Mut marker fast path — must not regress the
      * LocalMut hot loop.
@@ -4198,24 +4199,95 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = Hash.class)
     public static final class PerformMutMutateAct {
-        @Specialization
-        public static Object doPerform(
-                Hash effectHash,
-                Object actFn,
-                @Cached(value = "createOpCall(effectHash)", allowUncached = true)
-                    com.mezze.interpreter.nodes.effect.OpCallNode opCall) {
-            return opCall.executeMutMutateActFast(actFn);
+
+        // Cached fast path — same Assumption-guarded pattern as PerformD.
+        // actWrapperShape is resolved once and stays constant through PE
+        // so the JIT sees the record allocation as scalarizable.
+        @Specialization(assumptions = "handlerStable",
+                        guards = {"cachedHandler != null", "cachedTarget != null"},
+                        excludeForUncached = true)
+        public static Object doCached(Hash effectHash, Object actFn,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("resolveMutateIndex(cachedHandler)") int cachedFieldIndex,
+                @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
+                @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
+                @Cached("getHandlerStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
+                @Cached("createInlined(cachedTarget)") DirectCallNode callNode,
+                @Cached("resolveActWrapperShape()") MezzeRecord.Shape actShape) {
+            // Build the {act = fn} wrapper with a constant Shape.
+            // Consumed immediately by the inlined handler body → EA eliminates it.
+            MezzeRecord wrapper = MezzeRecord.withAllObjects(actShape, new Object[] { actFn });
+            Object[] opArgs = new Object[cachedCV.length + 1];
+            System.arraycopy(cachedCV, 0, opArgs, 0, cachedCV.length);
+            opArgs[cachedCV.length] = wrapper;
+            try {
+                return callNode.call(opArgs);
+            } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
+                if (com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.insideBdslHandle()) {
+                    throw abort;
+                }
+                throw new com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException(
+                    new com.mezze.interpreter.nodes.continuation.OpCall("mutate", wrapper, effectHash));
+            }
         }
 
-        /** `@TruffleBoundary` — OpCallNode.createMutMutateActFast contains
-         *  CompilerAsserts.neverPartOfCompilation() (build-time-only node
-         *  creation). The uncached BDSL variant would otherwise reach it
-         *  from a PE root. #402. */
+        // Fallback — full chain dispatch through YieldDispatch.
+        @Specialization
+        public static Object doGeneric(Hash effectHash, Object actFn,
+                @Cached(value = "resolveActWrapperShape()", allowUncached = true)
+                    MezzeRecord.Shape actShape,
+                @Cached(value = "initFieldIndex()", allowUncached = true, dimensions = 1)
+                    int[] fieldIndexBox) {
+            MezzeRecord wrapper = MezzeRecord.withAllObjects(actShape, new Object[] { actFn });
+            return YieldDispatch.dispatch(effectHash, "mutate", wrapper, fieldIndexBox);
+        }
+
+        static int[] initFieldIndex() {
+            return new int[] { -1 };
+        }
+
         @TruffleBoundary
-        static com.mezze.interpreter.nodes.effect.OpCallNode createOpCall(Hash effectHash) {
-            return com.mezze.interpreter.nodes.effect.OpCallNode.createMutMutateActFast(
-                    effectHash,
-                    new com.mezze.interpreter.nodes.literal.UnitLiteralNode());
+        static MezzeRecord resolveHandler(Hash effectHash) {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .peekHandlerForEffect(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getHandlerStableAssumption() {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getHandlerChainStableAssumption();
+        }
+
+        static int resolveMutateIndex(MezzeRecord handler) {
+            return handler.getFieldIndex("mutate");
+        }
+
+        static CallTarget resolveCallTarget(MezzeRecord handler, int fieldIndex) {
+            if (fieldIndex < 0) return null;
+            Object val = handler.getField(fieldIndex);
+            if (val instanceof MezzeFunction fn) return fn.getCallTarget();
+            return null;
+        }
+
+        static Object[] resolveClosureValues(MezzeRecord handler, int fieldIndex) {
+            if (fieldIndex < 0) return new Object[0];
+            Object val = handler.getField(fieldIndex);
+            if (val instanceof MezzeFunction fn) return fn.getClosureValues();
+            return new Object[0];
+        }
+
+        static DirectCallNode createInlined(CallTarget target) {
+            DirectCallNode n = DirectCallNode.create(target);
+            n.forceInlining();
+            return n;
+        }
+
+        static MezzeRecord.Shape resolveActWrapperShape() {
+            MezzeRecord.FieldLocation[] locs = {
+                new MezzeRecord.FieldLocation(
+                    MezzeRecord.FieldLocation.StorageType.OBJECT, 0)
+            };
+            return new MezzeRecord.Shape(new String[] { "act" }, locs);
         }
     }
 
