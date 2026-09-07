@@ -325,14 +325,14 @@ private class DoBlockLocalSolve(
     val solver: ConstraintSolver,
 )
 
-/** True if [lambda] captures a term variable from the enclosing scope — i.e. it
- *  references a name (in [usedVariables]) that is not one of its own parameters
- *  but is bound in [outerContext]. S1.3: such closures are left MONOMORPHIC when
- *  routed through bindLet (via suppressGeneralization) — generalizing them (even
- *  over their own free params) interacts badly with monomorphization/lowering of
- *  the captured value and can leak an outer monomorphic type var across two
- *  instantiations. A non-capturing lambda generalizes normally. */
-private fun doBlockLambdaCaptures(
+/** True if [lambda] captures a term variable from the enclosing scope whose type
+ *  carries FREE TYPE VARS — i.e. it references a name (in [usedVariables]) that is
+ *  not one of its own parameters, is bound in [outerContext], and whose (possibly
+ *  polymorphic-scheme-unquantified) type is non-ground. Such a capture can force
+ *  the lambda's type equal to an enclosing MONO var that the do-block's local
+ *  solve gives a fresh identity to, so generalizing over it would be unsound. A
+ *  capture of a fully-ground binding (`p : Int`) is safe and still generalizes. */
+private fun doBlockLambdaCapturesFreeVarBinding(
     lambda: ParsedLambda,
     usedVariables: Set<String>,
     outerContext: ConstraintContext,
@@ -342,8 +342,15 @@ private fun doBlockLambdaCaptures(
         is ParsedLambdaParams.Typed -> params.fields.map { it.name }.toSet()
     }
     return usedVariables.any { name ->
-        name !in paramNames &&
-            outerContext.typingContext.lookup(BindingKey.unqualified(name)) is TypingContext.LookupResult.Found
+        if (name in paramNames) return@any false
+        when (val lr = outerContext.typingContext.lookup(BindingKey.unqualified(name))) {
+            is TypingContext.LookupResult.Found -> when (val b = lr.binding) {
+                is TypingContext.Binding.Monomorphic -> collectFreeTypeVars(b.type).isNotEmpty()
+                is TypingContext.Binding.Polymorphic ->
+                    (collectFreeTypeVars(b.scheme.type) - b.scheme.quantifiedVars.toSet()).isNotEmpty()
+            }
+            else -> false
+        }
     }
 }
 
@@ -512,12 +519,24 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 // (bare/test construction), the local solve fails (the global solve
                 // surfaces the real error later), or bindLet is not injected — so
                 // behaviour is unchanged on those paths.
-                // A do-block lambda that captures an outer term variable must NOT
-                // generalize (see doBlockLambdaCaptures). bindLet honours this via
-                // suppressGeneralization; the top-level path never captures.
-                val capturesOuter = stmt.pattern is ParsedVariablePattern &&
+                // A do-block lambda that captures an outer binding whose type has
+                // FREE TYPE VARS is left monomorphic (suppressGeneralization). The
+                // danger is a capture that forces the lambda's type equal to an
+                // ENCLOSING MONO var (`k : 'a` → `let r: 'a = k`): the do-block's
+                // LOCAL solve gives the binding a fresh var identity, so bindLet's
+                // `ftv(type) \ ftv(env)` cannot see that it aliases the outer `'a`
+                // (different var instances across the local-solve boundary) and
+                // would wrongly quantify it — using it at Int then Str would pass
+                // unsoundly (PolyAuditProbeTest constraint-capture cases). BUT a
+                // capture of a GROUND outer binding (`p : Int`, no free vars) poses
+                // no such risk — its param var is genuinely independent — so it must
+                // still generalize (#15). Hence: suppress ONLY when a captured
+                // binding's type is non-ground. The old flag suppressed on ANY
+                // capture, monomorphizing a genuinely-polymorphic param.
+                val capturesFreeVarBinding = stmt.pattern is ParsedVariablePattern &&
                     stmt.value is ParsedLambda &&
-                    doBlockLambdaCaptures(stmt.value as ParsedLambda, exprResult.usedVariables, currentContext)
+                    doBlockLambdaCapturesFreeVarBinding(
+                        stmt.value as ParsedLambda, exprResult.usedVariables, currentContext)
 
                 // Include the accumulated ABILITY + ASSOCIATED-TYPE constraints in
                 // the local solve, mirroring the top-level per-binding solve
@@ -553,7 +572,7 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                             currentContext = currentContext.typingContext,
                             outerContext = currentContext.typingContext,
                             solver = localSolve.solver,
-                            suppressGeneralization = capturesOuter,
+                            suppressGeneralization = capturesFreeVarBinding,
                             // The do-block sequences a statement's effects into its
                             // own effect row (collector.merge above); the binding
                             // holds the pure value, so bindLet must NOT harvest the

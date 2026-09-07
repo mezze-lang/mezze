@@ -165,6 +165,23 @@ class PolyAuditProbeTest {
         """))
     }
 
+    @Test fun `a do-block lambda capturing a CONCRETE outer binding still generalizes its own param`() {
+        // #15: `k = { ignore } -> p` captures `p : Int` (CONCRETE — no free type
+        // vars). Its param `ignore`'s var is independent of `p` and is NOT free in
+        // the environment, so `k` must generalize to `forall 'b. { ignore: 'b } -> Int`
+        // and calling it at Int then Str must PASS. Capturing a binding whose type
+        // has no free vars must remove NOTHING from the generalizable set. (The
+        // over-broad rule was: any capture suppresses ALL generalization.)
+        assertNull(err("""
+            let f = {} -> do
+              let p = 5
+              let k = { ignore } -> p
+              let _a = k { ignore = 1 }
+              let _b = k { ignore = "s" }
+              p
+        """), "a do-block lambda capturing a concrete outer binding must still generalize over its own param")
+    }
+
     @Test fun `a genuinely polymorphic do-block lambda has a schematic type`() {
         // Directly inspect the generalized type: the inner `mk` binding is
         // polymorphic, so the enclosing `f` returns whatever the last use fixes,
