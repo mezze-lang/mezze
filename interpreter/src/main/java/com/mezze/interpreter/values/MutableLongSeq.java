@@ -98,12 +98,14 @@ public final class MutableLongSeq extends MutableSeq {
         return true;
     }
 
-    /** Pure long swap — three primitive moves, no Object manipulation. */
+    /**
+     * Pure long swap — three primitive moves, no Object manipulation.
+     * No explicit bounds check — relies on Java array access which
+     * throws ArrayIndexOutOfBoundsException (subclass of IOOBE) on
+     * invalid indices, and Graal can eliminate via range check elim.
+     */
     @Override
     public void swap(int i, int j) {
-        if (i < 0 || i >= size || j < 0 || j >= size) {
-            throw new IndexOutOfBoundsException("Swap indices out of bounds");
-        }
         long tmp = data[i];
         data[i] = data[j];
         data[j] = tmp;
