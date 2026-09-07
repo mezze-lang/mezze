@@ -2241,16 +2241,53 @@ public final class BytecodeCompiler {
             // record. Record-ABI callers already pass a record — the
             // callee is expecting it, so no marker needed.
             // ── KnownMutOps: inline Mut stdlib wrappers directly ──
-            // When a CallDirect targets a known Mut function (get, incr,
-            // swap, …), replace the call with InlineMutOp1/2/3 which
-            // executes the native Java operation directly — no lambda,
-            // no effect dispatch, no function call. Falls back to the
-            // original function via CallTarget when not under LocalMut.
+            // Mut is hermetic — no effect dispatch needed.  Typed ops
+            // (MutReadInt, MutSize, MutIncr, MutSwap, MutSet) return
+            // primitive long / boolean so the BDSL quickening avoids
+            // boxing.  Generic InlineMutOp1/2/3 handle the rest.
             if (c.isScalarABI() && !c.isTailCall()) {
-                var mutOp = KnownMutOps.lookup(c.getTargetHash());
+                var mutOp = KnownMutOps.lookupOrResolve(c.getTargetHash(), language);
                 if (mutOp != null && c.getArgs().size() == mutOp.arity()) {
                     Hash mutHash = new Hash(
                         com.mezze.interpreter.nodes.effect.MarkerEffects.MUT_EFFECT_HASH_HEX);
+                    // Typed fast paths — return primitive, no boxing
+                    switch (mutOp.kind()) {
+                        case MezzeBytecodeRootNode.MUT_READ_INT -> {
+                            b.beginMutReadInt();
+                            emitNode(c.getArgs().get(0), b, argCount, localMap);
+                            b.endMutReadInt();
+                            return;
+                        }
+                        case MezzeBytecodeRootNode.MUT_SIZE -> {
+                            b.beginMutSize();
+                            emitNode(c.getArgs().get(0), b, argCount, localMap);
+                            b.endMutSize();
+                            return;
+                        }
+                        case MezzeBytecodeRootNode.MUT_INCR -> {
+                            b.beginMutIncr();
+                            for (NodeIR arg : c.getArgs())
+                                emitNode(arg, b, argCount, localMap);
+                            b.endMutIncr();
+                            return;
+                        }
+                        case MezzeBytecodeRootNode.MUT_SWAP -> {
+                            b.beginMutSwap();
+                            for (NodeIR arg : c.getArgs())
+                                emitNode(arg, b, argCount, localMap);
+                            b.endMutSwap();
+                            return;
+                        }
+                        case MezzeBytecodeRootNode.MUT_SET -> {
+                            b.beginMutSet();
+                            for (NodeIR arg : c.getArgs())
+                                emitNode(arg, b, argCount, localMap);
+                            b.endMutSet();
+                            return;
+                        }
+                        default -> {}  // fall through to arity-based dispatch
+                    }
+                    // Arity-based dispatch for remaining ops
                     switch (mutOp.arity()) {
                         case 1 -> {
                             b.beginInlineMutOp1(mutOp.kind(), mutHash, c.getTargetHash());
@@ -3481,7 +3518,53 @@ public final class BytecodeCompiler {
             KEY_TO_OP = java.util.Map.copyOf(m);
         }
 
+        /**
+         * Secondary map: native function name → MutOp.
+         * Used to identify monomorphized Mut operations whose IR name is
+         * empty but whose body is a CallNativeIR after MutEraser β-reduction.
+         */
+        /**
+         * Secondary map: native function name → MutOp.
+         * Names match the actual {@code __native_*} calls in mutation.mz
+         * after MutEraser β-reduces the Mut.mutate wrapper.
+         */
+        private static final java.util.Map<String, MutOp> NATIVE_NAME_TO_OP;
+        static {
+            var n = new java.util.HashMap<String, MutOp>();
+            // MutInt ops
+            n.put("__native_mut_int_read",
+                new MutOp(MezzeBytecodeRootNode.MUT_READ_INT, 1));
+            n.put("__native_mut_int_write",
+                new MutOp(MezzeBytecodeRootNode.MUT_WRITE_INT, 2));
+            n.put("__native_mut_int_incr",
+                new MutOp(MezzeBytecodeRootNode.MUT_INCR, 2));
+            n.put("__native_mut_int_decr",
+                new MutOp(MezzeBytecodeRootNode.MUT_DECR, 2));
+            n.put("__native_int_to_mut",
+                new MutOp(MezzeBytecodeRootNode.MUT_INT_TO_MUT, 1));
+            // MutSeq ops
+            n.put("__native_mut_seq_get",
+                new MutOp(MezzeBytecodeRootNode.MUT_GET, 2));
+            n.put("__native_mut_seq_set",
+                new MutOp(MezzeBytecodeRootNode.MUT_SET, 3));
+            n.put("__native_mut_seq_swap",
+                new MutOp(MezzeBytecodeRootNode.MUT_SWAP, 3));
+            n.put("__native_mut_seq_len",
+                new MutOp(MezzeBytecodeRootNode.MUT_SIZE, 1));
+            n.put("__native_seq_to_mut",
+                new MutOp(MezzeBytecodeRootNode.MUT_SEQ_TO_MUT, 1));
+            n.put("__native_seq_to_immut",
+                new MutOp(MezzeBytecodeRootNode.MUT_SEQ_TO_IMMUT, 1));
+            // for_range is not a single native call — identified by name only
+            NATIVE_NAME_TO_OP = java.util.Map.copyOf(n);
+        }
+
         private static volatile java.util.Map<Hash, MutOp> hashToOp;
+        /** Extra entries discovered at compile time (monomorphized variants). */
+        private static final java.util.concurrent.ConcurrentHashMap<Hash, MutOp> dynamicOps =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+        private static final MutOp NEGATIVE = new MutOp(-1, -1);
 
         static MutOp lookup(Hash targetHash) {
             var map = hashToOp;
@@ -3489,7 +3572,89 @@ public final class BytecodeCompiler {
                 map = build();
                 hashToOp = map;
             }
-            return map.get(targetHash);
+            var op = map.get(targetHash);
+            if (op != null) return op;
+            op = dynamicOps.get(targetHash);
+            return op != null && op != NEGATIVE ? op : null;
+        }
+
+        /**
+         * Fallback lookup for monomorphized functions: resolve the target
+         * FunctionIR by hash and check name+source against KEY_TO_OP.
+         * When the name is empty (monomorphized), inspects the function
+         * body — after MutEraser β-reduction it is a CallNativeIR whose
+         * native name uniquely identifies the Mut operation.
+         * Caches the result (positive or negative) in dynamicOps.
+         */
+        static MutOp lookupOrResolve(Hash targetHash, MezzeLanguage lang) {
+            var op = lookup(targetHash);
+            if (op != null) return op;
+            // Check negative cache
+            if (dynamicOps.containsKey(targetHash)) return null;
+            // No language context — can't resolve dynamically (unit tests)
+            if (lang == null) return null;
+            // Try resolving via the language's function registry
+            var fn = lang.lookupFunctionIR(targetHash);
+            if (fn != null) {
+                // First try name-based lookup (works for non-monomorphized)
+                var name = fn.getName();
+                if (name != null && !name.isEmpty()) {
+                    var key = name + "@" + KnownArithOps.basename(fn.getSourceFile());
+                    op = KEY_TO_OP.get(key);
+                    if (op != null) {
+                        dynamicOps.put(targetHash, op);
+                        return op;
+                    }
+                }
+                // Monomorphized functions have empty names — identify by
+                // the native call in their body. Two shapes:
+                // (a) Post-MutEraser: body IS a CallNativeIR directly.
+                // (b) Pre-MutEraser (mono'd): body is PerformOpIR("mutate",
+                //     MakeRecordIR({act=MakeLambdaIR(lambdaHash)})) — look
+                //     through the lambda to find the CallNativeIR inside.
+                if (name == null || name.isEmpty()) {
+                    op = resolveByBody(fn, lang);
+                    if (op != null) {
+                        dynamicOps.put(targetHash, op);
+                        return op;
+                    }
+                }
+            }
+            // Negative cache
+            dynamicOps.put(targetHash, NEGATIVE);
+            return null;
+        }
+
+        /**
+         * Identify a Mut operation by its body structure.
+         * Shape A (post-MutEraser): body = CallNativeIR("__native_mut_*").
+         * Shape B (monomorphized, pre-erasure): body = PerformOpIR("mutate",
+         *   MakeRecordIR({act = MakeLambdaIR(λhash)})) — the lambda body
+         *   is a CallNativeIR. Look it up in the language registry.
+         */
+        private static MutOp resolveByBody(
+                com.mezze.language.truffleir.FunctionIR fn, MezzeLanguage lang) {
+            var body = fn.getBody();
+            // Shape A: direct native call
+            if (body instanceof com.mezze.language.truffleir.CallNativeIR nir) {
+                return NATIVE_NAME_TO_OP.get(nir.getName());
+            }
+            // Shape B: PerformOpIR("mutate", {act = λ})
+            if (body instanceof com.mezze.language.truffleir.PerformOpIR pop
+                    && "mutate".equals(pop.getOperationName())
+                    && pop.getArg() instanceof com.mezze.language.truffleir.MakeRecordIR mr
+                    && mr.getFields().size() == 1
+                    && "act".equals(mr.getFields().get(0).getName())
+                    && mr.getFields().get(0).getValue()
+                        instanceof com.mezze.language.truffleir.MakeLambdaIR ml) {
+                var lambdaFn = lang.lookupFunctionIR(ml.getFunctionHash());
+                if (lambdaFn != null
+                        && lambdaFn.getBody()
+                            instanceof com.mezze.language.truffleir.CallNativeIR nir) {
+                    return NATIVE_NAME_TO_OP.get(nir.getName());
+                }
+            }
+            return null;
         }
 
         private static java.util.Map<Hash, MutOp> build() {
@@ -5967,8 +6132,109 @@ public final class BytecodeCompiler {
      * followed by the chained IfThenElse whose then/else branches each
      * yield the case-body value.
      */
+    /**
+     * Detect and emit the fused {@code match get { seq, i } is Some { val } -> expr, None -> default}
+     * pattern.  Returns true if the fusion was applied.
+     *
+     * <p>Fused form: {@code MutGetRaw(seq, i)} returns raw value or null,
+     * then {@code IfThenElse(IsNotNull(raw), some_body, none_body)}.
+     * Eliminates: MezzeVariant allocation, VariantTagEquals, ReadVariantField.
+     */
+    private boolean tryEmitFusedMutGetMatch(MatchIR m, MezzeBytecodeRootNodeGen.Builder b,
+                                             int argCount, BytecodeLocal[] localMap) {
+        // Check: scrutinee is a MUT_GET call
+        NodeIR scrutinee = m.getScrutinee();
+        if (!(scrutinee instanceof CallDirectIR c)) return false;
+        if (!c.isScalarABI() || c.isTailCall()) return false;
+        var mutOp = KnownMutOps.lookupOrResolve(c.getTargetHash(), language);
+        if (mutOp == null || mutOp.kind() != MezzeBytecodeRootNode.MUT_GET) return false;
+        if (c.getArgs().size() != 2) return false;
+
+        // Check: exactly 2 cases, no guards, no if-let bindings
+        var cases = m.getCases();
+        if (cases.size() != 2) return false;
+        CaseIR someCase = null, noneCase = null;
+        for (CaseIR cs : cases) {
+            if (cs.getGuard() != null) return false;
+            if (!cs.getIfLetBindings().isEmpty()) return false;
+            var pat = cs.getPattern();
+            if (pat instanceof PatternIR.Variant vp) {
+                if ("Some".equals(vp.getTagName()) && vp.getFieldNames().size() == 1) {
+                    someCase = cs;
+                } else if ("None".equals(vp.getTagName()) && vp.getFieldNames().isEmpty()) {
+                    noneCase = cs;
+                }
+            } else if (pat instanceof PatternIR.Wildcard) {
+                noneCase = cs;
+            }
+        }
+        if (someCase == null || noneCase == null) return false;
+
+        // Extract the "val" binding slot from the Some pattern
+        PatternIR.Variant somePat = (PatternIR.Variant) someCase.getPattern();
+        int valSlot = somePat.getFieldSlots().get(0);
+
+        // Emit fused MutGetRaw + null-check IfThenElse.
+        // Structure mirrors the generic emitMatch: Block( setup, matchChain )
+        // where matchChain (here IfThenElse) is the Block's last child and
+        // produces the value.
+        b.beginBlock();
+        BytecodeLocal rawLocal = b.createLocal();
+        b.beginStoreLocal(rawLocal);
+        b.beginMutGetRaw();
+        for (NodeIR arg : c.getArgs())
+            emitNode(arg, b, argCount, localMap);
+        b.endMutGetRaw();
+        b.endStoreLocal();
+
+        // Zero-init binding slots (same as generic emitMatch)
+        java.util.Set<Integer> bindingSlots = new java.util.HashSet<>();
+        collectBindingSlots(cases, bindingSlots);
+        for (Integer slot : bindingSlots) {
+            if (slot != null && slot >= argCount && slot - argCount < localMap.length) {
+                b.beginStoreLocal(localMap[slot - argCount]);
+                b.emitLoadNullConstant();
+                b.endStoreLocal();
+            }
+        }
+
+        // Conditional (NOT IfThenElse — IfThenElse is void in BDSL)
+        // is the LAST child of the Block → produces the match value.
+        b.beginConditional();
+        // Condition: raw != null
+        b.beginIsNotNull();
+        b.emitLoadLocal(rawLocal);
+        b.endIsNotNull();
+        // Then (Some branch): bind val = raw, emit body
+        b.beginBlock();
+        // Write the val binding — raw value IS the val field directly
+        if (valSlot >= argCount && valSlot - argCount < localMap.length) {
+            b.beginStoreLocal(localMap[valSlot - argCount]);
+            b.emitLoadLocal(rawLocal);
+            b.endStoreLocal();
+        }
+        // Emit any case-level bindings for the Some case
+        for (var binding : someCase.getBindings()) {
+            if (binding.getSlot() >= argCount && binding.getSlot() - argCount < localMap.length) {
+                b.beginStoreLocal(localMap[binding.getSlot() - argCount]);
+                b.emitLoadLocal(rawLocal);
+                b.endStoreLocal();
+            }
+        }
+        emitNode(someCase.getBody(), b, argCount, localMap);
+        b.endBlock();
+        // Else (None branch)
+        emitNode(noneCase.getBody(), b, argCount, localMap);
+        b.endConditional();
+        b.endBlock();
+        return true;
+    }
+
     private void emitMatch(MatchIR m, MezzeBytecodeRootNodeGen.Builder b,
                            int argCount, BytecodeLocal[] localMap) {
+        // Try fused MutGetRaw + match pattern first
+        if (tryEmitFusedMutGetMatch(m, b, argCount, localMap)) return;
+
         b.beginBlock();
         BytecodeLocal scrutineeLocal = b.createLocal();
         b.beginStoreLocal(scrutineeLocal);

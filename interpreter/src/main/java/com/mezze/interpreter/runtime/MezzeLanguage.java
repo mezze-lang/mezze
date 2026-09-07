@@ -596,6 +596,18 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             java.util.List<com.mezze.language.truffleir.FunctionIR> userFunctions) {
         if ("0".equals(System.getenv("MEZZE_EAGER"))) return;
         if (roots.isEmpty()) return;
+        // Register user functions in context so lookupFunctionIR can find
+        // monomorphized functions during BytecodeCompiler emit (e.g.
+        // KnownMutOps resolution of mono'd stdlib wrappers like get<Int>).
+        MezzeContext ctx;
+        try { ctx = getCurrentContext(); } catch (Exception e) { ctx = null; }
+        int regCount = 0;
+        if (ctx != null) {
+            for (var fn : userFunctions) {
+                ctx.registerUserFunctionIR(fn.getHash(), fn);
+                regCount++;
+            }
+        }
         // Build a lookup that prefers the fresh user-function list, then
         // falls back to the language's consolidated lookupFunctionIR (per-
         // context user IR → stdlib pre-lowered → runtime store).

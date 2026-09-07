@@ -436,15 +436,14 @@ public final class MezzeVariant implements TruffleObject {
     }
 
     /**
-     * Create a Some variant with a value wrapped in { val = value }.
+     * Create a Some variant with a value.
      * Uses global registry for consistent tag assignment with pattern matching.
-     * OPTIMIZED: Uses cached field name array.
+     * OPTIMIZED: Fused — stores raw value directly, skipping MezzeRecord +
+     * Object[] allocation.  Down from 3 allocations to 1 (just the variant).
+     * The "val" field name is recorded for lazy materialization on cold paths.
      */
     public static MezzeVariant some(Object value) {
-        int tag = TagRegistry.getGlobal().getOrCreateTag("Some");
-        // Use cached VAL_FIELD array instead of allocating new String[]
-        MezzeRecord wrapped = MezzeRecord.fromFields(VAL_FIELD, new Object[]{value});
-        return singlePayload(TagRegistry.getGlobal(), tag, wrapped);
+        return singlePayloadFused(TagRegistry.getGlobal(), SOME_TAG, value, "val");
     }
 
     /**
@@ -533,25 +532,19 @@ public final class MezzeVariant implements TruffleObject {
     /**
      * Create an Ok variant.
      * Uses global registry for consistent tag assignment with pattern matching.
-     * OPTIMIZED: Uses cached field name array.
+     * OPTIMIZED: Fused — stores raw value directly, no MezzeRecord allocation.
      */
     public static MezzeVariant ok(Object value) {
-        int tag = TagRegistry.getGlobal().getOrCreateTag("Ok");
-        // Use cached VAL_FIELD array instead of allocating new String[]
-        MezzeRecord wrapped = MezzeRecord.fromFields(VAL_FIELD, new Object[]{value});
-        return singlePayload(TagRegistry.getGlobal(), tag, wrapped);
+        return singlePayloadFused(TagRegistry.getGlobal(), OK_TAG, value, "val");
     }
 
     /**
      * Create an Err variant.
      * Uses global registry for consistent tag assignment with pattern matching.
-     * OPTIMIZED: Uses cached field name array.
+     * OPTIMIZED: Fused — stores raw value directly, no MezzeRecord allocation.
      */
     public static MezzeVariant err(Object error) {
-        int tag = TagRegistry.getGlobal().getOrCreateTag("Err");
-        // Use cached ERROR_FIELD array instead of allocating new String[]
-        MezzeRecord wrapped = MezzeRecord.fromFields(ERROR_FIELD, new Object[]{error});
-        return singlePayload(TagRegistry.getGlobal(), tag, wrapped);
+        return singlePayloadFused(TagRegistry.getGlobal(), ERR_TAG, error, "error");
     }
 
     public TagRegistry getRegistry() {
