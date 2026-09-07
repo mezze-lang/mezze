@@ -484,16 +484,16 @@ public final class MezzeVariant implements TruffleObject {
         if (isNone()) {
             return null;
         }
-        // Use getRawPayloadValue to bypass lazy materialization —
-        // we handle both fused and non-fused payloads here.
         Object payload = getRawPayloadValue();
+        if (fusedFieldName != null) {
+            // Fused: raw payload IS the value directly.
+            return payload;
+        }
+        // Non-fused: payload is MezzeRecord { val = value }.
         if (payload instanceof MezzeRecord record) {
             Object val = record.getField("val");
             if (val != null) return val;
-            // Fused: wrapper eliminated, record IS the value
-            return record;
         }
-        // Fallback for direct value storage
         return payload;
     }
 
@@ -510,16 +510,18 @@ public final class MezzeVariant implements TruffleObject {
      * did {@code (MezzeRecord) v.getPayloadValue()} should migrate here.
      */
     public Object getPayloadFieldByName(String fieldName) {
-        // Use getRawPayloadValue() to bypass lazy materialization —
-        // we handle both fused and non-fused payloads here.
         Object payload = getRawPayloadValue();
+        if (fusedFieldName != null) {
+            // Fused: the raw payload IS the field value directly.
+            // Don't drill into it even if it's a MezzeRecord with
+            // a same-named field (e.g. Ok { val = { val = 42 } }).
+            return payload;
+        }
+        // Non-fused: payload is a wrapper MezzeRecord, extract field.
         if (payload instanceof MezzeRecord record) {
             Object val = record.getField(fieldName);
             if (val != null) return val;
-            // Fused path: wrapper was eliminated, payload IS the value
-            return record;
         }
-        // Raw payload (fused single-field variant) — the value IS the field
         return payload;
     }
 

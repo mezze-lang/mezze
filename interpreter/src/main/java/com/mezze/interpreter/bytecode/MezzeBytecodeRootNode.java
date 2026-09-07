@@ -1001,15 +1001,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         // MezzeVariant with a payload — unwrap to the payload record and
         // read the field there. Matches AST's accessVariantPayload.
-        @Specialization(guards = "isVariantWithRecordPayload(receiver)")
+        // Uses getPayloadFieldByName to avoid allocating a materialized
+        // MezzeRecord wrapper for fused single-field variants.
+        @Specialization(guards = "isVariantWithPayload(receiver)")
         public static Object doVariantPayload(
                 String fieldName,
                 com.mezze.interpreter.values.MezzeVariant receiver) {
-            Object payload = receiver.getPayloadValue();
-            if (payload instanceof MezzeRecord rec) {
-                Object v = rec.getField(fieldName);
-                if (v != null) return v;
-            }
+            Object v = receiver.getPayloadFieldByName(fieldName);
+            if (v != null) return v;
             return fallbackNotFound(receiver, fieldName);
         }
 
@@ -1041,10 +1040,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return "not".equals(fieldName) || "and".equals(fieldName) || "or".equals(fieldName);
         }
 
-        static boolean isVariantWithRecordPayload(Object obj) {
+        static boolean isVariantWithPayload(Object obj) {
             return obj instanceof com.mezze.interpreter.values.MezzeVariant v
-                    && v.hasPayload()
-                    && v.getPayloadValue() instanceof MezzeRecord;
+                    && v.hasPayload();
         }
 
         protected static int resolveLocationIndex(Shape shape, int fieldIndex) {
