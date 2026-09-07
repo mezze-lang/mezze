@@ -8,7 +8,6 @@ import com.mezze.datastructures.set.MezzeSet;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.interpreter.values.*;
-import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 /**
@@ -120,10 +119,10 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeDeque map(MezzeDeque deque, MezzeFunction mapper,
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(mapper, "x");
         MezzeDeque result = MezzeDeque.empty();
         for (Object element : deque) {
-            Object mapped = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, element));
+            Object mapped = ctx.call1(callNode, element);
             result = result.pushBack(mapped);
         }
         return result;
@@ -132,10 +131,10 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeDeque filter(MezzeDeque deque, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         MezzeDeque result = MezzeDeque.empty();
         for (Object element : deque) {
-            Object res = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, element));
+            Object res = ctx.call1(callNode, element);
             if (res instanceof Boolean && (Boolean) res) {
                 result = result.pushBack(element);
             }
@@ -144,36 +143,15 @@ public final class DequeNatives {
     }
 
     /**
-     * Scalar-ABI bypass for fold: when the folder is a bypassable BDSL
-     * function, passes (closures..., acc, x) directly — no MezzeRecord
-     * allocation per iteration.
+     * #403: drop {@code @TruffleBoundary} so PE can trace the loop.
+     * Uses ScalarCall for zero-alloc scalar bypass on the hot path.
      */
     public static Object fold(MezzeDeque deque, Object init, MezzeFunction folder,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object[] closureValues = folder.getClosureValues();
-        int closureLen = closureValues.length;
+        var ctx = ScalarCall.prepare2(folder, "acc", "x");
         Object acc = init;
-        CallTarget innerTarget = ScalarBypass.tryResolve(folder);
-        if (innerTarget != null) {
-            String[] params = folder.getParameterNames();
-            boolean accFirst = params.length < 2 || "acc".equals(params[0]);
-            int accSlot = accFirst ? closureLen : closureLen + 1;
-            int elemSlot = accFirst ? closureLen + 1 : closureLen;
-            Object[] args = new Object[closureLen + 2];
-            System.arraycopy(closureValues, 0, args, 0, closureLen);
-            for (Object element : deque) {
-                args[accSlot] = acc;
-                args[elemSlot] = element;
-                acc = callNode.call(innerTarget, args);
-            }
-            return acc;
-        }
-        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
         for (Object element : deque) {
-            Object[] args = new Object[closureLen + 1];
-            System.arraycopy(closureValues, 0, args, 0, closureLen);
-            args[closureLen] = MezzeRecord.wrapAccX(acc, element);
-            acc = callNode.call(target, args);
+            acc = ctx.call2(callNode, acc, element);
         }
         return acc;
     }
@@ -238,28 +216,6 @@ public final class DequeNatives {
         return deque.toArray();
     }
 
-    // ==================== Helper Methods ====================
-
-    private static Object[] prepareArgs(MezzeFunction fn, Object arg) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"x"}, new Object[]{arg}
-        );
-        return args;
-    }
-
-    private static Object[] prepareArgsTwo(MezzeFunction fn, Object arg1, Object arg2) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"acc", "x"}, new Object[]{arg1, arg2}
-        );
-        return args;
-    }
-
     @TruffleBoundary
     private static boolean deepEquals(Object a, Object b) {
         if (a == b) return true;
@@ -276,8 +232,9 @@ public final class DequeNatives {
     @TruffleBoundary
     public static boolean any(MezzeDeque deque, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         for (Object element : deque) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 return true;
             }
@@ -288,8 +245,9 @@ public final class DequeNatives {
     @TruffleBoundary
     public static boolean all(MezzeDeque deque, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         for (Object element : deque) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (!(result instanceof Boolean) || !(Boolean) result) {
                 return false;
             }
@@ -306,8 +264,9 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeVariant find(MezzeDeque deque, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         for (Object element : deque) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some(element);
             }
@@ -318,9 +277,10 @@ public final class DequeNatives {
     @TruffleBoundary
     public static long count(MezzeDeque deque, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         long cnt = 0;
         for (Object element : deque) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 cnt++;
             }
@@ -413,11 +373,11 @@ public final class DequeNatives {
         if (deque.isEmpty()) {
             return MezzeVariant.none();
         }
+        var ctx = ScalarCall.prepare2(f, "acc", "x");
         java.util.Iterator<Object> iter = deque.iterator();
         Object acc = iter.next();
         while (iter.hasNext()) {
-            acc = callNode.call(f.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"acc", "x"}, new Object[]{acc, iter.next()})});
+            acc = ctx.call2(callNode, acc, iter.next());
         }
         return MezzeVariant.some(acc);
     }
@@ -425,10 +385,10 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeDeque flatMap(MezzeDeque deque, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
         MezzeDeque result = MezzeDeque.empty();
         for (Object elem : deque) {
-            Object mapped = callNode.call(f.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            Object mapped = ctx.call1(callNode, elem);
             if (mapped instanceof MezzeDeque mappedDeque) {
                 for (Object item : mappedDeque) {
                     result = result.pushBack(item);
@@ -441,11 +401,11 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeRecord partition(MezzeDeque deque, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         MezzeDeque passDeque = MezzeDeque.empty();
         MezzeDeque failDeque = MezzeDeque.empty();
         for (Object elem : deque) {
-            Object result = callNode.call(predicate.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            Object result = ctx.call1(callNode, elem);
             if (result instanceof Boolean && (Boolean) result) {
                 passDeque = passDeque.pushBack(elem);
             } else {
@@ -540,11 +500,11 @@ public final class DequeNatives {
     public static MezzeVariant minBy(MezzeDeque deque, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (deque.isEmpty()) return MezzeVariant.none();
+        var ctx = ScalarCall.prepare1(f, "val");
         Object minElem = null;
         Object minKey = null;
         for (Object elem : deque) {
-            Object key = callNode.call(f.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            Object key = ctx.call1(callNode, elem);
             if (minKey == null || compare(key, minKey) < 0) {
                 minKey = key;
                 minElem = elem;
@@ -557,11 +517,11 @@ public final class DequeNatives {
     public static MezzeVariant maxBy(MezzeDeque deque, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (deque.isEmpty()) return MezzeVariant.none();
+        var ctx = ScalarCall.prepare1(f, "val");
         Object maxElem = null;
         Object maxKey = null;
         for (Object elem : deque) {
-            Object key = callNode.call(f.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            Object key = ctx.call1(callNode, elem);
             if (maxKey == null || compare(key, maxKey) > 0) {
                 maxKey = key;
                 maxElem = elem;
@@ -616,10 +576,10 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeVariant findIndex(MezzeDeque deque, MezzeFunction predicate,
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         int i = 0;
         for (Object elem : deque) {
-            Object result = callNode.call(predicate.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            Object result = ctx.call1(callNode, elem);
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some((long) i);
             }
@@ -633,10 +593,10 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeDeque takeWhile(MezzeDeque deque, MezzeFunction predicate,
                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         MezzeDeque result = MezzeDeque.empty();
         for (Object elem : deque) {
-            Object res = callNode.call(predicate.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            Object res = ctx.call1(callNode, elem);
             if (res instanceof Boolean && (Boolean) res) {
                 result = result.pushBack(elem);
             } else {
@@ -649,12 +609,12 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeDeque dropWhile(MezzeDeque deque, MezzeFunction predicate,
                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         MezzeDeque result = MezzeDeque.empty();
         boolean dropping = true;
         for (Object elem : deque) {
             if (dropping) {
-                Object res = callNode.call(predicate.getCallTarget(),
-                    new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+                Object res = ctx.call1(callNode, elem);
                 if (!(res instanceof Boolean) || !(Boolean) res) {
                     dropping = false;
                     result = result.pushBack(elem);
@@ -688,13 +648,13 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeRecord span(MezzeDeque deque, MezzeFunction predicate,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         MezzeDeque left = MezzeDeque.empty();
         MezzeDeque right = MezzeDeque.empty();
         boolean inLeft = true;
         for (Object elem : deque) {
             if (inLeft) {
-                Object res = callNode.call(predicate.getCallTarget(),
-                    new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+                Object res = ctx.call1(callNode, elem);
                 if (res instanceof Boolean && (Boolean) res) {
                     left = left.pushBack(elem);
                 } else {
@@ -716,12 +676,12 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeDeque scan(MezzeDeque deque, Object init, MezzeFunction f,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare2(f, "acc", "x");
         MezzeDeque result = MezzeDeque.empty();
         Object acc = init;
         result = result.pushBack(acc);
         for (Object elem : deque) {
-            acc = callNode.call(f.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"acc", "x"}, new Object[]{acc, elem})});
+            acc = ctx.call2(callNode, acc, elem);
             result = result.pushBack(acc);
         }
         return result;
@@ -745,12 +705,12 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeDeque dedupBy(MezzeDeque deque, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
         MezzeDeque result = MezzeDeque.empty();
         Object prevKey = null;
         boolean first = true;
         for (Object elem : deque) {
-            Object key = callNode.call(f.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            Object key = ctx.call1(callNode, elem);
             if (first || !deepEquals(key, prevKey)) {
                 result = result.pushBack(elem);
                 prevKey = key;

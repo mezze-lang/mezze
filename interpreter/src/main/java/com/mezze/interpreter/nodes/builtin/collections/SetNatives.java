@@ -5,7 +5,6 @@ import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.datastructures.set.MezzeSet;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.interpreter.values.*;
-import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 /**
@@ -115,10 +114,10 @@ public final class SetNatives {
     @TruffleBoundary
     public static MezzeSet filter(MezzeSet set, MezzeFunction predicate,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         MezzeSet result = MezzeSet.empty();
         for (Object element : set) {
-            Object res = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, element));
+            Object res = ctx.call1(callNode, element);
             if (res instanceof Boolean && (Boolean) res) {
                 result = result.add(element);
             }
@@ -129,47 +128,22 @@ public final class SetNatives {
     @TruffleBoundary
     public static MezzeSet map(MezzeSet set, MezzeFunction mapper,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(mapper, "val");
         MezzeSet result = MezzeSet.empty();
         for (Object element : set) {
-            Object mapped = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, element));
+            Object mapped = ctx.call1(callNode, element);
             result = result.add(mapped);
         }
         return result;
     }
 
-    /**
-     * Scalar-ABI bypass for fold: when the folder is a bypassable BDSL
-     * function, passes (closures..., acc, x) directly — no MezzeRecord
-     * allocation per iteration. One-time parameter name check for
-     * positional permutation ({acc,x} vs {x,acc}).
-     */
+    @TruffleBoundary
     public static Object fold(MezzeSet set, Object init, MezzeFunction folder,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object[] closureValues = folder.getClosureValues();
-        int closureLen = closureValues.length;
+        var ctx = ScalarCall.prepare2(folder, "acc", "x");
         Object acc = init;
-        CallTarget innerTarget = ScalarBypass.tryResolve(folder);
-        if (innerTarget != null) {
-            String[] params = folder.getParameterNames();
-            boolean accFirst = params.length < 2 || "acc".equals(params[0]);
-            int accSlot = accFirst ? closureLen : closureLen + 1;
-            int elemSlot = accFirst ? closureLen + 1 : closureLen;
-            Object[] args = new Object[closureLen + 2];
-            System.arraycopy(closureValues, 0, args, 0, closureLen);
-            for (Object element : set) {
-                args[accSlot] = acc;
-                args[elemSlot] = element;
-                acc = callNode.call(innerTarget, args);
-            }
-            return acc;
-        }
-        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
         for (Object element : set) {
-            Object[] args = new Object[closureLen + 1];
-            System.arraycopy(closureValues, 0, args, 0, closureLen);
-            args[closureLen] = MezzeRecord.wrapAccX(acc, element);
-            acc = callNode.call(target, args);
+            acc = ctx.call2(callNode, acc, element);
         }
         return acc;
     }
@@ -186,35 +160,14 @@ public final class SetNatives {
         return MezzeList.of(set.toArray());
     }
 
-    // ==================== Helper Methods ====================
-
-    private static Object[] prepareArgs(MezzeFunction fn, Object arg) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"val"}, new Object[]{arg}
-        );
-        return args;
-    }
-
-    private static Object[] prepareArgsTwo(MezzeFunction fn, Object arg1, Object arg2) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"acc", "x"}, new Object[]{arg1, arg2}
-        );
-        return args;
-    }
-
     // ==================== Predicate Operations ====================
 
     @TruffleBoundary
     public static boolean any(MezzeSet set, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         for (Object element : set) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 return true;
             }
@@ -225,8 +178,9 @@ public final class SetNatives {
     @TruffleBoundary
     public static boolean all(MezzeSet set, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         for (Object element : set) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (!(result instanceof Boolean) || !(Boolean) result) {
                 return false;
             }
@@ -243,8 +197,9 @@ public final class SetNatives {
     @TruffleBoundary
     public static MezzeVariant find(MezzeSet set, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         for (Object element : set) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some(element);
             }
@@ -255,9 +210,10 @@ public final class SetNatives {
     @TruffleBoundary
     public static long count(MezzeSet set, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         long cnt = 0;
         for (Object element : set) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 cnt++;
             }
@@ -334,11 +290,11 @@ public final class SetNatives {
         if (set.isEmpty()) {
             return MezzeVariant.none();
         }
+        var ctx = ScalarCall.prepare2(f, "acc", "x");
         java.util.Iterator<Object> iter = set.iterator();
         Object acc = iter.next();
         while (iter.hasNext()) {
-            acc = callNode.call(f.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"acc", "x"}, new Object[]{acc, iter.next()})});
+            acc = ctx.call2(callNode, acc, iter.next());
         }
         return MezzeVariant.some(acc);
     }
@@ -349,11 +305,11 @@ public final class SetNatives {
         if (set.isEmpty()) {
             return MezzeVariant.none();
         }
+        var ctx = ScalarCall.prepare1(f, "val");
         Object minElem = null;
         Object minKey = null;
         for (Object elem : set) {
-            Object key = callNode.call(f.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            Object key = ctx.call1(callNode, elem);
             if (minKey == null || compare(key, minKey) < 0) {
                 minKey = key;
                 minElem = elem;
@@ -368,11 +324,11 @@ public final class SetNatives {
         if (set.isEmpty()) {
             return MezzeVariant.none();
         }
+        var ctx = ScalarCall.prepare1(f, "val");
         Object maxElem = null;
         Object maxKey = null;
         for (Object elem : set) {
-            Object key = callNode.call(f.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            Object key = ctx.call1(callNode, elem);
             if (maxKey == null || compare(key, maxKey) > 0) {
                 maxKey = key;
                 maxElem = elem;
@@ -384,11 +340,11 @@ public final class SetNatives {
     @TruffleBoundary
     public static MezzeRecord partition(MezzeSet set, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         MezzeSet trueSet = MezzeSet.empty();
         MezzeSet falseSet = MezzeSet.empty();
         for (Object elem : set) {
-            Object result = callNode.call(predicate.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            Object result = ctx.call1(callNode, elem);
             if (result instanceof Boolean && (Boolean) result) {
                 trueSet = trueSet.add(elem);
             } else {
@@ -447,9 +403,10 @@ public final class SetNatives {
     @TruffleBoundary
     public static MezzeSet flatMap(MezzeSet set, MezzeFunction f,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
         MezzeSet result = MezzeSet.empty();
         for (Object elem : set) {
-            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            Object mapped = ctx.call1(callNode, elem);
             if (mapped instanceof MezzeSet innerSet) {
                 result = result.union(innerSet);
             }
@@ -460,9 +417,10 @@ public final class SetNatives {
     @TruffleBoundary
     public static MezzeList groupBy(MezzeSet set, MezzeFunction keyFn,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(keyFn, "val");
         java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
         for (Object elem : set) {
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = ctx.call1(callNode, elem);
             groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(elem);
         }
         Object[] result = new Object[groups.size()];
@@ -501,9 +459,10 @@ public final class SetNatives {
     @TruffleBoundary
     public static MezzeSet filterMap(MezzeSet set, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
         MezzeSet result = MezzeSet.empty();
         for (Object elem : set) {
-            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            Object mapped = ctx.call1(callNode, elem);
             if (mapped instanceof MezzeVariant v && v.isSome()) {
                 result = result.add(v.getPayloadFieldByName("val"));
             }
@@ -518,9 +477,10 @@ public final class SetNatives {
     @TruffleBoundary
     public static Object[] collectArray(MezzeSet set, MezzeFunction f,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
         for (Object elem : set) {
-            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            Object mapped = ctx.call1(callNode, elem);
             if (mapped instanceof MezzeVariant v && v.isSome()) {
                 result.add(v.getPayloadFieldByName("val"));
             }
@@ -534,9 +494,10 @@ public final class SetNatives {
     @TruffleBoundary
     public static MezzeList collectList(MezzeSet set, MezzeFunction f,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
         for (Object elem : set) {
-            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            Object mapped = ctx.call1(callNode, elem);
             if (mapped instanceof MezzeVariant v && v.isSome()) {
                 result.add(v.getPayloadFieldByName("val"));
             }

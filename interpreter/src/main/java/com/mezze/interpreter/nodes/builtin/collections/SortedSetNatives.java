@@ -187,9 +187,10 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static MezzeSortedSet filter(MezzeSortedSet set, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object element : set) {
-            Object res = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object res = ctx.call1(callNode, element);
             if (res instanceof Boolean && (Boolean) res) {
                 result = result.addObject(element);
             }
@@ -200,9 +201,10 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static Object fold(MezzeSortedSet set, Object init, MezzeFunction f,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare2(f, "acc", "x");
         Object acc = init;
         for (Object element : set) {
-            acc = callNode.call(f.getCallTarget(), prepareArgsAccX(f, acc, element));
+            acc = ctx.call2(callNode, acc, element);
         }
         return acc;
     }
@@ -210,9 +212,10 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static MezzeSortedSet map(MezzeSortedSet set, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object element : set) {
-            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, element));
+            Object mapped = ctx.call1(callNode, element);
             result = result.addObject(mapped);
         }
         return result;
@@ -221,8 +224,9 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static boolean any(MezzeSortedSet set, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         for (Object element : set) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 return true;
             }
@@ -233,8 +237,9 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static boolean all(MezzeSortedSet set, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         for (Object element : set) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (!(result instanceof Boolean) || !(Boolean) result) {
                 return false;
             }
@@ -245,8 +250,9 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static boolean none(MezzeSortedSet set, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         for (Object element : set) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 return false;
             }
@@ -257,8 +263,9 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static MezzeVariant find(MezzeSortedSet set, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         for (Object element : set) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some(element);
             }
@@ -269,9 +276,10 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static long count(MezzeSortedSet set, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         long cnt = 0;
         for (Object element : set) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 cnt++;
             }
@@ -285,10 +293,11 @@ public final class SortedSetNatives {
         if (set.isEmpty()) {
             return MezzeVariant.none();
         }
+        var ctx = ScalarCall.prepare2(f, "acc", "x");
         java.util.Iterator<Object> iter = set.iterator();
         Object acc = iter.next();
         while (iter.hasNext()) {
-            acc = callNode.call(f.getCallTarget(), prepareArgsAccX(f, acc, iter.next()));
+            acc = ctx.call2(callNode, acc, iter.next());
         }
         return MezzeVariant.some(acc);
     }
@@ -296,8 +305,9 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static MezzeRecord forEach(MezzeSortedSet set, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(fn, "val");
         for (Object element : set) {
-            callNode.call(fn.getCallTarget(), prepareArgs(fn, element));
+            ctx.call1(callNode, element);
         }
         return MezzeRecord.empty();  // Returns unit
     }
@@ -364,10 +374,11 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static MezzeRecord partition(MezzeSortedSet set, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "val");
         MezzeSortedSet passSet = MezzeSortedSet.empty();
         MezzeSortedSet failSet = MezzeSortedSet.empty();
         for (Object elem : set) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, elem));
+            Object result = ctx.call1(callNode, elem);
             if (result instanceof Boolean && (Boolean) result) {
                 passSet = passSet.addObject(elem);
             } else {
@@ -384,10 +395,11 @@ public final class SortedSetNatives {
     public static MezzeVariant minBy(MezzeSortedSet set, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (set.isEmpty()) return MezzeVariant.none();
+        var ctx = ScalarCall.prepare1(f, "val");
         Object minElem = null;
         Object minKey = null;
         for (Object elem : set) {
-            Object key = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            Object key = ctx.call1(callNode, elem);
             if (minKey == null || compare(key, minKey) < 0) {
                 minKey = key;
                 minElem = elem;
@@ -400,10 +412,11 @@ public final class SortedSetNatives {
     public static MezzeVariant maxBy(MezzeSortedSet set, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (set.isEmpty()) return MezzeVariant.none();
+        var ctx = ScalarCall.prepare1(f, "val");
         Object maxElem = null;
         Object maxKey = null;
         for (Object elem : set) {
-            Object key = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            Object key = ctx.call1(callNode, elem);
             if (maxKey == null || compare(key, maxKey) > 0) {
                 maxKey = key;
                 maxElem = elem;
@@ -528,9 +541,10 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static MezzeSortedSet filterMap(MezzeSortedSet set, MezzeFunction f,
                                            com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object elem : set) {
-            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            Object mapped = ctx.call1(callNode, elem);
             if (mapped instanceof MezzeVariant v && v.isSome()) {
                 result = result.addObject(v.getPayloadFieldByName("val"));
             }
@@ -545,9 +559,10 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static Object[] collectArray(MezzeSortedSet set, MezzeFunction f,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
         for (Object elem : set) {
-            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            Object mapped = ctx.call1(callNode, elem);
             if (mapped instanceof MezzeVariant v && v.isSome()) {
                 result.add(v.getPayloadFieldByName("val"));
             }
@@ -561,9 +576,10 @@ public final class SortedSetNatives {
     @TruffleBoundary
     public static MezzeList collectList(MezzeSortedSet set, MezzeFunction f,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
         for (Object elem : set) {
-            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            Object mapped = ctx.call1(callNode, elem);
             if (mapped instanceof MezzeVariant v && v.isSome()) {
                 result.add(v.getPayloadFieldByName("val"));
             }
@@ -571,13 +587,4 @@ public final class SortedSetNatives {
         return MezzeList.of(result.toArray());
     }
 
-    // ==================== Helper Methods ====================
-
-    private static Object[] prepareArgs(MezzeFunction f, Object value) {
-        return new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{value})};
-    }
-
-    private static Object[] prepareArgsAccX(MezzeFunction f, Object acc, Object x) {
-        return new Object[]{MezzeRecord.fromFields(new String[]{"acc", "x"}, new Object[]{acc, x})};
-    }
 }
