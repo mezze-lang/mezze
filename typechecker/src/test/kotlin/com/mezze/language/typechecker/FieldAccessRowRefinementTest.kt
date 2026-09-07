@@ -124,4 +124,37 @@ class FieldAccessRowRefinementTest {
         """)
         assertNotNull(e, "using both r.a and r.b means the arg must have a AND b")
     }
+
+    // Bug #14: calling an EFFECTFUL function field bound via a match/record
+    // PATTERN must carry the field's declared effect row, not spuriously reject.
+    // The pattern-bound name used to stay an unsolved var in the arm context, so
+    // checking the CALL `run {}` couldn't see the callee's <Log> and the declared
+    // row later unified against an empty performed row → false "actual performs
+    // only <>". Fixed by binding the arm name to its locally-solved type.
+    @Test
+    fun `calling an effectful function field bound via a record pattern is accepted`() {
+        val t = typeOf("call_it", """
+            use std::effects::log::{ Log }
+            type Task = { run: {} -> Int <Log> }
+            let call_it = { t: Task } -> match t is
+              { run } -> run {}
+        """)
+        assertNotNull(t, "calling a <Log> function field via a record pattern must type-check")
+        assertTrue(t!!.contains("Log"), "call_it must carry the <Log> effect row, got: $t")
+    }
+
+    // Control: the equivalent let-bound field access already worked — keep them
+    // consistent.
+    @Test
+    fun `calling an effectful function field bound via let is accepted (control)`() {
+        val t = typeOf("call_it", """
+            use std::effects::log::{ Log }
+            type Task = { run: {} -> Int <Log> }
+            let call_it = { t: Task } -> do
+              let run = t.run
+              run {}
+        """)
+        assertNotNull(t)
+        assertTrue(t!!.contains("Log"), "let-bound form must also carry <Log>, got: $t")
+    }
 }

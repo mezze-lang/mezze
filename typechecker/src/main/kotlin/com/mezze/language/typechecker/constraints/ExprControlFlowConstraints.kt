@@ -142,8 +142,20 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
         var caseContext = context
         val armConcreteBindings = mutableMapOf<String, MezzeType>()
         for ((varName, varType) in patternResult.bindings) {
-            caseContext = caseContext.extend(varName, varType)
             val resolved = armSolve?.solveResult?.substitution?.apply(varType)
+            // Bind the name to its SOLVED type when the local arm solve pinned it
+            // to a concrete shape, not the raw fresh HasField var. This matters
+            // when the pattern binds an effectful FUNCTION field (e.g. matching a
+            // `{ run: {} -> Int <Log> }` value as `{ run }`): if `run` stays an
+            // unsolved var in the arm context, checking the CALL `run {}` cannot
+            // see the callee's `<Log>` row at constraint-gen time, so the call
+            // looks pure and the declared `<Log>` later unifies against an empty
+            // performed row — a spurious "actual performs only <>" reject. The
+            // equivalent `let run = t.run; run {}` works precisely because its
+            // binding already carries the resolved effectful type. (The #392
+            // side-channel below stays for method-dispatch specialization.)
+            val boundType = if (resolved != null && resolved !is MezzeType.VarType) resolved else varType
+            caseContext = caseContext.extend(varName, boundType)
             if (resolved != null && resolved !is MezzeType.VarType) {
                 armConcreteBindings[varName] = resolved
             }
@@ -507,7 +519,23 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     stmt.value is ParsedLambda &&
                     doBlockLambdaCaptures(stmt.value as ParsedLambda, exprResult.usedVariables, currentContext)
 
-                val localSolve = solveDoBlockBindingLocally(collector.constraints, currentContext)
+                // Include the accumulated ABILITY + ASSOCIATED-TYPE constraints in
+                // the local solve, mirroring the top-level per-binding solve
+                // (ConstraintGenerator ~:192, which solves
+                // `result.constraints + result.abilityConstraints +
+                // result.associatedTypeConstraints + patternResult.constraints`).
+                // Without them the local solve never sees e.g. a `NumAdd Int Int`
+                // obligation, so bindLet's discharge oracle can't tell it is
+                // satisfied, and a do-block `let f = { n: Int } -> n * 2 + 1`
+                // leaks `with NumAdd Int 'b having 'out = 'a` + a free result var
+                // onto the enclosing fn — where the identical top-level binding
+                // correctly infers `{ n: Int } -> Int`. (merge() keeps ability /
+                // associated-type constraints in separate lists from `constraints`,
+                // which is why they were omitted here.)
+                val localSolveConstraints = collector.constraints +
+                    collector.abilityConstraints +
+                    collector.associatedTypeConstraints
+                val localSolve = solveDoBlockBindingLocally(localSolveConstraints, currentContext)
                 val letResult = if (localSolve != null) {
                     bindLetFn(
                         ExpressionConstraintGenerator.BindLetArgs(
