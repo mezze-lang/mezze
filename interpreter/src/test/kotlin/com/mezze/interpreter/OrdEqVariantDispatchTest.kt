@@ -1,0 +1,95 @@
+package com.mezze.interpreter
+
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.*
+
+/**
+ * #13: a user `impl Ord`/`impl Eq for` a VARIANT must be dispatched by the
+ * comparison/equality operators. The operand of `Low < High` desugars to
+ * `Low.lt { r = High }`, but the variant literal reached emit carrying an
+ * unresolved orphan type var, so dispatch fell through to the native
+ * comparator — which THREW for Ord (`Cannot compare MezzeVariant`) and
+ * silently used STRUCTURAL equality for Eq (ignoring the user impl).
+ *
+ * Fix (TypedASTCompiler): recover the concrete VariantType from the nullary
+ * constructor (unambiguous ctor only) for the dispatch lookup. Routed through
+ * the normal ability-op resolution, so a variant WITHOUT a user impl still
+ * resolves to null and keeps its derived structural default.
+ */
+class OrdEqVariantDispatchTest {
+    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+
+    private val ordImpl = """
+        use std::abilities::compare::{ Ord }
+        type Priority = | Low, Mid, High |
+        let rank = { p: Priority } -> match p is
+          Low -> 0
+          Mid -> 1
+          High -> 2
+        impl Ord for Priority where {
+          lt = { it, r } -> rank { p = it } < rank { p = r },
+          le = { it, r } -> rank { p = it } <= rank { p = r },
+          gt = { it, r } -> rank { p = it } > rank { p = r },
+          ge = { it, r } -> rank { p = it } >= rank { p = r },
+        }
+    """.trimIndent()
+
+    @Test
+    fun `Ord impl on a variant dispatches for less-than (true case)`() {
+        assertEquals(true, eval("$ordImpl\nLow < High"))
+    }
+
+    @Test
+    fun `Ord impl on a variant dispatches for less-than (false case)`() {
+        assertEquals(false, eval("$ordImpl\nHigh < Low"))
+    }
+
+    @Test
+    fun `Ord impl on a variant dispatches for less-or-equal`() {
+        assertEquals(true, eval("$ordImpl\nMid <= Mid"))
+    }
+
+    @Test
+    fun `Ord impl on a variant dispatches for greater-than`() {
+        assertEquals(true, eval("$ordImpl\nHigh > Low"))
+    }
+
+    @Test
+    fun `Eq impl on a variant dispatches to the user impl, not structural equals`() {
+        // The impl returns True for ALL pairs; a structural fallback would give
+        // False for Red vs Green — so a True result proves the impl dispatched.
+        assertEquals(true, eval("""
+            use std::abilities::compare::{ Eq }
+            type Color = | Red, Green |
+            impl Eq for Color where {
+              eq = { it, r } -> True,
+              neq = { it, r } -> False,
+            }
+            Red == Green
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `a variant WITHOUT an Eq impl keeps structural equality — equal`() {
+        assertEquals(true, eval("""
+            type Color = | Red, Green |
+            Red == Red
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `a variant WITHOUT an Eq impl keeps structural equality — unequal`() {
+        assertEquals(false, eval("""
+            type Color = | Red, Green |
+            Red == Green
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `primitive comparison is unaffected`() {
+        assertEquals(true, eval("1 < 2"))
+        assertEquals(false, eval("2 < 1"))
+        assertEquals(true, eval("1 == 1"))
+        assertEquals(true, eval("\"a\" < \"b\""))
+    }
+}

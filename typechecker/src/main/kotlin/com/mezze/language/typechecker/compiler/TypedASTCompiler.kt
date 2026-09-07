@@ -1385,7 +1385,20 @@ class TypedASTCompiler(
                         ?.targetTypes?.lastOrNull()
                         ?.takeIf { it !is VarType }
                 else null
-            val receiverType = fromJsonInputType ?: rawReceiverType
+
+            // #13: a nullary variant-construct receiver whose type never resolved
+            // (orphan var — e.g. `Low` in `Low < High`) can still be dispatched:
+            // its constructor unambiguously names its declared VariantType. Recover
+            // it so an `impl Ord`/`impl Eq for` a variant is found by
+            // tryResolveAbilityOp below. No-op for primitives / resolved receivers /
+            // ambiguous ctors, and a variant WITHOUT a user impl still resolves to
+            // null → structural default (via tryResolveAbilityOp / the fall-through).
+            // Composes with the from_json recovery above: apply that first, then the
+            // variant recovery, so a receiver that is neither is left as the raw var.
+            val receiverType =
+                fromJsonInputType
+                    ?: resolveVariantReceiverType(fn.record, rawReceiverType)
+                    ?: rawReceiverType
 
             // Try inline ops for primitives
             val inlineOp = tryInlineOp(methodName, receiverType)
@@ -3119,6 +3132,50 @@ class TypedASTCompiler(
     private fun variantDeclHasConstructors(name: String, constructors: Set<String>): Boolean {
         val declared = printTypeDefs[name] as? VariantType ?: return false
         return declared.constructors.keys == constructors
+    }
+
+    /**
+     * Constructor name -> the declared VariantType that uniquely declares it.
+     * Built from [printTypeDefs] (type name -> resolved MezzeType, which for a
+     * variant carries its constructors + Declared identity). A constructor
+     * declared by MORE THAN ONE type is left OUT (ambiguous — no safe pick).
+     *
+     * #13: an operator like `Low < High` desugars to `Low.lt { r = High }`, but
+     * the variant-literal operand `Low` can reach emit carrying an unresolved
+     * orphan TyVar (the solver discharged the `Ord 'a` obligation against
+     * `impl Ord for Priority` without writing `'a = Priority` into the final
+     * substitution — same "solved-type-doesn't-reach-emit" family as the
+     * do-block bugs). With the receiver type a bare var, tryResolveAbilityOp
+     * can't find the user impl and the call falls through to the native
+     * comparator (which throws for a variant / silently uses structural equals).
+     * A NULLARY constructor unambiguously names its declared type, so we can
+     * recover that type here for the dispatch lookup ONLY — routed through the
+     * normal ability-op resolution, so a variant WITHOUT a user impl still
+     * returns null and keeps its structural default.
+     */
+    private val variantTypeByConstructor: Map<String, MezzeType.VariantType> by lazy {
+        val single = HashMap<String, MezzeType.VariantType?>()
+        for (t in printTypeDefs.values) {
+            if (t is MezzeType.VariantType) {
+                for (ctor in t.constructors.keys) {
+                    if (single.containsKey(ctor)) single[ctor] = null  // ambiguous
+                    else single[ctor] = t
+                }
+            }
+        }
+        single.filterValues { it != null }.mapValues { it.value!! }
+    }
+
+    /**
+     * If [node] is a nullary variant-construct receiver whose type is an
+     * unresolved var, recover the declared VariantType from its constructor
+     * (unambiguous ctor only). Returns null otherwise — callers fall back to
+     * the node's own (possibly still-var) type, unchanged.
+     */
+    private fun resolveVariantReceiverType(node: TypedExpr, currentType: MezzeType): MezzeType? {
+        if (currentType !is VarType) return null
+        if (node !is com.mezze.language.typedast.TypedVariantConstruct) return null
+        return variantTypeByConstructor[node.tag]
     }
 
     /** Look up param names for a known callee hash. Returns null if unknown.
