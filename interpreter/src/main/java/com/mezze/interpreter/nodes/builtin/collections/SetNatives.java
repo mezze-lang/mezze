@@ -4,11 +4,9 @@ import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.datastructures.set.MezzeSet;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
-import com.mezze.interpreter.bytecode.TrampolineRootNode;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.RootCallTarget;
 
 /**
  * Native Set operations - ULTRA PERFORMANT.
@@ -151,7 +149,7 @@ public final class SetNatives {
         Object[] closureValues = folder.getClosureValues();
         int closureLen = closureValues.length;
         Object acc = init;
-        CallTarget innerTarget = tryScalarBypass(folder);
+        CallTarget innerTarget = ScalarBypass.tryResolve(folder);
         if (innerTarget != null) {
             String[] params = folder.getParameterNames();
             boolean accFirst = params.length < 2 || "acc".equals(params[0]);
@@ -174,18 +172,6 @@ public final class SetNatives {
             acc = callNode.call(target, args);
         }
         return acc;
-    }
-
-    private static CallTarget tryScalarBypass(MezzeFunction fn) {
-        if (fn.hasPartialArgs()) return null;
-        CallTarget target = fn.getCallTarget();
-        if (target instanceof RootCallTarget rct
-                && rct.getRootNode() instanceof TrampolineRootNode tramp
-                && !tramp.hasTailCalls()
-                && tramp.getInnerTarget() != null) {
-            return tramp.getInnerTarget();
-        }
-        return null;
     }
 
     // ==================== Conversion ====================

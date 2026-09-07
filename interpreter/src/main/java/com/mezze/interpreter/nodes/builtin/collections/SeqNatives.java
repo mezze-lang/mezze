@@ -9,10 +9,8 @@ import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.datastructures.nodes.*;
 import com.mezze.interpreter.values.*;
-import com.mezze.interpreter.bytecode.TrampolineRootNode;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.RootCallTarget;
 
 import java.util.Arrays;
 
@@ -197,7 +195,7 @@ public final class SeqNatives {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
         Object[] args;
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         if (innerTarget != null) {
             args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -227,7 +225,7 @@ public final class SeqNatives {
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -268,7 +266,7 @@ public final class SeqNatives {
         int closureLen = closureValues.length;
         int size = seq.size();
         Object[] result = new Object[size];
-        CallTarget innerTarget = tryScalarBypass(mapper);
+        CallTarget innerTarget = ScalarBypass.tryResolve(mapper);
         if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -299,7 +297,7 @@ public final class SeqNatives {
         // Two-pass: first count matches, then collect.
         boolean[] keep = new boolean[size];
         int count = 0;
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -495,7 +493,7 @@ public final class SeqNatives {
         int closureLen = closureValues.length;
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         if (innerTarget != null) {
             for (int i = 0; i < seq.size(); i++) {
                 args[closureLen] = seq.get(i);
@@ -523,7 +521,7 @@ public final class SeqNatives {
         int closureLen = closureValues.length;
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         if (innerTarget != null) {
             for (int i = 0; i < seq.size(); i++) {
                 args[closureLen] = seq.get(i);
@@ -557,7 +555,7 @@ public final class SeqNatives {
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
         long count = 0;
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         if (innerTarget != null) {
             for (int i = 0; i < seq.size(); i++) {
                 args[closureLen] = seq.get(i);
@@ -643,7 +641,7 @@ public final class SeqNatives {
         int closureLen = closureValues.length;
         boolean[] matches = new boolean[size];
         int matchCount = 0;
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -1023,7 +1021,7 @@ public final class SeqNatives {
     @TruffleBoundary
     public static MezzeRecord forEach(MezzeSeq seq, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        CallTarget innerTarget = tryScalarBypass(fn);
+        CallTarget innerTarget = ScalarBypass.tryResolve(fn);
         if (innerTarget != null) {
             Object[] closureValues = fn.getClosureValues();
             int closureLen = closureValues.length;
@@ -1426,24 +1424,6 @@ public final class SeqNatives {
         return args;
     }
 
-    /**
-     * Try to resolve the inner BDSL target for scalar-ABI bypass.
-     * Returns the inner CallTarget if the function is a bypassable BDSL
-     * function (TrampolineRootNode without tail calls), or null for
-     * AST/effect-handler callees that need record-wrapped arguments.
-     */
-    private static CallTarget tryScalarBypass(MezzeFunction fn) {
-        if (fn.hasPartialArgs()) return null;
-        CallTarget target = fn.getCallTarget();
-        if (target instanceof RootCallTarget rct
-                && rct.getRootNode() instanceof TrampolineRootNode tramp
-                && !tramp.hasTailCalls()
-                && tramp.getInnerTarget() != null) {
-            return tramp.getInnerTarget();
-        }
-        return null;
-    }
-
     private static Object[] prepareArgs(MezzeFunction fn, Object arg) {
         Object[] closureValues = fn.getClosureValues();
         Object[] args = new Object[closureValues.length + 1];
@@ -1470,7 +1450,7 @@ public final class SeqNatives {
         int size = seq.size();
         Object acc = init;
         // Scalar-ABI bypass
-        CallTarget innerTarget = tryScalarBypass(folder);
+        CallTarget innerTarget = ScalarBypass.tryResolve(folder);
         if (innerTarget != null) {
             String[] params = folder.getParameterNames();
             boolean accFirst = params.length < 2 || "acc".equals(params[0]);

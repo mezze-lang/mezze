@@ -9,10 +9,8 @@ import com.mezze.datastructures.set.MezzeSet;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.interpreter.values.*;
-import com.mezze.interpreter.bytecode.TrampolineRootNode;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.RootCallTarget;
 
 /**
  * Native List operations - ULTRA PERFORMANT.
@@ -196,7 +194,7 @@ public final class ListNatives {
         Object[] closureValues = mapper.getClosureValues();
         int closureLen = closureValues.length;
         // Scalar-ABI bypass: pass raw element without MezzeRecord wrapping
-        CallTarget innerTarget = tryScalarBypass(mapper);
+        CallTarget innerTarget = ScalarBypass.tryResolve(mapper);
         if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -227,7 +225,7 @@ public final class ListNatives {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
         // Scalar-ABI bypass
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -322,7 +320,7 @@ public final class ListNatives {
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         CallTarget callTarget = innerTarget != null ? innerTarget : predicate.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -344,7 +342,7 @@ public final class ListNatives {
                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         CallTarget callTarget = innerTarget != null ? innerTarget : predicate.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -369,7 +367,7 @@ public final class ListNatives {
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         CallTarget callTarget = innerTarget != null ? innerTarget : predicate.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -390,7 +388,7 @@ public final class ListNatives {
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         CallTarget callTarget = innerTarget != null ? innerTarget : predicate.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -417,7 +415,7 @@ public final class ListNatives {
         int matchCount = 0;
         int nonMatchCount = 0;
 
-        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         for (int i = 0; i < src.length; i++) {
             Object element = src[i];
             Object result;
@@ -566,24 +564,6 @@ public final class ListNatives {
 
     // ==================== Helper Methods ====================
 
-    /**
-     * Try to resolve the inner BDSL target for scalar-ABI bypass.
-     * Returns the inner CallTarget if the function is a bypassable BDSL
-     * function (TrampolineRootNode without tail calls), or null for
-     * AST/effect-handler callees that need record-wrapped arguments.
-     */
-    private static CallTarget tryScalarBypass(MezzeFunction fn) {
-        if (fn.hasPartialArgs()) return null;
-        CallTarget target = fn.getCallTarget();
-        if (target instanceof RootCallTarget rct
-                && rct.getRootNode() instanceof TrampolineRootNode tramp
-                && !tramp.hasTailCalls()
-                && tramp.getInnerTarget() != null) {
-            return tramp.getInnerTarget();
-        }
-        return null;
-    }
-
     private static Object[] prepareArgs(MezzeFunction fn, Object arg) {
         Object[] closureValues = fn.getClosureValues();
         Object[] args = new Object[closureValues.length + 1];
@@ -638,7 +618,7 @@ public final class ListNatives {
         // Scalar-ABI bypass: pass raw (closures..., acc, x) without record.
         // Must respect callee's parameter order: the wrapAccX field order
         // is [acc, x] but the callback might declare {x, acc} (swapped).
-        CallTarget innerTarget = tryScalarBypass(folder);
+        CallTarget innerTarget = ScalarBypass.tryResolve(folder);
         if (innerTarget != null) {
             String[] params = folder.getParameterNames();
             // Determine which positional slot gets acc vs element.
@@ -879,7 +859,7 @@ public final class ListNatives {
     public static MezzeRecord forEach(MezzeList list, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] src = list.toArray();
-        CallTarget innerTarget = tryScalarBypass(fn);
+        CallTarget innerTarget = ScalarBypass.tryResolve(fn);
         if (innerTarget != null) {
             Object[] closureValues = fn.getClosureValues();
             Object[] args = new Object[closureValues.length + 1];
