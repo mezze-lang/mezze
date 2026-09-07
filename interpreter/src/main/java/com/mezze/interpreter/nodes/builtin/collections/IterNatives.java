@@ -9,6 +9,7 @@ import com.mezze.datastructures.iter.DropIterNode;
 import com.mezze.datastructures.iter.UnaryOpIterNode;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 
@@ -85,13 +86,23 @@ public final class IterNatives {
                                  IndirectCallNode callNode) {
         Object[] closure = f.getClosureValues();
         int closureLen = closure.length;
-        com.oracle.truffle.api.CallTarget target = f.getCallTarget();
-        walkElements(it.getDescriptor(), x -> {
+        CallTarget innerTarget = ScalarBypass.tryResolve(f);
+        if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
-            args[closureLen] = MezzeRecord.wrapX(x);
-            callNode.call(target, args);
-        }, callNode);
+            walkElements(it.getDescriptor(), x -> {
+                args[closureLen] = x;
+                callNode.call(innerTarget, args);
+            }, callNode);
+        } else {
+            CallTarget target = f.getCallTarget();
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closure, 0, args, 0, closureLen);
+            walkElements(it.getDescriptor(), x -> {
+                args[closureLen] = MezzeRecord.wrapX(x);
+                callNode.call(target, args);
+            }, callNode);
+        }
         return MezzeRecord.empty();
     }
 
@@ -100,15 +111,26 @@ public final class IterNatives {
                              IndirectCallNode callNode) {
         Object[] closure = p.getClosureValues();
         int closureLen = closure.length;
-        com.oracle.truffle.api.CallTarget target = p.getCallTarget();
         long[] acc = {0L};
-        walkElements(it.getDescriptor(), x -> {
+        CallTarget innerTarget = ScalarBypass.tryResolve(p);
+        if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
-            args[closureLen] = MezzeRecord.wrapX(x);
-            Object r = callNode.call(target, args);
-            if (r instanceof Boolean && (Boolean) r) acc[0]++;
-        }, callNode);
+            walkElements(it.getDescriptor(), x -> {
+                args[closureLen] = x;
+                Object r = callNode.call(innerTarget, args);
+                if (r instanceof Boolean && (Boolean) r) acc[0]++;
+            }, callNode);
+        } else {
+            CallTarget target = p.getCallTarget();
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closure, 0, args, 0, closureLen);
+            walkElements(it.getDescriptor(), x -> {
+                args[closureLen] = MezzeRecord.wrapX(x);
+                Object r = callNode.call(target, args);
+                if (r instanceof Boolean && (Boolean) r) acc[0]++;
+            }, callNode);
+        }
         return acc[0];
     }
 
@@ -117,16 +139,28 @@ public final class IterNatives {
                               IndirectCallNode callNode) {
         Object[] closure = p.getClosureValues();
         int closureLen = closure.length;
-        com.oracle.truffle.api.CallTarget target = p.getCallTarget();
         boolean[] found = {false};
-        walkElements(it.getDescriptor(), x -> {
-            if (found[0]) return;
+        CallTarget innerTarget = ScalarBypass.tryResolve(p);
+        if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
-            args[closureLen] = MezzeRecord.wrapX(x);
-            Object r = callNode.call(target, args);
-            if (r instanceof Boolean && (Boolean) r) found[0] = true;
-        }, callNode);
+            walkElements(it.getDescriptor(), x -> {
+                if (found[0]) return;
+                args[closureLen] = x;
+                Object r = callNode.call(innerTarget, args);
+                if (r instanceof Boolean && (Boolean) r) found[0] = true;
+            }, callNode);
+        } else {
+            CallTarget target = p.getCallTarget();
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closure, 0, args, 0, closureLen);
+            walkElements(it.getDescriptor(), x -> {
+                if (found[0]) return;
+                args[closureLen] = MezzeRecord.wrapX(x);
+                Object r = callNode.call(target, args);
+                if (r instanceof Boolean && (Boolean) r) found[0] = true;
+            }, callNode);
+        }
         return found[0];
     }
 
@@ -135,16 +169,28 @@ public final class IterNatives {
                               IndirectCallNode callNode) {
         Object[] closure = p.getClosureValues();
         int closureLen = closure.length;
-        com.oracle.truffle.api.CallTarget target = p.getCallTarget();
         boolean[] allTrue = {true};
-        walkElements(it.getDescriptor(), x -> {
-            if (!allTrue[0]) return;
+        CallTarget innerTarget = ScalarBypass.tryResolve(p);
+        if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
-            args[closureLen] = MezzeRecord.wrapX(x);
-            Object r = callNode.call(target, args);
-            if (!(r instanceof Boolean) || !((Boolean) r)) allTrue[0] = false;
-        }, callNode);
+            walkElements(it.getDescriptor(), x -> {
+                if (!allTrue[0]) return;
+                args[closureLen] = x;
+                Object r = callNode.call(innerTarget, args);
+                if (!(r instanceof Boolean) || !((Boolean) r)) allTrue[0] = false;
+            }, callNode);
+        } else {
+            CallTarget target = p.getCallTarget();
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closure, 0, args, 0, closureLen);
+            walkElements(it.getDescriptor(), x -> {
+                if (!allTrue[0]) return;
+                args[closureLen] = MezzeRecord.wrapX(x);
+                Object r = callNode.call(target, args);
+                if (!(r instanceof Boolean) || !((Boolean) r)) allTrue[0] = false;
+            }, callNode);
+        }
         return allTrue[0];
     }
 
@@ -153,16 +199,28 @@ public final class IterNatives {
                               IndirectCallNode callNode) {
         Object[] closure = p.getClosureValues();
         int closureLen = closure.length;
-        com.oracle.truffle.api.CallTarget target = p.getCallTarget();
         Object[] result = {null};
-        walkElements(it.getDescriptor(), x -> {
-            if (result[0] != null) return;
+        CallTarget innerTarget = ScalarBypass.tryResolve(p);
+        if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
-            args[closureLen] = MezzeRecord.wrapX(x);
-            Object r = callNode.call(target, args);
-            if (r instanceof Boolean && (Boolean) r) result[0] = com.mezze.interpreter.values.MezzeVariant.some(x);
-        }, callNode);
+            walkElements(it.getDescriptor(), x -> {
+                if (result[0] != null) return;
+                args[closureLen] = x;
+                Object r = callNode.call(innerTarget, args);
+                if (r instanceof Boolean && (Boolean) r) result[0] = com.mezze.interpreter.values.MezzeVariant.some(x);
+            }, callNode);
+        } else {
+            CallTarget target = p.getCallTarget();
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closure, 0, args, 0, closureLen);
+            walkElements(it.getDescriptor(), x -> {
+                if (result[0] != null) return;
+                args[closureLen] = MezzeRecord.wrapX(x);
+                Object r = callNode.call(target, args);
+                if (r instanceof Boolean && (Boolean) r) result[0] = com.mezze.interpreter.values.MezzeVariant.some(x);
+            }, callNode);
+        }
         return result[0] != null ? result[0] : com.mezze.interpreter.values.MezzeVariant.none();
     }
 
@@ -171,20 +229,40 @@ public final class IterNatives {
                                 IndirectCallNode callNode) {
         Object[] closure = f.getClosureValues();
         int closureLen = closure.length;
-        com.oracle.truffle.api.CallTarget target = f.getCallTarget();
         Object[] acc = {null};
         boolean[] first = {true};
-        walkElements(it.getDescriptor(), x -> {
-            if (first[0]) {
-                acc[0] = x;
-                first[0] = false;
-            } else {
-                Object[] args = new Object[closureLen + 1];
-                System.arraycopy(closure, 0, args, 0, closureLen);
-                args[closureLen] = MezzeRecord.wrapAccX(acc[0], x);
-                acc[0] = callNode.call(target, args);
-            }
-        }, callNode);
+        CallTarget innerTarget = ScalarBypass.tryResolve(f);
+        if (innerTarget != null) {
+            String[] params = f.getParameterNames();
+            boolean accFirst = params.length < 2 || "acc".equals(params[0]);
+            int accSlot = accFirst ? closureLen : closureLen + 1;
+            int elemSlot = accFirst ? closureLen + 1 : closureLen;
+            Object[] args = new Object[closureLen + 2];
+            System.arraycopy(closure, 0, args, 0, closureLen);
+            walkElements(it.getDescriptor(), x -> {
+                if (first[0]) {
+                    acc[0] = x;
+                    first[0] = false;
+                } else {
+                    args[accSlot] = acc[0];
+                    args[elemSlot] = x;
+                    acc[0] = callNode.call(innerTarget, args);
+                }
+            }, callNode);
+        } else {
+            CallTarget target = f.getCallTarget();
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closure, 0, args, 0, closureLen);
+            walkElements(it.getDescriptor(), x -> {
+                if (first[0]) {
+                    acc[0] = x;
+                    first[0] = false;
+                } else {
+                    args[closureLen] = MezzeRecord.wrapAccX(acc[0], x);
+                    acc[0] = callNode.call(target, args);
+                }
+            }, callNode);
+        }
         return first[0] ? com.mezze.interpreter.values.MezzeVariant.none() : com.mezze.interpreter.values.MezzeVariant.some(acc[0]);
     }
 
@@ -259,22 +337,38 @@ public final class IterNatives {
             MezzeFunction fn = (MezzeFunction) unary.fn;
             Object[] closure = fn.getClosureValues();
             int closureLen = closure.length;
-            com.oracle.truffle.api.CallTarget target = fn.getCallTarget();
-            if (unary.isMap()) {
-                walkElements(unary.src, x -> {
-                    Object[] args = new Object[closureLen + 1];
-                    System.arraycopy(closure, 0, args, 0, closureLen);
-                    args[closureLen] = MezzeRecord.wrapX(x);
-                    consumer.accept(callNode.call(target, args));
-                }, callNode);
+            CallTarget innerTarget = ScalarBypass.tryResolve(fn);
+            if (innerTarget != null) {
+                Object[] args = new Object[closureLen + 1];
+                System.arraycopy(closure, 0, args, 0, closureLen);
+                if (unary.isMap()) {
+                    walkElements(unary.src, x -> {
+                        args[closureLen] = x;
+                        consumer.accept(callNode.call(innerTarget, args));
+                    }, callNode);
+                } else {
+                    walkElements(unary.src, x -> {
+                        args[closureLen] = x;
+                        Object r = callNode.call(innerTarget, args);
+                        if (r instanceof Boolean && (Boolean) r) consumer.accept(x);
+                    }, callNode);
+                }
             } else {
-                walkElements(unary.src, x -> {
-                    Object[] args = new Object[closureLen + 1];
-                    System.arraycopy(closure, 0, args, 0, closureLen);
-                    args[closureLen] = MezzeRecord.wrapX(x);
-                    Object r = callNode.call(target, args);
-                    if (r instanceof Boolean && (Boolean) r) consumer.accept(x);
-                }, callNode);
+                com.oracle.truffle.api.CallTarget target = fn.getCallTarget();
+                Object[] args = new Object[closureLen + 1];
+                System.arraycopy(closure, 0, args, 0, closureLen);
+                if (unary.isMap()) {
+                    walkElements(unary.src, x -> {
+                        args[closureLen] = MezzeRecord.wrapX(x);
+                        consumer.accept(callNode.call(target, args));
+                    }, callNode);
+                } else {
+                    walkElements(unary.src, x -> {
+                        args[closureLen] = MezzeRecord.wrapX(x);
+                        Object r = callNode.call(target, args);
+                        if (r instanceof Boolean && (Boolean) r) consumer.accept(x);
+                    }, callNode);
+                }
             }
         }
     }
@@ -359,30 +453,74 @@ public final class IterNatives {
             predTarget = pred.getCallTarget();
         }
 
+        // Scalar-ABI bypass: resolve inner targets once
+        CallTarget predInner = pred != null ? ScalarBypass.tryResolve(pred) : null;
+        CallTarget mapperInner = mapper != null ? ScalarBypass.tryResolve(mapper) : null;
+        CallTarget folderInner = ScalarBypass.tryResolve(folder);
+
+        // Hoist args arrays outside the loop — callbacks destructure
+        // immediately and never retain the array, so reuse is safe.
+        Object[] pArgs = null;
+        if (pred != null) {
+            CallTarget pt = predInner != null ? predInner : predTarget;
+            pArgs = new Object[predClosureLen + 1];
+            System.arraycopy(predClosure, 0, pArgs, 0, predClosureLen);
+        }
+        Object[] mArgs = null;
+        if (mapper != null) {
+            mArgs = new Object[mapperClosureLen + 1];
+            System.arraycopy(mapperClosure, 0, mArgs, 0, mapperClosureLen);
+        }
+
+        // Folder args: scalar bypass uses 2 separate arg slots, record path uses 1
+        Object[] fArgs;
+        int fAccSlot, fElemSlot;
+        boolean folderScalar = folderInner != null;
+        if (folderScalar) {
+            String[] fParams = folder.getParameterNames();
+            boolean accFirst = fParams.length < 2 || "acc".equals(fParams[0]);
+            fAccSlot = accFirst ? folderClosureLen : folderClosureLen + 1;
+            fElemSlot = accFirst ? folderClosureLen + 1 : folderClosureLen;
+            fArgs = new Object[folderClosureLen + 2];
+        } else {
+            fAccSlot = -1;
+            fElemSlot = -1;
+            fArgs = new Object[folderClosureLen + 1];
+        }
+        System.arraycopy(folderClosure, 0, fArgs, 0, folderClosureLen);
+
         boolean ascending = step > 0;
         while (ascending ? (i < end) : (i > end)) {
             Object x = (Object) i;
 
             if (pred != null) {
-                Object[] pArgs = new Object[predClosureLen + 1];
-                System.arraycopy(predClosure, 0, pArgs, 0, predClosureLen);
-                pArgs[predClosureLen] = MezzeRecord.wrapX(x);
-                Object r = callNode.call(predTarget, pArgs);
-                if (!(r instanceof Boolean) || !((Boolean) r)) {
-                    i += step;
-                    continue;
+                if (predInner != null) {
+                    pArgs[predClosureLen] = x;
+                    Object r = callNode.call(predInner, pArgs);
+                    if (!(r instanceof Boolean) || !((Boolean) r)) { i += step; continue; }
+                } else {
+                    pArgs[predClosureLen] = MezzeRecord.wrapX(x);
+                    Object r = callNode.call(predTarget, pArgs);
+                    if (!(r instanceof Boolean) || !((Boolean) r)) { i += step; continue; }
                 }
             }
             if (mapper != null) {
-                Object[] mArgs = new Object[mapperClosureLen + 1];
-                System.arraycopy(mapperClosure, 0, mArgs, 0, mapperClosureLen);
-                mArgs[mapperClosureLen] = MezzeRecord.wrapX(x);
-                x = callNode.call(mapperTarget, mArgs);
+                if (mapperInner != null) {
+                    mArgs[mapperClosureLen] = x;
+                    x = callNode.call(mapperInner, mArgs);
+                } else {
+                    mArgs[mapperClosureLen] = MezzeRecord.wrapX(x);
+                    x = callNode.call(mapperTarget, mArgs);
+                }
             }
-            Object[] fArgs = new Object[folderClosureLen + 1];
-            System.arraycopy(folderClosure, 0, fArgs, 0, folderClosureLen);
-            fArgs[folderClosureLen] = MezzeRecord.wrapAccX(acc, x);
-            acc = callNode.call(folderTarget, fArgs);
+            if (folderScalar) {
+                fArgs[fAccSlot] = acc;
+                fArgs[fElemSlot] = x;
+                acc = callNode.call(folderInner, fArgs);
+            } else {
+                fArgs[folderClosureLen] = MezzeRecord.wrapAccX(acc, x);
+                acc = callNode.call(folderTarget, fArgs);
+            }
             i += step;
         }
         return acc;
@@ -404,13 +542,28 @@ public final class IterNatives {
         collect(node, buf, callNode);
         Object[] folderClosure = folder.getClosureValues();
         int folderClosureLen = folderClosure.length;
-        com.oracle.truffle.api.CallTarget folderTarget = folder.getCallTarget();
         Object acc = initAcc;
-        for (Object x : buf) {
+        CallTarget folderInner = ScalarBypass.tryResolve(folder);
+        if (folderInner != null) {
+            String[] params = folder.getParameterNames();
+            boolean accFirst = params.length < 2 || "acc".equals(params[0]);
+            int accSlot = accFirst ? folderClosureLen : folderClosureLen + 1;
+            int elemSlot = accFirst ? folderClosureLen + 1 : folderClosureLen;
+            Object[] fArgs = new Object[folderClosureLen + 2];
+            System.arraycopy(folderClosure, 0, fArgs, 0, folderClosureLen);
+            for (Object x : buf) {
+                fArgs[accSlot] = acc;
+                fArgs[elemSlot] = x;
+                acc = callNode.call(folderInner, fArgs);
+            }
+        } else {
+            com.oracle.truffle.api.CallTarget folderTarget = folder.getCallTarget();
             Object[] fArgs = new Object[folderClosureLen + 1];
             System.arraycopy(folderClosure, 0, fArgs, 0, folderClosureLen);
-            fArgs[folderClosureLen] = MezzeRecord.wrapAccX(acc, x);
-            acc = callNode.call(folderTarget, fArgs);
+            for (Object x : buf) {
+                fArgs[folderClosureLen] = MezzeRecord.wrapAccX(acc, x);
+                acc = callNode.call(folderTarget, fArgs);
+            }
         }
         return acc;
     }
@@ -456,21 +609,37 @@ public final class IterNatives {
             MezzeFunction fn = (MezzeFunction) unary.fn;
             Object[] closure = fn.getClosureValues();
             int closureLen = closure.length;
-            com.oracle.truffle.api.CallTarget target = fn.getCallTarget();
-            if (unary.isMap()) {
-                for (Object x : inner) {
-                    Object[] args = new Object[closureLen + 1];
-                    System.arraycopy(closure, 0, args, 0, closureLen);
-                    args[closureLen] = MezzeRecord.wrapX(x);
-                    out.add(callNode.call(target, args));
+            CallTarget innerTarget = ScalarBypass.tryResolve(fn);
+            if (innerTarget != null) {
+                Object[] args = new Object[closureLen + 1];
+                System.arraycopy(closure, 0, args, 0, closureLen);
+                if (unary.isMap()) {
+                    for (Object x : inner) {
+                        args[closureLen] = x;
+                        out.add(callNode.call(innerTarget, args));
+                    }
+                } else {
+                    for (Object x : inner) {
+                        args[closureLen] = x;
+                        Object r = callNode.call(innerTarget, args);
+                        if (r instanceof Boolean && (Boolean) r) out.add(x);
+                    }
                 }
             } else {
-                for (Object x : inner) {
-                    Object[] args = new Object[closureLen + 1];
-                    System.arraycopy(closure, 0, args, 0, closureLen);
-                    args[closureLen] = MezzeRecord.wrapX(x);
-                    Object r = callNode.call(target, args);
-                    if (r instanceof Boolean && (Boolean) r) out.add(x);
+                com.oracle.truffle.api.CallTarget target = fn.getCallTarget();
+                Object[] args = new Object[closureLen + 1];
+                System.arraycopy(closure, 0, args, 0, closureLen);
+                if (unary.isMap()) {
+                    for (Object x : inner) {
+                        args[closureLen] = MezzeRecord.wrapX(x);
+                        out.add(callNode.call(target, args));
+                    }
+                } else {
+                    for (Object x : inner) {
+                        args[closureLen] = MezzeRecord.wrapX(x);
+                        Object r = callNode.call(target, args);
+                        if (r instanceof Boolean && (Boolean) r) out.add(x);
+                    }
                 }
             }
         }
