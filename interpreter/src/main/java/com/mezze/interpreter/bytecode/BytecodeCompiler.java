@@ -318,6 +318,29 @@ public final class BytecodeCompiler {
     // the 30×+ overhead of the CallIndirectScalar1 PIC path.
     private final java.util.HashMap<Integer, MakeLambdaIR> localLambdas = new java.util.HashMap<>();
 
+    // ── Captured-lambda devirtualization ──────────────────────────────
+    // Pre-analyzed mapping: childFunctionHash → captureIndex → binding.
+    // When a function `go` captures a let-bound lambda `mul` from its
+    // parent, this map records the relationship so compile() can emit
+    // CallDirect instead of CallIndirect for ReadCapture-based calls.
+    // Built by preAnalyzeCapturedLambdas() before compileWithCallees().
+    private final java.util.HashMap<Hash, java.util.HashMap<Integer, CapturedLambdaBinding>>
+            capturedLambdaDevirt = new java.util.HashMap<>();
+
+    // Hash of the function currently being compiled — set at the start
+    // of compile() so the CallIndirectScalarIR handler can look up the
+    // capturedLambdaDevirt map.
+    private Hash currentFunctionHash;
+
+    private static final class CapturedLambdaBinding {
+        final Hash lambdaHash;
+        final int lambdaCaptureCount;
+        CapturedLambdaBinding(Hash lambdaHash, int lambdaCaptureCount) {
+            this.lambdaHash = lambdaHash;
+            this.lambdaCaptureCount = lambdaCaptureCount;
+        }
+    }
+
     /**
      * Optional external CallTarget resolver — used when this compiler
      * is invoked from the runtime path where callee CallTargets already
@@ -1022,6 +1045,106 @@ public final class BytecodeCompiler {
         return false;
     }
 
+    // ── Captured-lambda pre-analysis ────────────────────────────────
+    // Scan each function's body to discover when a child MakeLambdaIR
+    // captures a let-bound lambda from the parent. Records the binding
+    // in capturedLambdaDevirt so compile() can devirtualize
+    // CallIndirect(ReadCapture(idx)) → CallDirect.
+
+    /**
+     * Pre-analyze all functions to build the {@link #capturedLambdaDevirt}
+     * map. Must be called before any {@link #compile(FunctionIR)} call.
+     */
+    public void preAnalyzeCapturedLambdas(java.util.List<FunctionIR> functions) {
+        capturedLambdaDevirt.clear();
+        for (FunctionIR fn : functions) {
+            // Step 1: find slot → lambda-hash for let-bound lambdas
+            var lambdaSlots = new java.util.HashMap<Integer, Hash>();
+            var lambdaCaptureCounts = new java.util.HashMap<Integer, Integer>();
+            collectLambdaBindings(fn.getBody(), lambdaSlots, lambdaCaptureCounts);
+
+            // Step 2: find MakeLambdaIR nodes whose captures reference
+            //         lambda slots — those are captured-lambda bindings.
+            collectCapturedLambdas(fn.getBody(), lambdaSlots, lambdaCaptureCounts);
+        }
+    }
+
+    /**
+     * Walk the IR tree to find {@code StmtIR.Let(slot, MakeLambdaIR(...))}
+     * bindings. Records slot → lambda hash and slot → lambda capture count.
+     */
+    private void collectLambdaBindings(NodeIR node,
+            java.util.Map<Integer, Hash> lambdaSlots,
+            java.util.Map<Integer, Integer> lambdaCaptureCounts) {
+        if (node instanceof BlockIR blk) {
+            for (StmtIR stmt : blk.getStmts()) {
+                if (stmt instanceof StmtIR.Let l && l.getValue() instanceof MakeLambdaIR ml) {
+                    lambdaSlots.put(l.getSlot(), ml.getFunctionHash());
+                    lambdaCaptureCounts.put(l.getSlot(), ml.getCaptures().size());
+                }
+                // Recurse into the value to find nested bindings
+                collectLambdaBindings(
+                        stmt instanceof StmtIR.Let let ? let.getValue() : ((StmtIR.Expr) stmt).getNode(),
+                        lambdaSlots, lambdaCaptureCounts);
+            }
+            collectLambdaBindings(blk.getResult(), lambdaSlots, lambdaCaptureCounts);
+        } else if (node instanceof IfIR ie) {
+            collectLambdaBindings(ie.getCond(), lambdaSlots, lambdaCaptureCounts);
+            collectLambdaBindings(ie.getThenBr(), lambdaSlots, lambdaCaptureCounts);
+            collectLambdaBindings(ie.getElseBr(), lambdaSlots, lambdaCaptureCounts);
+        }
+        // MakeLambdaIR, calls, etc. don't contain nested let bindings
+        // that would be in THIS function's scope — inner lambdas are
+        // separate FunctionIRs.
+    }
+
+    /**
+     * Walk the IR tree to find {@code MakeLambdaIR} nodes that capture
+     * slots which are known lambda bindings. Records in
+     * {@link #capturedLambdaDevirt}.
+     */
+    private void collectCapturedLambdas(NodeIR node,
+            java.util.Map<Integer, Hash> lambdaSlots,
+            java.util.Map<Integer, Integer> lambdaCaptureCounts) {
+        if (node instanceof MakeLambdaIR ml) {
+            java.util.HashMap<Integer, CapturedLambdaBinding> captureMap = null;
+            for (int i = 0; i < ml.getCaptures().size(); i++) {
+                CaptureIR cap = ml.getCaptures().get(i);
+                Hash lambdaHash = lambdaSlots.get(cap.getSlot());
+                if (lambdaHash != null) {
+                    if (captureMap == null) captureMap = new java.util.HashMap<>();
+                    captureMap.put(i, new CapturedLambdaBinding(
+                            lambdaHash,
+                            lambdaCaptureCounts.get(cap.getSlot())));
+                }
+            }
+            if (captureMap != null) {
+                capturedLambdaDevirt.put(ml.getFunctionHash(), captureMap);
+            }
+            // Don't recurse into MakeLambdaIR's children — captures are
+            // slot references, not nested IR.
+            return;
+        }
+        if (node instanceof BlockIR blk) {
+            for (StmtIR stmt : blk.getStmts()) {
+                NodeIR val = stmt instanceof StmtIR.Let l ? l.getValue() : ((StmtIR.Expr) stmt).getNode();
+                collectCapturedLambdas(val, lambdaSlots, lambdaCaptureCounts);
+            }
+            collectCapturedLambdas(blk.getResult(), lambdaSlots, lambdaCaptureCounts);
+        } else if (node instanceof IfIR ie) {
+            collectCapturedLambdas(ie.getCond(), lambdaSlots, lambdaCaptureCounts);
+            collectCapturedLambdas(ie.getThenBr(), lambdaSlots, lambdaCaptureCounts);
+            collectCapturedLambdas(ie.getElseBr(), lambdaSlots, lambdaCaptureCounts);
+        } else if (node instanceof CallIndirectScalarIR ci) {
+            collectCapturedLambdas(ci.getFunction(), lambdaSlots, lambdaCaptureCounts);
+            for (NodeIR arg : ci.getArgs()) {
+                collectCapturedLambdas(arg, lambdaSlots, lambdaCaptureCounts);
+            }
+        }
+        // Other node types don't contain MakeLambdaIR in positions
+        // relevant to this analysis.
+    }
+
     /**
      * Convenience: compile a list of {@code FunctionIR}s in dependency
      * order (callees first). Populates {@link #compiledCallTargets} as
@@ -1033,6 +1156,7 @@ public final class BytecodeCompiler {
      * failure from {@link #supports} on the mis-ordered function.
      */
     public java.util.List<RootNode> compileWithCallees(java.util.List<FunctionIR> functions) {
+        preAnalyzeCapturedLambdas(functions);
         var out = new java.util.ArrayList<RootNode>(functions.size());
         for (FunctionIR ir : functions) {
             // Pre-register a placeholder trampoline ONLY when this
@@ -1099,6 +1223,7 @@ public final class BytecodeCompiler {
         // Per-function scope: clear local lambda tracking so entries from
         // a previous compile() don't pollute this function's slot namespace.
         localLambdas.clear();
+        currentFunctionHash = ir.getHash();
 
         // Frame layout [captures..., params..., locals...] — captures
         // and params both come from LoadArgument in the closure calling
@@ -2512,6 +2637,83 @@ public final class BytecodeCompiler {
                             b.endCallDirectN();
                         }
                         return;
+                    }
+                }
+            }
+            // ── Captured lambda devirtualization ──
+            // When the call target is a ReadCapture whose capture index
+            // maps to a known let-bound lambda (pre-analyzed), emit
+            // CallDirect with ReadClosureValue ops to extract the
+            // captured lambda's own closure values.  Mirrors the local
+            // devirtualization above but sources captures from the
+            // MezzeFunction's closureValues array instead of the frame.
+            if (!ci.isTailCall() && ci.getFunction() instanceof ReadCaptureIR readCap) {
+                var capMap = capturedLambdaDevirt.get(currentFunctionHash);
+                if (capMap != null) {
+                    CapturedLambdaBinding binding = capMap.get(readCap.getIndex());
+                    if (binding != null) {
+                        CallTarget lambdaTarget = resolveCallTarget(binding.lambdaHash);
+                        if (lambdaTarget != null) {
+                            int lambdaCapCount = binding.lambdaCaptureCount;
+                            int totalArgs = lambdaCapCount + ci.getArgs().size();
+                            // canBypass: resolveScalarTarget unwraps the
+                            // trampoline at specialization time.
+                            boolean canBypass = lambdaTarget instanceof com.oracle.truffle.api.RootCallTarget rctL
+                                    && rctL.getRootNode() instanceof TrampolineRootNode trampL
+                                    && !trampL.hasTailCalls();
+                            if (totalArgs <= 3) {
+                                switch (totalArgs) {
+                                    case 1 -> {
+                                        b.beginCallDirect1(lambdaTarget, canBypass);
+                                        if (lambdaCapCount > 0) {
+                                            b.beginReadClosureValue(0);
+                                            b.emitLoadArgument(readCap.getIndex());
+                                            b.endReadClosureValue();
+                                        } else {
+                                            emitNode(ci.getArgs().get(0), b, argCount, localMap);
+                                        }
+                                        b.endCallDirect1();
+                                    }
+                                    case 2 -> {
+                                        b.beginCallDirect2(lambdaTarget, canBypass);
+                                        for (int i = 0; i < lambdaCapCount; i++) {
+                                            b.beginReadClosureValue(i);
+                                            b.emitLoadArgument(readCap.getIndex());
+                                            b.endReadClosureValue();
+                                        }
+                                        for (NodeIR arg : ci.getArgs()) {
+                                            emitNode(arg, b, argCount, localMap);
+                                        }
+                                        b.endCallDirect2();
+                                    }
+                                    case 3 -> {
+                                        b.beginCallDirect3(lambdaTarget, canBypass);
+                                        for (int i = 0; i < lambdaCapCount; i++) {
+                                            b.beginReadClosureValue(i);
+                                            b.emitLoadArgument(readCap.getIndex());
+                                            b.endReadClosureValue();
+                                        }
+                                        for (NodeIR arg : ci.getArgs()) {
+                                            emitNode(arg, b, argCount, localMap);
+                                        }
+                                        b.endCallDirect3();
+                                    }
+                                }
+                                return;
+                            } else {
+                                b.beginCallDirectN(lambdaTarget);
+                                for (int i = 0; i < lambdaCapCount; i++) {
+                                    b.beginReadClosureValue(i);
+                                    b.emitLoadArgument(readCap.getIndex());
+                                    b.endReadClosureValue();
+                                }
+                                for (NodeIR arg : ci.getArgs()) {
+                                    emitNode(arg, b, argCount, localMap);
+                                }
+                                b.endCallDirectN();
+                                return;
+                            }
+                        }
                     }
                 }
             }

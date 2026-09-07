@@ -3273,6 +3273,29 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Extract a closure value from a captured {@link MezzeFunction}.
+     *
+     * <p>Used by the captured-lambda devirtualization: when a function
+     * captures a lambda (e.g. {@code let go = {…} -> …mul{x}…} where
+     * {@code mul} is captured), and we devirtualize the call to use
+     * {@code CallDirect} instead of {@code CallIndirect}, we need to
+     * extract the captured lambda's own closure values to pass as
+     * arguments to the inner target.
+     *
+     * <p>The {@code closureValueIndex} is a {@code @ConstantOperand}
+     * (PE-visible), so the array index is constant-folded. The child
+     * evaluates to the {@link MezzeFunction} holding the closure values.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    public static final class ReadClosureValue {
+        @Specialization
+        public static Object doRead(int closureValueIndex, MezzeFunction fn) {
+            return fn.getClosureValues()[closureValueIndex];
+        }
+    }
+
+    /**
      * String-interpolation pattern match: try to match {@code scrutinee}
      * (a Str) against a template composed of alternating literal and
      * capture parts (encoded via {@code partTypes} + {@code literals}

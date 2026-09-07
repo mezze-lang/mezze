@@ -619,6 +619,16 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         for (Hash h : reachable) slotTable.allocate(h);
         // Phase 2 — emit each function through BDSL, publish its CT.
         com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
+        // Pre-analyze captured-lambda relationships across ALL reachable
+        // functions so compile() can devirtualize CallIndirect(ReadCapture).
+        {
+            var allIRs = new java.util.ArrayList<com.mezze.language.truffleir.FunctionIR>();
+            for (Hash h : reachable) {
+                var ir = lookup.invoke(h);
+                if (ir != null) allIRs.add(ir);
+            }
+            bdsl.preAnalyzeCapturedLambdas(allIRs);
+        }
         int emitted = 0, skippedUnsupported = 0, skippedMissing = 0, failed = 0;
         for (Hash h : reachable) {
             SlotEntry slot = slotTable.get(h);
