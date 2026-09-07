@@ -1140,7 +1140,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 MezzeFunction fn,
                 @Variadic Object[] args,
                 @Cached("fn.getCallTarget()") CallTarget cachedTarget,
-                @Cached("create(cachedTarget)") DirectCallNode callNode) {
+                @Cached("createForceInlined(cachedTarget)") DirectCallNode callNode) {
             // Skip partial-application check: the guard ensures no
             // outstanding partial args. For HOF callbacks the arg record
             // always fills all parameters (the typechecker guarantees
@@ -1154,6 +1154,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             System.arraycopy(closureValues, 0, combined, 0, closureLen);
             System.arraycopy(args, 0, combined, closureLen, args.length);
             return callNode.call(combined);
+        }
+
+        static DirectCallNode createForceInlined(CallTarget target) {
+            DirectCallNode node = DirectCallNode.create(target);
+            node.forceInlining();
+            return node;
         }
 
         @Specialization(replaces = "doDirect")
@@ -1224,9 +1230,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization(guards = {
             "fn.getCallTarget() == cachedTarget",
             "!fn.hasPartialArgs()",
-            "canBypass"
+            "canBypass",
+            "closureLen == 0"
         }, limit = "3")
-        public static Object doBypass(
+        public static Object doBypassNoClosure(
                 String fieldName,
                 MezzeFunction fn,
                 Object arg,
@@ -1235,9 +1242,72 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("resolveInner(cachedTarget)") CallTarget resolved,
                 @Cached("fn.getClosureValues().length") int closureLen,
                 @Cached("createInlined(resolved)") DirectCallNode callNode) {
-            if (closureLen == 0) {
-                return callNode.call(arg);
-            }
+            return callNode.call(arg);
+        }
+
+        /**
+         * Bypass with exactly 1 captured value: pass (closure0, arg)
+         * directly as varargs — avoids explicit Object[] allocation +
+         * System.arraycopy that would otherwise run per call.
+         */
+        @Specialization(guards = {
+            "fn.getCallTarget() == cachedTarget",
+            "!fn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 1"
+        }, limit = "3")
+        public static Object doBypass1Closure(
+                String fieldName,
+                MezzeFunction fn,
+                Object arg,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            return callNode.call(fn.getClosureValues()[0], arg);
+        }
+
+        /**
+         * Bypass with exactly 2 captured values: (closure0, closure1, arg).
+         */
+        @Specialization(guards = {
+            "fn.getCallTarget() == cachedTarget",
+            "!fn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 2"
+        }, limit = "3")
+        public static Object doBypass2Closures(
+                String fieldName,
+                MezzeFunction fn,
+                Object arg,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            Object[] cv = fn.getClosureValues();
+            return callNode.call(cv[0], cv[1], arg);
+        }
+
+        /**
+         * Generic bypass with 3+ captured values — falls back to
+         * explicit array allocation.
+         */
+        @Specialization(guards = {
+            "fn.getCallTarget() == cachedTarget",
+            "!fn.hasPartialArgs()",
+            "canBypass"
+        }, limit = "3")
+        public static Object doBypassGenericClosure(
+                String fieldName,
+                MezzeFunction fn,
+                Object arg,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
             Object[] closureValues = fn.getClosureValues();
             Object[] combined = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, combined, 0, closureLen);
@@ -1256,7 +1326,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 Object arg,
                 @Cached("fn.getCallTarget()") CallTarget cachedTarget,
                 @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
-                @Cached("create(cachedTarget)") DirectCallNode callNode) {
+                @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
             // Callee is not a bypassable BDSL function — wrap arg in a
             // record so the callee's normalizeArgs handles it correctly.
             MezzeRecord record = MezzeRecord.fromFields(
@@ -1272,7 +1342,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return callNode.call(combined);
         }
 
-        @Specialization(replaces = {"doBypass", "doDirectRecord"})
+        @Specialization(replaces = {"doBypassNoClosure", "doBypass1Closure", "doBypass2Closures", "doBypassGenericClosure", "doDirectRecord"})
         public static Object doIndirect(
                 String fieldName,
                 MezzeFunction fn,
