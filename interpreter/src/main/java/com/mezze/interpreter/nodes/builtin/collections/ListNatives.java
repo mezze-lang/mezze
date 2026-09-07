@@ -9,7 +9,10 @@ import com.mezze.datastructures.set.MezzeSet;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.interpreter.values.*;
+import com.mezze.interpreter.bytecode.TrampolineRootNode;
+import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.RootCallTarget;
 
 /**
  * Native List operations - ULTRA PERFORMANT.
@@ -190,10 +193,21 @@ public final class ListNatives {
         if (list.isEmpty()) return list;
         Object[] src = list.toArray();
         Object[] result = new Object[src.length];
-        // Reuse args array across iterations.
         Object[] closureValues = mapper.getClosureValues();
         int closureLen = closureValues.length;
-        com.oracle.truffle.api.CallTarget target = mapper.getCallTarget();
+        // Scalar-ABI bypass: pass raw element without MezzeRecord wrapping
+        CallTarget innerTarget = tryScalarBypass(mapper);
+        if (innerTarget != null) {
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < src.length; i++) {
+                args[closureLen] = src[i];
+                result[i] = callNode.call(innerTarget, args);
+            }
+            return MezzeList.of(result);
+        }
+        // Record path for non-BDSL callees
+        CallTarget target = mapper.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
         for (int i = 0; i < src.length; i++) {
@@ -210,18 +224,33 @@ public final class ListNatives {
         Object[] src = list.toArray();
         Object[] temp = new Object[src.length];
         int count = 0;
-        // Reuse args array across iterations.
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
-        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
-        Object[] args = new Object[closureLen + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureLen);
-        for (int i = 0; i < src.length; i++) {
-            Object element = src[i];
-            args[closureLen] = MezzeRecord.wrapX(element);
-            Object result = callNode.call(target, args);
-            if (result instanceof Boolean && (Boolean) result) {
-                temp[count++] = element;
+        // Scalar-ABI bypass
+        CallTarget innerTarget = tryScalarBypass(predicate);
+        if (innerTarget != null) {
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < src.length; i++) {
+                Object element = src[i];
+                args[closureLen] = element;
+                Object result = callNode.call(innerTarget, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    temp[count++] = element;
+                }
+            }
+        } else {
+            // Record path for non-BDSL callees
+            CallTarget target = predicate.getCallTarget();
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < src.length; i++) {
+                Object element = src[i];
+                args[closureLen] = MezzeRecord.wrapX(element);
+                Object result = callNode.call(target, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    temp[count++] = element;
+                }
             }
         }
         if (count == 0) return MezzeList.empty();
@@ -291,17 +320,17 @@ public final class ListNatives {
     public static MezzeVariant find(MezzeList list, MezzeFunction predicate,
 
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        // head/tail walk with reused args — O(n) short-circuit.
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
-        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget callTarget = innerTarget != null ? innerTarget : predicate.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
         MezzeList current = list;
         while (!current.isEmpty()) {
             Object element = current.head();
-            args[closureLen] = MezzeRecord.wrapX(element);
-            Object result = callNode.call(target, args);
+            args[closureLen] = innerTarget != null ? element : MezzeRecord.wrapX(element);
+            Object result = callNode.call(callTarget, args);
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some(element);
             }
@@ -315,14 +344,15 @@ public final class ListNatives {
                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
-        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget callTarget = innerTarget != null ? innerTarget : predicate.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
         MezzeList current = list;
         long idx = 0;
         while (!current.isEmpty()) {
-            args[closureLen] = MezzeRecord.wrapX(current.head());
-            Object result = callNode.call(target, args);
+            args[closureLen] = innerTarget != null ? current.head() : MezzeRecord.wrapX(current.head());
+            Object result = callNode.call(callTarget, args);
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some(idx);
             }
@@ -339,13 +369,14 @@ public final class ListNatives {
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
-        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget callTarget = innerTarget != null ? innerTarget : predicate.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
         MezzeList current = list;
         while (!current.isEmpty()) {
-            args[closureLen] = MezzeRecord.wrapX(current.head());
-            Object result = callNode.call(target, args);
+            args[closureLen] = innerTarget != null ? current.head() : MezzeRecord.wrapX(current.head());
+            Object result = callNode.call(callTarget, args);
             if (result instanceof Boolean && (Boolean) result) {
                 return true;
             }
@@ -359,13 +390,14 @@ public final class ListNatives {
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
-        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        CallTarget innerTarget = tryScalarBypass(predicate);
+        CallTarget callTarget = innerTarget != null ? innerTarget : predicate.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
         MezzeList current = list;
         while (!current.isEmpty()) {
-            args[closureLen] = MezzeRecord.wrapX(current.head());
-            Object result = callNode.call(target, args);
+            args[closureLen] = innerTarget != null ? current.head() : MezzeRecord.wrapX(current.head());
+            Object result = callNode.call(callTarget, args);
             if (!(result instanceof Boolean) || !(Boolean) result) {
                 return false;
             }
@@ -385,10 +417,15 @@ public final class ListNatives {
         int matchCount = 0;
         int nonMatchCount = 0;
 
+        CallTarget innerTarget = tryScalarBypass(predicate);
         for (int i = 0; i < src.length; i++) {
             Object element = src[i];
-            Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, element));
+            Object result;
+            if (innerTarget != null) {
+                result = callNode.call(innerTarget, prepareScalarArgs1(predicate, element));
+            } else {
+                result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            }
             if (result instanceof Boolean && (Boolean) result) {
                 matching[matchCount++] = element;
             } else {
@@ -529,6 +566,24 @@ public final class ListNatives {
 
     // ==================== Helper Methods ====================
 
+    /**
+     * Try to resolve the inner BDSL target for scalar-ABI bypass.
+     * Returns the inner CallTarget if the function is a bypassable BDSL
+     * function (TrampolineRootNode without tail calls), or null for
+     * AST/effect-handler callees that need record-wrapped arguments.
+     */
+    private static CallTarget tryScalarBypass(MezzeFunction fn) {
+        if (fn.hasPartialArgs()) return null;
+        CallTarget target = fn.getCallTarget();
+        if (target instanceof RootCallTarget rct
+                && rct.getRootNode() instanceof TrampolineRootNode tramp
+                && !tramp.hasTailCalls()
+                && tramp.getInnerTarget() != null) {
+            return tramp.getInnerTarget();
+        }
+        return null;
+    }
+
     private static Object[] prepareArgs(MezzeFunction fn, Object arg) {
         Object[] closureValues = fn.getClosureValues();
         Object[] args = new Object[closureValues.length + 1];
@@ -538,32 +593,71 @@ public final class ListNatives {
         return args;
     }
 
+    /** Scalar-ABI 1-arg: bypass record wrapping for BDSL callees. */
+    private static Object[] prepareScalarArgs1(MezzeFunction fn, Object arg) {
+        Object[] closureValues = fn.getClosureValues();
+        Object[] args = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
+        args[closureValues.length] = arg;  // raw scalar, no MezzeRecord
+        return args;
+    }
+
+    /** Scalar-ABI 2-arg: bypass record wrapping for BDSL callees. */
+    private static Object[] prepareScalarArgs2(MezzeFunction fn, Object arg1, Object arg2) {
+        Object[] closureValues = fn.getClosureValues();
+        Object[] args = new Object[closureValues.length + 2];
+        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
+        args[closureValues.length] = arg1;      // raw scalar
+        args[closureValues.length + 1] = arg2;  // raw scalar
+        return args;
+    }
+
     /**
      * #403: shared 2-arg fold loop for foldLeft/foldRight/reduce/scan.
-     * See {@link SeqNatives}'s foldTwoArg for design notes. We drop
-     * {@code @TruffleBoundary} so PE can trace and inline the folder;
-     * we do NOT skip the {@code MezzeRecord{acc, x}} wrap because the
-     * folder's param naming is user-chosen and disambiguating positional
-     * slots at runtime would require name-based dispatch.
      *
      * Uses toArray() for O(n) random-access instead of list.get(i) which
      * was O(n²) for cons-list. toArray() is a single O(n) pass, then the
      * fold loop is O(n) — total O(n) instead of O(n²).
      *
+     * Scalar-ABI bypass: when the folder is a bypassable BDSL function,
+     * passes (closures..., acc, x) directly — no MezzeRecord allocation
+     * per iteration. Falls back to record-wrapping for AST/effect callees.
      */
     private static Object foldTwoArg(MezzeList list, Object init, MezzeFunction folder,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                      boolean reverse, int startIndex, Object[] scanOut) {
         Object[] closureValues = folder.getClosureValues();
         int closureLen = closureValues.length;
-        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
+        CallTarget target = folder.getCallTarget();
         Object[] elements = list.toArray();
         int size = elements.length;
         int from = reverse ? size - 1 - startIndex : startIndex;
         int step = reverse ? -1 : 1;
         int end = reverse ? -1 : size;
         Object acc = init;
-        // Reuse args array across iterations — avoids 1M allocations per fold.
+        // Scalar-ABI bypass: pass raw (closures..., acc, x) without record.
+        // Must respect callee's parameter order: the wrapAccX field order
+        // is [acc, x] but the callback might declare {x, acc} (swapped).
+        CallTarget innerTarget = tryScalarBypass(folder);
+        if (innerTarget != null) {
+            String[] params = folder.getParameterNames();
+            // Determine which positional slot gets acc vs element.
+            // Default: acc at closureLen, element at closureLen+1
+            // Swapped: element at closureLen, acc at closureLen+1
+            boolean accFirst = params.length < 2 || "acc".equals(params[0]);
+            int accSlot = accFirst ? closureLen : closureLen + 1;
+            int elemSlot = accFirst ? closureLen + 1 : closureLen;
+            Object[] args = new Object[closureLen + 2];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = from; i != end; i += step) {
+                args[accSlot] = acc;
+                args[elemSlot] = elements[i];
+                acc = callNode.call(innerTarget, args);
+                if (scanOut != null) scanOut[i + 1] = acc;
+            }
+            return acc;
+        }
+        // Record path: wrap in MezzeRecord for non-BDSL callees
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
         for (int i = from; i != end; i += step) {
@@ -785,8 +879,19 @@ public final class ListNatives {
     public static MezzeRecord forEach(MezzeList list, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] src = list.toArray();
-        for (int i = 0; i < src.length; i++) {
-            callNode.call(fn.getCallTarget(), prepareArgs(fn, src[i]));
+        CallTarget innerTarget = tryScalarBypass(fn);
+        if (innerTarget != null) {
+            Object[] closureValues = fn.getClosureValues();
+            Object[] args = new Object[closureValues.length + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureValues.length);
+            for (int i = 0; i < src.length; i++) {
+                args[closureValues.length] = src[i];
+                callNode.call(innerTarget, args);
+            }
+        } else {
+            for (int i = 0; i < src.length; i++) {
+                callNode.call(fn.getCallTarget(), prepareArgs(fn, src[i]));
+            }
         }
         return MezzeRecord.empty();
     }

@@ -7,8 +7,11 @@ import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.datastructures.set.MezzeSet;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
+import com.mezze.interpreter.bytecode.TrampolineRootNode;
 import com.mezze.interpreter.values.*;
+import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.RootCallTarget;
 
 /**
  * Native Deque operations - ULTRA PERFORMANT.
@@ -143,15 +146,31 @@ public final class DequeNatives {
     }
 
     /**
-     * #403: drop {@code @TruffleBoundary} so PE can trace the loop.
-     * See {@link SeqNatives}'s foldTwoArg for why we keep the record wrap.
+     * Scalar-ABI bypass for fold: when the folder is a bypassable BDSL
+     * function, passes (closures..., acc, x) directly — no MezzeRecord
+     * allocation per iteration.
      */
     public static Object fold(MezzeDeque deque, Object init, MezzeFunction folder,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = folder.getClosureValues();
         int closureLen = closureValues.length;
-        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
         Object acc = init;
+        CallTarget innerTarget = tryScalarBypass(folder);
+        if (innerTarget != null) {
+            String[] params = folder.getParameterNames();
+            boolean accFirst = params.length < 2 || "acc".equals(params[0]);
+            int accSlot = accFirst ? closureLen : closureLen + 1;
+            int elemSlot = accFirst ? closureLen + 1 : closureLen;
+            Object[] args = new Object[closureLen + 2];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (Object element : deque) {
+                args[accSlot] = acc;
+                args[elemSlot] = element;
+                acc = callNode.call(innerTarget, args);
+            }
+            return acc;
+        }
+        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
         for (Object element : deque) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
@@ -159,6 +178,18 @@ public final class DequeNatives {
             acc = callNode.call(target, args);
         }
         return acc;
+    }
+
+    private static CallTarget tryScalarBypass(MezzeFunction fn) {
+        if (fn.hasPartialArgs()) return null;
+        CallTarget target = fn.getCallTarget();
+        if (target instanceof RootCallTarget rct
+                && rct.getRootNode() instanceof TrampolineRootNode tramp
+                && !tramp.hasTailCalls()
+                && tramp.getInnerTarget() != null) {
+            return tramp.getInnerTarget();
+        }
+        return null;
     }
 
     // ==================== Concat ====================
