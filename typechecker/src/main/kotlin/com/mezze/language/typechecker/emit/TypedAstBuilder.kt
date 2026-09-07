@@ -631,8 +631,22 @@ class TypedAstBuilder(
                     // equality), which the solver never pins — both fields
                     // end up with the same unresolved alias and downstream
                     // unification corrupts field-to-type alignment.
-                    val solvedType = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
-                        ?: substitution.apply(contextType)
+                    //
+                    // But the per-loc type can stay an unsolved var for a bare
+                    // no-payload variant in an unannotated record (`let order =
+                    // { status = Queued }`): the solver pinned the FIELD type
+                    // (`status: Status`) not this construction site. In that case
+                    // fall back to the pushed `contextType` (the record field's
+                    // expected type) when it is concrete, so the value reads as
+                    // `Status`, not `'a`. Prefer whichever is concrete; per-loc
+                    // wins when both are.
+                    val perLoc = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+                    val fromCtx = substitution.apply(contextType)
+                    val solvedType = when {
+                        perLoc != null && perLoc !is MezzeType.VarType -> perLoc
+                        fromCtx !is MezzeType.VarType -> fromCtx
+                        else -> perLoc ?: fromCtx
+                    }
                     TypedVariantConstruct(expr.constructor, payload, solvedType, loc)
                 }
             }
@@ -746,7 +760,22 @@ class TypedAstBuilder(
                 // A field whose value is a lambda then gets its param types pushed
                 // from the declaration, so an untyped callback param is stamped
                 // concrete for ability-method dispatch.
-                val expectedFields = (substitution.apply(contextType) as? MezzeType.RecordType)?.fields
+                //
+                // The record's OWN solved type (per-loc, from the solver) also
+                // carries per-field types the caller-context might not — e.g. an
+                // unannotated `let order = { status = Queued }` where the solver
+                // pinned `status: Status` from downstream use. Prefer contextType's
+                // fields when present, else fall back to the solved record's fields,
+                // so a field value like `Queued` is emitted with its solved type
+                // (`Status`) rather than a bare `'a`. (Hover/inlay read these.)
+                val ctxFields = (substitution.apply(contextType) as? MezzeType.RecordType)?.fields
+                val solvedFields = (callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+                    as? MezzeType.RecordType)?.fields
+                val expectedFields = when {
+                    ctxFields == null -> solvedFields
+                    solvedFields == null -> ctxFields
+                    else -> solvedFields + ctxFields // contextType wins on overlap
+                }
                 val entries = expr.entries.map { entry ->
                     when (entry) {
                         is ParsedRecordEntry.Field -> {
@@ -1131,9 +1160,16 @@ class TypedAstBuilder(
         // record are correct. Rebuild the fn type from the real param record
         // (wrappedArg.type carries `{ it: <solvedReceiver>, … }`) and return type.
         val correctedFn = if (fn is TypedVar && fn.name == methodInfo.methodName) {
+            // Preserve the method's effect row + ability constraints from the
+            // original (solved) fn type — rebuilding only param/return here would
+            // otherwise DROP them (default null), so a hover on `.send` lost its
+            // `<Http>` even though the method body performs Http.
+            val prior = substitution.apply(fn.type) as? MezzeType.FunctionType
             fn.copy(type = MezzeType.FunctionType(
                 paramType = substitution.apply(wrappedArg.type),
                 returnType = callReturnType,
+                effects = prior?.effects,
+                abilityConstraints = prior?.abilityConstraints ?: emptyList(),
             ))
         } else fn
 

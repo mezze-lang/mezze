@@ -100,4 +100,143 @@ class HoverMatchAndAliasTest {
         val h = hoverAt(prog, "let fast", 4)
         assertTrue(h.contains("Promise Str")) { "fast should hover as Promise Str, got: $h" }
     }
+
+    // ── Bug: a variant value whose shape matches an in-scope alias must hover
+    //    as the ALIAS NAME (Status), not as `'a` and not as the raw union.
+    //    `mez check` already resolves this (`order : { ..., status: Status }`);
+    //    the hover path diverged. Same family as the AsyncError test above.
+
+    private val orders = """
+        type Status = | Queued, Shipped { days: Int }, Cancelled { why: Str } |
+        let order = { id = "A-1", status = Queued }
+    """
+
+    @Test
+    fun `variant binding hovers as its in-scope alias name, not 'a`() {
+        val h = hoverAt(orders, "status = Queued", 0) // hover on `status` field
+        assertTrue(h.contains("Status")) { "status should hover as the alias Status, got: $h" }
+        assertTrue(!h.contains("'a")) { "status must not hover as an unsolved 'a, got: $h" }
+    }
+
+    @Test
+    fun `order binding hovers with status typed as the alias Status`() {
+        val h = hoverAt(orders, "let order", 4) // hover on `order`
+        assertTrue(h.contains("status: Status")) {
+            "order should hover with status: Status (the in-scope alias), got: $h"
+        }
+    }
+
+    // Faithful reproduction of the deployed home-page `onion.mz`: `order` is a
+    // LOCAL `let` inside a `do` block, later used via `describe { order }`. The
+    // deployed hovers.json showed the binding-name position rendering
+    // `{ id: Str, status: 'a }` — the local-do-let path, which the top-level
+    // `orders` case above does not exercise.
+    private val ordersFull = """
+        use std::int
+        type Status = | Queued, Shipped { days: Int }, Cancelled { why: Str } |
+        let describe = { order } -> match order.status is
+          Queued -> "${'$'}(order.id) waiting"
+          Shipped { days } -> "${'$'}(order.id) in ${'$'}(int::to_str { n = days })"
+          Cancelled { why } -> "${'$'}(order.id) cancelled: ${'$'}(why)"
+        let main = {} -> do
+          let order = { id = "A-1", status = Queued }
+          describe { order }
+    """
+
+    // KNOWN LIMITATION (disabled): in a LOCAL `let` inside a `do` block, a bare
+    // variant field (`let order = { status = Queued }`) hovers as `status: 'a`
+    // instead of `Status`. Root cause (traced): the per-binding solve DOES pin
+    // the var to Status (VariantSolver.inferVariantTypes returns Success(Status)
+    // and bindLet records the fully-resolved `{ id: Str, status: Status }` in
+    // doBindingSolvedTypes), but (a) that per-binding substitution is NOT merged
+    // into the FINAL global substitution emit reads (only solveResult.substitution
+    // is, via compose at TypeChecker.kt:479 — the ConstraintGenerator.kt:193
+    // per-binding solve's subst is discarded), and (b) the doBindingSolvedTypes
+    // entry recorded in the constraint phase does not survive into emit's
+    // aggregated map for this nested case (present at ExprControlFlowConstraints
+    // write time, null at TypedAstBuilder read time). The top-level case (the
+    // `orders` tests above) works; only the do-block-local path regresses. Fixing
+    // it cleanly needs the per-binding variant resolution to reach the global
+    // substitution (or the doBindingSolvedTypes entry to survive aggregation) —
+    // deeper than a display tweak and risks broad regressions, so it is deferred.
+    @Test
+    fun `local do-block order binding hovers status as Status, not 'a`() {
+        // Hover the `order` binding NAME at its local `let` definition.
+        val h = hoverAt(ordersFull, "let order", 4)
+        assertTrue(h.contains("Status")) {
+            "local `let order` binding must hover with status: Status, got: $h"
+        }
+        assertTrue(!h.contains("status: 'a")) {
+            "local `let order` binding must not render status as 'a, got: $h"
+        }
+    }
+
+    @Test
+    fun `record literal field in a local do-block hovers as Status, not 'a`() {
+        // Hover the `status` field inside the record literal at the local let.
+        val h = hoverAt(ordersFull, "status = Queued", 0)
+        assertTrue(!h.contains("'a")) {
+            "record-literal `status` field in a do-block must not render as 'a, got: $h"
+        }
+    }
+
+    @Test
+    fun `a bare variant with NO alias in scope hovers as the structural union`() {
+        // No `type` declared — the value's type is exactly its structural shape.
+        val src = "let s = Queued"
+        val h = hoverAt(src, "let s", 4)
+        assertTrue(h.contains("Queued")) {
+            "with no alias in scope, a bare variant should show its structural union naming Queued, got: $h"
+        }
+        assertTrue(!h.contains("'a")) { "a concrete variant must not hover as 'a, got: $h" }
+    }
+
+    // ── Bug: hovering an effectful METHOD-ALIAS call (`.send {}`, whose body
+    //    performs Http) must carry `<Http>` in the method's hovered signature —
+    //    exactly as hovering a free-fn call `println` shows `<Log>`. The
+    //    deployed hovers.json showed `send : { it: Request } -> Result Response
+    //    HttpError` with the effect row DROPPED, while `println` keeps `<Log>`.
+    //    (The enclosing wrapper `weather` DOES carry `<Http>` — that path is
+    //    fine; the bug is specific to the method-call hover position.)
+
+    private val httpProg = """
+        use std::effects::http::{ request }
+        let weather = { url } -> request { url }.send {}.text_or { def = "offline" }
+    """
+
+    @Test
+    fun `effectful wrapper hovers with its Http effect row`() {
+        // Regression guard: the wrapper arrow correctly carries the <Http> effect row.
+        // NOTE assert on the EFFECT ROW `<Http`, not the substring "Http" — the return
+        // type `HttpError` also contains "Http", which would pass for the wrong reason.
+        val h = hoverAt(httpProg, "let weather", 4)
+        assertTrue(h.contains("<Http")) {
+            "weather calls .send {} (performs Http) — its hover must carry the <Http> effect row, got: $h"
+        }
+    }
+
+    @Test
+    fun `hovering the send method call carries its Http effect row`() {
+        // The real bug: `.send {}` hovers as `send : {..} -> Result Response HttpError`
+        // WITHOUT the `<Http>` effect row, even though its body performs Http.request.
+        // Free-fn `println` keeps `<Log>`; the inherent-method hover drops the row.
+        val h = hoverAt(httpProg, ".send", 1) // cursor on the `send` token
+        assertTrue(h.contains("send")) { "sanity: hover should be about send, got: $h" }
+        assertTrue(h.contains("<Http")) {
+            "the .send method call performs Http — its hover must carry the <Http> effect row " +
+                "(not merely the HttpError return type), got: $h"
+        }
+    }
+
+    @Test
+    fun `hovering request shows a pure signature, no Http effect row`() {
+        // Control: request { url } only BUILDS a Request — it is pure, so its hover
+        // must NOT carry a `<Http>` effect row. (Confirms .send, not request, is the
+        // effectful call. Asserts absence of the ROW `<Http`, not the word "Http".)
+        val h = hoverAt(httpProg, "request {", 0)
+        assertTrue(h.contains("request")) { "sanity: hover should be about request, got: $h" }
+        assertTrue(!h.contains("<Http")) {
+            "request only builds a Request (pure) — its hover must NOT carry a <Http> effect row, got: $h"
+        }
+    }
 }

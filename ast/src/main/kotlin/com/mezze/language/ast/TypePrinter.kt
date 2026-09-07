@@ -36,6 +36,31 @@ private fun printVariantType(
         }
     }
 
+    // OPEN-SUBSET match: a value like `Queued` is inferred as an OPEN variant
+    // `| Queued, ... |` (rowVar != null) carrying only the constructors used so
+    // far. Its constructor set is a SUBSET of a declared alias's (e.g. `Status`
+    // has Queued/Shipped/Cancelled). An open variant is compatible with any
+    // alias whose constructor set is a superset, so if EXACTLY ONE in-scope
+    // alias is a superset we display that alias name (the compiler unifies the
+    // value to `Status` anyway — hover just diverged). Guarded UNIQUE so a
+    // constructor shared by two aliases stays structural rather than guessing.
+    if (type.rowVar != null && type.constructors.isNotEmpty()) {
+        val typeCtors = type.constructors.keys
+        val supersets = typeAliases.entries.filter { (_, info) ->
+            val def = info.definition
+            def is MezzeType.VariantType && def.constructors.keys.containsAll(typeCtors)
+        }
+        if (supersets.size == 1) {
+            val (aliasName, aliasInfo) = supersets.first()
+            val aliasDef = aliasInfo.definition as MezzeType.VariantType
+            val typeArgs = inferTypeArguments(type, aliasDef, aliasInfo.typeParams)
+            val argsStr = if (typeArgs.isNullOrEmpty()) "" else " " + typeArgs.joinToString(" ") {
+                prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
+            }
+            return aliasName + argsStr
+        }
+    }
+
     val aliasMatch = findTypeAliasForType(type, typeAliases)
     if (aliasMatch != null) {
         val aliasName = if (aliasMatch.typeArgs.isEmpty()) {

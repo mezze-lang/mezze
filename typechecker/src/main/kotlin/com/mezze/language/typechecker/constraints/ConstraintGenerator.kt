@@ -208,6 +208,42 @@ class ConstraintGenerator(
                         is ConstraintSolver.SolveResult.Success -> {
                             val substitution = solveResult.substitution
 
+                            // Feed this binding's STRUCTURAL resolution into the
+                            // shared perBindingSubstitution, exactly as the
+                            // ParsedTopLevelExpr path does (see below). This binding's
+                            // solve already pins e.g. a bare variant field
+                            // (`let order = { status = Queued }`) to its declared
+                            // alias (`status: Status`) via HasConstructor; without
+                            // merging it here that resolution is discarded (only the
+                            // GLOBAL solve's substitution is composed into the final
+                            // one at TypeChecker's compose(perBindingSubstitution)),
+                            // so emit reads a bare `'a` for the field and hover/inlay
+                            // show `'a`. A top-level `let` never hit this because its
+                            // value is re-solved globally; a do-block-local `let` is
+                            // not, so its per-binding resolution must be propagated
+                            // here. Mirror the expr path: compose only the STRUCTURAL
+                            // subset (HasField / HasConstructor) so equality /
+                            // method-resolution ordering stays owned by the global
+                            // solver.
+                            // Compose only the VARIANT (HasConstructor) resolution —
+                            // NOT HasField. HasField governs record OPENNESS (open
+                            // `{ a, ... }` vs closed `{ a }`); merging its per-binding
+                            // solve here reopens records that must print closed (e.g.
+                            // a `from_json` decode target — RecordInferenceOpenClosedTest).
+                            // The bug is only that a bare variant field stays `'a`;
+                            // solely HasConstructor pins it to its declared alias, so
+                            // that is all we propagate.
+                            val variantBindingConstraints = allBindingConstraints.filter {
+                                it is Constraint.HasConstructor
+                            }
+                            if (variantBindingConstraints.isNotEmpty()) {
+                                val variantSolve = solver.solve(variantBindingConstraints)
+                                if (variantSolve is ConstraintSolver.SolveResult.Success) {
+                                    perBindingSubstitution =
+                                        variantSolve.substitution.compose(perBindingSubstitution)
+                                }
+                            }
+
                             val letResult = bindLet(
                                 item = item,
                                 result = result,
