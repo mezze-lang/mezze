@@ -428,18 +428,24 @@ object MutEraser {
                 var stagesChanged = false
                 val newStages = node.stages.map { stage ->
                     when (stage) {
-                        is StageIR.Map, is StageIR.Filter -> stage
+                        is StageIR.Map, is StageIR.Filter, is StageIR.TakeWhile, is StageIR.DropWhile -> stage
                         is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
                         is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
                     }
                 }
                 val newSink: SinkIR = when (val sk = node.sink) {
-                    SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sk
+                    SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList,
+                    SinkIR.First, SinkIR.Last, SinkIR.Min, SinkIR.Max -> sk
                     is SinkIR.Fold -> {
                         val nInit = f(sk.init)
                         if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk
                     }
-                    is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find -> sk
+                    is SinkIR.Scan -> {
+                        val nInit = f(sk.init)
+                        if (nInit !== sk.init) SinkIR.Scan(nInit, sk.f) else sk
+                    }
+                    is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find,
+                    is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sk
                 }
                 val newFallback = node.fallback?.let(f)
                 if (newSource !== node.source || newSink !== node.sink || stagesChanged || newFallback !== node.fallback)

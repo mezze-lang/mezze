@@ -235,13 +235,19 @@ object FunctionIRReachability {
                         is com.mezze.language.truffleir.StageIR.Filter -> queue.add(stage.p.functionHash)
                         is com.mezze.language.truffleir.StageIR.Take -> collectHashesFromNode(stage.n, queue)
                         is com.mezze.language.truffleir.StageIR.Drop -> collectHashesFromNode(stage.n, queue)
+                        is com.mezze.language.truffleir.StageIR.TakeWhile -> queue.add(stage.p.functionHash)
+                        is com.mezze.language.truffleir.StageIR.DropWhile -> queue.add(stage.p.functionHash)
                     }
                 }
                 when (val sk = node.sink) {
                     com.mezze.language.truffleir.SinkIR.Sum,
                     com.mezze.language.truffleir.SinkIR.Count,
                     com.mezze.language.truffleir.SinkIR.ToSeq,
-                    com.mezze.language.truffleir.SinkIR.ToList -> {}
+                    com.mezze.language.truffleir.SinkIR.ToList,
+                    com.mezze.language.truffleir.SinkIR.First,
+                    com.mezze.language.truffleir.SinkIR.Last,
+                    com.mezze.language.truffleir.SinkIR.Min,
+                    com.mezze.language.truffleir.SinkIR.Max -> {}
                     is com.mezze.language.truffleir.SinkIR.Fold -> {
                         collectHashesFromNode(sk.init, queue)
                         queue.add(sk.f.functionHash)
@@ -251,6 +257,14 @@ object FunctionIRReachability {
                     is com.mezze.language.truffleir.SinkIR.Any -> queue.add(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.All -> queue.add(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.Find -> queue.add(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.None -> queue.add(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.MinBy -> queue.add(sk.f.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.MaxBy -> queue.add(sk.f.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.Partition -> queue.add(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.Scan -> {
+                        collectHashesFromNode(sk.init, queue)
+                        queue.add(sk.f.functionHash)
+                    }
                 }
                 // Walk the fallback node (the original IR before fusion)
                 // so its referenced hashes remain reachable.

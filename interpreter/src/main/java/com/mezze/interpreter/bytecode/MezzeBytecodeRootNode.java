@@ -2305,7 +2305,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     public static final int FLP_SINK_SUM = 0, FLP_SINK_COUNT = 1,
         FLP_SINK_ANY = 2, FLP_SINK_ALL = 3, FLP_SINK_FIND = 4,
-        FLP_SINK_TO_SEQ = 5, FLP_SINK_TO_LIST = 6, FLP_SINK_REDUCE = 7;
+        FLP_SINK_TO_SEQ = 5, FLP_SINK_TO_LIST = 6, FLP_SINK_REDUCE = 7,
+        FLP_SINK_NONE = 8;
 
     /**
      * Pack op ordinals and flags into a single int for FusedLongPipeline.
@@ -2462,6 +2463,15 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                             found = true; foundVal = v; break;
                         }
                     }
+                } else if (sinkKind == FLP_SINK_NONE) {
+                    // none = !any: if any element matches, result is false.
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0
+                                ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) {
+                            found = true; break;
+                        }
+                    } else { found = true; break; }
                 }
             }
 
@@ -2542,6 +2552,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                         long sv = sinkPredPreOp >= 0 ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
                         if (flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) { found = true; foundVal = v; break; }
                     }
+                } else if (sinkKind == FLP_SINK_NONE) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0 ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) { found = true; break; }
+                    } else { found = true; break; }
                 }
             }
             if (sinkKind == FLP_SINK_REDUCE && reduceNeedInit) return flpResultReduceEmpty();
@@ -2589,6 +2604,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 return found;
             } else if (sinkKind == FLP_SINK_ALL) {
                 return !found;
+            } else if (sinkKind == FLP_SINK_NONE) {
+                return !found;  // none = !any: found means a match exists → result is false
             } else if (sinkKind == FLP_SINK_FIND) {
                 return flpResultFind(found, foundVal);
             }
@@ -2772,6 +2789,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                             found = true; foundVal = v; break;
                         }
                     }
+                } else if (sinkKind == FLP_SINK_NONE) {
+                    if (sinkPredCmpOp >= 0) {
+                        long sv = sinkPredPreOp >= 0
+                                ? FusedLongPipeline.flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                        if (FusedLongPipeline.flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs)) {
+                            found = true; break;
+                        }
+                    } else { found = true; break; }
                 }
             }
 

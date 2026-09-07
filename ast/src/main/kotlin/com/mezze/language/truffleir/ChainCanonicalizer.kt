@@ -272,6 +272,12 @@ object ChainCanonicalizer {
         SinkIR.Count, is SinkIR.Any, is SinkIR.All -> true
         is SinkIR.Find, is SinkIR.Reduce -> true
         SinkIR.ToSeq, SinkIR.ToList -> true
+        is SinkIR.None -> true
+        SinkIR.First, SinkIR.Last -> true
+        SinkIR.Min, SinkIR.Max -> true
+        is SinkIR.Scan -> true
+        // Not yet emittable — canonicalized but gated here.
+        is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> false
     }
 
     /**
@@ -514,9 +520,12 @@ object ChainCanonicalizer {
         paramCount: Int,
     ): SinkIR = when (sink) {
         is SinkIR.Fold -> SinkIR.Fold(substituteSlots(sink.init, slotValues, paramCount), sink.f)
+        is SinkIR.Scan -> SinkIR.Scan(substituteSlots(sink.init, slotValues, paramCount), sink.f)
         // Other sinks have no expressions that reference param slots.
         SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sink
+        SinkIR.First, SinkIR.Last, SinkIR.Min, SinkIR.Max -> sink
         is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find -> sink
+        is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sink
     }
 
     /** Recursively substitute ReadLocalIR(slot) → slotValues[slot]. */
@@ -722,12 +731,53 @@ object ChainCanonicalizer {
             }
             "__native_list_to_seq" -> {
                 var src: NodeIR? = null
-                for (fld in mr.fields) { if (fld.name == "xs") src = fld.value }
+                for (fld in mr.fields) { if (fld.name == NativeHofNames.XS) src = fld.value }
                 val srcInner = src ?: return null
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions)
                 val effectiveSource = if (source is SourceIR.Opaque) SourceIR.RawList(source.expr) else source
                 val candidate = FusedChainIR(effectiveSource, stages, SinkIR.ToSeq, node.src)
                 if (isEffectSafe(candidate, allFunctions)) candidate else null
+            }
+            // ── New sinks ──
+            "__native_seq_none" ->
+                buildPredicateFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.None(it) }
+            "__native_list_none" ->
+                buildPredicateFusedList(mr, classifier, allFunctions, node.src) { SinkIR.None(it) }
+            "__native_seq_first" ->
+                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.First)
+            "__native_seq_last" ->
+                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.Last)
+            "__native_seq_min" ->
+                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.Min)
+            "__native_seq_max" ->
+                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.Max)
+            "__native_seq_min_by" ->
+                buildFunctionSinkFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.MinBy(it) }
+            "__native_seq_max_by" ->
+                buildFunctionSinkFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.MaxBy(it) }
+            "__native_seq_partition" ->
+                buildPredicateFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.Partition(it) }
+            "__native_seq_scan" -> {
+                var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
+                for (fld in mr.fields) when (fld.name) {
+                    NativeHofNames.XS -> src = fld.value
+                    NativeHofNames.INIT -> init = fld.value
+                    NativeHofNames.F -> f = fld.value
+                }
+                val srcInner = src ?: return null
+                val initExpr = init ?: return null
+                val fLambda = asMakeLambda(f) ?: return null
+                val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+                val effectiveSource = when {
+                    source is SourceIR.Opaque && NativeHofNames.isSeqNative(node.name) -> SourceIR.RawSeq(source.expr)
+                    source is SourceIR.Opaque -> null
+                    else -> source
+                }
+                if (effectiveSource == null) null
+                else {
+                    val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Scan(initExpr, fLambda), node.src)
+                    if (isEffectSafe(candidate, allFunctions)) candidate else null
+                }
             }
             else -> null
         }
@@ -748,7 +798,7 @@ object ChainCanonicalizer {
     ): FusedChainIR? {
         var srcNode: NodeIR? = null; var p: NodeIR? = null
         for (fld in mr.fields) when (fld.name) {
-            "xs" -> srcNode = fld.value; "p" -> p = fld.value
+            NativeHofNames.XS -> srcNode = fld.value; NativeHofNames.P -> p = fld.value
         }
         val srcInner = srcNode ?: return null
         val pLambda = asMakeLambda(p) ?: return null
@@ -758,7 +808,7 @@ object ChainCanonicalizer {
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
 
-    /** Build a FusedChainIR with a predicate sink (any/all/find) from a native call record. */
+    /** Build a FusedChainIR with a predicate sink (any/all/find/none/partition) from a native call record. */
     private fun buildPredicateFused(
         mr: MakeRecordIR,
         nativeName: String,
@@ -767,24 +817,67 @@ object ChainCanonicalizer {
         src: SourceInfo,
         wrap: (MakeLambdaIR) -> SinkIR,
     ): FusedChainIR? {
-        val srcField = if (nativeName.startsWith("__native_iter")) "it" else "xs"
+        val srcField = NativeHofNames.srcFieldFor(nativeName)
         var srcNode: NodeIR? = null; var p: NodeIR? = null
         for (fld in mr.fields) when (fld.name) {
-            srcField -> srcNode = fld.value; "p" -> p = fld.value
+            srcField -> srcNode = fld.value; NativeHofNames.P -> p = fld.value
         }
         val srcInner = srcNode ?: return null
         val pLambda = asMakeLambda(p) ?: return null
-        // Captures OK — emit-side handles them via capture slot remap.
         val (stages, source) = peelSource(srcInner, classifier, allFunctions)
-        // seq natives: promote Opaque → RawSeq (we know the source is a Seq).
-        // iter natives: source could be any iterator — must reject Opaque.
-        val effectiveSource = when {
-            source is SourceIR.Opaque && nativeName.startsWith("__native_seq") -> SourceIR.RawSeq(source.expr)
-            source is SourceIR.Opaque -> return null
-            else -> source
-        }
+        val effectiveSource = promoteOpaqueSource(source, nativeName) ?: return null
         val candidate = FusedChainIR(effectiveSource, stages, wrap(pLambda), src)
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
+    }
+
+    /** Build a FusedChainIR with a function sink (min_by/max_by) from a native call record. */
+    private fun buildFunctionSinkFused(
+        mr: MakeRecordIR,
+        nativeName: String,
+        classifier: ChainHofClassifier,
+        allFunctions: Map<Hash, FunctionIR>,
+        src: SourceInfo,
+        wrap: (MakeLambdaIR) -> SinkIR,
+    ): FusedChainIR? {
+        val srcField = NativeHofNames.srcFieldFor(nativeName)
+        var srcNode: NodeIR? = null; var f: NodeIR? = null
+        for (fld in mr.fields) when (fld.name) {
+            srcField -> srcNode = fld.value; NativeHofNames.F -> f = fld.value
+        }
+        val srcInner = srcNode ?: return null
+        val fLambda = asMakeLambda(f) ?: return null
+        val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+        val effectiveSource = promoteOpaqueSource(source, nativeName) ?: return null
+        val candidate = FusedChainIR(effectiveSource, stages, wrap(fLambda), src)
+        return if (isEffectSafe(candidate, allFunctions)) candidate else null
+    }
+
+    /** Build a FusedChainIR with a unary sink (first/last/min/max) from a native call record. */
+    private fun buildUnarySinkFused(
+        mr: MakeRecordIR,
+        nativeName: String,
+        classifier: ChainHofClassifier,
+        allFunctions: Map<Hash, FunctionIR>,
+        src: SourceInfo,
+        sink: SinkIR,
+    ): FusedChainIR? {
+        val srcField = NativeHofNames.srcFieldFor(nativeName)
+        var srcNode: NodeIR? = null
+        for (fld in mr.fields) { if (fld.name == srcField) srcNode = fld.value }
+        val srcInner = srcNode ?: return null
+        val (stages, source) = peelSource(srcInner, classifier, allFunctions)
+        val effectiveSource = promoteOpaqueSource(source, nativeName) ?: return null
+        val candidate = FusedChainIR(effectiveSource, stages, sink, src)
+        return if (isEffectSafe(candidate, allFunctions)) candidate else null
+    }
+
+    /** Promote an Opaque source based on the native call's collection type.
+     *  Seq natives → RawSeq, list natives → RawList, iter natives → reject. */
+    private fun promoteOpaqueSource(source: SourceIR, nativeName: String): SourceIR? = when {
+        source !is SourceIR.Opaque -> source
+        NativeHofNames.isSeqNative(nativeName) -> SourceIR.RawSeq(source.expr)
+        NativeHofNames.isListNative(nativeName) -> SourceIR.RawList(source.expr)
+        else -> null  // iter — can't determine concrete source type
     }
 
     // ── Phase 3/5: effect-row safety gate ─────────────────────────────
@@ -832,13 +925,24 @@ object ChainCanonicalizer {
         ChainHofClassifier.HofKind.FIND -> extractPredicateSink(call) { SinkIR.Find(it) }
         ChainHofClassifier.HofKind.TO_SEQ -> extractUnarySink(call, SinkIR.ToSeq)
         ChainHofClassifier.HofKind.TO_LIST -> extractUnarySink(call, SinkIR.ToList)
-        // MAP/FILTER/TAKE/DROP/FROM_SEQ aren't sinks — they're peel targets.
-        // If we land here we're processing the wrong callsite kind; refuse
-        // silently so the peel step handles it recursively.
+        ChainHofClassifier.HofKind.NONE -> extractPredicateSink(call) { SinkIR.None(it) }
+        ChainHofClassifier.HofKind.FIRST -> extractUnarySink(call, SinkIR.First)
+        ChainHofClassifier.HofKind.LAST -> extractUnarySink(call, SinkIR.Last)
+        ChainHofClassifier.HofKind.MIN -> extractUnarySink(call, SinkIR.Min)
+        ChainHofClassifier.HofKind.MAX -> extractUnarySink(call, SinkIR.Max)
+        ChainHofClassifier.HofKind.MIN_BY -> extractFunctionSink(call) { SinkIR.MinBy(it) }
+        ChainHofClassifier.HofKind.MAX_BY -> extractFunctionSink(call) { SinkIR.MaxBy(it) }
+        ChainHofClassifier.HofKind.PARTITION -> extractPredicateSink(call) { SinkIR.Partition(it) }
+        ChainHofClassifier.HofKind.SCAN -> extractScan(call)
+        // MAP/FILTER/TAKE/DROP/FROM_SEQ/TAKE_WHILE/DROP_WHILE aren't sinks —
+        // they're peel targets. If we land here we're processing the wrong
+        // callsite kind; refuse silently so the peel step handles it.
         ChainHofClassifier.HofKind.MAP,
         ChainHofClassifier.HofKind.FILTER,
         ChainHofClassifier.HofKind.TAKE,
         ChainHofClassifier.HofKind.DROP,
+        ChainHofClassifier.HofKind.TAKE_WHILE,
+        ChainHofClassifier.HofKind.DROP_WHILE,
         ChainHofClassifier.HofKind.FROM_SEQ -> null
     }
 
@@ -922,15 +1026,31 @@ object ChainCanonicalizer {
         return SinkIR.Reduce(fLambda) to src
     }
 
-    /** any/all/find — (src, p) + optional trailing dict. Predicate sinks. */
+    /** any/all/find/none/partition — (src, p) + optional trailing dict. Predicate sinks. */
     private fun extractPredicateSink(
         call: CallDirectIR,
         wrap: (MakeLambdaIR) -> SinkIR,
     ): Pair<SinkIR, NodeIR>? {
-        val (src, pRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = "p") ?: return null
+        val (src, pRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = NativeHofNames.P) ?: return null
         val pLambda = asMakeLambda(pRaw) ?: return null
-        // Captures OK — emit-side handles them via capture slot remap.
         return wrap(pLambda) to src
+    }
+
+    /** min_by/max_by — (src, f) + optional trailing dict. Function sinks. */
+    private fun extractFunctionSink(
+        call: CallDirectIR,
+        wrap: (MakeLambdaIR) -> SinkIR,
+    ): Pair<SinkIR, NodeIR>? {
+        val (src, fRaw) = extractTwoArgs(call, srcNames = SRC_NAMES, secondName = NativeHofNames.F) ?: return null
+        val fLambda = asMakeLambda(fRaw) ?: return null
+        return wrap(fLambda) to src
+    }
+
+    /** scan(src, init, f) — fold-like sink producing seq. */
+    private fun extractScan(call: CallDirectIR): Pair<SinkIR, NodeIR>? {
+        val (src, init, fRaw) = extractThreeArgs(call, srcNames = SRC_NAMES) ?: return null
+        val fLambda = asMakeLambda(fRaw) ?: return null
+        return SinkIR.Scan(init, fLambda) to src
     }
 
     /** to_seq/to_list — unary (src) sinks. */
@@ -951,10 +1071,8 @@ object ChainCanonicalizer {
         return sink to srcExpr
     }
 
-    /** Field names that mean "the collection source position" across
-     *  seq::/iter:: variants (plain module-level `xs`/`src`, ability-
-     *  method wrapper `it`). */
-    private val SRC_NAMES = setOf("xs", "src", "it")
+    /** Field names that mean "the collection source position". */
+    private val SRC_NAMES = NativeHofNames.SRC_FIELDS
 
     /**
      * Extract 3 positional or named args (source, init, f) from a call.
@@ -1052,6 +1170,18 @@ object ChainCanonicalizer {
             if (dropPeeled != null) {
                 stages.add(StageIR.Drop(dropPeeled.first))
                 current = dropPeeled.second
+                continue
+            }
+            val takeWhilePeeled = tryPeelTakeWhile(current, classifier)
+            if (takeWhilePeeled != null) {
+                stages.add(StageIR.TakeWhile(takeWhilePeeled.first))
+                current = takeWhilePeeled.second
+                continue
+            }
+            val dropWhilePeeled = tryPeelDropWhile(current, classifier)
+            if (dropWhilePeeled != null) {
+                stages.add(StageIR.DropWhile(dropWhilePeeled.first))
+                current = dropWhilePeeled.second
                 continue
             }
             val fromSeqPeeled = tryPeelIterFromSeq(current, classifier)
@@ -1225,8 +1355,60 @@ object ChainCanonicalizer {
         if (node !is CallDirectIR) return null
         val callee = classifier.lookup(node.targetHash) ?: return null
         if (callee.kind != ChainHofClassifier.HofKind.DROP) return null
-        val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = "n") ?: return null
+        val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = NativeHofNames.N) ?: return null
         return extracted.second to extracted.first
+    }
+
+    /** take_while { xs = <src>, p = <pred> } — returns (predLambda, srcExpr). */
+    private fun tryPeelTakeWhile(
+        node: NodeIR,
+        classifier: ChainHofClassifier,
+    ): Pair<MakeLambdaIR, NodeIR>? {
+        if (node is CallNativeIR
+            && NativeHofNames.isSeqOrIter(node.name, NativeHofNames.OP_TAKE_WHILE)
+            && !node.isScalarABI) {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var src: NodeIR? = null; var p: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                in SRC_NAMES -> src = fld.value
+                NativeHofNames.P -> p = fld.value
+            }
+            val srcInner = src ?: return null
+            val pLambda = asMakeLambda(p) ?: return null
+            return pLambda to srcInner
+        }
+        if (node !is CallDirectIR) return null
+        val callee = classifier.lookup(node.targetHash) ?: return null
+        if (callee.kind != ChainHofClassifier.HofKind.TAKE_WHILE) return null
+        val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = NativeHofNames.P) ?: return null
+        val pLambda = asMakeLambda(extracted.second) ?: return null
+        return pLambda to extracted.first
+    }
+
+    /** drop_while { xs = <src>, p = <pred> } — returns (predLambda, srcExpr). */
+    private fun tryPeelDropWhile(
+        node: NodeIR,
+        classifier: ChainHofClassifier,
+    ): Pair<MakeLambdaIR, NodeIR>? {
+        if (node is CallNativeIR
+            && NativeHofNames.isSeqOrIter(node.name, NativeHofNames.OP_DROP_WHILE)
+            && !node.isScalarABI) {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            var src: NodeIR? = null; var p: NodeIR? = null
+            for (fld in mr.fields) when (fld.name) {
+                in SRC_NAMES -> src = fld.value
+                NativeHofNames.P -> p = fld.value
+            }
+            val srcInner = src ?: return null
+            val pLambda = asMakeLambda(p) ?: return null
+            return pLambda to srcInner
+        }
+        if (node !is CallDirectIR) return null
+        val callee = classifier.lookup(node.targetHash) ?: return null
+        if (callee.kind != ChainHofClassifier.HofKind.DROP_WHILE) return null
+        val extracted = extractTwoArgs(node, srcNames = SRC_NAMES, secondName = NativeHofNames.P) ?: return null
+        val pLambda = asMakeLambda(extracted.second) ?: return null
+        return pLambda to extracted.first
     }
 
     /**
@@ -1404,21 +1586,21 @@ object ChainCanonicalizer {
                     is SourceIR.Opaque -> { val nE = f(s.expr); if (nE !== s.expr) SourceIR.Opaque(nE) else s }
                 }
                 var stagesChanged = false
-                val newStages = node.stages.map { stage ->
+                val newStages: List<StageIR> = node.stages.map { stage ->
                     when (stage) {
-                        is StageIR.Map, is StageIR.Filter -> stage
+                        is StageIR.Map, is StageIR.Filter,
+                        is StageIR.TakeWhile, is StageIR.DropWhile -> stage
                         is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
                         is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
                     }
                 }
                 val newSink: SinkIR = when (val sk = node.sink) {
                     is SinkIR.Fold -> { val nInit = f(sk.init); if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk }
-                    is SinkIR.ForEach -> sk
-                    is SinkIR.Reduce -> sk
-                    is SinkIR.Any -> sk
-                    is SinkIR.All -> sk
-                    is SinkIR.Find -> sk
+                    is SinkIR.Scan -> { val nInit = f(sk.init); if (nInit !== sk.init) SinkIR.Scan(nInit, sk.f) else sk }
+                    is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find -> sk
+                    is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sk
                     SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sk
+                    SinkIR.First, SinkIR.Last, SinkIR.Min, SinkIR.Max -> sk
                 }
                 val newFallback = node.fallback?.let(f)
                 if (newSource !== node.source || newSink !== node.sink || stagesChanged || newFallback !== node.fallback)
@@ -1452,7 +1634,9 @@ internal class ChainHofClassifier private constructor(
 
     internal enum class HofKind {
         FOLD, SUM, FOR_EACH, MAP, FILTER, TAKE, DROP, FROM_SEQ,
-        COUNT, REDUCE, ANY, ALL, FIND, TO_SEQ, TO_LIST
+        COUNT, REDUCE, ANY, ALL, FIND, TO_SEQ, TO_LIST,
+        TAKE_WHILE, DROP_WHILE, NONE, FIRST, LAST, MIN, MAX,
+        MIN_BY, MAX_BY, PARTITION, SCAN
     }
     internal data class Callee(val kind: HofKind)
 
@@ -1500,8 +1684,9 @@ internal class ChainHofClassifier private constructor(
             val name = fn.name
             val params = fn.paramNames
             val p0 = params.getOrNull(0) ?: return null
-            val isSrc = p0 == "xs" || p0 == "src" || p0 == "it"
-            if (!isSrc) return null
+            if (p0 !in NativeHofNames.SRC_FIELDS) return null
+            val p1 = params.getOrNull(1)
+            val p2 = params.getOrNull(2)
             // ── Ordering matters! ──
             // Mono specializations have empty names, so disambiguation
             // relies entirely on param layout. More specific patterns
@@ -1510,68 +1695,116 @@ internal class ChainHofClassifier private constructor(
             // #446 fix: SUM was matching mono map/filter/for_each before
             // they could reach their own branches.
             return when {
-                // fold/fold_left(src/xs/it, init, f [, dict]) — most specific (3-4 params)
+                // ── 3-param HOFs (most specific) ──
+                // fold/fold_left(src, init, f [, dict])
                 params.size in 3..4
-                    && (name == "fold" || name == "fold_left" || name.isEmpty())
-                    && params[1] == "init" && params[2] == "f" -> HofKind.FOLD
-                // map(src/xs/it, f [, dict]) — constrains params[1]
+                    && (name == NativeHofNames.OP_FOLD || name == NativeHofNames.OP_FOLD_LEFT || name.isEmpty())
+                    && p1 == NativeHofNames.INIT && p2 == NativeHofNames.F -> HofKind.FOLD
+                // scan(src, init, f [, dict]) — fold-like, produces seq
+                params.size in 3..4 && name == NativeHofNames.OP_SCAN
+                    && p1 == NativeHofNames.INIT && p2 == NativeHofNames.F -> HofKind.SCAN
+
+                // ── 2-param HOFs with function callback ──
+                // map(src, f [, dict])
                 params.size in 2..3
-                    && (name == "map" || name.isEmpty())
-                    && params[1] == "f" -> HofKind.MAP
-                // for_each(src/xs/it, f [, dict]) — constrains params[1];
-                // for mono, structurally identical to map — safe: if a
-                // mono for_each is classified as MAP, extractSinkAndSource
-                // rejects it (MAP isn't a sink) and the chain stays unfused.
+                    && (name == NativeHofNames.OP_MAP || name.isEmpty())
+                    && p1 == NativeHofNames.F -> HofKind.MAP
+                // for_each(src, f [, dict])
                 params.size in 2..3
-                    && (name == "for_each" || name.isEmpty())
-                    && params[1] == "f" -> HofKind.FOR_EACH
-                // filter(src/xs/it, p [, dict]) — constrains params[1]
+                    && (name == NativeHofNames.OP_FOR_EACH || name.isEmpty())
+                    && p1 == NativeHofNames.F -> HofKind.FOR_EACH
+                // reduce(src, f)
+                params.size in 2..3 && name == NativeHofNames.OP_REDUCE
+                    && p1 == NativeHofNames.F -> HofKind.REDUCE
+                // min_by(src, f) / max_by(src, f)
+                params.size in 2..3 && name == NativeHofNames.OP_MIN_BY
+                    && p1 == NativeHofNames.F -> HofKind.MIN_BY
+                params.size in 2..3 && name == NativeHofNames.OP_MAX_BY
+                    && p1 == NativeHofNames.F -> HofKind.MAX_BY
+
+                // ── 2-param HOFs with predicate callback ──
+                // All (src, p) HOFs share the same param layout, so mono
+                // specializations (empty name) are ambiguous.  When the name
+                // IS present we match it exactly; when empty we fall through
+                // to body-inspection (classifyPredicateByBody).
+                params.size in 2..3 && p1 == NativeHofNames.P -> when (name) {
+                    NativeHofNames.OP_FILTER     -> HofKind.FILTER
+                    NativeHofNames.OP_COUNT      -> HofKind.COUNT
+                    NativeHofNames.OP_ANY        -> HofKind.ANY
+                    NativeHofNames.OP_ALL        -> HofKind.ALL
+                    NativeHofNames.OP_FIND       -> HofKind.FIND
+                    NativeHofNames.OP_NONE       -> HofKind.NONE
+                    NativeHofNames.OP_PARTITION  -> HofKind.PARTITION
+                    NativeHofNames.OP_TAKE_WHILE -> HofKind.TAKE_WHILE
+                    NativeHofNames.OP_DROP_WHILE -> HofKind.DROP_WHILE
+                    ""   -> classifyPredicateByBody(fn)
+                    else -> null
+                }
+
+                // ── 2-param HOFs with count ──
+                // take(src, n [, dict])
                 params.size in 2..3
-                    && (name == "filter" || name.isEmpty())
-                    && params[1] == "p" -> HofKind.FILTER
-                // take(src/xs/it, n [, dict]) — constrains params[1]
+                    && (name == NativeHofNames.OP_TAKE || name.isEmpty())
+                    && p1 == NativeHofNames.N -> HofKind.TAKE
+                // drop(src, n [, dict])
                 params.size in 2..3
-                    && (name == "take" || name.isEmpty())
-                    && params[1] == "n" -> HofKind.TAKE
-                // drop(src/xs/it, n [, dict]) — constrains params[1];
-                // for mono, structurally identical to take — safe: both
-                // are stages, but misclassification changes semantics.
-                // Named fns are fine; mono take/drop are rare at the
-                // outer-call level (users don't chain `take` into `fold`
-                // via a mono specialization in practice).
-                params.size in 2..3
-                    && (name == "drop" || name.isEmpty())
-                    && params[1] == "n" -> HofKind.DROP
-                // ── Sink HOFs (named only — mono collides with stages) ──
-                // count(it, p) — same shape as filter, distinguish by name
-                params.size in 2..3 && name == "count"
-                    && params[1] == "p" -> HofKind.COUNT
-                // any(it, p)
-                params.size in 2..3 && name == "any"
-                    && params[1] == "p" -> HofKind.ANY
-                // all(it, p)
-                params.size in 2..3 && name == "all"
-                    && params[1] == "p" -> HofKind.ALL
-                // find(it, p)
-                params.size in 2..3 && name == "find"
-                    && params[1] == "p" -> HofKind.FIND
-                // reduce(it, f) — like fold but no init
-                params.size in 2..3 && name == "reduce"
-                    && params[1] == "f" -> HofKind.REDUCE
-                // to_seq(it) — materialize
-                params.size == 1 && name == "to_seq" -> HofKind.TO_SEQ
-                // to_list(it) — materialize
-                params.size == 1 && name == "to_list" -> HofKind.TO_LIST
-                // sum(src/xs/it [, dict]) — LAST among 1-2 param patterns;
-                // no params[1] constraint so it would shadow MAP/FILTER
-                // etc. if placed earlier.
+                    && (name == NativeHofNames.OP_DROP || name.isEmpty())
+                    && p1 == NativeHofNames.N -> HofKind.DROP
+
+                // ── 1-param unary sinks / stages ──
+                params.size == 1 && name == NativeHofNames.OP_TO_SEQ -> HofKind.TO_SEQ
+                params.size == 1 && name == NativeHofNames.OP_TO_LIST -> HofKind.TO_LIST
+                params.size == 1 && name == NativeHofNames.OP_FIRST -> HofKind.FIRST
+                params.size == 1 && name == NativeHofNames.OP_LAST -> HofKind.LAST
+                params.size == 1 && name == NativeHofNames.OP_MIN -> HofKind.MIN
+                params.size == 1 && name == NativeHofNames.OP_MAX -> HofKind.MAX
+
+                // ── Catch-all: least specific patterns LAST ──
+                // sum(src [, dict]) — no p1 constraint
                 params.size in 1..2
-                    && (name == "sum" || name.isEmpty()) -> HofKind.SUM
-                // from_seq(xs) — exactly 1 param, no ambiguity
+                    && (name == NativeHofNames.OP_SUM || name.isEmpty()) -> HofKind.SUM
+                // from_seq(xs) — 1 param, no ambiguity
                 params.size == 1
-                    && (name == "from_seq" || name.isEmpty()) -> HofKind.FROM_SEQ
+                    && (name == NativeHofNames.OP_FROM_SEQ || name.isEmpty()) -> HofKind.FROM_SEQ
                 else -> null
             }
+        }
+
+        /**
+         * Disambiguate empty-name (mono-specialized) `(src, p)` HOFs by
+         * inspecting the function body. Mono specs are thin wrappers that
+         * delegate to a single `CallNativeIR`; the native name encodes the
+         * operation (`__native_seq_filter`, `__native_seq_drop_while`, …).
+         *
+         * Falls back to FILTER for unrecognized bodies so that existing
+         * mono-spec filter chains keep fusing.
+         */
+        private fun classifyPredicateByBody(fn: FunctionIR): HofKind? {
+            val body = fn.body
+            val nativeName = (body as? CallNativeIR)?.name ?: return HofKind.FILTER
+            val op = extractNativeOp(nativeName) ?: return HofKind.FILTER
+            return when (op) {
+                NativeHofNames.OP_FILTER     -> HofKind.FILTER
+                NativeHofNames.OP_DROP_WHILE -> HofKind.DROP_WHILE
+                NativeHofNames.OP_TAKE_WHILE -> HofKind.TAKE_WHILE
+                NativeHofNames.OP_COUNT      -> HofKind.COUNT
+                NativeHofNames.OP_ANY        -> HofKind.ANY
+                NativeHofNames.OP_ALL        -> HofKind.ALL
+                NativeHofNames.OP_FIND       -> HofKind.FIND
+                NativeHofNames.OP_NONE       -> HofKind.NONE
+                NativeHofNames.OP_PARTITION  -> HofKind.PARTITION
+                else                         -> HofKind.FILTER
+            }
+        }
+
+        /** Extract the operation suffix from a native name like
+         *  `__native_seq_drop_while` → `"drop_while"`. */
+        private fun extractNativeOp(nativeName: String): String? {
+            for (coll in listOf(NativeHofNames.SEQ, NativeHofNames.ITER, NativeHofNames.LIST)) {
+                val prefix = "${com.mezze.language.ast.MagicParams.NATIVE_PREFIX}${coll}_"
+                if (nativeName.startsWith(prefix)) return nativeName.substring(prefix.length)
+            }
+            return null
         }
     }
 }

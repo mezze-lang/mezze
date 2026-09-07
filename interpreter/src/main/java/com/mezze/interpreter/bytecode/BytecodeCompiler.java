@@ -4440,6 +4440,28 @@ public final class BytecodeCompiler {
                 classifiedStages.add(new ClassifiedStage.TakeStep(takeStage.getN()));
             } else if (stage instanceof StageIR.Drop dropStage) {
                 classifiedStages.add(new ClassifiedStage.DropStep(dropStage.getN()));
+            } else if (stage instanceof StageIR.TakeWhile twStage) {
+                var predShape = classifyUnaryPredicateLambda(twStage.getP(), language);
+                if (predShape == null) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable take_while lambda");
+                    return false;
+                }
+                classifiedStages.add(new ClassifiedStage.TakeWhileStep(new FilterPeel(
+                    predShape.preOp, predShape.preRhs, predShape.preRhsNode,
+                    predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
+                    predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
+                    /*innerXs=*/ null)));
+            } else if (stage instanceof StageIR.DropWhile dwStage) {
+                var predShape = classifyUnaryPredicateLambda(dwStage.getP(), language);
+                if (predShape == null) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable drop_while lambda");
+                    return false;
+                }
+                classifiedStages.add(new ClassifiedStage.DropWhileStep(new FilterPeel(
+                    predShape.preOp, predShape.preRhs, predShape.preRhsNode,
+                    predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
+                    predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
+                    /*innerXs=*/ null)));
             }
         }
         java.util.Collections.reverse(classifiedStages);
@@ -4732,6 +4754,7 @@ public final class BytecodeCompiler {
                 case ANY -> MezzeBytecodeRootNode.FLP_SINK_ANY;
                 case ALL -> MezzeBytecodeRootNode.FLP_SINK_ALL;
                 case FIND -> MezzeBytecodeRootNode.FLP_SINK_FIND;
+                case NONE -> MezzeBytecodeRootNode.FLP_SINK_NONE;
             };
             FilterPeel sp = sc.predPeel();
             if (sp.callHash() != null) return null;
@@ -5324,6 +5347,10 @@ public final class BytecodeCompiler {
         record FilterStep(FilterPeel peel) implements ClassifiedStage {}
         record TakeStep(NodeIR n) implements ClassifiedStage {}
         record DropStep(NodeIR n) implements ClassifiedStage {}
+        /** TakeWhile: emit predicate check; if false → break (like filter + early exit). */
+        record TakeWhileStep(FilterPeel peel) implements ClassifiedStage {}
+        /** DropWhile: boolean state; skip elements while predicate is true. */
+        record DropWhileStep(FilterPeel peel) implements ClassifiedStage {}
     }
 
     // ── Sink mode: the per-element action and post-loop result ──────────
@@ -5340,15 +5367,22 @@ public final class BytecodeCompiler {
         /** Call f(x) per element, discard result. */
         record CallEach(com.oracle.truffle.api.CallTarget target, boolean scalarABI,
                         String fieldName) implements FusedSinkMode {}
-        /** Short-circuit predicate: Any/All/Find. */
+        /** Short-circuit predicate: Any/All/Find/None. */
         record ShortCircuit(FilterPeel predPeel, ShortCircuitKind kind) implements FusedSinkMode {}
         /** Fold with first element as init; result wrapped in Option. */
         record ReduceOpt(InlineOp op) implements FusedSinkMode {}
         /** Collect elements into a Seq or List. */
         record Materialize(MaterializeTarget target) implements FusedSinkMode {}
+        /** First/Last surviving element → Option. FIRST short-circuits; LAST full scan. */
+        record ElementCapture(ElementCaptureKind kind) implements FusedSinkMode {}
+        /** Min/Max over longs (direct comparison). Full scan → Option. */
+        record MinMaxLong(boolean isMax) implements FusedSinkMode {}
+        /** Scan: fold that emits each intermediate accumulator into a builder → Seq. */
+        record ScanAccum(InlineOp op, NodeIR initExpr) implements FusedSinkMode {}
 
-        enum ShortCircuitKind { ANY, ALL, FIND }
+        enum ShortCircuitKind { ANY, ALL, FIND, NONE }
         enum MaterializeTarget { SEQ, LIST }
+        enum ElementCaptureKind { FIRST, LAST }
     }
 
     /**
@@ -5392,6 +5426,26 @@ public final class BytecodeCompiler {
         }
         if (chain.getSink() instanceof SinkIR.ToList) {
             return new FusedSinkMode.Materialize(FusedSinkMode.MaterializeTarget.LIST);
+        }
+        if (chain.getSink() instanceof SinkIR.None noneSink) {
+            return classifyPredicateMode(noneSink.getP(), FusedSinkMode.ShortCircuitKind.NONE, dbg);
+        }
+        if (chain.getSink() instanceof SinkIR.First) {
+            return new FusedSinkMode.ElementCapture(FusedSinkMode.ElementCaptureKind.FIRST);
+        }
+        if (chain.getSink() instanceof SinkIR.Last) {
+            return new FusedSinkMode.ElementCapture(FusedSinkMode.ElementCaptureKind.LAST);
+        }
+        if (chain.getSink() instanceof SinkIR.Min) {
+            return new FusedSinkMode.MinMaxLong(/*isMax=*/ false);
+        }
+        if (chain.getSink() instanceof SinkIR.Max) {
+            return new FusedSinkMode.MinMaxLong(/*isMax=*/ true);
+        }
+        if (chain.getSink() instanceof SinkIR.Scan scanSink) {
+            var folderShape = classifyBinaryFolder(scanSink.getF(), dbg, "scan-folder");
+            if (folderShape == null) return null;
+            return new FusedSinkMode.ScanAccum(folderShape.op, scanSink.getInit());
         }
         if (dbg) System.err.println("[chain-canon-emit] reject: unsupported sink: "
                 + chain.getSink().getClass().getSimpleName());
@@ -5506,15 +5560,20 @@ public final class BytecodeCompiler {
         boolean isRange = rangeStart != null;
         boolean isList = rawListExpr != null;
         boolean useShortCircuitBranch = mode instanceof FusedSinkMode.ShortCircuit;
+        boolean hasTakeWhile = stages.stream()
+                .anyMatch(s -> s instanceof ClassifiedStage.TakeWhileStep);
+        boolean needsEarlyExit = useShortCircuitBranch || hasTakeWhile
+                || (mode instanceof FusedSinkMode.ElementCapture ec
+                    && ec.kind() == FusedSinkMode.ElementCaptureKind.FIRST);
 
         b.beginBlock();
 
-        // #442 — forward-branch exit for short-circuit sinks. When the
-        // predicate matches, we Branch past the While to exitLabel instead
-        // of checking !found on every iteration. This eliminates the
-        // DirectAnd+DirectNot per-loop overhead.
+        // #442 — forward-branch exit for short-circuit sinks, TakeWhile
+        // stages, and First capture. When the condition triggers, we
+        // Branch past the While to exitLabel instead of checking !found
+        // on every iteration.
         com.oracle.truffle.api.bytecode.BytecodeLabel exitLabel = null;
-        if (useShortCircuitBranch) {
+        if (needsEarlyExit) {
             exitLabel = b.createLabel();
         }
 
@@ -5554,6 +5613,27 @@ public final class BytecodeCompiler {
                 b.endStoreLocal();
             }
             case FusedSinkMode.Materialize ignored -> {
+                builderSlot = b.createLocal();
+            }
+            case FusedSinkMode.ElementCapture ignored -> {
+                foundSlot = b.createLocal();
+                b.beginStoreLocal(foundSlot);
+                  b.emitLoadObjectConstant(Boolean.FALSE);
+                b.endStoreLocal();
+                resultSlot = b.createLocal();
+            }
+            case FusedSinkMode.MinMaxLong ignored -> {
+                foundSlot = b.createLocal();
+                b.beginStoreLocal(foundSlot);
+                  b.emitLoadObjectConstant(Boolean.FALSE);
+                b.endStoreLocal();
+                accSlot = b.createLocal();
+            }
+            case FusedSinkMode.ScanAccum sa -> {
+                accSlot = b.createLocal();
+                b.beginStoreLocal(accSlot);
+                  emitNode(sa.initExpr(), b, argCount, localMap);
+                b.endStoreLocal();
                 builderSlot = b.createLocal();
             }
         }
@@ -5609,7 +5689,8 @@ public final class BytecodeCompiler {
         // ── Init builder for materializing sinks ──
         // RangeSeq sources produce longs — use a long[] builder to avoid
         // boxing. RawSeq sources use the generic ArrayList<Object> builder.
-        boolean useLongBuilder = isRange && mode instanceof FusedSinkMode.Materialize;
+        boolean useLongBuilder = isRange
+                && (mode instanceof FusedSinkMode.Materialize || mode instanceof FusedSinkMode.ScanAccum);
         boolean hasFilter = stages.stream().anyMatch(s -> s instanceof ClassifiedStage.FilterStep);
         if (mode instanceof FusedSinkMode.Materialize) {
             // Size hint: range end - start (if range); else seq size.
@@ -5653,9 +5734,48 @@ public final class BytecodeCompiler {
             }
             b.endStoreLocal();
         }
+        if (mode instanceof FusedSinkMode.ScanAccum) {
+            // Scan produces a seq of intermediate accumulator values.
+            // Init builder like Materialize but uses the source size directly
+            // (scan always emits one value per input element that passes stages).
+            b.beginStoreLocal(builderSlot);
+            if (useLongBuilder) {
+                b.beginNewLongSeqBuilder();
+                if (hasFilter) {
+                    b.beginDirectDivide();
+                      b.beginDirectSubtract();
+                        b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                      b.endDirectSubtract();
+                      b.emitLoadLongConstant(2L);
+                    b.endDirectDivide();
+                } else {
+                    b.beginDirectSubtract();
+                      b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                    b.endDirectSubtract();
+                }
+                b.endNewLongSeqBuilder();
+            } else if (isList) {
+                b.beginNewSeqBuilder();
+                  b.emitLoadLongConstant(64L);
+                b.endNewSeqBuilder();
+            } else {
+                b.beginNewSeqBuilder();
+                if (hasFilter) {
+                    b.beginDirectDivide();
+                      b.emitLoadLocal(sizeSlot);
+                      b.emitLoadLongConstant(2L);
+                    b.endDirectDivide();
+                } else {
+                    b.emitLoadLocal(sizeSlot);
+                }
+                b.endNewSeqBuilder();
+            }
+            b.endStoreLocal();
+        }
 
-        // ── Pre-allocate Take/Drop counter locals ──
+        // ── Pre-allocate Take/Drop counter locals + DropWhile state ──
         var takeDropCounters = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
+        var dropWhileFlags = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
         for (var stage : stages) {
             if (stage instanceof ClassifiedStage.TakeStep
                     || stage instanceof ClassifiedStage.DropStep) {
@@ -5664,6 +5784,13 @@ public final class BytecodeCompiler {
                   b.emitLoadLongConstant(0L);
                 b.endStoreLocal();
                 takeDropCounters.add(ctr);
+            } else if (stage instanceof ClassifiedStage.DropWhileStep) {
+                // Boolean flag: starts TRUE (dropping), flips to FALSE permanently
+                var flag = b.createLocal();
+                b.beginStoreLocal(flag);
+                  b.emitLoadObjectConstant(Boolean.TRUE);
+                b.endStoreLocal();
+                dropWhileFlags.add(flag);
             }
         }
 
@@ -5752,6 +5879,61 @@ public final class BytecodeCompiler {
                     filterDepth++;
                     takeCounterPostIncrement.add(ctr);
                 }
+                case ClassifiedStage.TakeWhileStep tw -> {
+                    // When predicate fails, exit the entire loop immediately.
+                    b.beginIfThen();
+                      b.beginDirectNot();
+                        emitPredicateCheck(b, xSlot, tw.peel(), argCount, localMap);
+                      b.endDirectNot();
+                      b.beginBlock();
+                        b.emitBranch(exitLabel);
+                      b.endBlock();
+                    b.endIfThen();
+                }
+                case ClassifiedStage.DropWhileStep dw -> {
+                    // Drop elements while the flag is true AND p(x) holds.
+                    // Once p(x) fails (or flag is already false), flip the
+                    // flag permanently and process the element.
+                    //
+                    // Emitted as:
+                    //   shouldSkip = false
+                    //   if (dropping) { if (p(x)) { shouldSkip = true } else { dropping = false } }
+                    //   if (!shouldSkip) { ... process element ... }
+                    //
+                    // Uses a local shouldSkip instead of Conditional to avoid
+                    // BDSL ternary semantics issues with boxed Boolean locals.
+                    var flag = dropWhileFlags.remove(0);
+                    var shouldSkip = b.createLocal();
+                    b.beginStoreLocal(shouldSkip);
+                      b.emitLoadObjectConstant(Boolean.FALSE);
+                    b.endStoreLocal();
+                    b.beginIfThen();
+                      b.emitLoadLocal(flag);
+                      b.beginBlock();
+                        b.beginIfThenElse();
+                          emitPredicateCheck(b, xSlot, dw.peel(), argCount, localMap);
+                          b.beginBlock();
+                            // p(x) true: still dropping, mark skip
+                            b.beginStoreLocal(shouldSkip);
+                              b.emitLoadObjectConstant(Boolean.TRUE);
+                            b.endStoreLocal();
+                          b.endBlock();
+                          b.beginBlock();
+                            // p(x) false: stop dropping
+                            b.beginStoreLocal(flag);
+                              b.emitLoadObjectConstant(Boolean.FALSE);
+                            b.endStoreLocal();
+                          b.endBlock();
+                        b.endIfThenElse();
+                      b.endBlock();
+                    b.endIfThen();
+                    b.beginIfThen();
+                      b.beginDirectNot();
+                        b.emitLoadLocal(shouldSkip);
+                      b.endDirectNot();
+                      b.beginBlock();
+                    filterDepth++;
+                }
             }
         }
 
@@ -5832,8 +6014,6 @@ public final class BytecodeCompiler {
             }
             case FusedSinkMode.Materialize ignored -> {
                 if (useLongBuilder) {
-                    // long[] builder = LongSeqBuilderAdd(builder, x)
-                    // Must store back — array may grow (new allocation).
                     b.beginStoreLocal(builderSlot);
                       b.beginLongSeqBuilderAdd();
                         b.emitLoadLocal(builderSlot);
@@ -5841,12 +6021,92 @@ public final class BytecodeCompiler {
                       b.endLongSeqBuilderAdd();
                     b.endStoreLocal();
                 } else {
-                    // builder.add(x) — discard the returned builder ref
                     var discardSlot2 = b.createLocal();
                     b.beginStoreLocal(discardSlot2);
                       b.beginSeqBuilderAdd();
                         b.emitLoadLocal(builderSlot);
                         b.emitLoadLocal(xSlot);
+                      b.endSeqBuilderAdd();
+                    b.endStoreLocal();
+                }
+            }
+            case FusedSinkMode.ElementCapture ec -> {
+                if (ec.kind() == FusedSinkMode.ElementCaptureKind.FIRST) {
+                    // First surviving element: capture + exit loop.
+                    b.beginStoreLocal(foundSlot);
+                      b.emitLoadObjectConstant(Boolean.TRUE);
+                    b.endStoreLocal();
+                    b.beginStoreLocal(resultSlot);
+                      b.emitLoadLocal(xSlot);
+                    b.endStoreLocal();
+                    b.emitBranch(exitLabel);
+                } else {
+                    // Last: keep overwriting. foundSlot = true; resultSlot = x.
+                    b.beginStoreLocal(foundSlot);
+                      b.emitLoadObjectConstant(Boolean.TRUE);
+                    b.endStoreLocal();
+                    b.beginStoreLocal(resultSlot);
+                      b.emitLoadLocal(xSlot);
+                    b.endStoreLocal();
+                }
+            }
+            case FusedSinkMode.MinMaxLong mm -> {
+                // First element → init; subsequent → update if better.
+                //   if (!found || (isMax ? acc < x : x < acc)) { acc = x; found = true }
+                b.beginIfThenElse();
+                  b.beginDirectNot();
+                    b.emitLoadLocal(foundSlot);
+                  b.endDirectNot();
+                  // Then: first element — unconditionally store.
+                  b.beginBlock();
+                    b.beginStoreLocal(accSlot);
+                      b.emitLoadLocal(xSlot);
+                    b.endStoreLocal();
+                    b.beginStoreLocal(foundSlot);
+                      b.emitLoadObjectConstant(Boolean.TRUE);
+                    b.endStoreLocal();
+                  b.endBlock();
+                  // Else: compare and conditionally update.
+                  b.beginBlock();
+                    b.beginIfThen();
+                    if (mm.isMax()) {
+                        // max: update when acc < x
+                        b.beginDirectLessThan();
+                          b.emitLoadLocal(accSlot); b.emitLoadLocal(xSlot);
+                        b.endDirectLessThan();
+                    } else {
+                        // min: update when x < acc
+                        b.beginDirectLessThan();
+                          b.emitLoadLocal(xSlot); b.emitLoadLocal(accSlot);
+                        b.endDirectLessThan();
+                    }
+                      b.beginBlock();
+                        b.beginStoreLocal(accSlot);
+                          b.emitLoadLocal(xSlot);
+                        b.endStoreLocal();
+                      b.endBlock();
+                    b.endIfThen();
+                  b.endBlock();
+                b.endIfThenElse();
+            }
+            case FusedSinkMode.ScanAccum sa -> {
+                // acc = acc <op> x; builder.add(acc)
+                b.beginStoreLocal(accSlot);
+                  emitInlineOpTwoLocals(sa.op(), accSlot, xSlot, b);
+                b.endStoreLocal();
+                if (useLongBuilder) {
+                    b.beginStoreLocal(builderSlot);
+                      b.beginLongSeqBuilderAdd();
+                        b.emitLoadLocal(builderSlot);
+                        b.emitLoadLocal(accSlot);
+                      b.endLongSeqBuilderAdd();
+                    b.endStoreLocal();
+                } else {
+                    var discardSlot3 = b.createLocal();
+                    b.beginStoreLocal(discardSlot3);
+                      b.beginSeqBuilderAdd();
+                        b.emitLoadLocal(builderSlot);
+                        b.emitLoadLocal(accSlot);
                       b.endSeqBuilderAdd();
                     b.endStoreLocal();
                 }
@@ -5884,7 +6144,7 @@ public final class BytecodeCompiler {
         b.endWhile();
 
         // #442 — land here when Branch(exitLabel) fires from a ShortCircuit
-        // sink. The foundSlot/resultSlot are already set by the branch site.
+        // sink, TakeWhile stage, or First capture.
         if (exitLabel != null) {
             b.emitLabel(exitLabel);
         }
@@ -5898,7 +6158,9 @@ public final class BytecodeCompiler {
             case FusedSinkMode.ShortCircuit sc -> {
                 switch (sc.kind()) {
                     case ANY -> b.emitLoadLocal(foundSlot);
-                    case ALL -> {
+                    case ALL, NONE -> {
+                        // ALL: !found (found means a non-match was seen)
+                        // NONE: !found (found means a match was seen → none is false)
                         b.beginDirectNot();
                           b.emitLoadLocal(foundSlot);
                         b.endDirectNot();
@@ -5906,7 +6168,6 @@ public final class BytecodeCompiler {
                     case FIND -> {
                         b.beginConditional();
                           b.emitLoadLocal(foundSlot);
-                          // Single-field variant fusion: raw value, no record.
                           b.beginMakeVariantSingleFieldPayload(SOME_TAG,
                               com.mezze.language.ast.BuiltinTypes.SOME, "val");
                             b.emitLoadLocal(resultSlot);
@@ -5920,7 +6181,6 @@ public final class BytecodeCompiler {
             case FusedSinkMode.ReduceOpt ignored -> {
                 b.beginConditional();
                   b.emitLoadLocal(hasAccSlot);
-                  // Single-field variant fusion: raw value, no record.
                   b.beginMakeVariantSingleFieldPayload(SOME_TAG,
                       com.mezze.language.ast.BuiltinTypes.SOME, "val");
                     b.emitLoadLocal(accSlot);
@@ -5931,18 +6191,10 @@ public final class BytecodeCompiler {
             }
             case FusedSinkMode.Materialize m -> {
                 if (useLongBuilder && m.target() == FusedSinkMode.MaterializeTarget.LIST) {
-                    // long[] → MezzeList: convert via MezzeSeq then to list.
-                    // The LongSeqBuilder stores unboxed longs; wrap into a
-                    // MezzeList by going through LongSeqStorage → MezzeSeq
-                    // → MezzeList.of(). We reuse the SeqBuilderToList
-                    // conversion by first materializing the seq, then
-                    // converting — but that costs an extra copy. Instead,
-                    // build a LongSeqBuilderToList that does it in one step.
                     b.beginLongSeqBuilderToList();
                       b.emitLoadLocal(builderSlot);
                     b.endLongSeqBuilderToList();
                 } else if (useLongBuilder) {
-                    // long[] → MezzeSeq via LongSeqStorage (unboxed)
                     b.beginLongSeqBuilderToSeq();
                       b.emitLoadLocal(builderSlot);
                     b.endLongSeqBuilderToSeq();
@@ -5954,6 +6206,42 @@ public final class BytecodeCompiler {
                     b.beginSeqBuilderToList();
                       b.emitLoadLocal(builderSlot);
                     b.endSeqBuilderToList();
+                }
+            }
+            case FusedSinkMode.ElementCapture ignored -> {
+                // First/Last → Option: Some{val=result} if found, else None
+                b.beginConditional();
+                  b.emitLoadLocal(foundSlot);
+                  b.beginMakeVariantSingleFieldPayload(SOME_TAG,
+                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                    b.emitLoadLocal(resultSlot);
+                  b.endMakeVariantSingleFieldPayload();
+                  b.emitMakeVariantNoPayload(NONE_TAG,
+                      com.mezze.language.ast.BuiltinTypes.NONE);
+                b.endConditional();
+            }
+            case FusedSinkMode.MinMaxLong ignored -> {
+                // Min/Max → Option: Some{val=acc} if found, else None
+                b.beginConditional();
+                  b.emitLoadLocal(foundSlot);
+                  b.beginMakeVariantSingleFieldPayload(SOME_TAG,
+                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                    b.emitLoadLocal(accSlot);
+                  b.endMakeVariantSingleFieldPayload();
+                  b.emitMakeVariantNoPayload(NONE_TAG,
+                      com.mezze.language.ast.BuiltinTypes.NONE);
+                b.endConditional();
+            }
+            case FusedSinkMode.ScanAccum ignored -> {
+                // Scan always produces a Seq of accumulated values.
+                if (useLongBuilder) {
+                    b.beginLongSeqBuilderToSeq();
+                      b.emitLoadLocal(builderSlot);
+                    b.endLongSeqBuilderToSeq();
+                } else {
+                    b.beginSeqBuilderToSeq();
+                      b.emitLoadLocal(builderSlot);
+                    b.endSeqBuilderToSeq();
                 }
             }
         }

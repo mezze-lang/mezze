@@ -818,6 +818,8 @@ object StorePopulator {
                         is com.mezze.language.truffleir.StageIR.Filter -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
                         is com.mezze.language.truffleir.StageIR.Take -> collectEdgesFromNode(stage.n, report)
                         is com.mezze.language.truffleir.StageIR.Drop -> collectEdgesFromNode(stage.n, report)
+                        is com.mezze.language.truffleir.StageIR.TakeWhile -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
+                        is com.mezze.language.truffleir.StageIR.DropWhile -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
                     }
                 }
                 when (val sk = node.sink) {
@@ -830,10 +832,22 @@ object StorePopulator {
                     is com.mezze.language.truffleir.SinkIR.Any -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
                     is com.mezze.language.truffleir.SinkIR.All -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
                     is com.mezze.language.truffleir.SinkIR.Find -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.None -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.MinBy -> report(sk.f.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.MaxBy -> report(sk.f.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.Partition -> report(sk.p.functionHash.hex, EdgeKind.CALLS)
+                    is com.mezze.language.truffleir.SinkIR.Scan -> {
+                        collectEdgesFromNode(sk.init, report)
+                        report(sk.f.functionHash.hex, EdgeKind.CALLS)
+                    }
                     com.mezze.language.truffleir.SinkIR.Sum,
                     com.mezze.language.truffleir.SinkIR.Count,
                     com.mezze.language.truffleir.SinkIR.ToSeq,
-                    com.mezze.language.truffleir.SinkIR.ToList -> {}
+                    com.mezze.language.truffleir.SinkIR.ToList,
+                    com.mezze.language.truffleir.SinkIR.First,
+                    com.mezze.language.truffleir.SinkIR.Last,
+                    com.mezze.language.truffleir.SinkIR.Min,
+                    com.mezze.language.truffleir.SinkIR.Max -> {}
                 }
             }
         }

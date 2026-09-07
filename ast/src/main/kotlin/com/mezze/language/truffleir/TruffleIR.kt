@@ -380,6 +380,10 @@ sealed interface StageIR {
     @Serializable data class Filter(val p: MakeLambdaIR) : StageIR
     @Serializable data class Take(val n: NodeIR) : StageIR
     @Serializable data class Drop(val n: NodeIR) : StageIR
+    /** Keep elements while predicate holds, then stop. */
+    @Serializable data class TakeWhile(val p: MakeLambdaIR) : StageIR
+    /** Skip elements while predicate holds, then keep the rest. */
+    @Serializable data class DropWhile(val p: MakeLambdaIR) : StageIR
 }
 
 /** How elements are combined. */
@@ -410,6 +414,24 @@ sealed interface SinkIR {
     @Serializable data object ToSeq : SinkIR
     /** ToList — materialize into a List (builder pattern). */
     @Serializable data object ToList : SinkIR
+    /** None — true when NO element matches. Semantically !any(p). */
+    @Serializable data class None(val p: MakeLambdaIR) : SinkIR
+    /** First element wrapped in Option. No predicate. */
+    @Serializable data object First : SinkIR
+    /** Last element wrapped in Option. No predicate. */
+    @Serializable data object Last : SinkIR
+    /** Min element (by natural Ord) wrapped in Option. */
+    @Serializable data object Min : SinkIR
+    /** Max element (by natural Ord) wrapped in Option. */
+    @Serializable data object Max : SinkIR
+    /** Min element by key function, wrapped in Option. */
+    @Serializable data class MinBy(val f: MakeLambdaIR) : SinkIR
+    /** Max element by key function, wrapped in Option. */
+    @Serializable data class MaxBy(val f: MakeLambdaIR) : SinkIR
+    /** Partition into {pass, fail} by predicate. */
+    @Serializable data class Partition(val p: MakeLambdaIR) : SinkIR
+    /** Scan — fold yielding each intermediate accumulator. Returns a Seq/List. */
+    @Serializable data class Scan(val init: NodeIR, val f: MakeLambdaIR) : SinkIR
 }
 
 // Effects
