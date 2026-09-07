@@ -2744,6 +2744,15 @@ public final class BytecodeCompiler {
                 b.endCallIndirectScalar1();
                 return;
             }
+            if (!ci.isTailCall() && ci.getArgs().size() == 2) {
+                String[] fieldNames2 = ci.getArgFieldNames().toArray(new String[0]);
+                b.beginCallIndirectScalar2(fieldNames2);
+                emitNode(ci.getFunction(), b, argCount, localMap);
+                emitNode(ci.getArgs().get(0), b, argCount, localMap);
+                emitNode(ci.getArgs().get(1), b, argCount, localMap);
+                b.endCallIndirectScalar2();
+                return;
+            }
             String[] fieldNames = ci.getArgFieldNames().toArray(new String[0]);
             if (ci.isTailCall()) {
                 b.beginTailCallIndirect();

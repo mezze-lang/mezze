@@ -1524,6 +1524,257 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Scalar-ABI indirect call with exactly two arguments. Mirrors
+     * {@link CallIndirectScalar1} but passes two raw scalar values
+     * instead of one — eliminates MakeRecord allocation for 2-arg
+     * HOF callbacks like fold/reduce ({acc, x} -> ...).
+     *
+     * <p>Field names are baked as a compile-time constant for the
+     * cold record-fallback path (AST callees, effect handlers).
+     * The hot bypass path ignores them entirely.
+     */
+    @Operation
+    @ConstantOperand(type = String[].class) // field names for record fallback
+    public static final class CallIndirectScalar2 {
+
+        // ── Identity-guarded specializations ──
+
+        @Specialization(guards = {
+            "fn == cachedFn",
+            "!cachedFn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 0"
+        }, limit = "3")
+        public static Object doStableNoClosure(
+                String[] fieldNames,
+                MezzeFunction fn, Object arg1, Object arg2,
+                @Cached("fn") MezzeFunction cachedFn,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            return callNode.call(arg1, arg2);
+        }
+
+        @Specialization(guards = {
+            "fn == cachedFn",
+            "!cachedFn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 1"
+        }, limit = "3")
+        public static Object doStable1Closure(
+                String[] fieldNames,
+                MezzeFunction fn, Object arg1, Object arg2,
+                @Cached("fn") MezzeFunction cachedFn,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("closureAt(fn, 0)") Object capture0,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            return callNode.call(capture0, arg1, arg2);
+        }
+
+        @Specialization(guards = {
+            "fn == cachedFn",
+            "!cachedFn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 2"
+        }, limit = "3")
+        public static Object doStable2Closures(
+                String[] fieldNames,
+                MezzeFunction fn, Object arg1, Object arg2,
+                @Cached("fn") MezzeFunction cachedFn,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("closureAt(fn, 0)") Object capture0,
+                @Cached("closureAt(fn, 1)") Object capture1,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            return callNode.call(capture0, capture1, arg1, arg2);
+        }
+
+        // ── CallTarget-guarded specializations (fallback) ──
+
+        @Specialization(guards = {
+            "fn.getCallTarget() == cachedTarget",
+            "!fn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 0"
+        }, limit = "3")
+        public static Object doBypassNoClosure(
+                String[] fieldNames,
+                MezzeFunction fn, Object arg1, Object arg2,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            return callNode.call(arg1, arg2);
+        }
+
+        @Specialization(guards = {
+            "fn.getCallTarget() == cachedTarget",
+            "!fn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 1"
+        }, limit = "3")
+        public static Object doBypass1Closure(
+                String[] fieldNames,
+                MezzeFunction fn, Object arg1, Object arg2,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            return callNode.call(fn.getClosureValues()[0], arg1, arg2);
+        }
+
+        @Specialization(guards = {
+            "fn.getCallTarget() == cachedTarget",
+            "!fn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 2"
+        }, limit = "3")
+        public static Object doBypass2Closures(
+                String[] fieldNames,
+                MezzeFunction fn, Object arg1, Object arg2,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            Object[] cv = fn.getClosureValues();
+            return callNode.call(cv[0], cv[1], arg1, arg2);
+        }
+
+        @Specialization(guards = {
+            "fn.getCallTarget() == cachedTarget",
+            "!fn.hasPartialArgs()",
+            "canBypass"
+        }, limit = "3")
+        public static Object doBypassGenericClosure(
+                String[] fieldNames,
+                MezzeFunction fn, Object arg1, Object arg2,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            Object[] closureValues = fn.getClosureValues();
+            Object[] combined = new Object[closureLen + 2];
+            System.arraycopy(closureValues, 0, combined, 0, closureLen);
+            combined[closureLen] = arg1;
+            combined[closureLen + 1] = arg2;
+            return callNode.call(combined);
+        }
+
+        @Specialization(guards = {
+            "fn.getCallTarget() == cachedTarget",
+            "!fn.hasPartialArgs()",
+            "!canBypass"
+        }, limit = "3")
+        public static Object doDirectRecord(
+                String[] fieldNames,
+                MezzeFunction fn, Object arg1, Object arg2,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
+            MezzeRecord record = MezzeRecord.fromFields(
+                    fieldNames, new Object[] { arg1, arg2 });
+            Object[] closureValues = fn.getClosureValues();
+            int closureLen = closureValues.length;
+            if (closureLen == 0) {
+                return callNode.call(record);
+            }
+            Object[] combined = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, combined, 0, closureLen);
+            combined[closureLen] = record;
+            return callNode.call(combined);
+        }
+
+        @Specialization(replaces = {"doStableNoClosure", "doStable1Closure", "doStable2Closures", "doBypassNoClosure", "doBypass1Closure", "doBypass2Closures", "doBypassGenericClosure", "doDirectRecord"})
+        public static Object doIndirect(
+                String[] fieldNames,
+                MezzeFunction fn, Object arg1, Object arg2,
+                @Cached IndirectCallNode callNode) {
+            CallTarget target = fn.getCallTarget();
+            if (!fn.hasPartialArgs() && canBypassTarget(target)) {
+                target = resolveInner(target);
+                Object[] closureValues = fn.getClosureValues();
+                int closureLen = closureValues.length;
+                if (closureLen == 0) {
+                    return callNode.call(target, arg1, arg2);
+                }
+                Object[] combined = new Object[closureLen + 2];
+                System.arraycopy(closureValues, 0, combined, 0, closureLen);
+                combined[closureLen] = arg1;
+                combined[closureLen + 1] = arg2;
+                return callNode.call(target, combined);
+            }
+            MezzeRecord record = MezzeRecord.fromFields(
+                    fieldNames, new Object[] { arg1, arg2 });
+            if (fn.getParameterNames().length > 0) {
+                if (!fn.hasAllParameters(record)) {
+                    return fn.withPartialArgs(record);
+                }
+                if (fn.hasPartialArgs()) {
+                    MezzeRecord complete = fn.buildCompleteRecord(record);
+                    Object[] closureValues = fn.getClosureValues();
+                    int closureLen = closureValues.length;
+                    if (closureLen == 0) {
+                        return callNode.call(target, complete);
+                    }
+                    Object[] combined = new Object[closureLen + 1];
+                    System.arraycopy(closureValues, 0, combined, 0, closureLen);
+                    combined[closureLen] = complete;
+                    return callNode.call(target, combined);
+                }
+            }
+            Object[] closureValues = fn.getClosureValues();
+            int closureLen = closureValues.length;
+            if (closureLen == 0) {
+                return callNode.call(target, record);
+            }
+            Object[] combined = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, combined, 0, closureLen);
+            combined[closureLen] = record;
+            return callNode.call(target, combined);
+        }
+
+        static Object closureAt(MezzeFunction fn, int index) {
+            return fn.getClosureValues()[index];
+        }
+
+        static DirectCallNode createInlined(CallTarget target) {
+            DirectCallNode node = DirectCallNode.create(target);
+            node.forceInlining();
+            return node;
+        }
+
+        static boolean canBypassTarget(CallTarget target) {
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct
+                    && rct.getRootNode() instanceof TrampolineRootNode tramp
+                    && !tramp.hasTailCalls()
+                    && tramp.getInnerTarget() != null) {
+                return true;
+            }
+            return false;
+        }
+
+        static CallTarget resolveInner(CallTarget target) {
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct
+                    && rct.getRootNode() instanceof TrampolineRootNode tramp
+                    && tramp.getInnerTarget() != null) {
+                return tramp.getInnerTarget();
+            }
+            return target;
+        }
+    }
+
+    /**
      * Construct a {@link MezzeFunction} closure — takes a compile-time
      * {@link CallTarget} + function name, pops the capture values off
      * the stack (variadic), pushes a MezzeFunction wrapping them.
