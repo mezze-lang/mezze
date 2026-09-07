@@ -3039,7 +3039,21 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = String.class)
     public static final class MakeVariantSinglePayload {
         @Specialization
-        public static MezzeVariant doSinglePayload(int tag, String tagName, Object payload,
+        public static MezzeVariant doLong(int tag, String tagName, long payload,
+                @Cached(value = "ensureRegistered(tagName)", allowUncached = true)
+                    TagRegistry registry) {
+            return MezzeVariant.singleLongPayload(registry, tag, payload);
+        }
+
+        @Specialization
+        public static MezzeVariant doDouble(int tag, String tagName, double payload,
+                @Cached(value = "ensureRegistered(tagName)", allowUncached = true)
+                    TagRegistry registry) {
+            return MezzeVariant.singleDoublePayload(registry, tag, payload);
+        }
+
+        @Specialization(replaces = {"doLong", "doDouble"})
+        public static MezzeVariant doObject(int tag, String tagName, Object payload,
                 @Cached(value = "ensureRegistered(tagName)", allowUncached = true)
                     TagRegistry registry) {
             return MezzeVariant.singlePayload(registry, tag, payload);
@@ -3207,6 +3221,56 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     private static final String[] LIST_CONS_FIELDS = new String[]{"head", "tail"};
+
+    /**
+     * Fused single-field variant payload extraction. Combines
+     * {@link UnwrapSinglePayload} + {@link ReadFieldByName} into one
+     * operation for patterns like {@code Ok { val } -> val}.
+     *
+     * <p>Handles two payload layouts:
+     * <ul>
+     *   <li><b>Record payload</b>: legacy path — the variant wraps a
+     *       MezzeRecord, extract the named field.</li>
+     *   <li><b>Direct value</b>: optimized path — the variant stores
+     *       the raw value (long, double, object) without a record
+     *       wrapper; return it directly.</li>
+     * </ul>
+     *
+     * <p>Lowers single-field {@link com.mezze.language.truffleir.PatternIR.Variant}
+     * in the BytecodeCompiler, paired with the fused MakeVariantSinglePayload
+     * that skips MakeRecord for 1-field payloads.
+     */
+    @Operation
+    @ConstantOperand(type = String.class)
+    public static final class ReadVariantField {
+        @Specialization(guards = "isLongPayload(variant)")
+        public static long doLong(String fieldName, MezzeVariant variant) {
+            return variant.getLongPayload();
+        }
+
+        @Specialization(guards = "isDoublePayload(variant)")
+        public static double doDouble(String fieldName, MezzeVariant variant) {
+            return variant.getDoublePayload();
+        }
+
+        @Specialization(replaces = {"doLong", "doDouble"})
+        public static Object doGeneric(String fieldName, MezzeVariant variant) {
+            Object payload = variant.getPayloadValue();
+            if (payload instanceof MezzeRecord record) {
+                return record.getField(record.getFieldIndex(fieldName));
+            }
+            // Direct value storage — the payload IS the field value
+            return payload;
+        }
+
+        static boolean isLongPayload(MezzeVariant v) {
+            return v.getPayloadType() == MezzeVariant.PayloadType.LONG;
+        }
+
+        static boolean isDoublePayload(MezzeVariant v) {
+            return v.getPayloadType() == MezzeVariant.PayloadType.DOUBLE;
+        }
+    }
 
     /**
      * String-interpolation pattern match: try to match {@code scrutinee}
