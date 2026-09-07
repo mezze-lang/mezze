@@ -6265,17 +6265,30 @@ public final class BytecodeCompiler {
         PatternIR.Variant somePat = (PatternIR.Variant) someCase.getPattern();
         int valSlot = somePat.getFieldSlots().get(0);
 
-        // Emit fused MutGetRaw + null-check IfThenElse.
-        // Structure mirrors the generic emitMatch: Block( setup, matchChain )
-        // where matchChain (here IfThenElse) is the Block's last child and
-        // produces the value.
+        // Emit fused get + match using the split MutInBounds + MutReadLong
+        // pattern.  For MutableLongSeq, MutReadLong returns unboxed long —
+        // zero boxing in the entire get+compare path.
+        //
+        // Structure:
+        //   Block {
+        //     seqLocal = seq_expr
+        //     idxLocal = i_expr
+        //     Conditional(
+        //       MutInBounds(seqLocal, idxLocal),
+        //       Block { val = MutReadLong(seqLocal, idxLocal); someBody },
+        //       noneBody
+        //     )
+        //   }
         b.beginBlock();
-        BytecodeLocal rawLocal = b.createLocal();
-        b.beginStoreLocal(rawLocal);
-        b.beginMutGetRaw();
-        for (NodeIR arg : c.getArgs())
-            emitNode(arg, b, argCount, localMap);
-        b.endMutGetRaw();
+
+        // Evaluate seq and index once, store for reuse
+        BytecodeLocal seqLocal = b.createLocal();
+        BytecodeLocal idxLocal = b.createLocal();
+        b.beginStoreLocal(seqLocal);
+        emitNode(c.getArgs().get(0), b, argCount, localMap);
+        b.endStoreLocal();
+        b.beginStoreLocal(idxLocal);
+        emitNode(c.getArgs().get(1), b, argCount, localMap);
         b.endStoreLocal();
 
         // Zero-init binding slots (same as generic emitMatch)
@@ -6289,26 +6302,31 @@ public final class BytecodeCompiler {
             }
         }
 
-        // Conditional (NOT IfThenElse — IfThenElse is void in BDSL)
-        // is the LAST child of the Block → produces the match value.
+        // Conditional: MutInBounds check
         b.beginConditional();
-        // Condition: raw != null
-        b.beginIsNotNull();
-        b.emitLoadLocal(rawLocal);
-        b.endIsNotNull();
-        // Then (Some branch): bind val = raw, emit body
+        b.beginMutInBounds();
+        b.emitLoadLocal(seqLocal);
+        b.emitLoadLocal(idxLocal);
+        b.endMutInBounds();
+        // Then (Some branch): unchecked read + body
         b.beginBlock();
-        // Write the val binding — raw value IS the val field directly
+        // Write the val binding — MutReadLong returns long for MutableLongSeq
         if (valSlot >= argCount && valSlot - argCount < localMap.length) {
             b.beginStoreLocal(localMap[valSlot - argCount]);
-            b.emitLoadLocal(rawLocal);
+            b.beginMutReadLong();
+            b.emitLoadLocal(seqLocal);
+            b.emitLoadLocal(idxLocal);
+            b.endMutReadLong();
             b.endStoreLocal();
         }
         // Emit any case-level bindings for the Some case
         for (var binding : someCase.getBindings()) {
             if (binding.getSlot() >= argCount && binding.getSlot() - argCount < localMap.length) {
                 b.beginStoreLocal(localMap[binding.getSlot() - argCount]);
-                b.emitLoadLocal(rawLocal);
+                b.beginMutReadLong();
+                b.emitLoadLocal(seqLocal);
+                b.emitLoadLocal(idxLocal);
+                b.endMutReadLong();
                 b.endStoreLocal();
             }
         }

@@ -4336,6 +4336,42 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Bounds check for the split MutInBounds + MutReadLong pattern.
+     * Returns true if index is in [0, seq.size()), false otherwise.
+     * Used in the fused get+match when the Some branch binds a long val.
+     */
+    @Operation
+    public static final class MutInBounds {
+        @Specialization
+        public static boolean doLong(com.mezze.interpreter.values.MutableLongSeq mutSeq, long i) {
+            int idx = (int) i;
+            return idx >= 0 && idx < mutSeq.size();
+        }
+        @Specialization
+        public static boolean doOp(com.mezze.interpreter.values.MutableSeq mutSeq, long i) {
+            int idx = (int) i;
+            return idx >= 0 && idx < mutSeq.size();
+        }
+    }
+
+    /**
+     * Unchecked read — only safe after a MutInBounds guard.
+     * For MutableLongSeq, returns unboxed long (zero boxing).
+     * For MutableSeq, returns Object (the element directly).
+     */
+    @Operation
+    public static final class MutReadLong {
+        @Specialization
+        public static long doLong(com.mezze.interpreter.values.MutableLongSeq mutSeq, long i) {
+            return mutSeq.getLong((int) i);
+        }
+        @Specialization
+        public static Object doOp(com.mezze.interpreter.values.MutableSeq mutSeq, long i) {
+            return mutSeq.get((int) i);
+        }
+    }
+
+    /**
      * Direct native emission for 2-argument Mut stdlib functions.
      * @see InlineMutOp1
      */
