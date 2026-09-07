@@ -858,9 +858,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static MezzeRecord doAllObjects(String[] fieldNames, @Variadic Object[] values,
                 @Cached(value = "resolveShape(fieldNames)", allowUncached = true)
                     com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
-            Object[] objectFields = new Object[values.length];
-            System.arraycopy(values, 0, objectFields, 0, values.length);
-            return new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, objectFields);
+            // The @Variadic array is a fresh per-execution allocation from
+            // the BDSL framework — safe to hand off directly instead of
+            // copying. Saves one Object[] allocation per record creation.
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, values);
         }
 
         @TruffleBoundary
@@ -2909,10 +2910,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = String.class)
     public static final class MakeVariantNoPayload {
         @Specialization
-        public static MezzeVariant doNoPayload(int tag, String tagName) {
+        public static MezzeVariant doNoPayload(int tag, String tagName,
+                @Cached(value = "ensureRegistered(tagName)", allowUncached = true)
+                    TagRegistry registry) {
+            return MezzeVariant.noPayload(registry, tag);
+        }
+
+        @TruffleBoundary
+        static TagRegistry ensureRegistered(String tagName) {
             TagRegistry registry = TagRegistry.getGlobal();
             registry.getOrCreateTag(tagName);
-            return MezzeVariant.noPayload(registry, tag);
+            return registry;
         }
     }
 
@@ -2929,10 +2937,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = String.class)
     public static final class MakeVariantSinglePayload {
         @Specialization
-        public static MezzeVariant doSinglePayload(int tag, String tagName, Object payload) {
+        public static MezzeVariant doSinglePayload(int tag, String tagName, Object payload,
+                @Cached(value = "ensureRegistered(tagName)", allowUncached = true)
+                    TagRegistry registry) {
+            return MezzeVariant.singlePayload(registry, tag, payload);
+        }
+
+        @TruffleBoundary
+        static TagRegistry ensureRegistered(String tagName) {
             TagRegistry registry = TagRegistry.getGlobal();
             registry.getOrCreateTag(tagName);
-            return MezzeVariant.singlePayload(registry, tag, payload);
+            return registry;
         }
     }
 

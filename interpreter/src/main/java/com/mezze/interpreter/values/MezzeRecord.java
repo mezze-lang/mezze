@@ -506,7 +506,7 @@ public final class MezzeRecord implements TruffleObject {
     @TruffleBoundary
     public static MezzeRecord fromFields(String[] fieldNames, Object[] values) {
         Shape shape = ShapeCache.getOrCreateAllObjects(fieldNames);
-        return new MezzeRecord(shape, new long[0], new double[0], values, true);
+        return new MezzeRecord(shape, EMPTY_LONGS, EMPTY_DOUBLES, values, true);
     }
 
     // ==================== CACHED SINGLE-FIELD RECORDS ====================
