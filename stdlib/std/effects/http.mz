@@ -203,9 +203,49 @@ pub let with_content_type: { req: Request, content_type: Str } -> Request = { re
 pub let with_accept: { req: Request, accept: Str } -> Request = { req, accept } ->
   with_header { req = req, key = "Accept", value = accept }
 
-## Set the Authorization header.
-pub let with_auth: { req: Request, auth: Str } -> Request = { req, auth } ->
-  with_header { req = req, key = "Authorization", value = auth }
+## An authentication scheme. `with_auth` renders it to the right header;
+## the `with_bearer` / `with_basic` / `with_api_key` shortcuts build the
+## common cases so callers rarely construct the variant by hand.
+pub type Auth =
+  | Bearer { token: Str },
+    Basic { username: Str, password: Str },
+    ApiKey { name: Str, val: Str } |
+
+## Render an `Auth` to its header name and value.
+##
+## `Bearer` and `Basic` set `Authorization`; `ApiKey` sets a custom header
+## (e.g. `X-API-Key`). `Basic` base64-encodes `username:password` via the
+## bytes codec.
+pub let auth_header: { auth: Auth } -> { key: Str, value: Str } = { auth } ->
+  match auth is
+    Bearer { token } ->
+      { key = "Authorization", value = str::concat { l = "Bearer ", r = token } }
+    Basic { username, password } -> do
+      let credentials =
+        str::concat { l = username, r = str::concat { l = ":", r = password } }
+      let encoded = bytes::to_base64 { b = bytes::from_str { s = credentials } }
+      { key = "Authorization", value = str::concat { l = "Basic ", r = encoded } }
+    ApiKey { name, val } ->
+      { key = name, value = val }
+
+## Set the request's authentication from a typed `Auth`.
+pub let with_auth: { req: Request, auth: Auth } -> Request = { req, auth } -> do
+  let h = auth_header { auth = auth }
+  with_header { req = req, key = h.key, value = h.value }
+
+## Shortcut: Bearer-token auth.
+pub let with_bearer: { req: Request, token: Str } -> Request = { req, token } ->
+  with_auth { req = req, auth = Bearer { token = token } }
+
+## Shortcut: HTTP Basic auth.
+pub let with_basic: { req: Request, username: Str, password: Str } -> Request =
+  { req, username, password } ->
+    with_auth { req = req, auth = Basic { username = username, password = password } }
+
+## Shortcut: an API key in a named header (e.g. `X-API-Key`).
+pub let with_api_key: { req: Request, name: Str, val: Str } -> Request =
+  { req, name, val } ->
+    with_auth { req = req, auth = ApiKey { name = name, val = val } }
 
 ## Decode response body as a UTF-8 string.
 pub let body_str: { resp: Response } -> Result Str Str = { resp } ->
@@ -263,36 +303,6 @@ pub let get_content_length: { resp: Response } -> Option Int = { resp } -> match
   None -> None
 
 
-## Create a Bearer token Authorization header map.
-pub let bearer_auth: { token: Str } -> Map Str Str = { token } ->
-  map::insert {
-    m = map::empty {},
-    k = "Authorization",
-    v = str::concat { l = "Bearer ", r = token },
-  }
-
-## Create a Basic auth Authorization header map.
-pub let basic_auth: { username: Str, password: Str } -> Map Str Str = { username, password } ->
-  do
-    let credentials = str::concat {
-      l = username,
-      r = str::concat { l = ":", r = password },
-    }
-    let encoded = __native_base64_encode { s = credentials }
-    map::insert {
-      m = map::empty {},
-      k = "Authorization",
-      v = str::concat { l = "Basic ", r = encoded },
-    }
-
-## Create a custom API key header map.
-pub let api_key_header: { key: Str, value: Str } -> Map Str Str = { key, value } ->
-  map::insert { m = map::empty {}, k = key, v = value }
-
-## Create an X-API-Key header map.
-pub let x_api_key: { key: Str } -> Map Str Str = { key } ->
-  map::insert { m = map::empty {}, k = "X-API-Key", v = key }
-
 # ─── Chainable surface ────────────────────────────────────────────────
 #
 # The chainable API lets you build a request via dot-method composition:
@@ -332,24 +342,47 @@ pub let with_method: { req: Request, val: Method } -> Request = { req, val } ->
     timeout_ms = req.timeout_ms,
   }
 
+## A query-parameter value: a string, an integer, or a repeated list.
+##
+## `UrlC` (see `std::codec::url`) is a partial-capability format — it
+## encodes scalars, not records or lists — so query values are modelled
+## explicitly here rather than by codec derivation over an arbitrary type.
+## A `QList` expands to a repeated key (`?tags=a&tags=b`), the encoding
+## parsed by the widest range of servers.
+pub type QueryValue =
+  | QStr { s: Str },
+    QInt { n: Int },
+    QList { xs: [Str] } |
+
+## Render one `key`/`QueryValue` pair to its `k=v` fragments. A scalar
+## yields one fragment; a `QList` yields one per element (repeated key).
+## Keys and values are percent-encoded per RFC 3986.
+pub let query_pairs: { key: Str, value: QueryValue } -> [Str] = { key, value } -> do
+  let ek = url_encode_component { s = key }
+  let pair = { v: Str } -> str::concat {
+    l = ek,
+    r = str::concat { l = "=", r = url_encode_component { s = v } },
+  }
+  match value is
+    QStr { s } -> [pair { v = s }]
+    QInt { n } -> [pair { v = int::to_str { n = n } }]
+    QList { xs } -> seq::map { xs = xs, f = { x } -> pair { v = x } }
+
 ## Append `?k1=v1&k2=v2&...` (or `&...` if the URL already has a query)
-## from a `Map Str Str`. Keys and values are percent-encoded per RFC 3986.
+## from a `Map Str QueryValue`. Scalar values render as one parameter each;
+## a `QList` renders as a repeated key. Keys and values are percent-encoded
+## per RFC 3986. Empty map is a no-op.
 ##
-## Mixed-type values must be pre-converted to Str by the caller (e.g.
-## `int::to_str { n = 42 }`). A future revision may add a polymorphic
-## variant gated on `Encode UrlC 'a` (see `std::codec::url`) so that any
-## scalar-encodable value can be passed directly.
-##
-## Empty map is a no-op.
-pub let with_query: { req: Request, params: Map Str Str } -> Request = { req, params } ->
+##   let p0 = map::insert { m = map::empty {}, k = "page", v = QInt { n = 2 } }
+##   let p = map::insert { m = p0, k = "tags", v = QList { xs = ["a", "b"] } }
+##   req.with_query { params = p }
+##   -- ?page=2&tags=a&tags=b
+pub let with_query: { req: Request, params: Map Str QueryValue } -> Request = { req, params } ->
   do
     let entries = map::to_seq { m = params }
     if seq::is_empty { xs = entries } then req else do
-      let pairs = seq::map { xs = entries, f = { x } ->
-        str::concat {
-          l = url_encode_component { s = x.k },
-          r = str::concat { l = "=", r = url_encode_component { s = x.v } },
-        } }
+      let pairs = seq::flat_map { xs = entries, f = { x } ->
+        query_pairs { key = x.k, value = x.v } }
       let qs = str::join { strings = pairs, separator = "&" }
       let sep = if str::contains { s = req.url, substring = "?" } then "&" else "?"
       let new_url = str::concat { l = req.url, r = str::concat { l = sep, r = qs } }
@@ -402,9 +435,12 @@ impl Request where {
   with_body = { it: 'it, val: Bytes } -> with_body { req = it, body = val },
   with_text = { it: 'it, val: Str } -> with_text { req = it, val = val },
   with_json = { it: 'it, val: Json } -> with_json { req = it, val = val },
-  with_query = { it: 'it, params: Map Str Str } -> with_query { req = it, params = params },
+  with_query = { it: 'it, params: Map Str QueryValue } -> with_query { req = it, params = params },
   with_timeout = { it: 'it, ms: Int } -> with_timeout { req = it, ms = ms },
-  with_auth = { it: 'it, val: Str } -> with_auth { req = it, auth = val },
+  with_auth = { it: 'it, auth: Auth } -> with_auth { req = it, auth = auth },
+  with_bearer = { it: 'it, token: Str } -> with_bearer { req = it, token = token },
+  with_basic = { it: 'it, username: Str, password: Str } -> with_basic { req = it, username = username, password = password },
+  with_api_key = { it: 'it, name: Str, val: Str } -> with_api_key { req = it, name = name, val = val },
   with_content_type = { it: 'it, val: Str } -> with_content_type { req = it, content_type = val },
   with_accept = { it: 'it, val: Str } -> with_accept { req = it, accept = val },
   ## Terminal — perform the request via the ambient Http handler.
@@ -459,7 +495,7 @@ impl Response where {
 ## requests from it for each call.
 ##
 ##   let api = client { base_url = "https://api.acme.com" }
-##     .with_auth    { val = "Bearer " ++ token }
+##     .with_bearer  { token = token }
 ##     .with_timeout { ms = 30000 }
 ##   let user = api.get { path = "/users/42" }.send {}
 pub type Client = {
@@ -517,11 +553,14 @@ impl Client where {
       default_headers = it.default_headers,
       default_timeout_ms = ms,
     },
-  ## Convenience: set Authorization in default_headers.
-  with_auth = { it: 'it, val: Str } ->
+  ## Convenience: set a typed `Auth` in default_headers so every derived
+  ## request carries it. `Bearer`/`Basic` set `Authorization`; `ApiKey`
+  ## sets its own header name.
+  with_auth = { it: 'it, auth: Auth } -> do
+    let h = auth_header { auth = auth }
     {
       base_url = it.base_url,
-      default_headers = map::insert { m = it.default_headers, k = "Authorization", v = val },
+      default_headers = map::insert { m = it.default_headers, k = h.key, v = h.value },
       default_timeout_ms = it.default_timeout_ms,
     },
   ## Verb shortcuts — return a Request pre-filled with the client's defaults.
@@ -626,10 +665,10 @@ let retry_loop
 ## predicate below). Sleeps `backoff_ms` between attempts.
 ##
 ##   request { url = "https://api.acme.com/users/42" }
-##     .with_auth { val = "Bearer xyz" }
+##     .with_bearer { token = "xyz" }
 ##     .send {}
 ##     -- becomes:
-##   retry { req = request{...}.with_auth{...}, max_attempts = 3, backoff_ms = 250 }
+##   retry { req = request{...}.with_bearer{...}, max_attempts = 3, backoff_ms = 250 }
 ##
 ## Returns the first Ok or the last Err. `max_attempts` includes the
 ## initial attempt — `max_attempts = 1` is a single shot with no retry.
@@ -937,8 +976,8 @@ pub let json_result: { resp: Result Response HttpError } -> Result Json HttpErro
 ## `.json {}` and the `Result`-keeping counterpart to `json_or`.
 ##
 ##   let user: Result { name: Str } HttpError =
-##     request { url }.send {}.decode {}
-pub let decode_result: { resp: Result Response HttpError } with FromJson 'a Str -> Result 'a HttpError = { resp } ->
+##     request { url }.send {}.from_json {}
+pub let from_json_result: { resp: Result Response HttpError } with FromJson 'a Str -> Result 'a HttpError = { resp } ->
   # Everything flows through the generic result combinators — NEVER a
   # hand-written `Ok { val = d } -> Ok { val = d }` re-wrap in this function. A
   # re-wrap here drops the target-directed decode's runtime dispatch (it crashes
@@ -970,11 +1009,11 @@ impl Result Response HttpError where {
   on_err = { it, f } -> on_err { resp = it, f = f },
 
   ## Body decoders that KEEP the Result (error channel preserved), as opposed to
-  ## the `*_or` finishers that collapse to a bare value. `.decode {}` is
-  ## target-directed — the type it returns is inferred from the use site.
+  ## the `*_or` finishers that collapse to a bare value. `.from_json {}` is
+  ## target-directed — the type it decodes into is inferred from the use site.
   text = { it } -> text_result { resp = it },
   json = { it } -> json_result { resp = it },
-  decode = { it } -> decode_result { resp = it },
+  from_json = { it } -> from_json_result { resp = it },
 
   ## dot-chain parity: inherent method for every receiver-taking free
   ## function not already covered by an ability, so `x.op {}` works.

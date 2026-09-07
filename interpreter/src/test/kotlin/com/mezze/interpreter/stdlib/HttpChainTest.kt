@@ -11,7 +11,7 @@ import org.junit.jupiter.api.BeforeEach
  *
  * The surface is method-driven:
  *   request { url }.with_method { val = Post }.with_json { val = j }.send {}
- *   client { base_url = "..." }.with_auth { val = "..." }.get { path = "..." }
+ *   client { base_url = "..." }.with_bearer { token = "..." }.get { path = "..." }
  *   resp.to_json {} / .text {} / .is_ok {} / .header { name }
  *
  * All tests use MockHttpClient so they don't touch the network.
@@ -134,7 +134,7 @@ class HttpChainTest {
 
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/protected" }
-                .with_auth { val = "Bearer xyz" }
+                .with_bearer { token = "xyz" }
                 .with_timeout { ms = 5000 }
                 .send {}
               match resp is
@@ -286,11 +286,11 @@ class HttpChainTest {
         // No `.send` — this is a pure builder check. Inspect the
         // Authorization header directly on the constructed request.
         val result = eval("""
-            use std::effects::http::{Http, client}
+            use std::effects::http::{Http, client, Bearer}
             use std::collections::map
 
             let api = client { base_url = "https://api.acme.com" }
-              .with_auth { val = "Bearer xyz" }
+              .with_auth { auth = Bearer { token = "xyz" } }
             let r = api.get { path = "/protected" }
             let auth_opt = map::get { m = r.headers, k = "Authorization" }
             match auth_opt is

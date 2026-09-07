@@ -56,10 +56,10 @@ class HttpStageDTest {
     @Test
     fun `with_query appends single string param`() {
         val result = eval("""
-            use std::effects::http::{request}
+            use std::effects::http::{request, QStr}
             use std::collections::map
 
-            let params = map::insert { m = map::empty {}, k = "q", v = "hello" }
+            let params = map::insert { m = map::empty {}, k = "q", v = QStr { s = "hello" } }
             let r = request { url = "https://api.acme.com/search" }
               .with_query { params = params }
             r.url
@@ -68,15 +68,13 @@ class HttpStageDTest {
     }
 
     @Test
-    fun `with_query int value via pre-encoded string`() {
-        // Polymorphic-value `with_query` is deferred (see ToUrl note);
-        // callers stringify primitives at the call-site.
+    fun `with_query int value renders without manual stringify`() {
+        // Typed QInt: the caller passes an Int directly; with_query renders it.
         val result = eval("""
-            use std::effects::http::{request}
+            use std::effects::http::{request, QInt}
             use std::collections::map
-            use std::int
 
-            let params = map::insert { m = map::empty {}, k = "page", v = int::to_str { n = 42 } }
+            let params = map::insert { m = map::empty {}, k = "page", v = QInt { n = 42 } }
             let r = request { url = "https://api.acme.com/items" }
               .with_query { params = params }
             r.url
@@ -85,12 +83,27 @@ class HttpStageDTest {
     }
 
     @Test
-    fun `with_query percent-encodes special characters`() {
+    fun `with_query list value renders as a repeated key`() {
+        // QList expands to one key=value fragment per element.
         val result = eval("""
-            use std::effects::http::{request}
+            use std::effects::http::{request, QList}
             use std::collections::map
 
-            let params = map::insert { m = map::empty {}, k = "q", v = "a b&c" }
+            let params = map::insert { m = map::empty {}, k = "tags", v = QList { xs = ["a", "b"] } }
+            let r = request { url = "https://api.acme.com/items" }
+              .with_query { params = params }
+            r.url
+        """)
+        assertEquals("https://api.acme.com/items?tags=a&tags=b", result)
+    }
+
+    @Test
+    fun `with_query percent-encodes special characters`() {
+        val result = eval("""
+            use std::effects::http::{request, QStr}
+            use std::collections::map
+
+            let params = map::insert { m = map::empty {}, k = "q", v = QStr { s = "a b&c" } }
             let r = request { url = "https://api.acme.com/s" }
               .with_query { params = params }
             r.url
@@ -114,10 +127,10 @@ class HttpStageDTest {
     @Test
     fun `with_query uses ampersand when URL already has a query string`() {
         val result = eval("""
-            use std::effects::http::{request}
+            use std::effects::http::{request, QInt}
             use std::collections::map
 
-            let params = map::insert { m = map::empty {}, k = "page", v = "2" }
+            let params = map::insert { m = map::empty {}, k = "page", v = QInt { n = 2 } }
             let r = request { url = "https://api.acme.com/x?lang=en" }
               .with_query { params = params }
             r.url
