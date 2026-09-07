@@ -4184,6 +4184,342 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    // ---- KnownMutOps: direct native emission for Mut stdlib functions ----
+    // MutOpKind constants — used by InlineMutOp1/2/3 and KnownMutOps.
+    // The ordinal is baked into BDSL bytecode as a ConstantOperand so Graal
+    // constant-folds through the switch during PE.
+    static final int MUT_READ_INT     = 0;  // 1-arg: (n: MutableInt) → long
+    static final int MUT_SIZE         = 1;  // 1-arg: (seq: MutableSeq) → long
+    static final int MUT_INT_TO_MUT   = 2;  // 1-arg: (n: long) → MutableInt
+    static final int MUT_SEQ_TO_MUT   = 3;  // 1-arg: (seq: MezzeSeq) → MutableSeq
+    static final int MUT_SEQ_TO_IMMUT = 4;  // 1-arg: (seq: MutableSeq) → MezzeSeq
+    static final int MUT_INCR         = 10; // 2-arg: (n: MutableInt, delta: long)
+    static final int MUT_DECR         = 11; // 2-arg: (n: MutableInt, delta: long)
+    static final int MUT_WRITE_INT    = 12; // 2-arg: (n: MutableInt, v: long)
+    static final int MUT_GET          = 13; // 2-arg: (seq: MutableSeq, i: long) → Option
+    static final int MUT_SET          = 20; // 3-arg: (seq: MutableSeq, i: long, v: Object) → Bool
+    static final int MUT_SWAP         = 21; // 3-arg: (seq: MutableSeq, i: long, j: long) → Bool
+    static final int MUT_FOR_RANGE    = 30; // 4-arg: (start: long, end: long, step: long, body: MezzeFunction)
+
+    /**
+     * Direct native emission for 1-argument Mut stdlib functions.
+     * When the active handler is LocalMut, executes the native Java call
+     * directly — no lambda creation, no effect dispatch, no function call.
+     * Falls back to calling the original stdlib function via CallTarget
+     * when the handler is not LocalMut (e.g. DebugLocalMut).
+     */
+    @Operation
+    @ConstantOperand(type = int.class)    // MutOpKind
+    @ConstantOperand(type = Hash.class)   // effect hash
+    @ConstantOperand(type = Hash.class)   // original function hash (fallback)
+    public static final class InlineMutOp1 {
+
+        @Specialization(assumptions = "handlerStable",
+                        guards = {"cachedHandler != null",
+                                  "isLocalMut(mutateTarget(cachedHandler))"},
+                        excludeForUncached = true)
+        public static Object doBypass(int opKind, Hash effectHash, Hash fnHash,
+                Object arg0,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("getStableAssumption()") com.oracle.truffle.api.Assumption handlerStable) {
+            return switch (opKind) {
+                case MUT_READ_INT     -> ((com.mezze.interpreter.values.MutableInt) arg0).get();
+                case MUT_SIZE         -> (long) ((com.mezze.interpreter.values.MutableSeq) arg0).size();
+                case MUT_INT_TO_MUT   -> new com.mezze.interpreter.values.MutableInt((long) arg0);
+                case MUT_SEQ_TO_MUT   -> com.mezze.interpreter.values.MutableSeq
+                                            .fromImmutable((MezzeSeq<?>) arg0);
+                case MUT_SEQ_TO_IMMUT -> ((com.mezze.interpreter.values.MutableSeq) arg0).toImmutable();
+                default -> throw CompilerDirectives.shouldNotReachHere();
+            };
+        }
+
+        @Specialization
+        @TruffleBoundary
+        public static Object doFallback(int opKind, Hash effectHash, Hash fnHash,
+                Object arg0) {
+            CallTarget ct = MezzeLanguage.get(null).getCachedStdlibCallTarget(fnHash);
+            return ct.call(arg0);
+        }
+
+        @TruffleBoundary
+        static MezzeRecord resolveHandler(Hash effectHash) {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .peekHandlerForEffect(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getStableAssumption() {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getHandlerChainStableAssumption();
+        }
+
+        static CallTarget mutateTarget(MezzeRecord handler) {
+            if (handler == null) return null;
+            int idx = handler.getFieldIndex("mutate");
+            if (idx < 0) return null;
+            Object val = handler.getField(idx);
+            return val instanceof MezzeFunction fn ? fn.getCallTarget() : null;
+        }
+
+        @TruffleBoundary
+        static boolean isLocalMut(CallTarget handlerMutateTarget) {
+            return PerformMutMutateAct.isLocalMutPassthrough(handlerMutateTarget);
+        }
+    }
+
+    /**
+     * Direct native emission for 2-argument Mut stdlib functions.
+     * @see InlineMutOp1
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    @ConstantOperand(type = Hash.class)
+    @ConstantOperand(type = Hash.class)
+    public static final class InlineMutOp2 {
+
+        @Specialization(assumptions = "handlerStable",
+                        guards = {"cachedHandler != null",
+                                  "isLocalMut(mutateTarget(cachedHandler))"},
+                        excludeForUncached = true)
+        public static Object doBypass(int opKind, Hash effectHash, Hash fnHash,
+                Object arg0, Object arg1,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("getStableAssumption()") com.oracle.truffle.api.Assumption handlerStable) {
+            return switch (opKind) {
+                case MUT_INCR -> {
+                    ((com.mezze.interpreter.values.MutableInt) arg0).add((long) arg1);
+                    yield MezzeRecord.empty();
+                }
+                case MUT_DECR -> {
+                    ((com.mezze.interpreter.values.MutableInt) arg0).subtract((long) arg1);
+                    yield MezzeRecord.empty();
+                }
+                case MUT_WRITE_INT -> {
+                    ((com.mezze.interpreter.values.MutableInt) arg0).set((long) arg1);
+                    yield MezzeRecord.empty();
+                }
+                case MUT_GET -> {
+                    Object val = ((com.mezze.interpreter.values.MutableSeq) arg0)
+                        .getSafe((int) (long) arg1);
+                    yield val != null ? MezzeVariant.some(val) : MezzeVariant.none();
+                }
+                default -> throw CompilerDirectives.shouldNotReachHere();
+            };
+        }
+
+        @Specialization
+        @TruffleBoundary
+        public static Object doFallback(int opKind, Hash effectHash, Hash fnHash,
+                Object arg0, Object arg1) {
+            CallTarget ct = MezzeLanguage.get(null).getCachedStdlibCallTarget(fnHash);
+            return ct.call(arg0, arg1);
+        }
+
+        @TruffleBoundary
+        static MezzeRecord resolveHandler(Hash effectHash) {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .peekHandlerForEffect(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getStableAssumption() {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getHandlerChainStableAssumption();
+        }
+
+        static CallTarget mutateTarget(MezzeRecord handler) {
+            if (handler == null) return null;
+            int idx = handler.getFieldIndex("mutate");
+            if (idx < 0) return null;
+            Object val = handler.getField(idx);
+            return val instanceof MezzeFunction fn ? fn.getCallTarget() : null;
+        }
+
+        @TruffleBoundary
+        static boolean isLocalMut(CallTarget handlerMutateTarget) {
+            return PerformMutMutateAct.isLocalMutPassthrough(handlerMutateTarget);
+        }
+    }
+
+    /**
+     * Direct native emission for 3-argument Mut stdlib functions.
+     * @see InlineMutOp1
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    @ConstantOperand(type = Hash.class)
+    @ConstantOperand(type = Hash.class)
+    public static final class InlineMutOp3 {
+
+        @Specialization(assumptions = "handlerStable",
+                        guards = {"cachedHandler != null",
+                                  "isLocalMut(mutateTarget(cachedHandler))"},
+                        excludeForUncached = true)
+        public static Object doBypass(int opKind, Hash effectHash, Hash fnHash,
+                Object arg0, Object arg1, Object arg2,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("getStableAssumption()") com.oracle.truffle.api.Assumption handlerStable) {
+            return switch (opKind) {
+                case MUT_SET -> {
+                    boolean ok = ((com.mezze.interpreter.values.MutableSeq) arg0)
+                        .setSafe((int) (long) arg1, arg2);
+                    yield ok;
+                }
+                case MUT_SWAP -> {
+                    try {
+                        ((com.mezze.interpreter.values.MutableSeq) arg0)
+                            .swap((int) (long) arg1, (int) (long) arg2);
+                        yield true;
+                    } catch (IndexOutOfBoundsException e) {
+                        yield false;
+                    }
+                }
+                default -> throw CompilerDirectives.shouldNotReachHere();
+            };
+        }
+
+        @Specialization
+        @TruffleBoundary
+        public static Object doFallback(int opKind, Hash effectHash, Hash fnHash,
+                Object arg0, Object arg1, Object arg2) {
+            CallTarget ct = MezzeLanguage.get(null).getCachedStdlibCallTarget(fnHash);
+            return ct.call(arg0, arg1, arg2);
+        }
+
+        @TruffleBoundary
+        static MezzeRecord resolveHandler(Hash effectHash) {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .peekHandlerForEffect(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getStableAssumption() {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getHandlerChainStableAssumption();
+        }
+
+        static CallTarget mutateTarget(MezzeRecord handler) {
+            if (handler == null) return null;
+            int idx = handler.getFieldIndex("mutate");
+            if (idx < 0) return null;
+            Object val = handler.getField(idx);
+            return val instanceof MezzeFunction fn ? fn.getCallTarget() : null;
+        }
+
+        @TruffleBoundary
+        static boolean isLocalMut(CallTarget handlerMutateTarget) {
+            return PerformMutMutateAct.isLocalMutPassthrough(handlerMutateTarget);
+        }
+    }
+
+    /**
+     * Compiled loop for Mut for_range: when LocalMut is active, runs the
+     * body closure in a tight compiled loop — no effect dispatch, no
+     * @TruffleBoundary boundary, body is inlined by Graal.
+     * Falls back to calling the original for_range function otherwise.
+     *
+     * Scalar ABI: (start: long, end: long, step: long, body: MezzeFunction)
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)   // effect hash
+    @ConstantOperand(type = Hash.class)   // original function hash (fallback)
+    public static final class CompiledForRange {
+
+        @Specialization(assumptions = "handlerStable",
+                        guards = {"cachedHandler != null",
+                                  "isLocalMut(mutateTarget(cachedHandler))",
+                                  "bodyTargetMatches(bodyFn, cachedBodyTarget)"},
+                        excludeForUncached = true)
+        public static Object doBypass(Hash effectHash, Hash fnHash,
+                long start, long end, long step, Object bodyFn,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("getStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
+                @Cached("extractBodyTarget(bodyFn)") CallTarget cachedBodyTarget,
+                @Cached("resolveInner(cachedBodyTarget)") CallTarget resolved,
+                @Cached("closureCount(bodyFn)") int closureLen,
+                @Cached("createForceInlined(resolved)") DirectCallNode callNode) {
+            MezzeFunction fn = (MezzeFunction) bodyFn;
+            Object[] cv = fn.getClosureValues();
+            if (closureLen == 0) {
+                for (long i = start; i < end; i += step) {
+                    callNode.call(i);
+                }
+            } else {
+                // Allocate combined array ONCE, reuse across iterations.
+                // Layout: [closure0, closure1, ..., closureN, loopVar]
+                Object[] args = new Object[closureLen + 1];
+                System.arraycopy(cv, 0, args, 0, closureLen);
+                for (long i = start; i < end; i += step) {
+                    args[closureLen] = i;
+                    callNode.call(args);
+                }
+            }
+            return MezzeRecord.empty();
+        }
+
+        @Specialization(replaces = "doBypass")
+        @TruffleBoundary
+        public static Object doFallback(Hash effectHash, Hash fnHash,
+                long start, long end, long step, Object bodyFn) {
+            CallTarget ct = MezzeLanguage.get(null).getCachedStdlibCallTarget(fnHash);
+            return ct.call(start, end, step, bodyFn);
+        }
+
+        static CallTarget extractBodyTarget(Object bodyFn) {
+            return bodyFn instanceof MezzeFunction fn ? fn.getCallTarget() : null;
+        }
+
+        static boolean bodyTargetMatches(Object bodyFn, CallTarget cached) {
+            return cached != null
+                && bodyFn instanceof MezzeFunction fn
+                && fn.getCallTarget() == cached;
+        }
+
+        static int closureCount(Object bodyFn) {
+            return bodyFn instanceof MezzeFunction fn ? fn.getClosureValues().length : 0;
+        }
+
+        static CallTarget resolveInner(CallTarget target) {
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct
+                    && rct.getRootNode() instanceof TrampolineRootNode tramp
+                    && tramp.getInnerTarget() != null) {
+                return tramp.getInnerTarget();
+            }
+            return target;
+        }
+
+        static DirectCallNode createForceInlined(CallTarget target) {
+            DirectCallNode node = DirectCallNode.create(target);
+            node.forceInlining();
+            return node;
+        }
+
+        @TruffleBoundary
+        static MezzeRecord resolveHandler(Hash effectHash) {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .peekHandlerForEffect(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getStableAssumption() {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getHandlerChainStableAssumption();
+        }
+
+        static CallTarget mutateTarget(MezzeRecord handler) {
+            if (handler == null) return null;
+            int idx = handler.getFieldIndex("mutate");
+            if (idx < 0) return null;
+            Object val = handler.getField(idx);
+            return val instanceof MezzeFunction fn ? fn.getCallTarget() : null;
+        }
+
+        @TruffleBoundary
+        static boolean isLocalMut(CallTarget handlerMutateTarget) {
+            return PerformMutMutateAct.isLocalMutPassthrough(handlerMutateTarget);
+        }
+    }
+
     /**
      * Fast path for {@code perform Mut mutate { act = <lambda> }}: pop
      * the raw act lambda (no wrapper record on the operand stack).

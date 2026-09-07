@@ -1,0 +1,76 @@
+# Quicksort benchmark — mutable MutSeq with in-place partitioning
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::effects::mutation::{LocalMut, seq_to_mut, get, swap, size, for_range, int_to_mut, read_int, incr}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::seq
+
+# LCG pseudo-random: seed → next seed (period 2^31)
+let next_rand = {seed} -> (seed * 1103515245 + 12345) % 2147483648
+
+let build_random_go = {n, seed, acc: [Int]} ->
+    if n == 0 then acc
+    else do
+        let s = next_rand { seed = seed }
+        build_random_go { n = n - 1, seed = s, acc = acc.push { x = s % 1000000 } }
+
+# In-place quicksort partition (Lomuto scheme)
+let partition = {arr, lo, hi} -> do
+    let pivot = match get { seq = arr, i = hi } is
+        Some { val } -> val
+        None -> 0
+    let i_ref = int_to_mut { n = lo }
+    for_range { start = lo, end = hi, step = 1, body = {i} -> do
+        let elem = match get { seq = arr, i = i } is
+            Some { val } -> val
+            None -> 0
+        if elem < pivot then do
+            let i_val = read_int { n = i_ref }
+            swap { seq = arr, i = i_val, j = i }
+            incr { n = i_ref, delta = 1 }
+        else {}
+    }
+    let i_val = read_int { n = i_ref }
+    swap { seq = arr, i = i_val, j = hi }
+    i_val
+
+let qsort = {arr, lo, hi} ->
+    if lo < hi then do
+        let p = partition { arr = arr, lo = lo, hi = hi }
+        qsort { arr = arr, lo = lo, hi = p - 1 }
+        qsort { arr = arr, lo = p + 1, hi = hi }
+    else {}
+
+# Run k iterations, return list of elapsed nanos
+let run_k = {data: [Int], k, acc: [Int]} ->
+    if k == 0 then acc
+    else perform SystemTime in do
+        let t0 = monotonic {}
+        perform LocalMut in do
+            let arr = seq_to_mut { seq = data }
+            let len = size { seq = arr }
+            qsort { arr = arr, lo = 0, hi = len - 1 }
+        let t1 = monotonic {}
+        let ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+        run_k { data = data, k = k - 1, acc = acc.push { x = ns } }
+
+let main = {} -> perform Console in perform SystemTime in do
+    let n = 100000
+    println { msg = "Quicksort (Mut, in-place) N=$(n.to_str{})" }
+
+    let data = build_random_go { n = n, seed = 42, acc = [] }
+
+    # 3 warmup + 5 measured = 8 runs, take last 5
+    let all_times = run_k { data = data, k = 8, acc = [] }
+    let times = seq::slice { xs = all_times, start = 3, end = 8 }
+    let sorted = seq::sort { xs = times }
+    let med = match seq::get { xs = sorted, i = 2 } is
+        Some { val } -> val
+        None -> 0
+    let min_t = match seq::get { xs = sorted, i = 0 } is
+        Some { val } -> val
+        None -> 0
+    let min_ms = min_t / 1000000
+    let med_ms = med / 1000000
+    println { msg = "  min=$(min_t.to_str{}) ns  med=$(med.to_str{}) ns" }
+    println { msg = "  min=$(min_ms.to_str{}) ms  med=$(med_ms.to_str{}) ms" }

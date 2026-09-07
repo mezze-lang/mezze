@@ -1,0 +1,60 @@
+# Quicksort benchmark — pure functional (filter-based, no mutation)
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::datetime::{duration_to_nanos, sub_duration}
+use std::collections::seq
+
+# LCG pseudo-random
+let next_rand = {seed} -> (seed * 1103515245 + 12345) % 2147483648
+
+let build_random_go = {n, seed, acc: [Int]} ->
+    if n == 0 then acc
+    else do
+        let s = next_rand { seed = seed }
+        build_random_go { n = n - 1, seed = s, acc = acc.push { x = s % 1000000 } }
+
+# Pure quicksort: filter into < pivot / >= pivot, recurse, concat
+let qsort = {xs: [Int]} -> do
+    let len = seq::size { xs = xs }
+    if len <= 1 then xs
+    else do
+        let pivot = match seq::get { xs = xs, i = 0 } is
+            Some { val } -> val
+            None -> 0
+        let rest = seq::slice { xs = xs, start = 1, end = len }
+        let lo = seq::filter { xs = rest, p = {x} -> x < pivot }
+        let hi = seq::filter { xs = rest, p = {x} -> x >= pivot }
+        let sorted_lo = qsort { xs = lo }
+        let sorted_hi = qsort { xs = hi }
+        let with_pivot = seq::push { xs = sorted_lo, x = pivot }
+        seq::concat { xs = with_pivot, ys = sorted_hi }
+
+# Run k iterations, return list of elapsed nanos
+let run_k = {data: [Int], k, acc: [Int]} ->
+    if k == 0 then acc
+    else perform SystemTime in do
+        let t0 = monotonic {}
+        qsort { xs = data }
+        let t1 = monotonic {}
+        let ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+        run_k { data = data, k = k - 1, acc = acc.push { x = ns } }
+
+let main = {} -> perform Console in perform SystemTime in do
+    let n = 100000
+    println { msg = "Quicksort (pure functional) N=$(n.to_str{})" }
+
+    let data = build_random_go { n = n, seed = 42, acc = [] }
+
+    let all_times = run_k { data = data, k = 8, acc = [] }
+    let times = seq::slice { xs = all_times, start = 3, end = 8 }
+    let sorted = seq::sort { xs = times }
+    let med = match seq::get { xs = sorted, i = 2 } is
+        Some { val } -> val
+        None -> 0
+    let min_t = match seq::get { xs = sorted, i = 0 } is
+        Some { val } -> val
+        None -> 0
+    let min_ms = min_t / 1000000
+    let med_ms = med / 1000000
+    println { msg = "  min=$(min_t.to_str{}) ns  med=$(med.to_str{}) ns" }
+    println { msg = "  min=$(min_ms.to_str{}) ms  med=$(med_ms.to_str{}) ms" }

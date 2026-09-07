@@ -1,0 +1,12 @@
+[package]
+name = "qsort_mut"
+version = "0.1.0"
+
+[[app]]
+name = "qsort_mut"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

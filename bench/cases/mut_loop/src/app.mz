@@ -1,0 +1,64 @@
+# Micro-benchmark: Mut ops — tail-recursive loop (bypasses for_range/while)
+use std::effects::log::{println, Console}
+use std::effects::time::{Time, SystemTime, monotonic}
+use std::effects::mutation::{LocalMut, int_to_mut, read_int, incr, for_range}
+use std::datetime::{duration_to_nanos, sub_duration}
+
+## Test 1: tail-recursive loop — 1 Mut op per iteration (incr)
+let bench_recursive = {n} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let result = perform LocalMut in do
+        let acc = int_to_mut { n = 0 }
+        let go = {i} -> if i >= n then {}
+            else do
+                incr { n = acc, delta = 1 }
+                go { i = i + 1 }
+        go { i = 0 }
+        read_int { n = acc }
+    let t1 = monotonic {}
+    let ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+    { result = result, ns = ns }
+
+## Test 2: for_range loop — for_range overhead + 1 Mut op per iteration
+let bench_for_range = {n} -> perform SystemTime in do
+    let t0 = monotonic {}
+    let result = perform LocalMut in do
+        let acc = int_to_mut { n = 0 }
+        for_range { start = 0, end = n, step = 1, body = {i} ->
+            incr { n = acc, delta = 1 }
+        }
+        read_int { n = acc }
+    let t1 = monotonic {}
+    let ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+    { result = result, ns = ns }
+
+let main = {} -> perform Console in perform SystemTime in do
+    let n = 10000000
+    println { msg = "Mut loop micro-benchmark N=$(n.to_str{})" }
+
+    ## warmup both
+    bench_recursive { n = n }
+    bench_recursive { n = n }
+    bench_recursive { n = n }
+    bench_for_range { n = n }
+    bench_for_range { n = n }
+    bench_for_range { n = n }
+
+    ## measured
+    println { msg = "--- Recursive (1 Mut op / iter) ---" }
+    let r1 = bench_recursive { n = n }
+    let r2 = bench_recursive { n = n }
+    let r3 = bench_recursive { n = n }
+    println { msg = "  result=$(r1.result.to_str{})" }
+    println { msg = "  $(r1.ns.to_str{}) ns  ($(( r1.ns / 1000000 ).to_str{}) ms)" }
+    println { msg = "  $(r2.ns.to_str{}) ns  ($(( r2.ns / 1000000 ).to_str{}) ms)" }
+    println { msg = "  $(r3.ns.to_str{}) ns  ($(( r3.ns / 1000000 ).to_str{}) ms)" }
+
+    println { msg = "--- for_range (4 Mut ops / iter) ---" }
+    let f1 = bench_for_range { n = n }
+    let f2 = bench_for_range { n = n }
+    let f3 = bench_for_range { n = n }
+    println { msg = "  result=$(f1.result.to_str{})" }
+    println { msg = "  $(f1.ns.to_str{}) ns  ($(( f1.ns / 1000000 ).to_str{}) ms)" }
+    println { msg = "  $(f2.ns.to_str{}) ns  ($(( f2.ns / 1000000 ).to_str{}) ms)" }
+    println { msg = "  $(f3.ns.to_str{}) ns  ($(( f3.ns / 1000000 ).to_str{}) ms)" }

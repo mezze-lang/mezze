@@ -1,0 +1,12 @@
+[package]
+name = "qsort_native"
+version = "0.1.0"
+
+[[app]]
+name = "qsort_native"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

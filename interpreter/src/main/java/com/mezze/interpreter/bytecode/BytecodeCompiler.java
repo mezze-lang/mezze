@@ -2240,6 +2240,46 @@ public final class BytecodeCompiler {
             // AST callee's normalizeArgs treats args[0] as scalar not
             // record. Record-ABI callers already pass a record — the
             // callee is expecting it, so no marker needed.
+            // ── KnownMutOps: inline Mut stdlib wrappers directly ──
+            // When a CallDirect targets a known Mut function (get, incr,
+            // swap, …), replace the call with InlineMutOp1/2/3 which
+            // executes the native Java operation directly — no lambda,
+            // no effect dispatch, no function call. Falls back to the
+            // original function via CallTarget when not under LocalMut.
+            if (c.isScalarABI() && !c.isTailCall()) {
+                var mutOp = KnownMutOps.lookup(c.getTargetHash());
+                if (mutOp != null && c.getArgs().size() == mutOp.arity()) {
+                    Hash mutHash = new Hash(
+                        com.mezze.interpreter.nodes.effect.MarkerEffects.MUT_EFFECT_HASH_HEX);
+                    switch (mutOp.arity()) {
+                        case 1 -> {
+                            b.beginInlineMutOp1(mutOp.kind(), mutHash, c.getTargetHash());
+                            emitNode(c.getArgs().get(0), b, argCount, localMap);
+                            b.endInlineMutOp1();
+                        }
+                        case 2 -> {
+                            b.beginInlineMutOp2(mutOp.kind(), mutHash, c.getTargetHash());
+                            for (NodeIR arg : c.getArgs())
+                                emitNode(arg, b, argCount, localMap);
+                            b.endInlineMutOp2();
+                        }
+                        case 3 -> {
+                            b.beginInlineMutOp3(mutOp.kind(), mutHash, c.getTargetHash());
+                            for (NodeIR arg : c.getArgs())
+                                emitNode(arg, b, argCount, localMap);
+                            b.endInlineMutOp3();
+                        }
+                        case 4 -> {
+                            // CompiledForRange: (start, end, step, body)
+                            b.beginCompiledForRange(mutHash, c.getTargetHash());
+                            for (NodeIR arg : c.getArgs())
+                                emitNode(arg, b, argCount, localMap);
+                            b.endCompiledForRange();
+                        }
+                    }
+                    return;
+                }
+            }
             boolean needsScalarMarker = c.isScalarABI()
                     && c.getArgs().size() == 1
                     && !isBdslCallee(target);
@@ -3391,10 +3431,78 @@ public final class BytecodeCompiler {
             return m;
         }
 
-        private static String basename(String path) {
+        static String basename(String path) {
             if (path == null) return "";
             int i = path.lastIndexOf('/');
             return i < 0 ? path : path.substring(i + 1);
+        }
+    }
+
+    /**
+     * Maps stdlib Mut wrapper functions to their native inline operations.
+     * Same pattern as {@link KnownArithOps}: populated lazily from the
+     * pre-lowered function map, looked up by Hash during CallDirectIR
+     * emission to replace CallDirect with InlineMutOp1/2/3.
+     */
+    static final class KnownMutOps {
+        record MutOp(int kind, int arity) {}
+
+        private static final java.util.Map<String, MutOp> KEY_TO_OP;
+        static {
+            var m = new java.util.HashMap<String, MutOp>();
+            // 1-arg ops
+            m.put("read_int@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_READ_INT, 1));
+            m.put("size@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_SIZE, 1));
+            m.put("int_to_mut@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_INT_TO_MUT, 1));
+            m.put("seq_to_mut@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_SEQ_TO_MUT, 1));
+            m.put("seq_to_immut@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_SEQ_TO_IMMUT, 1));
+            // 2-arg ops
+            m.put("incr@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_INCR, 2));
+            m.put("decr@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_DECR, 2));
+            m.put("write_int@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_WRITE_INT, 2));
+            m.put("get@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_GET, 2));
+            // 3-arg ops
+            m.put("set@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_SET, 3));
+            m.put("swap@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_SWAP, 3));
+            // 4-arg: compiled loop
+            m.put("for_range@mutation.mz",
+                new MutOp(MezzeBytecodeRootNode.MUT_FOR_RANGE, 4));
+            KEY_TO_OP = java.util.Map.copyOf(m);
+        }
+
+        private static volatile java.util.Map<Hash, MutOp> hashToOp;
+
+        static MutOp lookup(Hash targetHash) {
+            var map = hashToOp;
+            if (map == null) {
+                map = build();
+                hashToOp = map;
+            }
+            return map.get(targetHash);
+        }
+
+        private static java.util.Map<Hash, MutOp> build() {
+            var pre = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE
+                .getPreloweredFunctions();
+            var m = new java.util.HashMap<Hash, MutOp>();
+            for (var e : pre.entrySet()) {
+                var fn = e.getValue();
+                var key = fn.getName() + "@" + KnownArithOps.basename(fn.getSourceFile());
+                var op = KEY_TO_OP.get(key);
+                if (op != null) m.put(e.getKey(), op);
+            }
+            return m;
         }
     }
 

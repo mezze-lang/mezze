@@ -1,0 +1,12 @@
+[package]
+name = "mut_loop"
+version = "0.1.0"
+
+[[app]]
+name = "mut_loop"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]
