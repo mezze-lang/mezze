@@ -4189,18 +4189,119 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     // MutOpKind constants — used by InlineMutOp1/2/3 and KnownMutOps.
     // The ordinal is baked into BDSL bytecode as a ConstantOperand so Graal
     // constant-folds through the switch during PE.
+    // ── MutInt ops ─────────────────────────────────────────────────
     static final int MUT_READ_INT     = 0;  // 1-arg: (n: MutableInt) → long
     static final int MUT_SIZE         = 1;  // 1-arg: (seq: MutableSeq) → long
     static final int MUT_INT_TO_MUT   = 2;  // 1-arg: (n: long) → MutableInt
     static final int MUT_SEQ_TO_MUT   = 3;  // 1-arg: (seq: MezzeSeq) → MutableSeq
     static final int MUT_SEQ_TO_IMMUT = 4;  // 1-arg: (seq: MutableSeq) → MezzeSeq
+    static final int MUT_INT_TO_IMMUT = 5;  // 1-arg: (n: MutableInt) → long
     static final int MUT_INCR         = 10; // 2-arg: (n: MutableInt, delta: long)
     static final int MUT_DECR         = 11; // 2-arg: (n: MutableInt, delta: long)
     static final int MUT_WRITE_INT    = 12; // 2-arg: (n: MutableInt, v: long)
     static final int MUT_GET          = 13; // 2-arg: (seq: MutableSeq, i: long) → Option
+    static final int MUT_MUL_INT      = 14; // 2-arg: (n: MutableInt, factor: long)
+    static final int MUT_DIV_INT      = 15; // 2-arg: (n: MutableInt, divisor: long)
+    static final int MUT_MOD_INT      = 16; // 2-arg: (n: MutableInt, divisor: long)
     static final int MUT_SET          = 20; // 3-arg: (seq: MutableSeq, i: long, v: Object) → Bool
     static final int MUT_SWAP         = 21; // 3-arg: (seq: MutableSeq, i: long, j: long) → Bool
+    static final int MUT_CAS_INT      = 22; // 3-arg: (n: MutableInt, expected: long, new: long) → boolean
     static final int MUT_FOR_RANGE    = 30; // 4-arg: (start: long, end: long, step: long, body: MezzeFunction)
+
+    // ── MutFloat ops ────────────────────────────────────────────────
+    static final int MUT_READ_FLOAT     = 40; // 1-arg: (f: MutableFloat) → double
+    static final int MUT_FLOAT_TO_MUT   = 41; // 1-arg: (v: double) → MutableFloat
+    static final int MUT_FLOAT_TO_IMMUT = 42; // 1-arg: (f: MutableFloat) → double
+    static final int MUT_WRITE_FLOAT    = 43; // 2-arg: (f: MutableFloat, v: double)
+    static final int MUT_ADD_FLOAT      = 44; // 2-arg: (f: MutableFloat, delta: double)
+    static final int MUT_SUB_FLOAT      = 45; // 2-arg: (f: MutableFloat, delta: double)
+    static final int MUT_MUL_FLOAT      = 46; // 2-arg: (f: MutableFloat, factor: double)
+    static final int MUT_DIV_FLOAT      = 47; // 2-arg: (f: MutableFloat, divisor: double)
+
+    // ── MutBool ops ─────────────────────────────────────────────────
+    static final int MUT_READ_BOOL     = 50; // 1-arg: (b: MutableBool) → boolean
+    static final int MUT_TOGGLE_BOOL   = 51; // 1-arg: (b: MutableBool) → {}
+    static final int MUT_BOOL_TO_MUT   = 52; // 1-arg: (v: boolean) → MutableBool
+    static final int MUT_BOOL_TO_IMMUT = 53; // 1-arg: (b: MutableBool) → boolean
+    static final int MUT_WRITE_BOOL    = 54; // 2-arg: (b: MutableBool, v: boolean)
+    static final int MUT_SET_TRUE      = 55; // 1-arg: (b: MutableBool) → {}
+    static final int MUT_SET_FALSE     = 56; // 1-arg: (b: MutableBool) → {}
+
+    // ── MutChar ops ─────────────────────────────────────────────────
+    static final int MUT_READ_CHAR     = 60; // 1-arg: (c: MutableChar) → long
+    static final int MUT_CHAR_TO_MUT   = 61; // 1-arg: (v: long) → MutableChar
+    static final int MUT_CHAR_TO_IMMUT = 62; // 1-arg: (c: MutableChar) → long
+    static final int MUT_WRITE_CHAR    = 63; // 2-arg: (c: MutableChar, v: long)
+    static final int MUT_CHAR_TO_UPPER = 64; // 1-arg: (c: MutableChar) → {}
+    static final int MUT_CHAR_TO_LOWER = 65; // 1-arg: (c: MutableChar) → {}
+    static final int MUT_CHAR_IS_DIGIT      = 66; // 1-arg: → boolean
+    static final int MUT_CHAR_IS_LETTER     = 67; // 1-arg: → boolean
+    static final int MUT_CHAR_IS_WHITESPACE = 68; // 1-arg: → boolean
+
+    // ── MutString ops ───────────────────────────────────────────────
+    static final int MUT_STRING_LEN      = 70; // 1-arg: → long
+    static final int MUT_STRING_IS_EMPTY = 71; // 1-arg: → boolean
+    static final int MUT_STRING_READ     = 72; // 1-arg: → Object (String)
+    static final int MUT_STRING_CLEAR    = 73; // 1-arg: → {}
+    static final int MUT_STRING_REVERSE  = 74; // 1-arg: → {}
+    static final int MUT_STRING_TO_MUT   = 75; // 1-arg: (s: String) → MutableString
+    static final int MUT_STRING_TO_IMMUT = 76; // 1-arg: (ms: MutableString) → String
+    static final int MUT_STRING_WRITE    = 77; // 2-arg: (ms, s) → {}
+    static final int MUT_STRING_APPEND   = 78; // 2-arg: (ms, s) → {}
+    static final int MUT_STRING_PREPEND  = 79; // 2-arg: (ms, s) → {}
+
+    // ── MutMap ops ──────────────────────────────────────────────────
+    static final int MUT_MAP_SIZE     = 80; // 1-arg: → long
+    static final int MUT_MAP_CLEAR    = 81; // 1-arg: → {}
+    static final int MUT_MAP_TO_MUT   = 82; // 1-arg: (m: MezzeMap) → MutableMap
+    static final int MUT_MAP_TO_IMMUT = 83; // 1-arg: (mm: MutableMap) → MezzeMap
+    static final int MUT_MAP_CONTAINS = 84; // 2-arg: (mm, key) → boolean
+    static final int MUT_MAP_GET      = 85; // 2-arg: (mm, key) → Option
+    static final int MUT_MAP_REMOVE   = 86; // 2-arg: (mm, key) → {}
+    static final int MUT_MAP_PUT      = 87; // 3-arg: (mm, key, val) → {}
+
+    // ── MutSet ops ──────────────────────────────────────────────────
+    static final int MUT_SET_SIZE       = 90; // 1-arg: → long
+    static final int MUT_SET_CLEAR      = 91; // 1-arg: → {}
+    static final int MUT_CSET_TO_MUT    = 92; // 1-arg: (s: MezzeSet) → MutableSet
+    static final int MUT_CSET_TO_IMMUT  = 93; // 1-arg: (ms: MutableSet) → MezzeSet
+    static final int MUT_SET_CONTAINS   = 94; // 2-arg: (ms, elem) → boolean
+    static final int MUT_SET_ADD        = 95; // 2-arg: (ms, elem) → {}
+    static final int MUT_SET_REMOVE     = 96; // 2-arg: (ms, elem) → {}
+    static final int MUT_SET_TOGGLE     = 97; // 2-arg: (ms, elem) → boolean
+
+    // ── MutBytes ops ────────────────────────────────────────────────
+    static final int MUT_BYTES_LEN      = 100; // 1-arg: → long
+    static final int MUT_BYTES_CLEAR    = 101; // 1-arg: → {}
+    static final int MUT_BYTES_REVERSE  = 102; // 1-arg: → {}
+    static final int MUT_BYTES_TO_MUT   = 103; // 1-arg: (b: Bytes) → MutableBytes
+    static final int MUT_BYTES_TO_IMMUT = 104; // 1-arg: (mb: MutableBytes) → Bytes
+    static final int MUT_BYTES_GET      = 105; // 2-arg: (mb, i: long) → Option
+    static final int MUT_BYTES_SET      = 106; // 3-arg: (mb, i: long, v: long) → boolean
+    static final int MUT_BYTES_SWAP     = 107; // 3-arg: (mb, i: long, j: long) → boolean
+
+    // ── MutDeque ops ────────────────────────────────────────────────
+    static final int MUT_DEQUE_SIZE      = 110; // 1-arg: → long
+    static final int MUT_DEQUE_IS_EMPTY  = 111; // 1-arg: → boolean
+    static final int MUT_DEQUE_CLEAR     = 112; // 1-arg: → {}
+    static final int MUT_DEQUE_REVERSE   = 113; // 1-arg: → {}
+    static final int MUT_DEQUE_POP_FRONT = 114; // 1-arg: → Option
+    static final int MUT_DEQUE_POP_BACK  = 115; // 1-arg: → Option
+    static final int MUT_DEQUE_PEEK_FRONT = 116; // 1-arg: → Option
+    static final int MUT_DEQUE_PEEK_BACK  = 117; // 1-arg: → Option
+    static final int MUT_DEQUE_TO_MUT    = 118; // 1-arg: → MutableDeque
+    static final int MUT_DEQUE_TO_IMMUT  = 119; // 1-arg: → MezzeDeque
+    static final int MUT_DEQUE_PUSH_FRONT = 120; // 2-arg: (md, elem) → {}
+    static final int MUT_DEQUE_PUSH_BACK  = 121; // 2-arg: (md, elem) → {}
+
+    // ── MutSeq bulk ops ─────────────────────────────────────────────
+    static final int MUT_SEQ_SORT      = 130; // 1-arg: → {}
+    static final int MUT_SEQ_REVERSE   = 131; // 1-arg: → {}
+    static final int MUT_SEQ_CLEAR     = 132; // 1-arg: → {}
+    static final int MUT_SEQ_PUSH      = 133; // 2-arg: (ms, elem) → {}
+    static final int MUT_SEQ_POP       = 134; // 1-arg: → Option
+    static final int MUT_SEQ_INSERT    = 135; // 3-arg: (ms, i, elem) → boolean
+    static final int MUT_SEQ_REMOVE    = 136; // 2-arg: (ms, i) → Option
 
     /**
      * Direct native emission for 1-argument Mut stdlib functions.
@@ -4220,12 +4321,81 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static Object doOp(int opKind, Hash effectHash, Hash fnHash,
                 Object arg0) {
             return switch (opKind) {
+                // MutInt
                 case MUT_READ_INT     -> ((com.mezze.interpreter.values.MutableInt) arg0).get();
-                case MUT_SIZE         -> (long) ((com.mezze.interpreter.values.MutableSeq) arg0).size();
                 case MUT_INT_TO_MUT   -> new com.mezze.interpreter.values.MutableInt((long) arg0);
+                case MUT_INT_TO_IMMUT -> ((com.mezze.interpreter.values.MutableInt) arg0).get();
+                // MutSeq
+                case MUT_SIZE         -> (long) ((com.mezze.interpreter.values.MutableSeq) arg0).size();
                 case MUT_SEQ_TO_MUT   -> com.mezze.interpreter.values.MutableSeq
                                             .fromImmutable((MezzeSeq<?>) arg0);
                 case MUT_SEQ_TO_IMMUT -> ((com.mezze.interpreter.values.MutableSeq) arg0).toImmutable();
+                case MUT_SEQ_SORT     -> { ((com.mezze.interpreter.values.MutableSeq) arg0).sort(); yield MezzeRecord.empty(); }
+                case MUT_SEQ_REVERSE  -> { ((com.mezze.interpreter.values.MutableSeq) arg0).reverse(); yield MezzeRecord.empty(); }
+                case MUT_SEQ_CLEAR    -> { ((com.mezze.interpreter.values.MutableSeq) arg0).clear(); yield MezzeRecord.empty(); }
+                case MUT_SEQ_POP      -> { Object v = ((com.mezze.interpreter.values.MutableSeq) arg0).pop(); yield v != null ? MezzeVariant.some(v) : MezzeVariant.none(); }
+                // MutFloat
+                case MUT_READ_FLOAT     -> ((com.mezze.interpreter.values.MutableFloat) arg0).get();
+                case MUT_FLOAT_TO_MUT   -> new com.mezze.interpreter.values.MutableFloat((double) arg0);
+                case MUT_FLOAT_TO_IMMUT -> ((com.mezze.interpreter.values.MutableFloat) arg0).get();
+                // MutBool
+                case MUT_READ_BOOL     -> ((com.mezze.interpreter.values.MutableBool) arg0).get();
+                case MUT_TOGGLE_BOOL   -> { ((com.mezze.interpreter.values.MutableBool) arg0).toggle(); yield MezzeRecord.empty(); }
+                case MUT_BOOL_TO_MUT   -> new com.mezze.interpreter.values.MutableBool((boolean) arg0);
+                case MUT_BOOL_TO_IMMUT -> ((com.mezze.interpreter.values.MutableBool) arg0).get();
+                case MUT_SET_TRUE      -> { ((com.mezze.interpreter.values.MutableBool) arg0).set(true); yield MezzeRecord.empty(); }
+                case MUT_SET_FALSE     -> { ((com.mezze.interpreter.values.MutableBool) arg0).set(false); yield MezzeRecord.empty(); }
+                // MutChar — Mezze Char is a single-character String at runtime
+                case MUT_READ_CHAR     -> String.valueOf(((com.mezze.interpreter.values.MutableChar) arg0).get());
+                case MUT_CHAR_TO_MUT   -> new com.mezze.interpreter.values.MutableChar(((String) arg0).charAt(0));
+                case MUT_CHAR_TO_IMMUT -> String.valueOf(((com.mezze.interpreter.values.MutableChar) arg0).get());
+                case MUT_CHAR_TO_UPPER -> { ((com.mezze.interpreter.values.MutableChar) arg0).toUpper(); yield MezzeRecord.empty(); }
+                case MUT_CHAR_TO_LOWER -> { ((com.mezze.interpreter.values.MutableChar) arg0).toLower(); yield MezzeRecord.empty(); }
+                case MUT_CHAR_IS_DIGIT      -> ((com.mezze.interpreter.values.MutableChar) arg0).isDigit();
+                case MUT_CHAR_IS_LETTER     -> ((com.mezze.interpreter.values.MutableChar) arg0).isLetter();
+                case MUT_CHAR_IS_WHITESPACE -> ((com.mezze.interpreter.values.MutableChar) arg0).isWhitespace();
+                // MutString
+                case MUT_STRING_LEN      -> (long) ((com.mezze.interpreter.values.MutableString) arg0).length();
+                case MUT_STRING_IS_EMPTY -> ((com.mezze.interpreter.values.MutableString) arg0).isEmpty();
+                case MUT_STRING_READ     -> ((com.mezze.interpreter.values.MutableString) arg0).get();
+                case MUT_STRING_CLEAR    -> { ((com.mezze.interpreter.values.MutableString) arg0).clear(); yield MezzeRecord.empty(); }
+                case MUT_STRING_REVERSE  -> { ((com.mezze.interpreter.values.MutableString) arg0).reverse(); yield MezzeRecord.empty(); }
+                case MUT_STRING_TO_MUT   -> new com.mezze.interpreter.values.MutableString((String) arg0);
+                case MUT_STRING_TO_IMMUT -> ((com.mezze.interpreter.values.MutableString) arg0).get();
+                // MutMap
+                case MUT_MAP_SIZE     -> (long) ((com.mezze.interpreter.values.MutableMap) arg0).size();
+                case MUT_MAP_CLEAR    -> { ((com.mezze.interpreter.values.MutableMap) arg0).clear(); yield MezzeRecord.empty(); }
+                case MUT_MAP_TO_MUT   -> com.mezze.interpreter.values.MutableMap.fromImmutable((com.mezze.datastructures.map.MezzeMap<?,?>) arg0);
+                case MUT_MAP_TO_IMMUT -> ((com.mezze.interpreter.values.MutableMap) arg0).toImmutable();
+                // MutSet
+                case MUT_SET_SIZE       -> (long) ((com.mezze.interpreter.values.MutableSet) arg0).size();
+                case MUT_SET_CLEAR      -> { ((com.mezze.interpreter.values.MutableSet) arg0).clear(); yield MezzeRecord.empty(); }
+                case MUT_CSET_TO_MUT    -> com.mezze.interpreter.values.MutableSet.fromImmutable((com.mezze.datastructures.set.MezzeSet<?>) arg0);
+                case MUT_CSET_TO_IMMUT  -> ((com.mezze.interpreter.values.MutableSet) arg0).toImmutable();
+                // MutBytes
+                case MUT_BYTES_LEN     -> (long) ((com.mezze.interpreter.values.MutableBytes) arg0).length();
+                case MUT_BYTES_CLEAR   -> { ((com.mezze.interpreter.values.MutableBytes) arg0).clear(); yield MezzeRecord.empty(); }
+                case MUT_BYTES_REVERSE -> { ((com.mezze.interpreter.values.MutableBytes) arg0).reverse(); yield MezzeRecord.empty(); }
+                case MUT_BYTES_TO_MUT  -> {
+                    byte[] bytes;
+                    if (arg0 instanceof byte[] b) bytes = b;
+                    else if (arg0 instanceof com.mezze.datastructures.bytes.MezzeBytes mb) bytes = mb.getData();
+                    else if (arg0 instanceof com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes bnb) bytes = bnb.getData();
+                    else throw CompilerDirectives.shouldNotReachHere("bytes_to_mut: unexpected type " + arg0.getClass());
+                    yield com.mezze.interpreter.values.MutableBytes.fromImmutable(bytes);
+                }
+                case MUT_BYTES_TO_IMMUT -> ((com.mezze.interpreter.values.MutableBytes) arg0).toImmutable();
+                // MutDeque
+                case MUT_DEQUE_SIZE      -> (long) ((com.mezze.interpreter.values.MutableDeque) arg0).size();
+                case MUT_DEQUE_IS_EMPTY  -> ((com.mezze.interpreter.values.MutableDeque) arg0).isEmpty();
+                case MUT_DEQUE_CLEAR     -> { ((com.mezze.interpreter.values.MutableDeque) arg0).clear(); yield MezzeRecord.empty(); }
+                case MUT_DEQUE_REVERSE   -> { ((com.mezze.interpreter.values.MutableDeque) arg0).reverse(); yield MezzeRecord.empty(); }
+                case MUT_DEQUE_POP_FRONT -> { Object v = ((com.mezze.interpreter.values.MutableDeque) arg0).popFront(); yield v != null ? MezzeVariant.some(v) : MezzeVariant.none(); }
+                case MUT_DEQUE_POP_BACK  -> { Object v = ((com.mezze.interpreter.values.MutableDeque) arg0).popBack(); yield v != null ? MezzeVariant.some(v) : MezzeVariant.none(); }
+                case MUT_DEQUE_PEEK_FRONT -> { Object v = ((com.mezze.interpreter.values.MutableDeque) arg0).peekFront(); yield v != null ? MezzeVariant.some(v) : MezzeVariant.none(); }
+                case MUT_DEQUE_PEEK_BACK  -> { Object v = ((com.mezze.interpreter.values.MutableDeque) arg0).peekBack(); yield v != null ? MezzeVariant.some(v) : MezzeVariant.none(); }
+                case MUT_DEQUE_TO_MUT    -> com.mezze.interpreter.values.MutableDeque.fromImmutable((com.mezze.datastructures.deque.MezzeDeque<?>) arg0);
+                case MUT_DEQUE_TO_IMMUT  -> ((com.mezze.interpreter.values.MutableDeque) arg0).toImmutable();
                 default -> throw CompilerDirectives.shouldNotReachHere();
             };
         }
@@ -4265,6 +4435,386 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static Object doOp(Object mutInt, long delta) {
             ((com.mezze.interpreter.values.MutableInt) mutInt).add(delta);
             return MezzeRecord.empty();
+        }
+    }
+
+    /** decr — side effect, returns empty record. */
+    @Operation
+    public static final class MutDecr {
+        @Specialization
+        public static Object doOp(Object mutInt, long delta) {
+            ((com.mezze.interpreter.values.MutableInt) mutInt).subtract(delta);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** write_int — set MutableInt value, returns empty record. */
+    @Operation
+    public static final class MutWriteInt {
+        @Specialization
+        public static Object doOp(Object mutInt, long val) {
+            ((com.mezze.interpreter.values.MutableInt) mutInt).set(val);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** mul_int — multiply MutableInt, returns empty record. */
+    @Operation
+    public static final class MutMulInt {
+        @Specialization
+        public static Object doOp(Object mutInt, long factor) {
+            ((com.mezze.interpreter.values.MutableInt) mutInt).multiply(factor);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** div_int — integer divide MutableInt, returns empty record. */
+    @Operation
+    public static final class MutDivInt {
+        @Specialization
+        public static Object doOp(Object mutInt, long divisor) {
+            ((com.mezze.interpreter.values.MutableInt) mutInt).divide(divisor);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** mod_int — modulo MutableInt, returns empty record. */
+    @Operation
+    public static final class MutModInt {
+        @Specialization
+        public static Object doOp(Object mutInt, long divisor) {
+            ((com.mezze.interpreter.values.MutableInt) mutInt).mod(divisor);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** cas_int — compare-and-swap, returns boolean success. */
+    @Operation
+    public static final class MutCasInt {
+        @Specialization
+        public static boolean doOp(Object mutInt, long expected, long newValue) {
+            return ((com.mezze.interpreter.values.MutableInt) mutInt).compareAndSwap(expected, newValue);
+        }
+    }
+
+    // ── MutFloat typed operations ─────────────────────────────────
+
+    /** read_float — returns unboxed double. */
+    @Operation
+    public static final class MutReadFloat {
+        @Specialization
+        public static double doOp(Object mutFloat) {
+            return ((com.mezze.interpreter.values.MutableFloat) mutFloat).get();
+        }
+    }
+
+    /** Float mutation ops — ConstantOperand selects sub-op, typed double param. */
+    @Operation
+    @ConstantOperand(type = int.class) // sub-op: WRITE=0, ADD=1, SUB=2, MUL=3, DIV=4
+    public static final class MutFloatMutate {
+        @Specialization
+        public static Object doOp(int subOp, Object mutFloat, double val) {
+            var f = (com.mezze.interpreter.values.MutableFloat) mutFloat;
+            switch (subOp) {
+                case 0 -> f.set(val);
+                case 1 -> f.add(val);
+                case 2 -> f.subtract(val);
+                case 3 -> f.multiply(val);
+                case 4 -> f.divide(val);
+                default -> throw CompilerDirectives.shouldNotReachHere();
+            }
+            return MezzeRecord.empty();
+        }
+        static final int WRITE = 0, ADD = 1, SUB = 2, MUL = 3, DIV = 4;
+    }
+
+    // ── MutBool typed operations ──────────────────────────────────
+
+    /** read_bool — returns unboxed boolean. */
+    @Operation
+    public static final class MutReadBool {
+        @Specialization
+        public static boolean doOp(Object mutBool) {
+            return ((com.mezze.interpreter.values.MutableBool) mutBool).get();
+        }
+    }
+
+    /** write_bool — side effect, returns empty record. */
+    @Operation
+    public static final class MutWriteBool {
+        @Specialization
+        public static Object doOp(Object mutBool, Object val) {
+            ((com.mezze.interpreter.values.MutableBool) mutBool).set((boolean) val);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** toggle_bool — side effect, returns empty record. */
+    @Operation
+    public static final class MutToggleBool {
+        @Specialization
+        public static Object doOp(Object mutBool) {
+            ((com.mezze.interpreter.values.MutableBool) mutBool).toggle();
+            return MezzeRecord.empty();
+        }
+    }
+
+    // ── MutChar typed operations ──────────────────────────────────
+
+    /** read_char — Mezze Char is a single-character String at runtime. */
+    @Operation
+    public static final class MutReadChar {
+        @Specialization
+        public static Object doOp(Object mutChar) {
+            return String.valueOf(((com.mezze.interpreter.values.MutableChar) mutChar).get());
+        }
+    }
+
+    /** write_char — side effect, returns empty record. Mezze Char is String. */
+    @Operation
+    public static final class MutWriteChar {
+        @Specialization
+        public static Object doOp(Object mutChar, Object val) {
+            ((com.mezze.interpreter.values.MutableChar) mutChar).set(((String) val).charAt(0));
+            return MezzeRecord.empty();
+        }
+    }
+
+    // ── MutMap typed operations ───────────────────────────────────
+
+    /** map_size — returns unboxed long. */
+    @Operation
+    public static final class MutMapSize {
+        @Specialization
+        public static long doOp(Object mutMap) {
+            return (long) ((com.mezze.interpreter.values.MutableMap) mutMap).size();
+        }
+    }
+
+    /** map_contains — returns unboxed boolean. */
+    @Operation
+    public static final class MutMapContains {
+        @Specialization
+        public static boolean doOp(Object mutMap, Object key) {
+            return ((com.mezze.interpreter.values.MutableMap) mutMap).containsKey(key);
+        }
+    }
+
+    /** map_get — returns Option (Some{val}/None). */
+    @Operation
+    public static final class MutMapGet {
+        @Specialization
+        public static Object doOp(Object mutMap, Object key) {
+            Object val = ((com.mezze.interpreter.values.MutableMap) mutMap).get(key);
+            return val != null ? MezzeVariant.some(val) : MezzeVariant.none();
+        }
+    }
+
+    /** map_put — side effect, returns empty record. */
+    @Operation
+    public static final class MutMapPut {
+        @Specialization
+        public static Object doOp(Object mutMap, Object key, Object val) {
+            ((com.mezze.interpreter.values.MutableMap) mutMap).put(key, val);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** map_remove — side effect, returns empty record. */
+    @Operation
+    public static final class MutMapRemove {
+        @Specialization
+        public static Object doOp(Object mutMap, Object key) {
+            ((com.mezze.interpreter.values.MutableMap) mutMap).remove(key);
+            return MezzeRecord.empty();
+        }
+    }
+
+    // ── MutSet typed operations ───────────────────────────────────
+
+    /** set_size — returns unboxed long. */
+    @Operation
+    public static final class MutCSetSize {
+        @Specialization
+        public static long doOp(Object mutSet) {
+            return (long) ((com.mezze.interpreter.values.MutableSet) mutSet).size();
+        }
+    }
+
+    /** set_contains — returns unboxed boolean. */
+    @Operation
+    public static final class MutCSetContains {
+        @Specialization
+        public static boolean doOp(Object mutSet, Object elem) {
+            return ((com.mezze.interpreter.values.MutableSet) mutSet).contains(elem);
+        }
+    }
+
+    /** set_add — side effect, returns empty record. */
+    @Operation
+    public static final class MutCSetAdd {
+        @Specialization
+        public static Object doOp(Object mutSet, Object elem) {
+            ((com.mezze.interpreter.values.MutableSet) mutSet).add(elem);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** set_remove — side effect, returns empty record. */
+    @Operation
+    public static final class MutCSetRemove {
+        @Specialization
+        public static Object doOp(Object mutSet, Object elem) {
+            ((com.mezze.interpreter.values.MutableSet) mutSet).remove(elem);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** set_toggle — add if absent, remove if present, returns boolean (was added). */
+    @Operation
+    public static final class MutCSetToggle {
+        @Specialization
+        public static boolean doOp(Object mutSet, Object elem) {
+            return ((com.mezze.interpreter.values.MutableSet) mutSet).toggle(elem);
+        }
+    }
+
+    // ── MutBytes typed operations ─────────────────────────────────
+
+    /** bytes_len — returns unboxed long. */
+    @Operation
+    public static final class MutBytesLen {
+        @Specialization
+        public static long doOp(Object mutBytes) {
+            return (long) ((com.mezze.interpreter.values.MutableBytes) mutBytes).length();
+        }
+    }
+
+    /** bytes_get — returns Option (Some{val}/None). */
+    @Operation
+    public static final class MutBytesGet {
+        @Specialization
+        public static Object doOp(Object mutBytes, long i) {
+            int val = ((com.mezze.interpreter.values.MutableBytes) mutBytes).getSafe((int) i);
+            return val >= 0 ? MezzeVariant.some((long) val) : MezzeVariant.none();
+        }
+    }
+
+    /** bytes_set — returns boolean success. */
+    @Operation
+    public static final class MutBytesSet {
+        @Specialization
+        public static boolean doOp(Object mutBytes, long i, long val) {
+            return ((com.mezze.interpreter.values.MutableBytes) mutBytes).setSafe((int) i, (int) val);
+        }
+    }
+
+    /** bytes_swap — returns boolean success. */
+    @Operation
+    public static final class MutBytesSwap {
+        @Specialization
+        public static boolean doOp(Object mutBytes, long i, long j) {
+            return ((com.mezze.interpreter.values.MutableBytes) mutBytes).swap((int) i, (int) j);
+        }
+    }
+
+    // ── MutDeque typed operations ─────────────────────────────────
+
+    /** deque_size — returns unboxed long. */
+    @Operation
+    public static final class MutDequeSize {
+        @Specialization
+        public static long doOp(Object mutDeque) {
+            return (long) ((com.mezze.interpreter.values.MutableDeque) mutDeque).size();
+        }
+    }
+
+    /** deque_is_empty — returns unboxed boolean. */
+    @Operation
+    public static final class MutDequeIsEmpty {
+        @Specialization
+        public static boolean doOp(Object mutDeque) {
+            return ((com.mezze.interpreter.values.MutableDeque) mutDeque).isEmpty();
+        }
+    }
+
+    /** deque_push_back — side effect, returns empty record. */
+    @Operation
+    public static final class MutDequePushBack {
+        @Specialization
+        public static Object doOp(Object mutDeque, Object elem) {
+            ((com.mezze.interpreter.values.MutableDeque) mutDeque).pushBack(elem);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** deque_push_front — side effect, returns empty record. */
+    @Operation
+    public static final class MutDequePushFront {
+        @Specialization
+        public static Object doOp(Object mutDeque, Object elem) {
+            ((com.mezze.interpreter.values.MutableDeque) mutDeque).pushFront(elem);
+            return MezzeRecord.empty();
+        }
+    }
+
+    /** deque_pop_back — returns Option. */
+    @Operation
+    public static final class MutDequePopBack {
+        @Specialization
+        public static Object doOp(Object mutDeque) {
+            Object val = ((com.mezze.interpreter.values.MutableDeque) mutDeque).popBack();
+            return val != null ? MezzeVariant.some(val) : MezzeVariant.none();
+        }
+    }
+
+    /** deque_pop_front — returns Option. */
+    @Operation
+    public static final class MutDequePopFront {
+        @Specialization
+        public static Object doOp(Object mutDeque) {
+            Object val = ((com.mezze.interpreter.values.MutableDeque) mutDeque).popFront();
+            return val != null ? MezzeVariant.some(val) : MezzeVariant.none();
+        }
+    }
+
+    /** deque_peek_front — returns Option. */
+    @Operation
+    public static final class MutDequePeekFront {
+        @Specialization
+        public static Object doOp(Object mutDeque) {
+            Object val = ((com.mezze.interpreter.values.MutableDeque) mutDeque).peekFront();
+            return val != null ? MezzeVariant.some(val) : MezzeVariant.none();
+        }
+    }
+
+    /** deque_peek_back — returns Option. */
+    @Operation
+    public static final class MutDequePeekBack {
+        @Specialization
+        public static Object doOp(Object mutDeque) {
+            Object val = ((com.mezze.interpreter.values.MutableDeque) mutDeque).peekBack();
+            return val != null ? MezzeVariant.some(val) : MezzeVariant.none();
+        }
+    }
+
+    // ── MutString typed operations ────────────────────────────────
+
+    /** string_len — returns unboxed long. */
+    @Operation
+    public static final class MutStringLen {
+        @Specialization
+        public static long doOp(Object mutStr) {
+            return (long) ((com.mezze.interpreter.values.MutableString) mutStr).length();
+        }
+    }
+
+    /** string_is_empty — returns unboxed boolean. */
+    @Operation
+    public static final class MutStringIsEmpty {
+        @Specialization
+        public static boolean doOp(Object mutStr) {
+            return ((com.mezze.interpreter.values.MutableString) mutStr).isEmpty();
         }
     }
 
@@ -4386,23 +4936,45 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static Object doOp(int opKind, Hash effectHash, Hash fnHash,
                 Object arg0, Object arg1) {
             return switch (opKind) {
-                case MUT_INCR -> {
-                    ((com.mezze.interpreter.values.MutableInt) arg0).add((long) arg1);
-                    yield MezzeRecord.empty();
-                }
-                case MUT_DECR -> {
-                    ((com.mezze.interpreter.values.MutableInt) arg0).subtract((long) arg1);
-                    yield MezzeRecord.empty();
-                }
-                case MUT_WRITE_INT -> {
-                    ((com.mezze.interpreter.values.MutableInt) arg0).set((long) arg1);
-                    yield MezzeRecord.empty();
-                }
-                case MUT_GET -> {
-                    Object val = ((com.mezze.interpreter.values.MutableSeq) arg0)
-                        .getSafe((int) (long) arg1);
-                    yield val != null ? MezzeVariant.some(val) : MezzeVariant.none();
-                }
+                // MutInt
+                case MUT_INCR     -> { ((com.mezze.interpreter.values.MutableInt) arg0).add((long) arg1); yield MezzeRecord.empty(); }
+                case MUT_DECR     -> { ((com.mezze.interpreter.values.MutableInt) arg0).subtract((long) arg1); yield MezzeRecord.empty(); }
+                case MUT_WRITE_INT -> { ((com.mezze.interpreter.values.MutableInt) arg0).set((long) arg1); yield MezzeRecord.empty(); }
+                case MUT_MUL_INT  -> { ((com.mezze.interpreter.values.MutableInt) arg0).multiply((long) arg1); yield MezzeRecord.empty(); }
+                case MUT_DIV_INT  -> { ((com.mezze.interpreter.values.MutableInt) arg0).divide((long) arg1); yield MezzeRecord.empty(); }
+                case MUT_MOD_INT  -> { ((com.mezze.interpreter.values.MutableInt) arg0).mod((long) arg1); yield MezzeRecord.empty(); }
+                // MutSeq
+                case MUT_GET      -> { Object v = ((com.mezze.interpreter.values.MutableSeq) arg0).getSafe((int) (long) arg1); yield v != null ? MezzeVariant.some(v) : MezzeVariant.none(); }
+                case MUT_SEQ_PUSH -> { ((com.mezze.interpreter.values.MutableSeq) arg0).push(arg1); yield MezzeRecord.empty(); }
+                case MUT_SEQ_REMOVE -> { Object v = ((com.mezze.interpreter.values.MutableSeq) arg0).remove((int) (long) arg1); yield v != null ? MezzeVariant.some(v) : MezzeVariant.none(); }
+                // MutFloat
+                case MUT_WRITE_FLOAT -> { ((com.mezze.interpreter.values.MutableFloat) arg0).set((double) arg1); yield MezzeRecord.empty(); }
+                case MUT_ADD_FLOAT   -> { ((com.mezze.interpreter.values.MutableFloat) arg0).add((double) arg1); yield MezzeRecord.empty(); }
+                case MUT_SUB_FLOAT   -> { ((com.mezze.interpreter.values.MutableFloat) arg0).subtract((double) arg1); yield MezzeRecord.empty(); }
+                case MUT_MUL_FLOAT   -> { ((com.mezze.interpreter.values.MutableFloat) arg0).multiply((double) arg1); yield MezzeRecord.empty(); }
+                case MUT_DIV_FLOAT   -> { ((com.mezze.interpreter.values.MutableFloat) arg0).divide((double) arg1); yield MezzeRecord.empty(); }
+                // MutBool
+                case MUT_WRITE_BOOL -> { ((com.mezze.interpreter.values.MutableBool) arg0).set((boolean) arg1); yield MezzeRecord.empty(); }
+                // MutChar — Mezze Char is a single-character String
+                case MUT_WRITE_CHAR -> { ((com.mezze.interpreter.values.MutableChar) arg0).set(((String) arg1).charAt(0)); yield MezzeRecord.empty(); }
+                // MutString
+                case MUT_STRING_WRITE   -> { ((com.mezze.interpreter.values.MutableString) arg0).set((String) arg1); yield MezzeRecord.empty(); }
+                case MUT_STRING_APPEND  -> { ((com.mezze.interpreter.values.MutableString) arg0).append((String) arg1); yield MezzeRecord.empty(); }
+                case MUT_STRING_PREPEND -> { ((com.mezze.interpreter.values.MutableString) arg0).prepend((String) arg1); yield MezzeRecord.empty(); }
+                // MutMap
+                case MUT_MAP_CONTAINS -> ((com.mezze.interpreter.values.MutableMap) arg0).containsKey(arg1);
+                case MUT_MAP_GET      -> { Object v = ((com.mezze.interpreter.values.MutableMap) arg0).get(arg1); yield v != null ? MezzeVariant.some(v) : MezzeVariant.none(); }
+                case MUT_MAP_REMOVE   -> { ((com.mezze.interpreter.values.MutableMap) arg0).remove(arg1); yield MezzeRecord.empty(); }
+                // MutSet
+                case MUT_SET_CONTAINS -> ((com.mezze.interpreter.values.MutableSet) arg0).contains(arg1);
+                case MUT_SET_ADD      -> { ((com.mezze.interpreter.values.MutableSet) arg0).add(arg1); yield MezzeRecord.empty(); }
+                case MUT_SET_REMOVE   -> { ((com.mezze.interpreter.values.MutableSet) arg0).remove(arg1); yield MezzeRecord.empty(); }
+                case MUT_SET_TOGGLE   -> ((com.mezze.interpreter.values.MutableSet) arg0).toggle(arg1);
+                // MutBytes
+                case MUT_BYTES_GET -> { int v = ((com.mezze.interpreter.values.MutableBytes) arg0).getSafe((int) (long) arg1); yield v >= 0 ? MezzeVariant.some((long) v) : MezzeVariant.none(); }
+                // MutDeque
+                case MUT_DEQUE_PUSH_FRONT -> { ((com.mezze.interpreter.values.MutableDeque) arg0).pushFront(arg1); yield MezzeRecord.empty(); }
+                case MUT_DEQUE_PUSH_BACK  -> { ((com.mezze.interpreter.values.MutableDeque) arg0).pushBack(arg1); yield MezzeRecord.empty(); }
                 default -> throw CompilerDirectives.shouldNotReachHere();
             };
         }
@@ -4423,6 +4995,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static Object doOp(int opKind, Hash effectHash, Hash fnHash,
                 Object arg0, Object arg1, Object arg2) {
             return switch (opKind) {
+                // MutSeq
                 case MUT_SET -> {
                     boolean ok = ((com.mezze.interpreter.values.MutableSeq) arg0)
                         .setSafe((int) (long) arg1, arg2);
@@ -4437,6 +5010,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                         yield false;
                     }
                 }
+                case MUT_SEQ_INSERT -> ((com.mezze.interpreter.values.MutableSeq) arg0).insert((int) (long) arg1, arg2);
+                // MutInt
+                case MUT_CAS_INT -> ((com.mezze.interpreter.values.MutableInt) arg0).compareAndSwap((long) arg1, (long) arg2);
+                // MutMap
+                case MUT_MAP_PUT -> { ((com.mezze.interpreter.values.MutableMap) arg0).put(arg1, arg2); yield MezzeRecord.empty(); }
+                // MutBytes
+                case MUT_BYTES_SET  -> ((com.mezze.interpreter.values.MutableBytes) arg0).setSafe((int) (long) arg1, (int) (long) arg2);
+                case MUT_BYTES_SWAP -> ((com.mezze.interpreter.values.MutableBytes) arg0).swap((int) (long) arg1, (int) (long) arg2);
                 default -> throw CompilerDirectives.shouldNotReachHere();
             };
         }
