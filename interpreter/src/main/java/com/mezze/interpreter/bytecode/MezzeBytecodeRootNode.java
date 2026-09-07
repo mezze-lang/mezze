@@ -1953,11 +1953,24 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             boolean hasTake = (config & (1 << 30)) != 0;
             if (hasTake) n = (int) Math.min(n, takeLimit);
 
+            boolean filterFirst = (config & (1 << 29)) != 0;
+
+            // ── SIMD fast path for SUM/COUNT/REDUCE on materialized long[] ──
+            // Gated off on SVM: Vector API not intrinsified → pure overhead.
+            if (!FlpSimd.ON_SVM
+                    && n >= FlpSimd.SIMD_THRESHOLD
+                    && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
+                        || sinkKind == FLP_SINK_REDUCE)
+                    && sinkPredCmpOp < 0) {
+                return FlpSimd.flpArraySimd(data, n, sinkKind,
+                        mapOp, mapOperand, selfMap,
+                        filterPreOp, filterPreRhs, filterCmpOp, filterCmpRhs,
+                        foldOp, foldInit, filterFirst);
+            }
+
             long acc = foldInit;
             boolean found = false;
             long foundVal = 0;
-
-            boolean filterFirst = (config & (1 << 29)) != 0;
 
             // Reduce sink: init from first post-filter/map element inside the loop.
             boolean reduceNeedInit = sinkKind == FLP_SINK_REDUCE;
@@ -2174,7 +2187,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @TruffleBoundary
-        private static Object flpResultReduceEmpty() {
+        static Object flpResultReduceEmpty() {
             MezzeVariant.TagRegistry reg = MezzeVariant.TagRegistry.getGlobal();
             int noneTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
                     .computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
@@ -2242,6 +2255,23 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // Take stage: clamp iteration count to takeLimit.
             boolean hasTake = (config & (1 << 30)) != 0;
             if (hasTake) n = (int) Math.min(n, takeLimit);
+
+            // ── SIMD fast path for SUM/COUNT/REDUCE sinks on large ranges ──
+            // Delegates to a @TruffleBoundary method that uses the Java
+            // Vector API (jdk.incubator.vector) to process VECTOR_LENGTH
+            // elements per cycle. The threshold matches VectorOps; below
+            // it, the PE-optimized scalar loop wins on overhead.
+            // Gated off on SVM: Vector API not intrinsified → pure overhead.
+            if (!FlpSimd.ON_SVM
+                    && n >= FlpSimd.SIMD_THRESHOLD
+                    && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
+                        || sinkKind == FLP_SINK_REDUCE)
+                    && sinkPredCmpOp < 0) {
+                return FlpSimd.flpRangeSimd(start, n, sinkKind,
+                        mapOp, mapOperand, selfMap,
+                        filterPreOp, filterPreRhs, filterCmpOp, filterCmpRhs,
+                        foldOp, foldInit, filterFirst);
+            }
 
             long acc = foldInit;
             boolean found = false;

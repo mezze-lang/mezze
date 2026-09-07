@@ -16,6 +16,14 @@ java {
     }
 }
 
+// Enable Vector API (incubator module) — FlpSimd uses it for SIMD-accelerated
+// FusedLongPipeline/FusedLongRangePipeline hot paths.
+tasks.withType<JavaCompile> {
+    options.compilerArgs.addAll(listOf(
+        "--add-modules=jdk.incubator.vector"
+    ))
+}
+
 dependencies {
     // Core project dependencies.
     //
