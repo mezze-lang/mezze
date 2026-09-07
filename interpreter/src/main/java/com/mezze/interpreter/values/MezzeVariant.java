@@ -270,11 +270,36 @@ public final class MezzeVariant implements TruffleObject {
     private final int payloadLength;
 
     /**
+     * Non-null when creation-side fusion was applied: the single payload
+     * field's name (e.g. "val" for {@code Ok { val = 42 }}).  The BDSL
+     * hot path reads the raw typed payload via
+     * {@link com.mezze.interpreter.bytecode.MezzeBytecodeRootNode.ReadVariantField};
+     * cold paths ({@link #getPayloadValue()}, tests, native consumers)
+     * lazily materialize a wrapping {@link MezzeRecord} so the external
+     * representation stays backward-compatible.
+     */
+    @CompilationFinal
+    private final String fusedFieldName;
+
+    /** Lazily materialized MezzeRecord for fused single-field variants. */
+    private volatile MezzeRecord materializedRecord;
+
+    /**
+     * Whether this variant was created through the single-field fusion
+     * path ({@code MakeVariantSingleFieldPayload}).  The raw payload
+     * stores the field value directly, NOT a wrapping MezzeRecord.
+     */
+    public boolean isFused() {
+        return fusedFieldName != null;
+    }
+
+    /**
      * Private constructor - use factory methods for proper specialization.
      */
     private MezzeVariant(TagRegistry registry, int tag, PayloadType payloadType,
                          Object[] payload, Object singleValue, long longValue,
-                         double doubleValue, int payloadLength) {
+                         double doubleValue, int payloadLength,
+                         String fusedFieldName) {
         this.registry = registry;
         this.tag = tag;
         this.payloadType = payloadType;
@@ -283,6 +308,7 @@ public final class MezzeVariant implements TruffleObject {
         this.longValue = longValue;
         this.doubleValue = doubleValue;
         this.payloadLength = payloadLength;
+        this.fusedFieldName = fusedFieldName;
     }
 
 
@@ -294,6 +320,7 @@ public final class MezzeVariant implements TruffleObject {
         this.tag = tag;
         this.longValue = 0;
         this.doubleValue = 0.0;
+        this.fusedFieldName = null;
         if (payload == null || payload.length == 0) {
             this.payloadType = PayloadType.NONE;
             this.payload = EMPTY_PAYLOAD;
@@ -318,7 +345,7 @@ public final class MezzeVariant implements TruffleObject {
      */
     public static MezzeVariant noPayload(TagRegistry registry, int tag) {
         return new MezzeVariant(registry, tag, PayloadType.NONE,
-            EMPTY_PAYLOAD, NO_SINGLE_VALUE, 0, 0.0, 0);
+            EMPTY_PAYLOAD, NO_SINGLE_VALUE, 0, 0.0, 0, null);
     }
 
     /**
@@ -327,7 +354,7 @@ public final class MezzeVariant implements TruffleObject {
      */
     public static MezzeVariant singlePayload(TagRegistry registry, int tag, Object value) {
         return new MezzeVariant(registry, tag, PayloadType.OBJECT,
-            EMPTY_PAYLOAD, value, 0, 0.0, 1);
+            EMPTY_PAYLOAD, value, 0, 0.0, 1, null);
     }
 
     /**
@@ -336,7 +363,7 @@ public final class MezzeVariant implements TruffleObject {
      */
     public static MezzeVariant singleLongPayload(TagRegistry registry, int tag, long value) {
         return new MezzeVariant(registry, tag, PayloadType.LONG,
-            EMPTY_PAYLOAD, NO_SINGLE_VALUE, value, 0.0, 1);
+            EMPTY_PAYLOAD, NO_SINGLE_VALUE, value, 0.0, 1, null);
     }
 
     /**
@@ -345,7 +372,31 @@ public final class MezzeVariant implements TruffleObject {
      */
     public static MezzeVariant singleDoublePayload(TagRegistry registry, int tag, double value) {
         return new MezzeVariant(registry, tag, PayloadType.DOUBLE,
-            EMPTY_PAYLOAD, NO_SINGLE_VALUE, 0, value, 1);
+            EMPTY_PAYLOAD, NO_SINGLE_VALUE, 0, value, 1, null);
+    }
+
+    // ── Fused single-field variants ──────────────────────────────
+    // Creation-side fusion: the compiler skips MakeRecord for 1-field
+    // variant payloads and stores the raw value directly.  These
+    // factories record the original field name so getPayloadValue()
+    // can lazily materialize the MezzeRecord wrapper for cold paths.
+
+    public static MezzeVariant singleLongPayloadFused(TagRegistry registry, int tag,
+                                                      long value, String fieldName) {
+        return new MezzeVariant(registry, tag, PayloadType.LONG,
+            EMPTY_PAYLOAD, NO_SINGLE_VALUE, value, 0.0, 1, fieldName);
+    }
+
+    public static MezzeVariant singleDoublePayloadFused(TagRegistry registry, int tag,
+                                                        double value, String fieldName) {
+        return new MezzeVariant(registry, tag, PayloadType.DOUBLE,
+            EMPTY_PAYLOAD, NO_SINGLE_VALUE, 0, value, 1, fieldName);
+    }
+
+    public static MezzeVariant singlePayloadFused(TagRegistry registry, int tag,
+                                                  Object value, String fieldName) {
+        return new MezzeVariant(registry, tag, PayloadType.OBJECT,
+            EMPTY_PAYLOAD, value, 0, 0.0, 1, fieldName);
     }
 
     /**
@@ -359,7 +410,7 @@ public final class MezzeVariant implements TruffleObject {
             return singlePayload(registry, tag, values[0]);
         }
         return new MezzeVariant(registry, tag, PayloadType.MULTI,
-            values, NO_SINGLE_VALUE, 0, 0.0, values.length);
+            values, NO_SINGLE_VALUE, 0, 0.0, values.length, null);
     }
 
     // ==========================================
@@ -433,11 +484,42 @@ public final class MezzeVariant implements TruffleObject {
         if (isNone()) {
             return null;
         }
-        Object payload = getPayloadValue();
+        // Use getRawPayloadValue to bypass lazy materialization —
+        // we handle both fused and non-fused payloads here.
+        Object payload = getRawPayloadValue();
         if (payload instanceof MezzeRecord record) {
-            return record.getField("val");
+            Object val = record.getField("val");
+            if (val != null) return val;
+            // Fused: wrapper eliminated, record IS the value
+            return record;
         }
         // Fallback for direct value storage
+        return payload;
+    }
+
+    /**
+     * Get a named field from this variant's payload, handling both:
+     * <ul>
+     *   <li>Record-wrapped payloads (legacy): unwrap MezzeRecord, read field</li>
+     *   <li>Raw payloads (optimized single-field variants): return the raw
+     *       value directly — the field name is ignored because there's only
+     *       one value to return</li>
+     * </ul>
+     * This is the preferred accessor for runtime consumers that read a
+     * specific field from a variant's payload.  Callers that previously
+     * did {@code (MezzeRecord) v.getPayloadValue()} should migrate here.
+     */
+    public Object getPayloadFieldByName(String fieldName) {
+        // Use getRawPayloadValue() to bypass lazy materialization —
+        // we handle both fused and non-fused payloads here.
+        Object payload = getRawPayloadValue();
+        if (payload instanceof MezzeRecord record) {
+            Object val = record.getField(fieldName);
+            if (val != null) return val;
+            // Fused path: wrapper was eliminated, payload IS the value
+            return record;
+        }
+        // Raw payload (fused single-field variant) — the value IS the field
         return payload;
     }
 
@@ -507,9 +589,26 @@ public final class MezzeVariant implements TruffleObject {
 
     /**
      * Get the single payload value (for single-payload variants).
-     * OPTIMIZED: Direct field access with typed storage.
+     * <p>
+     * For fused single-field variants (creation-side fusion), this lazily
+     * materializes a wrapping {@link MezzeRecord} so callers that expect
+     * a record payload see the same shape as pre-fusion code.  The BDSL
+     * hot path bypasses this via {@code ReadVariantField} which reads the
+     * typed payload directly.
      */
     public Object getPayloadValue() {
+        if (fusedFieldName != null) {
+            return getMaterializedRecord();
+        }
+        return getRawPayloadValue();
+    }
+
+    /**
+     * Raw payload access — NO lazy materialization.  Used by BDSL
+     * operations ({@code ReadVariantField}, {@code UnwrapSinglePayload})
+     * that handle typed payloads directly.
+     */
+    public Object getRawPayloadValue() {
         return switch (payloadType) {
             case NONE -> null;
             case LONG -> longValue;
@@ -517,6 +616,27 @@ public final class MezzeVariant implements TruffleObject {
             case OBJECT -> singleValue;
             case MULTI -> payload[0];
         };
+    }
+
+    /**
+     * Lazy materialization for fused single-field variants.
+     * Thread-safe via double-checked locking on volatile field.
+     */
+    private MezzeRecord getMaterializedRecord() {
+        MezzeRecord rec = materializedRecord;
+        if (rec != null) return rec;
+        Object raw = getRawPayloadValue();
+        if (raw instanceof MezzeRecord r) {
+            // Payload is already a record (e.g. Wrapper { data = {x,y} })
+            // — wrap it in a 1-field record with the fused field name.
+            rec = MezzeRecord.fromFields(
+                    new String[]{fusedFieldName}, new Object[]{r});
+        } else {
+            rec = MezzeRecord.fromFields(
+                    new String[]{fusedFieldName}, new Object[]{raw});
+        }
+        materializedRecord = rec;
+        return rec;
     }
 
     /**

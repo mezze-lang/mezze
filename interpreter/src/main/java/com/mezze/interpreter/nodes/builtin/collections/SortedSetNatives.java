@@ -532,11 +532,7 @@ public final class SortedSetNatives {
         for (Object elem : set) {
             Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
             if (mapped instanceof MezzeVariant v && v.isSome()) {
-                // Some wraps value in { val = value }, so extract it
-                Object payload = v.getPayloadValue();
-                if (payload instanceof MezzeRecord rec) {
-                    result = result.addObject(rec.getField("val"));
-                }
+                result = result.addObject(v.getPayloadFieldByName("val"));
             }
         }
         return result;
@@ -553,10 +549,7 @@ public final class SortedSetNatives {
         for (Object elem : set) {
             Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
             if (mapped instanceof MezzeVariant v && v.isSome()) {
-                Object payload = v.getPayloadValue();
-                if (payload instanceof MezzeRecord rec) {
-                    result.add(rec.getField("val"));
-                }
+                result.add(v.getPayloadFieldByName("val"));
             }
         }
         return result.toArray();
@@ -572,10 +565,7 @@ public final class SortedSetNatives {
         for (Object elem : set) {
             Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
             if (mapped instanceof MezzeVariant v && v.isSome()) {
-                Object payload = v.getPayloadValue();
-                if (payload instanceof MezzeRecord rec) {
-                    result.add(rec.getField("val"));
-                }
+                result.add(v.getPayloadFieldByName("val"));
             }
         }
         return MezzeList.of(result.toArray());

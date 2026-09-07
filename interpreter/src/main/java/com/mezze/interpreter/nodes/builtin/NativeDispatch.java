@@ -2381,7 +2381,9 @@ public final class NativeDispatch extends MezzeNode {
             if (v.getConstructorName().equals(com.mezze.language.ast.BuiltinTypes.NIL)) {
                 break;
             } else if (v.getConstructorName().equals(com.mezze.language.ast.BuiltinTypes.CONS)) {
-                MezzeRecord payload = (MezzeRecord) v.getPayloadValue();
+                // Cons always has 2 fields (head, tail) → always MezzeRecord.
+                Object pv = v.getPayloadValue();
+                if (!(pv instanceof MezzeRecord payload)) break;
                 elements.add(payload.getField("head"));
                 current = payload.getField("tail");
             } else {
@@ -4352,23 +4354,14 @@ public final class NativeDispatch extends MezzeNode {
             return makeDecodeError("Expected Json variant");
         }
         String tag = jv.getConstructorName();
-        Object payload = jv.getPayloadValue();
-
-        if (payload instanceof MezzeRecord rec) {
-            return switch (tag) {
-                case "JString", "JInt", "JFloat", "JBool" -> rec.getField("val");
-                case "JNull" -> {
-                    int noneTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("None");
-                    yield MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), noneTag);
-                }
-                default -> makeDecodeError("Unsupported Json type: " + tag);
-            };
-        }
-        if ("JNull".equals(tag)) {
-            int noneTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("None");
-            return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), noneTag);
-        }
-        return makeDecodeError("Cannot decode Json type: " + tag);
+        return switch (tag) {
+            case "JString", "JInt", "JFloat", "JBool" -> jv.getPayloadFieldByName("val");
+            case "JNull" -> {
+                int noneTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("None");
+                yield MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), noneTag);
+            }
+            default -> makeDecodeError("Unsupported Json type: " + tag);
+        };
     }
 
     /**

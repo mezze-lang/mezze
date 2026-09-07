@@ -1558,7 +1558,7 @@ public final class SeqNatives {
         if (var.isNone()) {
             return var;
         }
-        double v = (Double) ((MezzeRecord) var.getPayloadValue()).getField("val");
+        double v = (Double) var.getPayloadFieldByName("val");
         return MezzeVariant.some(Math.sqrt(v));
     }
 

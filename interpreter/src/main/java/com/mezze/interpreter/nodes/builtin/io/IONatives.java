@@ -887,12 +887,9 @@ public final class IONatives {
         if (reqTimeoutObj instanceof Long l) {
             timeoutMs = l.intValue();
         } else if (reqTimeoutObj instanceof MezzeVariant v && v.isSome()) {
-            Object payload = v.getPayloadValue();
-            if (payload instanceof MezzeRecord pr) {
-                Object val = getField(pr, "val");
-                if (val instanceof Long l) {
-                    timeoutMs = l.intValue();
-                }
+            Object val = v.getPayloadFieldByName("val");
+            if (val instanceof Long l) {
+                timeoutMs = l.intValue();
             }
         }
 

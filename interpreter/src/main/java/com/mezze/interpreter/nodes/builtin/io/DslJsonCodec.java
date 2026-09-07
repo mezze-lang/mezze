@@ -280,38 +280,32 @@ public final class DslJsonCodec {
             case "JNull" -> writer.writeNull();
 
             case "JBool" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                Boolean b = (Boolean) payload.getField("val");
+                Boolean b = (Boolean) json.getPayloadFieldByName("val");
                 BoolConverter.serialize(b, writer);
             }
 
             case "JInt" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                Long l = (Long) payload.getField("val");
+                Long l = (Long) json.getPayloadFieldByName("val");
                 NumberConverter.serialize(l, writer);
             }
 
             case "JFloat" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                Double d = (Double) payload.getField("val");
+                Double d = (Double) json.getPayloadFieldByName("val");
                 NumberConverter.serialize(d, writer);
             }
 
             case "JString" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                String s = (String) payload.getField("val");
+                String s = (String) json.getPayloadFieldByName("val");
                 writer.writeString(s);
             }
 
             case "JArray" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                Object items = payload.getField("items");
+                Object items = json.getPayloadFieldByName("items");
                 serializeArray(writer, items);
             }
 
             case "JObject" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                Object fields = payload.getField("fields");
+                Object fields = json.getPayloadFieldByName("fields");
                 serializeObject(writer, fields);
             }
 
@@ -377,38 +371,32 @@ public final class DslJsonCodec {
             case "JNull" -> writer.writeNull();
 
             case "JBool" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                Boolean b = (Boolean) payload.getField("val");
+                Boolean b = (Boolean) json.getPayloadFieldByName("val");
                 BoolConverter.serialize(b, writer);
             }
 
             case "JInt" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                Long l = (Long) payload.getField("val");
+                Long l = (Long) json.getPayloadFieldByName("val");
                 NumberConverter.serialize(l, writer);
             }
 
             case "JFloat" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                Double d = (Double) payload.getField("val");
+                Double d = (Double) json.getPayloadFieldByName("val");
                 NumberConverter.serialize(d, writer);
             }
 
             case "JString" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                String s = (String) payload.getField("val");
+                String s = (String) json.getPayloadFieldByName("val");
                 writer.writeString(s);
             }
 
             case "JArray" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                Object items = payload.getField("items");
+                Object items = json.getPayloadFieldByName("items");
                 serializeArrayPretty(writer, items, indent);
             }
 
             case "JObject" -> {
-                MezzeRecord payload = (MezzeRecord) json.getPayloadValue();
-                Object fields = payload.getField("fields");
+                Object fields = json.getPayloadFieldByName("fields");
                 serializeObjectPretty(writer, fields, indent);
             }
 

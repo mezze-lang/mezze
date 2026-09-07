@@ -2405,6 +2405,20 @@ public final class BytecodeCompiler {
             if (payload == null) {
                 // No stack operands -> BDSL generates a single-shot emit*.
                 b.emitMakeVariantNoPayload(mv.getTag(), mv.getTagName());
+            } else if (payload instanceof MakeRecordIR rec
+                    && rec.getFields().size() == 1) {
+                // Single-field variant fusion: skip MakeRecord, pass the raw
+                // value directly via MakeVariantSingleFieldPayload.  Typed
+                // specializations (doLong / doDouble / doObject) store it
+                // without boxing.  Eliminates MezzeRecord + Object[1]
+                // allocations on the hot path.  The extra fieldName operand
+                // lets getPayloadValue() lazily materialize a MezzeRecord for
+                // cold-path consumers.  ReadVariantField on the match side
+                // reads the raw typed payload directly.
+                String fieldName = rec.getFields().get(0).getName();
+                b.beginMakeVariantSingleFieldPayload(mv.getTag(), mv.getTagName(), fieldName);
+                emitNode(rec.getFields().get(0).getValue(), b, argCount, localMap);
+                b.endMakeVariantSingleFieldPayload();
             } else {
                 b.beginMakeVariantSinglePayload(mv.getTag(), mv.getTagName());
                 emitNode(payload, b, argCount, localMap);
@@ -5092,12 +5106,11 @@ public final class BytecodeCompiler {
                     case FIND -> {
                         b.beginConditional();
                           b.emitLoadLocal(foundSlot);
-                          b.beginMakeVariantSinglePayload(SOME_TAG,
-                              com.mezze.language.ast.BuiltinTypes.SOME);
-                            b.beginMakeSingleFieldRecord(VAL_FIELD);
-                              b.emitLoadLocal(resultSlot);
-                            b.endMakeSingleFieldRecord();
-                          b.endMakeVariantSinglePayload();
+                          // Single-field variant fusion: raw value, no record.
+                          b.beginMakeVariantSingleFieldPayload(SOME_TAG,
+                              com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                            b.emitLoadLocal(resultSlot);
+                          b.endMakeVariantSingleFieldPayload();
                           b.emitMakeVariantNoPayload(NONE_TAG,
                               com.mezze.language.ast.BuiltinTypes.NONE);
                         b.endConditional();
@@ -5107,12 +5120,11 @@ public final class BytecodeCompiler {
             case FusedSinkMode.ReduceOpt ignored -> {
                 b.beginConditional();
                   b.emitLoadLocal(hasAccSlot);
-                  b.beginMakeVariantSinglePayload(SOME_TAG,
-                      com.mezze.language.ast.BuiltinTypes.SOME);
-                    b.beginMakeSingleFieldRecord(VAL_FIELD);
-                      b.emitLoadLocal(accSlot);
-                    b.endMakeSingleFieldRecord();
-                  b.endMakeVariantSinglePayload();
+                  // Single-field variant fusion: raw value, no record.
+                  b.beginMakeVariantSingleFieldPayload(SOME_TAG,
+                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                    b.emitLoadLocal(accSlot);
+                  b.endMakeVariantSingleFieldPayload();
                   b.emitMakeVariantNoPayload(NONE_TAG,
                       com.mezze.language.ast.BuiltinTypes.NONE);
                 b.endConditional();
@@ -6113,21 +6125,39 @@ public final class BytecodeCompiler {
         var names = v.getFieldNames();
         var slots = v.getFieldSlots();
         if (!names.isEmpty()) {
-            BytecodeLocal payloadLocal = b.createLocal();
-            b.beginStoreLocal(payloadLocal);
-            b.beginUnwrapSinglePayload();
-            b.emitLoadLocal(scrutineeLocal);
-            b.endUnwrapSinglePayload();
-            b.endStoreLocal();
-            for (int i = 0; i < names.size(); i++) {
-                int slot = slots.get(i);
-                if (slot < 0) continue;  // wildcard field (`_`) — no binding
-                BytecodeLocal target = localMap[slot - argCount];
-                b.beginStoreLocal(target);
-                b.beginReadFieldByName(names.get(i));
-                b.emitLoadLocal(payloadLocal);
-                b.endReadFieldByName();
+            if (names.size() == 1) {
+                // Single-field variant: use ReadVariantField to read
+                // directly from the variant, skipping UnwrapSinglePayload
+                // + ReadFieldByName.  Handles both raw-value payloads
+                // (from creation-side fusion) and MezzeRecord payloads.
+                int slot = slots.get(0);
+                if (slot >= 0) {
+                    BytecodeLocal target = localMap[slot - argCount];
+                    b.beginStoreLocal(target);
+                    b.beginReadVariantField(names.get(0));
+                    b.emitLoadLocal(scrutineeLocal);
+                    b.endReadVariantField();
+                    b.endStoreLocal();
+                }
+            } else {
+                // Multi-field variant: unwrap the MezzeRecord payload
+                // then read each field by name.
+                BytecodeLocal payloadLocal = b.createLocal();
+                b.beginStoreLocal(payloadLocal);
+                b.beginUnwrapSinglePayload();
+                b.emitLoadLocal(scrutineeLocal);
+                b.endUnwrapSinglePayload();
                 b.endStoreLocal();
+                for (int i = 0; i < names.size(); i++) {
+                    int slot = slots.get(i);
+                    if (slot < 0) continue;  // wildcard field (`_`)
+                    BytecodeLocal target = localMap[slot - argCount];
+                    b.beginStoreLocal(target);
+                    b.beginReadFieldByName(names.get(i));
+                    b.emitLoadLocal(payloadLocal);
+                    b.endReadFieldByName();
+                    b.endStoreLocal();
+                }
             }
         }
         emitCaseGuardsAndBody(c, cases, idx, scrutineeLocal, b, argCount, localMap);
@@ -6205,26 +6235,39 @@ public final class BytecodeCompiler {
             b.beginVariantTagEquals(iv.getTag(), iv.getTagName());
             b.emitLoadLocal(tmp);
             b.endVariantTagEquals();
-            // Then: bind captured fields (via payload record) and continue.
+            // Then: bind captured fields and continue.
             b.beginBlock();
             var names = iv.getFieldNames();
             var slots = iv.getFieldSlots();
             if (!names.isEmpty()) {
-                BytecodeLocal payloadLocal = b.createLocal();
-                b.beginStoreLocal(payloadLocal);
-                b.beginUnwrapSinglePayload();
-                b.emitLoadLocal(tmp);
-                b.endUnwrapSinglePayload();
-                b.endStoreLocal();
-                for (int i = 0; i < names.size(); i++) {
-                    int slot = slots.get(i);
-                    if (slot < 0) continue;  // wildcard field (`_`) — no binding
-                    BytecodeLocal target = localMap[slot - argCount];
-                    b.beginStoreLocal(target);
-                    b.beginReadFieldByName(names.get(i));
-                    b.emitLoadLocal(payloadLocal);
-                    b.endReadFieldByName();
+                if (names.size() == 1) {
+                    // Single-field: ReadVariantField from variant directly.
+                    int slot = slots.get(0);
+                    if (slot >= 0) {
+                        BytecodeLocal target = localMap[slot - argCount];
+                        b.beginStoreLocal(target);
+                        b.beginReadVariantField(names.get(0));
+                        b.emitLoadLocal(tmp);
+                        b.endReadVariantField();
+                        b.endStoreLocal();
+                    }
+                } else {
+                    BytecodeLocal payloadLocal = b.createLocal();
+                    b.beginStoreLocal(payloadLocal);
+                    b.beginUnwrapSinglePayload();
+                    b.emitLoadLocal(tmp);
+                    b.endUnwrapSinglePayload();
                     b.endStoreLocal();
+                    for (int i = 0; i < names.size(); i++) {
+                        int slot = slots.get(i);
+                        if (slot < 0) continue;
+                        BytecodeLocal target = localMap[slot - argCount];
+                        b.beginStoreLocal(target);
+                        b.beginReadFieldByName(names.get(i));
+                        b.emitLoadLocal(payloadLocal);
+                        b.endReadFieldByName();
+                        b.endStoreLocal();
+                    }
                 }
             }
             emitIfLetChain(c, iletIdx + 1, cases, caseIdx, scrutineeLocal, b, argCount, localMap);

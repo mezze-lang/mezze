@@ -3068,6 +3068,53 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Fused single-field variant creation: skips {@link MakeRecord} for
+     * 1-field variant payloads and stores the raw value directly in the
+     * variant's typed payload slot.  The extra {@code fieldName} constant
+     * operand lets {@link MezzeVariant#getPayloadValue()} lazily
+     * materialize a wrapping record for cold-path consumers.
+     *
+     * <p>BDSL match-side uses {@link ReadVariantField} which reads the
+     * raw typed payload directly — no materialization overhead.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)       // tag
+    @ConstantOperand(type = String.class)    // tagName
+    @ConstantOperand(type = String.class)    // fieldName
+    public static final class MakeVariantSingleFieldPayload {
+        @Specialization
+        public static MezzeVariant doLong(int tag, String tagName, String fieldName,
+                long payload,
+                @Cached(value = "ensureRegistered(tagName)", allowUncached = true)
+                    TagRegistry registry) {
+            return MezzeVariant.singleLongPayloadFused(registry, tag, payload, fieldName);
+        }
+
+        @Specialization
+        public static MezzeVariant doDouble(int tag, String tagName, String fieldName,
+                double payload,
+                @Cached(value = "ensureRegistered(tagName)", allowUncached = true)
+                    TagRegistry registry) {
+            return MezzeVariant.singleDoublePayloadFused(registry, tag, payload, fieldName);
+        }
+
+        @Specialization(replaces = {"doLong", "doDouble"})
+        public static MezzeVariant doObject(int tag, String tagName, String fieldName,
+                Object payload,
+                @Cached(value = "ensureRegistered(tagName)", allowUncached = true)
+                    TagRegistry registry) {
+            return MezzeVariant.singlePayloadFused(registry, tag, payload, fieldName);
+        }
+
+        @TruffleBoundary
+        static TagRegistry ensureRegistered(String tagName) {
+            TagRegistry registry = TagRegistry.getGlobal();
+            registry.getOrCreateTag(tagName);
+            return registry;
+        }
+    }
+
+    /**
      * Structural / primitive equality between two operands. Used by
      * literal patterns in match: {@code match x is 1 -> ... | _ -> ...}
      * lowers to a {@code PrimEquals(scrutinee, literal)} inside a
@@ -3255,11 +3302,20 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         @Specialization(replaces = {"doLong", "doDouble"})
         public static Object doGeneric(String fieldName, MezzeVariant variant) {
-            Object payload = variant.getPayloadValue();
-            if (payload instanceof MezzeRecord record) {
-                return record.getField(record.getFieldIndex(fieldName));
+            Object payload = variant.getRawPayloadValue();
+            if (variant.isFused()) {
+                // Fused: the raw payload IS the field value directly —
+                // no wrapper record to dig into, even when the value
+                // itself happens to be a MezzeRecord with a same-named
+                // field (e.g. Ok { val = { val = 42 } }).
+                return payload;
             }
-            // Direct value storage — the payload IS the field value
+            // Non-fused: payload is a wrapper MezzeRecord, extract the
+            // named field from it.
+            if (payload instanceof MezzeRecord record) {
+                int idx = record.getFieldIndex(fieldName);
+                if (idx >= 0) return record.getField(idx);
+            }
             return payload;
         }
 
