@@ -28,7 +28,6 @@ import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeRecord.FieldLocation;
-import com.mezze.interpreter.values.MezzeRecord.FieldLocation.StorageType;
 import com.mezze.interpreter.values.MezzeRecord.Shape;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.mezze.interpreter.values.MezzeVariant.TagRegistry;
@@ -874,6 +873,31 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     private static final double[] EMPTY_DOUBLES = new double[0];
 
     /**
+     * Specialized single-field record creation for the very common
+     * pattern: {@code { val = i }}, {@code { x = v }}, etc.
+     *
+     * <p>Unlike the variadic {@link MakeRecord}, this takes exactly one
+     * operand — no {@code @Variadic Object[]} framework allocation,
+     * simpler JIT optimization path. The single value goes directly
+     * into a freshly allocated {@code Object[1]}.
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class MakeSingleFieldRecord {
+        @Specialization
+        public static MezzeRecord doObject(String[] fieldNames, Object value,
+                @Cached(value = "resolveShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{value});
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
+        }
+    }
+
+    /**
      * General record spread with interleaved sources and explicit
      * fields: {@code { ...r, x = 1, ...s, y = 2 }}.
      *
@@ -1228,6 +1252,80 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = String.class) // the single field name for record fallback
     public static final class CallIndirectScalar1 {
 
+        // ── Identity-guarded specializations ──
+        // When the SAME function instance is called every iteration
+        // (the common case for locally-defined lambdas in loops), the
+        // identity guard `fn == cachedFn` makes the captured values
+        // @CompilationFinal. After PE + inlining, the callee body
+        // operates on constants — e.g. `k * arg` where k is folded.
+        // This eliminates the 30×+ overhead measured in closure-heavy
+        // hot loops vs manually-inlined equivalents.
+
+        @Specialization(guards = {
+            "fn == cachedFn",
+            "!cachedFn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 0"
+        }, limit = "3")
+        public static Object doStableNoClosure(
+                String fieldName,
+                MezzeFunction fn,
+                Object arg,
+                @Cached("fn") MezzeFunction cachedFn,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            return callNode.call(arg);
+        }
+
+        @Specialization(guards = {
+            "fn == cachedFn",
+            "!cachedFn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 1"
+        }, limit = "3")
+        public static Object doStable1Closure(
+                String fieldName,
+                MezzeFunction fn,
+                Object arg,
+                @Cached("fn") MezzeFunction cachedFn,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("closureAt(fn, 0)") Object capture0,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            return callNode.call(capture0, arg);
+        }
+
+        @Specialization(guards = {
+            "fn == cachedFn",
+            "!cachedFn.hasPartialArgs()",
+            "canBypass",
+            "closureLen == 2"
+        }, limit = "3")
+        public static Object doStable2Closures(
+                String fieldName,
+                MezzeFunction fn,
+                Object arg,
+                @Cached("fn") MezzeFunction cachedFn,
+                @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
+                @Cached("resolveInner(cachedTarget)") CallTarget resolved,
+                @Cached("fn.getClosureValues().length") int closureLen,
+                @Cached("closureAt(fn, 0)") Object capture0,
+                @Cached("closureAt(fn, 1)") Object capture1,
+                @Cached("createInlined(resolved)") DirectCallNode callNode) {
+            return callNode.call(capture0, capture1, arg);
+        }
+
+        // ── CallTarget-guarded specializations (fallback) ──
+        // Hit when the function instance changes across iterations but
+        // the CallTarget is stable (e.g. HOFs that receive different
+        // closure instances of the same lambda from different callers).
+
         @Specialization(guards = {
             "fn.getCallTarget() == cachedTarget",
             "!fn.hasPartialArgs()",
@@ -1343,7 +1441,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return callNode.call(combined);
         }
 
-        @Specialization(replaces = {"doBypassNoClosure", "doBypass1Closure", "doBypass2Closures", "doBypassGenericClosure", "doDirectRecord"})
+        @Specialization(replaces = {"doStableNoClosure", "doStable1Closure", "doStable2Closures", "doBypassNoClosure", "doBypass1Closure", "doBypass2Closures", "doBypassGenericClosure", "doDirectRecord"})
         public static Object doIndirect(
                 String fieldName,
                 MezzeFunction fn,
@@ -1395,6 +1493,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             System.arraycopy(closureValues, 0, combined, 0, closureLen);
             combined[closureLen] = record;
             return callNode.call(target, combined);
+        }
+
+        static Object closureAt(MezzeFunction fn, int index) {
+            return fn.getClosureValues()[index];
         }
 
         static DirectCallNode createInlined(CallTarget target) {

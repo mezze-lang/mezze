@@ -25,6 +25,7 @@ import com.mezze.language.truffleir.SourceIR;
 import com.mezze.language.truffleir.StageIR;
 import com.mezze.language.truffleir.SinkIR;
 import com.mezze.language.truffleir.LongLitIR;
+import com.mezze.language.truffleir.CaptureIR;
 import com.mezze.language.truffleir.CaseIR;
 import com.mezze.language.truffleir.MakeLambdaIR;
 import com.mezze.language.truffleir.MakeRecordIR;
@@ -309,6 +310,13 @@ public final class BytecodeCompiler {
     private BytecodeLocal selfTailContinueFlag;
     private int selfTailCaptureCount;
     private Hash selfTailHash;
+
+    // ── Local lambda devirtualization ─────────────────────────────────
+    // Maps local slot → MakeLambdaIR for `let` bindings that assign a
+    // lambda. Used by CallIndirectScalarIR emission to convert indirect
+    // calls on known-constant lambdas into direct calls, eliminating
+    // the 30×+ overhead of the CallIndirectScalar1 PIC path.
+    private final java.util.HashMap<Integer, MakeLambdaIR> localLambdas = new java.util.HashMap<>();
 
     /**
      * Optional external CallTarget resolver — used when this compiler
@@ -1088,6 +1096,10 @@ public final class BytecodeCompiler {
      * {@link #compiledCallTargets}. Violating either throws.
      */
     public RootNode compile(FunctionIR ir) {
+        // Per-function scope: clear local lambda tracking so entries from
+        // a previous compile() don't pollute this function's slot namespace.
+        localLambdas.clear();
+
         // Frame layout [captures..., params..., locals...] — captures
         // and params both come from LoadArgument in the closure calling
         // convention (see MezzeFunctionRootNode).
@@ -1636,6 +1648,22 @@ public final class BytecodeCompiler {
         return true;
     }
 
+    /** Emit a load of a capture slot — same logic as MakeLambdaIR capture emission
+     *  but without LoadLocalOrNull (captures are guaranteed written at devirtualized call sites). */
+    private void emitCapture(CaptureIR cap, MezzeBytecodeRootNodeGen.Builder b,
+                             int argCount, BytecodeLocal[] localMap) {
+        int slot = cap.getSlot();
+        if (slot < argCount) {
+            if (inSelfTailLoop && slot >= selfTailCaptureCount) {
+                b.emitLoadLocal(selfTailParamLocals[slot - selfTailCaptureCount]);
+            } else {
+                b.emitLoadArgument(slot);
+            }
+        } else {
+            b.emitLoadLocal(localMap[slot - argCount]);
+        }
+    }
+
     private void emitNode(NodeIR node, MezzeBytecodeRootNodeGen.Builder b,
                           int argCount, BytecodeLocal[] localMap) {
         if (node instanceof LongLitIR lit) {
@@ -1907,6 +1935,10 @@ public final class BytecodeCompiler {
                         }
                         currentLetInits.put(slot, l.getValue());
                         localAddedSlots.add(slot);
+                        // Track local lambda bindings for devirtualization.
+                        if (l.getValue() instanceof MakeLambdaIR ml) {
+                            localLambdas.put(slot, ml);
+                        }
                     }
                 } else if (s instanceof StmtIR.Expr e) {
                     // Bare expression statement — evaluate for side
@@ -2182,6 +2214,13 @@ public final class BytecodeCompiler {
                     emitNode(f.getValue(), b, argCount, localMap);
                 }
                 b.endSpreadRecord();
+            } else if (fieldNames.length == 1) {
+                // Single-field record: use the specialized non-variadic
+                // operation that avoids Object[] allocation and enables
+                // long-quickened unboxed storage for integer values.
+                b.beginMakeSingleFieldRecord(fieldNames);
+                emitNode(m.getFields().get(0).getValue(), b, argCount, localMap);
+                b.endMakeSingleFieldRecord();
             } else {
                 b.beginMakeRecord(fieldNames);
                 for (FieldIR f : m.getFields()) {
@@ -2411,6 +2450,71 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CallIndirectScalarIR ci) {
+            // ── Local lambda devirtualization ──
+            // When the call target is a ReadLocal that resolves to a let-bound
+            // MakeLambdaIR, we know the exact CallTarget at compile time.
+            // Emit CallDirect (captures prepended to args) instead of
+            // CallIndirect — the ConstantOperand CallTarget lets the JIT
+            // inline the callee completely, eliminating the 30×+ PIC overhead.
+            if (!ci.isTailCall() && ci.getFunction() instanceof ReadLocalIR readFn) {
+                MakeLambdaIR lambdaIR = localLambdas.get(readFn.getSlot());
+                if (lambdaIR != null) {
+                    CallTarget lambdaTarget = resolveCallTarget(lambdaIR.getFunctionHash());
+                    if (lambdaTarget != null) {
+                        int captureCount = lambdaIR.getCaptures().size();
+                        int totalArgs = captureCount + ci.getArgs().size();
+                        // canBypass: safe because we're explicitly passing
+                        // captures as positional args — the inner root
+                        // receives (captures..., params...) as expected.
+                        boolean canBypass = lambdaTarget instanceof com.oracle.truffle.api.RootCallTarget rctL
+                                && rctL.getRootNode() instanceof TrampolineRootNode trampL
+                                && !trampL.hasTailCalls();
+                        if (totalArgs <= 3) {
+                            // Emit CallDirect1/2/3 with captures prepended
+                            switch (totalArgs) {
+                                case 1 -> {
+                                    b.beginCallDirect1(lambdaTarget, canBypass);
+                                    if (captureCount > 0)
+                                        emitCapture(lambdaIR.getCaptures().get(0), b, argCount, localMap);
+                                    else
+                                        emitNode(ci.getArgs().get(0), b, argCount, localMap);
+                                    b.endCallDirect1();
+                                }
+                                case 2 -> {
+                                    b.beginCallDirect2(lambdaTarget, canBypass);
+                                    for (var cap : lambdaIR.getCaptures()) {
+                                        emitCapture(cap, b, argCount, localMap);
+                                    }
+                                    for (NodeIR arg : ci.getArgs()) {
+                                        emitNode(arg, b, argCount, localMap);
+                                    }
+                                    b.endCallDirect2();
+                                }
+                                case 3 -> {
+                                    b.beginCallDirect3(lambdaTarget, canBypass);
+                                    for (var cap : lambdaIR.getCaptures()) {
+                                        emitCapture(cap, b, argCount, localMap);
+                                    }
+                                    for (NodeIR arg : ci.getArgs()) {
+                                        emitNode(arg, b, argCount, localMap);
+                                    }
+                                    b.endCallDirect3();
+                                }
+                            }
+                        } else {
+                            b.beginCallDirectN(lambdaTarget);
+                            for (var cap : lambdaIR.getCaptures()) {
+                                emitCapture(cap, b, argCount, localMap);
+                            }
+                            for (NodeIR arg : ci.getArgs()) {
+                                emitNode(arg, b, argCount, localMap);
+                            }
+                            b.endCallDirectN();
+                        }
+                        return;
+                    }
+                }
+            }
             // Scalar-ABI indirect call. When the call has exactly one arg
             // and is not a tail call, emit CallIndirectScalar1 — passes the
             // arg value directly, bypassing MakeRecord allocation and
@@ -3998,9 +4102,9 @@ public final class BytecodeCompiler {
               // change; today's win is going from "not fused at all" to
               // "fused with one alloc per iter". Truffle EA often folds
               // the alloc when the callee reads the field once.
-              b.beginMakeRecord(new String[] { fieldName });
+              b.beginMakeSingleFieldRecord(new String[] { fieldName });
                 b.emitLoadLocal(xSlot);
-              b.endMakeRecord();
+              b.endMakeSingleFieldRecord();
           }
         b.endCallDirectN();
     }
@@ -4788,9 +4892,9 @@ public final class BytecodeCompiler {
                           b.emitLoadLocal(foundSlot);
                           b.beginMakeVariantSinglePayload(SOME_TAG,
                               com.mezze.language.ast.BuiltinTypes.SOME);
-                            b.beginMakeRecord(VAL_FIELD);
+                            b.beginMakeSingleFieldRecord(VAL_FIELD);
                               b.emitLoadLocal(resultSlot);
-                            b.endMakeRecord();
+                            b.endMakeSingleFieldRecord();
                           b.endMakeVariantSinglePayload();
                           b.emitMakeVariantNoPayload(NONE_TAG,
                               com.mezze.language.ast.BuiltinTypes.NONE);
@@ -4803,9 +4907,9 @@ public final class BytecodeCompiler {
                   b.emitLoadLocal(hasAccSlot);
                   b.beginMakeVariantSinglePayload(SOME_TAG,
                       com.mezze.language.ast.BuiltinTypes.SOME);
-                    b.beginMakeRecord(VAL_FIELD);
+                    b.beginMakeSingleFieldRecord(VAL_FIELD);
                       b.emitLoadLocal(accSlot);
-                    b.endMakeRecord();
+                    b.endMakeSingleFieldRecord();
                   b.endMakeVariantSinglePayload();
                   b.emitMakeVariantNoPayload(NONE_TAG,
                       com.mezze.language.ast.BuiltinTypes.NONE);

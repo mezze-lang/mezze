@@ -47,6 +47,19 @@ public final class ShapeCache {
     }
 
     /**
+     * Get or create a Shape where the single field uses LONG storage.
+     * Used by MakeSingleFieldRecord to keep integer values unboxed.
+     */
+    @TruffleBoundary
+    public static Shape getOrCreateSingleLong(String[] fieldNames) {
+        assert fieldNames.length == 1 : "getOrCreateSingleLong requires exactly one field";
+        FieldLocation[] locations = new FieldLocation[]{
+            new FieldLocation(FieldLocation.StorageType.LONG, 0)
+        };
+        return getOrCreate(fieldNames, locations);
+    }
+
+    /**
      * Key for shape lookup - based on field names and storage types.
      */
     private static final class ShapeKey {
