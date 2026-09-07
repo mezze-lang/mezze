@@ -4249,8 +4249,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     public static final class MutSize {
         @Specialization
-        public static long doOp(Object mutSeq) {
-            return (long) ((com.mezze.interpreter.values.MutableSeq) mutSeq).size();
+        public static long doLong(com.mezze.interpreter.values.MutableLongSeq mutSeq) {
+            return (long) mutSeq.size();
+        }
+        @Specialization
+        public static long doOp(com.mezze.interpreter.values.MutableSeq mutSeq) {
+            return (long) mutSeq.size();
         }
     }
 
@@ -4264,14 +4268,22 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
-    /** swap — side effect, returns boolean. */
+    /** swap — side effect, returns boolean. Pure long swap for MutableLongSeq. */
     @Operation
     public static final class MutSwap {
         @Specialization
-        public static boolean doOp(Object mutSeq, long i, long j) {
+        public static boolean doLong(com.mezze.interpreter.values.MutableLongSeq mutSeq, long i, long j) {
             try {
-                ((com.mezze.interpreter.values.MutableSeq) mutSeq)
-                    .swap((int) i, (int) j);
+                mutSeq.swap((int) i, (int) j);
+                return true;
+            } catch (IndexOutOfBoundsException e) {
+                return false;
+            }
+        }
+        @Specialization
+        public static boolean doOp(com.mezze.interpreter.values.MutableSeq mutSeq, long i, long j) {
+            try {
+                mutSeq.swap((int) i, (int) j);
                 return true;
             } catch (IndexOutOfBoundsException e) {
                 return false;
@@ -4279,13 +4291,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
-    /** set — side effect, returns boolean. */
+    /** set — side effect, returns boolean. Unboxed long path for MutableLongSeq. */
     @Operation
     public static final class MutSet {
         @Specialization
-        public static boolean doOp(Object mutSeq, long i, Object val) {
-            return ((com.mezze.interpreter.values.MutableSeq) mutSeq)
-                .setSafe((int) i, val);
+        public static boolean doLong(com.mezze.interpreter.values.MutableLongSeq mutSeq, long i, long val) {
+            return mutSeq.setSafeLong((int) i, val);
+        }
+        @Specialization
+        public static boolean doOp(com.mezze.interpreter.values.MutableSeq mutSeq, long i, Object val) {
+            return mutSeq.setSafe((int) i, val);
         }
     }
 
@@ -4294,13 +4309,20 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * The bytecode compiler emits this when it detects the pattern
      * {@code match get { seq, i } is Some { val } -> expr, None -> default}
      * and fuses the get + match into a null check.
+     *
+     * For MutableLongSeq, reads from {@code long[]} (cache-friendly) and
+     * autoboxes to Long.  Graal escape-analyses the box away when the value
+     * flows directly into an unbox (the common case in comparisons).
      */
     @Operation
     public static final class MutGetRaw {
         @Specialization
-        public static Object doOp(Object mutSeq, long i) {
-            return ((com.mezze.interpreter.values.MutableSeq) mutSeq)
-                .getSafe((int) i);
+        public static Object doLong(com.mezze.interpreter.values.MutableLongSeq mutSeq, long i) {
+            return mutSeq.getSafe((int) i);
+        }
+        @Specialization
+        public static Object doOp(com.mezze.interpreter.values.MutableSeq mutSeq, long i) {
+            return mutSeq.getSafe((int) i);
         }
     }
 

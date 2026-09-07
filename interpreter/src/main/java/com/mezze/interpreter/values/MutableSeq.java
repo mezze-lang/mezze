@@ -14,7 +14,7 @@ import java.util.Comparator;
  * This is the runtime representation of MutSeq - a mutable array
  * that can be sorted, reversed, filled, etc. in place.
  */
-public final class MutableSeq {
+public class MutableSeq {
     private Object[] data;
     private int size;
 
@@ -23,8 +23,17 @@ public final class MutableSeq {
         this.size = size;
     }
 
+    /** Subclass constructor — subclass manages its own storage. */
+    MutableSeq() {
+        this.data = null;
+        this.size = 0;
+    }
+
     @TruffleBoundary
     public static MutableSeq fromImmutable(MezzeSeq seq) {
+        if (seq.isLongStorage()) {
+            return MutableLongSeq.fromLongSeq(seq);
+        }
         int len = (int) seq.length();
         Object[] data = new Object[len];
         for (int i = 0; i < len; i++) {
