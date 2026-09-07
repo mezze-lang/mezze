@@ -51,6 +51,7 @@ import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
+import com.oracle.truffle.api.nodes.LoopNode;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.RootNode;
 import com.oracle.truffle.api.profiles.InlinedLoopConditionProfile;
@@ -2041,6 +2042,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 }
             }
 
+            // Report loop iterations to Truffle — drives PE on SVM native.
+            LoopNode.reportLoopCount(node, n);
+
             // ── Post-loop result ──
             if (sinkKind == FLP_SINK_REDUCE && reduceNeedInit) {
                 return flpResultReduceEmpty();
@@ -2347,6 +2351,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     }
                 }
             }
+
+            // Report loop iterations to Truffle — drives PE on SVM native.
+            LoopNode.reportLoopCount(node, n);
 
             // ── Post-loop result ──
             if (sinkKind == FLP_SINK_REDUCE && reduceNeedInit) {
