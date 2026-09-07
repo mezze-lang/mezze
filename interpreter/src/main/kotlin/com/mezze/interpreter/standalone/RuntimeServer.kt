@@ -226,10 +226,18 @@ object RuntimeServer {
             var hasTrace = false
             // Aggressive compilation thresholds — same rationale as
             // EmbeddedExec. Mezze's static types stabilize at invocation #1.
+            // InliningRecursionDepth=4 lets PE inline 2 levels of recursive
+            // calls, enabling escape analysis to scalar-replace Long boxing +
+            // Object[] varargs at DirectCallNode.call(). Measured: ~22% on
+            // recursive workloads (fib(40) native: 680ms → 530ms).
             if (jitEnabled) {
                 engineBuilder.option("engine.FirstTierCompilationThreshold", "16")
                 engineBuilder.option("engine.LastTierCompilationThreshold", "100")
                 engineBuilder.option("engine.SingleTierCompilationThreshold", "32")
+                // OSR: 10K iterations before compiling a running loop
+                // (default 100K). FP one-shot loops warm up 10× faster.
+                engineBuilder.option("engine.OSRCompilationThreshold", "10000")
+                engineBuilder.option("compiler.InliningRecursionDepth", "4")
             }
             System.getenv("MEZZE_ENGINE_OPTS")?.takeIf { it.isNotBlank() }?.let { raw ->
                 for (kv in raw.split(",")) {

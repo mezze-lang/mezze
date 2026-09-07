@@ -533,12 +533,15 @@ class BuildCommand {
             # saved). Short-lived CLI programs rarely GC at all; Serial's
             # single-threaded stop-the-world is never noticeable. CDS and
             # Serial GC are compatible (only ZGC is not).
+            # NewRatio=1: 50% of heap for young gen (default 33%). FP-style
+            # code allocates many short-lived values; a larger nursery keeps
+            # minor GC frequency low. With 4g heap → ~2g nursery.
             # NOTE: Do NOT use -XX:TieredStopAtLevel=1 here. While it saves
             # ~100ms startup, it disables the Graal/JVMCI JIT compiler that
             # Truffle uses for Mezze code — causing a 10-20× regression on
             # compute-heavy workloads (e.g. 12ms → 139ms for a 20M-iteration
             # tail loop). The Graal JIT requires at least tier 4 (C2 level).
-            DEFAULT_OPTS="-Xmx4g -XX:+UseSerialGC $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
+            DEFAULT_OPTS="-Xmx4g -XX:+UseSerialGC -XX:NewRatio=1 $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
             OPTS="${'$'}{MEZZE_JAVA_OPTS:-${'$'}DEFAULT_OPTS}"
 
             exec "${'$'}JAVA" ${'$'}OPTS -jar "${'$'}JAR" "${'$'}@"
@@ -566,7 +569,7 @@ class BuildCommand {
                 exit /b 1
             )
             if "%MEZZE_JAVA%"=="" set "MEZZE_JAVA=java"
-            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-Xmx4g -XX:+UseSerialGC $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
+            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-Xmx4g -XX:+UseSerialGC -XX:NewRatio=1 $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
             "%MEZZE_JAVA%" %MEZZE_JAVA_OPTS% -jar "%JAR%" %*
         """.trimIndent() + "\r\n"
         launcher.writeText(script)
@@ -597,7 +600,7 @@ class BuildCommand {
         val cmd = listOf(
             javaBin,
             "-XX:ArchiveClassesAtExit=${jsaFile.absolutePath}",
-            "-XX:+UseSerialGC",
+            "-XX:+UseSerialGC", "-XX:NewRatio=1",
             // CDS training is a dry-run that exits immediately — TieredStopAtLevel=1
             // speeds up the training but must stay out of the production launcher
             // (it kills the Graal JIT). Using it here only is fine: CDS archives

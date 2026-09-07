@@ -161,7 +161,6 @@ object EmbeddedExec {
             .apply { if (traceCompilation && jitCapable) option("engine.TraceCompilation", "true") }
             .apply { if (traceInlining && jitCapable) option("engine.TraceCompilationDetails", "true") }
             .apply { if (traceTTI && jitCapable) option("engine.TraceTransferToInterpreter", "true") }
-            .apply { if (osrThreshold != null && jitCapable) option("engine.OSRCompilationThreshold", osrThreshold.toString()) }
             // Aggressive compilation thresholds. Mezze's static type system
             // means call-site types stabilize at invocation #1, so the JIT's
             // profiling data is good enough at low iteration counts. Defaults
@@ -176,6 +175,13 @@ object EmbeddedExec {
                     option("engine.FirstTierCompilationThreshold", "16")
                     option("engine.LastTierCompilationThreshold", "100")
                     option("engine.SingleTierCompilationThreshold", "32")
+                    // OSR (on-stack replacement) threshold: how many loop
+                    // iterations before the JIT compiles a running loop.
+                    // Default is 100K — too high for FP-style one-shot loops
+                    // (e.g. range(0, 10M).fold). 10K gives 10× faster warmup
+                    // for loops entered once. MEZZE_OSR_THRESHOLD overrides.
+                    option("engine.OSRCompilationThreshold",
+                        (osrThreshold ?: 10_000).toString())
                     // Increase recursion inlining depth from the default (2)
                     // to 4. Measured on fib(40) native: 680ms → 530ms (~22%).
                     // The extra depth lets PE inline 2 levels of recursive
