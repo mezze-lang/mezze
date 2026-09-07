@@ -4200,9 +4200,67 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = Hash.class)
     public static final class PerformMutMutateAct {
 
-        // Cached fast path — same Assumption-guarded pattern as PerformD.
-        // actWrapperShape is resolved once and stays constant through PE
-        // so the JIT sees the record allocation as scalarizable.
+        // ---- LocalMut bypass detection ----
+        // Lazily resolved CallTarget of LocalMut.mutate = { act } -> act {}
+        // (the well-known passthrough). Compared by reference to decide
+        // whether to bypass the handler. Resolved once from
+        // StdlibRuntimeData; null means "couldn't resolve, don't bypass."
+        private static volatile CallTarget knownLocalMutMutateTarget;
+        private static volatile boolean localMutTargetResolved;
+
+        // LocalMut bypass — when the handler is the well-known LocalMut
+        // passthrough ({ act } -> act {}), call actFn directly from this
+        // per-call-site node. This makes the actFn dispatch MONOMORPHIC:
+        // each stdlib Mut wrapper (get, swap, incr, …) always passes the
+        // same act-lambda CallTarget, so Graal can devirtualize + inline
+        // through to the native impl. Without this, the shared handler's
+        // internal `act {}` IndirectCallNode is megamorphic across all Mut
+        // call sites and can never be inlined — the root cause of the
+        // 500× overhead on Mut-heavy workloads.
+        @Specialization(assumptions = "handlerStable",
+                        guards = {"cachedHandler != null", "cachedHandlerTarget != null",
+                                  "isLocalMutPassthrough(cachedHandlerTarget)",
+                                  "cachedActTarget != null",
+                                  "actTargetMatches(actFn, cachedActTarget)"},
+                        excludeForUncached = true)
+        public static Object doDirectBypass(Hash effectHash, Object actFn,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("resolveMutateIndex(cachedHandler)") int cachedFieldIndex,
+                @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedHandlerTarget,
+                @Cached("getHandlerStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
+                @Cached("resolveActCallTarget(actFn)") CallTarget cachedActTarget,
+                @Cached("createInlined(cachedActTarget)") DirectCallNode actCallNode) {
+            MezzeFunction fn = (MezzeFunction) actFn;
+            Object[] cv = fn.getClosureValues();
+            Object unit = MezzeRecord.empty();
+            try {
+                // Arity-specialized call to avoid varargs array allocation
+                // for common closure counts (0–2 captures cover get, swap,
+                // read_int, incr, int_to_mut, etc.). Graal EA scalarizes
+                // the varargs array in the default branch too, but explicit
+                // cases help in interpreter mode and early compilation tiers.
+                return switch (cv.length) {
+                    case 0 -> actCallNode.call(unit);
+                    case 1 -> actCallNode.call(cv[0], unit);
+                    case 2 -> actCallNode.call(cv[0], cv[1], unit);
+                    default -> {
+                        Object[] args = new Object[cv.length + 1];
+                        System.arraycopy(cv, 0, args, 0, cv.length);
+                        args[cv.length] = unit;
+                        yield actCallNode.call(args);
+                    }
+                };
+            } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
+                if (com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.insideBdslHandle()) {
+                    throw abort;
+                }
+                throw new com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException(
+                    new com.mezze.interpreter.nodes.continuation.OpCall("mutate", null, effectHash));
+            }
+        }
+
+        // Cached handler-dispatch path — still needed for DebugLocalMut
+        // and as fallback when the bypass can't fire.
         @Specialization(assumptions = "handlerStable",
                         guards = {"cachedHandler != null", "cachedTarget != null"},
                         excludeForUncached = true)
@@ -4214,8 +4272,6 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("getHandlerStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
                 @Cached("createInlined(cachedTarget)") DirectCallNode callNode,
                 @Cached("resolveActWrapperShape()") MezzeRecord.Shape actShape) {
-            // Build the {act = fn} wrapper with a constant Shape.
-            // Consumed immediately by the inlined handler body → EA eliminates it.
             MezzeRecord wrapper = MezzeRecord.withAllObjects(actShape, new Object[] { actFn });
             Object[] opArgs = new Object[cachedCV.length + 1];
             System.arraycopy(cachedCV, 0, opArgs, 0, cachedCV.length);
@@ -4288,6 +4344,56 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     MezzeRecord.FieldLocation.StorageType.OBJECT, 0)
             };
             return new MezzeRecord.Shape(new String[] { "act" }, locs);
+        }
+
+        // ---- LocalMut bypass helpers ----
+
+        static CallTarget resolveActCallTarget(Object actFn) {
+            if (actFn instanceof MezzeFunction fn) return fn.getCallTarget();
+            return null;
+        }
+
+        static boolean actTargetMatches(Object actFn, CallTarget cachedActTarget) {
+            return actFn instanceof MezzeFunction fn
+                && fn.getCallTarget() == cachedActTarget;
+        }
+
+        @TruffleBoundary
+        static boolean isLocalMutPassthrough(CallTarget handlerMutateTarget) {
+            if (!localMutTargetResolved) resolveLocalMutTarget();
+            return handlerMutateTarget != null
+                && knownLocalMutMutateTarget != null
+                && handlerMutateTarget == knownLocalMutMutateTarget;
+        }
+
+        @TruffleBoundary
+        private static synchronized void resolveLocalMutTarget() {
+            if (localMutTargetResolved) return;
+            try {
+                var pre = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE
+                    .getPreloweredFunctions();
+                Hash candidateHash = null;
+                for (var e : pre.entrySet()) {
+                    var fn = e.getValue();
+                    if ("mutate".equals(fn.getName())
+                            && fn.getSourceFile() != null
+                            && fn.getSourceFile().endsWith("mutation.mz")) {
+                        // LocalMut.mutate = { act } -> act {}  (indirect call body)
+                        // DebugLocalMut.mutate = { act } -> __native_debug_... (native call body)
+                        if (!(fn.getBody() instanceof com.mezze.language.truffleir.CallNativeIR)) {
+                            candidateHash = e.getKey();
+                            break;
+                        }
+                    }
+                }
+                if (candidateHash != null) {
+                    knownLocalMutMutateTarget = MezzeLanguage.get(null)
+                        .getCachedStdlibCallTarget(candidateHash);
+                }
+            } catch (Exception e) {
+                // Resolution failed — leave null, bypass won't activate
+            }
+            localMutTargetResolved = true;
         }
     }
 

@@ -5738,6 +5738,13 @@ public final class BytecodeCompiler {
     }
 
     /**
+     * True iff the perform-op is {@code Mut.loop { cond = X, body = Y }}.
+     * When this shape is detected, the compiler emits {@code PerformMutLoop}
+     * with cond/body as separate operands — at runtime the loop runs compiled
+     * with DirectCallNode.forceInlining instead of the interpreted
+     * {@code @TruffleBoundary __native_mutation_loop}.
+     */
+    /**
      * Path D8 endgame — lower a {@link HandleIR} entirely inline in BDSL
      * with zero heap alloc per Handle. See project_d8_handleir_design.md.
      *
