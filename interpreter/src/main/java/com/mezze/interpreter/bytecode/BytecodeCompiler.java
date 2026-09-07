@@ -2241,80 +2241,120 @@ public final class BytecodeCompiler {
             // record. Record-ABI callers already pass a record — the
             // callee is expecting it, so no marker needed.
             // ── KnownMutOps: inline Mut stdlib wrappers directly ──
-            // Mut is hermetic — no effect dispatch needed.  Typed ops
-            // (MutReadInt, MutSize, MutIncr, MutSwap, MutSet) return
-            // primitive long / boolean so the BDSL quickening avoids
-            // boxing.  Generic InlineMutOp1/2/3 handle the rest.
+            // Mut is hermetic — no effect dispatch needed.
+            // Three tiers:
+            //  1. Typed BDSL ops (MutReadInt, MutSize, MutIncr, MutSwap, MutSet)
+            //     — return primitive long/boolean, no boxing, PE-transparent.
+            //  2. Generic InlineMutOp1/2/3 — typed MUT_* constants (int_to_mut,
+            //     seq_to_mut, etc.) that go through the opKind switch.
+            //  3. Generic InlineMutRecord1/2/3/4 — ANY Mut wrapper around a
+            //     __native_* call.  Builds a MezzeRecord and calls the handler
+            //     directly.  @TruffleBoundary but eliminates effect dispatch.
             if (c.isScalarABI() && !c.isTailCall()) {
                 var mutOp = KnownMutOps.lookupOrResolve(c.getTargetHash(), language);
                 if (mutOp != null && c.getArgs().size() == mutOp.arity()) {
-                    Hash mutHash = new Hash(
-                        com.mezze.interpreter.nodes.effect.MarkerEffects.MUT_EFFECT_HASH_HEX);
-                    // Typed fast paths — return primitive, no boxing
-                    switch (mutOp.kind()) {
-                        case MezzeBytecodeRootNode.MUT_READ_INT -> {
-                            b.beginMutReadInt();
-                            emitNode(c.getArgs().get(0), b, argCount, localMap);
-                            b.endMutReadInt();
+                    // ── Generic record-ABI bypass (tier 3) ──
+                    if (mutOp.isGeneric()) {
+                        var handler = com.mezze.interpreter.nodes.builtin.NativeDispatch
+                            .recordHandlerOf(mutOp.nativeName());
+                        if (handler != null) {
+                            switch (mutOp.arity()) {
+                                case 1 -> {
+                                    b.beginInlineMutRecord1(handler, mutOp.shape());
+                                    emitNode(c.getArgs().get(0), b, argCount, localMap);
+                                    b.endInlineMutRecord1();
+                                }
+                                case 2 -> {
+                                    b.beginInlineMutRecord2(handler, mutOp.shape());
+                                    for (NodeIR arg : c.getArgs())
+                                        emitNode(arg, b, argCount, localMap);
+                                    b.endInlineMutRecord2();
+                                }
+                                case 3 -> {
+                                    b.beginInlineMutRecord3(handler, mutOp.shape());
+                                    for (NodeIR arg : c.getArgs())
+                                        emitNode(arg, b, argCount, localMap);
+                                    b.endInlineMutRecord3();
+                                }
+                                case 4 -> {
+                                    b.beginInlineMutRecord4(handler, mutOp.shape());
+                                    for (NodeIR arg : c.getArgs())
+                                        emitNode(arg, b, argCount, localMap);
+                                    b.endInlineMutRecord4();
+                                }
+                            }
                             return;
                         }
-                        case MezzeBytecodeRootNode.MUT_SIZE -> {
-                            b.beginMutSize();
-                            emitNode(c.getArgs().get(0), b, argCount, localMap);
-                            b.endMutSize();
-                            return;
+                        // Handler not found — fall through to normal call
+                    } else {
+                        // ── Typed fast paths (tier 1) ──
+                        Hash mutHash = new Hash(
+                            com.mezze.interpreter.nodes.effect.MarkerEffects.MUT_EFFECT_HASH_HEX);
+                        switch (mutOp.kind()) {
+                            case MezzeBytecodeRootNode.MUT_READ_INT -> {
+                                b.beginMutReadInt();
+                                emitNode(c.getArgs().get(0), b, argCount, localMap);
+                                b.endMutReadInt();
+                                return;
+                            }
+                            case MezzeBytecodeRootNode.MUT_SIZE -> {
+                                b.beginMutSize();
+                                emitNode(c.getArgs().get(0), b, argCount, localMap);
+                                b.endMutSize();
+                                return;
+                            }
+                            case MezzeBytecodeRootNode.MUT_INCR -> {
+                                b.beginMutIncr();
+                                for (NodeIR arg : c.getArgs())
+                                    emitNode(arg, b, argCount, localMap);
+                                b.endMutIncr();
+                                return;
+                            }
+                            case MezzeBytecodeRootNode.MUT_SWAP -> {
+                                b.beginMutSwap();
+                                for (NodeIR arg : c.getArgs())
+                                    emitNode(arg, b, argCount, localMap);
+                                b.endMutSwap();
+                                return;
+                            }
+                            case MezzeBytecodeRootNode.MUT_SET -> {
+                                b.beginMutSet();
+                                for (NodeIR arg : c.getArgs())
+                                    emitNode(arg, b, argCount, localMap);
+                                b.endMutSet();
+                                return;
+                            }
+                            default -> {}  // fall through to arity-based dispatch
                         }
-                        case MezzeBytecodeRootNode.MUT_INCR -> {
-                            b.beginMutIncr();
-                            for (NodeIR arg : c.getArgs())
-                                emitNode(arg, b, argCount, localMap);
-                            b.endMutIncr();
-                            return;
+                        // ── Typed InlineMutOp (tier 2) ──
+                        switch (mutOp.arity()) {
+                            case 1 -> {
+                                b.beginInlineMutOp1(mutOp.kind(), mutHash, c.getTargetHash());
+                                emitNode(c.getArgs().get(0), b, argCount, localMap);
+                                b.endInlineMutOp1();
+                            }
+                            case 2 -> {
+                                b.beginInlineMutOp2(mutOp.kind(), mutHash, c.getTargetHash());
+                                for (NodeIR arg : c.getArgs())
+                                    emitNode(arg, b, argCount, localMap);
+                                b.endInlineMutOp2();
+                            }
+                            case 3 -> {
+                                b.beginInlineMutOp3(mutOp.kind(), mutHash, c.getTargetHash());
+                                for (NodeIR arg : c.getArgs())
+                                    emitNode(arg, b, argCount, localMap);
+                                b.endInlineMutOp3();
+                            }
+                            case 4 -> {
+                                // CompiledForRange: (start, end, step, body)
+                                b.beginCompiledForRange(mutHash, c.getTargetHash());
+                                for (NodeIR arg : c.getArgs())
+                                    emitNode(arg, b, argCount, localMap);
+                                b.endCompiledForRange();
+                            }
                         }
-                        case MezzeBytecodeRootNode.MUT_SWAP -> {
-                            b.beginMutSwap();
-                            for (NodeIR arg : c.getArgs())
-                                emitNode(arg, b, argCount, localMap);
-                            b.endMutSwap();
-                            return;
-                        }
-                        case MezzeBytecodeRootNode.MUT_SET -> {
-                            b.beginMutSet();
-                            for (NodeIR arg : c.getArgs())
-                                emitNode(arg, b, argCount, localMap);
-                            b.endMutSet();
-                            return;
-                        }
-                        default -> {}  // fall through to arity-based dispatch
+                        return;
                     }
-                    // Arity-based dispatch for remaining ops
-                    switch (mutOp.arity()) {
-                        case 1 -> {
-                            b.beginInlineMutOp1(mutOp.kind(), mutHash, c.getTargetHash());
-                            emitNode(c.getArgs().get(0), b, argCount, localMap);
-                            b.endInlineMutOp1();
-                        }
-                        case 2 -> {
-                            b.beginInlineMutOp2(mutOp.kind(), mutHash, c.getTargetHash());
-                            for (NodeIR arg : c.getArgs())
-                                emitNode(arg, b, argCount, localMap);
-                            b.endInlineMutOp2();
-                        }
-                        case 3 -> {
-                            b.beginInlineMutOp3(mutOp.kind(), mutHash, c.getTargetHash());
-                            for (NodeIR arg : c.getArgs())
-                                emitNode(arg, b, argCount, localMap);
-                            b.endInlineMutOp3();
-                        }
-                        case 4 -> {
-                            // CompiledForRange: (start, end, step, body)
-                            b.beginCompiledForRange(mutHash, c.getTargetHash());
-                            for (NodeIR arg : c.getArgs())
-                                emitNode(arg, b, argCount, localMap);
-                            b.endCompiledForRange();
-                        }
-                    }
-                    return;
                 }
             }
             boolean needsScalarMarker = c.isScalarABI()
@@ -3482,7 +3522,16 @@ public final class BytecodeCompiler {
      * emission to replace CallDirect with InlineMutOp1/2/3.
      */
     static final class KnownMutOps {
-        record MutOp(int kind, int arity) {}
+        /** kind = MUT_* constant for typed fast paths, or MUT_GENERIC_NATIVE
+         *  for generic record-ABI bypass.  nativeName/shape are set only
+         *  for generic entries; shape is pre-cached at resolve time to skip
+         *  ShapeCache lookup on every invocation. */
+        record MutOp(int kind, int arity, String nativeName,
+                     com.mezze.interpreter.values.MezzeRecord.Shape shape) {
+            MutOp(int kind, int arity) { this(kind, arity, null, null); }
+            boolean isGeneric() { return kind == MUT_GENERIC_NATIVE; }
+        }
+        static final int MUT_GENERIC_NATIVE = -2;
 
         private static final java.util.Map<String, MutOp> KEY_TO_OP;
         static {
@@ -3627,19 +3676,29 @@ public final class BytecodeCompiler {
 
         /**
          * Identify a Mut operation by its body structure.
-         * Shape A (post-MutEraser): body = CallNativeIR("__native_mut_*").
+         *
+         * Shape A (post-MutEraser): body = CallNativeIR("__native_*").
+         *   This only matches known typed ops in NATIVE_NAME_TO_OP, because
+         *   any function with a CallNativeIR body matches Shape A — not just
+         *   Mut wrappers.  (e.g. monomorphized seq::sort_by<Int> also has
+         *   CallNativeIR body.)
+         *
          * Shape B (monomorphized, pre-erasure): body = PerformOpIR("mutate",
-         *   MakeRecordIR({act = MakeLambdaIR(λhash)})) — the lambda body
-         *   is a CallNativeIR. Look it up in the language registry.
+         *   MakeRecordIR({act = MakeLambdaIR(λhash)})).  This is UNAMBIGUOUSLY
+         *   a Mut wrapper.  Both typed and generic ops match here.
          */
         private static MutOp resolveByBody(
                 com.mezze.language.truffleir.FunctionIR fn, MezzeLanguage lang) {
             var body = fn.getBody();
-            // Shape A: direct native call
+
+            // Shape A: direct native call (post-MutEraser)
+            // ONLY typed ops — Shape A is ambiguous (matches any native body)
             if (body instanceof com.mezze.language.truffleir.CallNativeIR nir) {
                 return NATIVE_NAME_TO_OP.get(nir.getName());
             }
+
             // Shape B: PerformOpIR("mutate", {act = λ})
+            // Both typed AND generic — this is unambiguously a Mut wrapper
             if (body instanceof com.mezze.language.truffleir.PerformOpIR pop
                     && "mutate".equals(pop.getOperationName())
                     && pop.getArg() instanceof com.mezze.language.truffleir.MakeRecordIR mr
@@ -3651,9 +3710,41 @@ public final class BytecodeCompiler {
                 if (lambdaFn != null
                         && lambdaFn.getBody()
                             instanceof com.mezze.language.truffleir.CallNativeIR nir) {
-                    return NATIVE_NAME_TO_OP.get(nir.getName());
+                    // Typed fast path first
+                    var typed = NATIVE_NAME_TO_OP.get(nir.getName());
+                    if (typed != null) return typed;
+                    // Generic: extract field names from the native's record arg
+                    var fieldNames = extractFieldNames(nir);
+                    if (fieldNames == null) return null;
+                    // Check NativeDispatch has a handler for this native
+                    var handler = com.mezze.interpreter.nodes.builtin.NativeDispatch
+                        .recordHandlerOf(nir.getName());
+                    if (handler == null) return null;
+                    // Pre-cache the Shape at compile time to skip ShapeCache
+                    // lookup on every invocation at runtime
+                    var shape = com.mezze.interpreter.values.ShapeCache
+                        .getOrCreateAllObjects(fieldNames);
+                    return new MutOp(MUT_GENERIC_NATIVE, fieldNames.length,
+                        nir.getName(), shape);
                 }
             }
+            return null;
+        }
+
+        /** Extract field names from a record-ABI CallNativeIR's arg. */
+        private static String[] extractFieldNames(
+                com.mezze.language.truffleir.CallNativeIR nir) {
+            // Record-ABI: arg is a MakeRecordIR with named fields
+            if (nir.getArg() instanceof com.mezze.language.truffleir.MakeRecordIR mr) {
+                var fields = mr.getFields();
+                var names = new String[fields.size()];
+                for (int i = 0; i < fields.size(); i++) {
+                    names[i] = fields.get(i).getName();
+                }
+                return names;
+            }
+            // Scalar-ABI: args are positional, no field names available
+            // (would need NativeSignatures, which may not be on classpath)
             return null;
         }
 

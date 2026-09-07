@@ -29,6 +29,7 @@ import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeRecord.FieldLocation;
 import com.mezze.interpreter.values.MezzeRecord.Shape;
+import com.mezze.interpreter.values.ShapeCache;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.mezze.interpreter.values.MezzeVariant.TagRegistry;
 import com.oracle.truffle.api.CallTarget;
@@ -4383,6 +4384,101 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    // ── Generic Mut native bypass ──────────────────────────────────
+    // For Mut ops WITHOUT typed fast paths.  Builds a MezzeRecord from
+    // scalar args and calls the record-ABI NativeDispatch handler directly.
+    // @TruffleBoundary for SVM safety.  Still vastly faster than full
+    // effect dispatch (eliminates lambda + record + handler lookup + act call).
+
+    /** Generic 1-arg Mut native bypass. */
+    @Operation
+    @ConstantOperand(type = com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler.class)
+    @ConstantOperand(type = MezzeRecord.Shape.class)
+    public static final class InlineMutRecord1 {
+        @Specialization
+        @TruffleBoundary
+        public static Object doOp(
+                com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler handler,
+                MezzeRecord.Shape shape,
+                Object arg0,
+                @Cached(value = "createIndirect()", allowUncached = true)
+                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+            MezzeRecord rec = MezzeRecord.withAllObjects(shape, new Object[]{arg0});
+            return handler.handle(rec, callNode);
+        }
+        @TruffleBoundary
+        static com.oracle.truffle.api.nodes.IndirectCallNode createIndirect() {
+            return com.oracle.truffle.api.nodes.IndirectCallNode.create();
+        }
+    }
+
+    /** Generic 2-arg Mut native bypass. */
+    @Operation
+    @ConstantOperand(type = com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler.class)
+    @ConstantOperand(type = MezzeRecord.Shape.class)
+    public static final class InlineMutRecord2 {
+        @Specialization
+        @TruffleBoundary
+        public static Object doOp(
+                com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler handler,
+                MezzeRecord.Shape shape,
+                Object arg0, Object arg1,
+                @Cached(value = "createIndirect()", allowUncached = true)
+                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+            MezzeRecord rec = MezzeRecord.withAllObjects(shape, new Object[]{arg0, arg1});
+            return handler.handle(rec, callNode);
+        }
+        @TruffleBoundary
+        static com.oracle.truffle.api.nodes.IndirectCallNode createIndirect() {
+            return com.oracle.truffle.api.nodes.IndirectCallNode.create();
+        }
+    }
+
+    /** Generic 3-arg Mut native bypass. */
+    @Operation
+    @ConstantOperand(type = com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler.class)
+    @ConstantOperand(type = MezzeRecord.Shape.class)
+    public static final class InlineMutRecord3 {
+        @Specialization
+        @TruffleBoundary
+        public static Object doOp(
+                com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler handler,
+                MezzeRecord.Shape shape,
+                Object arg0, Object arg1, Object arg2,
+                @Cached(value = "createIndirect()", allowUncached = true)
+                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+            MezzeRecord rec = MezzeRecord.withAllObjects(shape, new Object[]{arg0, arg1, arg2});
+            return handler.handle(rec, callNode);
+        }
+        @TruffleBoundary
+        static com.oracle.truffle.api.nodes.IndirectCallNode createIndirect() {
+            return com.oracle.truffle.api.nodes.IndirectCallNode.create();
+        }
+    }
+
+    /** Generic 4-arg Mut native bypass. */
+    @Operation
+    @ConstantOperand(type = com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler.class)
+    @ConstantOperand(type = MezzeRecord.Shape.class)
+    public static final class InlineMutRecord4 {
+        @Specialization
+        @TruffleBoundary
+        public static Object doOp(
+                com.mezze.interpreter.nodes.builtin.NativeDispatch.NativeHandler handler,
+                MezzeRecord.Shape shape,
+                Object arg0, Object arg1, Object arg2, Object arg3,
+                @Cached(value = "createIndirect()", allowUncached = true)
+                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+            MezzeRecord rec = MezzeRecord.withAllObjects(shape,
+                new Object[]{arg0, arg1, arg2, arg3});
+            return handler.handle(rec, callNode);
+        }
+        @TruffleBoundary
+        static com.oracle.truffle.api.nodes.IndirectCallNode createIndirect() {
+            return com.oracle.truffle.api.nodes.IndirectCallNode.create();
+        }
+    }
+
     /**
      * Compiled loop for Mut for_range.  Mut is hermetic — no handler check,
      * no CyclicAssumption, just a tight compiled loop with the body inlined.
@@ -4686,11 +4782,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         static MezzeRecord.Shape resolveActWrapperShape() {
-            MezzeRecord.FieldLocation[] locs = {
-                new MezzeRecord.FieldLocation(
-                    MezzeRecord.FieldLocation.StorageType.OBJECT, 0)
-            };
-            return new MezzeRecord.Shape(new String[] { "act" }, locs);
+            return ShapeCache.getOrCreateAllObjects(new String[] { "act" });
         }
 
         // ---- LocalMut bypass helpers ----
