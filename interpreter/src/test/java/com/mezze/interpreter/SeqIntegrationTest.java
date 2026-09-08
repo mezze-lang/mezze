@@ -491,4 +491,55 @@ class SeqIntegrationTest {
             """);
         assertEquals(2L, result);
     }
+
+    // ========================================
+    // range_step fusion
+    // ========================================
+
+    @Test
+    void rangeStepSumFuses() {
+        // seq::range_step { start = 0, end = 10, step = 2 } gives [0, 2, 4, 6, 8]
+        // sum = 0 + 2 + 4 + 6 + 8 = 20
+        Object result = MezzeTestHelper.run("""
+            use std::collections::seq
+            seq::sum { xs = seq::range_step { start = 0, end = 10, step = 2 } }
+            """);
+        assertEquals(20L, result);
+    }
+
+    @Test
+    void rangeStepFilterMapFuses() {
+        // range_step 1..10 step 3 = [1, 4, 7]
+        // filter >2 = [4, 7]
+        // map *10 = [40, 70]
+        // sum = 110
+        Object result = MezzeTestHelper.run("""
+            use std::collections::seq
+            seq::range_step { start = 1, end = 10, step = 3 }
+                |> seq::filter { xs = @, p = { x } -> x > 2 }
+                |> seq::map { xs = @, f = { x } -> x * 10 }
+                |> seq::sum { xs = @ }
+            """);
+        assertEquals(110L, result);
+    }
+
+    @Test
+    void rangeStepCountFuses() {
+        // range_step 0..20 step 5 = [0, 5, 10, 15]  → count = 4
+        Object result = MezzeTestHelper.run("""
+            use std::collections::seq
+            seq::count { xs = seq::range_step { start = 0, end = 20, step = 5 } }
+            """);
+        assertEquals(4L, result);
+    }
+
+    @Test
+    void rangeStepNegativeStepSumFuses() {
+        // range_step 10..0 step -3 = [10, 7, 4, 1] → sum = 22
+        Object result = MezzeTestHelper.run("""
+            use std::collections::seq
+            seq::sum { xs = seq::range_step { start = 10, end = 0, step = -3 } }
+            """);
+        assertEquals(22L, result);
+    }
 }

@@ -808,6 +808,11 @@ object StorePopulator {
                         collectEdgesFromNode(s.start, report)
                         collectEdgesFromNode(s.end, report)
                     }
+                    is com.mezze.language.truffleir.SourceIR.RangeStepSeq -> {
+                        collectEdgesFromNode(s.start, report)
+                        collectEdgesFromNode(s.end, report)
+                        collectEdgesFromNode(s.step, report)
+                    }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectEdgesFromNode(s.xs, report)
                     is com.mezze.language.truffleir.SourceIR.RawList -> collectEdgesFromNode(s.xs, report)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectEdgesFromNode(s.expr, report)

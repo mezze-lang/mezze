@@ -360,6 +360,8 @@ sealed interface PatternIR {
 sealed interface SourceIR {
     /** `__native_seq_range { start, end }` — counted loop over start..end. */
     @Serializable data class RangeSeq(val start: NodeIR, val end: NodeIR) : SourceIR
+    /** `__native_seq_range_step { start, end, step }` — strided counted loop. */
+    @Serializable data class RangeStepSeq(val start: NodeIR, val end: NodeIR, val step: NodeIR) : SourceIR
     /** Any expression evaluating to a materialized Seq at runtime. Uses
      *  SeqSize/SeqGet indexed loop in the emit. */
     @Serializable data class RawSeq(val xs: NodeIR) : SourceIR

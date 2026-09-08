@@ -457,6 +457,7 @@ object ChainCanonicalizer {
             is SourceIR.RawSeq -> newSource.xs
             is SourceIR.RawList -> newSource.xs
             is SourceIR.RangeSeq -> null  // already terminal
+            is SourceIR.RangeStepSeq -> null  // already terminal
             is SourceIR.Opaque -> newSource.expr
         }
 
@@ -492,6 +493,11 @@ object ChainCanonicalizer {
         is SourceIR.RangeSeq -> SourceIR.RangeSeq(
             substituteSlots(source.start, slotValues, paramCount),
             substituteSlots(source.end, slotValues, paramCount),
+        )
+        is SourceIR.RangeStepSeq -> SourceIR.RangeStepSeq(
+            substituteSlots(source.start, slotValues, paramCount),
+            substituteSlots(source.end, slotValues, paramCount),
+            substituteSlots(source.step, slotValues, paramCount),
         )
         is SourceIR.Opaque -> SourceIR.Opaque(substituteSlots(source.expr, slotValues, paramCount))
     }
@@ -1174,6 +1180,26 @@ object ChainCanonicalizer {
                 if (start != null && end != null) return SourceIR.RangeSeq(start, end)
             }
         }
+        if (effective is CallNativeIR
+            && (effective.name == "__native_seq_range_step" || effective.name == "__native_iter_range_step")) {
+            if (effective.isScalarABI && effective.args.size == 3) {
+                return SourceIR.RangeStepSeq(effective.args[0], effective.args[1], effective.args[2])
+            }
+            val rec = effective.arg as? MakeRecordIR
+            if (rec != null) {
+                var start: NodeIR? = null; var end: NodeIR? = null; var step: NodeIR? = null
+                for (fld in rec.fields) {
+                    when (fld.name) {
+                        "start" -> start = fld.value
+                        "end" -> end = fld.value
+                        "step" -> step = fld.value
+                    }
+                }
+                if (start != null && end != null && step != null) {
+                    return SourceIR.RangeStepSeq(start, end, step)
+                }
+            }
+        }
         // Only __native_seq_* calls (except range, handled above) produce
         // MezzeSeq values. __native_list_*, __native_deque_*, etc. produce
         // non-Seq types — BuiltinSumLongSeq/SeqSize would crash on them.
@@ -1527,6 +1553,10 @@ object ChainCanonicalizer {
                     is SourceIR.RangeSeq -> {
                         val nStart = f(s.start); val nEnd = f(s.end)
                         if (nStart !== s.start || nEnd !== s.end) SourceIR.RangeSeq(nStart, nEnd) else s
+                    }
+                    is SourceIR.RangeStepSeq -> {
+                        val nStart = f(s.start); val nEnd = f(s.end); val nStep = f(s.step)
+                        if (nStart !== s.start || nEnd !== s.end || nStep !== s.step) SourceIR.RangeStepSeq(nStart, nEnd, nStep) else s
                     }
                     is SourceIR.RawSeq -> { val nXs = f(s.xs); if (nXs !== s.xs) SourceIR.RawSeq(nXs) else s }
                     is SourceIR.RawList -> { val nXs = f(s.xs); if (nXs !== s.xs) SourceIR.RawList(nXs) else s }

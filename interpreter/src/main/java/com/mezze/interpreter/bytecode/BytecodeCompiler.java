@@ -631,6 +631,11 @@ public final class BytecodeCompiler {
                 if (!supportsNode(rs.getStart(), argCount)) return false;
                 if (!supportsNode(rs.getEnd(), argCount)) return false;
             }
+            if (src instanceof SourceIR.RangeStepSeq rss) {
+                if (!supportsNode(rss.getStart(), argCount)) return false;
+                if (!supportsNode(rss.getEnd(), argCount)) return false;
+                if (!supportsNode(rss.getStep(), argCount)) return false;
+            }
             if (src instanceof SourceIR.RawSeq rs && !supportsNode(rs.getXs(), argCount)) return false;
             if (src instanceof SourceIR.RawList rl && !supportsNode(rl.getXs(), argCount)) return false;
             if (src instanceof SourceIR.Opaque os && !supportsNode(os.getExpr(), argCount)) return false;
@@ -4468,7 +4473,7 @@ public final class BytecodeCompiler {
         boolean hasStages = !classifiedStages.isEmpty();
 
         // ── Phase 4c: classify source ──
-        NodeIR rangeStart = null, rangeEnd = null;
+        NodeIR rangeStart = null, rangeEnd = null, rangeStep = null;
         NodeIR rawXsExpr = null;
         NodeIR rawListExpr = null;
         boolean isSumSink = sinkMode instanceof FusedSinkMode.Accumulate a
@@ -4478,6 +4483,10 @@ public final class BytecodeCompiler {
         if (chain.getSource() instanceof SourceIR.RangeSeq rangeSrc) {
             rangeStart = rangeSrc.getStart();
             rangeEnd = rangeSrc.getEnd();
+        } else if (chain.getSource() instanceof SourceIR.RangeStepSeq stepSrc) {
+            rangeStart = stepSrc.getStart();
+            rangeEnd = stepSrc.getEnd();
+            rangeStep = stepSrc.getStep();
         } else if (chain.getSource() instanceof SourceIR.RawSeq rawSrc) {
             rawXsExpr = rawSrc.getXs();
         } else if (chain.getSource() instanceof SourceIR.RawList rawListSrc) {
@@ -4495,7 +4504,7 @@ public final class BytecodeCompiler {
         if (sinkMode instanceof FusedSinkMode.Accumulate a && !a.ignoreElement()) {
             // #427 fast path: ADD folder over range with no stages → BuiltinSumRangeLong.
             // Guard: init must be a long literal (not double) — SumFloat must not take this path.
-            if (rangeStart != null && a.op() == InlineOp.ADD && !hasStages
+            if (rangeStart != null && rangeStep == null && a.op() == InlineOp.ADD && !hasStages
                     && a.initExpr() instanceof LongLitIR) {
                 b.beginBuiltinSumRangeLong();
                   emitNode(rangeStart, b, argCount, localMap);
@@ -4548,8 +4557,8 @@ public final class BytecodeCompiler {
         if (hasStages || rawListExpr != null || hasFoldElemTransform || hasShortCircuitSink || hasReduceSink || hasMaterializeSink) {
             var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
             if (flp != null) {
-                if (rangeStart != null) {
-                    // Range source → FusedLongRangePipeline (no seq allocation at all)
+                if (rangeStart != null && rangeStep == null) {
+                    // Range source (step=1) → FusedLongRangePipeline (no seq allocation at all)
                     b.beginFusedLongRangePipeline(flp.config);
                       emitNode(rangeStart, b, argCount, localMap);             // child 0: start
                       emitNode(rangeEnd,   b, argCount, localMap);             // child 1: end
@@ -4605,7 +4614,7 @@ public final class BytecodeCompiler {
         }
 
         // ── Phase 4d: emit the generic fused loop (fallback) ──
-        emitFusedLoop(classifiedStages, rangeStart, rangeEnd, rawXsExpr,
+        emitFusedLoop(classifiedStages, rangeStart, rangeEnd, rangeStep, rawXsExpr,
                 rawListExpr, sinkMode, b, argCount, localMap);
         if (dbg) System.err.println("[chain-canon-emit] emitted fused loop ("
                 + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
@@ -5628,7 +5637,7 @@ public final class BytecodeCompiler {
      */
     private void emitFusedLoop(
             java.util.List<ClassifiedStage> stages,
-            NodeIR rangeStart, NodeIR rangeEnd, NodeIR rawXsExpr,
+            NodeIR rangeStart, NodeIR rangeEnd, NodeIR rangeStep, NodeIR rawXsExpr,
             NodeIR rawListExpr,
             FusedSinkMode mode,
             MezzeBytecodeRootNodeGen.Builder b,
@@ -5744,9 +5753,11 @@ public final class BytecodeCompiler {
 
         // ── Source init ──
         com.oracle.truffle.api.bytecode.BytecodeLocal endSlot    = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal stepSlot   = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal seqSlot    = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal sizeSlot   = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal cursorSlot = null;
+        boolean hasStep = rangeStep != null;
         // Unboxed long[] iteration is handled by FusedLongPipeline (Phase 4d-fast).
         // The generic fused loop below uses SeqGet (boxed) because the seq may
         // contain non-numeric elements (promises, variants, records, etc.).
@@ -5758,6 +5769,12 @@ public final class BytecodeCompiler {
             b.beginStoreLocal(endSlot);
               emitNode(rangeEnd, b, argCount, localMap);
             b.endStoreLocal();
+            if (hasStep) {
+                stepSlot = b.createLocal();
+                b.beginStoreLocal(stepSlot);
+                  emitNode(rangeStep, b, argCount, localMap);
+                b.endStoreLocal();
+            }
         } else if (isList) {
             // List source: direct cons-cell traversal.  Avoids the O(n)
             // ListToArray conversion (allocation + double traversal) by
@@ -5944,13 +5961,27 @@ public final class BytecodeCompiler {
         b.beginWhile();
 
         // Condition: cursor-based lists use !ListIsEmpty(cursor);
-        // range/seq use the indexed i < bound.
+        // range/seq use the indexed i < bound;
+        // step ranges use (step > 0 ? i < end : end < i).
         if (isList) {
             b.beginDirectNot();
               b.beginListIsEmpty();
                 b.emitLoadLocal(cursorSlot);
               b.endListIsEmpty();
             b.endDirectNot();
+        } else if (hasStep) {
+            // step > 0 ? (i < end) : (end < i)
+            b.beginConditional();
+              b.beginDirectLessThan();
+                b.emitLoadLongConstant(0L); b.emitLoadLocal(stepSlot);
+              b.endDirectLessThan();
+              b.beginDirectLessThan();
+                b.emitLoadLocal(iSlot); b.emitLoadLocal(boundSlot);
+              b.endDirectLessThan();
+              b.beginDirectLessThan();
+                b.emitLoadLocal(boundSlot); b.emitLoadLocal(iSlot);
+              b.endDirectLessThan();
+            b.endConditional();
         } else {
             b.beginDirectLessThan();
               b.emitLoadLocal(iSlot); b.emitLoadLocal(boundSlot);
@@ -6360,7 +6391,8 @@ public final class BytecodeCompiler {
               b.endBlock();
             b.endIfThen();
         }
-        // Advance: cursor = ListTail(cursor) for lists; i++ otherwise.
+        // Advance: cursor = ListTail(cursor) for lists;
+        //          i += step for step ranges; i++ otherwise.
         if (isList) {
             b.beginStoreLocal(cursorSlot);
               b.beginListTail();
@@ -6370,7 +6402,12 @@ public final class BytecodeCompiler {
         } else {
             b.beginStoreLocal(iSlot);
               b.beginDirectAdd();
-                b.emitLoadLocal(iSlot); b.emitLoadLongConstant(1L);
+                b.emitLoadLocal(iSlot);
+                if (hasStep) {
+                    b.emitLoadLocal(stepSlot);
+                } else {
+                    b.emitLoadLongConstant(1L);
+                }
               b.endDirectAdd();
             b.endStoreLocal();
         }

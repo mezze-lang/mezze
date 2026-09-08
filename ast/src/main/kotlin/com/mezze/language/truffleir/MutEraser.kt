@@ -412,6 +412,11 @@ object MutEraser {
                         if (nStart !== s.start || nEnd !== s.end)
                             SourceIR.RangeSeq(nStart, nEnd) else s
                     }
+                    is SourceIR.RangeStepSeq -> {
+                        val nStart = f(s.start); val nEnd = f(s.end); val nStep = f(s.step)
+                        if (nStart !== s.start || nEnd !== s.end || nStep !== s.step)
+                            SourceIR.RangeStepSeq(nStart, nEnd, nStep) else s
+                    }
                     is SourceIR.RawSeq -> {
                         val nXs = f(s.xs)
                         if (nXs !== s.xs) SourceIR.RawSeq(nXs) else s
