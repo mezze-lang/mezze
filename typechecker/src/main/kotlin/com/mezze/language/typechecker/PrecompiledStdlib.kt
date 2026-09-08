@@ -229,7 +229,7 @@ object PrecompiledStdlib {
                 for ((modHash, typedMod) in allModulesForPrelower) {
                     try {
                         val compiler = TypedASTCompiler(abilityImpls = allAbilityImpls)
-                        val result = compiler.compile(typedMod)
+                        val result = compiler.compile(typedMod, isStdlibCompilation = true)
                         for (pr in result.performerRecords) {
                             val arr = mutableListOf(pr.performerHash, pr.effectHash)
                             for (i in pr.operationHashes.indices) {

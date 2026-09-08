@@ -110,6 +110,12 @@ class TypedASTCompiler(
     /** Current function's param names */
     private var currentParamNames = listOf<String>()
 
+    /** When true, the prescan and lambda-capture scan flag inlineable ops (lt, add, …)
+     *  for dict-dispatch on VarType receivers. True during stdlib pre-compilation;
+     *  false during user compilation (where phase 2 propagation carries dict
+     *  requirements from preloweredDictMethods instead). */
+    private var isStdlibMode = false
+
     /** Capture name → capture index (for the current lambda being compiled) */
     private var currentCaptureNames = mapOf<String, Int>()
 
@@ -490,6 +496,17 @@ class TypedASTCompiler(
         // takes the structural/native default (matching the old behavior of
         // never entering this branch for inlineable ops).
         if (methodName in inlineableOps && !hasRealOp) return false
+        // #18 guard: in user compilation (!isStdlibMode), only flag inlineable
+        // ops when the enclosing arrow explicitly carries an ability constraint
+        // (`with Ord 'a`, `with NumMul 'a`, etc.). Without the constraint guard,
+        // every generalized user function like `{x} -> x * 2` gets `__dict_mul`
+        // in its frame — and CallIndirect callers (HOF callbacks, closures)
+        // crash because they can't inject dicts.
+        //
+        // During stdlib compilation (isStdlibMode), we allow inlineable ops
+        // unconditionally because stdlib functions (sort, min, max) are always
+        // called via CallDirect, which can inject dicts at the call site.
+        if (methodName in inlineableOps && !isStdlibMode && !arrowIsConstrained) return false
         return when {
             arrowIsConstrained -> true
             opCandidates != null && opCandidates.size > 1 -> true
@@ -633,7 +650,9 @@ class TypedASTCompiler(
      * The abilityOpIndex is populated in init{}, so it's ready at construction.
      */
     fun prescanOnly(module: TypedModule) {
+        isStdlibMode = true
         prescanForDictMethods(listOf(module))
+        isStdlibMode = false
     }
 
     /**
@@ -650,7 +669,8 @@ class TypedASTCompiler(
         module: TypedModule,
         additionalModules: List<TypedModule> = emptyList(),
         additionalPerformers: List<TypedPerformerDecl> = emptyList(),
-        monoSpecializations: List<com.mezze.language.typechecker.mono.Monomorphizer.Specialization> = emptyList()
+        monoSpecializations: List<com.mezze.language.typechecker.mono.Monomorphizer.Specialization> = emptyList(),
+        isStdlibCompilation: Boolean = false
     ): CompileResult {
         extractedFunctions.clear()
         performerRecords.clear()
@@ -662,7 +682,11 @@ class TypedASTCompiler(
 
         // Pre-scan all modules to discover which functions need dictionary params.
         // This must happen before compilation so call sites can inject dict fields.
+        isStdlibMode = isStdlibCompilation
         prescanForDictMethods(listOf(module) + additionalModules)
+        // Keep isStdlibMode set during compilation so compileLambda's dict-capture
+        // scan (which calls scanExprForVarTypeMethods → shouldDictDispatchVarTypeOp)
+        // sees the same flag that prescan used.
 
         // Populate the hash → paramNames map used for scalar-ABI decisions at
         // direct-call sites (see emitCallDirect). Must run AFTER dict prescan
@@ -1948,6 +1972,13 @@ class TypedASTCompiler(
                     val elementType = extractConcreteElementTypeFromExpr(entry.value)
                     if (elementType != null) concreteTypes.add(elementType)
                     concreteTypes.add(recovered)
+                    // When the callee's constraint type args are generalized VarType
+                    // (not in the module substitution), the direct field type (e.g.
+                    // RecordType{x:Int,y:Int} or VariantType{Range{min:Int,max:Int},Empty})
+                    // won't match any ability impl. Collect concrete types from deeper
+                    // within the arg value's expression tree so the actual leaf types
+                    // (Int, Str, etc.) are reachable by resolveOpHashFromConcreteTypes.
+                    collectDeepConcreteTypes(entry.value, concreteTypes)
                 }
             }
         }
@@ -2067,6 +2098,24 @@ class TypedASTCompiler(
             if (elementType != null && elementType !is VarType) {
                 val opHash = tryResolveAbilityOp(methodName, elementType)
                 if (opHash != null) return opHash
+            }
+        }
+        // Third pass: descend into record field types. When the caller passes
+        // `{ point = { x = 6, y = 7 } }` and the callee's constraint is
+        // `with NumMul 'a` where `'a` is the type of `x`/`y`, the concrete arg
+        // field type is `RecordType{x:Int, y:Int}` — not `Int` directly. The
+        // constraint type arg stays a generalized VarType (not in the module
+        // substitution), so `constraintTypes` is empty and we fall back to
+        // `concreteTypes`. Extract record field types so `Int` is reachable.
+        for (concreteType in concreteTypes) {
+            if (concreteType is RecordType) {
+                for ((_, fieldType) in concreteType.fields) {
+                    val resolved = substitution.apply(fieldType)
+                    if (resolved !is VarType) {
+                        val opHash = tryResolveAbilityOp(methodName, resolved)
+                        if (opHash != null) return opHash
+                    }
+                }
             }
         }
         return null
@@ -2302,7 +2351,14 @@ class TypedASTCompiler(
         // them from the PARENT's dict-param slots. The parent already gained
         // those slots via the B2 scanner-descent fix.
         val lambdaDictMethods = sortedSetOf<String>()
-        scanExprForVarTypeMethods(expr.body, lambdaDictMethods)
+        // The lambda's own arrow might not carry `with <Ability>` constraints,
+        // but the PARENT scope may (e.g. `{ a, b } with Ord 'a -> ({ x, y } -> x <= y)…`).
+        // If the parent has dict params, the lambda body may reference VarType ops
+        // that need those dicts captured. Derive arrowIsConstrained from both the
+        // lambda's own type AND whether the parent scope carries dicts.
+        val parentHasDicts = currentParamNames.any { it.startsWith("__dict_") }
+        val lambdaConstrained = parentHasDicts || arrowHasAbilityConstraint(expr.type)
+        scanExprForVarTypeMethods(expr.body, lambdaDictMethods, lambdaConstrained)
         // Only keep dicts the parent actually has — otherwise we'd try to
         // capture a slot that doesn't exist.
         val dictsToCapture = lambdaDictMethods.mapNotNull { method ->
@@ -3406,6 +3462,44 @@ class TypedASTCompiler(
             if (elemType !is VarType) return elemType
         }
         return null
+    }
+
+    /**
+     * Collect concrete leaf types from deeper within an expression tree.
+     * When the callee's constraint type args are generalized VarType (not in the
+     * module substitution), top-level arg field types (record/variant wrappers)
+     * don't match any ability impl. This function traverses into nested records
+     * and variant constructors to extract the actual concrete leaf types (Int,
+     * Str, user-defined variants, etc.) that the constraint type variables were
+     * instantiated to.
+     *
+     * Only descends into structural shapes (records, variants, sub-expressions
+     * of known forms). Does NOT descend into function calls or lambdas — those
+     * are opaque at the call site.
+     */
+    private fun collectDeepConcreteTypes(expr: TypedExpr, out: MutableList<MezzeType>) {
+        when (expr) {
+            is TypedRecord -> {
+                for (entry in expr.entries) {
+                    if (entry is TypedRecordEntry.Field) {
+                        val t = substitution.apply(entry.value.type)
+                        val recovered = resolveVariantReceiverType(entry.value, t) ?: t
+                        if (recovered !is VarType) out.add(recovered)
+                        collectDeepConcreteTypes(entry.value, out)
+                    }
+                }
+            }
+            is com.mezze.language.typedast.TypedVariantConstruct -> {
+                expr.payload?.let { payload ->
+                    val t = substitution.apply(payload.type)
+                    if (t !is VarType) out.add(t)
+                    collectDeepConcreteTypes(payload, out)
+                }
+            }
+            // Leaf expressions: their types are already captured by the caller.
+            // Don't recurse into calls, lambdas, or other opaque forms.
+            else -> {}
+        }
     }
 
     /** Look up param names for a known callee hash. Returns null if unknown.
