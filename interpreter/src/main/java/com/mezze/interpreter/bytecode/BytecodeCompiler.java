@@ -5379,6 +5379,11 @@ public final class BytecodeCompiler {
         record MinMaxLong(boolean isMax) implements FusedSinkMode {}
         /** Scan: fold that emits each intermediate accumulator into a builder → Seq. */
         record ScanAccum(InlineOp op, NodeIR initExpr) implements FusedSinkMode {}
+        /** Min_by/Max_by: call key-extractor f(x), track element with best key → Option. */
+        record MinMaxByKey(boolean isMax, com.oracle.truffle.api.CallTarget keyFn,
+                           boolean scalarABI, String fieldName) implements FusedSinkMode {}
+        /** Partition: predicate split into {pass, fail} record of two Seqs. */
+        record PartitionPred(FilterPeel predPeel) implements FusedSinkMode {}
 
         enum ShortCircuitKind { ANY, ALL, FIND, NONE }
         enum MaterializeTarget { SEQ, LIST }
@@ -5447,6 +5452,15 @@ public final class BytecodeCompiler {
             if (folderShape == null) return null;
             return new FusedSinkMode.ScanAccum(folderShape.op, scanSink.getInit());
         }
+        if (chain.getSink() instanceof SinkIR.MinBy minBySink) {
+            return classifyMinMaxByMode(minBySink.getF(), /*isMax=*/ false, dbg);
+        }
+        if (chain.getSink() instanceof SinkIR.MaxBy maxBySink) {
+            return classifyMinMaxByMode(maxBySink.getF(), /*isMax=*/ true, dbg);
+        }
+        if (chain.getSink() instanceof SinkIR.Partition partSink) {
+            return classifyPartitionMode(partSink.getP(), dbg);
+        }
         if (dbg) System.err.println("[chain-canon-emit] reject: unsupported sink: "
                 + chain.getSink().getClass().getSimpleName());
         return null;
@@ -5496,6 +5510,50 @@ public final class BytecodeCompiler {
                 predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
                 /*innerXs=*/ null);
         return new FusedSinkMode.ShortCircuit(predPeel, kind);
+    }
+
+    /** Classify min_by/max_by: resolve the key-extractor function. */
+    private FusedSinkMode classifyMinMaxByMode(MakeLambdaIR keyLambda, boolean isMax, boolean dbg) {
+        com.oracle.truffle.api.CallTarget target = null;
+        boolean scalarABI = false;
+        String fieldName = null;
+
+        var shape = classifyUnaryLiteralLambda(keyLambda, language);
+        if (shape != null && shape.callHash != null) {
+            target = resolveCallTarget(shape.callHash);
+            if (target == null && language != null)
+                target = language.getOrMintUserStub(shape.callHash, "min_max_by_key");
+            if (target != null) { scalarABI = shape.callScalarABI; fieldName = shape.callFieldName; }
+        }
+        if (target == null) {
+            if (keyLambda.getCaptures().isEmpty()) {
+                target = resolveCallTarget(keyLambda.getFunctionHash());
+                if (target == null && language != null)
+                    target = language.getOrMintUserStub(keyLambda.getFunctionHash(), "min_max_by_key");
+            }
+            if (target == null) {
+                if (dbg) System.err.println("[chain-canon-emit] reject: min/max_by key fn not callable");
+                return null;
+            }
+            var ir = language.lookupFunctionIR(keyLambda.getFunctionHash());
+            if (ir != null && ir.getParamSlots().size() == 1) { scalarABI = true; fieldName = null; }
+        }
+        return new FusedSinkMode.MinMaxByKey(isMax, target, scalarABI, fieldName);
+    }
+
+    /** Classify partition: resolve the predicate. */
+    private FusedSinkMode classifyPartitionMode(MakeLambdaIR predicateLambda, boolean dbg) {
+        var predShape = classifyUnaryPredicateLambda(predicateLambda, language);
+        if (predShape == null) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable partition predicate");
+            return null;
+        }
+        var predPeel = new FilterPeel(
+                predShape.preOp, predShape.preRhs, predShape.preRhsNode,
+                predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
+                predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
+                /*innerXs=*/ null);
+        return new FusedSinkMode.PartitionPred(predPeel);
     }
 
     /** Classify a ForEach body lambda into a CallEach mode. */
@@ -5636,6 +5694,22 @@ public final class BytecodeCompiler {
                 b.endStoreLocal();
                 builderSlot = b.createLocal();
             }
+            case FusedSinkMode.MinMaxByKey ignored -> {
+                // foundSlot: have we seen any element yet?
+                // accSlot: current best element
+                // resultSlot: current best key (from f(element))
+                foundSlot = b.createLocal();
+                b.beginStoreLocal(foundSlot);
+                  b.emitLoadObjectConstant(Boolean.FALSE);
+                b.endStoreLocal();
+                accSlot = b.createLocal();       // best element
+                resultSlot = b.createLocal();    // best key
+            }
+            case FusedSinkMode.PartitionPred ignored -> {
+                // Two builders: pass and fail
+                builderSlot = b.createLocal();   // pass builder
+                resultSlot = b.createLocal();    // fail builder
+            }
         }
 
         // ── Source init ──
@@ -5770,6 +5844,48 @@ public final class BytecodeCompiler {
                 }
                 b.endNewSeqBuilder();
             }
+            b.endStoreLocal();
+        }
+        if (mode instanceof FusedSinkMode.PartitionPred) {
+            // Partition: two generic builders (pass + fail). Use half the
+            // source size for each — a reasonable starting estimate.
+            b.beginStoreLocal(builderSlot);
+            b.beginNewSeqBuilder();
+            if (isRange) {
+                b.beginDirectDivide();
+                  b.beginDirectSubtract();
+                    b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                  b.endDirectSubtract();
+                  b.emitLoadLongConstant(2L);
+                b.endDirectDivide();
+            } else if (isList) {
+                b.emitLoadLongConstant(8L);
+            } else {
+                b.beginDirectDivide();
+                  b.emitLoadLocal(sizeSlot);
+                  b.emitLoadLongConstant(2L);
+                b.endDirectDivide();
+            }
+            b.endNewSeqBuilder();
+            b.endStoreLocal();
+            b.beginStoreLocal(resultSlot);
+            b.beginNewSeqBuilder();
+            if (isRange) {
+                b.beginDirectDivide();
+                  b.beginDirectSubtract();
+                    b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                  b.endDirectSubtract();
+                  b.emitLoadLongConstant(2L);
+                b.endDirectDivide();
+            } else if (isList) {
+                b.emitLoadLongConstant(8L);
+            } else {
+                b.beginDirectDivide();
+                  b.emitLoadLocal(sizeSlot);
+                  b.emitLoadLongConstant(2L);
+                b.endDirectDivide();
+            }
+            b.endNewSeqBuilder();
             b.endStoreLocal();
         }
 
@@ -6111,6 +6227,84 @@ public final class BytecodeCompiler {
                     b.endStoreLocal();
                 }
             }
+            case FusedSinkMode.MinMaxByKey mmb -> {
+                // key = f(x); if (!found || key </> bestKey) { bestKey = key; acc = x; found = true }
+                var argCopy = b.createLocal();
+                b.beginStoreLocal(argCopy);
+                  b.emitLoadLocal(xSlot);
+                b.endStoreLocal();
+                var keySlot = b.createLocal();
+                b.beginStoreLocal(keySlot);
+                  emitCallOneArg(b, mmb.keyFn(), argCopy, mmb.scalarABI(), mmb.fieldName());
+                b.endStoreLocal();
+                b.beginIfThenElse();
+                  b.beginDirectNot();
+                    b.emitLoadLocal(foundSlot);
+                  b.endDirectNot();
+                  // Then: first element — unconditionally store.
+                  b.beginBlock();
+                    b.beginStoreLocal(accSlot);
+                      b.emitLoadLocal(xSlot);
+                    b.endStoreLocal();
+                    b.beginStoreLocal(resultSlot);
+                      b.emitLoadLocal(keySlot);
+                    b.endStoreLocal();
+                    b.beginStoreLocal(foundSlot);
+                      b.emitLoadObjectConstant(Boolean.TRUE);
+                    b.endStoreLocal();
+                  b.endBlock();
+                  // Else: compare and conditionally update.
+                  b.beginBlock();
+                    b.beginIfThen();
+                    if (mmb.isMax()) {
+                        // max_by: update when bestKey < key
+                        b.beginDirectLessThan();
+                          b.emitLoadLocal(resultSlot); b.emitLoadLocal(keySlot);
+                        b.endDirectLessThan();
+                    } else {
+                        // min_by: update when key < bestKey
+                        b.beginDirectLessThan();
+                          b.emitLoadLocal(keySlot); b.emitLoadLocal(resultSlot);
+                        b.endDirectLessThan();
+                    }
+                      b.beginBlock();
+                        b.beginStoreLocal(accSlot);
+                          b.emitLoadLocal(xSlot);
+                        b.endStoreLocal();
+                        b.beginStoreLocal(resultSlot);
+                          b.emitLoadLocal(keySlot);
+                        b.endStoreLocal();
+                      b.endBlock();
+                    b.endIfThen();
+                  b.endBlock();
+                b.endIfThenElse();
+            }
+            case FusedSinkMode.PartitionPred pp -> {
+                // if p(x) → passBuilder.add(x) else → failBuilder.add(x)
+                b.beginIfThenElse();
+                  emitPredicateCheck(b, xSlot, pp.predPeel(), argCount, localMap);
+                  // Then: pass
+                  b.beginBlock();
+                    var discardP = b.createLocal();
+                    b.beginStoreLocal(discardP);
+                      b.beginSeqBuilderAdd();
+                        b.emitLoadLocal(builderSlot);
+                        b.emitLoadLocal(xSlot);
+                      b.endSeqBuilderAdd();
+                    b.endStoreLocal();
+                  b.endBlock();
+                  // Else: fail
+                  b.beginBlock();
+                    var discardF = b.createLocal();
+                    b.beginStoreLocal(discardF);
+                      b.beginSeqBuilderAdd();
+                        b.emitLoadLocal(resultSlot);
+                        b.emitLoadLocal(xSlot);
+                      b.endSeqBuilderAdd();
+                    b.endStoreLocal();
+                  b.endBlock();
+                b.endIfThenElse();
+            }
         }
 
         // ── Close stages (shared) ──
@@ -6243,6 +6437,29 @@ public final class BytecodeCompiler {
                       b.emitLoadLocal(builderSlot);
                     b.endSeqBuilderToSeq();
                 }
+            }
+            case FusedSinkMode.MinMaxByKey ignored -> {
+                // Min_by/Max_by → Option: Some{val=acc} if found, else None
+                b.beginConditional();
+                  b.emitLoadLocal(foundSlot);
+                  b.beginMakeVariantSingleFieldPayload(SOME_TAG,
+                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                    b.emitLoadLocal(accSlot);
+                  b.endMakeVariantSingleFieldPayload();
+                  b.emitMakeVariantNoPayload(NONE_TAG,
+                      com.mezze.language.ast.BuiltinTypes.NONE);
+                b.endConditional();
+            }
+            case FusedSinkMode.PartitionPred ignored -> {
+                // Partition → {pass = passSeq, fail = failSeq}
+                b.beginMakeRecord(new String[] { "pass", "fail" });
+                  b.beginSeqBuilderToSeq();
+                    b.emitLoadLocal(builderSlot);
+                  b.endSeqBuilderToSeq();
+                  b.beginSeqBuilderToSeq();
+                    b.emitLoadLocal(resultSlot);
+                  b.endSeqBuilderToSeq();
+                b.endMakeRecord();
             }
         }
 

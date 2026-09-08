@@ -276,8 +276,7 @@ object ChainCanonicalizer {
         SinkIR.First, SinkIR.Last -> true
         SinkIR.Min, SinkIR.Max -> true
         is SinkIR.Scan -> true
-        // Not yet emittable — canonicalized but gated here.
-        is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> false
+        is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> true
     }
 
     /**
