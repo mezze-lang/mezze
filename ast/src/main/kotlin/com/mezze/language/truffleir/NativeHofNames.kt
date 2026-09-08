@@ -33,9 +33,15 @@ object NativeHofNames {
     const val XS = "xs"
     const val IT = "it"
     const val SRC = "src"
+    /** Set / SortedSet source field. */
+    const val S = "s"
+    /** Deque source field. */
+    const val D = "d"
+    /** Map / SortedMap source field. */
+    const val M = "m"
 
     /** All names that mean "the collection source position". */
-    val SRC_FIELDS: Set<String> = setOf(XS, SRC, IT)
+    val SRC_FIELDS: Set<String> = setOf(XS, SRC, IT, S, D, M)
 
     /** Function / transform callback. */
     const val F = "f"
@@ -51,6 +57,9 @@ object NativeHofNames {
     const val SEQ = "seq"
     const val ITER = "iter"
     const val LIST = "list"
+    const val SET = "set"
+    const val SORTED_SET = "sorted_set"
+    const val DEQUE = "deque"
 
     // ── Operation names ─────────────────────────────────────────────────
     // These mirror the function names in stdlib. Used both for building
@@ -102,6 +111,15 @@ object NativeHofNames {
     /** True if [name] is `__native_list_{op}`. */
     fun isList(name: String, op: String): Boolean = name == native(LIST, op)
 
+    /** True if [name] is `__native_set_{op}`. */
+    fun isSet(name: String, op: String): Boolean = name == native(SET, op)
+
+    /** True if [name] is `__native_sorted_set_{op}`. */
+    fun isSortedSet(name: String, op: String): Boolean = name == native(SORTED_SET, op)
+
+    /** True if [name] is `__native_deque_{op}`. */
+    fun isDeque(name: String, op: String): Boolean = name == native(DEQUE, op)
+
     /** True if [name] is the seq OR iter variant of [op]. */
     fun isSeqOrIter(name: String, op: String): Boolean =
         isSeq(name, op) || isIter(name, op)
@@ -109,6 +127,12 @@ object NativeHofNames {
     /** True if [name] is the seq, iter, OR list variant of [op]. */
     fun isAnyCollection(name: String, op: String): Boolean =
         isSeq(name, op) || isIter(name, op) || isList(name, op)
+
+    /** True if [name] is ANY element-based collection variant of [op].
+     *  Excludes Map/SortedMap (entry-based callbacks). */
+    fun isAnyElementCollection(name: String, op: String): Boolean =
+        isSeq(name, op) || isIter(name, op) || isList(name, op) ||
+        isSet(name, op) || isSortedSet(name, op) || isDeque(name, op)
 
     /** True if [name] starts with `__native_seq_`. */
     fun isSeqNative(name: String): Boolean = name.startsWith("${MagicParams.NATIVE_PREFIX}${SEQ}_")
@@ -119,12 +143,26 @@ object NativeHofNames {
     /** True if [name] starts with `__native_list_`. */
     fun isListNative(name: String): Boolean = name.startsWith("${MagicParams.NATIVE_PREFIX}${LIST}_")
 
+    /** True if [name] starts with `__native_set_`. */
+    fun isSetNative(name: String): Boolean = name.startsWith("${MagicParams.NATIVE_PREFIX}${SET}_")
+
+    /** True if [name] starts with `__native_sorted_set_`. */
+    fun isSortedSetNative(name: String): Boolean = name.startsWith("${MagicParams.NATIVE_PREFIX}${SORTED_SET}_")
+
+    /** True if [name] starts with `__native_deque_`. */
+    fun isDequeNative(name: String): Boolean = name.startsWith("${MagicParams.NATIVE_PREFIX}${DEQUE}_")
+
+    /** All collection prefixes used for element-based fusion (body inspection). */
+    val ELEMENT_COLLECTION_PREFIXES: List<String> = listOf(SEQ, ITER, LIST, SET, SORTED_SET, DEQUE)
+
     /**
-     * Resolve the source field name for a native call. Seq uses [XS],
-     * iter uses [IT], list uses [XS].
+     * Resolve the source field name for a native call. Seq/List uses [XS],
+     * iter uses [IT], Set/SortedSet uses [S], Deque uses [D], Map uses [M].
      */
     fun srcFieldFor(nativeName: String): String = when {
         isIterNative(nativeName) -> IT
-        else -> XS
+        isSetNative(nativeName) || isSortedSetNative(nativeName) -> S
+        isDequeNative(nativeName) -> D
+        else -> XS // seq, list
     }
 }
