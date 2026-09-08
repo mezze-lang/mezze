@@ -1814,6 +1814,14 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.fromMap(getMap(r, "m")));
         HANDLERS.put("__native_deque_from_sorted_map", (r, c) ->
             DequeNatives.fromSortedMap(getSortedMap(r, "m")));
+
+        // forEach / first / last
+        HANDLERS.put("__native_deque_for_each", (r, c) ->
+            DequeNatives.forEach(getDeque(r, "d"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_deque_first", (r, c) ->
+            DequeNatives.first(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_last", (r, c) ->
+            DequeNatives.last(getDeque(r, "d")));
     }
 
     // ==================== NonEmptyList ====================

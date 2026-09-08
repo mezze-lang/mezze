@@ -249,6 +249,62 @@ pub let unique: { d: Deque 'a } -> Deque 'a = { d } -> __native_deque_unique { d
 ## Sorts elements in ascending order.
 pub let sort: { d: Deque 'a } -> Deque 'a = { d } -> __native_deque_sort { d = d }
 
+## Returns True if any element matches the predicate.
+pub let any: { d: Deque 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { d, p } ->
+  __native_deque_any { d = d, p = p }
+
+## Returns True if all elements match the predicate.
+pub let all: { d: Deque 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { d, p } ->
+  __native_deque_all { d = d, p = p }
+
+## Returns True if no element matches the predicate.
+pub let none: { d: Deque 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { d, p } ->
+  __native_deque_none { d = d, p = p }
+
+## Returns the first element matching the predicate, or None.
+pub let find: { d: Deque 'a, p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { d, p } ->
+  __native_deque_find { d = d, p = p }
+
+## Counts elements matching the predicate.
+pub let count: { d: Deque 'a, p: { x: 'a } -> Bool <...> } -> Int <...> = { d, p } ->
+  __native_deque_count { d = d, p = p }
+
+## Reduces elements using f, returning None if empty.
+pub let reduce
+  : { d: Deque 'a, f: { acc: 'a, x: 'a } -> 'a <...> }
+  -> Option 'a <...>
+  = { d, f } -> __native_deque_reduce { d = d, f = f }
+
+## Sums all integer elements.
+pub let sum: { d: Deque Int } -> Int = { d } -> __native_deque_sum { d = d }
+
+## Returns the product of all integer elements.
+pub let product: { d: Deque Int } -> Int = { d } -> __native_deque_product { d = d }
+
+## Returns the minimum element, or None if empty.
+pub let min: { d: Deque 'a } with Ord 'a -> Option 'a = { d } -> __native_deque_min { d = d }
+
+## Returns the maximum element, or None if empty.
+pub let max: { d: Deque 'a } with Ord 'a -> Option 'a = { d } -> __native_deque_max { d = d }
+
+## Returns True if the deque contains the element.
+pub let contains: { d: Deque 'a, x: 'a } with Eq 'a -> Bool = { d, x } ->
+  __native_deque_contains { d = d, x = x }
+
+## Executes f for each element, for side effects only.
+pub let for_each: { d: Deque 'a, f: { x: 'a } -> 'b <...> } -> {} <...> = { d, f } ->
+  __native_deque_for_each { d = d, f = f }
+
+## Returns the first element, or None if empty.
+pub let first: { d: Deque 'a } -> Option 'a = { d } -> __native_deque_first { d = d }
+
+## Returns the last element, or None if empty.
+pub let last: { d: Deque 'a } -> Option 'a = { d } -> __native_deque_last { d = d }
+
+## Applies f to each element and flattens the resulting deques.
+pub let flat_map: { d: Deque 'a, f: { x: 'a } -> Deque 'b <...> } -> Deque 'b <...> = { d, f } ->
+  __native_deque_flat_map { d = d, f = f }
+
 ## Sums all float elements.
 pub let sum_float: { d: Deque Float } -> Float = { d } -> __native_deque_sum_float { d = d }
 
@@ -304,6 +360,21 @@ impl Deque 'a where {
   to_map = { it } -> to_map { d = it },
   to_sorted_map = { it } -> to_sorted_map { d = it },
   partition = { it, p } -> partition { d = it, p = p },
+  any = { it, p } -> any { d = it, p = p },
+  all = { it, p } -> all { d = it, p = p },
+  none = { it, p } -> none { d = it, p = p },
+  find = { it, p } -> find { d = it, p = p },
+  count = { it, p } -> count { d = it, p = p },
+  reduce = { it, f } -> reduce { d = it, f = f },
+  sum = { it } -> sum { d = it },
+  product = { it } -> product { d = it },
+  min = { it } -> min { d = it },
+  max = { it } -> max { d = it },
+  contains = { it, x } -> contains { d = it, x = x },
+  for_each = { it, f } -> for_each { d = it, f = f },
+  first = { it } -> first { d = it },
+  last = { it } -> last { d = it },
+  flat_map = { it, f } -> flat_map { d = it, f = f },
   sum_float = { it } -> sum_float { d = it },
   product_float = { it } -> product_float { d = it },
 }

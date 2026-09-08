@@ -899,4 +899,32 @@ public final class DequeNatives {
         }
         return result;
     }
+
+    // ── forEach / first / last ──────────────────────────────────
+
+    @TruffleBoundary
+    public static MezzeRecord forEach(MezzeDeque deque, MezzeFunction fn,
+                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(fn, "x");
+        for (Object element : deque) {
+            ctx.call1(callNode, element);
+        }
+        return MezzeRecord.empty();
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant first(MezzeDeque deque) {
+        if (deque.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        return MezzeVariant.some(deque.peekFront());
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant last(MezzeDeque deque) {
+        if (deque.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        return MezzeVariant.some(deque.peekBack());
+    }
 }
