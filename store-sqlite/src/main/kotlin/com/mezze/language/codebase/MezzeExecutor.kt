@@ -250,6 +250,7 @@ class MezzeExecutor(
                     is com.mezze.language.truffleir.SinkIR.Any -> check(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.All -> check(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.Find -> check(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.FindIndex -> check(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.None -> check(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.MinBy -> check(sk.f.functionHash)
                     is com.mezze.language.truffleir.SinkIR.MaxBy -> check(sk.f.functionHash)
@@ -259,6 +260,9 @@ class MezzeExecutor(
                         check(sk.f.functionHash)
                     }
                     com.mezze.language.truffleir.SinkIR.Sum,
+                    com.mezze.language.truffleir.SinkIR.SumFloat,
+                    com.mezze.language.truffleir.SinkIR.Product,
+                    com.mezze.language.truffleir.SinkIR.ProductFloat,
                     com.mezze.language.truffleir.SinkIR.Count,
                     com.mezze.language.truffleir.SinkIR.ToSeq,
                     com.mezze.language.truffleir.SinkIR.ToList,
@@ -436,6 +440,7 @@ class MezzeExecutor(
                     is com.mezze.language.truffleir.SinkIR.Any -> queue.add(sk.p.functionHash.hex)
                     is com.mezze.language.truffleir.SinkIR.All -> queue.add(sk.p.functionHash.hex)
                     is com.mezze.language.truffleir.SinkIR.Find -> queue.add(sk.p.functionHash.hex)
+                    is com.mezze.language.truffleir.SinkIR.FindIndex -> queue.add(sk.p.functionHash.hex)
                     is com.mezze.language.truffleir.SinkIR.None -> queue.add(sk.p.functionHash.hex)
                     is com.mezze.language.truffleir.SinkIR.MinBy -> queue.add(sk.f.functionHash.hex)
                     is com.mezze.language.truffleir.SinkIR.MaxBy -> queue.add(sk.f.functionHash.hex)
@@ -445,6 +450,9 @@ class MezzeExecutor(
                         queue.add(sk.f.functionHash.hex)
                     }
                     com.mezze.language.truffleir.SinkIR.Sum,
+                    com.mezze.language.truffleir.SinkIR.SumFloat,
+                    com.mezze.language.truffleir.SinkIR.Product,
+                    com.mezze.language.truffleir.SinkIR.ProductFloat,
                     com.mezze.language.truffleir.SinkIR.Count,
                     com.mezze.language.truffleir.SinkIR.ToSeq,
                     com.mezze.language.truffleir.SinkIR.ToList,

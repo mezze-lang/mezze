@@ -740,8 +740,9 @@ object TrivialWrapperInliner {
                         if (nInit !== sk.init) SinkIR.Scan(nInit, sk.f) else sk
                     }
                     is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find,
-                    is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sk
-                    SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList,
+                    is SinkIR.FindIndex, is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sk
+                    SinkIR.Sum, SinkIR.SumFloat, SinkIR.Product, SinkIR.ProductFloat,
+                    SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList,
                     SinkIR.First, SinkIR.Last, SinkIR.Min, SinkIR.Max -> sk
                 }
                 val newFallback = node.fallback?.let(f)

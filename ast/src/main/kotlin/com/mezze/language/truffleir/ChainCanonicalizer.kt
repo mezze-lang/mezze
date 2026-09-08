@@ -250,9 +250,11 @@ object ChainCanonicalizer {
 
     /** True for sinks the BDSL emitter can handle today. */
     private fun isEmittableSink(sink: SinkIR): Boolean = when (sink) {
-        is SinkIR.Fold, SinkIR.Sum, is SinkIR.ForEach -> true
+        is SinkIR.Fold, SinkIR.Sum, SinkIR.SumFloat -> true
+        SinkIR.Product, SinkIR.ProductFloat -> true
+        is SinkIR.ForEach -> true
         SinkIR.Count, is SinkIR.Any, is SinkIR.All -> true
-        is SinkIR.Find, is SinkIR.Reduce -> true
+        is SinkIR.Find, is SinkIR.FindIndex, is SinkIR.Reduce -> true
         SinkIR.ToSeq, SinkIR.ToList -> true
         is SinkIR.None -> true
         SinkIR.First, SinkIR.Last -> true
@@ -503,10 +505,11 @@ object ChainCanonicalizer {
         is SinkIR.Fold -> SinkIR.Fold(substituteSlots(sink.init, slotValues, paramCount), sink.f)
         is SinkIR.Scan -> SinkIR.Scan(substituteSlots(sink.init, slotValues, paramCount), sink.f)
         // Other sinks have no expressions that reference param slots.
-        SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sink
+        SinkIR.Sum, SinkIR.SumFloat, SinkIR.Product, SinkIR.ProductFloat -> sink
+        SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sink
         SinkIR.First, SinkIR.Last, SinkIR.Min, SinkIR.Max -> sink
         is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find -> sink
-        is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sink
+        is SinkIR.FindIndex, is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sink
     }
 
     /** Recursively substitute ReadLocalIR(slot) → slotValues[slot]. */
@@ -670,6 +673,16 @@ object ChainCanonicalizer {
                 buildFunctionSinkFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.MinBy(it) }
             NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MAX_BY) ->
                 buildFunctionSinkFused(mr, node.name, classifier, allFunctions, node.src) { SinkIR.MaxBy(it) }
+            // ── SumFloat / Product / ProductFloat (unary sinks) ──
+            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_SUM_FLOAT) ->
+                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.SumFloat)
+            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_PRODUCT) ->
+                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.Product)
+            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_PRODUCT_FLOAT) ->
+                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.ProductFloat)
+            // ── FindIndex (predicate sink) ──
+            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_FIND_INDEX) ->
+                buildPredicateFusedGeneric(mr, node.name, classifier, allFunctions, node.src) { SinkIR.FindIndex(it) }
             // ── Scan ── (returns a collection of the source type — only fuse for seq/iter)
             NativeHofNames.isSeqOrIter(node.name, NativeHofNames.OP_SCAN) -> {
                 val srcField = NativeHofNames.srcFieldFor(node.name)
@@ -846,6 +859,9 @@ object ChainCanonicalizer {
     ): Pair<SinkIR, NodeIR>? = when (callee.kind) {
         ChainHofClassifier.HofKind.FOLD -> extractFold(call)
         ChainHofClassifier.HofKind.SUM -> extractSum(call)
+        ChainHofClassifier.HofKind.SUM_FLOAT -> extractUnarySink(call, SinkIR.SumFloat)
+        ChainHofClassifier.HofKind.PRODUCT -> extractUnarySink(call, SinkIR.Product)
+        ChainHofClassifier.HofKind.PRODUCT_FLOAT -> extractUnarySink(call, SinkIR.ProductFloat)
         ChainHofClassifier.HofKind.FOR_EACH -> extractForEach(call)
         ChainHofClassifier.HofKind.COUNT -> extractCount(call)
         ChainHofClassifier.HofKind.REDUCE -> extractReduce(call)
@@ -863,6 +879,7 @@ object ChainCanonicalizer {
         ChainHofClassifier.HofKind.MAX_BY -> extractFunctionSink(call) { SinkIR.MaxBy(it) }
         ChainHofClassifier.HofKind.PARTITION -> extractPredicateSink(call) { SinkIR.Partition(it) }
         ChainHofClassifier.HofKind.SCAN -> extractScan(call)
+        ChainHofClassifier.HofKind.FIND_INDEX -> extractPredicateSink(call) { SinkIR.FindIndex(it) }
         // MAP/FILTER/TAKE/DROP/FROM_SEQ/TAKE_WHILE/DROP_WHILE aren't sinks —
         // they're peel targets. If we land here we're processing the wrong
         // callsite kind; refuse silently so the peel step handles it.
@@ -1528,8 +1545,9 @@ object ChainCanonicalizer {
                     is SinkIR.Fold -> { val nInit = f(sk.init); if (nInit !== sk.init) SinkIR.Fold(nInit, sk.f) else sk }
                     is SinkIR.Scan -> { val nInit = f(sk.init); if (nInit !== sk.init) SinkIR.Scan(nInit, sk.f) else sk }
                     is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find -> sk
-                    is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sk
-                    SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sk
+                    is SinkIR.FindIndex, is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sk
+                    SinkIR.Sum, SinkIR.SumFloat, SinkIR.Product, SinkIR.ProductFloat -> sk
+                    SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sk
                     SinkIR.First, SinkIR.Last, SinkIR.Min, SinkIR.Max -> sk
                 }
                 val newFallback = node.fallback?.let(f)
@@ -1563,8 +1581,8 @@ internal class ChainHofClassifier private constructor(
 ) {
 
     internal enum class HofKind {
-        FOLD, SUM, FOR_EACH, MAP, FILTER, TAKE, DROP, FROM_SEQ,
-        COUNT, REDUCE, ANY, ALL, FIND, TO_SEQ, TO_LIST,
+        FOLD, SUM, SUM_FLOAT, PRODUCT, PRODUCT_FLOAT, FOR_EACH, MAP, FILTER, TAKE, DROP, FROM_SEQ,
+        COUNT, REDUCE, ANY, ALL, FIND, FIND_INDEX, TO_SEQ, TO_LIST,
         TAKE_WHILE, DROP_WHILE, NONE, FIRST, LAST, MIN, MAX,
         MIN_BY, MAX_BY, PARTITION, SCAN
     }
@@ -1682,6 +1700,10 @@ internal class ChainHofClassifier private constructor(
                     && name == NativeHofNames.OP_DROP
                     && p1 == NativeHofNames.N -> HofKind.DROP
 
+                // ── 2-param HOFs with predicate: find_index ──
+                params.size in 2..3 && name == NativeHofNames.OP_FIND_INDEX
+                    && p1 == NativeHofNames.P -> HofKind.FIND_INDEX
+
                 // ── 1-param unary sinks / stages ──
                 params.size == 1 && name == NativeHofNames.OP_TO_SEQ -> HofKind.TO_SEQ
                 params.size == 1 && name == NativeHofNames.OP_TO_LIST -> HofKind.TO_LIST
@@ -1689,6 +1711,9 @@ internal class ChainHofClassifier private constructor(
                 params.size == 1 && name == NativeHofNames.OP_LAST -> HofKind.LAST
                 params.size == 1 && name == NativeHofNames.OP_MIN -> HofKind.MIN
                 params.size == 1 && name == NativeHofNames.OP_MAX -> HofKind.MAX
+                params.size == 1 && name == NativeHofNames.OP_SUM_FLOAT -> HofKind.SUM_FLOAT
+                params.size == 1 && name == NativeHofNames.OP_PRODUCT -> HofKind.PRODUCT
+                params.size == 1 && name == NativeHofNames.OP_PRODUCT_FLOAT -> HofKind.PRODUCT_FLOAT
 
                 // ── Catch-all: least specific patterns LAST ──
                 // sum(src [, dict]) — no p1 constraint
@@ -1729,6 +1754,7 @@ internal class ChainHofClassifier private constructor(
                 NativeHofNames.OP_FIND       -> HofKind.FIND
                 NativeHofNames.OP_NONE       -> HofKind.NONE
                 NativeHofNames.OP_PARTITION  -> HofKind.PARTITION
+                NativeHofNames.OP_FIND_INDEX -> HofKind.FIND_INDEX
                 else                         -> HofKind.FILTER
             }
         }

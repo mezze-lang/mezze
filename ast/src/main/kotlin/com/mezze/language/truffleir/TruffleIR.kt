@@ -400,6 +400,12 @@ sealed interface SinkIR {
      * treats this identically to Fold with an ADD folder over init=0.
      */
     @Serializable data object Sum : SinkIR
+    /** Sum over Float elements — init=0.0, op=ADD. Generic fused loop (not FLP). */
+    @Serializable data object SumFloat : SinkIR
+    /** Product over Int elements — init=1, op=MUL. */
+    @Serializable data object Product : SinkIR
+    /** Product over Float elements — init=1.0, op=MUL. */
+    @Serializable data object ProductFloat : SinkIR
     /** Count — increments a counter per element. Result is Int. */
     @Serializable data object Count : SinkIR
     /** Reduce — fold without init; first element is the initial accumulator. */
@@ -410,6 +416,8 @@ sealed interface SinkIR {
     @Serializable data class All(val p: MakeLambdaIR) : SinkIR
     /** Find — short-circuit: return Some(x) on first predicate match, None otherwise. */
     @Serializable data class Find(val p: MakeLambdaIR) : SinkIR
+    /** FindIndex — short-circuit: return Some(index) on first predicate match, None otherwise. */
+    @Serializable data class FindIndex(val p: MakeLambdaIR) : SinkIR
     /** ToSeq — materialize into a Seq (builder pattern). */
     @Serializable data object ToSeq : SinkIR
     /** ToList — materialize into a List (builder pattern). */

@@ -241,6 +241,9 @@ object FunctionIRReachability {
                 }
                 when (val sk = node.sink) {
                     com.mezze.language.truffleir.SinkIR.Sum,
+                    com.mezze.language.truffleir.SinkIR.SumFloat,
+                    com.mezze.language.truffleir.SinkIR.Product,
+                    com.mezze.language.truffleir.SinkIR.ProductFloat,
                     com.mezze.language.truffleir.SinkIR.Count,
                     com.mezze.language.truffleir.SinkIR.ToSeq,
                     com.mezze.language.truffleir.SinkIR.ToList,
@@ -257,6 +260,7 @@ object FunctionIRReachability {
                     is com.mezze.language.truffleir.SinkIR.Any -> queue.add(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.All -> queue.add(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.Find -> queue.add(sk.p.functionHash)
+                    is com.mezze.language.truffleir.SinkIR.FindIndex -> queue.add(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.None -> queue.add(sk.p.functionHash)
                     is com.mezze.language.truffleir.SinkIR.MinBy -> queue.add(sk.f.functionHash)
                     is com.mezze.language.truffleir.SinkIR.MaxBy -> queue.add(sk.f.functionHash)

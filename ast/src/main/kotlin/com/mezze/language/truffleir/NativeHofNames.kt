@@ -93,6 +93,10 @@ object NativeHofNames {
     const val OP_MAX_BY = "max_by"
     const val OP_PARTITION = "partition"
     const val OP_SCAN = "scan"
+    const val OP_SUM_FLOAT = "sum_float"
+    const val OP_PRODUCT = "product"
+    const val OP_PRODUCT_FLOAT = "product_float"
+    const val OP_FIND_INDEX = "find_index"
 
     // ── Native name builder ─────────────────────────────────────────────
 

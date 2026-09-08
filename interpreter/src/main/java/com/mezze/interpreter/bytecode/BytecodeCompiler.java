@@ -4473,7 +4473,8 @@ public final class BytecodeCompiler {
         NodeIR rawListExpr = null;
         boolean isSumSink = sinkMode instanceof FusedSinkMode.Accumulate a
                 && !a.ignoreElement() && a.op() == InlineOp.ADD
-                && a.elemOp() == null;  // exclude compound folds (e.g. acc + x*x)
+                && a.elemOp() == null  // exclude compound folds (e.g. acc + x*x)
+                && a.initExpr() instanceof LongLitIR;  // exclude SumFloat (double init)
         if (chain.getSource() instanceof SourceIR.RangeSeq rangeSrc) {
             rangeStart = rangeSrc.getStart();
             rangeEnd = rangeSrc.getEnd();
@@ -4493,7 +4494,9 @@ public final class BytecodeCompiler {
         // ── Fast paths — skip the generic loop for simple builtins ──
         if (sinkMode instanceof FusedSinkMode.Accumulate a && !a.ignoreElement()) {
             // #427 fast path: ADD folder over range with no stages → BuiltinSumRangeLong.
-            if (rangeStart != null && a.op() == InlineOp.ADD && !hasStages) {
+            // Guard: init must be a long literal (not double) — SumFloat must not take this path.
+            if (rangeStart != null && a.op() == InlineOp.ADD && !hasStages
+                    && a.initExpr() instanceof LongLitIR) {
                 b.beginBuiltinSumRangeLong();
                   emitNode(rangeStart, b, argCount, localMap);
                   emitNode(rangeEnd,   b, argCount, localMap);
@@ -4755,7 +4758,9 @@ public final class BytecodeCompiler {
                 case ALL -> MezzeBytecodeRootNode.FLP_SINK_ALL;
                 case FIND -> MezzeBytecodeRootNode.FLP_SINK_FIND;
                 case NONE -> MezzeBytecodeRootNode.FLP_SINK_NONE;
+                case FIND_INDEX -> -1; // Not supported in FLP
             };
+            if (sinkKind < 0) return null;
             FilterPeel sp = sc.predPeel();
             if (sp.callHash() != null) return null;
             sinkPredPreOp = sp.preOp() != null ? sp.preOp().ordinal() : -1;
@@ -5385,7 +5390,7 @@ public final class BytecodeCompiler {
         /** Partition: predicate split into {pass, fail} record of two Seqs. */
         record PartitionPred(FilterPeel predPeel) implements FusedSinkMode {}
 
-        enum ShortCircuitKind { ANY, ALL, FIND, NONE }
+        enum ShortCircuitKind { ANY, ALL, FIND, NONE, FIND_INDEX }
         enum MaterializeTarget { SEQ, LIST }
         enum ElementCaptureKind { FIRST, LAST }
     }
@@ -5405,6 +5410,18 @@ public final class BytecodeCompiler {
             return new FusedSinkMode.Accumulate(InlineOp.ADD,
                     new LongLitIR(0L, chain.getSrc()), false);
         }
+        if (chain.getSink() instanceof SinkIR.SumFloat) {
+            return new FusedSinkMode.Accumulate(InlineOp.ADD,
+                    new DoubleLitIR(0.0, chain.getSrc()), false);
+        }
+        if (chain.getSink() instanceof SinkIR.Product) {
+            return new FusedSinkMode.Accumulate(InlineOp.MUL,
+                    new LongLitIR(1L, chain.getSrc()), false);
+        }
+        if (chain.getSink() instanceof SinkIR.ProductFloat) {
+            return new FusedSinkMode.Accumulate(InlineOp.MUL,
+                    new DoubleLitIR(1.0, chain.getSrc()), false);
+        }
         if (chain.getSink() instanceof SinkIR.Count) {
             return new FusedSinkMode.Accumulate(InlineOp.ADD,
                     new LongLitIR(0L, chain.getSrc()), /*ignoreElement=*/ true);
@@ -5420,6 +5437,9 @@ public final class BytecodeCompiler {
         }
         if (chain.getSink() instanceof SinkIR.Find findSink) {
             return classifyPredicateMode(findSink.getP(), FusedSinkMode.ShortCircuitKind.FIND, dbg);
+        }
+        if (chain.getSink() instanceof SinkIR.FindIndex findIndexSink) {
+            return classifyPredicateMode(findIndexSink.getP(), FusedSinkMode.ShortCircuitKind.FIND_INDEX, dbg);
         }
         if (chain.getSink() instanceof SinkIR.Reduce reduceSink) {
             var reducerShape = classifyBinaryFolder(reduceSink.getF(), dbg, "reducer");
@@ -5661,6 +5681,16 @@ public final class BytecodeCompiler {
                 b.endStoreLocal();
                 if (sc.kind() == FusedSinkMode.ShortCircuitKind.FIND) {
                     resultSlot = b.createLocal();
+                }
+                if (sc.kind() == FusedSinkMode.ShortCircuitKind.FIND_INDEX) {
+                    // Dedicated 0-based counter — works for all source types
+                    // (list cursor, seq index, range value). Incremented in sink
+                    // body after the predicate ifThen so it only counts elements
+                    // that reach the sink (respects filter stages).
+                    resultSlot = b.createLocal();
+                    b.beginStoreLocal(resultSlot);
+                      b.emitLoadLongConstant(0L);
+                    b.endStoreLocal();
                 }
             }
             case FusedSinkMode.ReduceOpt ignored -> {
@@ -6103,9 +6133,20 @@ public final class BytecodeCompiler {
                           b.emitLoadLocal(xSlot);
                         b.endStoreLocal();
                     }
+                    // FIND_INDEX: resultSlot already holds the 0-based counter
+                    // which IS the correct index — no overwrite needed.
                     b.emitBranch(exitLabel);
                   b.endBlock();
                 b.endIfThen();
+                // Increment FIND_INDEX counter (only reached when predicate
+                // was false — Branch(exit) skips this for the matching element).
+                if (sc.kind() == FusedSinkMode.ShortCircuitKind.FIND_INDEX) {
+                    b.beginStoreLocal(resultSlot);
+                      b.beginDirectAdd();
+                        b.emitLoadLocal(resultSlot); b.emitLoadLongConstant(1L);
+                      b.endDirectAdd();
+                    b.endStoreLocal();
+                }
             }
             case FusedSinkMode.ReduceOpt r -> {
                 // First element → init; subsequent → acc = acc <op> x
@@ -6359,7 +6400,7 @@ public final class BytecodeCompiler {
                           b.emitLoadLocal(foundSlot);
                         b.endDirectNot();
                     }
-                    case FIND -> {
+                    case FIND, FIND_INDEX -> {
                         b.beginConditional();
                           b.emitLoadLocal(foundSlot);
                           b.beginMakeVariantSingleFieldPayload(SOME_TAG,

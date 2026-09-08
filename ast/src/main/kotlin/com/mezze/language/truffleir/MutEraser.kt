@@ -434,7 +434,8 @@ object MutEraser {
                     }
                 }
                 val newSink: SinkIR = when (val sk = node.sink) {
-                    SinkIR.Sum, SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList,
+                    SinkIR.Sum, SinkIR.SumFloat, SinkIR.Product, SinkIR.ProductFloat,
+                    SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList,
                     SinkIR.First, SinkIR.Last, SinkIR.Min, SinkIR.Max -> sk
                     is SinkIR.Fold -> {
                         val nInit = f(sk.init)
@@ -445,7 +446,7 @@ object MutEraser {
                         if (nInit !== sk.init) SinkIR.Scan(nInit, sk.f) else sk
                     }
                     is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find,
-                    is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sk
+                    is SinkIR.FindIndex, is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sk
                 }
                 val newFallback = node.fallback?.let(f)
                 if (newSource !== node.source || newSink !== node.sink || stagesChanged || newFallback !== node.fallback)
