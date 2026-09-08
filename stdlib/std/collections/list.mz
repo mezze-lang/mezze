@@ -76,28 +76,13 @@ pub let get: { xs: List 'a, index: Int } -> Option 'a = { xs, index } ->
   __native_list_get { xs = xs, index = index }
 
 ## Take n elements from front — build reverse-accum, reverse at end.
-let take_go: { xs: List 'a, n: Int, acc: List 'a } -> List 'a = { xs, n, acc } ->
-  if n <= 0 then acc else match uncons { xs = xs } is
-    None -> acc
-    Some { val = { head, tail } } -> take_go {
-      xs = tail,
-      n = n - 1,
-      acc = cons { head = head, tail = acc },
-    }
-
-
 ## Returns the first n elements.
 pub let take: { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
-  reverse { xs = take_go { xs = xs, n = n, acc = empty {} } }
-
-## Drop n elements from front — tail-recursive walk, returns rest.
-let drop_go: { xs: List 'a, n: Int } -> List 'a = { xs, n } -> if n <= 0 then xs else match uncons { xs = xs } is
-  None -> xs
-  Some { val = { head, tail } } -> drop_go { xs = tail, n = n - 1 }
-
+  __native_list_take { xs = xs, n = n }
 
 ## Drops the first n elements.
-pub let drop: { xs: List 'a, n: Int } -> List 'a = { xs, n } -> drop_go { xs = xs, n = n }
+pub let drop: { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+  __native_list_drop { xs = xs, n = n }
 
 ## Applies f to each element, returning a new list.
 pub let map: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'b <...> = { xs, f } ->
@@ -244,31 +229,13 @@ pub let find_index: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option Int <.
   __native_list_find_index { xs = xs, p = p }
 
 ## Splits into elements matching and not matching the predicate.
-## Single fold_left builds both accumulators in reverse, one reverse per output.
 pub let partition
   : { xs: List 'a, p: { x: 'a } -> Bool <...> }
   -> { pass: List 'a, fail: List 'a } <...>
-  = { xs, p } -> do
-    let both = fold_left {
-      xs = xs,
-      init = { ps = empty {}, fs = empty {} },
-      f = { acc, x } -> if p { x = x } then { ps = cons { head = x, tail = acc.ps }, fs = acc.fs } else { ps = acc.ps, fs = cons { head = x, tail = acc.fs } },
-    }
-    {
-      pass = reverse { xs = both.ps },
-      fail = reverse { xs = both.fs },
-    }
+  = { xs, p } -> __native_list_partition { xs = xs, p = p }
 
 ## Returns the last element, or None if empty.
-## Tail-recursive walk to end.
-let last_go: { xs: List 'a, cur: 'a } -> 'a = { xs, cur } -> match uncons { xs = xs } is
-  None -> cur
-  Some { val = { head, tail } } -> last_go { xs = tail, cur = head }
-
-
-pub let last: { xs: List 'a } -> Option 'a = { xs } -> match uncons { xs = xs } is
-  None -> None
-  Some { val = { head, tail } } -> Some { val = last_go { xs = tail, cur = head } }
+pub let last: { xs: List 'a } -> Option 'a = { xs } -> __native_list_last { xs = xs }
 
 
 ## Returns all elements except the last.
@@ -280,43 +247,18 @@ pub let init: { xs: List 'a } -> List 'a = { xs } -> match uncons { xs = reverse
 
 
 ## Returns the minimum element, or None if empty.
-pub let min: { xs: List 'a } with Ord 'a -> Option 'a = { xs } -> match uncons { xs = xs } is
-  None -> None
-  Some { val = { head, tail } } -> Some {
-    val = fold_left { xs = tail, init = head, f = { acc, x } -> if x < acc then x else acc },
-  }
-
+pub let min: { xs: List 'a } with Ord 'a -> Option 'a = { xs } -> __native_list_min { xs = xs }
 
 ## Returns the maximum element, or None if empty.
-pub let max: { xs: List 'a } with Ord 'a -> Option 'a = { xs } -> match uncons { xs = xs } is
-  None -> None
-  Some { val = { head, tail } } -> Some {
-    val = fold_left { xs = tail, init = head, f = { acc, x } -> if x > acc then x else acc },
-  }
-
+pub let max: { xs: List 'a } with Ord 'a -> Option 'a = { xs } -> __native_list_max { xs = xs }
 
 ## Returns the minimum element by a key function, or None if empty.
 pub let min_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } with Ord 'b -> Option 'a <...> = { xs, f } ->
-  match uncons { xs = xs } is
-    None -> None
-    Some { val = { head, tail } } -> do
-      let seed = { best = head, key = f { x = head } }
-      let r = fold_left { xs = tail, init = seed, f = { acc, x } -> do
-        let k = f { x = x }
-        if k < acc.key then { best = x, key = k } else acc }
-      Some { val = r.best }
-
+  __native_list_min_by { xs = xs, f = f }
 
 ## Returns the maximum element by a key function, or None if empty.
 pub let max_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } with Ord 'b -> Option 'a <...> = { xs, f } ->
-  match uncons { xs = xs } is
-    None -> None
-    Some { val = { head, tail } } -> do
-      let seed = { best = head, key = f { x = head } }
-      let r = fold_left { xs = tail, init = seed, f = { acc, x } -> do
-        let k = f { x = x }
-        if k > acc.key then { best = x, key = k } else acc }
-      Some { val = r.best }
+  __native_list_max_by { xs = xs, f = f }
 
 
 ## Sums all integer elements.
@@ -359,34 +301,14 @@ pub let zip_with_index
   = { xs } -> enumerate { xs = xs }
 
 ## Executes f for each element, for side effects only.
-let for_each_go: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> {} <...> = { xs, f } ->
-  match uncons { xs = xs } is
-    None -> {}
-    Some { val = { head, tail } } -> do
-      f { x = head }
-      for_each_go { xs = tail, f = f }
-
-
 pub let for_each: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> {} <...> = { xs, f } ->
-  for_each_go { xs = xs, f = f }
+  __native_list_for_each { xs = xs, f = f }
 
 ## Like fold_left, but returns all intermediate accumulator values.
-## Builds acc list reversed then reverses at end. Includes init as first element.
 pub let scan
   : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> }
   -> List 'acc <...>
-  = { xs, init, f } -> do
-    let both = fold_left {
-      xs = xs,
-      init = {
-        cur = init,
-        acc = cons { head = init, tail = empty {} },
-      },
-      f = { acc, x } -> do
-        let nxt = f { acc = acc.cur, x = x }
-        { cur = nxt, acc = cons { head = nxt, tail = acc.acc } },
-    }
-    reverse { xs = both.acc }
+  = { xs, init, f } -> __native_list_scan { xs = xs, init = init, f = f }
 
 ## Splits at index i into {l, r}.
 ## Reuses take / drop.
@@ -437,34 +359,12 @@ pub let group_consecutive_by
   = { xs, f } -> __native_list_group_consecutive_by { xs = xs, f = f }
 
 ## Takes elements from the front while the predicate holds.
-## take_while walks + collects into reverse-accum, then reverse at end.
-## Short-circuits on first predicate-false via helper (fold_left can't).
-let take_while_go
-  : { xs: List 'a, p: { x: 'a } -> Bool <...>, acc: List 'a }
-  -> List 'a <...>
-  = { xs, p, acc } -> match uncons { xs = xs } is
-    None -> acc
-    Some { val = { head, tail } } -> if p { x = head } then take_while_go {
-      xs = tail,
-      p = p,
-      acc = cons { head = head, tail = acc },
-    } else acc
-
-
 pub let take_while: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
-  reverse {
-    xs = take_while_go { xs = xs, p = p, acc = empty {} },
-  }
+  __native_list_take_while { xs = xs, p = p }
 
 ## Drops elements from the front while the predicate holds.
-let drop_while_go: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
-  match uncons { xs = xs } is
-    None -> xs
-    Some { val = { head, tail } } -> if p { x = head } then drop_while_go { xs = tail, p = p } else xs
-
-
 pub let drop_while: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
-  drop_while_go { xs = xs, p = p }
+  __native_list_drop_while { xs = xs, p = p }
 
 ## Returns True if no element matches the predicate.
 pub let none: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
@@ -472,7 +372,7 @@ pub let none: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, 
 
 ## Counts elements matching the predicate.
 pub let count: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p } ->
-  fold_left { xs = xs, init = 0, f = { acc, x } -> if p { x = x } then acc + 1 else acc }
+  __native_list_count { xs = xs, p = p }
 
 ## Removes duplicate elements, keeping the first occurrence.
 pub let unique: { xs: List 'a } -> List 'a = { xs } -> __native_list_unique { xs = xs }
