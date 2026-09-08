@@ -450,8 +450,59 @@ private fun unifyVar(typeVar: TypeVar, type: MezzeType): UnificationResult {
     return UnificationResult.Success(Substitution.single(typeVar, type))
 }
 
+/**
+ * #11 directional field requirement: every field the DEMAND record declares must
+ * be present in the VALUE record. Extras on the VALUE are fine (row polymorphism);
+ * a field the VALUE has but the DEMAND lacks is not our concern here. Recurses
+ * into record-typed fields shared by both. Returns a Failure iff the value is a
+ * CONCRETE record that lacks a field the demand requires; returns null (OK) when
+ * the value is still a bare var (inference not finished — leave it to the solver)
+ * or when all demanded fields are present. Only called from unifyFunctions, where
+ * arg-vs-param direction is known — the symmetric unifyRecords is unchanged.
+ */
+private fun directionalParamFieldCheck(value: MezzeType, demand: MezzeType): UnificationResult.Failure? {
+    if (demand !is MezzeType.RecordType || value !is MezzeType.RecordType) return null
+    for ((fieldName, demandFieldType) in demand.fields) {
+        val valueFieldType = value.fields[fieldName]
+        if (valueFieldType == null) {
+            // The demand requires `fieldName`; the value's concrete field set lacks
+            // it. Sound to accept ONLY if the value's row var could still supply it
+            // — but a launder is exactly "the value is open yet genuinely has no
+            // such field", which is indistinguishable from a not-yet-inferred open
+            // value. We reject when the value is a record with a rowVar that is NOT
+            // a fresh inference placeholder for this field, i.e. always for a
+            // concrete open record: an explicit `{ x, ... }` value declares its
+            // fields and `...` admits only EXTRAS, it does not conjure `y`.
+            return UnificationResult.Failure(
+                message = "record fields don't match: missing '$fieldName' (required by the expected type)",
+                type1 = value,
+                type2 = demand,
+            )
+        }
+        // Recurse into nested records (both concrete) so `{ r: { y, ... } }` vs
+        // `{ r: { x, ... } }` is caught at the inner level too.
+        directionalParamFieldCheck(value = valueFieldType, demand = demandFieldType)?.let { return it }
+    }
+    return null
+}
+
 private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionType, registry: DeclarationRegistry): UnificationResult {
     val paramSubst = unify(fn1.paramType, fn2.paramType, registry).getOrElse { return it }
+    // #11 directional param check. By the call-argument convention documented
+    // for the effect rows below — Equality(left = arg, right = param) →
+    // unifyFunctions(fn1 = arg/value, fn2 = param/demand) — fn2.paramType is the
+    // DEMAND and fn1.paramType is the VALUE. Symmetric unifyRecords (above) can't
+    // reject a field the DEMAND requires but the VALUE lacks when both are open:
+    // it absorbs it into the value's row var (the launder — an open value
+    // `{ x, ... }` wrongly satisfies a demand `{ y, ... }`). Enforce it here with
+    // the direction this site has: every concrete field of the demand must be
+    // present in the value (recursively for nested records). The value's extra
+    // fields remain fine (row polymorphism), and a field the value has that the
+    // demand lacks is unaffected — only demand→value absence is a launder.
+    directionalParamFieldCheck(
+        value = paramSubst.apply(fn1.paramType),
+        demand = paramSubst.apply(fn2.paramType),
+    )?.let { return it }
     val return1 = paramSubst.apply(fn1.returnType)
     val return2 = paramSubst.apply(fn2.returnType)
     val returnSubst = unify(return1, return2, registry).getOrElse { return it }

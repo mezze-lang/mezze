@@ -177,18 +177,17 @@ class OpenRecordValidationTest {
     }
 
     // ========================================================================
-    // #11 SOUNDNESS (DEFERRED — see @Disabled note): an OPEN value `{ x: Int, ... }`
-    // must NOT satisfy a demand for a DIFFERENT declared field `{ y: Int, ... }`.
-    // The open∥open unification branch silently absorbs the demanded `y` into the
-    // value's row var → runtime `Field not found: y`. NOT fixed: unifyRecords is
-    // SYMMETRIC and cannot distinguish this launder from the legitimate case of a
-    // value carrying extra fields beyond an open demand (`{ x, y, ... }` vs
-    // `{ y, ... }`) — both are "field on one open side, absent from the other".
-    // A correct fix needs expected-vs-actual (subsumption) direction threaded into
-    // record unification or applied at the arg-check call site.
+    // #11 SOUNDNESS (FIXED): an OPEN value `{ x: Int, ... }` must NOT satisfy a
+    // demand for a DIFFERENT declared field `{ y: Int, ... }`. The open∥open
+    // unification branch used to silently absorb the demanded `y` into the value's
+    // row var → runtime `Field not found: y`. Fixed with a DIRECTIONAL param-field
+    // check in unifyFunctions (Unification.kt): the call-argument convention there
+    // (Equality(left=arg, right=param) → unifyFunctions(fn1=arg/value, fn2=param/
+    // demand)) gives the direction symmetric unifyRecords lacks — every concrete
+    // field the DEMAND declares must be present in the VALUE (recursively); the
+    // value's EXTRA fields remain fine (the legitimate row-poly case below).
     // ========================================================================
 
-    @org.junit.jupiter.api.Disabled("Known: open∥open record unification launders a demanded field; needs directional subsumption (see comment)")
     @Test
     fun `open value does not satisfy demand for a field it does not declare`() {
         shouldFail("""
