@@ -92,4 +92,63 @@ class OrdEqVariantDispatchTest {
         assertEquals(true, eval("1 == 1"))
         assertEquals(true, eval("\"a\" < \"b\""))
     }
+
+    // #18 follow-up: a comparison inside a GENERIC `with Ord 'a` body (the
+    // receiver is a still-generic `'a`, dispatched through a runtime dict)
+    // must reach the user variant impl — not fall through to the native
+    // comparator (`Cannot compare MezzeVariant`) or hand the dict slot an
+    // empty record. The direct (non-HOF) form is what this fix covers: the
+    // `inlineableOps` guard used to exclude `lt`/`gt`/`eq` from the VarType
+    // dict-passing branch entirely, so a `with Ord 'a` helper never requested
+    // a `__dict_lt` and its `a < b` crashed at runtime on a variant operand.
+
+    @Test
+    fun `comparison inside a generic with-Ord body dispatches on a variant`() {
+        // `smaller` is generic over `'a with Ord 'a`; the `a < b` receiver is a
+        // dict-param'd `'a`. Called with variant operands, it must use the user
+        // `impl Ord for Priority`. High > Low so the smaller is Low.
+        assertEquals("Low", eval("""
+            $ordImpl
+            let smaller : { a: 'a, b: 'a } with Ord 'a -> 'a = { a, b } ->
+              if a < b then a else b
+            (smaller { a = High, b = Low }).to_dbg {}
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `comparison inside a generic with-Ord body — reversed operands`() {
+        assertEquals("Low", eval("""
+            $ordImpl
+            let smaller : { a: 'a, b: 'a } with Ord 'a -> 'a = { a, b } ->
+              if a < b then a else b
+            (smaller { a = Low, b = High }).to_dbg {}
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `greater-than inside a generic with-Ord body dispatches on a variant`() {
+        assertEquals("High", eval("""
+            $ordImpl
+            let larger : { a: 'a, b: 'a } with Ord 'a -> 'a = { a, b } ->
+              if a > b then a else b
+            (larger { a = High, b = Low }).to_dbg {}
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `equality inside a generic with-Eq body dispatches to the user impl`() {
+        // The Eq impl reports ALL Colors equal; a structural fallback would say
+        // Red != Green. A generic `with Eq 'a` helper calling `a == b` must use
+        // the impl — so Red vs Green comes back True.
+        assertEquals(true, eval("""
+            use std::abilities::compare::{ Eq }
+            type Color = | Red, Green |
+            impl Eq for Color where {
+              eq = { it, r } -> True,
+              neq = { it, r } -> False,
+            }
+            let same : { a: 'a, b: 'a } with Eq 'a -> Bool = { a, b } -> a == b
+            same { a = Red, b = Green }
+        """.trimIndent()))
+    }
 }

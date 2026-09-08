@@ -418,6 +418,59 @@ class TypedASTCompiler(
         return type.abilityConstraints.isNotEmpty()
     }
 
+    /**
+     * Whether a method call on a VarType receiver should be marked for
+     * dict-passing (both when SCANNING for a callee's dict params and when
+     * EMITTING the call). Single source of truth for the two mirror sites so
+     * collection and consumption can never disagree.
+     *
+     * `to_str` / `to_dbg` with no real ability op are the InspectIR path
+     * (auto-derived, receiver's shape baked at compile time) — never
+     * dict-dispatched. There are many same-named `to_str` (one per type),
+     * which would otherwise trip the multiple-candidates rule and demand a
+     * `__dict_to_str` the caller never passes.
+     *
+     * #18: comparison / arithmetic ops (`lt`, `eq`, `add`, …) also need a dict
+     * when the receiver is a still-generic `'a` under a `with Ord`/`with Eq`/
+     * `with Num*` constraint — e.g. `x < acc` inside `list::min`'s body. The
+     * old `methodName !in inlineableOps` guard excluded these entirely, so the
+     * `<` fell through to the native comparator and crashed on a user variant
+     * (`Cannot compare MezzeVariant`). The exclusion existed only so PRIMITIVE
+     * operands inline (no dict) — but a primitive receiver is a concrete type,
+     * not a VarType, so it never enters this branch; and a VarType receiver
+     * that mono later specializes to a primitive gets its dict param stripped
+     * during specialization. So for `inlineableOps` we require a REAL ability
+     * op of that name to exist (`opCandidates` non-empty) in addition to the
+     * constrained-arrow / multi-candidate rule — a bare `'a` with no `Ord`/`Eq`
+     * impl anywhere in scope still falls through to the structural default
+     * rather than demanding a dict nobody supplies.
+     */
+    private fun shouldDictDispatchVarTypeOp(
+        methodName: String,
+        arrowIsConstrained: Boolean
+    ): Boolean {
+        val isInspectSugar =
+            methodName == Keywords.TO_STR || methodName == Keywords.TO_DBG
+        if (isInspectSugar) return false
+        val opCandidates = abilityOpIndex[methodName]
+        val hasRealOp = opCandidates != null && opCandidates.isNotEmpty()
+        // Inlineable ops (comparisons / arithmetic) only dict-dispatch when a
+        // real ability op backs them — otherwise a VarType `'a` with no impl
+        // takes the structural/native default (matching the old behavior of
+        // never entering this branch for inlineable ops).
+        if (methodName in inlineableOps && !hasRealOp) return false
+        return when {
+            arrowIsConstrained -> true
+            opCandidates != null && opCandidates.size > 1 -> true
+            // For a non-inlineable op the historical rule required >1 candidate.
+            // For an inlineable op backed by a real ability (Ord/Eq/Num), a
+            // single candidate still needs the dict at a polymorphic call site,
+            // since the receiver stays generic until mono specializes it.
+            methodName in inlineableOps && hasRealOp -> true
+            else -> false
+        }
+    }
+
     private fun scanExprForVarTypeMethods(
         expr: TypedExpr,
         out: MutableSet<String>,
@@ -428,7 +481,15 @@ class TypedASTCompiler(
                 val fn = expr.function
                 if (fn is TypedFieldAccess) {
                     val methodName = fn.field
-                    val receiverType = fn.record.type
+                    // Refresh against the final substitution so an inlineable op
+                    // whose receiver is a resolved primitive (e.g. `rank {..} <
+                    // rank {..}` where `rank` returns Int, but the sub-expr's
+                    // node type was still a var at build time) is NOT mistaken
+                    // for a generic-'a comparison and given a spurious dict param.
+                    // #18: without this, an `impl Ord for T` body's own internal
+                    // `<` on Int would demand a `__dict_lt` its caller never
+                    // supplies, misaligning the arg record at runtime.
+                    val receiverType = substitution.apply(fn.record.type)
                     // Bug B (#86): a VarType receiver whose id is in the enclosing
                     // arrow's `with`-constraint typevar set needs dict-passing even
                     // when abilityOpIndex has zero entries at this compile step
@@ -437,36 +498,8 @@ class TypedASTCompiler(
                     // flag as needing dict if there are multiple candidates
                     // (ambiguous — can't resolve statically). Single candidate =
                     // resolved in compileCall without needing a dict param.
-                    if (receiverType is VarType && methodName !in inlineableOps) {
-                        val opCandidates = abilityOpIndex[methodName]
-                        // Bug B (#86): a `with`-constrained arrow lets its
-                        // body call ability ops on a still-generic receiver —
-                        // typecheck already justified the call, so we mark
-                        // regardless of impl-index population (which is empty
-                        // at stdlib-precompile time for methods whose impls
-                        // are auto-derived per user type). Outside a
-                        // constrained arrow, fall back to the pre-existing
-                        // "multiple candidates → dict" rule.
-                        // `to_str` / `to_dbg` with no user ability op are the
-                        // InspectIR path (auto-derived, receiver's shape baked at
-                        // compile time) — never dict-dispatched. Marking them makes
-                        // the enclosing op demand a `__dict_to_str` the caller never
-                        // passes, so `x.op {}` returns the op function uncalled. Do
-                        // NOT mark them unless a real ability op of that name exists.
-                        // `to_str` / `to_dbg` are resolved by the InspectIR path
-                        // (or a receiver-typed free fn), NEVER by a runtime dict —
-                        // there are many same-named `to_str` (one per type), which
-                        // would otherwise trip the multiple-candidates rule below and
-                        // demand a `__dict_to_str` the caller never passes.
-                        val isInspectSugar =
-                            methodName == Keywords.TO_STR || methodName == Keywords.TO_DBG
-                        val shouldMark = when {
-                            isInspectSugar -> false
-                            arrowIsConstrained -> true
-                            opCandidates != null && opCandidates.size > 1 -> true
-                            else -> false
-                        }
-                        if (shouldMark) out.add(methodName)
+                    if (receiverType is VarType && shouldDictDispatchVarTypeOp(methodName, arrowIsConstrained)) {
+                        out.add(methodName)
                     }
                     scanExprForVarTypeMethods(fn.record, out, arrowIsConstrained)
                 } else {
@@ -1528,7 +1561,19 @@ class TypedASTCompiler(
             }
 
             // VarType receiver — try dictionary passing first, then fall back to dynamic dispatch.
-            if (receiverType is VarType && methodName !in inlineableOps) {
+            // #18: comparison / arithmetic ops (`inlineableOps`) reach here too when the
+            // receiver stayed a generic `'a` (concrete primitives already inlined above via
+            // tryInlineOp, which returns null for VarType). They dict-dispatch only when a
+            // real ability op backs them AND the current function actually holds the matching
+            // `__dict_<op>` param (populated by the collection pass through the same
+            // shouldDictDispatchVarTypeOp predicate) — otherwise we fall through to the
+            // structural/native default, preserving prior behavior for un-constrained vars.
+            val opIsInlineable = methodName in inlineableOps
+            val inlineableNeedsDict = opIsInlineable &&
+                abilityOpIndex[methodName]?.isNotEmpty() == true &&
+                (currentParamNames.indexOf(com.mezze.language.ast.MagicParams.dictParamName(methodName)) >= 0 ||
+                    currentCaptureNames[com.mezze.language.ast.MagicParams.dictParamName(methodName)] != null)
+            if (receiverType is VarType && (!opIsInlineable || inlineableNeedsDict)) {
                 val opCandidates = abilityOpIndex[methodName]
                 // Bug B (#86): also enter this branch when there are no impl
                 // candidates yet (blanket-impl body precompiled with the
@@ -1789,12 +1834,21 @@ class TypedASTCompiler(
         dictMethods: Set<String>,
         src: SourceInfo
     ): NodeIR {
-        // Collect concrete types from the argument record
+        // Collect concrete types from the argument record. Refresh each field's
+        // type against the final substitution and, for a nullary variant literal
+        // whose type stayed an orphan var (e.g. `smaller { a = High, b = Low }`
+        // where `High`/`Low` never solved to `Priority`), recover the declared
+        // VariantType from its constructor — the same #13 recovery the receiver
+        // path uses. Without this the arg types read as bare VarType, dict
+        // resolution finds no impl, and the callee's DictMethodCallIR is handed
+        // an empty record instead of the `impl Ord/Eq` op function.
         val concreteTypes = mutableListOf<MezzeType>()
         if (argExpr is TypedRecord) {
             for (entry in argExpr.entries) {
                 if (entry is TypedRecordEntry.Field) {
-                    concreteTypes.add(entry.value.type)
+                    val refreshed = substitution.apply(entry.value.type)
+                    val recovered = resolveVariantReceiverType(entry.value, refreshed) ?: refreshed
+                    concreteTypes.add(recovered)
                 }
             }
         }
