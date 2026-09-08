@@ -210,8 +210,9 @@ pub let intersperse: { xs: List 'a, sep: 'a } -> List 'a = { xs, sep } -> match 
   }
 
 
-## Sorts elements in ascending order.
-pub let sort: { xs: List 'a } -> List 'a = { xs } -> __native_list_sort { xs = xs }
+## Sorts elements in ascending order using the element's Ord impl.
+pub let sort: { xs: List 'a } with Ord 'a -> List 'a = { xs } ->
+  sort_by { xs = xs, cmp = { a, b } -> a <= b }
 
 ## Sorts using a `less-or-equal` comparator: `cmp { a, b }` returns True when `a`
 ## should come before `b` (matches `Ord`'s `lt`/`le` and the `<`/`<=` operators).
@@ -247,10 +248,12 @@ pub let init: { xs: List 'a } -> List 'a = { xs } -> match uncons { xs = reverse
 
 
 ## Returns the minimum element, or None if empty.
-pub let min: { xs: List 'a } with Ord 'a -> Option 'a = { xs } -> __native_list_min { xs = xs }
+pub let min: { xs: List 'a } with Ord 'a -> Option 'a = { xs } ->
+  reduce { xs = xs, f = { acc, x } -> if x < acc then x else acc }
 
 ## Returns the maximum element, or None if empty.
-pub let max: { xs: List 'a } with Ord 'a -> Option 'a = { xs } -> __native_list_max { xs = xs }
+pub let max: { xs: List 'a } with Ord 'a -> Option 'a = { xs } ->
+  reduce { xs = xs, f = { acc, x } -> if x > acc then x else acc }
 
 ## Returns the minimum element by a key function, or None if empty.
 pub let min_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } with Ord 'b -> Option 'a <...> = { xs, f } ->

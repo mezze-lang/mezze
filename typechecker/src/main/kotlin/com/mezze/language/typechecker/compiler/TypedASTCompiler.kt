@@ -50,6 +50,16 @@ class TypedASTCompiler(
     private val monoStripBySiteLoc: Map<com.mezze.language.parsedast.Loc, Set<String>> = emptyMap(),
     private val preloweredFunctions: Map<Hash, FunctionIR> = emptyMap(),
     /**
+     * Dict method requirements discovered during stdlib pre-compilation.
+     * Seeded into [dictMethodsForHash] so user-code call sites correctly inject
+     * dict params for pre-lowered stdlib functions (whose modules are NOT
+     * re-scanned during user compilation). Without this, a call like
+     * `seq::min { xs = [High, Low, Mid] }` would miss the `__dict_lt` injection
+     * because the prescan only covers `additionalModules` (a small prelude
+     * subset) — not the full set of imported stdlib modules.
+     */
+    private val preloweredDictMethods: Map<Hash, Set<String>> = emptyMap(),
+    /**
      * Final module substitution — used to refresh stale VarType on TypedVar
      * nodes whose type field was captured before the outer scope solved the
      * relevant TyVar (e.g. `<-` desugar binds the payload before the
@@ -190,8 +200,20 @@ class TypedASTCompiler(
      * Also transitively propagates dict requirements: if function A calls function B
      * which needs dict params, then A also needs those same dict params (to forward them).
      */
+    /**
+     * Expose the discovered dict method requirements so the stdlib pre-compilation
+     * step can accumulate them and pass them to the user-code compiler.
+     */
+    fun getDictMethodsForHash(): Map<Hash, Set<String>> = dictMethodsForHash.toMap()
+
     private fun prescanForDictMethods(modules: List<TypedModule>) {
         dictMethodsForHash.clear()
+        // Seed with pre-lowered stdlib dict methods so call sites in the user
+        // module correctly inject dicts for stdlib functions whose modules are
+        // NOT in `additionalModules` during user compilation.
+        for ((h, methods) in preloweredDictMethods) {
+            dictMethodsForHash[h] = methods
+        }
 
         // Phase 1: find functions with direct VarType method calls
         val allDecls = mutableListOf<TypedLetDecl>()
@@ -301,11 +323,20 @@ class TypedASTCompiler(
                                 }
                             }
                         }
+                        // When arg types still contain VarType (even inside containers
+                        // like SeqType(VarType)), skip resolution — a blanket
+                        // container-level impl (e.g. `impl Ord for ['a]`) could match
+                        // when the dict is actually for the element type. Mark for
+                        // forwarding so the enclosing function gets the dict param.
+                        val anyArgHasVarType = concreteTypes.any { containsVarType(it) }
                         for (methodName in calleeDictMethods) {
-                            val resolved = resolveOpHashFromConcreteTypes(methodName, concreteTypes)
-                            if (resolved == null) {
-                                // Can't resolve statically — need a dict param to forward
+                            if (anyArgHasVarType) {
                                 out.add(methodName)
+                            } else {
+                                val resolved = resolveOpHashFromConcreteTypes(methodName, concreteTypes)
+                                if (resolved == null) {
+                                    out.add(methodName)
+                                }
                             }
                         }
                     }
@@ -594,6 +625,16 @@ class TypedASTCompiler(
         val operationHashes: List<String>,
         val operationNames: List<String>
     )
+
+    /**
+     * Run only the dict-method prescan for a module (no compilation).
+     * Used by PrecompiledStdlib to discover dict requirements from cache-loaded
+     * typed modules without the cost of full compilation.
+     * The abilityOpIndex is populated in init{}, so it's ready at construction.
+     */
+    fun prescanOnly(module: TypedModule) {
+        prescanForDictMethods(listOf(module))
+    }
 
     /**
      * Compile a TypedModule and its imports to FunctionIR list.
@@ -1450,6 +1491,7 @@ class TypedASTCompiler(
                 return compileInlineOp(inlineOp, receiverIR, argIR, src)
             }
 
+
             // Try ability method resolution. For concrete types, resolve directly.
             // For VarType, try single-candidate resolution (monomorphized code where
             // the type variable wasn't fully substituted but only one impl exists),
@@ -1724,7 +1766,19 @@ class TypedASTCompiler(
                     // resolved ability op functions into the argument record.
                     val calleeDictMethods = dictMethodsForHash[calleeHash]
                     if (calleeDictMethods != null && calleeDictMethods.isNotEmpty()) {
-                        val enrichedArgIR = injectDictFields(argIR, expr.arg, calleeDictMethods, src)
+                        val rawFnType = fn.type as? FunctionType
+                        val rawConstraintTypeArgs = rawFnType?.abilityConstraints
+                            ?.flatMap { it.typeArgs }
+                            ?.map { substitution.apply(it) }
+                            ?: emptyList()
+                        val constraintTypes = rawConstraintTypeArgs.filter { it !is VarType }
+                        // When ALL constraint type args are still VarType after substitution,
+                        // we're inside a generic function body calling another generic function.
+                        // In this case, prefer forwarding dicts from the caller over resolving
+                        // from concrete types (which may match a wrong blanket container impl).
+                        val calleeConstraintsAreGeneric = rawConstraintTypeArgs.isNotEmpty() &&
+                            rawConstraintTypeArgs.all { it is VarType }
+                        val enrichedArgIR = injectDictFields(argIR, expr.arg, calleeDictMethods, constraintTypes, calleeConstraintsAreGeneric, src)
                         census.byHashDictInject++
                         emitCallDirect(calleeHash, enrichedArgIR, expr.isTailCall, src)
                     } else if (isNonLambdaUserLet(calleeHash)) {
@@ -1854,6 +1908,7 @@ class TypedASTCompiler(
      * @param argIR the already-compiled argument IR
      * @param argExpr the typed argument expression (for type info)
      * @param dictMethods set of method names the callee needs
+     * @param constraintTypes concrete types from the callee's ability constraints (preferred for resolution)
      * @param src source info for generated IR nodes
      * @return argIR with injected dict fields, or original argIR if resolution fails
      */
@@ -1861,51 +1916,94 @@ class TypedASTCompiler(
         argIR: NodeIR,
         argExpr: TypedExpr,
         dictMethods: Set<String>,
+        constraintTypes: List<MezzeType>,
+        calleeConstraintsAreGeneric: Boolean,
         src: SourceInfo
     ): NodeIR {
-        // Collect concrete types from the argument record. Refresh each field's
-        // type against the final substitution and, for a nullary variant literal
-        // whose type stayed an orphan var (e.g. `smaller { a = High, b = Low }`
-        // where `High`/`Low` never solved to `Priority`), recover the declared
-        // VariantType from its constructor — the same #13 recovery the receiver
-        // path uses. Without this the arg types read as bare VarType, dict
-        // resolution finds no impl, and the callee's DictMethodCallIR is handed
-        // an empty record instead of the `impl Ord/Eq` op function.
+        // Collect concrete types from the argument record as fallback. Refresh
+        // each field's type against the final substitution and, for a nullary
+        // variant literal whose type stayed an orphan var (e.g.
+        // `smaller { a = High, b = Low }` where `High`/`Low` never solved to
+        // `Priority`), recover the declared VariantType from its constructor —
+        // the same #13 recovery the receiver path uses. Without this the arg
+        // types read as bare VarType, dict resolution finds no impl, and the
+        // callee's DictMethodCallIR is handed an empty record instead of the
+        // `impl Ord/Eq` op function.
         val concreteTypes = mutableListOf<MezzeType>()
         if (argExpr is TypedRecord) {
             for (entry in argExpr.entries) {
                 if (entry is TypedRecordEntry.Field) {
                     val refreshed = substitution.apply(entry.value.type)
                     val recovered = resolveVariantReceiverType(entry.value, refreshed) ?: refreshed
+                    // For container expressions (seq/list literals), extract the
+                    // concrete ELEMENT type from the expression tree FIRST. The
+                    // container's type annotation may have unresolved VarType elements
+                    // (generalized type variable not in the module substitution), but
+                    // the individual elements — especially variant constructors — can
+                    // be recovered. Placing element types BEFORE container types ensures
+                    // `min_manual { xs = [High, Low, Mid] }` resolves `lt` against
+                    // `impl Ord for P` (element-level) rather than `impl Ord for ['a]`
+                    // (seq-level), because resolveOpHashFromConcreteTypes tries types in
+                    // order and returns the first match.
+                    val elementType = extractConcreteElementTypeFromExpr(entry.value)
+                    if (elementType != null) concreteTypes.add(elementType)
                     concreteTypes.add(recovered)
                 }
             }
         }
 
-        // For each required dict method, try to resolve the op hash using concrete types
+        // For each required dict method, try to resolve the op hash using concrete types.
+        // Try constraint types first (exact), then fall back to argument field types.
+        //
+        // When the callee's constraint type args are all VarType (generic call inside
+        // a generic function body), prefer forwarding from the caller's dict params
+        // over resolving from concrete types. Inside such a body the arg types are
+        // still generic (VarType wrapped in containers like SeqType), and resolving
+        // against them can match a CONTAINER-level impl (e.g. `impl Ord for ['a]`)
+        // instead of the intended ELEMENT-level impl that the caller's dict carries.
         val dictFields = mutableListOf<FieldIR>()
         for (methodName in dictMethods.sorted()) {
             val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
-            val opHash = resolveOpHashFromConcreteTypes(methodName, concreteTypes)
-            if (opHash != null) {
-                // ReadContextFnIR fetches the MezzeFunction from the global registry by hash
-                // WITHOUT auto-evaluating it as a thunk. This is critical because ability op
-                // functions may look like zero-param thunks but we need the function object itself.
-                dictFields.add(FieldIR(dictParamName, ReadGlobalFnByHashIR(opHash, src)))
-            } else {
-                // Can't resolve — check if caller has this dict param (forwarding)
+
+            // When constraints are generic, prefer forwarding from caller
+            if (calleeConstraintsAreGeneric) {
+                // 1a. Forward from caller param
                 val callerDictIdx = currentParamNames.indexOf(dictParamName)
                 if (callerDictIdx >= 0) {
-                    // Forward the dict from our own params
+                    val slot = currentCaptureCount + callerDictIdx
+                    dictFields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
+                    continue
+                }
+                // 1b. Forward from caller capture
+                val callerCaptureIdx = currentCaptureNames[dictParamName]
+                if (callerCaptureIdx != null) {
+                    dictFields.add(FieldIR(dictParamName, ReadCaptureIR(callerCaptureIdx, SlotKind.OBJECT, src)))
+                    continue
+                }
+            }
+
+            // 2. Resolve from concrete types
+            val opHash = if (constraintTypes.isNotEmpty()) {
+                resolveOpHashFromConcreteTypes(methodName, constraintTypes)
+                    ?: resolveOpHashFromConcreteTypes(methodName, concreteTypes)
+            } else {
+                resolveOpHashFromConcreteTypes(methodName, concreteTypes)
+            }
+            if (opHash != null) {
+                dictFields.add(FieldIR(dictParamName, ReadGlobalFnByHashIR(opHash, src)))
+            } else {
+                // 3. Fallback: forward from caller if available
+                val callerDictIdx = currentParamNames.indexOf(dictParamName)
+                if (callerDictIdx >= 0) {
                     val slot = currentCaptureCount + callerDictIdx
                     dictFields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
                 } else {
-                    // No resolution — pass UnitLitIR as placeholder.
-                    // The callee's DictMethodCallIR will fail at runtime if this
-                    // path is actually taken. In practice, if the caller can't resolve
-                    // the dict, the call site must also have VarType and the pre-scan
-                    // should have put dict params on the caller too.
-                    dictFields.add(FieldIR(dictParamName, UnitLitIR(src)))
+                    val callerCaptureIdx = currentCaptureNames[dictParamName]
+                    if (callerCaptureIdx != null) {
+                        dictFields.add(FieldIR(dictParamName, ReadCaptureIR(callerCaptureIdx, SlotKind.OBJECT, src)))
+                    } else {
+                        dictFields.add(FieldIR(dictParamName, UnitLitIR(src)))
+                    }
                 }
             }
         }
@@ -1920,6 +2018,25 @@ class TypedASTCompiler(
             // This shouldn't normally happen (function args are records), but handle gracefully.
             MakeRecordIR(dictFields, src)
         }
+    }
+
+    /**
+     * Check if a type contains any VarType in its structure.
+     * A type like SeqType(VarType) is "partially generic" — the container is
+     * known but the element is unknown. Resolving ability impls against such
+     * types can match blanket container-level impls (e.g. `impl Ord for ['a]`)
+     * when the intended resolution is for the element type.
+     */
+    private fun containsVarType(type: MezzeType): Boolean = when (type) {
+        is VarType -> true
+        is SeqType -> containsVarType(type.elementType)
+        is ListType -> containsVarType(type.elementType)
+        is SetType -> containsVarType(type.elementType)
+        is SortedSetType -> containsVarType(type.elementType)
+        is MapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
+        is SortedMapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
+        is TypeApplication -> type.args.any { containsVarType(it) }
+        else -> false
     }
 
     /**
@@ -3259,6 +3376,36 @@ class TypedASTCompiler(
         if (currentType !is VarType) return null
         if (node !is com.mezze.language.typedast.TypedVariantConstruct) return null
         return variantTypeByConstructor[node.tag]
+    }
+
+    /**
+     * Extract a concrete element type from a container expression.
+     * When a seq/list literal's TYPE has an unresolved VarType element (generalized
+     * type variable not in the module substitution), the individual ELEMENTS may
+     * carry recoverable concrete types — variant constructors map to their declared
+     * VariantType, and non-VarType expression types are used directly.
+     *
+     * Returns the first concrete element type found, or null if all elements have
+     * unresolvable types.
+     */
+    private fun extractConcreteElementTypeFromExpr(expr: TypedExpr): MezzeType? {
+        val elements: List<TypedExpr> = when (expr) {
+            is com.mezze.language.typedast.TypedSeq -> expr.elements.mapNotNull {
+                when (it) {
+                    is com.mezze.language.typedast.TypedSeqElement.Regular -> it.expr
+                    is com.mezze.language.typedast.TypedSeqElement.Spread -> it.expr
+                }
+            }
+            // TypedCall to list::from_seq, etc. — don't dig into call args
+            else -> return null
+        }
+        for (element in elements) {
+            val elemType = substitution.apply(element.type)
+            val recovered = resolveVariantReceiverType(element, elemType)
+            if (recovered != null) return recovered
+            if (elemType !is VarType) return elemType
+        }
+        return null
     }
 
     /** Look up param names for a known callee hash. Returns null if unknown.

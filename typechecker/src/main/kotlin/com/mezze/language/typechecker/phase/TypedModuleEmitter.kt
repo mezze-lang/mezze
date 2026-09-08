@@ -254,12 +254,14 @@ private fun compileModule(
     )
 
     val stdlibFns = try { PrecompiledStdlib.preloweredFunctions } catch (_: Throwable) { emptyMap() }
+    val stdlibDictMethods = try { PrecompiledStdlib.preloweredDictMethods } catch (_: Throwable) { emptyMap() }
     val compiler = TypedASTCompiler(
         abilityImpls = allAbilityImpls,
         stdlibHashes = preludeHashes,
         monoCallSiteRewrites = monoResult.bySiteLoc,
         monoStripBySiteLoc = monoResult.stripBySiteLoc,
         preloweredFunctions = stdlibFns,
+        preloweredDictMethods = stdlibDictMethods,
         substitution = substitution,
         decodeOpBySite = decodeOpBySite,
     )

@@ -1,4 +1,4 @@
-use std::abilities::compare::{ Eq }
+use std::abilities::compare::{ Eq, Ord }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
 use std::int
@@ -119,10 +119,12 @@ pub let count: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Int <...> = { s, p
   __native_set_count { s = s, p = p }
 
 ## Returns the minimum element, or None if empty.
-pub let min: { s: Set 'a } -> Option 'a = { s } -> __native_set_min { s = s }
+pub let min: { s: Set 'a } with Ord 'a -> Option 'a = { s } ->
+  reduce { s = s, f = { acc, x } -> if x < acc then x else acc }
 
 ## Returns the maximum element, or None if empty.
-pub let max: { s: Set 'a } -> Option 'a = { s } -> __native_set_max { s = s }
+pub let max: { s: Set 'a } with Ord 'a -> Option 'a = { s } ->
+  reduce { s = s, f = { acc, x } -> if x > acc then x else acc }
 
 ## Sums all integer elements.
 pub let sum: { s: Set Int } -> Int = { s } -> __native_set_sum { s = s }

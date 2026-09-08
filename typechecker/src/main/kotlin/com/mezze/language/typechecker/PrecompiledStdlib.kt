@@ -61,6 +61,13 @@ object PrecompiledStdlib {
     var preloweredFunctions: Map<Hash, FunctionIR>
         private set
 
+    /** Dict method requirements discovered during stdlib pre-compilation.
+     *  Keys are function hashes, values are sets of method names (e.g. "lt", "le").
+     *  Passed to the user-code TypedASTCompiler so call sites can inject dicts
+     *  for pre-compiled stdlib functions. */
+    var preloweredDictMethods: Map<Hash, Set<String>> = emptyMap()
+        private set
+
     var stdlibDependencyGraph: Map<Hash, Set<Hash>> = emptyMap()
         private set
 
@@ -161,6 +168,8 @@ object PrecompiledStdlib {
             // to an empty map, preserving the pre-#415 behavior.
             stdlibTypedModules = fullCache.typedModules
             loadedModules = emptyMap()
+            // Re-derive dict methods — the snapshot format doesn't store them.
+            preloweredDictMethods = prescanDictMethodsFromModules(stdlibTypedModules)
 
             moduleLoader = ModuleLoader.fromPath(projectRoot.toString())
             val tc = TypeChecker()
@@ -201,6 +210,9 @@ object PrecompiledStdlib {
                 preloweredFunctions = preloaded.functions
                 preloweredPerformerRecords = preloaded.performers
                 stdlibDependencyGraph = preloaded.dependencyGraph
+                // Re-derive dict methods from typed modules when loading from cache.
+                // The cache format doesn't store dict methods, so we prescan here.
+                preloweredDictMethods = prescanDictMethodsFromModules(stdlibTypedModules)
             } else {
                 val allModulesForPrelower = HashMap<Hash, TypedAstModule>(stdlibTypedModules)
                 for ((_, cachedMod) in ModuleTypeChecker.getAllCachedModules()) {
@@ -212,6 +224,7 @@ object PrecompiledStdlib {
 
                 val preFunctions = mutableMapOf<Hash, FunctionIR>()
                 val prePerformers = mutableListOf<Array<String>>()
+                val preDictMethods = mutableMapOf<Hash, Set<String>>()
                 val allAbilityImpls = allModulesForPrelower.values.flatMap { it.abilityImpls }
                 for ((modHash, typedMod) in allModulesForPrelower) {
                     try {
@@ -226,6 +239,10 @@ object PrecompiledStdlib {
                             prePerformers.add(arr.toTypedArray())
                         }
                         for (fn in result.functions) { preFunctions.putIfAbsent(fn.hash, fn) }
+                        // Accumulate dict method requirements for user-code compilation
+                        for ((h, methods) in compiler.getDictMethodsForHash()) {
+                            preDictMethods[h] = methods
+                        }
                     } catch (e: Exception) {
                         // Stdlib lowering failures are not "best-effort": they mean a
                         // stdlib function won't be available at runtime, manifesting
@@ -241,6 +258,7 @@ object PrecompiledStdlib {
                 }
                 preloweredFunctions = preFunctions
                 preloweredPerformerRecords = prePerformers
+                preloweredDictMethods = preDictMethods
                 buildDependencyGraph()
             }
 
@@ -277,6 +295,28 @@ object PrecompiledStdlib {
             preloweredPerformerRecords = preloweredPerformerRecords,
             dependencyGraph = stdlibDependencyGraph,
         )
+    }
+
+    /**
+     * Lightweight prescan of stdlib typed modules to discover which functions
+     * need dictionary params (e.g. `__dict_lt`). Runs the TypedASTCompiler's
+     * prescan for each module, collecting the hash → methods map. Does NOT
+     * compile function bodies — only the prescan step runs.
+     */
+    private fun prescanDictMethodsFromModules(modules: Map<Hash, TypedAstModule>): Map<Hash, Set<String>> {
+        if (modules.isEmpty()) return emptyMap()
+        val allAbilityImpls = modules.values.flatMap { it.abilityImpls }
+        val result = mutableMapOf<Hash, Set<String>>()
+        for ((_, typedMod) in modules) {
+            try {
+                val compiler = TypedASTCompiler(abilityImpls = allAbilityImpls)
+                compiler.prescanOnly(typedMod)
+                for ((h, methods) in compiler.getDictMethodsForHash()) {
+                    result[h] = methods
+                }
+            } catch (_: Exception) { /* best-effort — non-fatal */ }
+        }
+        return result
     }
 
         @OptIn(ExperimentalSerializationApi::class)

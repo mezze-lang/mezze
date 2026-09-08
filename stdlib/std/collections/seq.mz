@@ -181,8 +181,9 @@ pub let count: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p }
 ## Reverses the sequence.
 pub let reverse: { xs: ['a] } -> ['a] = { xs } -> __native_seq_reverse { xs = xs }
 
-## Sorts elements in ascending order.
-pub let sort: { xs: ['a] } -> ['a] = { xs } -> __native_seq_sort { xs = xs }
+## Sorts elements in ascending order using the element's Ord impl.
+pub let sort: { xs: ['a] } with Ord 'a -> ['a] = { xs } ->
+  sort_by { xs = xs, cmp = { a, b } -> a <= b }
 
 ## Sorts using a `less-or-equal` comparator: `cmp { a, b }` returns True when `a`
 ## should come before `b`. Matches how ordering is expressed everywhere else in
@@ -251,10 +252,12 @@ pub let empty: {} -> ['a] = {} -> __native_seq_empty {}
 pub let of: { x: 'a, xs: ['a] } -> ['a] = { x, xs } -> push_front { xs = xs, x = x }
 
 ## Returns the minimum element, or None if empty.
-pub let min: { xs: ['a] } -> Option 'a = { xs } -> __native_seq_min { xs = xs }
+pub let min: { xs: ['a] } with Ord 'a -> Option 'a = { xs } ->
+  reduce { xs = xs, f = { acc, x } -> if x < acc then x else acc }
 
 ## Returns the maximum element, or None if empty.
-pub let max: { xs: ['a] } -> Option 'a = { xs } -> __native_seq_max { xs = xs }
+pub let max: { xs: ['a] } with Ord 'a -> Option 'a = { xs } ->
+  reduce { xs = xs, f = { acc, x } -> if x > acc then x else acc }
 
 ## Returns the minimum element by a key function, or None if empty.
 pub let min_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> Option 'a <...> = { xs, f } ->

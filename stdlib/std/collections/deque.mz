@@ -1,6 +1,7 @@
 use std::abilities::compare::{ Eq, Ord }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
+use std::collections::seq
 use std::int
 
 ## Default Deque is the empty deque.
@@ -247,7 +248,8 @@ pub let partition
 pub let unique: { d: Deque 'a } -> Deque 'a = { d } -> __native_deque_unique { d = d }
 
 ## Sorts elements in ascending order.
-pub let sort: { d: Deque 'a } -> Deque 'a = { d } -> __native_deque_sort { d = d }
+pub let sort: { d: Deque 'a } with Ord 'a -> Deque 'a = { d } ->
+  from_seq { xs = seq::sort { xs = to_seq { d = d } } }
 
 ## Returns True if any element matches the predicate.
 pub let any: { d: Deque 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { d, p } ->
@@ -282,10 +284,12 @@ pub let sum: { d: Deque Int } -> Int = { d } -> __native_deque_sum { d = d }
 pub let product: { d: Deque Int } -> Int = { d } -> __native_deque_product { d = d }
 
 ## Returns the minimum element, or None if empty.
-pub let min: { d: Deque 'a } with Ord 'a -> Option 'a = { d } -> __native_deque_min { d = d }
+pub let min: { d: Deque 'a } with Ord 'a -> Option 'a = { d } ->
+  reduce { d = d, f = { acc, x } -> if x < acc then x else acc }
 
 ## Returns the maximum element, or None if empty.
-pub let max: { d: Deque 'a } with Ord 'a -> Option 'a = { d } -> __native_deque_max { d = d }
+pub let max: { d: Deque 'a } with Ord 'a -> Option 'a = { d } ->
+  reduce { d = d, f = { acc, x } -> if x > acc then x else acc }
 
 ## Returns True if the deque contains the element.
 pub let contains: { d: Deque 'a, x: 'a } with Eq 'a -> Bool = { d, x } ->

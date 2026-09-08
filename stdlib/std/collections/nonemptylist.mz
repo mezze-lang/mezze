@@ -133,7 +133,8 @@ pub let to_seq: { xs: NonEmptyList 'a } -> ['a] = { xs } -> __native_nel_to_seq 
 pub let from_seq: { xs: ['a] } -> Option (NonEmptyList 'a) = { xs } -> __native_nel_from_seq { xs = xs }
 
 ## Sorts elements in ascending order.
-pub let sort: { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } -> __native_nel_sort { xs = xs }
+pub let sort: { xs: NonEmptyList 'a } with Ord 'a -> NonEmptyList 'a = { xs } ->
+  sort_by { xs = xs, cmp = { l, r } -> l <= r }
 
 ## Sorts using a `less-or-equal` comparator: `cmp { l, r }` returns True when `l`
 ## should come before `r` (matches `Ord`'s `lt`/`le` and the `<`/`<=` operators).
