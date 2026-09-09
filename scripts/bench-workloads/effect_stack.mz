@@ -1,0 +1,99 @@
+# Effect stack benchmark — exercises Mut, Async, Parallel end-to-end.
+
+use std::effects::log::{ Console, println }
+use std::effects::mutation::{ Mut, LocalMut, MutInt, MutSeq, int_to_mut, read_int, incr1, seq_to_mut, sort, seq_to_immut }
+use std::effects::async::{ Async, LoomAsync, await }
+use std::effects::parallel::{ Parallel, LoomParallel, sum, reduce }
+use std::effects::time::{ Time, SystemTime }
+use std::collections::seq
+use std::str
+use std::datetime::{ duration_to_nanos, sub_duration }
+
+## Mut benchmark: tight increment loop
+let bench_mut_incr = { n } -> perform LocalMut in do
+  let counter = int_to_mut { n = 0 }
+  let i = int_to_mut { n = 0 }
+  Mut.loop {
+    cond = {} -> read_int { n = i } < n,
+    body = {} -> do
+      incr1 { n = counter }
+      incr1 { n = i }
+  }
+  read_int { n = counter }
+
+## Mut benchmark: seq sort
+let bench_mut_sort = { xs } -> perform LocalMut in do
+  let ms = seq_to_mut { seq = xs }
+  sort { seq = ms }
+  seq_to_immut { seq = ms }
+
+## Async benchmark: spawn N tasks and await all
+let bench_async_spawn_await = { n } -> perform LoomAsync in do
+  let nums = seq::range { start = 0, end = n }
+  let promises = seq::map { xs = nums, f = { x } -> Async.spawn { f = {} -> x * x } }
+  seq::fold {
+    xs = promises,
+    init = 0,
+    f = { acc, x } -> match await { p = x } is
+      Ok { val } -> acc + val
+      Err { error = _ } -> acc
+  }
+
+## Parallel benchmark: parallel sum
+let bench_parallel_sum = { xs } -> perform LoomParallel in
+  sum { xs = xs }
+
+## Parallel benchmark: parallel reduce
+let bench_parallel_reduce = { xs } -> perform LoomParallel in
+  reduce {
+    xs = seq::map { xs = xs, f = { x } -> x * x },
+    f = { l, r } -> l + r,
+  }
+
+## Timing: returns elapsed nanoseconds for N iterations of f
+let time_ns = { f, iterations } -> perform SystemTime in perform LocalMut in do
+  ## Warmup
+  f {}
+  f {}
+  let start = Time.monotonic {}
+  let i = int_to_mut { n = 0 }
+  Mut.loop {
+    cond = {} -> read_int { n = i } < iterations,
+    body = {} -> do
+      f {}
+      incr1 { n = i }
+  }
+  let stop = Time.monotonic {}
+  duration_to_nanos { d = sub_duration { a = stop, b = start } }
+
+let report = { label, total_ns, iterations } -> do
+  let us_per_iter = total_ns / 1000 / iterations
+  println { msg = str::concat { l = label, r = str::concat { l = ": ", r = str::concat { l = us_per_iter.to_dbg {}, r = " us/iter" } } } }
+
+let main = {} -> perform Console in do
+  println { msg = "=== Effect Stack Benchmark ===" }
+
+  let n1 = 100
+  let t1 = time_ns { iterations = n1, f = {} -> bench_mut_incr { n = 10000 } }
+  report { label = "mut_incr_10k", total_ns = t1, iterations = n1 }
+
+  let unsorted = seq::range { start = 0, end = 1000 }
+  let n2 = 100
+  let t2 = time_ns { iterations = n2, f = {} -> bench_mut_sort { xs = unsorted } }
+  report { label = "mut_sort_1k", total_ns = t2, iterations = n2 }
+
+  let n3 = 10
+  let t3 = time_ns { iterations = n3, f = {} -> bench_async_spawn_await { n = 50 } }
+  report { label = "async_spawn_50", total_ns = t3, iterations = n3 }
+
+  let nums = seq::range { start = 0, end = 10000 }
+  let n4 = 50
+  let t4 = time_ns { iterations = n4, f = {} -> bench_parallel_sum { xs = nums } }
+  report { label = "parallel_sum_10k", total_ns = t4, iterations = n4 }
+
+  let nums2 = seq::range { start = 0, end = 1000 }
+  let n5 = 50
+  let t5 = time_ns { iterations = n5, f = {} -> bench_parallel_reduce { xs = nums2 } }
+  report { label = "parallel_reduce_1k", total_ns = t5, iterations = n5 }
+
+  println { msg = "=== Done ===" }
