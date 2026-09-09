@@ -5572,13 +5572,87 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = String.class)
     public static final class EffectBinding {
+        /**
+         * Fast path for resume/abort: when the handler chain is stable
+         * (same CyclicAssumption PerformD.doCached guards on), we know
+         * no dispatch fiber is set — the doCached path never enters
+         * dispatch mode. So resume → singleton fallThroughResumeFn,
+         * abort → singleton makeAbortFunction, with zero ThreadLocal
+         * probes and zero @TruffleBoundary crossings. PE constant-folds
+         * these to the singleton function pointer.
+         *
+         * <p>The guard resolves {@link EffectBindingKind} from the name
+         * once at specialization time (the name is a @ConstantOperand,
+         * so it's a compilation constant). The cached singleton is the
+         * function object PE sees as a constant — no dispatch, no
+         * ThreadLocal, no boundary.
+         *
+         * <p>This eliminates the last @TruffleBoundary on the hot
+         * op-call path: previously EffectBindingNode.lookupOnFiber was
+         * called for every resume/abort read inside an inlined handler
+         * body, crossing a boundary to call
+         * HandlerChainRegistry.dispatching() only to return the same
+         * singleton every time.
+         */
+        @Specialization(assumptions = "handlerStable",
+                        guards = {"isResumeOrAbortKind(name)"},
+                        excludeForUncached = true)
+        public static Object doCachedResumeAbort(
+                String name,
+                @Cached("getHandlerStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
+                @Cached("resolveSingleton(name)") Object singleton) {
+            return singleton;
+        }
+
+        /**
+         * Fallback: handler chain unstable or SCOPE binding. Delegates
+         * to the full EffectBindingNode which crosses @TruffleBoundary
+         * to read the dispatch fiber or context.
+         */
         @Specialization
-        public static Object doBinding(
+        public static Object doGeneric(
                 String name,
                 @Cached(value = "createBinding(name)", allowUncached = true)
                     com.mezze.interpreter.nodes.effect.EffectBindingNode binding) {
-            // EffectBindingNode.execute doesn't touch the frame; safe to pass null.
             return binding.execute(null);
+        }
+
+        /**
+         * Guard: true for RESUME or ABORT bindings — the two kinds
+         * whose singleton functions can be constant-folded when the
+         * handler chain is stable. Resolves via
+         * {@link EffectBindingKind#fromName} so the name set is
+         * maintained in one place (ScopedEffectConstants).
+         */
+        static boolean isResumeOrAbortKind(String name) {
+            com.mezze.language.ast.EffectBindingKind kind =
+                com.mezze.language.ast.EffectBindingKind.Companion.fromName(name);
+            return kind == com.mezze.language.ast.EffectBindingKind.RESUME
+                || kind == com.mezze.language.ast.EffectBindingKind.ABORT;
+        }
+
+        /**
+         * Resolve the singleton function for a resume/abort binding.
+         * Called once at specialization time — the result becomes a
+         * compilation constant.
+         */
+        static Object resolveSingleton(String name) {
+            com.mezze.language.ast.EffectBindingKind kind =
+                com.mezze.language.ast.EffectBindingKind.Companion.fromName(name);
+            if (kind == com.mezze.language.ast.EffectBindingKind.RESUME) {
+                return YieldDispatch.fallThroughResumeFnPublic();
+            } else if (kind == com.mezze.language.ast.EffectBindingKind.ABORT) {
+                return com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.makeAbortFunction();
+            }
+            // SCOPE or unknown — should not reach here due to guard,
+            // but return null defensively (fallback handles it).
+            return null;
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getHandlerStableAssumption() {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getHandlerChainStableAssumption();
         }
 
         /** `@TruffleBoundary` — Node.<init> is neverPartOfCompilation. #402. */
