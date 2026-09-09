@@ -917,6 +917,7 @@ private class WireSession private constructor(
             "--add-opens=java.base/java.lang=ALL-UNNAMED",
             "--add-opens=java.base/java.nio=ALL-UNNAMED",
             "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+            "--add-modules=jdk.incubator.vector",
             "--sun-misc-unsafe-memory-access=allow",
             "-Dpolyglot.engine.WarnInterpreterOnly=false",
         )
