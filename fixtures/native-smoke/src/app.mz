@@ -10,9 +10,7 @@
 # Run:  just native-test
 #
 # KNOWN BUGS (pre-existing):
-# 1. std::effects::generator non-functional at runtime — resume is
-#    fall-through only, doesn't re-enter the suspended continuation.
-# 2. jdk.incubator.vector NoClassDefFoundError on JVM exec when
+# 1. jdk.incubator.vector NoClassDefFoundError on JVM exec when
 #    SIMD FLP fusion triggers — native binary handles this correctly.
 
 use std::effects::log::{println, Console}
