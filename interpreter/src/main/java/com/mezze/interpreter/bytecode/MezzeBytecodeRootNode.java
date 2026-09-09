@@ -2418,8 +2418,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             boolean filterFirst = (config & (1 << 29)) != 0;
 
             // ── SIMD fast path for SUM/COUNT/REDUCE on materialized long[] ──
-            // Gated off on SVM: Vector API not intrinsified → pure overhead.
-            if (!FlpSimd.ON_SVM
+            // Gated off on SVM and when jdk.incubator.vector is absent.
+            if (FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
                     && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
                         || sinkKind == FLP_SINK_REDUCE)
@@ -2742,8 +2742,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // Vector API (jdk.incubator.vector) to process VECTOR_LENGTH
             // elements per cycle. The threshold matches VectorOps; below
             // it, the PE-optimized scalar loop wins on overhead.
-            // Gated off on SVM: Vector API not intrinsified → pure overhead.
-            if (!FlpSimd.ON_SVM
+            // Gated off on SVM and when jdk.incubator.vector is absent.
+            if (FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
                     && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
                         || sinkKind == FLP_SINK_REDUCE)

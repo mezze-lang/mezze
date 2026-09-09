@@ -1,6 +1,5 @@
 package com.mezze.interpreter.bytecode;
 
-import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import jdk.incubator.vector.LongVector;
 import jdk.incubator.vector.VectorMask;
@@ -28,21 +27,38 @@ import jdk.incubator.vector.VectorSpecies;
 final class FlpSimd {
 
     /**
-     * True when running inside a SubstrateVM native image.
+     * True when the Vector API is available AND we're not on SVM.
      * SVM's JIT does not intrinsify the Vector API — operations fall back to
      * per-lane scalar code with Vector object overhead, which is strictly slower
-     * than the PE-optimized scalar loop.  Disable SIMD in that case.
+     * than the PE-optimized scalar loop.  Also false when jdk.incubator.vector
+     * is simply not on the module path (e.g. {@code mez dev} without
+     * {@code --add-modules}).
+     *
+     * <p>Callers gate on this field; when false, the Vector API classes in the
+     * lazy {@link Vectors} holder are never touched, so no
+     * {@code NoClassDefFoundError} is thrown.
      */
-    static final boolean ON_SVM =
-            System.getProperty("org.graalvm.nativeimage.imagecode") != null;
+    static final boolean AVAILABLE = probeVectorApi();
 
-    @CompilationFinal
-    private static final VectorSpecies<Long> SPECIES = LongVector.SPECIES_PREFERRED;
-    @CompilationFinal
-    private static final int VL = SPECIES.length();
+    private static boolean probeVectorApi() {
+        if (System.getProperty("org.graalvm.nativeimage.imagecode") != null) return false;
+        try {
+            Class.forName("jdk.incubator.vector.LongVector");
+            return true;
+        } catch (ClassNotFoundException | NoClassDefFoundError e) {
+            return false;
+        }
+    }
 
-    /** Below this, scalar PE-optimized loop wins on overhead. */
-    static final int SIMD_THRESHOLD = VL * 4;
+    /** Lazy holder — Vector API classes loaded only when first accessed. */
+    private static final class Vectors {
+        static final VectorSpecies<Long> SPECIES = LongVector.SPECIES_PREFERRED;
+        static final int VL = SPECIES.length();
+    }
+
+    /** Below this, scalar PE-optimized loop wins on overhead.
+     *  MAX_VALUE when SIMD is unavailable so callers' threshold check always fails. */
+    static final int SIMD_THRESHOLD = AVAILABLE ? Vectors.VL * 4 : Integer.MAX_VALUE;
 
     // FLP op constants (mirrored from FusedLongPipeline.flpOp)
     private static final int OP_ADD = 0, OP_SUB = 1, OP_MUL = 2, OP_DIV = 3, OP_MOD = 4;
@@ -65,27 +81,27 @@ final class FlpSimd {
                                int filterCmpOp, long filterCmpRhs,
                                int foldOp, long foldInit, boolean filterFirst) {
         // Pre-compute broadcast vectors
-        LongVector filterPreRhsVec = LongVector.broadcast(SPECIES, filterPreRhs);
-        LongVector filterCmpRhsVec = LongVector.broadcast(SPECIES, filterCmpRhs);
-        LongVector mapOperandVec   = LongVector.broadcast(SPECIES, mapOperand);
+        LongVector filterPreRhsVec = LongVector.broadcast(Vectors.SPECIES, filterPreRhs);
+        LongVector filterCmpRhsVec = LongVector.broadcast(Vectors.SPECIES, filterCmpRhs);
+        LongVector mapOperandVec   = LongVector.broadcast(Vectors.SPECIES, mapOperand);
 
         // Iota vector: [0, 1, 2, ..., VL-1]
-        long[] iotaArr = new long[VL];
-        for (int j = 0; j < VL; j++) iotaArr[j] = j;
-        LongVector iota = LongVector.fromArray(SPECIES, iotaArr, 0);
+        long[] iotaArr = new long[Vectors.VL];
+        for (int j = 0; j < Vectors.VL; j++) iotaArr[j] = j;
+        LongVector iota = LongVector.fromArray(Vectors.SPECIES, iotaArr, 0);
 
-        LongVector accVec = LongVector.zero(SPECIES);
+        LongVector accVec = LongVector.zero(Vectors.SPECIES);
         long countAcc = 0;
         boolean reduceNeedInit = sinkKind == MezzeBytecodeRootNode.FLP_SINK_REDUCE;
         long scalarAcc = foldInit;
 
-        int bound = SPECIES.loopBound(n);
+        int bound = Vectors.SPECIES.loopBound(n);
         int i = 0;
 
         // ── Main SIMD loop ──
-        for (; i < bound; i += VL) {
+        for (; i < bound; i += Vectors.VL) {
             // Generate: v[lane] = start + i + lane
-            LongVector v = LongVector.broadcast(SPECIES, start + i).add(iota);
+            LongVector v = LongVector.broadcast(Vectors.SPECIES, start + i).add(iota);
 
             // ── Filter ──
             VectorMask<Long> mask;
@@ -94,7 +110,7 @@ final class FlpSimd {
                         ? simdOp(filterPreOp, v, filterPreRhsVec) : v;
                 mask = simdCmp(filterCmpOp, fv, filterCmpRhsVec);
             } else {
-                mask = SPECIES.maskAll(true);
+                mask = Vectors.SPECIES.maskAll(true);
             }
 
             // ── Map ──
@@ -117,14 +133,14 @@ final class FlpSimd {
                     reduceNeedInit = false;
                     // Process remaining lanes in this vector
                     VectorMask<Long> rest = mask.and(
-                            SPECIES.indexInRange(firstLane + 1, VL));
-                    accVec = LongVector.broadcast(SPECIES, 0);
+                            Vectors.SPECIES.indexInRange(firstLane + 1, Vectors.VL));
+                    accVec = LongVector.broadcast(Vectors.SPECIES, 0);
                     if (foldOp == OP_ADD) {
                         accVec = accVec.add(v, rest);
                     } else if (foldOp == OP_MUL) {
                         // For mul reduce, can't use vector accumulation as easily.
                         // Fall back to scalar for the remaining lanes.
-                        for (int lane = firstLane + 1; lane < VL; lane++) {
+                        for (int lane = firstLane + 1; lane < Vectors.VL; lane++) {
                             if (mask.laneIsSet(lane)) {
                                 scalarAcc = flpOp(foldOp, scalarAcc, v.lane(lane));
                             }
@@ -135,7 +151,7 @@ final class FlpSimd {
                         accVec = accVec.add(v, mask);
                     } else {
                         // Non-add reduce: scalar fallback per lane
-                        for (int lane = 0; lane < VL; lane++) {
+                        for (int lane = 0; lane < Vectors.VL; lane++) {
                             if (mask.laneIsSet(lane)) {
                                 scalarAcc = flpOp(foldOp, scalarAcc, v.lane(lane));
                             }
@@ -193,20 +209,20 @@ final class FlpSimd {
                                int filterPreOp, long filterPreRhs,
                                int filterCmpOp, long filterCmpRhs,
                                int foldOp, long foldInit, boolean filterFirst) {
-        LongVector filterPreRhsVec = LongVector.broadcast(SPECIES, filterPreRhs);
-        LongVector filterCmpRhsVec = LongVector.broadcast(SPECIES, filterCmpRhs);
-        LongVector mapOperandVec   = LongVector.broadcast(SPECIES, mapOperand);
+        LongVector filterPreRhsVec = LongVector.broadcast(Vectors.SPECIES, filterPreRhs);
+        LongVector filterCmpRhsVec = LongVector.broadcast(Vectors.SPECIES, filterCmpRhs);
+        LongVector mapOperandVec   = LongVector.broadcast(Vectors.SPECIES, mapOperand);
 
-        LongVector accVec = LongVector.zero(SPECIES);
+        LongVector accVec = LongVector.zero(Vectors.SPECIES);
         long countAcc = 0;
         boolean reduceNeedInit = sinkKind == MezzeBytecodeRootNode.FLP_SINK_REDUCE;
         long scalarAcc = foldInit;
 
-        int bound = SPECIES.loopBound(n);
+        int bound = Vectors.SPECIES.loopBound(n);
         int i = 0;
 
-        for (; i < bound; i += VL) {
-            LongVector v = LongVector.fromArray(SPECIES, data, i);
+        for (; i < bound; i += Vectors.VL) {
+            LongVector v = LongVector.fromArray(Vectors.SPECIES, data, i);
 
             VectorMask<Long> mask;
             if (filterCmpOp >= 0) {
@@ -214,7 +230,7 @@ final class FlpSimd {
                         ? simdOp(filterPreOp, v, filterPreRhsVec) : v;
                 mask = simdCmp(filterCmpOp, fv, filterCmpRhsVec);
             } else {
-                mask = SPECIES.maskAll(true);
+                mask = Vectors.SPECIES.maskAll(true);
             }
 
             if (mapOp >= 0) {
@@ -231,12 +247,12 @@ final class FlpSimd {
                     scalarAcc = v.lane(firstLane);
                     reduceNeedInit = false;
                     VectorMask<Long> rest = mask.and(
-                            SPECIES.indexInRange(firstLane + 1, VL));
-                    accVec = LongVector.broadcast(SPECIES, 0);
+                            Vectors.SPECIES.indexInRange(firstLane + 1, Vectors.VL));
+                    accVec = LongVector.broadcast(Vectors.SPECIES, 0);
                     if (foldOp == OP_ADD) {
                         accVec = accVec.add(v, rest);
                     } else {
-                        for (int lane = firstLane + 1; lane < VL; lane++) {
+                        for (int lane = firstLane + 1; lane < Vectors.VL; lane++) {
                             if (mask.laneIsSet(lane)) {
                                 scalarAcc = flpOp(foldOp, scalarAcc, v.lane(lane));
                             }
@@ -246,7 +262,7 @@ final class FlpSimd {
                     if (foldOp == OP_ADD) {
                         accVec = accVec.add(v, mask);
                     } else {
-                        for (int lane = 0; lane < VL; lane++) {
+                        for (int lane = 0; lane < Vectors.VL; lane++) {
                             if (mask.laneIsSet(lane)) {
                                 scalarAcc = flpOp(foldOp, scalarAcc, v.lane(lane));
                             }
@@ -326,7 +342,7 @@ final class FlpSimd {
             case CMP_LE  -> a.lt(b).or(a.eq(b));
             case CMP_GT  -> b.lt(a);
             case CMP_GE  -> b.lt(a).or(a.eq(b));
-            default -> SPECIES.maskAll(false);
+            default -> Vectors.SPECIES.maskAll(false);
         };
     }
 

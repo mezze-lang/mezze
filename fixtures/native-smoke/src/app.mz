@@ -8,10 +8,7 @@
 # with the expected output, all @Specialization methods are clean.
 #
 # Run:  just native-test
-#
-# KNOWN BUGS (pre-existing):
-# 1. jdk.incubator.vector NoClassDefFoundError on JVM exec when
-#    SIMD FLP fusion triggers — native binary handles this correctly.
+
 
 use std::effects::log::{println, Console}
 use std::effects::mutation::{
