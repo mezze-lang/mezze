@@ -19,6 +19,12 @@ public final class MutableString {
         this.value = new StringBuilder(capacity);
     }
 
+    /** Factory behind {@link TruffleBoundary} for use from JIT-compiled code. */
+    @TruffleBoundary
+    public static MutableString createBoundary(String initial) {
+        return new MutableString(initial);
+    }
+
     @TruffleBoundary
     public String get() {
         return value.toString();
@@ -29,10 +35,12 @@ public final class MutableString {
         this.value = new StringBuilder(newValue);
     }
 
+    @TruffleBoundary
     public int length() {
         return value.length();
     }
 
+    @TruffleBoundary
     public boolean isEmpty() {
         return value.length() == 0;
     }

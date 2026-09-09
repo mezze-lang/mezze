@@ -41,22 +41,27 @@ public final class MutableSet {
         return result;
     }
 
+    @TruffleBoundary
     public int size() {
         return data.size();
     }
 
+    @TruffleBoundary
     public boolean contains(Object elem) {
         return data.contains(elem);
     }
 
+    @TruffleBoundary
     public void add(Object elem) {
         data.add(elem);
     }
 
+    @TruffleBoundary
     public void remove(Object elem) {
         data.remove(elem);
     }
 
+    @TruffleBoundary
     public void clear() {
         data.clear();
     }
@@ -97,6 +102,7 @@ public final class MutableSet {
      * Toggle element - add if not present, remove if present.
      * Returns true if element is now in the set.
      */
+    @TruffleBoundary
     public boolean toggle(Object elem) {
         if (data.contains(elem)) {
             data.remove(elem);

@@ -14,13 +14,15 @@ class FunctionInterpreterTest {
 
     @Test
     fun `test function with complex record operations`() {
+        // Spread preserves all fields from a concrete (closed) record, so
+        // chained spreads keep both `name` and `age` without type-level
+        // field loss.  (Generic update functions like `{record, value} ->
+        // {...record, name = value}` generalise the row and lose field
+        // info — that's tested separately in OpenRecordValidationTest.)
         val source = """
-            let updateName = {record, value} -> {...record, name = value}
-            let updateAge = {record, value} -> {...record, age = value}
-
             let person = {name = "Alice", age = 30}
-            let updated1 = updateName {record = person, value = "Bob"}
-            let updated2 = updateAge {record = updated1, value = 25}
+            let updated1 = {...person, name = "Bob"}
+            let updated2 = {...updated1, age = 25}
             updated2
         """.trimIndent()
 

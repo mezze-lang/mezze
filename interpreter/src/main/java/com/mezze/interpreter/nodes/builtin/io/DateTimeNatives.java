@@ -56,7 +56,8 @@ public final class DateTimeNatives {
             return o instanceof MezzeInstant other && this.instant.equals(other.instant);
         }
         @Override public int hashCode() { return instant.hashCode(); }
-        @Override public String toString() { return instant.toString(); }
+        @Override @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+        public String toString() { return instant.toString(); }
     }
 
     /**

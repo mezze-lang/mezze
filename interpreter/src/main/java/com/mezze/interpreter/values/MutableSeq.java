@@ -23,6 +23,12 @@ public class MutableSeq {
         this.size = size;
     }
 
+    /** Throw from behind a boundary so string concat stays out of JIT scope. */
+    @TruffleBoundary
+    private static IndexOutOfBoundsException oobError(int index, int size) {
+        return new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
+    }
+
     /** Subclass constructor — subclass manages its own storage. */
     MutableSeq() {
         this.data = null;
@@ -59,14 +65,14 @@ public class MutableSeq {
 
     public Object get(int index) {
         if (index < 0 || index >= size) {
-            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
+            throw oobError(index, size);
         }
         return data[index];
     }
 
     public void set(int index, Object value) {
         if (index < 0 || index >= size) {
-            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
+            throw oobError(index, size);
         }
         data[index] = value;
     }
@@ -135,7 +141,7 @@ public class MutableSeq {
 
     public void swap(int i, int j) {
         if (i < 0 || i >= size || j < 0 || j >= size) {
-            throw new IndexOutOfBoundsException("Swap indices out of bounds");
+            throw oobError(i, size);
         }
         Object temp = data[i];
         data[i] = data[j];
@@ -190,6 +196,7 @@ public class MutableSeq {
     /**
      * Clear all elements.
      */
+    @TruffleBoundary
     public void clear() {
         Arrays.fill(data, 0, size, null);
         size = 0;

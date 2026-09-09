@@ -149,8 +149,9 @@ class AnonymousImplMethodTest {
     fun `Int to_nat returns Some for positive`() {
         assertEquals(5L, eval("""
             use std::int
+            use std::nat
             match 5.to_nat {} is
-                Some {val} -> val
+                Some {val} -> nat::to_int { n = val }
                 None -> -1
         """))
     }
@@ -159,9 +160,10 @@ class AnonymousImplMethodTest {
     fun `Int to_nat returns None for negative`() {
         assertEquals(-1L, eval("""
             use std::int
+            use std::nat
             let n = 0 - 3
             match n.to_nat {} is
-                Some {val} -> val
+                Some {val} -> nat::to_int { n = val }
                 None -> 0 - 1
         """))
     }

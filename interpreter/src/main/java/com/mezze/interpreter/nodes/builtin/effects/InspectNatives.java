@@ -176,8 +176,10 @@ public final class InspectNatives {
                 return ctor + " " + render(variant.getPayloadValue(), arm.getPayload(), dbgStyle);
             }
         }
-        throw new NativeTypeMismatchException(
-            "Inspect: variant constructor '" + ctor + "' not in its PrintType");
+        // Constructor not in the compile-time PrintType — the value came
+        // through a polymorphic catch-all arm or an open variant type.
+        // Fall back to dynamic rendering so we never crash on unknown ctors.
+        return valueToString(value);
     }
 
     private static String renderElements(Iterable<?> elems, PrintType inner, boolean dbgStyle,

@@ -173,7 +173,7 @@ class NatModuleTest {
         val source = """
             use std::nat
             match nat::from_int { n = 42 } is
-                Some { val } -> val
+                Some { val } -> nat::to_int { n = val }
                 None -> -1
         """.trimIndent()
 
@@ -197,7 +197,7 @@ class NatModuleTest {
         val source = """
             use std::nat
             match nat::from_int { n = 0 } is
-                Some { val } -> val
+                Some { val } -> nat::to_int { n = val }
                 None -> -1
         """.trimIndent()
 
@@ -209,7 +209,7 @@ class NatModuleTest {
         val source = """
             use std::nat
             match nat::from_float { n = 42.7 } is
-                Some { val } -> val
+                Some { val } -> nat::to_int { n = val }
                 None -> -1
         """.trimIndent()
 
@@ -233,7 +233,7 @@ class NatModuleTest {
         val source = """
             use std::nat
             match nat::from_float { n = 0.0 } is
-                Some { val } -> val
+                Some { val } -> nat::to_int { n = val }
                 None -> -1
         """.trimIndent()
 
@@ -245,7 +245,7 @@ class NatModuleTest {
         val source = """
             use std::nat
             match nat::from_str { s = "42" } is
-                Some { val } -> val
+                Some { val } -> nat::to_int { n = val }
                 None -> -1
         """.trimIndent()
 

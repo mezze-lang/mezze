@@ -41,26 +41,32 @@ public final class MutableMap {
         return result;
     }
 
+    @TruffleBoundary
     public int size() {
         return data.size();
     }
 
+    @TruffleBoundary
     public Object get(Object key) {
         return data.get(key);
     }
 
+    @TruffleBoundary
     public void put(Object key, Object value) {
         data.put(key, value);
     }
 
+    @TruffleBoundary
     public void remove(Object key) {
         data.remove(key);
     }
 
+    @TruffleBoundary
     public boolean containsKey(Object key) {
         return data.containsKey(key);
     }
 
+    @TruffleBoundary
     public void clear() {
         data.clear();
     }
@@ -100,6 +106,7 @@ public final class MutableMap {
     /**
      * Update value at key using a function. Returns true if key existed.
      */
+    @TruffleBoundary
     public boolean update(Object key, java.util.function.Function<Object, Object> updater) {
         if (data.containsKey(key)) {
             data.put(key, updater.apply(data.get(key)));
@@ -111,6 +118,7 @@ public final class MutableMap {
     /**
      * Get value or insert default. Returns the value.
      */
+    @TruffleBoundary
     public Object getOrInsert(Object key, Object defaultValue) {
         if (!data.containsKey(key)) {
             data.put(key, defaultValue);

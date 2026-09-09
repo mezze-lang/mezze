@@ -449,7 +449,12 @@ object ChainCanonicalizer {
         // Substitute any MakeLambdaIR captures in stages that reference
         // param slots — but for trivial wrappers the stages typically
         // reference the same slots. For safety, also substitute in sink.
-        val newSink = substituteSinkSlots(fused.sink, slotValues, paramCount)
+        // Returns null when a lambda capture can't be remapped to a caller slot.
+        val newSink = substituteSinkSlots(fused.sink, slotValues, paramCount) ?: return null
+
+        // Remap captures in the callee's stages (filter/map/takeWhile/dropWhile
+        // lambdas may capture dict params from the callee's frame).
+        val remappedStages = remapStageCaptures(fused.stages, slotValues, paramCount) ?: return null
 
         // Re-peel the substituted source to discover upstream stages
         // (e.g. filter, map) that now appear in the caller's arg expression.
@@ -463,7 +468,7 @@ object ChainCanonicalizer {
 
         if (sourceExpr != null) {
             val (peeledStages, peeledSource) = peelSource(sourceExpr, classifier, allFunctions)
-            val combinedStages = peeledStages + fused.stages
+            val combinedStages = peeledStages + remappedStages
             // If we peeled to a known source, use it. Otherwise preserve
             // the substituted source type (RawSeq stays RawSeq, etc.).
             val finalSource = if (peeledSource is SourceIR.Opaque && newSource is SourceIR.RawSeq) {
@@ -478,7 +483,7 @@ object ChainCanonicalizer {
         }
 
         // RangeSeq or no re-peel needed: just substitute and return.
-        val candidate = FusedChainIR(newSource, fused.stages, newSink, call.src)
+        val candidate = FusedChainIR(newSource, remappedStages, newSink, call.src)
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
 
@@ -502,20 +507,143 @@ object ChainCanonicalizer {
         is SourceIR.Opaque -> SourceIR.Opaque(substituteSlots(source.expr, slotValues, paramCount))
     }
 
-    /** Substitute ReadLocalIR(slot) references in a SinkIR. */
+    /** Substitute ReadLocalIR(slot) references in a SinkIR.
+     *  Returns null if a lambda capture can't be remapped (the caller
+     *  must bail out of the composition). */
     private fun substituteSinkSlots(
         sink: SinkIR,
         slotValues: Map<Int, NodeIR>,
         paramCount: Int,
-    ): SinkIR = when (sink) {
-        is SinkIR.Fold -> SinkIR.Fold(substituteSlots(sink.init, slotValues, paramCount), sink.f)
-        is SinkIR.Scan -> SinkIR.Scan(substituteSlots(sink.init, slotValues, paramCount), sink.f)
-        // Other sinks have no expressions that reference param slots.
+    ): SinkIR? = when (sink) {
+        is SinkIR.Fold -> {
+            val rf = remapLambdaCaptures(sink.f, slotValues, paramCount) ?: return null
+            SinkIR.Fold(substituteSlots(sink.init, slotValues, paramCount), rf)
+        }
+        is SinkIR.Scan -> {
+            val rf = remapLambdaCaptures(sink.f, slotValues, paramCount) ?: return null
+            SinkIR.Scan(substituteSlots(sink.init, slotValues, paramCount), rf)
+        }
+        is SinkIR.Reduce -> {
+            val rf = remapLambdaCaptures(sink.f, slotValues, paramCount) ?: return null
+            SinkIR.Reduce(rf)
+        }
+        is SinkIR.ForEach -> {
+            val rf = remapLambdaCaptures(sink.f, slotValues, paramCount) ?: return null
+            SinkIR.ForEach(rf)
+        }
+        is SinkIR.Any -> {
+            val rp = remapLambdaCaptures(sink.p, slotValues, paramCount) ?: return null
+            SinkIR.Any(rp)
+        }
+        is SinkIR.All -> {
+            val rp = remapLambdaCaptures(sink.p, slotValues, paramCount) ?: return null
+            SinkIR.All(rp)
+        }
+        is SinkIR.Find -> {
+            val rp = remapLambdaCaptures(sink.p, slotValues, paramCount) ?: return null
+            SinkIR.Find(rp)
+        }
+        is SinkIR.FindIndex -> {
+            val rp = remapLambdaCaptures(sink.p, slotValues, paramCount) ?: return null
+            SinkIR.FindIndex(rp)
+        }
+        is SinkIR.None -> {
+            val rp = remapLambdaCaptures(sink.p, slotValues, paramCount) ?: return null
+            SinkIR.None(rp)
+        }
+        is SinkIR.MinBy -> {
+            val rf = remapLambdaCaptures(sink.f, slotValues, paramCount) ?: return null
+            SinkIR.MinBy(rf)
+        }
+        is SinkIR.MaxBy -> {
+            val rf = remapLambdaCaptures(sink.f, slotValues, paramCount) ?: return null
+            SinkIR.MaxBy(rf)
+        }
+        is SinkIR.Partition -> {
+            val rp = remapLambdaCaptures(sink.p, slotValues, paramCount) ?: return null
+            SinkIR.Partition(rp)
+        }
+        // Sinks with no expressions that reference param slots.
         SinkIR.Sum, SinkIR.SumFloat, SinkIR.Product, SinkIR.ProductFloat -> sink
         SinkIR.Count, SinkIR.ToSeq, SinkIR.ToList -> sink
         SinkIR.First, SinkIR.Last, SinkIR.Min, SinkIR.Max -> sink
-        is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All, is SinkIR.Find -> sink
-        is SinkIR.FindIndex, is SinkIR.None, is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition -> sink
+    }
+
+    /** Remap a MakeLambdaIR's captures from the callee's frame to the caller's.
+     *  Each CaptureIR(slot=S) where S < paramCount is mapped via slotValues[S].
+     *  If slotValues[S] is ReadLocalIR, the capture slot is updated.
+     *  If slotValues[S] is not a ReadLocalIR (e.g. a literal or MakeSeqIR),
+     *  the capture can't be expressed as a slot reference → returns null.
+     *  Lambdas with no captures that need remapping are returned as-is. */
+    private fun remapLambdaCaptures(
+        lambda: MakeLambdaIR,
+        slotValues: Map<Int, NodeIR>,
+        paramCount: Int,
+    ): MakeLambdaIR? {
+        if (lambda.captures.isEmpty()) return lambda
+        val newCaptures = lambda.captures.map { cap ->
+            if (cap.slot < paramCount) {
+                val mapped = slotValues[cap.slot] ?: return null
+                if (mapped is ReadLocalIR) {
+                    CaptureIR(slot = mapped.slot, kind = cap.kind)
+                } else {
+                    // Can't map a non-slot expression into a CaptureIR slot.
+                    return null
+                }
+            } else {
+                // Slot beyond param range — callee local/capture. But
+                // composeThroughFusedCallee already rejected callees with
+                // locals/captures, so this shouldn't happen.
+                cap
+            }
+        }
+        return if (newCaptures == lambda.captures) lambda
+               else lambda.copy(captures = newCaptures)
+    }
+
+    /** Remap captures in a list of stages. Returns null if any lambda
+     *  capture can't be remapped. Returns the original list when nothing changed. */
+    private fun remapStageCaptures(
+        stages: List<StageIR>,
+        slotValues: Map<Int, NodeIR>,
+        paramCount: Int,
+    ): List<StageIR>? {
+        var changed = false
+        val result = stages.map { stage ->
+            when (stage) {
+                is StageIR.Map -> {
+                    val rf = remapLambdaCaptures(stage.f, slotValues, paramCount) ?: return null
+                    if (rf !== stage.f) changed = true
+                    StageIR.Map(rf)
+                }
+                is StageIR.Filter -> {
+                    val rp = remapLambdaCaptures(stage.p, slotValues, paramCount) ?: return null
+                    if (rp !== stage.p) changed = true
+                    StageIR.Filter(rp)
+                }
+                is StageIR.TakeWhile -> {
+                    val rp = remapLambdaCaptures(stage.p, slotValues, paramCount) ?: return null
+                    if (rp !== stage.p) changed = true
+                    StageIR.TakeWhile(rp)
+                }
+                is StageIR.DropWhile -> {
+                    val rp = remapLambdaCaptures(stage.p, slotValues, paramCount) ?: return null
+                    if (rp !== stage.p) changed = true
+                    StageIR.DropWhile(rp)
+                }
+                is StageIR.Take -> {
+                    val nn = substituteSlots(stage.n, slotValues, paramCount)
+                    if (nn !== stage.n) changed = true
+                    StageIR.Take(nn)
+                }
+                is StageIR.Drop -> {
+                    val nn = substituteSlots(stage.n, slotValues, paramCount)
+                    if (nn !== stage.n) changed = true
+                    StageIR.Drop(nn)
+                }
+            }
+        }
+        return if (changed) result else stages
     }
 
     /** Recursively substitute ReadLocalIR(slot) → slotValues[slot]. */

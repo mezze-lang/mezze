@@ -47,10 +47,12 @@ public final class MutableDeque {
         return result;
     }
 
+    @TruffleBoundary
     public int size() {
         return data.size();
     }
 
+    @TruffleBoundary
     public boolean isEmpty() {
         return data.isEmpty();
     }
@@ -58,6 +60,7 @@ public final class MutableDeque {
     /**
      * Push element to front.
      */
+    @TruffleBoundary
     public void pushFront(Object elem) {
         data.addFirst(elem);
     }
@@ -65,6 +68,7 @@ public final class MutableDeque {
     /**
      * Push element to back.
      */
+    @TruffleBoundary
     public void pushBack(Object elem) {
         data.addLast(elem);
     }
@@ -72,6 +76,7 @@ public final class MutableDeque {
     /**
      * Pop element from front. Returns null if empty.
      */
+    @TruffleBoundary
     public Object popFront() {
         return data.pollFirst();
     }
@@ -79,6 +84,7 @@ public final class MutableDeque {
     /**
      * Pop element from back. Returns null if empty.
      */
+    @TruffleBoundary
     public Object popBack() {
         return data.pollLast();
     }
@@ -86,6 +92,7 @@ public final class MutableDeque {
     /**
      * Peek at front element without removing. Returns null if empty.
      */
+    @TruffleBoundary
     public Object peekFront() {
         return data.peekFirst();
     }
@@ -93,6 +100,7 @@ public final class MutableDeque {
     /**
      * Peek at back element without removing. Returns null if empty.
      */
+    @TruffleBoundary
     public Object peekBack() {
         return data.peekLast();
     }
@@ -100,6 +108,7 @@ public final class MutableDeque {
     /**
      * Clear all elements.
      */
+    @TruffleBoundary
     public void clear() {
         data.clear();
     }

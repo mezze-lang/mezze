@@ -79,6 +79,31 @@ native:
     ./gradlew :cli:nativeCompile
     @echo "→ cli/build/native/nativeCompile/mez"
 
+# Build + run the native-smoke fixture as a native binary.
+# Catches SVM blocklist violations before merge.
+[group('test')]
+native-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    MEZ=cli/build/native/nativeCompile/mez
+    if [ ! -f "$MEZ" ]; then
+        echo "Building mez native binary first…"
+        ./gradlew :cli:nativeCompile
+    fi
+    WORKDIR=$(mktemp -d)
+    trap 'rm -rf "$WORKDIR"' EXIT
+    cp -r fixtures/native-smoke/* "$WORKDIR/"
+    cd "$WORKDIR"
+    echo "Building native-smoke with --native…"
+    "$OLDPWD/$MEZ" build --native 2>&1 | tee native-build.log
+    if ! grep -q 'native' native-build.log; then
+        echo "FAIL: native binary not produced"
+        exit 1
+    fi
+    echo "Running native binary…"
+    ./.build/native_smoke-native
+    echo "✓ native-test passed"
+
 # gradle clean (compiler build outputs)
 [group('mez')]
 clean:

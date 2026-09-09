@@ -43,6 +43,7 @@ public final class MutableBytes {
         data[index] = value;
     }
 
+    @TruffleBoundary
     public void fill(byte value) {
         Arrays.fill(data, value);
     }
@@ -50,6 +51,7 @@ public final class MutableBytes {
     /**
      * Fill a range with a value.
      */
+    @TruffleBoundary
     public void fillRange(int start, int end, byte value) {
         if (start < 0) start = 0;
         if (end > data.length) end = data.length;
@@ -143,6 +145,7 @@ public final class MutableBytes {
     /**
      * Clear all bytes to zero.
      */
+    @TruffleBoundary
     public void clear() {
         Arrays.fill(data, (byte) 0);
     }
