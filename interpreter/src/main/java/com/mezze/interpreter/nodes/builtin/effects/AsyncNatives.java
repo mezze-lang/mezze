@@ -847,6 +847,7 @@ public final class AsyncNatives {
      * single-threaded scheduler and want to give cancel-delivery a
      * chance to land under Loom.
      */
+    @TruffleBoundary
     public static MezzeRecord yieldNow(MezzeRecord args) {
         Thread.yield();
         return MezzeRecord.empty();
