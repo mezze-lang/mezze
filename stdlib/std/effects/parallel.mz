@@ -310,3 +310,70 @@ pub let flat_map
   : { xs: ['a], f: { x: 'a } -> ['b] <...> }
   -> ['b] <Parallel, ...>
   = { xs, f } -> flatten { xs = map { xs = xs, f = f } }
+
+## ==================================================================
+## Fused chunk-parallel combinators.
+##
+## The element-wise combinators above (map, filter, reduce, fold) each
+## perform one operation per parallel pass. Chaining them materializes
+## a full intermediate Seq between each stage:
+##
+##   parallel::filter { xs = parallel::map { xs = data, f = ... }, f = ... }
+##   ─────── 2 full parallel passes, 1 intermediate Seq allocation ──────
+##
+## The chunk combinators below avoid this: they split the input into
+## parallel sub-batches and hand each batch to a user-supplied function
+## that can apply an entire pipeline in one go — typically via Iter
+## (which FLP-fuses into a single tight loop per chunk):
+##
+##   parallel::chunk_fold {
+##     xs = data,
+##     zero = 0,
+##     f = { xs } -> xs.to_iter{}.map { f = double }.filter { p = is_even }.sum{},
+##     combine = { l, r } -> l + r,
+##   }
+##   ─── 1 parallel pass, 0 intermediate allocations per chunk ───
+##
+## The splitting uses the same binary-split + min_chunk strategy as
+## the element-wise combinators above.
+## ==================================================================
+
+## Parallel chunk fold: split into parallel sub-batches, apply `f` to
+## each batch, combine results with an associative `combine`.
+## Within each chunk, `f` can use the full Iter pipeline (FLP-fused)
+## for zero-allocation multi-stage processing.
+pub let chunk_fold
+  : { xs: ['a], zero: 'b, f: { xs: ['a] } -> 'b <...>, combine: { l: 'b, r: 'b } -> 'b <...> }
+  -> 'b <Parallel, ...>
+  = { xs, zero, f, combine } ->
+    if seq::size { xs = xs } == 0 then zero
+    else if seq::size { xs = xs } <= min_chunk {} then f { xs = xs }
+    else do
+      let n = seq::size { xs = xs }
+      let mid = n / 2
+      let left = seq::take { xs = xs, n = mid }
+      let right = seq::drop { xs = xs, n = mid }
+      let both = Parallel.join {
+        l = {} -> chunk_fold { xs = left, zero = zero, f = f, combine = combine },
+        r = {} -> chunk_fold { xs = right, zero = zero, f = f, combine = combine },
+      }
+      combine { l = both.l, r = both.r }
+
+## Parallel chunk map: apply a per-chunk transform, collect results to Seq.
+## The per-chunk function receives a sub-batch as `['a]` and returns `['b]`.
+## Typical usage builds an Iter pipeline inside:
+##
+##   parallel::chunk_map {
+##     xs = data,
+##     f = { xs } -> xs.to_iter{}.map { f = transform }.filter { p = keep }.to_seq{},
+##   }
+pub let chunk_map
+  : { xs: ['a], f: { xs: ['a] } -> ['b] <...> }
+  -> ['b] <Parallel, ...>
+  = { xs, f } ->
+    chunk_fold {
+      xs = xs,
+      zero = [],
+      f = f,
+      combine = { l, r } -> seq::concat { xs = l, ys = r },
+    }
