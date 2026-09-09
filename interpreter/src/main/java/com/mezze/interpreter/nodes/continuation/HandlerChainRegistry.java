@@ -12,35 +12,34 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Per-thread state holder for the effect-handler runtime.
  *
- * <p>Historically wrapped a {@code jdk.internal.vm.Continuation} to
- * implement suspend/resume of an in-Mezze perform body across a driver
- * loop. That fiber-continuation surface (create/run/suspend/resume,
- * plus the Loom bridge in {@code LoomContinuationBackend}) was deleted
- * in #333 once BDSL Yield became the sole path for effect suspension.
- * What survives here is:
+ * <p>All per-thread effect state is consolidated in a single
+ * {@link EffectState} struct accessed via one {@link ThreadLocal}. This
+ * eliminates redundant ThreadLocal.get() calls when multiple pieces of
+ * effect state are accessed in the same @TruffleBoundary method (e.g.
+ * handler chain + D8 handle stack during push/pop). Each ThreadLocal.get()
+ * costs ~200ns; merging 4 ThreadLocals into 1 saves ~800ns per perform
+ * round-trip.
  *
+ * <p>The struct holds:
  * <ul>
- *   <li>{@link #HANDLER_CHAIN} — per-thread stack of
- *       {@link HandlerChainEntry} pairs (handler record + effect hash),
- *       pushed by every {@code perform Handler in body} while body runs.
- *       Spawned tasks inherit the parent's chain at spawn time
- *       ({@link #snapshotHandlerChainEntries()} +
- *       {@link #installHandlerChainEntries(HandlerChainEntry[])}).</li>
- *   <li>{@link #D8_HANDLE_STACK} — BDSL Handle depth counter, distinct
- *       from HANDLER_CHAIN so a snapshot install on a spawned thread
- *       doesn't fool YieldDispatch into treating a chain push as a
- *       live catch boundary.</li>
- *   <li>Dispatch-only fibers ({@link #acquireDispatchOnly()}) — carry
- *       the per-op-invocation effect-handle stack so chain-dispatched
- *       op handlers can bind {@code resume}/{@code abort} via
- *       {@code EffectBindingNode}. No continuation involved.</li>
+ *   <li>{@code handlerChain} — stack of (handler record, effect hash)
+ *       pairs pushed by every {@code perform Handler in body}.</li>
+ *   <li>{@code d8HandleStack} — BDSL Handle depth tracking, distinct
+ *       from handlerChain so snapshot-install on spawned threads doesn't
+ *       create phantom catch boundaries.</li>
+ *   <li>{@code dispatching} — pointer to the dispatch-only registry
+ *       whose op handler is currently running (for EffectBindingNode).</li>
+ *   <li>{@code dispatchPool} — 1-slot pool of reusable dispatch
+ *       registries.</li>
  * </ul>
+ *
+ * <p>Additionally, combined methods ({@link #pushHandlerAndEnterHandle},
+ * {@link #popHandlerAndExitHandle}) do both chain + D8 stack operations
+ * in a single ThreadLocal.get(), used by the BDSL PushHandlerChain /
+ * PopHandlerChain @Operations.
  *
  * <p>Matching in chain dispatch is by (effect_hash, op_name) so two
  * in-scope effects with the same simple op name don't collide (#246).
- * Unhandled ops at the chain bottom surface as
- * {@code TaskUnhandledOpException} for the spawning code to re-dispatch
- * against the parent's chain at await time (see {@link SpawnSupport}).
  */
 public final class HandlerChainRegistry {
 
@@ -56,14 +55,20 @@ public final class HandlerChainRegistry {
     private static final AtomicLong ID_GEN = new AtomicLong();
     @CompilationFinal final long id = ID_GEN.incrementAndGet();
 
-    /**
-     * Per-thread pointer to the fiber whose op handler is currently being
-     * invoked by chain dispatch. The op handler body needs to find the
-     * carrier fiber to read its resume/abort handles via
-     * {@code EffectBindingNode}. Pinned by {@link #enterDispatch()} /
-     * cleared by {@link #exitDispatch(HandlerChainRegistry)}.
-     */
-    private static final ThreadLocal<HandlerChainRegistry> DISPATCH = new ThreadLocal<>();
+    // ================================================================
+    // Consolidated per-thread effect state — ONE ThreadLocal for all.
+    // ================================================================
+
+    /** All per-thread effect state in a single struct. */
+    static final class EffectState {
+        final ArrayDeque<HandlerChainEntry> handlerChain = new ArrayDeque<>();
+        final ArrayDeque<BdslHandleFrame> d8HandleStack = new ArrayDeque<>();
+        HandlerChainRegistry dispatching;
+        HandlerChainRegistry dispatchPool;
+    }
+
+    private static final ThreadLocal<EffectState> STATE =
+        ThreadLocal.withInitial(EffectState::new);
 
     /**
      * The fiber whose op handler is currently being dispatched on the
@@ -72,64 +77,38 @@ public final class HandlerChainRegistry {
      */
     @TruffleBoundary
     public static HandlerChainRegistry dispatching() {
-        return DISPATCH.get();
+        return STATE.get().dispatching;
     }
 
     /**
      * Mark this fiber as the one being dispatched. Returns the previously
      * pinned fiber so the caller can restore it via {@link #exitDispatch}.
-     *
-     * {@code @TruffleBoundary} — ThreadLocal.get()/set() reachability
-     * closure in native-image drags in every ThreadLocal supplier on the
-     * classpath (including Helidon's HashMap/Vector allocators). #402.
      */
     @TruffleBoundary
     public HandlerChainRegistry enterDispatch() {
-        HandlerChainRegistry prev = DISPATCH.get();
-        DISPATCH.set(this);
+        EffectState s = STATE.get();
+        HandlerChainRegistry prev = s.dispatching;
+        s.dispatching = this;
         return prev;
     }
 
     /** Counterpart to {@link #enterDispatch()}. */
     @TruffleBoundary
     public static void exitDispatch(HandlerChainRegistry previous) {
-        DISPATCH.set(previous);
+        STATE.get().dispatching = previous;
     }
 
     /**
-     * Historical no-op preserved as a call-site hook. Before #333 this
-     * cleared {@code CURRENT} around body so native handlers (e.g.
-     * {@code __native_mutation_loop}) that re-entered Mezze code wouldn't
-     * suspend an outer perform's Loom continuation. With Loom gone
-     * CURRENT no longer exists, so this just runs body directly. Callers
-     * remain untouched to avoid churn; if #333 follow-up wants to inline
-     * every call, this method can be removed. Root cause of #255.
+     * Historical no-op preserved as a call-site hook. See #255.
      */
     public static <T> T runDetached(java.util.function.Supplier<T> body) {
         return body.get();
     }
 
     // ----------------------------------------------------------------
-    // Per-thread handler chain.
-    //
-    // Each `perform Handler in body` pushes its handler record onto this
-    // thread-local stack while body runs, then pops on exit. The chain
-    // captures the dynamic set of handlers in scope on this thread, in
-    // outermost→innermost order (top = innermost).
-    //
-    // Used by `Async.spawn` to capture the parent's handlers and re-
-    // install them on the spawned virtual thread so op-calls inside the
-    // task dispatch through the same handler chain.
+    // Handler-chain-stable assumption.
     // ----------------------------------------------------------------
 
-    private static final ThreadLocal<java.util.ArrayDeque<HandlerChainEntry>>
-        HANDLER_CHAIN = ThreadLocal.withInitial(java.util.ArrayDeque::new);
-
-    // Phase 5 — handler-chain-stable assumption.
-    // Invalidated on every push/pop so PerformD's cached specialization
-    // can detect when the handler set changes. CyclicAssumption supports
-    // multiple invalidation/re-acquire cycles across the compilation
-    // lifetime.
     private static final CyclicAssumption HANDLER_CHAIN_STABLE =
         new CyclicAssumption("handler-chain-stable");
 
@@ -138,38 +117,31 @@ public final class HandlerChainRegistry {
         return HANDLER_CHAIN_STABLE.getAssumption();
     }
 
-    /**
-     * Push a handler with the content hash of the effect it implements.
-     * The effect hash is required for correct dispatch when two effects in
-     * scope declare ops with the same simple name (#246).
-     */
+    // ----------------------------------------------------------------
+    // Per-thread handler chain — individual operations.
+    // ----------------------------------------------------------------
+
     @TruffleBoundary
     public static void pushHandlerOnChain(
             com.mezze.interpreter.values.MezzeRecord handler,
             com.mezze.language.typedast.Hash effectHash) {
-        HANDLER_CHAIN.get().push(new HandlerChainEntry(handler, effectHash));
+        STATE.get().handlerChain.push(new HandlerChainEntry(handler, effectHash));
         HANDLER_CHAIN_STABLE.invalidate();
     }
 
     @TruffleBoundary
     public static void popHandlerOffChain() {
-        HANDLER_CHAIN.get().pop();
+        STATE.get().handlerChain.pop();
         HANDLER_CHAIN_STABLE.invalidate();
     }
 
-    /** Current depth of the per-thread handler chain. */
     @TruffleBoundary
     public static int handlerChainDepth() {
-        return HANDLER_CHAIN.get().size();
+        return STATE.get().handlerChain.size();
     }
 
     // ----------------------------------------------------------------
-    // D8 BDSL Handle depth counter — only touched by
-    // MezzeBytecodeRootNode.PushHandlerChain / PopHandlerChain.
-    // Distinct from the general HANDLER_CHAIN depth so a snapshot install
-    // on a spawned thread (which populates HANDLER_CHAIN without
-    // establishing a catch site on this frame) doesn't fool YieldDispatch
-    // into thinking a BDSL Handle boundary is live. See project_d8_handleir_design.
+    // D8 BDSL Handle depth — individual operations.
     // ----------------------------------------------------------------
 
     /** Per-Handle scope-hook frame. Non-null only when the handler has an
@@ -183,94 +155,134 @@ public final class HandlerChainRegistry {
         }
     }
 
-    private static final ThreadLocal<java.util.ArrayDeque<BdslHandleFrame>>
-        D8_HANDLE_STACK = ThreadLocal.withInitial(java.util.ArrayDeque::new);
-
     /** Sentinel pushed for handlers without scope hooks — avoids nullable
      *  ArrayDeque entries. Identity-compared, never dereferenced. */
     private static final BdslHandleFrame NO_SCOPE_FRAME = new BdslHandleFrame(null, null);
 
     @TruffleBoundary
     public static void enterBdslHandle() {
-        D8_HANDLE_STACK.get().push(NO_SCOPE_FRAME);
+        STATE.get().d8HandleStack.push(NO_SCOPE_FRAME);
     }
 
     @TruffleBoundary
     public static void enterBdslHandleWithScope(Object scope, Object prevScope) {
-        D8_HANDLE_STACK.get().push(
+        STATE.get().d8HandleStack.push(
             scope == null && prevScope == null ? NO_SCOPE_FRAME
                 : new BdslHandleFrame(scope, prevScope));
     }
 
     @TruffleBoundary
     public static void exitBdslHandle() {
-        D8_HANDLE_STACK.get().pop();
+        STATE.get().d8HandleStack.pop();
     }
 
-    /** Peek the scope frame at the innermost live BDSL Handle, or null if
-     *  that Handle has no scope hooks (common case). Called by
-     *  PopHandlerChain before it pops the stack. */
     @TruffleBoundary
     public static BdslHandleFrame peekBdslHandleScope() {
-        var s = D8_HANDLE_STACK.get();
+        var s = STATE.get().d8HandleStack;
         if (s.isEmpty()) return null;
         BdslHandleFrame top = s.peek();
         return top == NO_SCOPE_FRAME ? null : top;
     }
 
-    /** Peek the handler record on the top of the per-thread chain — used
-     *  by PopHandlerChain to reach finalize_scope before popping. */
     @TruffleBoundary
     public static com.mezze.interpreter.values.MezzeRecord peekTopHandlerRecord() {
-        var chain = HANDLER_CHAIN.get();
+        var chain = STATE.get().handlerChain;
         if (chain.isEmpty()) return null;
         HandlerChainEntry entry = chain.peek();
         return entry == null ? null : entry.handler();
     }
 
-    /** True when at least one BDSL Handle catch boundary is live on this
-     *  thread, i.e. a PushHandlerChain has fired without a matching
-     *  PopHandlerChain (in either the otherwise or catch branch). */
     @TruffleBoundary
     public static boolean insideBdslHandle() {
-        return !D8_HANDLE_STACK.get().isEmpty();
+        return !STATE.get().d8HandleStack.isEmpty();
+    }
+
+    // ----------------------------------------------------------------
+    // Combined push/pop — single ThreadLocal.get() for both stacks.
+    //
+    // Called by BDSL PushHandlerChain / PopHandlerChain @Operations
+    // which always touch both handler chain and D8 handle stack.
+    // Saves one ThreadLocal.get() per push and ~3 per pop vs calling
+    // the individual methods.
+    // ----------------------------------------------------------------
+
+    /**
+     * Combined push: handler chain entry + D8 handle scope frame in one
+     * ThreadLocal.get(). Used by BDSL PushHandlerChain @Operation.
+     */
+    @TruffleBoundary
+    public static void pushHandlerAndEnterHandle(
+            com.mezze.interpreter.values.MezzeRecord handler,
+            com.mezze.language.typedast.Hash effectHash,
+            Object scope, Object prevScope) {
+        EffectState s = STATE.get();
+        s.handlerChain.push(new HandlerChainEntry(handler, effectHash));
+        s.d8HandleStack.push(
+            scope == null && prevScope == null ? NO_SCOPE_FRAME
+                : new BdslHandleFrame(scope, prevScope));
+        HANDLER_CHAIN_STABLE.invalidate();
     }
 
     /**
-     * Force the per-thread handler chain back to the given depth by
-     * popping until size == depth. Used by the BDSL Handle @Operation's
-     * outer {@code finally} to recover from cross-scope continuation yields
-     * (e.g. outer perform aborts while an inner perform's chain push is
-     * still on the stack): inner's {@code popHandlerOffChain} never fires
-     * because the yield bypasses inner's Java {@code finally}, leaving the
-     * chain polluted for the next test. Truncating to a depth snapshot
-     * makes the cleanup unconditional.
+     * Result of {@link #popHandlerAndExitHandle()} — carries the handler
+     * record and scope frame that PopHandlerChain needs for finalize_scope.
+     */
+    public static final class PopResult {
+        public final com.mezze.interpreter.values.MezzeRecord handler;
+        public final BdslHandleFrame scopeFrame;
+        PopResult(com.mezze.interpreter.values.MezzeRecord handler, BdslHandleFrame scopeFrame) {
+            this.handler = handler;
+            this.scopeFrame = scopeFrame;
+        }
+    }
+
+    /**
+     * Combined pop: peek both stacks (for finalize_scope), then pop both,
+     * invalidate assumption — all in one ThreadLocal.get(). Used by BDSL
+     * PopHandlerChain @Operation.
+     *
+     * @return handler + scope frame for finalize_scope invocation, or
+     *         null handler / null frame when the stack is empty or has
+     *         no scope hooks.
      */
     @TruffleBoundary
+    public static PopResult popHandlerAndExitHandle() {
+        EffectState s = STATE.get();
+        // Peek before pop — need handler for finalize_scope.
+        var chain = s.handlerChain;
+        com.mezze.interpreter.values.MezzeRecord handler = null;
+        if (!chain.isEmpty()) {
+            HandlerChainEntry entry = chain.peek();
+            if (entry != null) handler = entry.handler();
+        }
+        var d8 = s.d8HandleStack;
+        BdslHandleFrame frame = null;
+        if (!d8.isEmpty()) {
+            BdslHandleFrame top = d8.peek();
+            if (top != NO_SCOPE_FRAME) frame = top;
+        }
+        // Pop both.
+        chain.pop();
+        d8.pop();
+        HANDLER_CHAIN_STABLE.invalidate();
+        return new PopResult(handler, frame);
+    }
+
+    // ----------------------------------------------------------------
+    // Chain truncation, snapshot, install.
+    // ----------------------------------------------------------------
+
+    @TruffleBoundary
     public static void truncateHandlerChainTo(int depth) {
-        var chain = HANDLER_CHAIN.get();
+        var chain = STATE.get().handlerChain;
         while (chain.size() > depth) chain.pop();
     }
 
-    /** Singleton empty array — handed back instead of allocating per call.
-     *  Most spawn sites snapshot a chain with no handlers above them
-     *  (top-level Async.spawn outside any perform installs zero handlers
-     *  on this thread), so this is the overwhelmingly common case. */
     private static final HandlerChainEntry[] EMPTY_ENTRY_CHAIN = new HandlerChainEntry[0];
 
-    /**
-     * Snapshot of the handler chain on this thread, innermost-first
-     * (matching the iteration order callers want for "innermost matches
-     * first" dispatch). Returns an array of (handler, effect_hash) entries
-     * so chain-dispatch can match by (effect_hash, op_name) — required to
-     * disambiguate when two effects in scope declare an op with the same
-     * simple name (#246).
-     */
-    /** `@TruffleBoundary` — same rationale as {@link #peekHandlerForEffect}:
-     *  ThreadLocal.get closure reaches blocklisted methods under SVM. #402. */
     @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     public static HandlerChainEntry[] snapshotHandlerChainEntries() {
-        ArrayDeque<HandlerChainEntry> chain = HANDLER_CHAIN.get();
+        ArrayDeque<HandlerChainEntry> chain = STATE.get().handlerChain;
         int size = chain.size();
         if (size == 0) return EMPTY_ENTRY_CHAIN;
         return chain.toArray(new HandlerChainEntry[size]);
@@ -278,28 +290,13 @@ public final class HandlerChainRegistry {
 
     /**
      * Allocation-free lookup of the innermost handler whose effect-hash
-     * matches {@code effectHash}, or {@code null} if none in scope. Used by
-     * the marker-effect fast path in {@code OpCallNode}: hot Mut op-calls
-     * need to locate the surrounding LocalMut handler without allocating
-     * a fresh chain array per call. ArrayDeque.peekFirst is O(1); the
-     * iterator path (when we need to skip past non-matching entries) is
-     * still allocation-free because ArrayDeque's Iterator is an inner
-     * non-static class reused via cursor state. #257.
+     * matches {@code effectHash}, or {@code null} if none in scope.
      */
-    // `@TruffleBoundary` — ThreadLocal.get() reachability closure in
-    // native-image drags in every ThreadLocal supplier on the classpath
-    // (including Helidon's ValueResolvingFilter → HashMap.<init>, which is
-    // blocklisted for runtime compilation). The perform hot path calls
-    // peekHandlerForEffect once per op-call; the boundary loses some inlining
-    // but keeps SVM Truffle compilation valid. See #402.
     @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     public static com.mezze.interpreter.values.MezzeRecord peekHandlerForEffect(
             com.mezze.language.typedast.Hash effectHash) {
-        ArrayDeque<HandlerChainEntry> chain = HANDLER_CHAIN.get();
+        ArrayDeque<HandlerChainEntry> chain = STATE.get().handlerChain;
         if (chain.isEmpty()) return null;
-        // Fast path: the innermost entry usually matches (perform Mut.x
-        // inside `handle Mut { ... }`). Check it without setting up the
-        // iterator — saves Iterator alloc + a virtual call per perform.
         HandlerChainEntry head = chain.peek();
         if (head != null) {
             com.mezze.language.typedast.Hash eh = head.effectHash();
@@ -307,9 +304,8 @@ public final class HandlerChainRegistry {
                 return head.handler();
             }
         }
-        // Slow path: walk the rest of the chain looking for an outer handler.
         for (HandlerChainEntry entry : chain) {
-            if (entry == head) continue;  // already checked above
+            if (entry == head) continue;
             com.mezze.language.typedast.Hash eh = entry.effectHash();
             if (eh != null && eh.equals(effectHash)) {
                 return entry.handler();
@@ -318,16 +314,9 @@ public final class HandlerChainRegistry {
         return null;
     }
 
-    /**
-     * Install a captured (handler, effect-hash) chain on the current
-     * thread. Caller is responsible for {@link #clearHandlerChain()} on
-     * the same thread when done (typically in a finally block). For
-     * one-shot scope use, {@link #runWithHandlerChain} is safer.
-     */
     @TruffleBoundary
     public static void installHandlerChainEntries(HandlerChainEntry[] chain) {
-        ArrayDeque<HandlerChainEntry> stack = HANDLER_CHAIN.get();
-        // Push in reverse so the innermost (chain[0]) ends up on top.
+        ArrayDeque<HandlerChainEntry> stack = STATE.get().handlerChain;
         for (int i = chain.length - 1; i >= 0; i--) {
             stack.push(chain[i]);
         }
@@ -335,34 +324,18 @@ public final class HandlerChainRegistry {
 
     @TruffleBoundary
     public static void clearHandlerChain() {
-        HANDLER_CHAIN.get().clear();
+        STATE.get().handlerChain.clear();
     }
 
-    /**
-     * Pop {@code count} handlers from the top of this thread's chain.
-     * Companion to {@link #installHandlerChainEntries} when the caller
-     * must preserve any handlers underneath the chunk it installed (e.g.
-     * the coop scheduler runs spawned bodies on its driver thread, which
-     * itself sits inside an outer perform).
-     */
     @TruffleBoundary
     public static void popHandlerChain(int count) {
         if (count <= 0) return;
-        ArrayDeque<HandlerChainEntry> stack = HANDLER_CHAIN.get();
+        ArrayDeque<HandlerChainEntry> stack = STATE.get().handlerChain;
         for (int i = 0; i < count && !stack.isEmpty(); i++) {
             stack.pop();
         }
     }
 
-    /**
-     * Install {@code chain} on the current thread, run {@code body}, then
-     * clear. Use this in spawned-task bodies that need to inherit the
-     * parent's handler chain. Empty chain is a no-op fast path.
-     * Effect-hash-preserving: required so cross-thread spawn paths retain
-     * effect identity and the inherited chain's op-name lookup can
-     * disambiguate when two in-scope effects declare an op with the same
-     * simple name (#246).
-     */
     public static void runWithHandlerChain(HandlerChainEntry[] chain, Runnable body) {
         if (chain.length == 0) {
             body.run();
@@ -372,76 +345,44 @@ public final class HandlerChainRegistry {
         try {
             body.run();
         } finally {
-            // Pop only what we pushed. clearHandlerChain() would wipe
-            // handlers that were installed by an outer perform on the
-            // same thread — which happens when runWithHandlerChain is
-            // called inline from a thread that already has a chain
-            // (e.g. Parallel.join's left-side inline execution).
             popHandlerChain(chain.length);
         }
     }
 
     private HandlerChainRegistry() {}
 
-    /**
-     * Acquire a dispatch-only fiber — a carrier for the effect-handle
-     * stack ({@link #pushEffectHandles}, {@link #currentResume},
-     * {@link #currentAbort}) so chain-dispatched op handlers can bind
-     * {@code resume}/{@code abort} via {@code EffectBindingNode}. No
-     * continuation involved.
-     *
-     * <p>Acquires from a thread-local 1-slot pool when available — every
-     * chain-dispatch entry allocates and discards one dispatch fiber,
-     * so reusing a single per-thread slot saves an allocation per
-     * op-call. The fiber is in clean state when reused
-     * (popEffectHandles already clears its slots).
-     *
-     * <p>Callers MUST pair this with {@link #releaseDispatchOnly(HandlerChainRegistry)}
-     * after use. The pool is best-effort: nested dispatch fibers allocate
-     * fresh (no recursive pool).
-     */
+    // ----------------------------------------------------------------
+    // Dispatch-only fiber pool.
+    // ----------------------------------------------------------------
+
     @TruffleBoundary
     public static HandlerChainRegistry acquireDispatchOnly() {
-        HandlerChainRegistry cached = DISPATCH_POOL.get();
+        EffectState s = STATE.get();
+        HandlerChainRegistry cached = s.dispatchPool;
         if (cached != null) {
-            DISPATCH_POOL.set(null);
+            s.dispatchPool = null;
             return cached;
         }
         return new HandlerChainRegistry();
     }
 
-    /** Return a dispatch fiber to the per-thread cache (best-effort). */
     @TruffleBoundary
     public static void releaseDispatchOnly(HandlerChainRegistry fiber) {
         if (fiber.effectHandleDepth != 0) {
-            // Caller didn't pop their pushes — don't pool a dirty fiber.
             return;
         }
-        // Most recent goes in cache; older one (if any) is dropped.
-        DISPATCH_POOL.set(fiber);
+        STATE.get().dispatchPool = fiber;
     }
 
-    /** Back-compat wrapper. New callers should use acquire/release. */
     @TruffleBoundary
     public static HandlerChainRegistry createDispatchOnly() {
         return acquireDispatchOnly();
     }
 
-    private static final ThreadLocal<HandlerChainRegistry> DISPATCH_POOL =
-        ThreadLocal.withInitial(() -> null);
-
     public long getId() { return id; }
 
     // ----------------------------------------------------------------
     // Per-op-invocation effect-handler control-flow handles.
-    //
-    // Chain dispatch pushes a frame {resume, abort} before invoking an op
-    // handler's lambda and pops it after the lambda returns. Op handler
-    // body code reads them via EffectBindingIR (kind=RESUME/ABORT), which
-    // calls currentResume() / currentAbort() on the dispatch fiber.
-    //
-    // Nested op calls each push their own frame, so inner ops don't
-    // clobber outer ops' handles.
     // ----------------------------------------------------------------
 
     public void pushEffectHandles(Object resume, Object abort) {

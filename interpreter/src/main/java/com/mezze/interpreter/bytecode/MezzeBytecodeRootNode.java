@@ -3952,9 +3952,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 prevScope = D8ScopeHooks.installScope(node, scope);
             }
             com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
-                .pushHandlerOnChain(rec, effectHash);
-            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
-                .enterBdslHandleWithScope(scope, prevScope);
+                .pushHandlerAndEnterHandle(rec, effectHash, scope, prevScope);
         }
     }
 
@@ -3970,24 +3968,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @TruffleBoundary
         @Specialization
         public static void doPop(@Bind Node node) {
-            // Read scope hook state from the D8 stack BEFORE popping the
-            // chain (the chain entry still points at the handler whose
-            // finalize_scope we want to invoke).
-            var handler = com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
-                .peekTopHandlerRecord();
-            var frame = com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
-                .peekBdslHandleScope();
-            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
-                .popHandlerOffChain();
-            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
-                .exitBdslHandle();
-            if (frame != null && handler != null) {
-                Object finFn = handler.getField(
+            // Combined pop: peek + pop both stacks in a single
+            // ThreadLocal.get(), then invoke finalize_scope if present.
+            var result = com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .popHandlerAndExitHandle();
+            if (result.scopeFrame != null && result.handler != null) {
+                Object finFn = result.handler.getField(
                     com.mezze.language.ast.ScopedEffectConstants.FINALIZE_SCOPE);
                 if (finFn instanceof MezzeFunction fn) {
-                    D8ScopeHooks.invokeFinalizeScope(fn, frame.scope);
+                    D8ScopeHooks.invokeFinalizeScope(fn, result.scopeFrame.scope);
                 }
-                D8ScopeHooks.restoreScope(node, frame.prevScope);
+                D8ScopeHooks.restoreScope(node, result.scopeFrame.prevScope);
             }
         }
     }
