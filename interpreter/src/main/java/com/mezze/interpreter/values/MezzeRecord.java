@@ -518,6 +518,7 @@ public final class MezzeRecord implements TruffleObject {
     private static final Shape SHAPE_X;
     private static final Shape SHAPE_ACC_X;
     private static final Shape SHAPE_A_B;
+    private static final Shape SHAPE_S;
     static {
         SHAPE_X = new Shape(
             new String[]{"x"},
@@ -536,6 +537,10 @@ public final class MezzeRecord implements TruffleObject {
                 new FieldLocation(FieldLocation.StorageType.OBJECT, 0),
                 new FieldLocation(FieldLocation.StorageType.OBJECT, 1)
             }
+        );
+        SHAPE_S = new Shape(
+            new String[]{"s"},
+            new FieldLocation[]{new FieldLocation(FieldLocation.StorageType.OBJECT, 0)}
         );
     }
 
@@ -559,6 +564,14 @@ public final class MezzeRecord implements TruffleObject {
      * Create a {a: a, b: b} record - FAST PATH for comparator operations.
      * Uses pre-cached shape - NO @TruffleBoundary, JIT-friendly.
      */
+    /**
+     * Create a {s: value} record - FAST PATH for iter unfold step calls.
+     * Uses pre-cached shape - NO @TruffleBoundary, JIT-friendly.
+     */
+    public static MezzeRecord wrapS(Object value) {
+        return new MezzeRecord(SHAPE_S, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{value}, true);
+    }
+
     public static MezzeRecord wrapAB(Object a, Object b) {
         return new MezzeRecord(SHAPE_A_B, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{a, b}, true);
     }

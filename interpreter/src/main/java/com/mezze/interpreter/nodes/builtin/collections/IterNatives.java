@@ -1,14 +1,10 @@
 package com.mezze.interpreter.nodes.builtin.collections;
 
-import com.mezze.datastructures.iter.IterNode;
-import com.mezze.datastructures.iter.MezzeIter;
-import com.mezze.datastructures.iter.RangeIterNode;
-import com.mezze.datastructures.iter.SeqIterNode;
-import com.mezze.datastructures.iter.TakeIterNode;
-import com.mezze.datastructures.iter.DropIterNode;
-import com.mezze.datastructures.iter.UnaryOpIterNode;
+import com.mezze.datastructures.iter.*;
+import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
@@ -26,6 +22,18 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
 public final class IterNatives {
 
     private IterNatives() {}
+
+    // Step variant tags — computed once, same as TagRegistry.getOrCreateTag
+    private static final int YIELD_TAG = "Yield".hashCode() & 0x7FFFFFFF;
+    private static final int SKIP_TAG  = "Skip".hashCode()  & 0x7FFFFFFF;
+    private static final int DONE_TAG  = "Done".hashCode()  & 0x7FFFFFFF;
+
+    // Register tags in global registry so pattern matching can find them
+    static {
+        MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Yield");
+        MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Skip");
+        MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Done");
+    }
 
     // ===== CONSTRUCTION =====
 
@@ -58,6 +66,46 @@ public final class IterNatives {
 
     public static MezzeIter drop(MezzeIter it, long n) {
         return it.drop(n);
+    }
+
+    public static MezzeIter takeWhile(MezzeIter it, MezzeFunction p) {
+        return it.takeWhile(p);
+    }
+
+    public static MezzeIter dropWhile(MezzeIter it, MezzeFunction p) {
+        return it.dropWhile(p);
+    }
+
+    public static MezzeIter fromList(MezzeList list) {
+        return MezzeIter.fromList(list);
+    }
+
+    public static MezzeIter unfold(Object initialState, MezzeFunction stepFn) {
+        return MezzeIter.unfold(initialState, stepFn);
+    }
+
+    public static MezzeIter once(Object value) {
+        return MezzeIter.once(value);
+    }
+
+    public static MezzeIter empty() {
+        return MezzeIter.empty();
+    }
+
+    public static MezzeIter enumerate(MezzeIter it) {
+        return it.enumerate();
+    }
+
+    public static MezzeIter chain(MezzeIter a, MezzeIter b) {
+        return a.chain(b);
+    }
+
+    public static MezzeIter zip(MezzeIter a, MezzeIter b) {
+        return a.zip(b);
+    }
+
+    public static MezzeIter flatMap(MezzeIter it, MezzeFunction f) {
+        return it.flatMap(f);
     }
 
     // ===== SINKS =====
@@ -274,6 +322,29 @@ public final class IterNatives {
     }
 
     @TruffleBoundary
+    public static long countAll(MezzeIter it, IndirectCallNode callNode) {
+        long[] acc = {0L};
+        walkElements(it.getDescriptor(), x -> acc[0]++, callNode);
+        return acc[0];
+    }
+
+    @TruffleBoundary
+    public static Object first(MezzeIter it, IndirectCallNode callNode) {
+        Object[] result = {null};
+        walkElements(it.getDescriptor(), x -> {
+            if (result[0] == null) result[0] = MezzeVariant.some(x);
+        }, callNode);
+        return result[0] != null ? result[0] : MezzeVariant.none();
+    }
+
+    @TruffleBoundary
+    public static Object last(MezzeIter it, IndirectCallNode callNode) {
+        Object[] result = {null};
+        walkElements(it.getDescriptor(), x -> result[0] = x, callNode);
+        return result[0] != null ? MezzeVariant.some(result[0]) : MezzeVariant.none();
+    }
+
+    @TruffleBoundary
     public static Object toList(MezzeIter it, IndirectCallNode callNode) {
         java.util.ArrayList<Object> buf = new java.util.ArrayList<>();
         walkElements(it.getDescriptor(), buf::add, callNode);
@@ -312,6 +383,20 @@ public final class IterNatives {
             }
             return;
         }
+        if (node instanceof ListIterNode listNode) {
+            Object[] arr = listNode.list.toArray();
+            for (Object x : arr) {
+                consumer.accept(x);
+            }
+            return;
+        }
+        if (node instanceof OnceIterNode once) {
+            consumer.accept(once.value);
+            return;
+        }
+        if (node instanceof EmptyIterNode) {
+            return;
+        }
         if (node instanceof TakeIterNode take) {
             long[] remaining = {take.n};
             walkElements(take.src, x -> {
@@ -331,6 +416,112 @@ public final class IterNatives {
                     consumer.accept(x);
                 }
             }, callNode);
+            return;
+        }
+        if (node instanceof TakeWhileIterNode tw) {
+            boolean[] done = {false};
+            MezzeFunction pred = (MezzeFunction) tw.predicate;
+            CallTarget predInner = ScalarBypass.tryResolve(pred);
+            Object[] pClosure = pred.getClosureValues();
+            int pClosureLen = pClosure.length;
+            Object[] pArgs = new Object[pClosureLen + 1];
+            System.arraycopy(pClosure, 0, pArgs, 0, pClosureLen);
+            walkElements(tw.src, x -> {
+                if (done[0]) return;
+                if (predInner != null) {
+                    pArgs[pClosureLen] = x;
+                    Object r = callNode.call(predInner, pArgs);
+                    if (r instanceof Boolean && (Boolean) r) consumer.accept(x);
+                    else done[0] = true;
+                } else {
+                    pArgs[pClosureLen] = MezzeRecord.wrapX(x);
+                    Object r = callNode.call(pred.getCallTarget(), pArgs);
+                    if (r instanceof Boolean && (Boolean) r) consumer.accept(x);
+                    else done[0] = true;
+                }
+            }, callNode);
+            return;
+        }
+        if (node instanceof DropWhileIterNode dw) {
+            boolean[] dropping = {true};
+            MezzeFunction pred = (MezzeFunction) dw.predicate;
+            CallTarget predInner = ScalarBypass.tryResolve(pred);
+            Object[] pClosure = pred.getClosureValues();
+            int pClosureLen = pClosure.length;
+            Object[] pArgs = new Object[pClosureLen + 1];
+            System.arraycopy(pClosure, 0, pArgs, 0, pClosureLen);
+            walkElements(dw.src, x -> {
+                if (dropping[0]) {
+                    if (predInner != null) {
+                        pArgs[pClosureLen] = x;
+                        Object r = callNode.call(predInner, pArgs);
+                        if (!(r instanceof Boolean && (Boolean) r)) {
+                            dropping[0] = false;
+                            consumer.accept(x);
+                        }
+                    } else {
+                        pArgs[pClosureLen] = MezzeRecord.wrapX(x);
+                        Object r = callNode.call(pred.getCallTarget(), pArgs);
+                        if (!(r instanceof Boolean && (Boolean) r)) {
+                            dropping[0] = false;
+                            consumer.accept(x);
+                        }
+                    }
+                } else {
+                    consumer.accept(x);
+                }
+            }, callNode);
+            return;
+        }
+        if (node instanceof EnumerateIterNode en) {
+            long[] idx = {0L};
+            walkElements(en.src, x -> {
+                consumer.accept(MezzeRecord.fromFields(
+                    new String[]{"i", "val"}, new Object[]{idx[0], x}));
+                idx[0]++;
+            }, callNode);
+            return;
+        }
+        if (node instanceof ChainIterNode chain) {
+            walkElements(chain.first, consumer, callNode);
+            walkElements(chain.second, consumer, callNode);
+            return;
+        }
+        if (node instanceof ZipIterNode zip) {
+            // Materialize both sides, zip by index
+            java.util.ArrayList<Object> left = new java.util.ArrayList<>();
+            java.util.ArrayList<Object> right = new java.util.ArrayList<>();
+            walkElements(zip.first, left::add, callNode);
+            walkElements(zip.second, right::add, callNode);
+            int len = Math.min(left.size(), right.size());
+            for (int idx = 0; idx < len; idx++) {
+                consumer.accept(MezzeRecord.fromFields(
+                    new String[]{"fst", "snd"}, new Object[]{left.get(idx), right.get(idx)}));
+            }
+            return;
+        }
+        if (node instanceof FlatMapIterNode fm) {
+            MezzeFunction fn = (MezzeFunction) fm.fn;
+            Object[] fmClosure = fn.getClosureValues();
+            int fmClosureLen = fmClosure.length;
+            CallTarget fmInner = ScalarBypass.tryResolve(fn);
+            Object[] fmArgs = new Object[fmClosureLen + 1];
+            System.arraycopy(fmClosure, 0, fmArgs, 0, fmClosureLen);
+            walkElements(fm.src, x -> {
+                MezzeIter inner;
+                if (fmInner != null) {
+                    fmArgs[fmClosureLen] = x;
+                    inner = (MezzeIter) callNode.call(fmInner, fmArgs);
+                } else {
+                    fmArgs[fmClosureLen] = MezzeRecord.wrapX(x);
+                    inner = (MezzeIter) callNode.call(fn.getCallTarget(), fmArgs);
+                }
+                walkElements(inner.getDescriptor(), consumer, callNode);
+            }, callNode);
+            return;
+        }
+        if (node instanceof UnfoldIterNode unfold) {
+            walkUnfold(unfold, consumer, callNode);
             return;
         }
         if (node instanceof UnaryOpIterNode unary) {
@@ -373,6 +564,77 @@ public final class IterNatives {
         }
     }
 
+    /**
+     * Unfold driver loop. Calls the step function repeatedly, matching
+     * on the Step variant tag (Yield/Skip/Done).
+     *
+     * The step function has Mezze signature:
+     *   { s: 'state } -> Step 'elem 'state
+     * and returns a MezzeVariant:
+     *   Yield { val: 'elem, next: 'state } — emit val, continue with next
+     *   Skip  { next: 'state }             — advance state, no emission
+     *   Done                               — stop
+     */
+    @TruffleBoundary
+    private static void walkUnfold(UnfoldIterNode unfold, ElementConsumer consumer,
+                                   IndirectCallNode callNode) {
+        MezzeFunction stepFn = (MezzeFunction) unfold.stepFunction;
+        Object[] closure = stepFn.getClosureValues();
+        int closureLen = closure.length;
+        CallTarget stepInner = ScalarBypass.tryResolve(stepFn);
+
+        Object state = unfold.initialState;
+
+        if (stepInner != null) {
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closure, 0, args, 0, closureLen);
+            while (true) {
+                args[closureLen] = state;
+                MezzeVariant step = (MezzeVariant) callNode.call(stepInner, args);
+                int tag = step.getTag();
+                if (tag == YIELD_TAG) {
+                    Object payload = step.getRawPayloadValue();
+                    if (payload instanceof MezzeRecord rec) {
+                        consumer.accept(rec.getField("val"));
+                        state = rec.getField("next");
+                    } else {
+                        // Fused single-field — shouldn't happen for Yield (2 fields)
+                        consumer.accept(payload);
+                        break;
+                    }
+                } else if (tag == SKIP_TAG) {
+                    state = step.getPayloadFieldByName("next");
+                } else {
+                    // Done
+                    break;
+                }
+            }
+        } else {
+            CallTarget target = stepFn.getCallTarget();
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closure, 0, args, 0, closureLen);
+            while (true) {
+                args[closureLen] = MezzeRecord.wrapS(state);
+                MezzeVariant step = (MezzeVariant) callNode.call(target, args);
+                int tag = step.getTag();
+                if (tag == YIELD_TAG) {
+                    Object payload = step.getRawPayloadValue();
+                    if (payload instanceof MezzeRecord rec) {
+                        consumer.accept(rec.getField("val"));
+                        state = rec.getField("next");
+                    } else {
+                        consumer.accept(payload);
+                        break;
+                    }
+                } else if (tag == SKIP_TAG) {
+                    state = step.getPayloadFieldByName("next");
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
     /** Recursive walker. Each unary transform wraps the surrounding folder. */
     @TruffleBoundary
     private static Object foldWalk(IterNode node, Object acc, MezzeFunction folder,
@@ -380,7 +642,12 @@ public final class IterNatives {
         if (node instanceof RangeIterNode range) {
             return foldRange(range, acc, folder, callNode, /*mapper*/ null, /*filter*/ null);
         }
-        if (node instanceof SeqIterNode || node instanceof TakeIterNode || node instanceof DropIterNode) {
+        if (node instanceof SeqIterNode || node instanceof TakeIterNode || node instanceof DropIterNode
+                || node instanceof ListIterNode || node instanceof OnceIterNode || node instanceof EmptyIterNode
+                || node instanceof TakeWhileIterNode || node instanceof DropWhileIterNode
+                || node instanceof EnumerateIterNode || node instanceof ChainIterNode
+                || node instanceof ZipIterNode || node instanceof FlatMapIterNode
+                || node instanceof UnfoldIterNode) {
             return foldViaRecursion(node, acc, folder, callNode);
         }
         if (node instanceof UnaryOpIterNode unary) {
@@ -568,80 +835,13 @@ public final class IterNatives {
         return acc;
     }
 
+    /**
+     * Collect all elements into an ArrayList. Delegates to walkElements
+     * for all node types — keeps a single source of truth for walking.
+     */
     @TruffleBoundary
     private static void collect(IterNode node, java.util.ArrayList<Object> out,
                                 IndirectCallNode callNode) {
-        if (node instanceof RangeIterNode range) {
-            long i = range.start;
-            long end = range.end;
-            long step = range.step;
-            if (step == 0) return;
-            boolean asc = step > 0;
-            while (asc ? (i < end) : (i > end)) {
-                out.add((Object) i);
-                i += step;
-            }
-            return;
-        }
-        if (node instanceof SeqIterNode seqNode) {
-            for (int idx = 0; idx < seqNode.size(); idx++) {
-                out.add(seqNode.get(idx));
-            }
-            return;
-        }
-        if (node instanceof TakeIterNode take) {
-            java.util.ArrayList<Object> inner = new java.util.ArrayList<>();
-            collect(take.src, inner, callNode);
-            long n = Math.min(take.n, inner.size());
-            for (int idx = 0; idx < n; idx++) out.add(inner.get(idx));
-            return;
-        }
-        if (node instanceof DropIterNode drop) {
-            java.util.ArrayList<Object> inner = new java.util.ArrayList<>();
-            collect(drop.src, inner, callNode);
-            long start = Math.min(drop.n, inner.size());
-            for (int idx = (int) start; idx < inner.size(); idx++) out.add(inner.get(idx));
-            return;
-        }
-        if (node instanceof UnaryOpIterNode unary) {
-            java.util.ArrayList<Object> inner = new java.util.ArrayList<>();
-            collect(unary.src, inner, callNode);
-            MezzeFunction fn = (MezzeFunction) unary.fn;
-            Object[] closure = fn.getClosureValues();
-            int closureLen = closure.length;
-            CallTarget innerTarget = ScalarBypass.tryResolve(fn);
-            if (innerTarget != null) {
-                Object[] args = new Object[closureLen + 1];
-                System.arraycopy(closure, 0, args, 0, closureLen);
-                if (unary.isMap()) {
-                    for (Object x : inner) {
-                        args[closureLen] = x;
-                        out.add(callNode.call(innerTarget, args));
-                    }
-                } else {
-                    for (Object x : inner) {
-                        args[closureLen] = x;
-                        Object r = callNode.call(innerTarget, args);
-                        if (r instanceof Boolean && (Boolean) r) out.add(x);
-                    }
-                }
-            } else {
-                com.oracle.truffle.api.CallTarget target = fn.getCallTarget();
-                Object[] args = new Object[closureLen + 1];
-                System.arraycopy(closure, 0, args, 0, closureLen);
-                if (unary.isMap()) {
-                    for (Object x : inner) {
-                        args[closureLen] = MezzeRecord.wrapX(x);
-                        out.add(callNode.call(target, args));
-                    }
-                } else {
-                    for (Object x : inner) {
-                        args[closureLen] = MezzeRecord.wrapX(x);
-                        Object r = callNode.call(target, args);
-                        if (r instanceof Boolean && (Boolean) r) out.add(x);
-                    }
-                }
-            }
-        }
+        walkElements(node, out::add, callNode);
     }
 }

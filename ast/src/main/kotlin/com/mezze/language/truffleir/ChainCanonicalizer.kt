@@ -1811,22 +1811,20 @@ internal class ChainHofClassifier private constructor(
                     && p1 == NativeHofNames.INIT && p2 == NativeHofNames.F -> HofKind.SCAN
 
                 // ── 2-param HOFs with function callback ──
-                // map(src, f [, dict])
-                params.size in 2..3
-                    && (name == NativeHofNames.OP_MAP || name.isEmpty())
-                    && p1 == NativeHofNames.F -> HofKind.MAP
-                // for_each(src, f [, dict])
-                params.size in 2..3
-                    && (name == NativeHofNames.OP_FOR_EACH || name.isEmpty())
-                    && p1 == NativeHofNames.F -> HofKind.FOR_EACH
-                // reduce(src, f)
-                params.size in 2..3 && name == NativeHofNames.OP_REDUCE
-                    && p1 == NativeHofNames.F -> HofKind.REDUCE
-                // min_by(src, f) / max_by(src, f)
-                params.size in 2..3 && name == NativeHofNames.OP_MIN_BY
-                    && p1 == NativeHofNames.F -> HofKind.MIN_BY
-                params.size in 2..3 && name == NativeHofNames.OP_MAX_BY
-                    && p1 == NativeHofNames.F -> HofKind.MAX_BY
+                // All (src, f) HOFs share the same param layout, so mono
+                // specializations (empty name) are ambiguous — body-inspect
+                // to disambiguate (same pattern as predicate HOFs below).
+                // Named functions match exactly; flat_map is explicitly
+                // excluded (its callback returns Iter, not an element).
+                params.size in 2..3 && p1 == NativeHofNames.F -> when (name) {
+                    NativeHofNames.OP_MAP      -> HofKind.MAP
+                    NativeHofNames.OP_FOR_EACH -> HofKind.FOR_EACH
+                    NativeHofNames.OP_REDUCE   -> HofKind.REDUCE
+                    NativeHofNames.OP_MIN_BY   -> HofKind.MIN_BY
+                    NativeHofNames.OP_MAX_BY   -> HofKind.MAX_BY
+                    ""   -> classifyFCallbackByBody(fn)
+                    else -> null
+                }
 
                 // ── 2-param HOFs with predicate callback ──
                 // All (src, p) HOFs share the same param layout, so mono
@@ -1893,28 +1891,57 @@ internal class ChainHofClassifier private constructor(
          * Falls back to FILTER for unrecognized bodies so that existing
          * mono-spec filter chains keep fusing.
          */
-        private fun classifyPredicateByBody(fn: FunctionIR): HofKind? {
+        private fun classifyPredicateByBody(fn: FunctionIR): HofKind? =
+            classifyByBody(fn, PREDICATE_OPS, HofKind.FILTER)
+
+        /** Disambiguate mono-spec (src, f) HOFs by inspecting the native
+         *  call in the function body. flat_map, for_each, reduce, min_by,
+         *  max_by all share the same (src, f) fingerprint as map. Returns
+         *  null for unrecognized bodies (flat_map, unknown) — they must
+         *  NOT be fused as MAP. */
+        private fun classifyFCallbackByBody(fn: FunctionIR): HofKind? =
+            classifyByBody(fn, F_CALLBACK_OPS, null)
+
+        private val PREDICATE_OPS = mapOf(
+            NativeHofNames.OP_FILTER     to HofKind.FILTER,
+            NativeHofNames.OP_DROP_WHILE to HofKind.DROP_WHILE,
+            NativeHofNames.OP_TAKE_WHILE to HofKind.TAKE_WHILE,
+            NativeHofNames.OP_COUNT      to HofKind.COUNT,
+            NativeHofNames.OP_ANY        to HofKind.ANY,
+            NativeHofNames.OP_ALL        to HofKind.ALL,
+            NativeHofNames.OP_FIND       to HofKind.FIND,
+            NativeHofNames.OP_NONE       to HofKind.NONE,
+            NativeHofNames.OP_PARTITION  to HofKind.PARTITION,
+            NativeHofNames.OP_FIND_INDEX to HofKind.FIND_INDEX,
+        )
+
+        private val F_CALLBACK_OPS = mapOf(
+            NativeHofNames.OP_MAP      to HofKind.MAP,
+            NativeHofNames.OP_FOR_EACH to HofKind.FOR_EACH,
+            NativeHofNames.OP_REDUCE   to HofKind.REDUCE,
+            NativeHofNames.OP_MIN_BY   to HofKind.MIN_BY,
+            NativeHofNames.OP_MAX_BY   to HofKind.MAX_BY,
+            // flat_map intentionally absent — its callback returns Iter,
+            // not an element, so fusing it as MAP would be unsound.
+        )
+
+        /** Shared body-inspection logic: extract the native-call operation
+         *  name from the function body and look it up in [ops]. Returns
+         *  [fallback] when the body isn't a native call or the op isn't
+         *  in [ops]. */
+        private fun classifyByBody(
+            fn: FunctionIR,
+            ops: Map<String, HofKind>,
+            fallback: HofKind?,
+        ): HofKind? {
             val body = fn.body
             // When the body IS a native call, inspect its name.
             // When it isn't (e.g., list::take_while calling take_while_go),
-            // return null — we can't distinguish filter/take_while/drop_while
-            // from a CallDirect body. Returning FILTER here would mis-classify
-            // mono drop_while as filter (inverting semantics).
+            // return null — we can't distinguish the HOF variants from a
+            // CallDirect body.
             val nativeName = (body as? CallNativeIR)?.name ?: return null
-            val op = extractNativeOp(nativeName) ?: return HofKind.FILTER
-            return when (op) {
-                NativeHofNames.OP_FILTER     -> HofKind.FILTER
-                NativeHofNames.OP_DROP_WHILE -> HofKind.DROP_WHILE
-                NativeHofNames.OP_TAKE_WHILE -> HofKind.TAKE_WHILE
-                NativeHofNames.OP_COUNT      -> HofKind.COUNT
-                NativeHofNames.OP_ANY        -> HofKind.ANY
-                NativeHofNames.OP_ALL        -> HofKind.ALL
-                NativeHofNames.OP_FIND       -> HofKind.FIND
-                NativeHofNames.OP_NONE       -> HofKind.NONE
-                NativeHofNames.OP_PARTITION  -> HofKind.PARTITION
-                NativeHofNames.OP_FIND_INDEX -> HofKind.FIND_INDEX
-                else                         -> HofKind.FILTER
-            }
+            val op = extractNativeOp(nativeName) ?: return fallback
+            return ops[op] ?: fallback
         }
 
         /** Extract the operation suffix from a native name like

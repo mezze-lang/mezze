@@ -1,17 +1,30 @@
-## Lazy Iter — descriptor-tree sequence.
+## Lazy Iter — universal iteration pipeline.
 ##
-## `Iter` is opaque: its stages allocate only immutable descriptor nodes
-## (no arrays, no boxed cells) and no user code runs until a sink like
-## `fold` walks the descriptor. The BDSL fused sink can pattern-match the
-## descriptor shape at PE time and lower a whole chain into a single loop
-## over primitive longs — for numeric ranges the fused shape is the same
-## as a hand-written `for` loop.
+## `Iter 'a` is opaque: stages allocate only immutable descriptor nodes
+## and no user code runs until a terminal sink walks the chain. Known
+## sources (range, from_seq, from_list) fuse at compile time into a single
+## tight loop; user-defined sources via `unfold` fuse at JIT time through
+## Truffle PE — same driver loop, same combinator surface.
 ##
-## Any type implementing the `ToIter` ability can enter the Iter pipeline
-## via its `next` method. Known producers (range) get full producer +
-## combinator fusion. Unknown producers (file handles, user types) get
-## combinator fusion with one `next()` call per element.
+## Types that want `.to_iter{}` dot-syntax implement the `Iterable` ability
+## (see `std::abilities::iter`). Collections with their own fused HOFs
+## (Seq, List, Set, SortedSet, Deque) keep those — `Iter` is for cross-
+## collection pipelines, unfused collections (Map, SortedMap), and user
+## types.
 use std::int
+
+## The step result returned by an `unfold` step function.
+##
+## - `Yield` — produced an element; `next` is the updated state.
+## - `Skip`  — no element this step (e.g. filter); `next` advances state.
+## - `Done`  — iteration finished.
+pub type Step 'elem 'state = |
+  Yield { val: 'elem, next: 'state },
+  Skip { next: 'state },
+  Done,
+|
+
+# Constructors
 
 ## Creates a lazy range `[start, end)` stepped by 1.
 pub let range: { start: Int, end: Int } -> Iter Int = { start, end } ->
@@ -24,6 +37,35 @@ pub let range_step: { start: Int, end: Int, step: Int } -> Iter Int = { start, e
 ## Creates a lazy iterator from a Seq.
 pub let from_seq: { xs: ['a] } -> Iter 'a = { xs } ->
   __native_iter_from_seq { xs = xs }
+
+## Creates a lazy iterator from a List.
+pub let from_list: { xs: List 'a } -> Iter 'a = { xs } ->
+  __native_iter_from_list { xs = xs }
+
+## Universal iterator constructor. Takes an initial state and a step
+## function that advances it. This is the entry point for user-defined
+## iteration — trees, file handles, database cursors, paginated APIs.
+##
+##     iter::unfold {
+##       state = 0,
+##       step = { s } ->
+##         if s >= 10 then Done {}
+##         else Yield { val = s * s, next = s + 1 }
+##     }
+pub let unfold
+  : { state: 's, step: { s: 's } -> Step 'a 's <...> }
+  -> Iter 'a <...>
+  = { state, step } -> __native_iter_unfold { state = state, step = step }
+
+## Single-element iterator.
+pub let once: { val: 'a } -> Iter 'a = { val } ->
+  __native_iter_once { val = val }
+
+## Empty iterator.
+pub let empty: {} -> Iter 'a = {} ->
+  __native_iter_empty {}
+
+# Stages (lazy — return Iter)
 
 ## Applies `f` lazily to each element. Deferred until a sink runs.
 pub let map: { it: Iter 'a, f: { x: 'a } -> 'b <...> } -> Iter 'b <...> = { it, f } ->
@@ -41,9 +83,36 @@ pub let take: { it: Iter 'a, n: Int } -> Iter 'a = { it, n } ->
 pub let drop: { it: Iter 'a, n: Int } -> Iter 'a = { it, n } ->
   __native_iter_drop { it = it, n = n }
 
-## Left fold — the terminal sink that walks the descriptor and produces a
-## value. This is the fusion entry point: the BDSL sink specializes on the
-## descriptor tree at PE time.
+## Takes elements while `p` holds.
+pub let take_while
+  : { it: Iter 'a, p: { x: 'a } -> Bool <...> } -> Iter 'a <...>
+  = { it, p } -> __native_iter_take_while { it = it, p = p }
+
+## Drops elements while `p` holds, then yields the rest.
+pub let drop_while
+  : { it: Iter 'a, p: { x: 'a } -> Bool <...> } -> Iter 'a <...>
+  = { it, p } -> __native_iter_drop_while { it = it, p = p }
+
+## Pairs each element with its 0-based index.
+pub let enumerate: { it: Iter 'a } -> Iter { i: Int, val: 'a } = { it } ->
+  __native_iter_enumerate { it = it }
+
+## Concatenates two iterators.
+pub let chain: { a: Iter 'a, b: Iter 'a } -> Iter 'a = { a, b } ->
+  __native_iter_chain { a = a, b = b }
+
+## Zips two iterators element-wise. Stops at the shorter.
+pub let zip: { a: Iter 'a, b: Iter 'b } -> Iter { fst: 'a, snd: 'b } = { a, b } ->
+  __native_iter_zip { a = a, b = b }
+
+## Applies `f` to each element, flattening the resulting iterators.
+pub let flat_map
+  : { it: Iter 'a, f: { x: 'a } -> Iter 'b <...> } -> Iter 'b <...>
+  = { it, f } -> __native_iter_flat_map { it = it, f = f }
+
+# Sinks (terminal — force evaluation)
+
+## Left fold — the canonical terminal. All other sinks are fold variants.
 pub let fold
   : { it: Iter 'a, init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> }
   -> 'b <...>
@@ -59,11 +128,9 @@ pub let for_each
   -> {} <...>
   = { it, f } -> __native_iter_for_each { it = it, f = f }
 
-## Count elements satisfying `p`.
-pub let count
-  : { it: Iter 'a, p: { x: 'a } -> Bool <...> }
-  -> Int <...>
-  = { it, p } -> __native_iter_count { it = it, p = p }
+## Count elements.
+pub let count: { it: Iter 'a } -> Int = { it } ->
+  __native_iter_count_all { it = it }
 
 ## True if any element satisfies `p`.
 pub let any
@@ -89,6 +156,14 @@ pub let reduce
   -> Option 'a <...>
   = { it, f } -> __native_iter_reduce { it = it, f = f }
 
+## First element, or None.
+pub let first: { it: Iter 'a } -> Option 'a = { it } ->
+  __native_iter_first { it = it }
+
+## Last element, or None.
+pub let last: { it: Iter 'a } -> Option 'a = { it } ->
+  __native_iter_last { it = it }
+
 ## Materialize the iterator into a Seq.
 pub let to_seq: { it: Iter 'a } -> ['a] = { it } ->
   __native_iter_to_seq { it = it }
@@ -97,24 +172,32 @@ pub let to_seq: { it: Iter 'a } -> ['a] = { it } ->
 pub let to_list: { it: Iter 'a } -> List 'a = { it } ->
   __native_iter_to_list { it = it }
 
-## Inherent methods for dot-chain syntax on Iter values.
+# Inherent methods for dot-chain syntax.
+
 impl Iter 'a where {
   map = { it, f } -> map { it = it, f = f },
   filter = { it, p } -> filter { it = it, p = p },
   take = { it, n } -> take { it = it, n = n },
   drop = { it, n } -> drop { it = it, n = n },
+  take_while = { it, p } -> take_while { it = it, p = p },
+  drop_while = { it, p } -> drop_while { it = it, p = p },
+  enumerate = { it } -> enumerate { it = it },
+  chain = { it, b } -> chain { a = it, b = b },
+  zip = { it, b } -> zip { a = it, b = b },
+  flat_map = { it, f } -> flat_map { it = it, f = f },
   fold = { it, init, f } -> fold { it = it, init = init, f = f },
   for_each = { it, f } -> for_each { it = it, f = f },
-  count = { it, p } -> count { it = it, p = p },
+  count = { it } -> count { it = it },
   any = { it, p } -> any { it = it, p = p },
   all = { it, p } -> all { it = it, p = p },
   find = { it, p } -> find { it = it, p = p },
   reduce = { it, f } -> reduce { it = it, f = f },
+  first = { it } -> first { it = it },
+  last = { it } -> last { it = it },
   to_seq = { it } -> to_seq { it = it },
   to_list = { it } -> to_list { it = it },
 }
 
-## Inherent methods on Iter Int only.
 impl Iter Int where {
   sum = { it } -> sum { it = it },
 }

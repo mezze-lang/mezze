@@ -1,22 +1,18 @@
-## Conversion to Iter — the universal iteration entry point.
+## Iterable — the universal iteration entry point.
 ##
-## Any type that implements `ToIter` can be iterated: its elements are
-## available to all Iter combinators (filter, map, fold, etc.) via a
-## single `next` method that returns `Option 'elem`.
+## Any type that implements `Iterable` gains `.to_iter{}` which returns
+## an `Iter 'elem`. All Iter combinators (filter, map, fold, to_seq, …)
+## are then available via dot-chaining.
 ##
-## Collections like Seq and List implement `ToIter` for generic code,
-## but keep their own optimized inherent HOFs for direct use. When the
-## fusion pass sees a concrete type at monomorphization time it can
-## specialize to the direct-storage path — the ability is the generic
-## interface, specialization recovers the fast path.
+## For linear types (List, Deque) the impl is trivial. For non-linear
+## types (trees, graphs) the impl delegates to `iter::unfold`. For
+## effectful producers (file handles, HTTP streams) effects propagate
+## through `<...>` on `to_iter`.
 ##
-## Effectful producers (file handles, DB cursors) implement `ToIter`
-## with effects on `next`. Pure producers (range) use `<>`. The effect
-## row propagates through the combinator chain — pure producers get
-## full fusion with zero overhead, effectful producers get combinator
-## fusion with one `next()` call per element.
-use std::option
+## Collections with fused HOFs (Seq, List, Set, SortedSet, Deque) keep
+## their direct methods — `Iterable` is for cross-collection pipelines
+## and types without built-in fusion.
 
-ability ToIter for 'c having 'elem where {
-  next: { it: 'c } -> Option 'elem <...>
+ability Iterable for 'c having 'elem where {
+  to_iter: { it: 'c } -> Iter 'elem <...>
 }

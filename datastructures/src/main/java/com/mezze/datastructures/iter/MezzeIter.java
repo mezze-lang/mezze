@@ -52,6 +52,22 @@ public final class MezzeIter implements TruffleObject {
         return new MezzeIter(new SeqIterNode(seq));
     }
 
+    public static MezzeIter fromList(com.mezze.datastructures.list.MezzeList list) {
+        return new MezzeIter(new ListIterNode(list));
+    }
+
+    public static MezzeIter unfold(Object initialState, Object stepFunction) {
+        return new MezzeIter(new UnfoldIterNode(initialState, stepFunction));
+    }
+
+    public static MezzeIter once(Object value) {
+        return new MezzeIter(new OnceIterNode(value));
+    }
+
+    public static MezzeIter empty() {
+        return new MezzeIter(EmptyIterNode.INSTANCE);
+    }
+
     // ===== TRANSFORM (return new descriptors — no work done) =====
 
     /** Java-side map: wraps the fn as opaque; the runtime fold layer casts. */
@@ -70,6 +86,30 @@ public final class MezzeIter implements TruffleObject {
 
     public MezzeIter drop(long n) {
         return new MezzeIter(new DropIterNode(descriptor, n));
+    }
+
+    public MezzeIter takeWhile(Object predicate) {
+        return new MezzeIter(new TakeWhileIterNode(descriptor, predicate));
+    }
+
+    public MezzeIter dropWhile(Object predicate) {
+        return new MezzeIter(new DropWhileIterNode(descriptor, predicate));
+    }
+
+    public MezzeIter enumerate() {
+        return new MezzeIter(new EnumerateIterNode(descriptor));
+    }
+
+    public MezzeIter chain(MezzeIter other) {
+        return new MezzeIter(new ChainIterNode(descriptor, other.descriptor));
+    }
+
+    public MezzeIter zip(MezzeIter other) {
+        return new MezzeIter(new ZipIterNode(descriptor, other.descriptor));
+    }
+
+    public MezzeIter flatMap(Object fn) {
+        return new MezzeIter(new FlatMapIterNode(descriptor, fn));
     }
 
     // ===== JAVA-SIDE FOLD (fallback, not the hot path) =====

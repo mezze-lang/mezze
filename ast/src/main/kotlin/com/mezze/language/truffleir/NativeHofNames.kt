@@ -97,6 +97,15 @@ object NativeHofNames {
     const val OP_PRODUCT = "product"
     const val OP_PRODUCT_FLOAT = "product_float"
     const val OP_FIND_INDEX = "find_index"
+    const val OP_UNFOLD = "unfold"
+    const val OP_FROM_LIST = "from_list"
+    const val OP_ONCE = "once"
+    const val OP_EMPTY = "empty"
+    const val OP_ENUMERATE = "enumerate"
+    const val OP_CHAIN = "chain"
+    const val OP_ZIP = "zip"
+    const val OP_FLAT_MAP = "flat_map"
+    const val OP_COUNT_ALL = "count_all"
 
     // ── Native name builder ─────────────────────────────────────────────
 

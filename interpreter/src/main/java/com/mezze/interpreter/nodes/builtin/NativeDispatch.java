@@ -942,6 +942,38 @@ public final class NativeDispatch extends MezzeNode {
             IterNatives.toSeq(getIter(r, "it"), c));
         HANDLERS.put("__native_iter_to_list", (r, c) ->
             IterNatives.toList(getIter(r, "it"), c));
+
+        // New constructors
+        HANDLERS.put("__native_iter_from_list", (r, c) ->
+            IterNatives.fromList(getList(r, "xs")));
+        HANDLERS.put("__native_iter_unfold", (r, c) ->
+            IterNatives.unfold(getField(r, "state"), getFunction(r, "step")));
+        HANDLERS.put("__native_iter_once", (r, c) ->
+            IterNatives.once(getField(r, "val")));
+        HANDLERS.put("__native_iter_empty", (r, c) ->
+            IterNatives.empty());
+
+        // New stages
+        HANDLERS.put("__native_iter_take_while", (r, c) ->
+            IterNatives.takeWhile(getIter(r, "it"), getFunction(r, "p")));
+        HANDLERS.put("__native_iter_drop_while", (r, c) ->
+            IterNatives.dropWhile(getIter(r, "it"), getFunction(r, "p")));
+        HANDLERS.put("__native_iter_enumerate", (r, c) ->
+            IterNatives.enumerate(getIter(r, "it")));
+        HANDLERS.put("__native_iter_chain", (r, c) ->
+            IterNatives.chain(getIter(r, "a"), getIter(r, "b")));
+        HANDLERS.put("__native_iter_zip", (r, c) ->
+            IterNatives.zip(getIter(r, "a"), getIter(r, "b")));
+        HANDLERS.put("__native_iter_flat_map", (r, c) ->
+            IterNatives.flatMap(getIter(r, "it"), getFunction(r, "f")));
+
+        // New sinks
+        HANDLERS.put("__native_iter_count_all", (r, c) ->
+            IterNatives.countAll(getIter(r, "it"), c));
+        HANDLERS.put("__native_iter_first", (r, c) ->
+            IterNatives.first(getIter(r, "it"), c));
+        HANDLERS.put("__native_iter_last", (r, c) ->
+            IterNatives.last(getIter(r, "it"), c));
     }
 
     // ==================== List ====================

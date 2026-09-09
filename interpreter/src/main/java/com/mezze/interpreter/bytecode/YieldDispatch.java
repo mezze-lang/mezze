@@ -142,19 +142,19 @@ public final class YieldDispatch {
                 + (opImplRaw == null ? "null" : opImplRaw.getClass().getName()) + ")");
         }
 
-        // Set up a dispatch-only fiber that carries resume/abort as
-        // top-of-stack effect-handles for EffectBindingIR to find.
-        HandlerChainRegistry dispatchFiber = HandlerChainRegistry.acquireDispatchOnly();
-        MezzeFunction resumeFn = fallThroughResumeFn();
-        MezzeFunction abortFn = EffectHandlerDriver.makeAbortFunction();
-        dispatchFiber.pushEffectHandles(resumeFn, abortFn);
-        HandlerChainRegistry prevDispatch = dispatchFiber.enterDispatch();
-
+        // Call the op impl DIRECTLY — no dispatch fiber needed.
+        // EffectBindingNode falls back to singleton resume/abort when
+        // dispatching() returns null:
+        //   resume → fallThroughResumeFn (return arg.val)
+        //   abort  → makeAbortFunction (throw AbortPerformException)
+        // These are functionally identical to what the dispatch fiber
+        // would carry. Eliminating the fiber saves 4 ThreadLocal
+        // operations per op-call (acquire, enter, exit, release).
+        Object[] cv = opImpl.getClosureValues();
+        Object[] opArgs = new Object[cv.length + 1];
+        System.arraycopy(cv, 0, opArgs, 0, cv.length);
+        opArgs[cv.length] = arg;
         try {
-            Object[] cv = opImpl.getClosureValues();
-            Object[] opArgs = new Object[cv.length + 1];
-            System.arraycopy(cv, 0, opArgs, 0, cv.length);
-            opArgs[cv.length] = arg;
             Object result = IndirectCallNode.getUncached().call(opImpl.getCallTarget(), opArgs);
             if (TRACE) trace("  impl returned normally: " + summarize(result));
             return result;
@@ -174,10 +174,6 @@ public final class YieldDispatch {
                 throw new TaskUnhandledOpException(new OpCall(opName, arg, effectHash));
             }
             throw abort;
-        } finally {
-            HandlerChainRegistry.exitDispatch(prevDispatch);
-            dispatchFiber.popEffectHandles();
-            HandlerChainRegistry.releaseDispatchOnly(dispatchFiber);
         }
     }
 

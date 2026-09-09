@@ -64,41 +64,51 @@ public final class OpCallNode extends MezzeNode {
     private IndirectCallNode chainCallNode;
 
     /**
-     * Marker-Mut fast path gate. ON by default; opt out with
-     * {@code MEZZE_MARKER_MUT=0}. Note: {@code com.mezze.interpreter} is in
+     * Op-call PIC gate. ON by default; opt out with
+     * {@code MEZZE_OPCALL_PIC=0}. Note: {@code com.mezze.interpreter} is in
      * {@code --initialize-at-build-time} for native-image, so this static
      * final field is resolved at image build time — the runtime env var
      * doesn't change the value. The default-ON form is safe at build time
-     * (build env has no MEZZE_MARKER_MUT, so the condition evaluates true).
+     * (build env has no MEZZE_OPCALL_PIC, so the condition evaluates true).
      */
-    private static final boolean MARKER_MUT_ENABLED =
-        !"0".equals(System.getenv("MEZZE_MARKER_MUT"));
+    private static final boolean PIC_ENABLED =
+        !"0".equals(System.getenv("MEZZE_OPCALL_PIC"));
 
     /** True if this op-call's effectHash is the Mut effect. Cached at construction. */
     @CompilationFinal
     private final boolean isMutOp;
 
     /**
-     * Inline cache for the marker fast path. Captured on first execution
-     * inside a Mut region: the handler record on the chain, the op field
-     * index inside that record, and a DirectCallNode pinned to the op
-     * implementation's CallTarget. Subsequent calls verify
-     * {@code cachedMarkerHandler == peekHandlerForEffect(Mut)} and dispatch
-     * via {@link #markerCallNode} — Truffle then folds the call through
+     * Inline cache for the op-call fast path. Generalized from Mut-only
+     * (#257) to ALL effects. Captured on first execution: the handler
+     * record on the chain, the op field index inside that record, and a
+     * DirectCallNode pinned to the op implementation's CallTarget.
+     * Subsequent calls verify
+     * {@code cachedHandler == peekHandlerForEffect(effectHash)} and dispatch
+     * via {@link #picCallNode} — Truffle then folds the call through
      * partial evaluation and the JIT inlines the callee. Mismatch
-     * (different LocalMut region with a different handler record) deopts
-     * and re-initializes; this is the standard PIC pattern. #257.
+     * (different handler region) deopts and re-initializes; this is the
+     * standard PIC pattern. After {@link #MAX_PIC_MISSES} misses, the PIC
+     * is disabled and dispatch falls through to chain walk.
+     *
+     * <p>When no dispatch fiber is set (no chain-dispatch plumbing), the
+     * singleton fallback resume/abort in {@code EffectBindingNode} provide
+     * correct semantics: resume = fall-through identity, abort = throw
+     * {@link AbortPerformException}.
      */
+    private static final int MAX_PIC_MISSES = 3;
     @CompilationFinal
-    private com.mezze.interpreter.values.MezzeRecord cachedMarkerHandler;
+    private int picMisses = 0;
     @CompilationFinal
-    private int cachedMarkerFieldIndex = -1;
+    private com.mezze.interpreter.values.MezzeRecord cachedHandler;
     @CompilationFinal
-    private int cachedMarkerClosureLen = -1;
+    private int cachedFieldIndex = -1;
+    @CompilationFinal
+    private int cachedClosureLen = -1;
     @CompilationFinal(dimensions = 1)
-    private Object[] cachedMarkerClosure;
+    private Object[] cachedClosure;
     @Child
-    private com.oracle.truffle.api.nodes.DirectCallNode markerCallNode;
+    private com.oracle.truffle.api.nodes.DirectCallNode picCallNode;
 
     /**
      * True when this op-call is the specialized `Mut.mutate { act = X }`
@@ -128,7 +138,7 @@ public final class OpCallNode extends MezzeNode {
         this.operationName = operationName;
         this.effectHash = effectHash;
         this.argumentNode = argumentNode;
-        this.isMutOp = MARKER_MUT_ENABLED && MarkerEffects.isMutEffect(effectHash);
+        this.isMutOp = PIC_ENABLED && MarkerEffects.isMutEffect(effectHash);
         this.isMutMutateActFast = isMutMutateActFast;
         if (isMutMutateActFast) {
             MezzeRecord.FieldLocation[] locs = {
@@ -204,30 +214,42 @@ public final class OpCallNode extends MezzeNode {
      * {@link #executeMutMutateActFast} once the argument value is in hand.
      */
     private Object dispatchWith(Object args) {
-        // #257 marker fast path. CURRENT is always null now that the Loom
-        // fiber-drive path is gone (#333). If our
-        // inline cache holds the same handler that's currently on the
-        // chain, dispatch direct through markerCallNode — no chain walk,
-        // no dispatch fiber, no resume/abort plumbing.
-        if (isMutOp && markerCallNode != null) {
-            com.mezze.interpreter.values.MezzeRecord top =
-                HandlerChainRegistry.peekHandlerForEffect(effectHash);
-            if (top == cachedMarkerHandler) {
-                return invokeMarker(args);
-            }
-            // Different region — deopt and re-cache.
-            CompilerDirectives.transferToInterpreterAndInvalidate();
-        }
-        if (isMutOp) {
-            com.mezze.interpreter.values.MezzeRecord top =
-                HandlerChainRegistry.peekHandlerForEffect(effectHash);
-            if (top != null) {
+        // Generalized PIC for ALL effects (extended from Mut-only #257).
+        // When the handler record at the top of the chain matches our
+        // cached handler, dispatch through a DirectCallNode with
+        // forceInlining — no chain walk, no dispatch fiber, no
+        // resume/abort plumbing. EffectBindingNode falls back to
+        // singleton resume/abort when no dispatch fiber is set.
+        //
+        // After MAX_PIC_MISSES handler changes, the PIC is disabled and
+        // dispatch falls through to chain walk — avoids constant
+        // deoptimization at megamorphic call sites.
+        if (PIC_ENABLED && picMisses <= MAX_PIC_MISSES) {
+            if (picCallNode != null) {
+                com.mezze.interpreter.values.MezzeRecord top =
+                    HandlerChainRegistry.peekHandlerForEffect(effectHash);
+                if (top == cachedHandler) {
+                    return invokePic(args);
+                }
+                // Different handler region — deopt and re-cache.
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                if (initializeMarkerCache(top)) {
-                    return invokeMarker(args);
+                picMisses++;
+                if (top != null && initializePicCache(top)) {
+                    return invokePic(args);
+                }
+            } else {
+                // PIC initialization: first call at this site.
+                com.mezze.interpreter.values.MezzeRecord top =
+                    HandlerChainRegistry.peekHandlerForEffect(effectHash);
+                if (top != null) {
+                    CompilerDirectives.transferToInterpreterAndInvalidate();
+                    if (initializePicCache(top)) {
+                        return invokePic(args);
+                    }
                 }
             }
         }
+        // Fallback: full chain dispatch.
         HandlerChainEntry[] chain = HandlerChainRegistry.snapshotHandlerChainEntries();
         if (chain.length > 0) {
             return chainDispatch(chain, args);
@@ -236,14 +258,14 @@ public final class OpCallNode extends MezzeNode {
     }
 
     /**
-     * One-time cache setup for the marker fast path. Caller has already
+     * One-time cache setup for the PIC fast path. Caller has already
      * deopted via {@link CompilerDirectives#transferToInterpreterAndInvalidate()}.
      * Returns false if the handler record doesn't expose the expected op
      * field as a {@link MezzeFunction} — the caller falls back to chain
      * dispatch so correctness is preserved even if the handler shape is
      * unexpected.
      */
-    private boolean initializeMarkerCache(com.mezze.interpreter.values.MezzeRecord handler) {
+    private boolean initializePicCache(com.mezze.interpreter.values.MezzeRecord handler) {
         int idx = handler.getFieldIndex(operationName);
         if (idx < 0) return false;
         Object f = handler.getField(idx);
@@ -252,27 +274,52 @@ public final class OpCallNode extends MezzeNode {
         com.oracle.truffle.api.nodes.DirectCallNode node =
             com.oracle.truffle.api.nodes.DirectCallNode.create(op.getCallTarget());
         node.forceInlining();
-        this.markerCallNode = insert(node);
-        this.cachedMarkerHandler = handler;
-        this.cachedMarkerFieldIndex = idx;
-        this.cachedMarkerClosureLen = closure.length;
-        this.cachedMarkerClosure = closure;
+        this.picCallNode = insert(node);
+        this.cachedHandler = handler;
+        this.cachedFieldIndex = idx;
+        this.cachedClosureLen = closure.length;
+        this.cachedClosure = closure;
         return true;
     }
 
     /**
-     * Hot-path invoke through the marker inline cache. The handler's op
+     * Hot-path invoke through the PIC inline cache. The handler's op
      * impl takes one record arg (the op's args) and returns its result.
      * Closure values are prepended per the standard Mezze call ABI.
+     *
+     * <p>For non-Mut effects (Exception, Return, custom effects), the
+     * handler body may call {@code abort}. The resulting
+     * {@link AbortPerformException} is caught and routed: inside a BDSL
+     * Handle → rethrow; otherwise → {@link TaskUnhandledOpException} for
+     * spawned-task boundary. For Mut ops the handler never aborts, so the
+     * try-catch is dead code and PE eliminates it.
      */
-    private Object invokeMarker(Object args) {
-        int closureLen = cachedMarkerClosureLen;
+    private Object invokePic(Object args) {
+        int closureLen = cachedClosureLen;
         Object[] callArgs = new Object[closureLen + 1];
         if (closureLen > 0) {
-            System.arraycopy(cachedMarkerClosure, 0, callArgs, 0, closureLen);
+            System.arraycopy(cachedClosure, 0, callArgs, 0, closureLen);
         }
         callArgs[closureLen] = args;
-        return markerCallNode.call(callArgs);
+        try {
+            return picCallNode.call(callArgs);
+        } catch (AbortPerformException abort) {
+            return handlePicAbort(abort, args);
+        }
+    }
+
+    /**
+     * Handle an abort thrown by the PIC-dispatched handler. Same rule as
+     * {@link #chainDispatch}: inside a BDSL Handle, rethrow; otherwise
+     * convert to {@link TaskUnhandledOpException}.
+     */
+    @TruffleBoundary
+    private Object handlePicAbort(AbortPerformException abort, Object args) {
+        if (HandlerChainRegistry.insideBdslHandle()) {
+            throw abort;
+        }
+        throw new TaskUnhandledOpException(
+            new OpCall(operationName, args, effectHash));
     }
 
     /**
@@ -324,7 +371,7 @@ public final class OpCallNode extends MezzeNode {
 
     /**
      * Walk a handler chain innermost-first, call the first matching op
-     * handler directly under a dispatch-only fiber. Used by:
+     * handler directly. Used by:
      *
      * <ul>
      *   <li>{@link OpCallNode#chainDispatch} — fiber-less op-call dispatch
@@ -334,7 +381,11 @@ public final class OpCallNode extends MezzeNode {
      *       has been installed but no fiber is current (#285)</li>
      * </ul>
      *
-     * Returns {@link #DISPATCH_NO_MATCH} when no handler in the chain
+     * <p>No dispatch fiber is set — {@link EffectBindingNode} falls back
+     * to singleton resume/abort when {@code dispatching()} returns null.
+     * This eliminates 4 ThreadLocal operations per op-call.
+     *
+     * <p>Returns {@link #DISPATCH_NO_MATCH} when no handler in the chain
      * matches. Otherwise returns the handler's result. Translates an
      * {@code abort} inside the handler body to
      * {@link TaskUnhandledOpException} so the spawned-task boundary
@@ -365,42 +416,23 @@ public final class OpCallNode extends MezzeNode {
             }
             Object f = chain[i].handler().getField(operationName);
             if (f instanceof MezzeFunction op) {
-                // Set up dispatch context so the handler body can read
-                // resume/abort via EffectBindingNode. Acquire from a
-                // per-thread 1-slot pool to avoid allocating a fresh
-                // dispatch fiber per op-call.
-                HandlerChainRegistry dispatchFiber = HandlerChainRegistry.acquireDispatchOnly();
-                MezzeFunction resumeFn = makeChainResumeFunction();
-                MezzeFunction abortFn = EffectHandlerDriver.makeAbortFunction();
-                dispatchFiber.pushEffectHandles(resumeFn, abortFn);
-
+                // Call the handler directly — no dispatch fiber needed.
+                // EffectBindingNode returns singleton resume/abort when
+                // dispatching() is null (same functions the fiber would
+                // carry). Eliminates 4 ThreadLocal ops per dispatch.
                 Object[] closure = op.getClosureValues();
                 Object[] callArgs = new Object[closure.length + 1];
                 System.arraycopy(closure, 0, callArgs, 0, closure.length);
                 callArgs[closure.length] = args;
 
-                HandlerChainRegistry prev = dispatchFiber.enterDispatch();
                 try {
                     return callNode.call(op.getCallTarget(), callArgs);
                 } catch (AbortPerformException abort) {
-                    // The handler called abort {val = ...}. Two cases:
-                    //   - Inside a BDSL Handle (Path D8): rethrow so the
-                    //     enclosing Handle's TryCatchOtherwise catch branch
-                    //     picks it up via UnwrapAbortValue.
-                    //   - Otherwise (spawned task, top level): convert to
-                    //     TaskUnhandledOpException so SpawnSupport stashes it
-                    //     on the promise for parent await re-issue. Same
-                    //     rule as YieldDispatch — the two dispatch
-                    //     paths must agree on when to convert.
                     if (HandlerChainRegistry.insideBdslHandle()) {
                         throw abort;
                     }
                     throw new TaskUnhandledOpException(
                         new OpCall(operationName, args, effectHash));
-                } finally {
-                    HandlerChainRegistry.exitDispatch(prev);
-                    dispatchFiber.popEffectHandles();
-                    HandlerChainRegistry.releaseDispatchOnly(dispatchFiber);
                 }
             }
         }
