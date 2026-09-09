@@ -325,24 +325,31 @@ class TypedASTCompiler(
                         if (expr.arg is TypedRecord) {
                             for (entry in (expr.arg as TypedRecord).entries) {
                                 if (entry is TypedRecordEntry.Field) {
-                                    concreteTypes.add(entry.value.type)
+                                    val refreshed = substitution.apply(entry.value.type)
+                                    val recovered = resolveVariantReceiverType(entry.value, refreshed) ?: refreshed
+                                    // Extract concrete element types from seq/list literals
+                                    // so VarType-wrapped containers (e.g. SeqType(VarType))
+                                    // can still resolve the element-level impl.
+                                    val elementType = extractConcreteElementTypeFromExpr(entry.value)
+                                    if (elementType != null) concreteTypes.add(elementType)
+                                    concreteTypes.add(recovered)
+                                    collectDeepConcreteTypes(entry.value, concreteTypes)
                                 }
                             }
                         }
-                        // When arg types still contain VarType (even inside containers
-                        // like SeqType(VarType)), skip resolution — a blanket
-                        // container-level impl (e.g. `impl Ord for ['a]`) could match
-                        // when the dict is actually for the element type. Mark for
-                        // forwarding so the enclosing function gets the dict param.
-                        val anyArgHasVarType = concreteTypes.any { containsVarType(it) }
+                        // Filter out types that still contain VarType before resolution.
+                        // A SeqType(VarType) could match a container-level impl like
+                        // `impl Ord for ['a]` when the dict is actually for the element
+                        // type — which is unknown. Only fully-concrete types (or types
+                        // where expression-based extraction recovered the element type)
+                        // can be safely resolved.
+                        val resolvableTypes = concreteTypes.filter { !containsVarType(it) }
+                        // Try to resolve each dict method from the concrete types.
+                        // Only forward to caller when resolution actually fails.
                         for (methodName in calleeDictMethods) {
-                            if (anyArgHasVarType) {
+                            val resolved = resolveOpHashFromConcreteTypes(methodName, resolvableTypes)
+                            if (resolved == null) {
                                 out.add(methodName)
-                            } else {
-                                val resolved = resolveOpHashFromConcreteTypes(methodName, concreteTypes)
-                                if (resolved == null) {
-                                    out.add(methodName)
-                                }
                             }
                         }
                     }
@@ -441,18 +448,68 @@ class TypedASTCompiler(
     }
 
     /**
-     * True iff the arrow carries at least one `with <Ability>` constraint.
-     * Bug B (#86): a `with`-constrained arrow lets its body call ability ops
-     * on a still-generic receiver (`{it: 'a} with Encode JsonC 'a -> …` allows
-     * `it.encode {…}`). Any VarType-receiver method call in such an arrow must
-     * be marked for dict-passing so the resolved impl reaches the call site.
-     * Matching on ability-hash / typevar-id would misfire under mono
-     * specialization (fresh ids); the boolean "arrow is constrained" bit is
-     * stable regardless of substitution.
+     * True iff the arrow carries at least one `with <Ability>` constraint
+     * that is still genuinely polymorphic after applying the final
+     * substitution. A constraint like `NumAdd(VarType('a), IntType)` is
+     * polymorphic only if `'a` remains a VarType after substitution —
+     * if it resolves to `Int`, the constraint is `NumAdd(Int, Int)`,
+     * which is a concrete built-in operation that doesn't need
+     * dict-passing.
+     *
+     * Bug B (#86): a `with`-constrained arrow lets its body call ability
+     * ops on a still-generic receiver (`{it: 'a} with Encode JsonC 'a
+     * -> …` allows `it.encode {…}`). Any VarType-receiver method call
+     * in such an arrow must be marked for dict-passing so the resolved
+     * impl reaches the call site.
+     *
+     * Bug #X (dict-leak): recursive functions like `sum_to = {n} -> n +
+     * sum_to {n-1}` generate a `NumAdd(VarType, IntType)` constraint
+     * during inference. This constraint can leak onto enclosing function
+     * types (e.g. `main`). Under the old `isNotEmpty()` check, the
+     * leaked constraint caused `main` to be marked as constrained →
+     * lambdas inside main got spurious `__dict_mul` captures → crash
+     * when the callback's closureValues didn't match the inner BDSL
+     * root's capture count. Applying substitution filters out these
+     * resolved constraints correctly.
      */
     private fun arrowHasAbilityConstraint(type: MezzeType): Boolean {
         if (type !is MezzeType.FunctionType) return false
-        return type.abilityConstraints.isNotEmpty()
+        if (type.abilityConstraints.isEmpty()) return false
+        // A function with ability constraints only needs dict-passing
+        // if its parameter type is genuinely polymorphic (contains VarType
+        // after substitution). Functions like `fib: {n: Int} -> Int`
+        // can carry stale constraints from type inference (the VarType
+        // in the constraint was resolved but the constraint wasn't
+        // cleaned up). These functions don't need dict-passing because
+        // all their operations can be resolved from concrete types at
+        // compile time.
+        //
+        // The generalized type variables in these stale constraints are
+        // NOT in the module substitution (they were let-generalized),
+        // so substitution.apply() on the constraint's typeArgs doesn't
+        // help — they remain VarType. But the function's own paramType
+        // IS fully resolved under the substitution.
+        val resolvedParam = substitution.apply(type.paramType)
+        return containsVarTypeDeep(resolvedParam)
+    }
+
+    /** Like [containsVarType] but also recurses into record fields and
+     *  function types — needed to detect VarType in parameter types. */
+    private fun containsVarTypeDeep(type: MezzeType): Boolean = when (type) {
+        is MezzeType.VarType -> true
+        is MezzeType.RecordType -> type.fields.values.any { containsVarTypeDeep(it) }
+        is MezzeType.FunctionType -> containsVarTypeDeep(type.paramType) || containsVarTypeDeep(type.returnType)
+        is MezzeType.SeqType -> containsVarTypeDeep(type.elementType)
+        is MezzeType.ListType -> containsVarTypeDeep(type.elementType)
+        is MezzeType.SetType -> containsVarTypeDeep(type.elementType)
+        is MezzeType.SortedSetType -> containsVarTypeDeep(type.elementType)
+        is MezzeType.MapType -> containsVarTypeDeep(type.keyType) || containsVarTypeDeep(type.valueType)
+        is MezzeType.SortedMapType -> containsVarTypeDeep(type.keyType) || containsVarTypeDeep(type.valueType)
+        is MezzeType.TypeApplication -> type.args.any { containsVarTypeDeep(it) }
+        is MezzeType.VariantType -> type.constructors.values.any { payload ->
+            payload != null && containsVarTypeDeep(payload)
+        } || type.typeArgs.any { containsVarTypeDeep(it) }
+        else -> false
     }
 
     /**
@@ -789,20 +846,6 @@ class TypedASTCompiler(
                 census.byHashMono + census.byHashPlain + census.native + census.globalThunk
             val dictOwned = census.methodDictCallee + census.byHashDictInject
             fun pct(n: Int) = if (total == 0) 0.0 else 100.0 * n / total
-            System.err.println(
-                "[census] total=$total mono-direct=${monoOwned}(${"%.1f".format(pct(monoOwned))}%) " +
-                "dict-path=${dictOwned}(${"%.1f".format(pct(dictOwned))}%) " +
-                "indirect=${census.indirect}(${"%.1f".format(pct(census.indirect))}%)"
-            )
-            System.err.println(
-                "[census]   inlineOp=${census.inlineOp} methodConcrete=${census.methodConcrete} " +
-                "methodSingleVar=${census.methodSingleVar} byHashMono=${census.byHashMono} " +
-                "byHashPlain=${census.byHashPlain} native=${census.native} globalThunk=${census.globalThunk}"
-            )
-            System.err.println(
-                "[census]   methodDictCallee=${census.methodDictCallee} " +
-                "byHashDictInject=${census.byHashDictInject}"
-            )
         }
 
         // Per-hash dedupe. The compiler's three append phases (decls,
@@ -2033,7 +2076,9 @@ class TypedASTCompiler(
                     if (callerCaptureIdx != null) {
                         dictFields.add(FieldIR(dictParamName, ReadCaptureIR(callerCaptureIdx, SlotKind.OBJECT, src)))
                     } else {
-                        dictFields.add(FieldIR(dictParamName, UnitLitIR(src)))
+                        // Don't inject a sentinel — leave the field absent so the
+                        // callee's trampoline resolves DictFallback for primitive ops
+                        // (add, lt, eq, …). See TrampolineRootNode.unpackRecordSlow.
                     }
                 }
             }

@@ -449,6 +449,24 @@ public final class BytecodeCompiler {
     }
 
     /**
+     * True iff the trampoline carries hidden {@code __dict_<op>} params
+     * that need runtime dict-fallback resolution. Bypassing such a
+     * trampoline at a CallDirect site passes the caller's raw arg
+     * straight to the inner BDSL root, where the dict slot receives the
+     * arg value (typically an empty record) instead of the resolved impl
+     * function → {@code UnsupportedSpecializationException} at
+     * {@code CallIndirect}.
+     */
+    private static boolean trampolineHasDictParams(TrampolineRootNode tramp) {
+        String[] names = tramp.getParameterNames();
+        if (names == null) return false;
+        for (String name : names) {
+            if (com.mezze.language.ast.MagicParams.INSTANCE.isDict(name)) return true;
+        }
+        return false;
+    }
+
+    /**
      * True iff {@code ir} uses only IR node types this compiler can
      * lower. Bail early instead of building a partial BDSL program that
      * would later throw at an unsupported node. Callers MUST also check
@@ -2666,7 +2684,8 @@ public final class BytecodeCompiler {
                         && target instanceof com.oracle.truffle.api.RootCallTarget rct1
                         && rct1.getRootNode() instanceof TrampolineRootNode tramp1
                         && !tramp1.hasTailCalls()
-                        && tramp1.getClosureCount() == 0;
+                        && tramp1.getClosureCount() == 0
+                        && !trampolineHasDictParams(tramp1);
                 b.beginCallDirect1(target, canBypass);
                 emitNode(c.getArgs().get(0), b, argCount, localMap);
                 b.endCallDirect1();
@@ -2675,7 +2694,8 @@ public final class BytecodeCompiler {
                         && target instanceof com.oracle.truffle.api.RootCallTarget rct2
                         && rct2.getRootNode() instanceof TrampolineRootNode tramp2
                         && !tramp2.hasTailCalls()
-                        && tramp2.getClosureCount() == 0;
+                        && tramp2.getClosureCount() == 0
+                        && !trampolineHasDictParams(tramp2);
                 b.beginCallDirect2(target, canBypass);
                 for (NodeIR arg : c.getArgs()) {
                     emitNode(arg, b, argCount, localMap);
@@ -2686,7 +2706,8 @@ public final class BytecodeCompiler {
                         && target instanceof com.oracle.truffle.api.RootCallTarget rct3
                         && rct3.getRootNode() instanceof TrampolineRootNode tramp3
                         && !tramp3.hasTailCalls()
-                        && tramp3.getClosureCount() == 0;
+                        && tramp3.getClosureCount() == 0
+                        && !trampolineHasDictParams(tramp3);
                 b.beginCallDirect3(target, canBypass);
                 for (NodeIR arg : c.getArgs()) {
                     emitNode(arg, b, argCount, localMap);
@@ -2917,8 +2938,12 @@ public final class BytecodeCompiler {
             // Dict method dispatch: read impl fn from a dictSlot, call
             // it with the single record arg (the receiver is already
             // injected into that record as "it" upstream).
-            b.beginCallIndirect();
+            // The dict slot holds a MezzeFunction at runtime — either the
+            // user's ability impl or a native fallback resolved by
+            // TrampolineRootNode.unpackRecordSlow when the caller passed
+            // the {} sentinel (pre-mono dead-dict case).
             int slot = dm.getDictSlot();
+            b.beginCallIndirect();
             if (slot < argCount) {
                 b.emitLoadArgument(slot);
             } else {

@@ -1,0 +1,152 @@
+# Native-image smoke test
+#
+# Exercises every BDSL operation category that can trigger SVM
+# blocklist violations, plus effect handlers and collection HOFs
+# with polymorphic callbacks.
+#
+# If `mez build --native` succeeds AND the binary runs to completion
+# with the expected output, all @Specialization methods are clean.
+#
+# Run:  just native-test
+#
+# KNOWN BUGS (pre-existing):
+# 1. std::effects::generator has a type error (Some { val, rest }).
+# 2. jdk.incubator.vector NoClassDefFoundError on JVM exec when
+#    SIMD FLP fusion triggers — native binary handles this correctly.
+
+use std::effects::log::{println, Console}
+use std::effects::mutation::{
+    LocalMut,
+    int_to_mut, read_int, write_int, incr,
+    float_to_mut, read_float, write_float,
+    bool_to_mut, bool_to_immut, set_true,
+    string_to_mut, string_to_immut, string_len, string_append, string_clear,
+    seq_to_mut, seq_to_immut, push, pop, sort, reverse, size,
+    map_with_capacity, map_put, map_get, map_contains, map_size, map_clear,
+    set_with_capacity, set_add, set_contains, set_size, set_clear,
+    deque_to_mut, deque_push_back, deque_pop_front, deque_size, deque_clear,
+    bytes_to_mut, bytes_get, bytes_len, bytes_fill, bytes_clear
+}
+use std::effects::exception::{Exception, ExceptionToResult, throw}
+use std::effects::reader::{with_reader, ask}
+use std::effects::early_return::{EarlyReturn, return_if}
+use std::effects::random::{SeededRandom, random_int}
+use std::collections::list
+use std::collections::deque
+use std::collections::bytes
+use std::int
+
+## Recursive functions using + (exercises the dict-leak fix:
+## stale NumAdd constraints on these must NOT cause spurious
+## __dict_mul captures on lambdas in main's body)
+let fib = {n} ->
+    if n <= 1
+    then n
+    else fib {n = n - 1} + fib {n = n - 2}
+
+let sum_to = {n} ->
+    if n <= 0
+    then 0
+    else n + sum_to {n = n - 1}
+
+## Polymorphic addition (exercises poly_add with concrete Int args)
+let poly_add = {a, b} -> a + b
+
+let main = {} -> perform Console in perform LocalMut in do
+    ## Recursive + poly functions
+    let f = fib {n = 10}
+    let s = sum_to {n = 10}
+    let p = poly_add {a = 3, b = 4}
+
+    println {msg = "recursive: fib=$(int::to_str {n = f}), sum=$(int::to_str {n = s}), add=$(int::to_str {n = p})"}
+
+    ## MutInt / MutFloat / MutBool
+    let mi = int_to_mut {n = 0}
+    write_int {n = mi, v = 42}
+    incr {n = mi, delta = 1}
+    let _ = read_int {n = mi}
+    let mf = float_to_mut {n = 0.0}
+    write_float {n = mf, v = 3.14}
+    let _ = read_float {n = mf}
+    let mb = bool_to_mut {b = False}
+    set_true {b = mb}
+    let _ = bool_to_immut {b = mb}
+
+    ## MutString
+    let ms = string_to_mut {s = "hello"}
+    string_append {s = ms, suffix = " world"}
+    let _ = string_len {s = ms}
+    string_clear {s = ms}
+    let _ = string_to_immut {s = ms}
+
+    ## MutSeq
+    let sq = seq_to_mut {seq = [3, 1, 2]}
+    push {seq = sq, v = 4}
+    let _ = size {seq = sq}
+    sort {seq = sq}
+    reverse {seq = sq}
+    pop {seq = sq}
+    let _ = seq_to_immut {seq = sq}
+
+    ## MutMap
+    let mm = map_with_capacity {capacity = 4}
+    map_put {map = mm, key = "a", value = 1}
+    let _ = map_get {map = mm, key = "a"}
+    let _ = map_contains {map = mm, key = "a"}
+    let _ = map_size {map = mm}
+    map_clear {map = mm}
+
+    ## MutSet
+    let mset = set_with_capacity {capacity = 4}
+    set_add {set = mset, elem = 1}
+    let _ = set_contains {set = mset, elem = 1}
+    let _ = set_size {set = mset}
+    set_clear {set = mset}
+
+    ## MutDeque
+    let md = deque_to_mut {deque = deque::empty {}}
+    deque_push_back {deque = md, elem = 4}
+    let _ = deque_size {deque = md}
+    deque_pop_front {deque = md}
+    deque_clear {deque = md}
+
+    ## MutBytes
+    let by = bytes_to_mut {bytes = bytes::from_seq {arr = [1, 2, 3, 4]}}
+    let _ = bytes_get {bytes = by, i = 0}
+    let _ = bytes_len {bytes = by}
+    bytes_fill {bytes = by, v = 0}
+    bytes_clear {bytes = by}
+
+    println {msg = "mutation: ok"}
+
+    ## Collection HOFs (polymorphic callbacks — exercises the dict-leak fix)
+    let xs = list::range {start = 1, end = 10}
+    let doubled = list::map {f = {x} -> x * 2, xs = xs}
+    let sum = list::fold_left {init = 0, f = {acc, x} -> acc + x, xs = doubled}
+    let _ = list::filter {p = {x} -> x > 5, xs = xs}
+    let _ = list::any {p = {x} -> x == 3, xs = xs}
+
+    println {msg = "collection hofs: ok"}
+
+    ## Exception effect
+    let _ = perform ExceptionToResult in throw {error = "expected"}
+
+    ## Reader effect
+    let config = with_reader {val = 42, body = {} -> ask {}}
+
+    ## EarlyReturn effect
+    let early = perform EarlyReturn in do
+        return_if {condition = True, val = 99}
+        0
+
+    ## Random effect
+    let rval = perform SeededRandom {seed = 12345} in
+        random_int {min = 1, max = 100}
+
+    println {msg = "effects: ok"}
+
+    ## String interpolation
+    let n = 42
+    let _ = "val=$(int::to_str {n = n})"
+
+    println {msg = "native-smoke: all ops OK (sum=$(int::to_str {n = sum}), config=$(int::to_str {n = config}), early=$(int::to_str {n = early}), rval=$(int::to_str {n = rval}))"}

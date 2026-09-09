@@ -466,10 +466,10 @@ private fun directionalParamFieldCheck(value: MezzeType, demand: MezzeType): Uni
         val valueFieldType = value.fields[fieldName]
         if (valueFieldType == null) {
             // The demand requires `fieldName`; the value's concrete field set lacks
-            // it. Sound to accept ONLY if the value's row var could still supply it
+            // it.  Sound to accept ONLY if the value's row var could still supply it
             // — but a launder is exactly "the value is open yet genuinely has no
             // such field", which is indistinguishable from a not-yet-inferred open
-            // value. We reject when the value is a record with a rowVar that is NOT
+            // value.  We reject when the value is a record with a rowVar that is NOT
             // a fresh inference placeholder for this field, i.e. always for a
             // concrete open record: an explicit `{ x, ... }` value declares its
             // fields and `...` admits only EXTRAS, it does not conjure `y`.
@@ -499,9 +499,11 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
     // present in the value (recursively for nested records). The value's extra
     // fields remain fine (row polymorphism), and a field the value has that the
     // demand lacks is unaffected — only demand→value absence is a launder.
+    val __dfcValue = paramSubst.apply(fn1.paramType)
+    val __dfcDemand = paramSubst.apply(fn2.paramType)
     directionalParamFieldCheck(
-        value = paramSubst.apply(fn1.paramType),
-        demand = paramSubst.apply(fn2.paramType),
+        value = __dfcValue,
+        demand = __dfcDemand,
     )?.let { return it }
     val return1 = paramSubst.apply(fn1.returnType)
     val return2 = paramSubst.apply(fn2.returnType)

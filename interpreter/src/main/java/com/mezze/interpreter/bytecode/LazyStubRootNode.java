@@ -92,7 +92,9 @@ public final class LazyStubRootNode extends RootNode {
         // already prepended the marker for scalar-1arg. But it did NOT
         // prepend closures — that's the caller-side node's job (which
         // BDSL doesn't do for CallDirect). Prepend closures here.
-        return fwd.call(prependClosures(frame.getArguments()));
+        Object[] incoming = frame.getArguments();
+        Object[] toSend = prependClosures(incoming);
+        return fwd.call(toSend);
     }
 
     private Object[] prependClosures(Object[] rawArgs) {

@@ -107,6 +107,9 @@ public final class TrampolineRootNode extends RootNode {
     private Object cachedShape;
     @CompilerDirectives.CompilationFinal(dimensions = 1)
     private int[] cachedFieldIndices;
+    /** Cached dict-fallback functions for dict params with fi < 0 (missing from record). */
+    @CompilerDirectives.CompilationFinal(dimensions = 1)
+    private com.mezze.interpreter.values.MezzeFunction[] cachedDictFallbacks;
 
     @Child
     private LoopNode loop;
@@ -211,6 +214,10 @@ public final class TrampolineRootNode extends RootNode {
         return parameterCount;
     }
 
+    public String[] getParameterNames() {
+        return parameterNames;
+    }
+
     /** #374 — captured-values count baked at construction. */
     public int getClosureCount() {
         return closureCount;
@@ -253,12 +260,20 @@ public final class TrampolineRootNode extends RootNode {
      * Boundary: check if the incoming record is a partial application
      * (missing some param fields). Returns the partial MezzeFunction if
      * so, or null if all fields are present (normal call).
+     *
+     * <p>Dict params ({@code __dict_<op>}) are excluded from the check:
+     * when a polymorphic function with dict params is called indirectly
+     * (through a captured closure), the caller can't supply the dict.
+     * Missing dict params are resolved at runtime in {@code unpackRecordSlow}
+     * via {@link DictFallbackRootNode} instead of triggering partial
+     * application.
      */
     @CompilerDirectives.TruffleBoundary
     private Object checkPartialApplication(
             com.mezze.interpreter.values.MezzeRecord rec, Object[] rawArgs) {
         for (int i = 0; i < parameterCount; i++) {
-            if (rec.getFieldIndex(parameterNames[i]) < 0) {
+            if (rec.getFieldIndex(parameterNames[i]) < 0
+                    && !com.mezze.language.ast.MagicParams.INSTANCE.isDict(parameterNames[i])) {
                 Object[] closures;
                 if (closureCount == 0) {
                     closures = null;
@@ -376,6 +391,9 @@ public final class TrampolineRootNode extends RootNode {
      */
     @CompilerDirectives.TruffleBoundary
     private boolean isSingleParamRawRecord(com.mezze.interpreter.values.MezzeRecord rec) {
+        // Dict params missing from the record need dict-fallback resolution
+        // in unpackRecordSlow — never treat them as the "raw record" case.
+        if (com.mezze.language.ast.MagicParams.INSTANCE.isDict(parameterNames[0])) return false;
         return rec.getFieldIndex(parameterNames[0]) < 0;
     }
 
@@ -385,7 +403,11 @@ public final class TrampolineRootNode extends RootNode {
         if (shape == cachedShape && indices != null) {
             for (int i = 0; i < parameterCount; i++) {
                 int fi = indices[i];
-                if (fi >= 0) flat[closureCount + i] = rec.getField(fi);
+                if (fi >= 0) {
+                    flat[closureCount + i] = rec.getField(fi);
+                } else if (cachedDictFallbacks != null && cachedDictFallbacks[i] != null) {
+                    flat[closureCount + i] = cachedDictFallbacks[i];
+                }
             }
             return;
         }
@@ -396,13 +418,48 @@ public final class TrampolineRootNode extends RootNode {
     @CompilerDirectives.TruffleBoundary
     private void unpackRecordSlow(com.mezze.interpreter.values.MezzeRecord rec, Object[] flat) {
         int[] fresh = new int[parameterCount];
+        com.mezze.interpreter.values.MezzeFunction[] fallbacks = null;
         for (int i = 0; i < parameterCount; i++) {
             int fi = rec.getFieldIndex(parameterNames[i]);
             fresh[i] = fi;
-            if (fi >= 0) flat[closureCount + i] = rec.getField(fi);
+            boolean isDict = com.mezze.language.ast.MagicParams.INSTANCE.isDict(parameterNames[i]);
+            if (fi >= 0) {
+                Object val = rec.getField(fi);
+                if (isDict && !(val instanceof com.mezze.interpreter.values.MezzeFunction)) {
+                    // Dict param present but holds a sentinel (e.g. {} from
+                    // UnitLitIR when the compiler couldn't resolve the dict at
+                    // the call site). Resolve the fallback instead.
+                    var fb = resolveDictFallback(parameterNames[i]);
+                    flat[closureCount + i] = fb;
+                    fresh[i] = -1; // mark as "missing" so cached path uses fallback
+                    if (fallbacks == null) fallbacks = new com.mezze.interpreter.values.MezzeFunction[parameterCount];
+                    fallbacks[i] = fb;
+                } else {
+                    flat[closureCount + i] = val;
+                }
+            } else if (isDict) {
+                // Dict param missing from caller record — resolve at runtime.
+                // This happens when a polymorphic function with dict params is
+                // called indirectly (through a captured closure) and the caller
+                // can't inject dicts. Fall back to an intrinsic function that
+                // performs the operation directly on primitive types.
+                var fb = resolveDictFallback(parameterNames[i]);
+                flat[closureCount + i] = fb;
+                if (fallbacks == null) fallbacks = new com.mezze.interpreter.values.MezzeFunction[parameterCount];
+                fallbacks[i] = fb;
+            }
         }
         this.cachedFieldIndices = fresh;
+        this.cachedDictFallbacks = fallbacks;
         this.cachedShape = rec.getShape();
+    }
+
+    @CompilerDirectives.TruffleBoundary
+    private com.mezze.interpreter.values.MezzeFunction resolveDictFallback(String dictParamName) {
+        String opName = com.mezze.language.ast.MagicParams.INSTANCE.dictMethodOf(dictParamName);
+        if (opName == null) return null;
+        var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
+        return lang.getDictFallback(opName);
     }
 
     /**

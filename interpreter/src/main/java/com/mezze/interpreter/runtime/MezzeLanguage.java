@@ -973,6 +973,28 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         importedCallTargetCache.put(hash, ct);
     }
 
+    // ── Dict fallback cache ─────────────────────────────────────────────
+    // Intrinsic dict functions for primitive-type operations. Used by
+    // TrampolineRootNode when a polymorphic function with dict params is
+    // called indirectly (through a captured closure) and the caller can't
+    // supply the dict. One instance per op name, created on first use.
+    private final java.util.concurrent.ConcurrentHashMap<String, com.mezze.interpreter.values.MezzeFunction> dictFallbackCache =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Get or create an intrinsic dict-fallback function for the given
+     * operation name. The returned {@link com.mezze.interpreter.values.MezzeFunction}
+     * performs the named operation directly on primitive types (Long, Double,
+     * String, Boolean) without needing a real ability impl lookup.
+     */
+    public com.mezze.interpreter.values.MezzeFunction getDictFallback(String opName) {
+        return dictFallbackCache.computeIfAbsent(opName, op -> {
+            var root = new com.mezze.interpreter.bytecode.DictFallbackRootNode(this, op);
+            return com.mezze.interpreter.values.MezzeFunction.create(
+                root.getCallTarget(), "__dict_fallback_" + op);
+        });
+    }
+
     /**
      * Evict CallTargets for the given hashes from all Language-level caches.
      * Stdlib hashes never change in a JVM lifetime (content-addressed), so

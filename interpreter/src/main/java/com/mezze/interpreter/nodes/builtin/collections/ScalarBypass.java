@@ -21,6 +21,11 @@ final class ScalarBypass {
      * Returns the inner CallTarget if the function is bypassable,
      * or null for AST/effect-handler/partial-application callees
      * that need record-wrapped arguments.
+     *
+     * <p>Functions with hidden dict params (e.g. {@code __dict_add__}) are NOT
+     * bypassable because the scalar path skips the trampoline's dict-fallback
+     * resolution, causing AIOOB when the inner BDSL target expects more args
+     * than the caller supplies.
      */
     static CallTarget tryResolve(MezzeFunction fn) {
         if (fn.hasPartialArgs()) return null;
@@ -28,9 +33,19 @@ final class ScalarBypass {
         if (target instanceof RootCallTarget rct
                 && rct.getRootNode() instanceof TrampolineRootNode tramp
                 && !tramp.hasTailCalls()
-                && tramp.getInnerTarget() != null) {
+                && tramp.getInnerTarget() != null
+                && !hasDictParams(tramp)) {
             return tramp.getInnerTarget();
         }
         return null;
+    }
+
+    private static boolean hasDictParams(TrampolineRootNode tramp) {
+        String[] names = tramp.getParameterNames();
+        if (names == null) return false;
+        for (String name : names) {
+            if (com.mezze.language.ast.MagicParams.INSTANCE.isDict(name)) return true;
+        }
+        return false;
     }
 }

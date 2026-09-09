@@ -169,6 +169,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         super(language, frameDescriptor);
     }
 
+    /** Check if a trampoline has any hidden dict params ({@code __dict_*}). */
+    @CompilerDirectives.TruffleBoundary
+    static boolean hasDictParams(TrampolineRootNode tramp) {
+        String[] names = tramp.getParameterNames();
+        if (names == null) return false;
+        for (String name : names) {
+            if (com.mezze.language.ast.MagicParams.INSTANCE.isDict(name)) return true;
+        }
+        return false;
+    }
+
     /**
      * Push a compile-time long constant onto the operand stack.
      *
@@ -1218,6 +1229,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return callNode.call(fn.getCallTarget(), combined);
         }
 
+
+
         private static Object invokeWithClosure(MezzeFunction fn, Object arg,
                                                 IndirectCallNode callNode) {
             Object[] closureValues = fn.getClosureValues();
@@ -1452,13 +1465,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 target = resolveInner(target);
                 Object[] closureValues = fn.getClosureValues();
                 int closureLen = closureValues.length;
-                if (closureLen == 0) {
-                    return callNode.call(target, arg);
+                try {
+                    if (closureLen == 0) {
+                        return callNode.call(target, arg);
+                    }
+                    Object[] combined = new Object[closureLen + 1];
+                    System.arraycopy(closureValues, 0, combined, 0, closureLen);
+                    combined[closureLen] = arg;
+                    return callNode.call(target, combined);
+                } catch (ArrayIndexOutOfBoundsException e) {
+                    throw e;
                 }
-                Object[] combined = new Object[closureLen + 1];
-                System.arraycopy(closureValues, 0, combined, 0, closureLen);
-                combined[closureLen] = arg;
-                return callNode.call(target, combined);
             }
             // Fallback: wrap in record and route through the full
             // CallIndirect dispatch (handles partial application,
@@ -1504,16 +1521,28 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return node;
         }
 
+        @CompilerDirectives.TruffleBoundary
         static boolean canBypassTarget(CallTarget target) {
-            if (target instanceof com.oracle.truffle.api.RootCallTarget rct
-                    && rct.getRootNode() instanceof TrampolineRootNode tramp
-                    && !tramp.hasTailCalls()
-                    && tramp.getInnerTarget() != null) {
-                return true;
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct) {
+                var root = rct.getRootNode();
+                // Non-tail-call trampoline: bypass to inner BDSL root
+                // ONLY when the trampoline's parameter count matches CIS1's
+                // arity (1 user arg) AND there are no dict params. Dict-passing
+                // inflates paramCount beyond the user-visible arity — bypassing
+                // skips the trampoline's dict-fallback resolution and sends the
+                // user's record as a dict slot → UnsupportedSpecializationException.
+                if (root instanceof TrampolineRootNode tramp
+                        && !tramp.hasTailCalls()
+                        && tramp.getParameterCount() == 1
+                        && !hasDictParams(tramp)
+                        && tramp.getInnerTarget() != null) {
+                    return true;
+                }
             }
             return false;
         }
 
+        @CompilerDirectives.TruffleBoundary
         static CallTarget resolveInner(CallTarget target) {
             if (target instanceof com.oracle.truffle.api.RootCallTarget rct
                     && rct.getRootNode() instanceof TrampolineRootNode tramp
@@ -1755,16 +1784,24 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return node;
         }
 
+        @CompilerDirectives.TruffleBoundary
         static boolean canBypassTarget(CallTarget target) {
-            if (target instanceof com.oracle.truffle.api.RootCallTarget rct
-                    && rct.getRootNode() instanceof TrampolineRootNode tramp
-                    && !tramp.hasTailCalls()
-                    && tramp.getInnerTarget() != null) {
-                return true;
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct) {
+                var root = rct.getRootNode();
+                // CIS2 bypass: safe only when paramCount == 2 AND no dict
+                // params. See CIS1.canBypassTarget for rationale.
+                if (root instanceof TrampolineRootNode tramp
+                        && !tramp.hasTailCalls()
+                        && tramp.getParameterCount() == 2
+                        && !hasDictParams(tramp)
+                        && tramp.getInnerTarget() != null) {
+                    return true;
+                }
             }
             return false;
         }
 
+        @CompilerDirectives.TruffleBoundary
         static CallTarget resolveInner(CallTarget target) {
             if (target instanceof com.oracle.truffle.api.RootCallTarget rct
                     && rct.getRootNode() instanceof TrampolineRootNode tramp
@@ -4385,7 +4422,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 case MUT_STRING_READ     -> ((com.mezze.interpreter.values.MutableString) arg0).get();
                 case MUT_STRING_CLEAR    -> { ((com.mezze.interpreter.values.MutableString) arg0).clear(); yield MezzeRecord.empty(); }
                 case MUT_STRING_REVERSE  -> { ((com.mezze.interpreter.values.MutableString) arg0).reverse(); yield MezzeRecord.empty(); }
-                case MUT_STRING_TO_MUT   -> new com.mezze.interpreter.values.MutableString((String) arg0);
+                case MUT_STRING_TO_MUT   -> com.mezze.interpreter.values.MutableString.createBoundary((String) arg0);
                 case MUT_STRING_TO_IMMUT -> ((com.mezze.interpreter.values.MutableString) arg0).get();
                 // MutMap
                 case MUT_MAP_SIZE     -> (long) ((com.mezze.interpreter.values.MutableMap) arg0).size();
@@ -4406,7 +4443,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     if (arg0 instanceof byte[] b) bytes = b;
                     else if (arg0 instanceof com.mezze.datastructures.bytes.MezzeBytes mb) bytes = mb.getData();
                     else if (arg0 instanceof com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes bnb) bytes = bnb.getData();
-                    else throw CompilerDirectives.shouldNotReachHere("bytes_to_mut: unexpected type " + arg0.getClass());
+                    else throw bytesToMutError(arg0);
                     yield com.mezze.interpreter.values.MutableBytes.fromImmutable(bytes);
                 }
                 case MUT_BYTES_TO_IMMUT -> ((com.mezze.interpreter.values.MutableBytes) arg0).toImmutable();
@@ -4424,6 +4461,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 default -> throw CompilerDirectives.shouldNotReachHere();
             };
         }
+    }
+
+    @CompilerDirectives.TruffleBoundary
+    private static RuntimeException bytesToMutError(Object arg0) {
+        throw CompilerDirectives.shouldNotReachHere("bytes_to_mut: unexpected type " + arg0.getClass());
     }
 
     // ── Typed Mut operations ───────────────────────────────────────
