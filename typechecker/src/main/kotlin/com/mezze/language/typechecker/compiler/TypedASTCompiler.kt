@@ -149,6 +149,19 @@ class TypedASTCompiler(
      */
     private val recursiveLetLambdas = mutableMapOf<String, RecursiveLetInfo>()
 
+    /**
+     * Do-block local aliases of a top-level (or ability-op) function reference:
+     * `let g = addTen` records `"g" -> addTen's hash`. A call through the alias
+     * (`g { x = 5 }`) must be routed through the SAME ByHash path a direct call
+     * (`addTen { x = 5 }`) takes — dict injection + mono call-site rewrite —
+     * otherwise a CONSTRAINED callee (e.g. `with NumAdd Int 'a`) reaches the
+     * plain CallIndirect path with no `__dict_<op>` supplied, and the unresolved
+     * dict-shaped op leaks into a value slot → ClassCastException at runtime
+     * (the #18 family, indirect-call layer). Populated in the do-block Let
+     * compile; cleared/restored with the block scope like [recursiveLetLambdas].
+     */
+    private val localFnAliases = mutableMapOf<String, Hash>()
+
     private data class RecursiveLetInfo(
         val hash: Hash,
         val captureKinds: List<SlotKind>
@@ -1918,6 +1931,27 @@ class TypedASTCompiler(
                 is BindingRef.Local -> {
                     // Resolve using the same scope logic as compileVar
                     val resolvedSlot = resolveLocalSlot(fn.name, binding.depth)
+                    // Function-alias fast path: `let g = addTen; g { x = 5 }`. If g
+                    // aliases a top-level function that needs dict params, a plain
+                    // CallIndirect on g's slot would never supply `__dict_<op>` and a
+                    // CONSTRAINED callee would leak the op into a value slot at runtime.
+                    // Route through the alias target's ByHash path (dict injection +
+                    // mono rewrite) exactly like a direct call. See [localFnAliases].
+                    val aliasTargetHash = localFnAliases[fn.name]
+                    val aliasDictMethods = aliasTargetHash?.let { dictMethodsForHash[it] }
+                    if (aliasTargetHash != null && aliasDictMethods != null && aliasDictMethods.isNotEmpty()) {
+                        val specialized = monoCallSiteRewrites[expr.loc]
+                        if (specialized != null && !isNonLambdaUserLet(aliasTargetHash)) {
+                            census.byHashMono++
+                            val strip = monoStripBySiteLoc[expr.loc]
+                            val finalArgIR = if (strip.isNullOrEmpty() || argIR !is MakeRecordIR) argIR
+                            else MakeRecordIR(argIR.fields.filter { it.name !in strip }, src)
+                            return emitCallDirect(specialized, finalArgIR, expr.isTailCall, src)
+                        }
+                        val enrichedArgIR = injectDictFields(argIR, expr.arg, aliasDictMethods, src)
+                        census.byHashDictInject++
+                        return emitCallDirect(aliasTargetHash, enrichedArgIR, expr.isTailCall, src)
+                    }
                     if (resolvedSlot >= 0) {
                         census.indirect++
                         emitCallIndirect(ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
@@ -2495,6 +2529,7 @@ class TypedASTCompiler(
     private fun compileBlock(expr: TypedBlock, src: SourceInfo): NodeIR {
         val savedLocalMappings = localsByName.toMap()
         val savedRecursiveLets = recursiveLetLambdas.toMap()
+        val savedFnAliases = localFnAliases.toMap()
         val stmts = expr.statements.map { stmt ->
             when (stmt) {
                 is TypedStatement.Let -> {
@@ -2508,6 +2543,22 @@ class TypedASTCompiler(
                         val lambdaHash = com.mezze.language.typedast.TypedASTHasher.hashExpr(stmtValue)
                         val captureKinds = stmtValue.captures.map { typeToSlotKind(it.type) }
                         recursiveLetLambdas[stmt.name] = RecursiveLetInfo(lambdaHash, captureKinds)
+                    }
+
+                    // FUNCTION-ALIAS REGISTRATION: `let g = addTen` where the RHS is a
+                    // bare reference to a top-level function. Record `g -> addTen's hash`
+                    // so a call through `g` routes through the ByHash path (dict injection
+                    // + mono rewrite) instead of a plain CallIndirect. Without this, a
+                    // CONSTRAINED callee (`with NumAdd Int 'a`) invoked via the alias never
+                    // receives its `__dict_<op>` and the op leaks into a value slot at
+                    // runtime. Only genuine lambda callees are aliased here (not value
+                    // thunks); the slot is still populated normally below so `g` can also
+                    // be used as a plain value.
+                    if (stmtValue is TypedVar && stmtValue.binding is BindingRef.ByHash) {
+                        val targetHash = (stmtValue.binding as BindingRef.ByHash).hash
+                        if (isLambdaHash(targetHash, declIndex?.get(targetHash))) {
+                            localFnAliases[stmt.name] = targetHash
+                        }
                     }
 
                     val valueIR = if (stmtValue is TypedLambda) {
@@ -2548,6 +2599,8 @@ class TypedASTCompiler(
         localsByName.putAll(savedLocalMappings)
         recursiveLetLambdas.clear()
         recursiveLetLambdas.putAll(savedRecursiveLets)
+        localFnAliases.clear()
+        localFnAliases.putAll(savedFnAliases)
         return BlockIR(stmts, resultIR, src)
     }
 
