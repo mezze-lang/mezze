@@ -1,6 +1,8 @@
 use std::abilities::compare::{ Eq, Ord }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
+use std::abilities::iter::{ Iterable }
+use std::collections::iter
 use std::int
 
 ## Default SortedSet is the empty sorted set.
@@ -262,4 +264,8 @@ impl SortedSet 'a where {
 impl Sized for SortedSet 'a where {
   size = { it } -> size { s = it },
   is_empty = { it } -> is_empty { s = it },
+}
+
+impl Iterable for SortedSet 'a having 'elem = 'a where {
+  to_iter = { it } -> iter::from_seq { xs = to_seq { s = it } }
 }

@@ -1,6 +1,8 @@
 use std::abilities::compare::{ Eq, Ord }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
+use std::abilities::iter::{ Iterable }
+use std::collections::iter
 use std::int
 
 ## Default Seq is the empty sequence.
@@ -661,6 +663,10 @@ impl Seq 'a where {
 impl Sized for ['a] where {
   size = { it } -> size { xs = it },
   is_empty = { it } -> is_empty { xs = it },
+}
+
+impl Iterable for ['a] having 'elem = 'a where {
+  to_iter = { it } -> iter::from_seq { xs = it }
 }
 
 ## Wrap any value in a one-element Seq via method syntax:

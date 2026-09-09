@@ -125,7 +125,8 @@ public final class IterNatives {
     @TruffleBoundary
     public static long sum(MezzeIter it) {
         long[] acc = {0L};
-        walkElements(it.getDescriptor(), x -> { acc[0] += (Long) x; }, null);
+        walkElements(it.getDescriptor(), x -> { acc[0] += (Long) x; },
+                     IndirectCallNode.getUncached());
         return acc[0];
     }
 

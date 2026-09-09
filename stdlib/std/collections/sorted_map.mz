@@ -1,6 +1,8 @@
 use std::abilities::compare::{ Eq, Ord }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
+use std::abilities::iter::{ Iterable }
+use std::collections::iter
 use std::int
 
 ## Default SortedMap is the empty sorted map.
@@ -220,4 +222,8 @@ impl SortedMap 'k 'v where {
 impl Sized for SortedMap 'k 'v where {
   size = { it } -> size { m = it },
   is_empty = { it } -> is_empty { m = it },
+}
+
+impl Iterable for SortedMap 'k 'v having 'elem = { k: 'k, v: 'v } where {
+  to_iter = { it } -> iter::from_list { xs = to_list { m = it } }
 }

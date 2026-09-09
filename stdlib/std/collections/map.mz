@@ -1,6 +1,8 @@
 use std::abilities::compare::{ Eq }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
+use std::abilities::iter::{ Iterable }
+use std::collections::iter
 use std::int
 
 ## Default Map is the empty map.
@@ -280,4 +282,8 @@ impl Map 'k 'v where {
 impl Sized for Map 'k 'v where {
   size = { it } -> size { m = it },
   is_empty = { it } -> is_empty { m = it },
+}
+
+impl Iterable for Map 'k 'v having 'elem = { k: 'k, v: 'v } where {
+  to_iter = { it } -> iter::from_seq { xs = to_seq { m = it } }
 }

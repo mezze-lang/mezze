@@ -1,6 +1,8 @@
 use std::abilities::compare::{ Eq, Ord }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
+use std::abilities::iter::{ Iterable }
+use std::collections::iter
 use std::int
 
 ## Default List is the empty list.
@@ -644,6 +646,10 @@ impl List 'a where {
 impl Sized for List 'a where {
   size = { it } -> size { xs = it },
   is_empty = { it } -> is_empty { xs = it },
+}
+
+impl Iterable for List 'a having 'elem = 'a where {
+  to_iter = { it } -> iter::from_list { xs = it }
 }
 
 ## Wrap any value in a one-element linked List via method syntax:

@@ -1,6 +1,8 @@
 use std::abilities::compare::{ Eq, Ord }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
+use std::abilities::iter::{ Iterable }
+use std::collections::iter
 use std::collections::seq
 use std::int
 
@@ -386,4 +388,8 @@ impl Deque 'a where {
 impl Sized for Deque 'a where {
   size = { it } -> size { d = it },
   is_empty = { it } -> is_empty { d = it },
+}
+
+impl Iterable for Deque 'a having 'elem = 'a where {
+  to_iter = { it } -> iter::from_seq { xs = to_seq { d = it } }
 }
