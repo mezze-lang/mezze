@@ -12,6 +12,7 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.LoopNode;
+import com.oracle.truffle.api.HostCompilerDirectives.InliningCutoff;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.RepeatingNode;
 import com.oracle.truffle.api.nodes.RootNode;
@@ -335,6 +336,7 @@ public final class TrampolineRootNode extends RootNode {
      * discrimination. Adding them would let numeric hot loops through
      * BDSL avoid the boxing round-trip. Deferred until we measure need.
      */
+    @InliningCutoff
     private Object[] normalizeArgs(Object[] args) {
         // Scalar ABI marker for the 1-param collision case.
         if (parameterCount == 1
@@ -416,6 +418,7 @@ public final class TrampolineRootNode extends RootNode {
     }
 
     @CompilerDirectives.TruffleBoundary
+    @InliningCutoff
     private void unpackRecordSlow(com.mezze.interpreter.values.MezzeRecord rec, Object[] flat) {
         int[] fresh = new int[parameterCount];
         com.mezze.interpreter.values.MezzeFunction[] fallbacks = null;
@@ -481,6 +484,8 @@ public final class TrampolineRootNode extends RootNode {
     }
 
     @Override
+    @CompilerDirectives.TruffleBoundary
+    @InliningCutoff
     public String toString() {
         return "TrampolineRootNode[" + name + "]";
     }

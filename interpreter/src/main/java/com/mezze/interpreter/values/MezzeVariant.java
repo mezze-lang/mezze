@@ -2,6 +2,7 @@ package com.mezze.interpreter.values;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.HostCompilerDirectives.InliningCutoff;
 import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.library.ExportLibrary;
@@ -156,6 +157,8 @@ public final class MezzeVariant implements TruffleObject {
             return tagCounter.get();
         }
 
+        @TruffleBoundary
+        @InliningCutoff
         public String getConstructorName(int tag) {
             if (isDynamic) {
                 // With hashCode-based tags, we can't use tag as list index.
@@ -732,6 +735,7 @@ public final class MezzeVariant implements TruffleObject {
 
     @Override
     @TruffleBoundary
+    @InliningCutoff
     public String toString() {
         String name = getConstructorName();
         if (payloadLength == 0) {

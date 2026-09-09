@@ -3,6 +3,7 @@ package com.mezze.interpreter.values;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.HostCompilerDirectives.InliningCutoff;
 import com.oracle.truffle.api.interop.ArityException;
 import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.TruffleObject;
@@ -278,6 +279,7 @@ public final class MezzeFunction implements TruffleObject {
 
     @Override
     @TruffleBoundary
+    @InliningCutoff
     public String toString() {
         return "<function " + name + ">";
     }

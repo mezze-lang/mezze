@@ -2,6 +2,7 @@ package com.mezze.interpreter.values;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.HostCompilerDirectives.InliningCutoff;
 import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.interop.UnknownIdentifierException;
@@ -362,6 +363,7 @@ public final class MezzeRecord implements TruffleObject {
 
     @Override
     @TruffleBoundary
+    @InliningCutoff
     public String toString() {
         StringBuilder sb = new StringBuilder("{");
         for (int i = 0; i < shape.getFieldCount(); i++) {

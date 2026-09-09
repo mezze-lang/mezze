@@ -36,6 +36,7 @@ import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerAsserts;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.HostCompilerDirectives.InliningCutoff;
 import com.oracle.truffle.api.bytecode.BytecodeRootNode;
 import com.oracle.truffle.api.bytecode.ConstantOperand;
 import com.oracle.truffle.api.bytecode.ForceQuickening;
@@ -46,6 +47,7 @@ import com.oracle.truffle.api.bytecode.Variadic;
 import com.oracle.truffle.api.dsl.Bind;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Fallback;
+import com.oracle.truffle.api.dsl.ReportPolymorphism;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.VirtualFrame;
@@ -163,6 +165,7 @@ import com.oracle.truffle.api.profiles.InlinedLoopConditionProfile;
 @OperationProxy(value = com.mezze.interpreter.nodes.seq.SeqAccessNode.class, name = "SeqGet")
 @OperationProxy(value = com.mezze.datastructures.nodes.SeqSumLongScalarNode.class, name = "BuiltinSumLongSeq")
 @OperationProxy(value = com.mezze.datastructures.nodes.SumRangeLongNode.class, name = "BuiltinSumRangeLong")
+@ReportPolymorphism
 public abstract class MezzeBytecodeRootNode extends RootNode implements BytecodeRootNode {
 
     protected MezzeBytecodeRootNode(MezzeLanguage language, FrameDescriptor frameDescriptor) {
@@ -335,6 +338,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
         @Fallback
         @TruffleBoundary
+        @InliningCutoff
         public static String doOther(boolean dbgStyle, Object v) {
             // Compound values (records, variants, lists, maps, ...) must render
             // in Mezze surface syntax — `Err { error = "x" }`, `Some { val = 42 }`,
@@ -633,6 +637,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          * alternative. Falls through to a shared IndirectCallNode.
          */
         @Specialization(replaces = "doCached")
+        @ReportPolymorphism.Megamorphic
         public static Object doIndirect(
                 CallTarget target,
                 @Variadic Object[] args,
@@ -741,6 +746,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @Specialization(replaces = "doCached")
+        @ReportPolymorphism.Megamorphic
         public static Object doIndirect(
                 CallTarget target,
                 boolean canBypass,
@@ -780,6 +786,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @Specialization(replaces = "doCached")
+        @ReportPolymorphism.Megamorphic
         public static Object doIndirect(
                 CallTarget target,
                 boolean canBypass,
@@ -821,6 +828,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @Specialization(replaces = "doCached")
+        @ReportPolymorphism.Megamorphic
         public static Object doIndirect(
                 CallTarget target,
                 boolean canBypass,
@@ -991,6 +999,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // Uses getField(int) after a single findFieldIndex — one string
         // hash-lookup then array access. Documented as cold-path per #348.
         @Specialization(replaces = "doRecordCached")
+        @ReportPolymorphism.Megamorphic
         public static Object doRecordGeneric(String fieldName, MezzeRecord record) {
             int fieldIndex = record.getShape().findFieldIndex(fieldName);
             if (fieldIndex < 0) {
@@ -1043,6 +1052,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          *  Cold fallback (type error). See #402. */
         @Fallback
         @TruffleBoundary
+        @InliningCutoff
         public static Object doNotRecord(String fieldName, Object receiver) {
             throw new RuntimeException("Expected record for field '" + fieldName + "', got: " +
                 (receiver == null ? "null" : receiver.getClass().getSimpleName()));
@@ -1064,6 +1074,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @TruffleBoundary
+        @InliningCutoff
         private static Object fallbackNotFound(Object receiver, String fieldName) {
             throw new RuntimeException("Field not found: " + fieldName);
         }
@@ -1198,6 +1209,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @Specialization(replaces = "doDirect")
+        @ReportPolymorphism.Megamorphic
         public static Object doInvoke(
                 MezzeFunction fn,
                 @Variadic Object[] args,
@@ -1454,6 +1466,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @Specialization(replaces = {"doStableNoClosure", "doStable1Closure", "doStable2Closures", "doBypassNoClosure", "doBypass1Closure", "doBypass2Closures", "doBypassGenericClosure", "doDirectRecord"})
+        @ReportPolymorphism.Megamorphic
         public static Object doIndirect(
                 String fieldName,
                 MezzeFunction fn,
@@ -1726,6 +1739,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @Specialization(replaces = {"doStableNoClosure", "doStable1Closure", "doStable2Closures", "doBypassNoClosure", "doBypass1Closure", "doBypass2Closures", "doBypassGenericClosure", "doDirectRecord"})
+        @ReportPolymorphism.Megamorphic
         public static Object doIndirect(
                 String[] fieldNames,
                 MezzeFunction fn, Object arg1, Object arg2,
@@ -1908,6 +1922,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @Specialization(replaces = "doCached")
+        @ReportPolymorphism.Megamorphic
         public static Object doIndirect(
                 String hashHex,
                 @Variadic Object[] args,
@@ -3132,8 +3147,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     public static final class NonExhaustiveMatch {
         @Specialization
+        @TruffleBoundary
+        @InliningCutoff
         public static Object doThrow() {
-            com.oracle.truffle.api.CompilerDirectives.transferToInterpreterAndInvalidate();
             throw new RuntimeException("Non-exhaustive match: no variant tag matched — "
                     + "typechecker exhaustiveness guarantee violated");
         }
@@ -3471,6 +3487,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          */
         @Specialization(replaces = {"doLong", "doDouble", "doBoolean"})
         @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+        @InliningCutoff
         public static boolean doObject(Object left, Object right) {
             return java.util.Objects.equals(left, right);
         }
