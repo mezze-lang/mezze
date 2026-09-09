@@ -1224,8 +1224,14 @@ public final class NativeDispatch extends MezzeNode {
             SetNatives.difference(getSet(r, "s1"), getSet(r, "s2")));
         HANDLERS.put("__native_set_is_subset", (r, c) ->
             SetNatives.isSubset(getSet(r, "s1"), getSet(r, "s2")));
+        HANDLERS.put("__native_set_is_superset", (r, c) ->
+            SetNatives.isSuperset(getSet(r, "s1"), getSet(r, "s2")));
+        HANDLERS.put("__native_set_is_disjoint", (r, c) ->
+            SetNatives.isDisjoint(getSet(r, "s1"), getSet(r, "s2")));
         HANDLERS.put("__native_set_equals", (r, c) ->
             SetNatives.equals(getSet(r, "s1"), getSet(r, "s2")));
+        HANDLERS.put("__native_set_for_each", (r, c) ->
+            SetNatives.forEach(getSet(r, "s"), getFunction(r, "f"), c));
         HANDLERS.put("__native_set_to_seq", (r, c) ->
             SetNatives.toArray(getSet(r, "s")));
         HANDLERS.put("__native_set_to_list", (r, c) ->

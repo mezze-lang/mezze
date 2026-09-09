@@ -105,6 +105,22 @@ public final class SetNatives {
     }
 
     @TruffleBoundary
+    public static boolean isSuperset(MezzeSet set1, MezzeSet set2) {
+        return set2.isSubsetOf(set1);
+    }
+
+    @TruffleBoundary
+    public static boolean isDisjoint(MezzeSet set1, MezzeSet set2) {
+        // Short-circuit: iterate the smaller set, probe the larger.
+        MezzeSet smaller = set1.size() <= set2.size() ? set1 : set2;
+        MezzeSet larger  = smaller == set1 ? set2 : set1;
+        for (Object elem : smaller) {
+            if (larger.contains(elem)) return false;
+        }
+        return true;
+    }
+
+    @TruffleBoundary
     public static boolean equals(MezzeSet set1, MezzeSet set2) {
         return set1.equals(set2);
     }
@@ -219,6 +235,18 @@ public final class SetNatives {
             }
         }
         return cnt;
+    }
+
+    // ==================== ForEach ====================
+
+    @TruffleBoundary
+    public static Object forEach(MezzeSet set, MezzeFunction f,
+                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
+        for (Object element : set) {
+            ctx.call1(callNode, element);
+        }
+        return MezzeRecord.empty();
     }
 
     // ==================== Min/Max/Sum/Product ====================
