@@ -431,6 +431,13 @@ class ConstraintSolver(
         val rightCtors = rightType.constructors.keys
         if (leftCtors == rightCtors) return null
 
+        // L-01: never merge two provably-DISTINCT declared variants (different
+        // content hash). unifyVariants already VETOes this pair; without the same
+        // guard here, match-arm inference would union a foreign module's variant
+        // into another's row var and launder a foreign constructor. Anonymous /
+        // UNDETERMINED identities (genuine row-poly) still merge below.
+        if (identityVerdict(leftType.identity, rightType.identity) == IdentityVerdict.DISTINCT) return null
+
         val isMatchContext = originalConstraint.isMatchCaseContext
         val bothOpen = leftType.rowVar != null && rightType.rowVar != null
         val eitherPatternBased = (leftType.rowVar != null && patternBasedRowVars.contains(leftType.rowVar)) ||

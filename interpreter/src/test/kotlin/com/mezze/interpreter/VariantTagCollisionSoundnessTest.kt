@@ -308,6 +308,37 @@ class VariantTagCollisionSoundnessTest {
     }
 
     /**
+     * Match-inference variant merge launder (ledger L-01, fixed 2026-09-10).
+     * ConstraintSolver.mergeVariantConstructors unioned two variants'
+     * constructor maps in a match/both-open context with NO identity guard, so a
+     * value of one declared variant could have a DISTINCT declared variant's
+     * constructors merged into its row var — laundering a foreign constructor
+     * into a match site. Fix: gate the merge on identityVerdict != DISTINCT
+     * (mirrors unifyVariants). Soundness-preserving outcome: rejection, or the
+     * value routes only within its own type. The hole would let a Tag2-only
+     * constructor fire on a Tag1 value.
+     */
+    @Test
+    fun `match inference does not merge distinct declared variants`() {
+        val source = """
+            type Tag1 = | Ping, Pong |
+            type Tag2 = | Zip, Zap |
+
+            let sink = { t: Tag1 } -> match t is
+                Ping -> "t1-ping"
+                Pong -> "t1-pong"
+
+            let v: Tag2 = Zip
+            sink { t = v }
+        """.trimIndent()
+        val result = runOrReject(source)
+        // A Tag2 value must never satisfy a Tag1 sink. Rejection is correct; the
+        // dangerous outcome is any Tag1 arm string coming back from a Tag2 value.
+        assertTrue(result is Rejected || (result != "t1-ping" && result != "t1-pong"),
+            "Soundness hole: distinct-variant merge laundered Tag2 into Tag1 match")
+    }
+
+    /**
      * Stdlib-vs-user-type clash. The stdlib defines `Some` (Option). If a
      * user declared `type Foo = | Some, Bar |`, would the typechecker
      * accept it, and if so does a `Some` value of `Foo` match an

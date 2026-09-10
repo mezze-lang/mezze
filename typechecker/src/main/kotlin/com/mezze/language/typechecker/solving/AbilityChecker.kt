@@ -335,7 +335,13 @@ class AbilityChecker internal constructor(
 
                 val resolvedTypeVar = currentSubst.apply(MezzeType.VarType(typeVar))
 
-                val unifyResult = unify(resolvedTypeVar, concreteType)
+                // L-03: thread the class registry (was defaulting to
+                // DeclarationRegistry.EMPTY) so alias/type-decl expansion happens
+                // here the SAME as in VariantSolver's unify calls. Without it, a
+                // nominal-alias/TypeApplication concreteType fails to expand and
+                // `having 'out` silently mis-resolves — the same associated-type
+                // question answered differently with vs without the registry.
+                val unifyResult = unify(resolvedTypeVar, concreteType, registry)
                 when (unifyResult) {
                     is UnificationResult.Success -> {
                         resultSubst = unifyResult.substitution.compose(resultSubst)
