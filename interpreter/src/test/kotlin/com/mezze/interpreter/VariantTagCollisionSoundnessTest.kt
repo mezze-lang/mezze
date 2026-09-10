@@ -260,6 +260,54 @@ class VariantTagCollisionSoundnessTest {
     }
 
     /**
+     * Subset-key ability-dispatch leak (ledger L-36 / L-55 / L-56, fixed
+     * 2026-09-10). `typeMatchesTarget`'s VariantType-vs-VariantType arm used to
+     * accept a receiver whose constructor set was a proper SUBSET of the impl
+     * target's — with no identity guard. So a value of `Small = | A |` could
+     * dispatch an `impl` written for a DISTINCT declaration `Big = | A, B, C |`,
+     * running `Big`'s method body against a `Small` value.
+     *
+     * The fix adds the `identityVerdict == DISTINCT -> false` veto (the same one
+     * the solver's `unifyVariants` and the sibling TypeApp/Record arms carry) in
+     * both the compiler (`TypedASTCompiler.typeMatchesTarget`) and the mono mirror
+     * (`MonoTypeOps.typeMatchesTarget`). Two DISTINCT declared variants no longer
+     * cross-dispatch; the structural subset path still serves genuine
+     * identity-less (cross-module stripped) receivers.
+     *
+     * Soundness-preserving outcomes: typechecker rejection, OR the value routes to
+     * ITS OWN impl (returns "small"). The hole would show as "big" — Big's body
+     * fired on a Small value.
+     */
+    @Test
+    fun `subset-variant does not dispatch a distinct superset impl`() {
+        val source = """
+            ability Describe for 'a where {
+              describe: {} -> Str
+            }
+
+            type Small = | A |
+            type Big = | A, B, C |
+
+            impl Describe for Small where {
+              describe = {} -> "small"
+            }
+            impl Describe for Big where {
+              describe = {} -> "big"
+            }
+
+            let v: Small = A
+            v.describe {}
+        """.trimIndent()
+        val result = runOrReject(source)
+        // v is a Small; it must dispatch Small's impl ("small") or be rejected.
+        // "big" means Big's impl fired on a Small value — the subset-key leak.
+        assertNotEquals("big", result,
+            "Soundness hole: Small value dispatched the distinct Big impl via subset-key match")
+        assertTrue(result is Rejected || result == "small",
+            "Expected Small to route to its own impl or be rejected; got: $result")
+    }
+
+    /**
      * Stdlib-vs-user-type clash. The stdlib defines `Some` (Option). If a
      * user declared `type Foo = | Some, Bar |`, would the typechecker
      * accept it, and if so does a `Some` value of `Foo` match an

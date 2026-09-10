@@ -3392,7 +3392,19 @@ class TypedASTCompiler(
                 if (cHash != null && tHash != null) cHash == tHash
                 else concreteType.constructor == targetType.name
             }
-            // VariantType to VariantType: match if constructors overlap or type names match
+            // VariantType to VariantType: match if constructors overlap or type names match.
+            //
+            // Guarded by an identity DISTINCT reject FIRST, mirroring the sibling
+            // TypeApplication (3316) and RecordType (3375) arms and the solver's
+            // unifyVariants veto (#12): two DIFFERENT Declared variants (differing
+            // content hash) must NOT match even when one's constructor set is a
+            // subset of the other's — otherwise a sub-variant `| A |` from module X
+            // dispatches an impl written for `| A, B, C |` in module Y (wrong-dispatch,
+            // ledger L-36/L-55). Anonymous/UNDETERMINED identities (e.g. an
+            // identity-stripped cross-module `Json` receiver) are NOT DISTINCT, so the
+            // structural subset match below still recovers those links.
+            concreteType is VariantType && targetType is VariantType &&
+                identityVerdict(concreteType.identity, targetType.identity) == IdentityVerdict.DISTINCT -> false
             concreteType is VariantType && targetType is VariantType -> {
                 // Same type name (e.g., both are "Json")
                 val concreteName = concreteType.identity.displayNameOrNull()

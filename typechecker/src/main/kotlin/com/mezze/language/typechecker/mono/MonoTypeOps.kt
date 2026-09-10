@@ -106,8 +106,15 @@ internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean 
         if (identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT) return false
         return concrete.fields == target.fields
     }
-    // VariantType vs VariantType: typeName or constructor-set overlap
+    // VariantType vs VariantType: typeName or constructor-set overlap, gated on
+    // identity NOT being DISTINCT FIRST — mirrors the compiler's typeMatchesTarget
+    // (TypedASTCompiler VariantType arm) and the solver's unifyVariants veto (#12).
+    // Two different Declared variants (differing content hash) must not match via
+    // the subset branch, else mono dispatches a superset impl to a sub-variant
+    // (wrong-dispatch, ledger L-56). Anonymous/UNDETERMINED identities still fall
+    // through to the structural match, keeping cross-module stripped variants working.
     if (concrete is MezzeType.VariantType && target is MezzeType.VariantType) {
+        if (identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT) return false
         val concreteName = concrete.identity.displayNameOrNull()
         if (concreteName != null && concreteName == target.identity.displayNameOrNull()) return true
         if (concrete.constructors.keys == target.constructors.keys) return true
