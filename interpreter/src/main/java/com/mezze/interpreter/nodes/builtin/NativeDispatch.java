@@ -15,6 +15,7 @@ import com.mezze.interpreter.nodes.builtin.collections.*;
 import com.mezze.interpreter.nodes.builtin.concurrency.*;
 import com.mezze.interpreter.nodes.builtin.effects.*;
 import com.mezze.interpreter.nodes.builtin.io.*;
+import com.mezze.interpreter.nodes.builtin.polyglot.*;
 import com.mezze.interpreter.nodes.builtin.primitives.*;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -206,6 +207,8 @@ public final class NativeDispatch extends MezzeNode {
         registerCrashHandler();
         // Mutation primitives (safe local mutation)
         registerMutationHandlers();
+        // Polyglot interop (Foreign, JVM host lookup, Context lifecycle)
+        registerPolyglotHandlers();
         // Note: Comptime is handled at conversion time, no runtime handler needed
     }
 
@@ -4231,6 +4234,97 @@ public final class NativeDispatch extends MezzeNode {
             Object r2 = getField(r, "r");
             return l != r2;
         });
+    }
+
+    // ==================== Polyglot Interop ====================
+    //
+    // Bridges std::polyglot::core / std::polyglot::jvm to the Truffle
+    // InteropLibrary. Each Foreign-consuming native takes a Foreign value
+    // (auto-wrapping raw values in a MezzeForeign) and returns either a
+    // primitive result, a wrapped Foreign, or a Result Foreign InteropError.
+    //
+    // Context lifecycle natives (create/close/eval/binding) route through
+    // MezzePolyglotSupport via MezzeContext.get(callNode) — the callNode
+    // is used to resolve the enclosing TruffleLanguage.Env.
+
+    private static void registerPolyglotHandlers() {
+        // Type predicates & coercion
+        HANDLERS.put("__native_polyglot_is_null",
+            (r, c) -> PolyglotNatives.isNull(r));
+        HANDLERS.put("__native_polyglot_is_string",
+            (r, c) -> PolyglotNatives.isString(r));
+        HANDLERS.put("__native_polyglot_as_string",
+            (r, c) -> PolyglotNatives.asString(r));
+        HANDLERS.put("__native_polyglot_is_number",
+            (r, c) -> PolyglotNatives.isNumber(r));
+        HANDLERS.put("__native_polyglot_fits_in_long",
+            (r, c) -> PolyglotNatives.fitsInLong(r));
+        HANDLERS.put("__native_polyglot_as_long",
+            (r, c) -> PolyglotNatives.asLong(r));
+        HANDLERS.put("__native_polyglot_as_double",
+            (r, c) -> PolyglotNatives.asDouble(r));
+        HANDLERS.put("__native_polyglot_as_boolean",
+            (r, c) -> PolyglotNatives.asBoolean(r));
+
+        // Constructors
+        HANDLERS.put("__native_polyglot_from_int",
+            (r, c) -> PolyglotNatives.fromInt(r));
+        HANDLERS.put("__native_polyglot_from_float",
+            (r, c) -> PolyglotNatives.fromFloat(r));
+        HANDLERS.put("__native_polyglot_from_str",
+            (r, c) -> PolyglotNatives.fromStr(r));
+        HANDLERS.put("__native_polyglot_from_bool",
+            (r, c) -> PolyglotNatives.fromBool(r));
+        HANDLERS.put("__native_polyglot_null_val",
+            (r, c) -> PolyglotNatives.nullVal(r));
+
+        // Members
+        HANDLERS.put("__native_polyglot_has_members",
+            (r, c) -> PolyglotNatives.hasMembers(r));
+        HANDLERS.put("__native_polyglot_has_member",
+            (r, c) -> PolyglotNatives.hasMember(r));
+        HANDLERS.put("__native_polyglot_read_member",
+            (r, c) -> PolyglotNatives.readMember(r));
+        HANDLERS.put("__native_polyglot_write_member",
+            (r, c) -> PolyglotNatives.writeMember(r));
+        HANDLERS.put("__native_polyglot_invoke_member",
+            (r, c) -> PolyglotNatives.invokeMember(r));
+
+        // Arrays
+        HANDLERS.put("__native_polyglot_has_array_elements",
+            (r, c) -> PolyglotNatives.hasArrayElements(r));
+        HANDLERS.put("__native_polyglot_array_size",
+            (r, c) -> PolyglotNatives.arraySize(r));
+        HANDLERS.put("__native_polyglot_read_array",
+            (r, c) -> PolyglotNatives.readArray(r));
+
+        // Execution
+        HANDLERS.put("__native_polyglot_is_executable",
+            (r, c) -> PolyglotNatives.isExecutable(r));
+        HANDLERS.put("__native_polyglot_execute",
+            (r, c) -> PolyglotNatives.execute(r));
+        HANDLERS.put("__native_polyglot_is_instantiable",
+            (r, c) -> PolyglotNatives.isInstantiable(r));
+        HANDLERS.put("__native_polyglot_instantiate",
+            (r, c) -> PolyglotNatives.instantiate(r));
+
+        // Meta
+        HANDLERS.put("__native_polyglot_type_name",
+            (r, c) -> PolyglotNatives.typeName(r));
+
+        // JVM host access
+        HANDLERS.put("__native_jvm_class",
+            (r, c) -> JvmNatives.lookupClass(r, c));
+
+        // Context lifecycle
+        HANDLERS.put("__native_polyglot_context_create",
+            (r, c) -> PolyglotContextNatives.create(r));
+        HANDLERS.put("__native_polyglot_context_close",
+            (r, c) -> PolyglotContextNatives.close(r));
+        HANDLERS.put("__native_polyglot_context_eval",
+            (r, c) -> PolyglotContextNatives.eval(r, c));
+        HANDLERS.put("__native_polyglot_context_binding",
+            (r, c) -> PolyglotContextNatives.binding(r, c));
     }
 
     @TruffleBoundary
