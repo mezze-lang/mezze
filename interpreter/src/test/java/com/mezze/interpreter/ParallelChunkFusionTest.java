@@ -212,4 +212,67 @@ class ParallelChunkFusionTest {
         // Sum = 100*101/2 = 5050
         assertEquals(5050L, result);
     }
+
+    // ── Regression: recursive parallel-join re-entrancy (#99) ───────────
+
+    /**
+     * Deep recursive parallel fold with min_chunk=1 forces MAXIMUM re-entrant
+     * Parallel.join nesting on the caller thread (each join runs its left side
+     * inline, which recurses into another join). The per-thread pooled
+     * JoinContext must NOT be clobbered by a nested join — otherwise results are
+     * dropped nondeterministically (sum comes out short). Regression for the
+     * JoinContext re-entrancy race introduced by the zero-copy/pooling perf
+     * rewrite (main 1d8cae54 + a4f136db); pre-fix this returned wrong sums that
+     * varied per run. Repeated to defeat timing luck.
+     */
+    @Test
+    void recursiveParallelJoinDoesNotDropResults() {
+        String src = """
+            use std::effects::parallel::{ Parallel, LoomParallelWith, chunk_fold }
+            use std::collections::iter
+            use std::collections::seq
+            use std::abilities::iter::{ Iterable }
+
+            perform LoomParallelWith {max_concurrent = 4, min_chunk = 1} in do
+              chunk_fold {
+                xs = seq::range { start = 1, end = 65 },
+                zero = 0,
+                f = { xs } -> xs.to_iter{}.sum{},
+                combine = { l, r } -> l + r,
+              }
+            """;
+        // Sum of 1..64 = 64*65/2 = 2080. min_chunk=1 over 64 elems => a full
+        // binary recursion tree of joins, all nesting inline on the caller.
+        for (int i = 0; i < 20; i++) {
+            com.mezze.language.typechecker.ModuleResolver.clearCache();
+            assertEquals(2080L, eval(src),
+                "recursive parallel fold dropped results on iteration " + i +
+                " — JoinContext re-entrancy race (#99)");
+        }
+    }
+
+    /**
+     * Same re-entrancy hazard for chunk_map: the concat-combine must preserve
+     * every element across the recursive join tree. Asserts exact result size
+     * (the failing symptom was a short seq: 8→6/9, 5→7).
+     */
+    @Test
+    void recursiveParallelMapPreservesAllElements() {
+        String src = """
+            use std::effects::parallel::{ Parallel, LoomParallelWith, map }
+            use std::collections::seq
+
+            perform LoomParallelWith {max_concurrent = 4, min_chunk = 1} in do
+              let xs = seq::range { start = 1, end = 33 }
+              map {xs = xs, f = {x} -> x * 10}
+            """;
+        for (int i = 0; i < 20; i++) {
+            com.mezze.language.typechecker.ModuleResolver.clearCache();
+            Object result = eval(src);
+            var seq = (com.mezze.datastructures.seq.MezzeSeq<?>) result;
+            assertEquals(32, seq.toArray().length,
+                "parallel map dropped elements on iteration " + i +
+                " — JoinContext re-entrancy race (#99)");
+        }
+    }
 }
