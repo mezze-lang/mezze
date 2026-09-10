@@ -40,7 +40,23 @@ data class MezzeToml(
     val build: BuildConfig = BuildConfig(),
     val dependencies: Map<String, String> = emptyMap(),
     @SerialName("dev-dependencies")
-    val devDependencies: Map<String, String> = emptyMap()
+    val devDependencies: Map<String, String> = emptyMap(),
+    /** Per-project toolchain pin — which `mez` version builds/runs this project. */
+    val toolchain: ToolchainConfig? = null,
+)
+
+/**
+ * `[toolchain]` — pins the Mezze toolchain a project uses.
+ *
+ *     [toolchain]
+ *     channel = "0.1"      # a track ("0.1", "nightly") or an exact pin ("0.1.3")
+ *
+ * `mez` resolves this against the toolchains installed in `~/.mezze/toolchains/`
+ * (see ToolchainResolver). Overridden by `mez +<ver>` or `MEZ_VERSION`.
+ */
+@Serializable
+data class ToolchainConfig(
+    val channel: String? = null,
 )
 
 /**

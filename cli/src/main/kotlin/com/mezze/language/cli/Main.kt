@@ -144,6 +144,7 @@ fun main(args: Array<String>) {
             "index" -> handleIndexCommand(remainingArgs)
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
+            "toolchain" -> handleToolchainCommand(remainingArgs)
             // Package management (add/remove/sync) is unwired pending #108.
             // The implementations exist but the dependency-resolution backend
             // (deps.sqlite, mezze_packages/) isn't connected to the rest of
@@ -444,6 +445,10 @@ private fun handleCheckCommand(args: List<String>) {
 
 private fun handleIndexCommand(args: List<String>) {
     com.mezze.language.cli.commands.IndexCommand().execute(args)
+}
+
+private fun handleToolchainCommand(args: List<String>) {
+    com.mezze.language.cli.toolchain.ToolchainCommand().execute(args)
 }
 
 private fun readStdin(): String {
