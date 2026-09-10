@@ -626,8 +626,16 @@ object DuplicateDeclarationValidator {
         for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
             if (!impl.isInherent) continue
 
+            // L-14: key on the LOSSLESS structuralTypeKey (already used for the
+            // ability-impl overlap key), not the `_`-joined parsedTypeAnnotationToString.
+            // The flat join renders both `impl [Bar]` and `impl Array Bar` as
+            // `Array_Bar`, colliding two distinct inherent-method targets into one
+            // key → a spurious "duplicate method". structuralTypeKey's arity
+            // delimiters keep them distinct.
+            val typeKey = impl.targetTypes.joinToString("|") { structuralTypeKey(it) }
+            // Human-readable rendering for the error message only — the dedup KEY
+            // above is the lossless structuralTypeKey.
             val targetTypeNames = impl.targetTypes.map { parsedTypeAnnotationToString(it) }
-            val typeKey = targetTypeNames.joinToString("_")
 
             val existingMethods = methodsByType.getOrPut(typeKey) { mutableMapOf() }
 

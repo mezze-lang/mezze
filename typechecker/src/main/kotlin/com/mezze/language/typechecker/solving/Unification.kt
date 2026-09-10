@@ -401,9 +401,19 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         // the payload and expanding the TypeApp side produces a synthetic `{val: T}`
         // record that isn't the raw wrapped type.
         type1 is MezzeType.TypeApplication && type2 is MezzeType.NewtypeType -> {
-            val h1 = (type1.identity as? TypeIdentity.Declared)?.hash
-            val h2 = (type2.identity as? TypeIdentity.Declared)?.hash
-            val sameDeclaration = if (h1 != null && h2 != null) h1 == h2 else type1.constructor == type2.name
+            // #400/L-21: decide by identityVerdict, NOT the bare `h1==h2 else name==`
+            // guess. DISTINCT (both Declared, hashes differ) MUST reject — otherwise a
+            // hashless TypeApp for one module's `Id` laundered into another module's
+            // Declared newtype `Id` by name alone even though that side HAD a hash.
+            // Name only decides when the verdict is UNDETERMINED (a hashless/Anonymous
+            // side — the name is then the sole identity available). Mirrors the
+            // Newtype/Newtype arm above and unifyTypeApplications.
+            val verdict = identityVerdict(type1.identity, type2.identity)
+            val sameDeclaration = when (verdict) {
+                IdentityVerdict.DISTINCT -> false
+                IdentityVerdict.SAME, IdentityVerdict.UNDETERMINED ->
+                    type1.constructor == type2.name || sameDeclaredIdentity(type1.identity, type2.identity)
+            }
             if (sameDeclaration) UnificationResult.Success(Substitution.empty)
             else UnificationResult.Failure(
                 message = "Type mismatch: ${type1.constructor} is not the same type as ${type2.name}",
@@ -412,9 +422,14 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
             )
         }
         type1 is MezzeType.NewtypeType && type2 is MezzeType.TypeApplication -> {
-            val h1 = (type1.identity as? TypeIdentity.Declared)?.hash
-            val h2 = (type2.identity as? TypeIdentity.Declared)?.hash
-            val sameDeclaration = if (h1 != null && h2 != null) h1 == h2 else type1.name == type2.constructor
+            // Symmetric to the arm above (L-21): identityVerdict decides, DISTINCT
+            // rejects the cross-module name launder, name only for UNDETERMINED.
+            val verdict = identityVerdict(type1.identity, type2.identity)
+            val sameDeclaration = when (verdict) {
+                IdentityVerdict.DISTINCT -> false
+                IdentityVerdict.SAME, IdentityVerdict.UNDETERMINED ->
+                    type1.name == type2.constructor || sameDeclaredIdentity(type1.identity, type2.identity)
+            }
             if (sameDeclaration) UnificationResult.Success(Substitution.empty)
             else UnificationResult.Failure(
                 message = "Type mismatch: ${type1.name} is not the same type as ${type2.constructor}",
@@ -1128,7 +1143,13 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
             val type2 = inst2.associatedTypes[key]
 
             if (type1 != null && type2 != null) {
-                val result = unify(composedSubst.apply(type1), composedSubst.apply(type2))
+                // L-31: thread the in-scope registry (was defaulting to
+                // DeclarationRegistry.EMPTY) so a TypeApplication needing alias
+                // expansion resolves here the SAME way it does in the sibling
+                // ability-constraint path (unifyAssociatedTypeMaps threads registry).
+                // Without it, the same associated-type question got two answers
+                // depending on whether it flowed through an effect row or a constraint.
+                val result = unify(composedSubst.apply(type1), composedSubst.apply(type2), registry)
                 when (result) {
                     is UnificationResult.Success -> {
                         composedSubst = composedSubst.compose(result.substitution)
