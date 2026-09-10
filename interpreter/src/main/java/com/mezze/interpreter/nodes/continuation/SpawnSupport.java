@@ -52,8 +52,12 @@ public final class SpawnSupport {
      * {@code future.get()}'s {@code ExecutionException} cause.
      */
     public static void runJoinTask(HandlerChainEntry[] chain, CompletableFuture<Object> future, Supplier<Object> body) {
+        runJoinTask(chain, null, future, body);
+    }
+
+    public static void runJoinTask(HandlerChainEntry[] chain, Object scope, CompletableFuture<Object> future, Supplier<Object> body) {
         try {
-            HandlerChainRegistry.runWithHandlerChain(chain, () -> future.complete(body.get()));
+            HandlerChainRegistry.runWithHandlerChain(chain, scope, () -> future.complete(body.get()));
         } catch (Throwable e) {
             future.completeExceptionally(e);
         }
@@ -101,13 +105,22 @@ public final class SpawnSupport {
         AtomicReference<Throwable> errSink,
         Runnable body
     ) {
-        runBatchTask(chain, opSink, errSink, body, false);
+        runBatchTask(chain, null, opSink, errSink, body, false);
+    }
+
+    public static void runBatchTask(
+        HandlerChainEntry[] chain,
+        Object scope,
+        AtomicReference<TaskUnhandledOpException> opSink,
+        AtomicReference<Throwable> errSink,
+        Runnable body
+    ) {
+        runBatchTask(chain, scope, opSink, errSink, body, false);
     }
 
     /**
-     * Variant of {@link #runBatchTask(HandlerChainEntry[], AtomicReference,
-     * AtomicReference, Runnable)} that skips the redundant chain install
-     * when the caller guarantees the chain is already on this thread.
+     * Variant that skips the redundant chain install when the caller
+     * guarantees the chain is already on this thread.
      *
      * <p>This is the case for {@code Parallel.join}'s left side: the
      * chain snapshot was taken on the calling thread and left-side body
@@ -122,6 +135,7 @@ public final class SpawnSupport {
      */
     public static void runBatchTask(
         HandlerChainEntry[] chain,
+        Object scope,
         AtomicReference<TaskUnhandledOpException> opSink,
         AtomicReference<Throwable> errSink,
         Runnable body,
@@ -131,7 +145,7 @@ public final class SpawnSupport {
             if (sameThreadChain) {
                 body.run();
             } else {
-                HandlerChainRegistry.runWithHandlerChain(chain, body);
+                HandlerChainRegistry.runWithHandlerChain(chain, scope, body);
             }
         } catch (TaskUnhandledOpException tue) {
             opSink.compareAndSet(null, tue);

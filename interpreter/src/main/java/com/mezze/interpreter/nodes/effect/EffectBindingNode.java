@@ -2,9 +2,7 @@ package com.mezze.interpreter.nodes.effect;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry;
-import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.language.ast.EffectBindingKind;
-import com.mezze.language.ast.ScopedEffectConstants;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -91,8 +89,7 @@ public final class EffectBindingNode extends MezzeNode {
 
     @TruffleBoundary
     private Object lookupOnContext(String which) {
-        MezzeContext context = MezzeContext.get(this);
-        Object value = context.lookupScopeVar(which);
+        Object value = HandlerChainRegistry.lookupScopeVar();
         if (value == null) {
             throw new RuntimeException("Scope variable '" + which + "' not found");
         }

@@ -304,11 +304,9 @@ public final class MezzeContext {
     private final ConcurrentHashMap<com.mezze.language.typedast.Hash, Object> handlersByHash =
         new ConcurrentHashMap<>();
 
-    // Name-keyed scope slots. Currently only used for the reserved name "scope"
-    // (scoped-effect record) and local-variable fallback in
-    // ReadLocalWithFallbackNode. Strict separation from handlersByHash means a
-    // 64-hex local-variable name can never collide with an impl hash.
-    private final ConcurrentHashMap<String, Object> scopeVars = new ConcurrentHashMap<>();
+    // Scope variable storage has moved to HandlerChainRegistry.EffectState
+    // (per-thread, zero-cost field read instead of ConcurrentHashMap lookup).
+    // See HandlerChainRegistry.installScopeVar / lookupScopeVar / restoreScopeVar.
 
     @TruffleBoundary
     public void defineHandler(com.mezze.language.typedast.Hash hash, Object value) {
@@ -377,14 +375,22 @@ public final class MezzeContext {
         return com.mezze.interpreter.values.MezzeRecord.withAllObjects(shape, opValues);
     }
 
+    /**
+     * @deprecated Use {@link com.mezze.interpreter.nodes.continuation.HandlerChainRegistry#installScopeVar} instead.
+     */
+    @Deprecated
     @TruffleBoundary
     public void defineScopeVar(String name, Object value) {
-        scopeVars.put(name, value);
+        com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.restoreScopeVar(value);
     }
 
+    /**
+     * @deprecated Use {@link com.mezze.interpreter.nodes.continuation.HandlerChainRegistry#lookupScopeVar} instead.
+     */
+    @Deprecated
     @TruffleBoundary
     public Object lookupScopeVar(String name) {
-        return scopeVars.get(name);
+        return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.lookupScopeVar();
     }
 
     // ========================

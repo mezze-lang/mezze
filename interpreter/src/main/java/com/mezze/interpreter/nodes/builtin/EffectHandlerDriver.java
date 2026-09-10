@@ -243,46 +243,23 @@ public final class EffectHandlerDriver {
     }
 
     /**
-     * Install {@code scope} as the current value of the "scope" var on the
-     * MezzeContext, returning whatever was there before so the caller can
-     * restore it on exit. Returns null if no context is available (e.g.
-     * isolated unit tests).
+     * Install {@code scope} as the current scope value on the per-thread
+     * EffectState, returning whatever was there before so the caller can
+     * restore it on exit.
      */
     @TruffleBoundary
     private static Object installScope(MezzeNode dispatchNode, Object scope) {
-        if (scope == null) return null;
-        MezzeContext ctx = tryGetContext(dispatchNode);
-        if (ctx == null) return null;
-        Object prev = ctx.lookupScopeVar(ScopedEffectConstants.SCOPE);
-        ctx.defineScopeVar(ScopedEffectConstants.SCOPE, scope);
-        return prev;
+        return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.installScopeVar(scope);
     }
 
     /**
      * Restore the outer perform's scope (if any) after this perform's body
      * completes. Only called when this perform installed a scope.
-     *
-     * <p>If there was no outer scope ({@code prev == null}), we write an
-     * empty record rather than null because the underlying ConcurrentHashMap
-     * doesn't store nulls; {@link com.mezze.interpreter.nodes.ReadScopeNode}
-     * treats this the same as absence.
      */
     @TruffleBoundary
     private static void restoreScope(MezzeNode dispatchNode, Object prev) {
-        MezzeContext ctx = tryGetContext(dispatchNode);
-        if (ctx == null) return;
-        ctx.defineScopeVar(
-            ScopedEffectConstants.SCOPE,
+        com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.restoreScopeVar(
             prev != null ? prev : MezzeRecord.empty()
         );
-    }
-
-    @TruffleBoundary
-    private static MezzeContext tryGetContext(MezzeNode dispatchNode) {
-        try {
-            return MezzeContext.get(dispatchNode);
-        } catch (Throwable ignored) {
-            return null;
-        }
     }
 }

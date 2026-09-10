@@ -75,6 +75,11 @@ public final class HandlerChainRegistry {
         // for chain dispatch on a spawned task."
         int bdslHandleDepth = 0;
 
+        // Current active scope value — the scope returned by the innermost
+        // scoped handler's initialize_scope. Read by EffectBindingNode(SCOPE)
+        // during op dispatch. Per-thread, so no cross-thread contention.
+        Object currentScope;
+
         HandlerChainRegistry dispatching;
         HandlerChainRegistry dispatchPool;
 
@@ -426,6 +431,44 @@ public final class HandlerChainRegistry {
     }
 
     // ----------------------------------------------------------------
+    // Scope variable — direct field on EffectState (replaces the old
+    // ConcurrentHashMap<String,Object> on MezzeContext). Only one key
+    // ("scope") was ever used; a plain field is zero-cost.
+    // ----------------------------------------------------------------
+
+    /**
+     * Install a new scope value, returning the previous one so the
+     * caller can restore it on pop. Called by PushHandlerChainScoped
+     * and EffectHandlerDriver.installScope.
+     */
+    @TruffleBoundary
+    public static Object installScopeVar(Object scope) {
+        if (scope == null) return null;
+        EffectState s = STATE.get();
+        Object prev = s.currentScope;
+        s.currentScope = scope;
+        return prev;
+    }
+
+    /**
+     * Restore a previous scope value. Called by PopHandlerChainScoped
+     * and EffectHandlerDriver.restoreScope.
+     */
+    @TruffleBoundary
+    public static void restoreScopeVar(Object prev) {
+        STATE.get().currentScope = prev;
+    }
+
+    /**
+     * Read the current scope value. Called by EffectBindingNode(SCOPE)
+     * during op dispatch.
+     */
+    @TruffleBoundary
+    public static Object lookupScopeVar() {
+        return STATE.get().currentScope;
+    }
+
+    // ----------------------------------------------------------------
     // Chain lookup, truncation, snapshot, install.
     // ----------------------------------------------------------------
 
@@ -508,6 +551,7 @@ public final class HandlerChainRegistry {
         }
         s.depth = 0;
         s.bdslHandleDepth = 0;
+        s.currentScope = null;
     }
 
     @TruffleBoundary
@@ -525,15 +569,27 @@ public final class HandlerChainRegistry {
     }
 
     public static void runWithHandlerChain(HandlerChainEntry[] chain, Runnable body) {
-        if (chain.length == 0) {
+        runWithHandlerChain(chain, null, body);
+    }
+
+    /**
+     * Install handler chain and optional scope for the duration of {@code body}.
+     * The scope is set before the body runs and restored after.
+     */
+    public static void runWithHandlerChain(HandlerChainEntry[] chain, Object scope, Runnable body) {
+        if (chain.length == 0 && scope == null) {
             body.run();
             return;
         }
-        installHandlerChainEntries(chain);
+        EffectState s = STATE.get();
+        Object prevScope = s.currentScope;
+        if (scope != null) s.currentScope = scope;
+        if (chain.length > 0) installHandlerChainEntries(chain);
         try {
             body.run();
         } finally {
-            popHandlerChain(chain.length);
+            if (chain.length > 0) popHandlerChain(chain.length);
+            s.currentScope = prevScope;
         }
     }
 

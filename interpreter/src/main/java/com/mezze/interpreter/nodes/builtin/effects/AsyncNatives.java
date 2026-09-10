@@ -618,10 +618,11 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
-        // Capture the parent's effect-handler chain at spawn time so the
-        // spawned task's OpCallNode (fiber-less dispatch path) can find
+        // Capture the parent's effect-handler chain and scope at spawn time
+        // so the spawned task's OpCallNode (fiber-less dispatch path) can find
         // the same handlers that were in scope at the spawn site.
         HandlerChainEntry[] handlerChain = HandlerChainRegistry.snapshotHandlerChainEntries();
+        Object parentScope = HandlerChainRegistry.lookupScopeVar();
 
         // Single promise: body completes it, parent awaits it. Thread
         // reference is patched in after construction (single writer:
@@ -630,7 +631,7 @@ public final class AsyncNatives {
         // inner+delegating-outer pattern.
         MezzePromise promise = new MezzePromise(null, semaphore);
 
-        Thread vThread = env.newTruffleThreadBuilder(() -> runPromiseTask(handlerChain, promise, () -> {
+        Thread vThread = env.newTruffleThreadBuilder(() -> runPromiseTask(handlerChain, parentScope, promise, () -> {
             if (semaphore != null) {
                 semaphore.acquireUninterruptibly();
             }
@@ -690,16 +691,16 @@ public final class AsyncNatives {
         System.arraycopy(closureValues, 0, fullArgs, 0, closureValues.length);
         fullArgs[closureValues.length] = MezzeRecord.empty();
 
-        // Capture the parent's effect-handler chain at spawn time so the
-        // spawned task's OpCallNode (fiber-less dispatch path) can find
-        // the same handlers that were in scope at the spawn site.
+        // Capture the parent's effect-handler chain and scope at spawn time
+        // so the spawned task can find the same handlers + scope at the spawn site.
         HandlerChainEntry[] handlerChain = HandlerChainRegistry.snapshotHandlerChainEntries();
+        Object parentScope = HandlerChainRegistry.lookupScopeVar();
 
         MezzePromise promise = new MezzePromise(null, null);
 
         // Platform thread (not virtual)
         Thread thread = env.newTruffleThreadBuilder(
-            () -> runPromiseTask(handlerChain, promise,
+            () -> runPromiseTask(handlerChain, parentScope, promise,
                 () -> callNode.call(callTarget, fullArgs))
         ).build();
 
@@ -786,10 +787,11 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
-        // Capture the parent's effect-handler chain at spawn time so the
-        // spawned task dispatches op-calls through the same handlers that
-        // were in scope here. Snapshot copy is safe to ship across threads.
+        // Capture the parent's effect-handler chain and scope at spawn time
+        // so the spawned task dispatches op-calls through the same handlers
+        // and scope that were in scope here.
         HandlerChainEntry[] handlerChain = HandlerChainRegistry.snapshotHandlerChainEntries();
+        Object parentScope = HandlerChainRegistry.lookupScopeVar();
 
         // Single promise: body completes it, parent awaits it. Thread
         // reference is patched in after construction (single writer:
@@ -797,7 +799,7 @@ public final class AsyncNatives {
         MezzePromise promise = new MezzePromise(null, null);
 
         Thread vThread = env.newTruffleThreadBuilder(
-            () -> runPromiseTask(handlerChain, promise,
+            () -> runPromiseTask(handlerChain, parentScope, promise,
                 () -> callNode.call(f.getCallTarget(), fullArgs))
         ).virtual(true).build();
 
@@ -957,6 +959,7 @@ public final class AsyncNatives {
         Env env = scope.env != null ? scope.env : context.getEnv();
 
         HandlerChainEntry[] handlerChain = HandlerChainRegistry.snapshotHandlerChainEntries();
+        Object parentScope = HandlerChainRegistry.lookupScopeVar();
 
         MezzePromise promise = new MezzePromise(null, null);
         scope.addChild(promise);
@@ -967,7 +970,7 @@ public final class AsyncNatives {
             // `scope` (#252 transitive cancellation linkage).
             CURRENT_SCOPE.set(scope);
             try {
-                HandlerChainRegistry.runWithHandlerChain(handlerChain, () -> {
+                HandlerChainRegistry.runWithHandlerChain(handlerChain, parentScope, () -> {
                     if (scope.isCancelled()) {
                         promise.cancel();
                         return;
@@ -1289,11 +1292,16 @@ public final class AsyncNatives {
      * promise.
      */
     private static void runPromiseTask(HandlerChainEntry[] chain, MezzePromise promise, TaskBody body) {
+        runPromiseTask(chain, null, promise, body);
+    }
+
+    private static void runPromiseTask(HandlerChainEntry[] chain, Object scope, MezzePromise promise, TaskBody body) {
         // Inlined HandlerChainRegistry.runWithHandlerChain so we don't allocate a
         // second lambda per spawn. The chain.length == 0 fast path matches
         // the common case (top-level Async.spawn outside any perform).
         boolean installed = false;
         try {
+            if (scope != null) HandlerChainRegistry.restoreScopeVar(scope);
             if (chain.length > 0) {
                 HandlerChainRegistry.installHandlerChainEntries(chain);
                 installed = true;

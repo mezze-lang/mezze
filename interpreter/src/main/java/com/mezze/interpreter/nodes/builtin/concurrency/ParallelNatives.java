@@ -357,6 +357,7 @@ public final class ParallelNatives {
         MezzeFunction rightFn = getFunction(args, "r");
 
         HandlerChainEntry[] chain = HandlerChainRegistry.snapshotHandlerChainEntries();
+        Object parentScope = HandlerChainRegistry.lookupScopeVar();
         boolean callerIsVirtual = Thread.currentThread().isVirtual();
         boolean leftInline = (virtual == callerIsVirtual);
 
@@ -375,7 +376,7 @@ public final class ParallelNatives {
                 }
             }
             try {
-                SpawnSupport.runBatchTask(chain, opSink, errSink, () ->
+                SpawnSupport.runBatchTask(chain, parentScope, opSink, errSink, () ->
                     rightResultHolder[0] = callThunk(rightFn, callNode));
             } finally {
                 if (sem != null) sem.release();
@@ -394,7 +395,7 @@ public final class ParallelNatives {
                     }
                 }
                 try {
-                    SpawnSupport.runBatchTask(chain, opSink, errSink, () ->
+                    SpawnSupport.runBatchTask(chain, parentScope, opSink, errSink, () ->
                         leftResultHolder[0] = callThunk(leftFn, callNode));
                 } finally {
                     if (sem != null) sem.release();
@@ -417,7 +418,7 @@ public final class ParallelNatives {
             try {
                 // Same-thread inline: skip the redundant chain reinstall.
                 SpawnSupport.runBatchTask(
-                    chain, opSink, errSink,
+                    chain, parentScope, opSink, errSink,
                     () -> leftResultHolder[0] = callThunk(leftFn, callNode),
                     /* sameThreadChain = */ true);
             } finally {

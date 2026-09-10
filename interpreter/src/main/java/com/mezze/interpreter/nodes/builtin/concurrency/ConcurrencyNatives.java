@@ -1180,7 +1180,7 @@ public final class ConcurrencyNatives {
      * the function dispatch through the same handlers that were in scope
      * at the send site.
      */
-    private record AgentAction(MezzeFunction func, com.oracle.truffle.api.TruffleLanguage.Env env, com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain) {}
+    private record AgentAction(MezzeFunction func, com.oracle.truffle.api.TruffleLanguage.Env env, com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain, Object scope) {}
 
     /**
      * Clojure-style Agent for async state updates.
@@ -1225,7 +1225,7 @@ public final class ConcurrencyNatives {
                 throw new MezzeGuestException("Agent: cannot send to an agent in error state: " + error.get());
             }
 
-            actionQueue.add(new AgentAction(func, env, HandlerChainRegistry.snapshotHandlerChainEntries()));
+            actionQueue.add(new AgentAction(func, env, HandlerChainRegistry.snapshotHandlerChainEntries(), HandlerChainRegistry.lookupScopeVar()));
             processQueue();
         }
 
@@ -1267,7 +1267,7 @@ public final class ConcurrencyNatives {
                             callArgs[closureValues.length] = argRecord;
 
                             Object[] newStateHolder = new Object[1];
-                            HandlerChainRegistry.runWithHandlerChain(action.chain, () ->
+                            HandlerChainRegistry.runWithHandlerChain(action.chain, action.scope, () ->
                                 newStateHolder[0] = func.getCallTarget().call(callArgs));
                             state.set(newStateHolder[0]);
                         } catch (Throwable e) {

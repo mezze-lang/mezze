@@ -1,7 +1,5 @@
 package com.mezze.interpreter.bytecode;
 
-import com.mezze.interpreter.nodes.MezzeNode;
-import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.language.ast.ScopedEffectConstants;
@@ -48,29 +46,13 @@ final class D8ScopeHooks {
 
     @TruffleBoundary
     static Object installScope(Node dispatchNode, Object scope) {
-        if (scope == null) return null;
-        MezzeContext ctx = tryGetContext(dispatchNode);
-        if (ctx == null) return null;
-        Object prev = ctx.lookupScopeVar(ScopedEffectConstants.SCOPE);
-        ctx.defineScopeVar(ScopedEffectConstants.SCOPE, scope);
-        return prev;
+        return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.installScopeVar(scope);
     }
 
     @TruffleBoundary
     static void restoreScope(Node dispatchNode, Object prev) {
-        MezzeContext ctx = tryGetContext(dispatchNode);
-        if (ctx == null) return;
-        ctx.defineScopeVar(
-            ScopedEffectConstants.SCOPE,
+        com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.restoreScopeVar(
             prev != null ? prev : MezzeRecord.empty()
         );
-    }
-
-    private static MezzeContext tryGetContext(Node dispatchNode) {
-        try {
-            return MezzeContext.get(dispatchNode);
-        } catch (Throwable ignored) {
-            return null;
-        }
     }
 }
