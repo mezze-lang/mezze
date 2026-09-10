@@ -1,0 +1,28 @@
+# JVM host-language access.
+#
+# Look up JVM classes (fully-qualified) and hand them back as Foreign
+# values.  `instantiate` (from std::polyglot::core) constructs instances;
+# `invoke_member` calls methods; `read_member` reads static fields.
+#
+# Requires the enclosing polyglot Context to allow host class lookup —
+# `allowAllAccess(true)` or `allowHostClassLookup` on the builder.
+use std::polyglot::core::{ Foreign, InteropError }
+
+## Effect that names a JVM host — the handler decides whether class
+## lookup is permitted (production configurations may deny host access
+## while tests permit it).
+effect Jvm where {
+  class: { name: Str } -> Result Foreign InteropError <Jvm>
+}
+
+## Default JVM host — allows any class the runtime can see.
+pub type JvmHost = {}
+
+impl Jvm for JvmHost where {
+  class = { name } -> __native_jvm_class { name = name }
+}
+
+## Convenience: look up a class outside an effect handler (uses the
+## enclosing Env's host lookup permissions directly).
+pub let class: { name: Str } -> Result Foreign InteropError = { name } ->
+  __native_jvm_class { name = name }

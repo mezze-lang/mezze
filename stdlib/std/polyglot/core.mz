@@ -1,0 +1,106 @@
+# Polyglot interop — Phase 1.
+#
+# Bridges Mezze values to guest languages (Python, JavaScript, JVM classes,
+# ...) via the Truffle InteropLibrary.  A `Foreign` value opaquely wraps a
+# guest-language object; call sites use inherent methods on Foreign to
+# read/write members, invoke methods, execute callables, and coerce
+# to primitives.  Every fallible operation returns
+# `Result Foreign InteropError`.
+
+use std::result
+
+## An opaque handle to a guest-language value.  The runtime stores the
+## wrapped Truffle interop object plus its source-language tag.
+pub newtype Foreign = __NativeForeign
+
+## An opaque polyglot Context handle — declares the guest languages a
+## computation may touch.  Phase 1 uses the enclosing Truffle Env; the
+## Context primarily acts as an allow-list.
+pub newtype Context = __NativeContext
+
+## Errors returned by every fallible interop operation.
+##
+## - NotFound       — the requested member/binding does not exist.
+## - TypeError      — the guest value did not accept the requested op.
+## - GuestError     — the guest language raised an exception; message and
+##                    stack are propagated verbatim.
+## - ArityMismatch  — execute/invoke arg count mismatched the target.
+## - UnsupportedMessage — the underlying Truffle message is not supported
+##                    by the receiver.
+pub type InteropError = |
+  NotFound { name: Str },
+  TypeError { message: Str },
+  GuestError { message: Str, guest_stack: Str },
+  ArityMismatch { expected: Int, actual: Int },
+  UnsupportedMessage,
+|
+
+## Inherent methods on Foreign — dispatch to __native_polyglot_* natives.
+impl Foreign where {
+  is_null       = { it } -> __native_polyglot_is_null       { val = it },
+  is_string     = { it } -> __native_polyglot_is_string     { val = it },
+  as_string     = { it } -> __native_polyglot_as_string     { val = it },
+  is_number     = { it } -> __native_polyglot_is_number     { val = it },
+  fits_in_int   = { it } -> __native_polyglot_fits_in_long  { val = it },
+  as_int        = { it } -> __native_polyglot_as_long       { val = it },
+  as_float      = { it } -> __native_polyglot_as_double     { val = it },
+  as_bool       = { it } -> __native_polyglot_as_boolean    { val = it },
+
+  has_members   = { it } -> __native_polyglot_has_members   { val = it },
+  has_member    = { it, name } -> __native_polyglot_has_member    { val = it, name = name },
+  read_member   = { it, name } -> __native_polyglot_read_member   { val = it, name = name },
+  write_member  = { it, name, new_val } ->
+    __native_polyglot_write_member { val = it, name = name, new_val = new_val },
+  invoke_member = { it, name, args } ->
+    __native_polyglot_invoke_member { val = it, name = name, args = args },
+
+  has_array_elements = { it } -> __native_polyglot_has_array_elements { val = it },
+  array_size    = { it } -> __native_polyglot_array_size    { val = it },
+  read_array    = { it, index } -> __native_polyglot_read_array    { val = it, index = index },
+
+  is_executable = { it } -> __native_polyglot_is_executable { val = it },
+  execute       = { it, args } -> __native_polyglot_execute { val = it, args = args },
+  is_instantiable = { it } -> __native_polyglot_is_instantiable { val = it },
+  instantiate   = { it, args } -> __native_polyglot_instantiate { val = it, args = args },
+
+  type_name     = { it } -> __native_polyglot_type_name { val = it },
+}
+
+## Constructors — lift Mezze primitives into Foreign wrappers.
+pub let from_int: { val: Int } -> Foreign = { val } ->
+  __native_polyglot_from_int { val = val }
+
+pub let from_float: { val: Float } -> Foreign = { val } ->
+  __native_polyglot_from_float { val = val }
+
+pub let from_str: { val: Str } -> Foreign = { val } ->
+  __native_polyglot_from_str { val = val }
+
+pub let from_bool: { val: Bool } -> Foreign = { val } ->
+  __native_polyglot_from_bool { val = val }
+
+pub let null_val: {} -> Foreign = {} ->
+  __native_polyglot_null_val {}
+
+## Context lifecycle.
+##
+## create_context / close_context are explicit pair — for scoped usage
+## prefer `with_context` which handles close on both success and error.
+pub let create_context: { languages: [Str], classpath: [Str] } -> Context =
+  { languages, classpath } ->
+    __native_polyglot_context_create { languages = languages, classpath = classpath }
+
+pub let close_context: { it: Context } -> {} = { it } ->
+  __native_polyglot_context_close { it = it }
+
+## Evaluate guest-language source code inside a Context.
+pub let context_eval:
+  { it: Context, language: Str, code: Str } -> Result Foreign InteropError =
+  { it, language, code } ->
+    __native_polyglot_context_eval { it = it, language = language, code = code }
+
+## Look up a top-level binding by name in a guest language.
+pub let context_binding:
+  { it: Context, language: Str, name: Str } -> Result Foreign InteropError =
+  { it, language, name } ->
+    __native_polyglot_context_binding { it = it, language = language, name = name }
