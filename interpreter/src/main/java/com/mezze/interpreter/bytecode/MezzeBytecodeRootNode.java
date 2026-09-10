@@ -3914,18 +3914,96 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
-     * Path D8 (Handle @Operation, endgame Shape B — see
-     * docs/perf/bdsl-effects-path-d-2026-07.md §D8).
-     *
-     * <p>Push the handler value (popped from the operand stack) onto the
-     * per-thread handler chain, tagged with {@code effectHash} so
-     * {@link YieldDispatch#dispatch} finds it by (effectHash, opName).
-     * Pairs with {@link PopHandlerChain}. The emit-site brackets the body
-     * with these two ops inside a {@code TryCatchOtherwise} so both normal
-     * and abort exits pop the chain — no fiber, no lambda, no dispatch
-     * object, no heap alloc per handle.
-     *
-     * <p>Void op: consumes the handler, produces nothing.
+     * Simple push: non-scoped effects (13 of 19 stdlib effects).
+     * No scope-hook check, no scope allocation — just handler + effectHash
+     * onto the flat array stack. Zero heap allocation per push.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    public static final class PushHandlerChainSimple {
+        @TruffleBoundary
+        @Specialization
+        public static void doPush(Hash effectHash, Object handler) {
+            if (!(handler instanceof MezzeRecord rec)) {
+                throw new RuntimeException(
+                    "Handler must be a record, got: "
+                    + (handler == null ? "null" : handler.getClass().getSimpleName()));
+            }
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .pushSimple(rec, effectHash);
+        }
+    }
+
+    /**
+     * Scoped push: effects with initialize_scope / finalize_scope
+     * (Random, STM, Async, Parallel, HTTP, Workflow).
+     * Calls initialize_scope, installs scope in context, stores
+     * scope+prevScope on the merged stack for the paired pop.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    public static final class PushHandlerChainScoped {
+        @TruffleBoundary
+        @Specialization
+        public static void doPush(Hash effectHash, Object handler, @Bind Node node) {
+            if (!(handler instanceof MezzeRecord rec)) {
+                throw new RuntimeException(
+                    "Handler must be a record, got: "
+                    + (handler == null ? "null" : handler.getClass().getSimpleName()));
+            }
+            Object initFn = rec.getField(
+                com.mezze.language.ast.ScopedEffectConstants.INITIALIZE_SCOPE);
+            Object scope = null;
+            Object prevScope = null;
+            if (initFn instanceof MezzeFunction fn) {
+                scope = D8ScopeHooks.invokeInitializeScope(fn);
+                prevScope = D8ScopeHooks.installScope(node, scope);
+            }
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .pushScoped(rec, effectHash, scope, prevScope);
+        }
+    }
+
+    /**
+     * Simple pop: non-scoped effects. Just decrement depth and null
+     * the slot. No scope cleanup, no return value, no allocation.
+     * Emitted twice per Handle (otherwise + catch branches).
+     */
+    @Operation
+    public static final class PopHandlerChainSimple {
+        @TruffleBoundary
+        @Specialization
+        public static void doPop() {
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.popSimple();
+        }
+    }
+
+    /**
+     * Scoped pop: effects with finalize_scope. Pops the stack,
+     * invokes finalize_scope with the stored scope value, then
+     * restores the previous context scope.
+     */
+    @Operation
+    public static final class PopHandlerChainScoped {
+        @TruffleBoundary
+        @Specialization
+        public static void doPop(@Bind Node node) {
+            var result = com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.popScoped();
+            if (result.handler != null) {
+                Object finFn = result.handler.getField(
+                    com.mezze.language.ast.ScopedEffectConstants.FINALIZE_SCOPE);
+                if (finFn instanceof MezzeFunction fn) {
+                    D8ScopeHooks.invokeFinalizeScope(fn, result.scope);
+                }
+                D8ScopeHooks.restoreScope(node, result.prevScope);
+            }
+        }
+    }
+
+    /**
+     * Legacy PushHandlerChain — kept for backwards compatibility with
+     * any pre-compiled bytecode that references the old operation name.
+     * Delegates to the appropriate simple/scoped variant at runtime.
      */
     @Operation
     @ConstantOperand(type = Hash.class)
@@ -3938,11 +4016,6 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     "Handler must be a record, got: "
                     + (handler == null ? "null" : handler.getClass().getSimpleName()));
             }
-            // Scope hook: initialize_scope creates the scope value; store
-            // (scope, prevContextScope) on the D8 scope stack for the
-            // paired PopHandlerChain to invoke finalize_scope + restore.
-            // No-alloc common case (no hooks): the stack push writes null
-            // and PopHandlerChain sees the null and skips.
             Object initFn = rec.getField(
                 com.mezze.language.ast.ScopedEffectConstants.INITIALIZE_SCOPE);
             Object scope = null;
@@ -3957,19 +4030,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
-     * Path D8: pop the innermost handler off the per-thread chain.
-     * Emitted twice per Handle by the compiler — once in the "otherwise"
-     * (normal exit) branch of TryCatchOtherwise and once in the "catch"
-     * (abort exit) branch — so the chain is always balanced regardless of
-     * how the body exits.
+     * Legacy PopHandlerChain — kept for backwards compatibility.
      */
     @Operation
     public static final class PopHandlerChain {
         @TruffleBoundary
         @Specialization
         public static void doPop(@Bind Node node) {
-            // Combined pop: peek + pop both stacks in a single
-            // ThreadLocal.get(), then invoke finalize_scope if present.
             var result = com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .popHandlerAndExitHandle();
             if (result.scopeFrame != null && result.handler != null) {

@@ -6,37 +6,27 @@ import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.utilities.CyclicAssumption;
 
-import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Per-thread state holder for the effect-handler runtime.
  *
  * <p>All per-thread effect state is consolidated in a single
- * {@link EffectState} struct accessed via one {@link ThreadLocal}. This
- * eliminates redundant ThreadLocal.get() calls when multiple pieces of
- * effect state are accessed in the same @TruffleBoundary method (e.g.
- * handler chain + D8 handle stack during push/pop). Each ThreadLocal.get()
- * costs ~200ns; merging 4 ThreadLocals into 1 saves ~800ns per perform
- * round-trip.
+ * {@link EffectState} struct accessed via one {@link ThreadLocal}. The
+ * handler chain and D8 handle stack are merged into a single flat array
+ * stack — push/pop touch one structure, not two. Scope hooks
+ * (initialize_scope / finalize_scope) are separated into dedicated
+ * push/pop methods so the common non-scoped path never probes for
+ * scope fields.
  *
  * <p>The struct holds:
  * <ul>
- *   <li>{@code handlerChain} — stack of (handler record, effect hash)
- *       pairs pushed by every {@code perform Handler in body}.</li>
- *   <li>{@code d8HandleStack} — BDSL Handle depth tracking, distinct
- *       from handlerChain so snapshot-install on spawned threads doesn't
- *       create phantom catch boundaries.</li>
+ *   <li>Merged handler+D8 stack — flat arrays indexed by depth.</li>
  *   <li>{@code dispatching} — pointer to the dispatch-only registry
  *       whose op handler is currently running (for EffectBindingNode).</li>
  *   <li>{@code dispatchPool} — 1-slot pool of reusable dispatch
  *       registries.</li>
  * </ul>
- *
- * <p>Additionally, combined methods ({@link #pushHandlerAndEnterHandle},
- * {@link #popHandlerAndExitHandle}) do both chain + D8 stack operations
- * in a single ThreadLocal.get(), used by the BDSL PushHandlerChain /
- * PopHandlerChain @Operations.
  *
  * <p>Matching in chain dispatch is by (effect_hash, op_name) so two
  * in-scope effects with the same simple op name don't collide (#246).
@@ -57,14 +47,53 @@ public final class HandlerChainRegistry {
 
     // ================================================================
     // Consolidated per-thread effect state — ONE ThreadLocal for all.
+    //
+    // Handler chain and D8 handle stack are MERGED into flat arrays.
+    // Each slot at index i holds: handler record, effect hash, scope
+    // value, previous scope, and a BDSL-handle flag.
+    //
+    // Push = write fields at depth, depth++. Pop = depth--, null fields.
+    // Zero heap allocation per push/pop.
     // ================================================================
+
+    /** Initial capacity — effect chains rarely exceed 8. */
+    private static final int INITIAL_CAPACITY = 16;
 
     /** All per-thread effect state in a single struct. */
     static final class EffectState {
-        final ArrayDeque<HandlerChainEntry> handlerChain = new ArrayDeque<>();
-        final ArrayDeque<BdslHandleFrame> d8HandleStack = new ArrayDeque<>();
+        // Merged handler chain + D8 handle stack — parallel flat arrays.
+        MezzeRecord[] handlers = new MezzeRecord[INITIAL_CAPACITY];
+        com.mezze.language.typedast.Hash[] effectHashes = new com.mezze.language.typedast.Hash[INITIAL_CAPACITY];
+        // Scope hook data — only non-null for scoped effects.
+        Object[] scopes = new Object[INITIAL_CAPACITY];
+        Object[] prevScopes = new Object[INITIAL_CAPACITY];
+        int depth = 0;
+        // Separate BDSL Handle depth — counts only pushes from BDSL
+        // PushHandlerChain* @Operations (not from installHandlerChainEntries
+        // on spawned tasks). Used by insideBdslHandle() to distinguish
+        // "inside a BDSL Handle catch boundary" from "chain entries installed
+        // for chain dispatch on a spawned task."
+        int bdslHandleDepth = 0;
+
         HandlerChainRegistry dispatching;
         HandlerChainRegistry dispatchPool;
+
+        /** Grow all parallel arrays when depth reaches capacity. */
+        void grow() {
+            int newCap = handlers.length * 2;
+            MezzeRecord[] h = new MezzeRecord[newCap];
+            com.mezze.language.typedast.Hash[] e = new com.mezze.language.typedast.Hash[newCap];
+            Object[] s = new Object[newCap];
+            Object[] ps = new Object[newCap];
+            System.arraycopy(handlers, 0, h, 0, handlers.length);
+            System.arraycopy(effectHashes, 0, e, 0, effectHashes.length);
+            System.arraycopy(scopes, 0, s, 0, scopes.length);
+            System.arraycopy(prevScopes, 0, ps, 0, prevScopes.length);
+            handlers = h;
+            effectHashes = e;
+            scopes = s;
+            prevScopes = ps;
+        }
     }
 
     private static final ThreadLocal<EffectState> STATE =
@@ -164,40 +193,194 @@ public final class HandlerChainRegistry {
     }
 
     // ----------------------------------------------------------------
-    // Per-thread handler chain — individual operations.
+    // Merged push/pop — handler chain + D8 handle in one flat array.
+    //
+    // Two variants: simple (no scope hooks — the common case for 13 of
+    // 19 stdlib effects) and scoped (with initialize_scope/finalize_scope).
+    // The simple path does NO scope work — zero overhead from scope hooks.
+    // ----------------------------------------------------------------
+
+    /**
+     * Simple push (non-scoped effects): handler + effectHash only.
+     * No scope hook check, no scope allocation. Used by BDSL
+     * PushHandlerChainSimple @Operation.
+     */
+    @TruffleBoundary
+    public static void pushSimple(
+            MezzeRecord handler,
+            com.mezze.language.typedast.Hash effectHash) {
+        EffectState s = STATE.get();
+        int d = s.depth;
+        if (d >= s.handlers.length) s.grow();
+        s.handlers[d] = handler;
+        s.effectHashes[d] = effectHash;
+        // scopes[d] and prevScopes[d] stay null — no scope hooks.
+        s.depth = d + 1;
+        s.bdslHandleDepth++;
+        invalidateAssumptions(effectHash);
+    }
+
+    /**
+     * Simple pop (non-scoped effects): just decrement depth and null
+     * the slot. No scope cleanup, no return value. Used by BDSL
+     * PopHandlerChainSimple @Operation.
+     */
+    @TruffleBoundary
+    public static void popSimple() {
+        EffectState s = STATE.get();
+        int d = s.depth - 1;
+        com.mezze.language.typedast.Hash effectHash = s.effectHashes[d];
+        s.handlers[d] = null;
+        s.effectHashes[d] = null;
+        s.depth = d;
+        s.bdslHandleDepth--;
+        invalidateAssumptions(effectHash);
+    }
+
+    /**
+     * Scoped push: handler + effectHash + scope hooks. Stores scope
+     * and prevScope for the paired popScoped() to run finalize_scope.
+     * Used by BDSL PushHandlerChainScoped @Operation.
+     */
+    @TruffleBoundary
+    public static void pushScoped(
+            MezzeRecord handler,
+            com.mezze.language.typedast.Hash effectHash,
+            Object scope, Object prevScope) {
+        EffectState s = STATE.get();
+        int d = s.depth;
+        if (d >= s.handlers.length) s.grow();
+        s.handlers[d] = handler;
+        s.effectHashes[d] = effectHash;
+        s.scopes[d] = scope;
+        s.prevScopes[d] = prevScope;
+        s.depth = d + 1;
+        s.bdslHandleDepth++;
+        invalidateAssumptions(effectHash);
+    }
+
+    /**
+     * Result of {@link #popScoped()} — carries the handler record, scope
+     * value, and previous scope that PopHandlerChainScoped needs.
+     * Only allocated for scoped effects (6 of 19 stdlib effects).
+     */
+    public static final class ScopedPopResult {
+        public final MezzeRecord handler;
+        public final Object scope;
+        public final Object prevScope;
+        ScopedPopResult(MezzeRecord handler, Object scope, Object prevScope) {
+            this.handler = handler;
+            this.scope = scope;
+            this.prevScope = prevScope;
+        }
+    }
+
+    /**
+     * Scoped pop: returns handler + scope data for finalize_scope
+     * invocation. Used by BDSL PopHandlerChainScoped @Operation.
+     */
+    @TruffleBoundary
+    public static ScopedPopResult popScoped() {
+        EffectState s = STATE.get();
+        int d = s.depth - 1;
+        MezzeRecord handler = s.handlers[d];
+        com.mezze.language.typedast.Hash effectHash = s.effectHashes[d];
+        Object scope = s.scopes[d];
+        Object prevScope = s.prevScopes[d];
+        s.handlers[d] = null;
+        s.effectHashes[d] = null;
+        s.scopes[d] = null;
+        s.prevScopes[d] = null;
+        s.depth = d;
+        s.bdslHandleDepth--;
+        invalidateAssumptions(effectHash);
+        return new ScopedPopResult(handler, scope, prevScope);
+    }
+
+    // ----------------------------------------------------------------
+    // Chain-only push/pop — for non-BDSL callers (MezzeSuspend.force,
+    // installHandlerChainEntries, tests, YieldDispatchTest).
+    // Does NOT increment bdslHandleDepth because there is no BDSL
+    // Handle catch boundary on these call paths.
     // ----------------------------------------------------------------
 
     @TruffleBoundary
     public static void pushHandlerOnChain(
-            com.mezze.interpreter.values.MezzeRecord handler,
+            MezzeRecord handler,
             com.mezze.language.typedast.Hash effectHash) {
-        STATE.get().handlerChain.push(new HandlerChainEntry(handler, effectHash));
-        invalidateAssumptions(effectHash);
+        pushChainOnly(handler, effectHash);
     }
 
     @TruffleBoundary
     public static void popHandlerOffChain() {
-        var chain = STATE.get().handlerChain;
-        com.mezze.language.typedast.Hash effectHash = null;
-        if (!chain.isEmpty()) {
-            HandlerChainEntry top = chain.peek();
-            if (top != null) effectHash = top.effectHash();
-        }
-        chain.pop();
+        popChainOnly();
+    }
+
+    /** Push handler on chain WITHOUT marking a BDSL Handle boundary. */
+    private static void pushChainOnly(
+            MezzeRecord handler,
+            com.mezze.language.typedast.Hash effectHash) {
+        EffectState s = STATE.get();
+        int d = s.depth;
+        if (d >= s.handlers.length) s.grow();
+        s.handlers[d] = handler;
+        s.effectHashes[d] = effectHash;
+        s.depth = d + 1;
+        invalidateAssumptions(effectHash);
+    }
+
+    /** Pop handler from chain WITHOUT decrementing bdslHandleDepth. */
+    private static void popChainOnly() {
+        EffectState s = STATE.get();
+        int d = s.depth - 1;
+        com.mezze.language.typedast.Hash effectHash = s.effectHashes[d];
+        s.handlers[d] = null;
+        s.effectHashes[d] = null;
+        s.depth = d;
         invalidateAssumptions(effectHash);
     }
 
     @TruffleBoundary
     public static int handlerChainDepth() {
-        return STATE.get().handlerChain.size();
+        return STATE.get().depth;
     }
 
     // ----------------------------------------------------------------
-    // D8 BDSL Handle depth — individual operations.
+    // Combined push/pop — backwards compat for any callers that used
+    // the old pushHandlerAndEnterHandle / popHandlerAndExitHandle API.
+    // Now simply delegates to pushScoped/popScoped (or pushSimple for
+    // the non-scoped case).
     // ----------------------------------------------------------------
 
-    /** Per-Handle scope-hook frame. Non-null only when the handler has an
-     *  initialize_scope hook. */
+    /**
+     * Combined push (legacy API — used by legacy PushHandlerChain).
+     * Delegates to pushScoped or pushSimple. Both increment bdslHandleDepth.
+     */
+    @TruffleBoundary
+    public static void pushHandlerAndEnterHandle(
+            MezzeRecord handler,
+            com.mezze.language.typedast.Hash effectHash,
+            Object scope, Object prevScope) {
+        if (scope != null || prevScope != null) {
+            pushScoped(handler, effectHash, scope, prevScope);
+        } else {
+            pushSimple(handler, effectHash);
+        }
+    }
+
+    /**
+     * Legacy PopResult — kept for any callers using the old API.
+     */
+    public static final class PopResult {
+        public final MezzeRecord handler;
+        public final BdslHandleFrame scopeFrame;
+        PopResult(MezzeRecord handler, BdslHandleFrame scopeFrame) {
+            this.handler = handler;
+            this.scopeFrame = scopeFrame;
+        }
+    }
+
+    /** Per-Handle scope-hook frame. Kept as legacy type for PopResult. */
     public static final class BdslHandleFrame {
         public final Object scope;
         public final Object prevScope;
@@ -207,189 +390,137 @@ public final class HandlerChainRegistry {
         }
     }
 
-    /** Sentinel pushed for handlers without scope hooks — avoids nullable
-     *  ArrayDeque entries. Identity-compared, never dereferenced. */
-    private static final BdslHandleFrame NO_SCOPE_FRAME = new BdslHandleFrame(null, null);
-
-    @TruffleBoundary
-    public static void enterBdslHandle() {
-        STATE.get().d8HandleStack.push(NO_SCOPE_FRAME);
-    }
-
-    @TruffleBoundary
-    public static void enterBdslHandleWithScope(Object scope, Object prevScope) {
-        STATE.get().d8HandleStack.push(
-            scope == null && prevScope == null ? NO_SCOPE_FRAME
-                : new BdslHandleFrame(scope, prevScope));
-    }
-
-    @TruffleBoundary
-    public static void exitBdslHandle() {
-        STATE.get().d8HandleStack.pop();
-    }
-
-    @TruffleBoundary
-    public static BdslHandleFrame peekBdslHandleScope() {
-        var s = STATE.get().d8HandleStack;
-        if (s.isEmpty()) return null;
-        BdslHandleFrame top = s.peek();
-        return top == NO_SCOPE_FRAME ? null : top;
-    }
-
-    @TruffleBoundary
-    public static com.mezze.interpreter.values.MezzeRecord peekTopHandlerRecord() {
-        var chain = STATE.get().handlerChain;
-        if (chain.isEmpty()) return null;
-        HandlerChainEntry entry = chain.peek();
-        return entry == null ? null : entry.handler();
-    }
-
-    @TruffleBoundary
-    public static boolean insideBdslHandle() {
-        return !STATE.get().d8HandleStack.isEmpty();
-    }
-
-    // ----------------------------------------------------------------
-    // Combined push/pop — single ThreadLocal.get() for both stacks.
-    //
-    // Called by BDSL PushHandlerChain / PopHandlerChain @Operations
-    // which always touch both handler chain and D8 handle stack.
-    // Saves one ThreadLocal.get() per push and ~3 per pop vs calling
-    // the individual methods.
-    // ----------------------------------------------------------------
-
     /**
-     * Combined push: handler chain entry + D8 handle scope frame in one
-     * ThreadLocal.get(). Used by BDSL PushHandlerChain @Operation.
-     */
-    @TruffleBoundary
-    public static void pushHandlerAndEnterHandle(
-            com.mezze.interpreter.values.MezzeRecord handler,
-            com.mezze.language.typedast.Hash effectHash,
-            Object scope, Object prevScope) {
-        EffectState s = STATE.get();
-        s.handlerChain.push(new HandlerChainEntry(handler, effectHash));
-        s.d8HandleStack.push(
-            scope == null && prevScope == null ? NO_SCOPE_FRAME
-                : new BdslHandleFrame(scope, prevScope));
-        invalidateAssumptions(effectHash);
-    }
-
-    /**
-     * Result of {@link #popHandlerAndExitHandle()} — carries the handler
-     * record and scope frame that PopHandlerChain needs for finalize_scope.
-     */
-    public static final class PopResult {
-        public final com.mezze.interpreter.values.MezzeRecord handler;
-        public final BdslHandleFrame scopeFrame;
-        PopResult(com.mezze.interpreter.values.MezzeRecord handler, BdslHandleFrame scopeFrame) {
-            this.handler = handler;
-            this.scopeFrame = scopeFrame;
-        }
-    }
-
-    /**
-     * Combined pop: peek both stacks (for finalize_scope), then pop both,
-     * invalidate assumption — all in one ThreadLocal.get(). Used by BDSL
-     * PopHandlerChain @Operation.
-     *
-     * @return handler + scope frame for finalize_scope invocation, or
-     *         null handler / null frame when the stack is empty or has
-     *         no scope hooks.
+     * Combined pop (legacy API). Translates to new stack format.
      */
     @TruffleBoundary
     public static PopResult popHandlerAndExitHandle() {
         EffectState s = STATE.get();
-        // Peek before pop — need handler for finalize_scope + effect hash
-        // for per-effect assumption invalidation.
-        var chain = s.handlerChain;
-        com.mezze.interpreter.values.MezzeRecord handler = null;
-        com.mezze.language.typedast.Hash effectHash = null;
-        if (!chain.isEmpty()) {
-            HandlerChainEntry entry = chain.peek();
-            if (entry != null) {
-                handler = entry.handler();
-                effectHash = entry.effectHash();
-            }
-        }
-        var d8 = s.d8HandleStack;
-        BdslHandleFrame frame = null;
-        if (!d8.isEmpty()) {
-            BdslHandleFrame top = d8.peek();
-            if (top != NO_SCOPE_FRAME) frame = top;
-        }
-        // Pop both.
-        chain.pop();
-        d8.pop();
+        int d = s.depth - 1;
+        MezzeRecord handler = s.handlers[d];
+        com.mezze.language.typedast.Hash effectHash = s.effectHashes[d];
+        Object scope = s.scopes[d];
+        Object prevScope = s.prevScopes[d];
+        s.handlers[d] = null;
+        s.effectHashes[d] = null;
+        s.scopes[d] = null;
+        s.prevScopes[d] = null;
+        s.depth = d;
+        s.bdslHandleDepth--;
         invalidateAssumptions(effectHash);
+        BdslHandleFrame frame = (scope != null || prevScope != null)
+            ? new BdslHandleFrame(scope, prevScope) : null;
         return new PopResult(handler, frame);
     }
 
-    // ----------------------------------------------------------------
-    // Chain truncation, snapshot, install.
-    // ----------------------------------------------------------------
-
+    /**
+     * Whether the current thread is inside a BDSL Handle boundary
+     * (i.e. a TryCatchOtherwise catch site exists on the call stack
+     * that will catch AbortPerformException). Distinguished from chain
+     * entries installed via installHandlerChainEntries on spawned tasks
+     * which have no catch site.
+     */
     @TruffleBoundary
-    public static void truncateHandlerChainTo(int depth) {
-        var chain = STATE.get().handlerChain;
-        while (chain.size() > depth) chain.pop();
+    public static boolean insideBdslHandle() {
+        return STATE.get().bdslHandleDepth > 0;
     }
 
-    private static final HandlerChainEntry[] EMPTY_ENTRY_CHAIN = new HandlerChainEntry[0];
-
-    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
-    public static HandlerChainEntry[] snapshotHandlerChainEntries() {
-        ArrayDeque<HandlerChainEntry> chain = STATE.get().handlerChain;
-        int size = chain.size();
-        if (size == 0) return EMPTY_ENTRY_CHAIN;
-        return chain.toArray(new HandlerChainEntry[size]);
-    }
+    // ----------------------------------------------------------------
+    // Chain lookup, truncation, snapshot, install.
+    // ----------------------------------------------------------------
 
     /**
      * Allocation-free lookup of the innermost handler whose effect-hash
      * matches {@code effectHash}, or {@code null} if none in scope.
      */
-    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
-    public static com.mezze.interpreter.values.MezzeRecord peekHandlerForEffect(
+    @TruffleBoundary
+    public static MezzeRecord peekHandlerForEffect(
             com.mezze.language.typedast.Hash effectHash) {
-        ArrayDeque<HandlerChainEntry> chain = STATE.get().handlerChain;
-        if (chain.isEmpty()) return null;
-        HandlerChainEntry head = chain.peek();
-        if (head != null) {
-            com.mezze.language.typedast.Hash eh = head.effectHash();
+        EffectState s = STATE.get();
+        // Walk from top of stack (innermost handler) outward.
+        for (int i = s.depth - 1; i >= 0; i--) {
+            com.mezze.language.typedast.Hash eh = s.effectHashes[i];
             if (eh != null && eh.equals(effectHash)) {
-                return head.handler();
-            }
-        }
-        for (HandlerChainEntry entry : chain) {
-            if (entry == head) continue;
-            com.mezze.language.typedast.Hash eh = entry.effectHash();
-            if (eh != null && eh.equals(effectHash)) {
-                return entry.handler();
+                return s.handlers[i];
             }
         }
         return null;
     }
 
     @TruffleBoundary
+    public static MezzeRecord peekTopHandlerRecord() {
+        EffectState s = STATE.get();
+        if (s.depth == 0) return null;
+        return s.handlers[s.depth - 1];
+    }
+
+    @TruffleBoundary
+    public static void truncateHandlerChainTo(int depth) {
+        EffectState s = STATE.get();
+        while (s.depth > depth) {
+            int d = s.depth - 1;
+            s.handlers[d] = null;
+            s.effectHashes[d] = null;
+            s.scopes[d] = null;
+            s.prevScopes[d] = null;
+            s.depth = d;
+        }
+    }
+
+    private static final HandlerChainEntry[] EMPTY_ENTRY_CHAIN = new HandlerChainEntry[0];
+
+    @TruffleBoundary
+    public static HandlerChainEntry[] snapshotHandlerChainEntries() {
+        EffectState s = STATE.get();
+        int size = s.depth;
+        if (size == 0) return EMPTY_ENTRY_CHAIN;
+        // Snapshot in innermost-first order (matches old ArrayDeque
+        // convention): snapshot[0] = innermost (top of stack),
+        // snapshot[size-1] = outermost (bottom of stack).
+        HandlerChainEntry[] snapshot = new HandlerChainEntry[size];
+        for (int i = 0; i < size; i++) {
+            snapshot[i] = new HandlerChainEntry(
+                s.handlers[size - 1 - i], s.effectHashes[size - 1 - i]);
+        }
+        return snapshot;
+    }
+
+    @TruffleBoundary
     public static void installHandlerChainEntries(HandlerChainEntry[] chain) {
-        ArrayDeque<HandlerChainEntry> stack = STATE.get().handlerChain;
+        // chain is innermost-first. Install in reverse so outermost
+        // goes at lower depth index, innermost at higher (top).
+        // Uses pushChainOnly — no bdslHandleDepth increment, since
+        // these are chain entries from a parent thread, not BDSL
+        // Handle catch boundaries on THIS thread.
         for (int i = chain.length - 1; i >= 0; i--) {
-            stack.push(chain[i]);
+            pushChainOnly(chain[i].handler(), chain[i].effectHash());
         }
     }
 
     @TruffleBoundary
     public static void clearHandlerChain() {
-        STATE.get().handlerChain.clear();
+        EffectState s = STATE.get();
+        for (int i = 0; i < s.depth; i++) {
+            s.handlers[i] = null;
+            s.effectHashes[i] = null;
+            s.scopes[i] = null;
+            s.prevScopes[i] = null;
+        }
+        s.depth = 0;
+        s.bdslHandleDepth = 0;
     }
 
     @TruffleBoundary
     public static void popHandlerChain(int count) {
         if (count <= 0) return;
-        ArrayDeque<HandlerChainEntry> stack = STATE.get().handlerChain;
-        for (int i = 0; i < count && !stack.isEmpty(); i++) {
-            stack.pop();
+        EffectState s = STATE.get();
+        for (int i = 0; i < count && s.depth > 0; i++) {
+            int d = s.depth - 1;
+            s.handlers[d] = null;
+            s.effectHashes[d] = null;
+            s.scopes[d] = null;
+            s.prevScopes[d] = null;
+            s.depth = d;
         }
     }
 

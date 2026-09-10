@@ -1651,12 +1651,19 @@ class TypedAstBuilder(
 
         val paramsExpr = handler.params?.let { buildExpr(it, file) }
 
+        // Detect scoped effects: performer has an initialize_scope op.
+        val resolvedDecl = implDecl ?: importedImpl
+        val isScoped = resolvedDecl?.operations?.any {
+            it.name == com.mezze.language.ast.ScopedEffectConstants.INITIALIZE_SCOPE
+        } ?: false
+
         return TypedHandlerRef(
             performerHash = performerHash,
             effectHash = effectHash,
             performerName = performerName,
             params = paramsExpr,
-            loc = loc
+            loc = loc,
+            isScoped = isScoped
         )
     }
 

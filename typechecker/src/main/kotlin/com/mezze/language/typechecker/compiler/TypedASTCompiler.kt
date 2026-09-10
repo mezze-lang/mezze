@@ -1307,7 +1307,7 @@ class TypedASTCompiler(
                 HandleIR(
                     compileExpr(expr.body),
                     expr.handlers.map { h ->
-                        HandlerBindIR(h.performerHash, h.effectHash, h.performerName, h.params?.let { compileExpr(it) })
+                        HandlerBindIR(h.performerHash, h.effectHash, h.performerName, h.params?.let { compileExpr(it) }, h.isScoped)
                     },
                     src,
                     staticallyFullyDischarges = expr.fullyDischarges

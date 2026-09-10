@@ -7178,16 +7178,25 @@ public final class BytecodeCompiler {
         }
         HandlerBindIR hb = handlers.get(idx);
         boolean isOutermost = idx == 0;
+        boolean isScoped = hb.isScoped();
         b.beginBlock();
         BytecodeLocal resultSlot = b.createLocal();
         b.beginTryCatchOtherwise(() -> {
-            // otherwise (normal exit): pop the chain (runs finalize_scope)
-            b.emitPopHandlerChain();
+            // otherwise (normal exit): pop the chain
+            if (isScoped) {
+                b.emitPopHandlerChainScoped();
+            } else {
+                b.emitPopHandlerChainSimple();
+            }
         });
         // === try branch ===
         b.beginBlock();
-        // Push handler on chain
-        b.beginPushHandlerChain(hb.getEffectHash());
+        // Push handler on chain — scoped vs simple
+        if (isScoped) {
+            b.beginPushHandlerChainScoped(hb.getEffectHash());
+        } else {
+            b.beginPushHandlerChainSimple(hb.getEffectHash());
+        }
         if (hb.getParams() != null) {
             b.beginLookupParameterizedHandlerByHash(hb.getHandlerHash());
             emitNode(hb.getParams(), b, argCount, localMap);
@@ -7195,7 +7204,11 @@ public final class BytecodeCompiler {
         } else {
             b.emitLookupHandlerByHash(hb.getHandlerHash());
         }
-        b.endPushHandlerChain();
+        if (isScoped) {
+            b.endPushHandlerChainScoped();
+        } else {
+            b.endPushHandlerChainSimple();
+        }
         // Body (recursing for next handler / final body). Path E (#336):
         // at the outermost Handle wrap body's result in AutoForceIfSuspended
         // so a lazy MezzeSuspend flowing out of body — e.g. from a
@@ -7224,7 +7237,11 @@ public final class BytecodeCompiler {
         // Parallel's per-scope ForkJoinPool. Pop first, then let Unwrap
         // decide whether to yield the abort value or rethrow.
         b.beginBlock();
-        b.emitPopHandlerChain();
+        if (isScoped) {
+            b.emitPopHandlerChainScoped();
+        } else {
+            b.emitPopHandlerChainSimple();
+        }
         b.beginStoreLocal(resultSlot);
         b.beginUnwrapAbortValue();
         b.emitLoadException();

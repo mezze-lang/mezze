@@ -268,7 +268,8 @@ data class TypedHandlerRef(
     val effectHash: Hash,
     val performerName: String,   // For runtime lookup (registered by EffectImplStorageNode)
     val params: TypedExpr?,
-    val loc: Loc
+    val loc: Loc,
+    val isScoped: Boolean = false
 )
 
 // TypedAbilityCall REMOVED — ability calls become TypedCall with BindingRef.ByHash.

@@ -460,7 +460,7 @@ sealed interface SinkIR {
     override val src: SourceInfo,
     val staticallyFullyDischarges: Boolean = false
 ) : NodeIR
-@Serializable data class HandlerBindIR(val handlerHash: Hash, val effectHash: Hash, val performerName: String, val params: NodeIR?)
+@Serializable data class HandlerBindIR(val handlerHash: Hash, val effectHash: Hash, val performerName: String, val params: NodeIR?, val isScoped: Boolean = false)
 /** Effect operation call — runtime dispatch via handler stack.
  *  Can't be CallDirect because the performer isn't known at compile time
  *  (different perform blocks can use different performers).
