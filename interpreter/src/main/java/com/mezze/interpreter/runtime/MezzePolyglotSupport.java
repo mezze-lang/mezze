@@ -2,7 +2,9 @@ package com.mezze.interpreter.runtime;
 
 import com.oracle.truffle.api.TruffleLanguage.Env;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import org.graalvm.polyglot.Value;
+import com.oracle.truffle.api.interop.InteropLibrary;
+import com.oracle.truffle.api.interop.UnknownIdentifierException;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
 
 import java.util.Set;
 
@@ -87,12 +89,49 @@ public final class MezzePolyglotSupport {
     }
 
     /**
-     * Get the bindings (global scope) of a guest language.
+     * Get the top-level bindings (global scope) of a guest language.
+     *
+     * The previous implementation returned {@code env.getPolyglotBindings()}
+     * for every language — that's the SHARED cross-language import/export
+     * scope, not the per-language globals.  We now evaluate a
+     * language-idiomatic expression that yields the language's top-level
+     * namespace, giving callers per-language {@code readMember}/{@code
+     * getMembers} access.
+     *
+     * The result is a TruffleObject whose members are the language's global
+     * bindings — readable via {@link InteropLibrary#readMember}.
      */
     @TruffleBoundary
     public Object getBindings(String languageId) {
         assertLanguageAvailable(languageId);
-        return env.getPolyglotBindings();
+        String globalsExpr = switch (languageId) {
+            case "python" -> "__import__('builtins').globals()";
+            case "js"     -> "globalThis";
+            case "ruby"   -> "self";
+            case "wasm"   -> "";  // wasm has no global namespace at this layer
+            default -> null;
+        };
+        if (globalsExpr == null) {
+            throw new MezzePolyglotException(
+                "No top-scope accessor for language: " + languageId);
+        }
+        return eval(languageId, globalsExpr);
+    }
+
+    /**
+     * Look up a single top-level binding by name in a guest language.
+     * Returns the value or throws {@link UnknownIdentifierException} if the
+     * name is not bound.
+     */
+    @TruffleBoundary
+    public Object getBinding(String languageId, String name)
+            throws UnknownIdentifierException, UnsupportedMessageException {
+        Object bindings = getBindings(languageId);
+        InteropLibrary lib = InteropLibrary.getUncached(bindings);
+        if (!lib.isMemberReadable(bindings, name)) {
+            throw UnknownIdentifierException.create(name);
+        }
+        return lib.readMember(bindings, name);
     }
 
     private void assertLanguageAvailable(String languageId) {
