@@ -1166,11 +1166,34 @@ class ConstraintGenerator(
         val functionAbilityConstraints = abilityConstraints.mapNotNull { constraint ->
             val solvedTypeVar = substitution.apply(MezzeType.VarType(constraint.typeVar))
 
-            if (solvedTypeVar is MezzeType.VarType) {
-                val matchingTypeVar = typeVars.find { it.name == solvedTypeVar.variable.name }
+            // The constraint's primary/receiver var (`constraint.typeVar`) is the one
+            // to attach the obligation to — but for a class-param ability like
+            // `NumAdd 'r for 'l` inferred from `{x}->x+N`, the receiver `'l` may have
+            // resolved to a CONCRETE type (the `+N` fixes it) while the FREE quantifiable
+            // var that IS this fn's param sits in `typeArgs` (the class-arg `'r`). When
+            // the receiver solved concrete, fall back to the first class-arg var that is
+            // one of THIS fn's own param vars — so a constrained fn passed through a HOF
+            // (`wrap {f = addTen}`) still attaches `with NumAdd Int 'a` to the HOF's
+            // param/result instead of silently dropping it. We match the fallback by
+            // IDENTITY (id) against `typeVars`, never by name, and only pick a var that
+            // is genuinely one of this fn's params (so we never invent a bogus obligation).
+            val attachVar: TypeVar? =
+                if (solvedTypeVar is MezzeType.VarType) {
+                    typeVars.find { it.name == solvedTypeVar.variable.name }
+                } else {
+                    // Receiver resolved concrete — anchor on a param var carried in the
+                    // class-args (keeps the fn polymorphic; that var stays free).
+                    constraint.typeArgs.firstNotNullOfOrNull { arg ->
+                        val a = substitution.apply(arg)
+                        (a as? MezzeType.VarType)?.variable?.let { v -> typeVars.find { it.id == v.id } }
+                    }
+                }
+
+            if (attachVar != null) {
+                val matchingTypeVar = attachVar
 
                 val constraintResolvedHash = constraint.abilityHash ?: registry.resolveAbilityHash(constraint.abilityName)
-                if (matchingTypeVar != null && !WellKnownHashConstants.isInspect(constraintResolvedHash)) {
+                if (!WellKnownHashConstants.isInspect(constraintResolvedHash)) {
                     // Carry the FULL type-arg tuple: primary (the matched var) plus
                     // the constraint's extra ability args, substituted. Hardcoding a
                     // single arg dropped the extras for a multi-param ability, which
@@ -1183,10 +1206,22 @@ class ConstraintGenerator(
                     // associatedTypes, so the with-clause renders + unifies.
                     val bindings = resolvedAssociatedBindings[constraint.abilityName to constraint.typeVar.id]
                         ?: emptyMap()
+                    // Normal path: the matched var IS the receiver, so it leads the tuple
+                    // (receiver + class-args). Fallback path (receiver resolved concrete,
+                    // matched var came from the class-args): the tuple is the SOLVED
+                    // receiver followed by the substituted class-args — prepending the
+                    // matched (class-arg) var would drop the concrete receiver (`Int`) and
+                    // print `NumAdd 'a 'a`. So use the solved receiver as the lead.
+                    val leadArgs: List<MezzeType> =
+                        if (solvedTypeVar is MezzeType.VarType) {
+                            listOf(MezzeType.VarType(matchingTypeVar)) +
+                                constraint.typeArgs.map { substitution.apply(it) }
+                        } else {
+                            listOf(solvedTypeVar) + constraint.typeArgs.map { substitution.apply(it) }
+                        }
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = listOf(MezzeType.VarType(matchingTypeVar)) +
-                            constraint.typeArgs.map { substitution.apply(it) },
+                        typeArgs = leadArgs,
                         associatedTypeBindings = bindings,
                         abilityHash = constraint.abilityHash
                     )
