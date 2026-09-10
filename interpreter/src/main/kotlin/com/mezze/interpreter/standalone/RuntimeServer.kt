@@ -261,7 +261,15 @@ object RuntimeServer {
         }
         val engine = engineBuilder.build()
 
-        val context = Context.newBuilder(MezzeLanguage.ID)
+        // Polyglot: enable GraalPy under an env flag. Same rationale as
+        // EmbeddedExec — opt-in because loading `python` adds cost every
+        // non-polyglot program would pay. MEZZE_ENABLE_PYTHON=1 flips it
+        // on; MEZZE_PYTHON_PATH points at a venv site-packages.
+        val enablePython = System.getenv("MEZZE_ENABLE_PYTHON") == "1"
+        val pythonPath = System.getenv("MEZZE_PYTHON_PATH")
+
+        val languageIds = if (enablePython) arrayOf(MezzeLanguage.ID, "python") else arrayOf(MezzeLanguage.ID)
+        val contextBuilder = Context.newBuilder(*languageIds)
             .engine(engine)
             .allowAllAccess(true)
             .allowCreateThread(true)
@@ -273,7 +281,15 @@ object RuntimeServer {
             // inherited fd 2 (parent's terminal); avoids wire frames for
             // dev-tool startup banners.
             .out(wireOut)
-            .build()
+        if (enablePython) {
+            contextBuilder
+                .option("python.PosixModuleBackend", "java")
+                .option("python.WarnExperimentalFeatures", "false")
+            if (!pythonPath.isNullOrBlank()) {
+                contextBuilder.option("python.PythonPath", pythonPath)
+            }
+        }
+        val context = contextBuilder.build()
 
         val state = ServerState(context, engine, runIdCarrier, jitEnabled)
 

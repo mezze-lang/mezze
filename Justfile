@@ -38,15 +38,20 @@ default:
 # ============================================================
 
 # Build the mez CLI → cli/build/install/mez/bin/mez
+# Also refresh ~/.mezze/lib/mezze-runtime.jar: the launcher searches
+# there FIRST when spawning JVM children (mez dev / mez exec), so
+# without this step a fresh dev build is shadowed by whatever
+# runtime jar the previous `installNative` (or `mez` install) left
+# behind — dev changes silently don't take effect.
 [group('mez')]
 build:
-    ./gradlew :cli:installDist
+    ./gradlew :cli:installDist :cli:installRuntime
     @echo "→ {{mez}}"
 
 # internal: build the CLI only if the launcher is missing
 [private]
 _mez:
-    @[ -x {{mez}} ] || ./gradlew :cli:installDist
+    @[ -x {{mez}} ] || ./gradlew :cli:installDist :cli:installRuntime
 
 # Run mez with any args:  just mez init hello   ·   just mez exec app.mz
 [group('mez')]
@@ -171,12 +176,45 @@ test-class module pattern:
     @mkdir -p logs
     ./gradlew :{{module}}:test --no-daemon --tests '{{pattern}}' 2>&1 | tee logs/{{module}}-{{pattern}}.log
 
-# Run the polyglot numpy demo (Mezze x numpy).  Requires numpy in a
-# GraalPy venv on the classpath — see examples/polyglot_numpy/README.md
-# for setup.  Uses `mez exec` under the JVM (native binaries have no
-# polyglot).
+# Install numpy 1.26.4 into the GraalPy venv (idempotent). The venv
+# itself must already exist at interpreter/build/graalpy-venv/venv/
+# — historically the org.graalvm.python Gradle plugin creates it,
+# but the plugin's default parallel Meson build OOMs numpy's AVX2
+# dispatch step. `-j1` caps compile jobs to one; the build takes
+# ~25 min but succeeds. pip is a no-op when numpy is already
+# installed, so re-running this recipe is safe.
+#
+# If the venv is missing, follow the manual bootstrap in
+# examples/polyglot_numpy/README.md.
+[group('mez')]
+polyglot-setup-python:
+    @mkdir -p logs
+    @if [ ! -x interpreter/build/graalpy-venv/venv/bin/graalpy ]; then \
+        echo "ERROR: GraalPy venv missing at interpreter/build/graalpy-venv/venv/"; \
+        echo "       See examples/polyglot_numpy/README.md for the bootstrap steps."; \
+        exit 1; \
+    fi
+    interpreter/build/graalpy-venv/venv/bin/graalpy -m pip install \
+        --no-cache-dir \
+        --config-settings=setup-args=-Dblas=none \
+        --config-settings=setup-args=-Dlapack=none \
+        --config-settings=compile-args=-j1 \
+        'numpy==1.26.4' 2>&1 | tee logs/polyglot-setup.log | tail -n 20
+
+# Run the polyglot numpy demo (Mezze x numpy). Requires numpy in a
+# GraalPy venv on the classpath — bootstrap it with
+# `just polyglot-setup-python`. Uses `mez exec` under the JVM
+# (native binaries have no polyglot at this layer).
+#
+# Wiring: MEZZE_ENABLE_PYTHON=1 flips the runtime Context builder to
+# include "python", and MEZZE_PYTHON_PATH points GraalPy at the venv
+# so `import numpy` resolves. This is the ONLY thing the runtime
+# needs — the demo itself is pure Mezze on top of the generic
+# std::polyglot::core surface.
 [group('mez')]
 mez-run-numpy-demo: _mez
+    MEZZE_ENABLE_PYTHON=1 \
+    MEZZE_PYTHON_PATH="{{justfile_directory()}}/interpreter/build/graalpy-venv/venv/lib/python3.12/site-packages" \
     {{mez}} exec examples/polyglot_numpy/src/app.mz
 
 # ============================================================

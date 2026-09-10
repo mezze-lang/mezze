@@ -37,7 +37,7 @@ class NumpyInteropTest {
 
     @BeforeAll
     fun probeNumpy() {
-        val probe = MezzeTestHelper.run(
+        val probe = MezzeTestHelper.runWithPythonIsolate(
             """
             use std::polyglot::core::{ create_context, close_context }
             use std::polyglot::python::{ python_eval }
@@ -64,7 +64,13 @@ class NumpyInteropTest {
         assumeTrue(numpyAvailable, "numpy not installed in GraalPy venv")
     }
 
-    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+    // Each numpy test loads a fresh GraalPy context via
+    // `runWithPythonIsolate` — GraalPy's `python.IsolateNativeModules`
+    // is enabled so `_multiarray_umath.so` can be loaded from more
+    // than one Context in the same JVM. Uses a dedicated Engine (not
+    // the shared one) so the isolate's classloader can't leak into
+    // Mezze-bytecode reflection lookups in other tests.
+    private fun eval(source: String): Any = MezzeTestHelper.runWithPythonIsolate(source)
 
     private fun assertOk(result: Any?): MezzeVariant {
         assertTrue(result is MezzeVariant, "Expected MezzeVariant, got $result")
@@ -111,12 +117,16 @@ class NumpyInteropTest {
 
     @Test
     fun `numpy array mean of 1 2 3 is 2`() {
+        // numpy `.mean()` returns a numpy.float64 scalar, which
+        // InteropLibrary.asDouble() does NOT accept — wrap in Python
+        // float(...) so a native Python float crosses the boundary.
+        // Same pattern the sum/std tests below already use.
         val result = eval(
             """
             use std::polyglot::core::{ create_context, close_context }
             use std::polyglot::python::{ python_eval }
             let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "__import__('numpy').array([1.0, 2.0, 3.0]).mean()" }
+            let r = python_eval { context = ctx, source = "float(__import__('numpy').array([1.0, 2.0, 3.0]).mean())" }
             let _ = close_context { it = ctx }
             match r is
               Ok { val = m } -> m.as_float{}
@@ -220,6 +230,9 @@ class NumpyInteropTest {
     fun `numpy array mean via invoke_member on module`() {
         // Import numpy, get .array, execute it with a python list, then
         // invoke .mean() — end-to-end via the Foreign surface only.
+        // The `.mean()` result is a numpy.float64 scalar (see the note
+        // on `mean of 1 2 3 is 2`); chain `.item()` on the Foreign
+        // surface to get a native Python float back before `.as_float{}`.
         val result = eval(
             """
             use std::polyglot::core::{ create_context, close_context }
@@ -237,7 +250,10 @@ class NumpyInteropTest {
                         match ctor.execute { args = [lst] } is
                           Ok { val = arr } ->
                             match arr.invoke_member { name = "mean", args = [] } is
-                              Ok { val = m } -> m.as_float{}
+                              Ok { val = m } ->
+                                match m.invoke_member { name = "item", args = [] } is
+                                  Ok { val = p } -> p.as_float{}
+                                  Err { error } -> Err { error = error }
                               Err { error } -> Err { error = error }
                           Err { error } -> Err { error = error }
                       Err { error } -> Err { error = error }

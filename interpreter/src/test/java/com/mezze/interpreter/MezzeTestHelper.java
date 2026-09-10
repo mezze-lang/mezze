@@ -78,7 +78,37 @@ public final class MezzeTestHelper {
         return runWith(sourceCode, null, jitEngine);
     }
 
+    /**
+     * Execute with GraalPy's `python.IsolateNativeModules` set to true.
+     * Needed for tests that load a Python C-extension (numpy, etc.) from
+     * more than one Context in the same process — without isolation the
+     * second load fails with "a second GraalPy context attempted to load
+     * a native module ...".
+     *
+     * Runs on a dedicated fresh Engine (not the shared one) so the
+     * isolate's classloader cannot leak into other tests' Mezze
+     * bytecode reflection lookups.
+     */
+    public static Object runWithPythonIsolate(String sourceCode) {
+        // Fresh Engine per call — safe because the isolate must not
+        // survive into shared-engine tests.
+        Engine engine = Engine.newBuilder()
+            .allowExperimentalOptions(true)
+            .option("engine.WarnInterpreterOnly", "false")
+            .option("engine.Compilation", "false")
+            .build();
+        try {
+            return runWith(sourceCode, null, engine, true);
+        } finally {
+            try { engine.close(); } catch (Exception ignored) {}
+        }
+    }
+
     private static Object runWith(String sourceCode, Path projectRoot, Engine engine) {
+        return runWith(sourceCode, projectRoot, engine, false);
+    }
+
+    private static Object runWith(String sourceCode, Path projectRoot, Engine engine, boolean pythonIsolate) {
         Path root = projectRoot != null
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));
@@ -102,6 +132,9 @@ public final class MezzeTestHelper {
                 .allowExperimentalOptions(true)
                 .option("python.PosixModuleBackend", "java")
                 .option("python.WarnExperimentalFeatures", "false");
+        if (pythonIsolate) {
+            builder.option("python.IsolateNativeModules", "true");
+        }
 
         // If the org.graalvm.python plugin populated the venv, wire its
         // site-packages onto PythonPath so `import numpy` succeeds.  The

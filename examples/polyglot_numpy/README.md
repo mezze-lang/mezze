@@ -7,22 +7,40 @@ No numpy-specific glue in the Mezze runtime — just the generic
 
 ## Prerequisites — install numpy into a GraalPy venv
 
-GraalPy 25.0.3 does not include numpy out of the box. numpy also
-cannot be built from source under GraalPy today (the Meson AVX2
-loop-generation pass fails). Install a prebuilt patched wheel via
-the GraalPy patch repo:
+GraalPy 25.0.3 does not ship numpy out of the box. numpy's Meson
+build spawns a JVM per compilation task; the default parallel (-j)
+setting exhausts memory during the AVX2 dispatch header generation
+and the build is OOM-killed. Force the compile jobs to 1 and the
+build takes ~25 minutes but succeeds — GraalPy's own patched
+`numpy 1.26.4` sdist is applied automatically:
 
 ```
-# From the interpreter build tree, or your own venv:
-$JAVA_HOME/bin/graalpy -m venv /path/to/venv
-/path/to/venv/bin/graalpy -m ensurepip
-/path/to/venv/bin/graalpy -m pip install 'numpy==1.26.4'
-# then export or hand -Dpython.PythonPath=/path/to/venv/lib/python3.12/site-packages
+just polyglot-setup-python
 ```
 
-The MezzeTestHelper auto-wires `python.PythonPath` to
+That recipe expands to (from an initialised GraalPy launcher):
+
+```
+interpreter/build/graalpy-venv/venv/bin/graalpy -m pip install \
+    --no-cache-dir \
+    --config-settings=setup-args=-Dblas=none \
+    --config-settings=setup-args=-Dlapack=none \
+    --config-settings=compile-args=-j1 \
+    'numpy==1.26.4'
+```
+
+`--config-settings=compile-args=-j1` is the key flag — it caps
+Meson/ninja to a single compile job, which keeps peak memory well
+under the ~27 GB machine limit. The BLAS/LAPACK opt-outs skip a
+few third-party checks that GraalPy doesn't need.
+
+The `MezzeTestHelper.runWithPythonIsolate` helper auto-wires
+`python.PythonPath` to
 `interpreter/build/graalpy-venv/venv/lib/python3.12/site-packages`
-when that path exists, so `NumpyInteropTest` picks it up.
+when that path exists, so `NumpyInteropTest` picks it up. It also
+enables `python.IsolateNativeModules` so numpy's
+`_multiarray_umath.so` can be loaded from more than one Context in
+the same JVM.
 
 ## Run
 

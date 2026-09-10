@@ -92,15 +92,26 @@ dependencies {
     // DSL-JSON - high performance JSON library (byte-level, no reflection, GraalVM native-image compatible)
     implementation("com.dslplatform:dsl-json:2.0.2")
 
+    // GraalPy — polyglot Python. Depend on the concrete jars, NOT the
+    // aggregating `org.graalvm.polyglot:python` POM: shadowJar cannot
+    // expand a POM artifact and fails with "Cannot expand ZIP ...pom".
+    // `runtimeOnly` because :interpreter never references GraalPy classes
+    // by symbol — everything goes through the generic polyglot API
+    // (Env.parsePublic, Context.eval on "python"). Having them on the
+    // runtime classpath is what lets the shadowJar bundle GraalPy into
+    // mezze-runtime.jar so `mez exec` can enable the "python" language
+    // when MEZZE_ENABLE_PYTHON=1.
+    runtimeOnly("org.graalvm.python:python-language:25.0.3")
+    runtimeOnly("org.graalvm.python:python-resources:25.0.3")
+    runtimeOnly("org.graalvm.python:python-launcher:25.0.3")
+
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation(project(":parser"))
     testImplementation(project(":typechecker"))
 
-    // GraalPy — polyglot Python for interop tests.  The `python` POM
-    // aggregates the language runtime + stdlib resources.  `python-embedding`
-    // gives us `GraalPyResources` and venv helpers used by the numpy demo.
-    testImplementation("org.graalvm.polyglot:python:25.0.3")
+    // python-embedding — GraalPyResources + venv helpers used by the
+    // NumpyInteropTest harness. Tests only; not needed at runtime.
     testImplementation("org.graalvm.python:python-embedding:25.0.3")
 }
 
@@ -278,9 +289,23 @@ val runtimeShadowJar = tasks.register<com.github.jengelman.gradle.plugins.shadow
         exclude(dependency("org.xerial:sqlite-jdbc"))
     }
 
-    // Don't merge service files; just include them — each contributor's
-    // META-INF/services entries should land verbatim.
+    // Truffle discovers languages/instruments via ServiceLoader —
+    // META-INF/services/com.oracle.truffle.api.provider.TruffleLanguageProvider
+    // lists every language impl. Every contributing jar (mezze,
+    // python-language, regex, nfi, ...) ships its own copy of that
+    // file; the runtime jar has to contain every line, or the language
+    // never registers and Context.newBuilder(...,"python") fails at
+    // runtime with "Could not find option with name python.PythonPath".
+    //
+    // Two knobs are needed together. mergeServiceFiles() installs the
+    // transformer that concatenates copies from configuration deps.
+    // duplicatesStrategy = INCLUDE stops Gradle's default Copy
+    // machinery from silently dropping duplicates before the
+    // transformer sees them — the annotation-processor output of
+    // :interpreter and python-language.jar both write the same path,
+    // and INCLUDE is what lets both reach the merge.
     mergeServiceFiles()
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
 
     // Exclude module-info.class so the merged fat-jar doesn't claim to be
     // a module (would conflict on the classpath).
