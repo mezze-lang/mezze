@@ -5,6 +5,7 @@ import com.mezze.interpreter.values.MezzeRecord.FieldLocation;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -21,6 +22,10 @@ public final class ShapeCache {
 
     private static final ConcurrentHashMap<ShapeKey, Shape> CACHE = new ConcurrentHashMap<>();
 
+    // Fast-path cache for the all-objects case (the most common).
+    // Keyed on field names alone — avoids allocating FieldLocation[] + ShapeKey on hits.
+    private static final ConcurrentHashMap<List<String>, Shape> ALL_OBJECTS_CACHE = new ConcurrentHashMap<>();
+
     private ShapeCache() {}
 
     /**
@@ -36,14 +41,23 @@ public final class ShapeCache {
     /**
      * Get or create a Shape where all fields use OBJECT storage.
      * This is the most common case for dynamic records.
+     *
+     * Uses a separate fast-path cache keyed on field names alone,
+     * avoiding the FieldLocation[] + ShapeKey allocation on cache hits.
      */
     @TruffleBoundary
     public static Shape getOrCreateAllObjects(String[] fieldNames) {
+        List<String> nameKey = Arrays.asList(fieldNames);
+        Shape cached = ALL_OBJECTS_CACHE.get(nameKey);
+        if (cached != null) return cached;
+        // Miss — build FieldLocation[] and delegate to full cache
         FieldLocation[] locations = new FieldLocation[fieldNames.length];
         for (int i = 0; i < fieldNames.length; i++) {
             locations[i] = new FieldLocation(FieldLocation.StorageType.OBJECT, i);
         }
-        return getOrCreate(fieldNames, locations);
+        Shape shape = getOrCreate(fieldNames, locations);
+        ALL_OBJECTS_CACHE.putIfAbsent(nameKey, shape);
+        return shape;
     }
 
     /**
@@ -106,6 +120,7 @@ public final class ShapeCache {
     @TruffleBoundary
     public static void clear() {
         CACHE.clear();
+        ALL_OBJECTS_CACHE.clear();
     }
 
     /**

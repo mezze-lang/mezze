@@ -24,27 +24,39 @@ public final class DoubleSeqStorage implements SeqStorage {
     @CompilationFinal
     private final int length;
 
+    private final int offset;
+
     private final Object[] ownerToken;
 
     public DoubleSeqStorage(double[] data) {
         this.data = data;
         this.length = data.length;
+        this.offset = 0;
         this.ownerToken = null;
     }
 
     private DoubleSeqStorage(double[] data, int length, Object[] ownerToken) {
         this.data = data;
         this.length = length;
+        this.offset = 0;
         this.ownerToken = ownerToken;
     }
 
+    /** Zero-copy slice view: shares the parent's backing array. */
+    private DoubleSeqStorage(double[] data, int offset, int length) {
+        this.data = data;
+        this.offset = offset;
+        this.length = length;
+        this.ownerToken = null;
+    }
+
     private boolean isOwner() {
-        return ownerToken != null && ownerToken[0] == this;
+        return offset == 0 && ownerToken != null && ownerToken[0] == this;
     }
 
     private double[] trimmedData() {
-        if (length == data.length) return data;
-        return Arrays.copyOf(data, length);
+        if (offset == 0 && length == data.length) return data;
+        return Arrays.copyOfRange(data, offset, offset + length);
     }
 
     @Override
@@ -61,7 +73,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Unboxed access - no boxing overhead.
      */
     public double getDouble(int index) {
-        return data[index];
+        return data[offset + index];
     }
 
     @Override
@@ -76,7 +88,8 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Unboxed update.
      */
     public DoubleSeqStorage updateDouble(int index, double value) {
-        double[] newData = Arrays.copyOf(data, length);
+        double[] newData = new double[length];
+        System.arraycopy(data, offset, newData, 0, length);
         newData[index] = value;
         return new DoubleSeqStorage(newData);
     }
@@ -101,7 +114,7 @@ public final class DoubleSeqStorage implements SeqStorage {
         }
         int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
         double[] newData = new double[newCapacity];
-        System.arraycopy(data, 0, newData, 0, length);
+        System.arraycopy(data, offset, newData, 0, length);
         newData[length] = value;
         Object[] token = new Object[1];
         var result = new DoubleSeqStorage(newData, length + 1, token);
@@ -123,7 +136,7 @@ public final class DoubleSeqStorage implements SeqStorage {
     public DoubleSeqStorage prependDouble(double value) {
         double[] newData = new double[length + 1];
         newData[0] = value;
-        System.arraycopy(data, 0, newData, 1, length);
+        System.arraycopy(data, offset, newData, 1, length);
         return new DoubleSeqStorage(newData);
     }
 
@@ -138,7 +151,8 @@ public final class DoubleSeqStorage implements SeqStorage {
         if (start == 0 && end == length) {
             return this;
         }
-        return new DoubleSeqStorage(Arrays.copyOfRange(data, start, end));
+        // Zero-copy view over the same backing array.
+        return new DoubleSeqStorage(data, offset + start, end - start);
     }
 
     @Override
@@ -153,13 +167,30 @@ public final class DoubleSeqStorage implements SeqStorage {
     }
 
     /**
-     * Concat two double storages - stays unboxed.
+     * Concat two double storages — stays unboxed.
+     * COW-owner fast path avoids fresh allocation when spare capacity suffices.
      */
     public DoubleSeqStorage concatDouble(DoubleSeqStorage other) {
-        double[] newData = new double[length + other.length];
-        System.arraycopy(data, 0, newData, 0, length);
-        System.arraycopy(other.data, 0, newData, length, other.length);
-        return new DoubleSeqStorage(newData);
+        int otherLen = other.length;
+
+        // COW-owner fast path: copy right into spare capacity
+        if (isOwner() && length + otherLen <= data.length) {
+            System.arraycopy(other.data, other.offset, data, length, otherLen);
+            var result = new DoubleSeqStorage(data, length + otherLen, ownerToken);
+            ownerToken[0] = result;
+            return result;
+        }
+
+        // Allocate with spare capacity for future appends/concats (1.5x + 4)
+        int total = length + otherLen;
+        int newCapacity = Math.max(total, total + (total >> 1) + 4);
+        double[] newData = new double[newCapacity];
+        System.arraycopy(data, offset, newData, 0, length);
+        System.arraycopy(other.data, other.offset, newData, length, otherLen);
+        Object[] token = new Object[1];
+        var result = new DoubleSeqStorage(newData, total, token);
+        token[0] = result;
+        return result;
     }
 
     @Override
@@ -190,7 +221,7 @@ public final class DoubleSeqStorage implements SeqStorage {
     public double sumSmall(int knownSize) {
         double result = 0.0;
         for (int i = 0; i < knownSize; i++) {
-            result += data[i];
+            result += data[offset + i];
         }
         return result;
     }
@@ -266,7 +297,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      */
     public int indexOf(double value) {
         for (int i = 0; i < length; i++) {
-            if (data[i] == value) {
+            if (data[offset + i] == value) {
                 return i;
             }
         }
@@ -279,7 +310,7 @@ public final class DoubleSeqStorage implements SeqStorage {
     @ExplodeLoop
     public int indexOfSmall(double value, int knownSize) {
         for (int i = 0; i < knownSize; i++) {
-            if (data[i] == value) {
+            if (data[offset + i] == value) {
                 return i;
             }
         }
@@ -300,7 +331,7 @@ public final class DoubleSeqStorage implements SeqStorage {
     public DoubleSeqStorage reverse() {
         double[] newData = new double[length];
         for (int i = 0; i < length; i++) {
-            newData[i] = data[length - 1 - i];
+            newData[i] = data[offset + length - 1 - i];
         }
         return new DoubleSeqStorage(newData);
     }
@@ -309,7 +340,8 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Sort in ascending order.
      */
     public DoubleSeqStorage sort() {
-        double[] newData = Arrays.copyOf(data, length);
+        double[] newData = new double[length];
+        System.arraycopy(data, offset, newData, 0, length);
         Arrays.sort(newData);
         return new DoubleSeqStorage(newData);
     }
@@ -320,7 +352,7 @@ public final class DoubleSeqStorage implements SeqStorage {
     private ObjectSeqStorage transitionToObject() {
         Object[] objects = new Object[length];
         for (int i = 0; i < length; i++) {
-            objects[i] = data[i];
+            objects[i] = data[offset + i];
         }
         return new ObjectSeqStorage(objects);
     }
@@ -349,7 +381,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Used by to_mut to get a fresh copy that can be mutated.
      */
     public DoubleSeqStorage copyToMutable() {
-        return new DoubleSeqStorage(Arrays.copyOf(data, length));
+        return new DoubleSeqStorage(Arrays.copyOfRange(data, offset, offset + length));
     }
 
     /**
@@ -357,7 +389,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutSet(int index, double value) {
-        data[index] = value;
+        data[offset + index] = value;
     }
 
     /**
@@ -365,9 +397,9 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutSwap(int i, int j) {
-        double tmp = data[i];
-        data[i] = data[j];
-        data[j] = tmp;
+        double tmp = data[offset + i];
+        data[offset + i] = data[offset + j];
+        data[offset + j] = tmp;
     }
 
     /**
@@ -375,7 +407,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutIncr(int index, double delta) {
-        data[index] += delta;
+        data[offset + index] += delta;
     }
 
     /**
@@ -383,7 +415,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutSort() {
-        Arrays.sort(data, 0, length);
+        Arrays.sort(data, offset, offset + length);
     }
 
     /**
@@ -391,8 +423,8 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutReverse() {
-        int left = 0;
-        int right = length - 1;
+        int left = offset;
+        int right = offset + length - 1;
         while (left < right) {
             double tmp = data[left];
             data[left] = data[right];
@@ -407,7 +439,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutFill(double value) {
-        Arrays.fill(data, 0, length, value);
+        Arrays.fill(data, offset, offset + length, value);
     }
 
     /**
@@ -415,6 +447,6 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutFillRange(int start, int end, double value) {
-        Arrays.fill(data, start, end, value);
+        Arrays.fill(data, offset + start, offset + end, value);
     }
 }

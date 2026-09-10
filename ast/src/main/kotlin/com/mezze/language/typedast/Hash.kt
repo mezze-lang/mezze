@@ -23,11 +23,26 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class Hash(val hex: String) {
+    // Pre-computed hash for O(1) fast-reject in equals() — avoids
+    // 128-char String.equals() when hashes differ (the common case
+    // in handler chain linear scans).
+    @Transient
+    private val cachedHash: Int = hex.hashCode()
+
     init {
         require(hex.isNotEmpty()) { "Hash must not be empty" }
         require(hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' || it == '#' }) {
             "Hash must be hex, got: ${hex.take(20)}"
         }
+    }
+
+    override fun hashCode(): Int = cachedHash
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is Hash) return false
+        // Fast-reject on pre-computed hash before touching the 128-char string
+        return cachedHash == other.cachedHash && hex == other.hex
     }
 
     override fun toString(): String = hex.take(8) + "..."

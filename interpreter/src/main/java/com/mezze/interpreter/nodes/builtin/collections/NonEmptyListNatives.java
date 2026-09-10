@@ -181,24 +181,22 @@ public final class NonEmptyListNatives {
         return new MezzeNonEmptyList(result);
     }
 
-    @TruffleBoundary
     public static MezzeNonEmptyList map(MezzeNonEmptyList list, MezzeFunction mapper,
                                                                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(mapper, "x");
         Object[] result = new Object[list.size()];
         for (int i = 0; i < list.size(); i++) {
-            result[i] = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, list.get(i)));
+            result[i] = ctx.call1(callNode, list.get(i));
         }
         return new MezzeNonEmptyList(result);
     }
 
-    @TruffleBoundary
     public static MezzeNonEmptyList flatMap(MezzeNonEmptyList list, MezzeFunction mapper,
                                                                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(mapper, "x");
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
         for (int i = 0; i < list.size(); i++) {
-            Object mapped = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, list.get(i)));
+            Object mapped = ctx.call1(callNode, list.get(i));
             if (mapped instanceof MezzeNonEmptyList nel) {
                 for (int j = 0; j < nel.size(); j++) {
                     result.add(nel.get(j));
@@ -206,43 +204,37 @@ public final class NonEmptyListNatives {
             }
         }
         if (result.isEmpty()) {
-            // Internal invariant: flatMap's f returns a NonEmptyList (non-empty
-            // by construction), so the flattened result is always non-empty.
-            // Reaching here means a runtime bug, not a valid program input.
             throw new IllegalStateException("[internal] flatMap on NonEmptyList produced an empty result — invariant violated");
         }
         return new MezzeNonEmptyList(result.toArray());
     }
 
-    @TruffleBoundary
     public static Object foldLeft(MezzeNonEmptyList list, Object init, MezzeFunction folder,
                                                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare2(folder, "acc", "x");
         Object acc = init;
         for (int i = 0; i < list.size(); i++) {
-            acc = callNode.call(folder.getCallTarget(),
-                prepareArgsTwo(folder, acc, list.get(i)));
+            acc = ctx.call2(callNode, acc, list.get(i));
         }
         return acc;
     }
 
-    @TruffleBoundary
     public static Object foldRight(MezzeNonEmptyList list, Object init, MezzeFunction folder,
                                                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare2(folder, "x", "acc");
         Object acc = init;
         for (int i = list.size() - 1; i >= 0; i--) {
-            acc = callNode.call(folder.getCallTarget(),
-                prepareArgsTwo(folder, list.get(i), acc));
+            acc = ctx.call2(callNode, list.get(i), acc);
         }
         return acc;
     }
 
-    @TruffleBoundary
     public static Object reduce(MezzeNonEmptyList list, MezzeFunction reducer,
                                                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare2(reducer, "acc", "x");
         Object acc = list.head();
         for (int i = 1; i < list.size(); i++) {
-            acc = callNode.call(reducer.getCallTarget(),
-                prepareArgsTwo(reducer, acc, list.get(i)));
+            acc = ctx.call2(callNode, acc, list.get(i));
         }
         return acc;
     }
@@ -259,12 +251,11 @@ public final class NonEmptyListNatives {
         return false;
     }
 
-    @TruffleBoundary
     public static boolean any(MezzeNonEmptyList list, MezzeFunction predicate,
                                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         for (int i = 0; i < list.size(); i++) {
-            Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, list.get(i)));
+            Object result = ctx.call1(callNode, list.get(i));
             if (result instanceof Boolean && (Boolean) result) {
                 return true;
             }
@@ -272,12 +263,11 @@ public final class NonEmptyListNatives {
         return false;
     }
 
-    @TruffleBoundary
     public static boolean all(MezzeNonEmptyList list, MezzeFunction predicate,
                                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         for (int i = 0; i < list.size(); i++) {
-            Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, list.get(i)));
+            Object result = ctx.call1(callNode, list.get(i));
             if (!(result instanceof Boolean) || !(Boolean) result) {
                 return false;
             }
@@ -341,14 +331,12 @@ public final class NonEmptyListNatives {
      * Sort by comparator function: {l: 'a, r: 'a} -> Int
      * Returns negative if l < r, 0 if equal, positive if l > r
      */
-    @TruffleBoundary
     public static MezzeNonEmptyList sortBy(MezzeNonEmptyList list, MezzeFunction cmpFn,
                                                                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare2(cmpFn, "l", "r");
         Object[] arr = list.getElements().clone();
         java.util.Arrays.sort(arr, (a, b) -> {
-            // Call the comparator function with {l, r}
-            Object result = callNode.call(cmpFn.getCallTarget(),
-                prepareArgsLR(cmpFn, a, b));
+            Object result = ctx.call2(callNode, a, b);
             if (result instanceof Long) {
                 return ((Long) result).intValue();
             }
@@ -416,36 +404,6 @@ public final class NonEmptyListNatives {
     }
 
     // ==================== Helper Methods ====================
-
-    private static Object[] prepareArgs(MezzeFunction fn, Object arg) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"x"}, new Object[]{arg}
-        );
-        return args;
-    }
-
-    private static Object[] prepareArgsTwo(MezzeFunction fn, Object arg1, Object arg2) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"acc", "x"}, new Object[]{arg1, arg2}
-        );
-        return args;
-    }
-
-    private static Object[] prepareArgsLR(MezzeFunction fn, Object left, Object right) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"l", "r"}, new Object[]{left, right}
-        );
-        return args;
-    }
 
     @TruffleBoundary
     private static boolean deepEquals(Object a, Object b) {

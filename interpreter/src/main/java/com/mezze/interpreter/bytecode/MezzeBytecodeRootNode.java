@@ -932,9 +932,100 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = String[].class)
     public static final class SpreadRecord {
-        @Specialization
-        public static MezzeRecord doSpread(String[] entryNames, @Variadic Object[] values) {
+        /**
+         * Shape-cached fast path: when the spread source has a stable
+         * shape, the result field layout is fixed and we can skip the
+         * LinkedHashMap merge entirely. We pre-compute the result
+         * Shape + a field-source map at specialization time.
+         */
+        @Specialization(guards = {
+            "hasSingleSpread(entryNames)",
+            "getSpreadSource(entryNames, values).getShape() == cachedSrcShape"
+        }, limit = "3")
+        public static MezzeRecord doCachedShape(
+                String[] entryNames, @Variadic Object[] values,
+                @Cached("getSpreadSource(entryNames, values).getShape()") com.mezze.interpreter.values.MezzeRecord.Shape cachedSrcShape,
+                @Cached("computeResultShape(entryNames, cachedSrcShape)") com.mezze.interpreter.values.MezzeRecord.Shape resultShape,
+                @Cached(value = "computeFieldMap(entryNames, cachedSrcShape)", dimensions = 1) int[] fieldMap) {
+            // fieldMap[i] encodes where result field i comes from:
+            //   >= 0 → source record field at that index
+            //   < 0  → explicit value at index (-fieldMap[i] - 1)
+            MezzeRecord src = getSpreadSource(entryNames, values);
+            Object[] resultValues = new Object[resultShape.getFieldCount()];
+            for (int i = 0; i < resultValues.length; i++) {
+                int mapping = fieldMap[i];
+                if (mapping >= 0) {
+                    resultValues[i] = src.getField(mapping);
+                } else {
+                    resultValues[i] = values[-mapping - 1];
+                }
+            }
+            return new MezzeRecord(resultShape, EMPTY_LONGS, EMPTY_DOUBLES, resultValues);
+        }
+
+        @Specialization(replaces = "doCachedShape")
+        public static MezzeRecord doGeneric(String[] entryNames, @Variadic Object[] values) {
             return buildSpreadRecord(entryNames, values);
+        }
+
+        /** True when there's exactly one __spread__ entry (the common case). */
+        static boolean hasSingleSpread(String[] entryNames) {
+            int count = 0;
+            for (String n : entryNames) {
+                if ("__spread__".equals(n)) count++;
+            }
+            return count == 1;
+        }
+
+        /** Extract the MezzeRecord that's being spread. */
+        static MezzeRecord getSpreadSource(String[] entryNames, Object[] values) {
+            for (int i = 0; i < entryNames.length; i++) {
+                if ("__spread__".equals(entryNames[i]) && values[i] instanceof MezzeRecord r) {
+                    return r;
+                }
+            }
+            return null;
+        }
+
+        @CompilerDirectives.TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape computeResultShape(
+                String[] entryNames, com.mezze.interpreter.values.MezzeRecord.Shape srcShape) {
+            java.util.LinkedHashMap<String, Object> fieldOrder = new java.util.LinkedHashMap<>();
+            for (String name : entryNames) {
+                if ("__spread__".equals(name)) {
+                    for (int j = 0; j < srcShape.getFieldCount(); j++) {
+                        fieldOrder.put(srcShape.getFieldName(j), null);
+                    }
+                } else {
+                    fieldOrder.put(name, null);
+                }
+            }
+            String[] resultNames = fieldOrder.keySet().toArray(new String[0]);
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(resultNames);
+        }
+
+        @CompilerDirectives.TruffleBoundary
+        static int[] computeFieldMap(String[] entryNames,
+                                     com.mezze.interpreter.values.MezzeRecord.Shape srcShape) {
+            // Build the merged field order (same as computeResultShape)
+            java.util.LinkedHashMap<String, int[]> fieldOrder = new java.util.LinkedHashMap<>();
+            // int[0] = source type (0=spread, 1=explicit), int[1] = index
+            for (int i = 0; i < entryNames.length; i++) {
+                if ("__spread__".equals(entryNames[i])) {
+                    for (int j = 0; j < srcShape.getFieldCount(); j++) {
+                        fieldOrder.put(srcShape.getFieldName(j), new int[]{0, j});
+                    }
+                } else {
+                    // Encode as -(valueIndex + 1) so negative distinguishes from source
+                    fieldOrder.put(entryNames[i], new int[]{1, i});
+                }
+            }
+            int[] map = new int[fieldOrder.size()];
+            int idx = 0;
+            for (int[] entry : fieldOrder.values()) {
+                map[idx++] = entry[0] == 0 ? entry[1] : -(entry[1] + 1);
+            }
+            return map;
         }
     }
 
@@ -953,9 +1044,62 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = String[].class)
     public static final class UpdateRecord {
-        @Specialization
-        public static MezzeRecord doAllObjects(String[] updateNames, MezzeRecord source, @Variadic Object[] updateValues) {
+        /**
+         * Shape-cached fast path: when the source record has a stable shape
+         * (common — most update sites see the same type), pre-resolve the
+         * result shape and update-field indices at specialization time.
+         * Eliminates the LinkedHashMap allocation per update. #58.
+         */
+        @Specialization(guards = "source.getShape() == cachedShape", limit = "3",
+                        excludeForUncached = true)
+        public static MezzeRecord doCached(
+                String[] updateNames,
+                MezzeRecord source,
+                @Variadic Object[] updateValues,
+                @Cached("source.getShape()") Shape cachedShape,
+                @Cached("computeResultShape(cachedShape, updateNames)") Shape resultShape,
+                @Cached("cachedShape.getFieldCount()") int srcCount,
+                @Cached(value = "computeUpdateIndices(resultShape, updateNames)", dimensions = 1) int[] updateIndices) {
+            int resultCount = resultShape.getFieldCount();
+            Object[] fields = new Object[resultCount];
+            // Source fields occupy positions 0..srcCount-1 (result shape
+            // preserves source field order, appends new update fields).
+            for (int i = 0; i < srcCount; i++) {
+                fields[i] = source.getField(i);
+            }
+            // Overlay update values at pre-resolved positions.
+            for (int i = 0; i < updateIndices.length; i++) {
+                fields[updateIndices[i]] = updateValues[i];
+            }
+            return new MezzeRecord(resultShape, EMPTY_LONGS, EMPTY_DOUBLES, fields);
+        }
+
+        @Specialization(replaces = "doCached")
+        @ReportPolymorphism.Megamorphic
+        public static MezzeRecord doGeneric(String[] updateNames, MezzeRecord source, @Variadic Object[] updateValues) {
             return buildUpdatedRecord(source, updateNames, updateValues);
+        }
+
+        @TruffleBoundary
+        static Shape computeResultShape(Shape sourceShape, String[] updateNames) {
+            int srcCount = sourceShape.getFieldCount();
+            java.util.LinkedHashSet<String> allNames = new java.util.LinkedHashSet<>(srcCount + updateNames.length);
+            for (int i = 0; i < srcCount; i++) {
+                allNames.add(sourceShape.getFieldName(i));
+            }
+            for (String name : updateNames) {
+                allNames.add(name);
+            }
+            return ShapeCache.getOrCreateAllObjects(allNames.toArray(new String[0]));
+        }
+
+        @TruffleBoundary
+        static int[] computeUpdateIndices(Shape resultShape, String[] updateNames) {
+            int[] indices = new int[updateNames.length];
+            for (int i = 0; i < updateNames.length; i++) {
+                indices[i] = resultShape.findFieldIndex(updateNames[i]);
+            }
+            return indices;
         }
     }
 
@@ -1098,9 +1242,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = CallTarget.class)
     public static final class TailCallDirectN {
         @Specialization
-        public static Object doThrow(CallTarget target, @Variadic Object[] args) {
-            throw new TailCallException(target, args);
+        public static Object doThrow(CallTarget target, @Variadic Object[] args,
+                @Cached(value = "createTce()", allowUncached = true, neverDefault = true) TailCallException tce) {
+            throw tce.fill(target, args);
         }
+
+        static TailCallException createTce() { return new TailCallException(); }
     }
 
     /**
@@ -1112,7 +1259,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     public static final class TailCallIndirect {
         @Specialization
-        public static Object doThrow(MezzeFunction fn, @Variadic Object[] args) {
+        public static Object doThrow(MezzeFunction fn, @Variadic Object[] args,
+                @Cached(value = "createTce()", allowUncached = true, neverDefault = true) TailCallException tce) {
             // Same partial-application slow path as CallIndirect. A tail
             // call to a partially-applied MezzeFunction still needs to
             // merge/complete the partial args before firing.
@@ -1137,7 +1285,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                         System.arraycopy(closureValues, 0, combined, 0, closureLen);
                         combined[closureLen] = complete;
                     }
-                    throw new TailCallException(fn.getCallTarget(), combined);
+                    throw tce.fill(fn.getCallTarget(), combined);
                 }
             }
             Object[] closureValues = fn.getClosureValues();
@@ -1150,8 +1298,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 System.arraycopy(closureValues, 0, combined, 0, closureLen);
                 System.arraycopy(args, 0, combined, closureLen, args.length);
             }
-            throw new TailCallException(fn.getCallTarget(), combined);
+            throw tce.fill(fn.getCallTarget(), combined);
         }
+
+        static TailCallException createTce() { return new TailCallException(); }
     }
 
     /**
@@ -1180,26 +1330,42 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          */
         @Specialization(guards = {
             "fn.getCallTarget() == cachedTarget",
-            "!fn.hasPartialArgs()"
+            "!fn.hasPartialArgs()",
+            "fn.getClosureValues().length == cachedClosureLen"
         }, limit = "3")
         public static Object doDirect(
                 MezzeFunction fn,
                 @Variadic Object[] args,
                 @Cached("fn.getCallTarget()") CallTarget cachedTarget,
+                @Cached("fn.getClosureValues().length") int cachedClosureLen,
                 @Cached("createForceInlined(cachedTarget)") DirectCallNode callNode) {
-            // Skip partial-application check: the guard ensures no
-            // outstanding partial args. For HOF callbacks the arg record
-            // always fills all parameters (the typechecker guarantees
-            // this at monomorphic call sites).
-            Object[] closureValues = fn.getClosureValues();
-            int closureLen = closureValues.length;
-            if (closureLen == 0) {
-                return callNode.call(args);
-            }
-            Object[] combined = new Object[closureLen + args.length];
-            System.arraycopy(closureValues, 0, combined, 0, closureLen);
-            System.arraycopy(args, 0, combined, closureLen, args.length);
-            return callNode.call(combined);
+            // Closure-length-specialized call: cachedClosureLen is a PE
+            // constant, so the switch folds. Cases 0–2 avoid allocating
+            // a combined Object[]. #62.
+            return switch (cachedClosureLen) {
+                case 0 -> callNode.call(args);
+                case 1 -> {
+                    Object[] combined = new Object[1 + args.length];
+                    combined[0] = fn.getClosureValues()[0];
+                    System.arraycopy(args, 0, combined, 1, args.length);
+                    yield callNode.call(combined);
+                }
+                case 2 -> {
+                    Object[] cv = fn.getClosureValues();
+                    Object[] combined = new Object[2 + args.length];
+                    combined[0] = cv[0];
+                    combined[1] = cv[1];
+                    System.arraycopy(args, 0, combined, 2, args.length);
+                    yield callNode.call(combined);
+                }
+                default -> {
+                    Object[] closureValues = fn.getClosureValues();
+                    Object[] combined = new Object[cachedClosureLen + args.length];
+                    System.arraycopy(closureValues, 0, combined, 0, cachedClosureLen);
+                    System.arraycopy(args, 0, combined, cachedClosureLen, args.length);
+                    yield callNode.call(combined);
+                }
+            };
         }
 
         static DirectCallNode createForceInlined(CallTarget target) {
@@ -1449,11 +1615,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 Object arg,
                 @Cached("fn.getCallTarget()") CallTarget cachedTarget,
                 @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
-                @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
+                @Cached("createInlined(cachedTarget)") DirectCallNode callNode,
+                @Cached("resolveShape1(fieldName)") com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
             // Callee is not a bypassable BDSL function — wrap arg in a
             // record so the callee's normalizeArgs handles it correctly.
-            MezzeRecord record = MezzeRecord.fromFields(
-                    new String[] { fieldName }, new Object[] { arg });
+            // Shape is pre-cached — no @TruffleBoundary fromFields call.
+            MezzeRecord record = new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, new Object[] { arg });
             Object[] closureValues = fn.getClosureValues();
             int closureLen = closureValues.length;
             if (closureLen == 0) {
@@ -1563,6 +1730,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 return tramp.getInnerTarget();
             }
             return target;
+        }
+
+        @CompilerDirectives.TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveShape1(String fieldName) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(new String[] { fieldName });
         }
     }
 
@@ -1724,9 +1896,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 MezzeFunction fn, Object arg1, Object arg2,
                 @Cached("fn.getCallTarget()") CallTarget cachedTarget,
                 @Cached("canBypassTarget(cachedTarget)") boolean canBypass,
-                @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
-            MezzeRecord record = MezzeRecord.fromFields(
-                    fieldNames, new Object[] { arg1, arg2 });
+                @Cached("createInlined(cachedTarget)") DirectCallNode callNode,
+                @Cached("resolveShape2(fieldNames)") com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            // Shape is pre-cached — no @TruffleBoundary fromFields call.
+            MezzeRecord record = new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, new Object[] { arg1, arg2 });
             Object[] closureValues = fn.getClosureValues();
             int closureLen = closureValues.length;
             if (closureLen == 0) {
@@ -1824,6 +1997,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             }
             return target;
         }
+
+        @CompilerDirectives.TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveShape2(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
+        }
     }
 
     /**
@@ -1917,8 +2095,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Variadic Object[] args,
                 @Cached(value = "resolveByHash(hashHex)", allowUncached = true) CallTarget cachedTarget,
                 @Cached(value = "callByHashNeedsMarker(cachedTarget, args.length)", allowUncached = true, neverDefault = false) boolean needsMarker,
-                @Cached("create(cachedTarget)") DirectCallNode callNode) {
+                @Cached("createForceInlined(cachedTarget)") DirectCallNode callNode) {
             return callNode.call(needsMarker ? callByHashPrependMarker(args) : args);
+        }
+
+        static DirectCallNode createForceInlined(CallTarget target) {
+            DirectCallNode node = DirectCallNode.create(target);
+            node.forceInlining();
+            return node;
         }
 
         @Specialization(replaces = "doCached")
@@ -1982,10 +2166,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 String hashHex,
                 @Variadic Object[] args,
                 @Cached(value = "resolveByHash(hashHex)", allowUncached = true) CallTarget cachedTarget,
-                @Cached(value = "needsMarkerFor(cachedTarget, args.length)", allowUncached = true, neverDefault = false) boolean needsMarker) {
+                @Cached(value = "needsMarkerFor(cachedTarget, args.length)", allowUncached = true, neverDefault = false) boolean needsMarker,
+                @Cached(value = "createTce()", allowUncached = true, neverDefault = true) TailCallException tce) {
             Object[] finalArgs = needsMarker ? prependMarkerFor(args) : args;
-            throw new TailCallException(cachedTarget, finalArgs);
+            throw tce.fill(cachedTarget, finalArgs);
         }
+
+        static TailCallException createTce() { return new TailCallException(); }
 
         @TruffleBoundary
         static CallTarget resolveByHash(String hashHex) {
@@ -2664,42 +2851,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return acc;
         }
 
-        @TruffleBoundary
         private static Object flpResultFind(boolean found, long foundVal) {
-            MezzeVariant.TagRegistry reg = MezzeVariant.TagRegistry.getGlobal();
-            int someTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
-                    .computeVariantTag(com.mezze.language.ast.BuiltinTypes.SOME, null);
-            int noneTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
-                    .computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
-            if (found) {
-                reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.SOME);
-                MezzeRecord payload = MezzeRecord.fromFields(
-                        new String[]{"val"}, new Object[]{foundVal});
-                return MezzeVariant.singlePayload(reg, someTag, payload);
-            } else {
-                reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.NONE);
-                return MezzeVariant.noPayload(reg, noneTag);
-            }
+            return found ? MezzeVariant.some(foundVal) : MezzeVariant.none();
         }
 
-        @TruffleBoundary
         static Object flpResultReduceEmpty() {
-            MezzeVariant.TagRegistry reg = MezzeVariant.TagRegistry.getGlobal();
-            int noneTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
-                    .computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
-            reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.NONE);
-            return MezzeVariant.noPayload(reg, noneTag);
+            return MezzeVariant.none();
         }
 
-        @TruffleBoundary
         private static Object flpResultReduceSome(long acc) {
-            MezzeVariant.TagRegistry reg = MezzeVariant.TagRegistry.getGlobal();
-            int someTag = com.mezze.language.ast.BuiltinTypes.INSTANCE
-                    .computeVariantTag(com.mezze.language.ast.BuiltinTypes.SOME, null);
-            reg.getOrCreateTag(com.mezze.language.ast.BuiltinTypes.SOME);
-            MezzeRecord payload = MezzeRecord.fromFields(
-                    new String[]{"val"}, new Object[]{acc});
-            return MezzeVariant.singlePayload(reg, someTag, payload);
+            return MezzeVariant.some(acc);
         }
 
         public static boolean isLongStorage(MezzeSeq<?> seq) {
@@ -2948,12 +3109,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             boolean p1Other  = (config & (1 << 16)) != 0;
 
             long p0 = p0Init, p1 = p1Init;
+            int count = 0;
 
             // Loop while the condition is NOT met (the condition triggers
             // the base case, so we loop while it's false).
-            for (long i = 0; loopProfile.inject(node,
+            while (loopProfile.inject(node,
                     !FusedLongPipeline.flpCmp(condCmpOp,
-                            condOnP0 ? p0 : p1, condRhs)); i++) {
+                            condOnP0 ? p0 : p1, condRhs))) {
                 long newP0 = p0Op >= 0
                         ? FusedLongPipeline.flpOp(p0Op, p0, p0Other ? p1 : p0Rhs)
                         : p0;
@@ -2962,7 +3124,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                         : p1;
                 p0 = newP0;
                 p1 = newP1;
+                count++;
             }
+            LoopNode.reportLoopCount(node, count);
 
             return resultIdx == 0 ? p0 : p1;
         }
@@ -3012,14 +3176,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             boolean resultParam = (config & (1 << 8)) != 0;
 
             long p0 = p0Init;
+            int count = 0;
 
             // Loop while condition is NOT met (condition triggers base case).
-            for (long i = 0; loopProfile.inject(node,
-                    !FusedLongPipeline.flpCmp(condCmpOp, p0, condRhs)); i++) {
+            while (loopProfile.inject(node,
+                    !FusedLongPipeline.flpCmp(condCmpOp, p0, condRhs))) {
                 p0 = p0Op >= 0
                         ? FusedLongPipeline.flpOp(p0Op, p0, p0Rhs)
                         : p0;
+                count++;
             }
+            LoopNode.reportLoopCount(node, count);
 
             return resultParam ? p0 : baseResult;
         }
@@ -3339,18 +3506,23 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @ConstantOperand(type = int.class)
     @ConstantOperand(type = String.class)
     public static final class MakeVariantNoPayload {
+        /**
+         * Return a cached singleton — no-payload variants (Nil, True, False,
+         * LT, GT, EQ, …) are identity-equal by tag. Eliminates ~72 bytes
+         * allocation per construction. #66.
+         */
         @Specialization
         public static MezzeVariant doNoPayload(int tag, String tagName,
-                @Cached(value = "ensureRegistered(tagName)", allowUncached = true)
-                    TagRegistry registry) {
-            return MezzeVariant.noPayload(registry, tag);
+                @Cached(value = "createSingleton(tag, tagName)", allowUncached = true)
+                    MezzeVariant singleton) {
+            return singleton;
         }
 
         @TruffleBoundary
-        static TagRegistry ensureRegistered(String tagName) {
+        static MezzeVariant createSingleton(int tag, String tagName) {
             TagRegistry registry = TagRegistry.getGlobal();
             registry.getOrCreateTag(tagName);
-            return registry;
+            return MezzeVariant.noPayload(registry, tag);
         }
     }
 
@@ -3470,6 +3642,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return left == right;
         }
 
+        /** String literal patterns in {@code when}: PE-transparent. #64. */
+        @Specialization
+        public static boolean doString(String left, String right) {
+            return left.equals(right);
+        }
+
         /**
          * Object-eq fallback for the primitive-eq operation. `@TruffleBoundary`
          * gates PE at this method, which is required for
@@ -3485,7 +3663,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          * so the object-fallback path is cold — the boundary has zero perf
          * cost on the hot paths (doLong/doDouble/doBoolean). See #402.
          */
-        @Specialization(replaces = {"doLong", "doDouble", "doBoolean"})
+        @Specialization(replaces = {"doLong", "doDouble", "doBoolean", "doString"})
         @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         @InliningCutoff
         public static boolean doObject(Object left, Object right) {
@@ -3517,6 +3695,43 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static String doGet(int index, String[] array) {
             return array[index];
+        }
+    }
+
+    /**
+     * Read a variant's int tag as a long for use in switch-dispatch.
+     * Handles both {@link MezzeVariant} (direct tag) and native
+     * {@link com.mezze.datastructures.list.MezzeList} (Nil/Cons mapping).
+     *
+     * <p>Used by the optimized variant-match path: the compiler reads the
+     * tag once into a local, then dispatches via {@link PrimEquals} on
+     * the local — giving Graal PE the canonical pattern for
+     * {@code IntegerSwitchNode} folding (single value, dense int
+     * constants). Eliminates N repeated tag reads from the scrutinee.
+     */
+    @Operation
+    public static final class ReadVariantTag {
+        @Specialization
+        public static long doVariant(MezzeVariant variant) {
+            return variant.getTag();
+        }
+
+        @Specialization
+        public static long doList(com.mezze.datastructures.list.MezzeList<?> list) {
+            return list.isEmpty() ? MezzeVariant.NIL_TAG : MezzeVariant.CONS_TAG;
+        }
+
+        @Specialization(guards = {"!isVariant(other)", "!isList(other)"})
+        public static long doOther(Object other) {
+            return -1L;
+        }
+
+        protected static boolean isVariant(Object obj) {
+            return obj instanceof MezzeVariant;
+        }
+
+        protected static boolean isList(Object obj) {
+            return obj instanceof com.mezze.datastructures.list.MezzeList<?>;
         }
     }
 
@@ -3848,11 +4063,22 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // op-call (acquireDispatchOnly, enterDispatch, exitDispatch,
             // releaseDispatchOnly) that existed solely to shuttle
             // the same global singletons to EffectBindingNode.
-            Object[] opArgs = new Object[cachedCV.length + 1];
-            System.arraycopy(cachedCV, 0, opArgs, 0, cachedCV.length);
-            opArgs[cachedCV.length] = arg;
+            // Closure-length-specialized call to avoid per-op Object[]
+            // allocation. cachedCV.length is a PE constant (@Cached); the
+            // switch folds to a single branch. Cases 0–2 cover most handler
+            // ops; Graal EA scalarizes the default branch too. #61.
             try {
-                return callNode.call(opArgs);
+                return switch (cachedCV.length) {
+                    case 0 -> callNode.call(arg);
+                    case 1 -> callNode.call(cachedCV[0], arg);
+                    case 2 -> callNode.call(cachedCV[0], cachedCV[1], arg);
+                    default -> {
+                        Object[] opArgs = new Object[cachedCV.length + 1];
+                        System.arraycopy(cachedCV, 0, opArgs, 0, cachedCV.length);
+                        opArgs[cachedCV.length] = arg;
+                        yield callNode.call(opArgs);
+                    }
+                };
             } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
                 if (com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.insideBdslHandle()) {
                     throw abort;
@@ -5280,10 +5506,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("extractBodyTarget(bodyFn)") CallTarget cachedBodyTarget,
                 @Cached("resolveInner(cachedBodyTarget)") CallTarget resolved,
                 @Cached("closureCount(bodyFn)") int closureLen,
-                @Cached("createForceInlined(resolved)") DirectCallNode callNode) {
+                @Cached("createForceInlined(resolved)") DirectCallNode callNode,
+                @Bind("$node") Node node) {
+            long count = 0;
             for (long i = start; i < end; i += step) {
                 callNode.call(i);
+                count++;
             }
+            LoopNode.reportLoopCount(node, count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count);
             return MezzeRecord.empty();
         }
 
@@ -5295,11 +5525,15 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("extractBodyTarget(bodyFn)") CallTarget cachedBodyTarget,
                 @Cached("resolveInner(cachedBodyTarget)") CallTarget resolved,
                 @Cached("closureCount(bodyFn)") int closureLen,
-                @Cached("createForceInlined(resolved)") DirectCallNode callNode) {
+                @Cached("createForceInlined(resolved)") DirectCallNode callNode,
+                @Bind("$node") Node node) {
             Object c0 = ((MezzeFunction) bodyFn).getClosureValues()[0];
+            long count = 0;
             for (long i = start; i < end; i += step) {
                 callNode.call(c0, i);
+                count++;
             }
+            LoopNode.reportLoopCount(node, count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count);
             return MezzeRecord.empty();
         }
 
@@ -5311,12 +5545,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("extractBodyTarget(bodyFn)") CallTarget cachedBodyTarget,
                 @Cached("resolveInner(cachedBodyTarget)") CallTarget resolved,
                 @Cached("closureCount(bodyFn)") int closureLen,
-                @Cached("createForceInlined(resolved)") DirectCallNode callNode) {
+                @Cached("createForceInlined(resolved)") DirectCallNode callNode,
+                @Bind("$node") Node node) {
             Object[] cv = ((MezzeFunction) bodyFn).getClosureValues();
             Object c0 = cv[0], c1 = cv[1];
+            long count = 0;
             for (long i = start; i < end; i += step) {
                 callNode.call(c0, c1, i);
+                count++;
             }
+            LoopNode.reportLoopCount(node, count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count);
             return MezzeRecord.empty();
         }
 
@@ -5328,12 +5566,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("extractBodyTarget(bodyFn)") CallTarget cachedBodyTarget,
                 @Cached("resolveInner(cachedBodyTarget)") CallTarget resolved,
                 @Cached("closureCount(bodyFn)") int closureLen,
-                @Cached("createForceInlined(resolved)") DirectCallNode callNode) {
+                @Cached("createForceInlined(resolved)") DirectCallNode callNode,
+                @Bind("$node") Node node) {
             Object[] cv = ((MezzeFunction) bodyFn).getClosureValues();
             Object c0 = cv[0], c1 = cv[1], c2 = cv[2];
+            long count = 0;
             for (long i = start; i < end; i += step) {
                 callNode.call(c0, c1, c2, i);
+                count++;
             }
+            LoopNode.reportLoopCount(node, count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count);
             return MezzeRecord.empty();
         }
 
@@ -5344,14 +5586,18 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("extractBodyTarget(bodyFn)") CallTarget cachedBodyTarget,
                 @Cached("resolveInner(cachedBodyTarget)") CallTarget resolved,
                 @Cached("closureCount(bodyFn)") int closureLen,
-                @Cached("createForceInlined(resolved)") DirectCallNode callNode) {
+                @Cached("createForceInlined(resolved)") DirectCallNode callNode,
+                @Bind("$node") Node node) {
             Object[] cv = ((MezzeFunction) bodyFn).getClosureValues();
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(cv, 0, args, 0, closureLen);
+            long count = 0;
             for (long i = start; i < end; i += step) {
                 args[closureLen] = i;
                 callNode.call(args);
+                count++;
             }
+            LoopNode.reportLoopCount(node, count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count);
             return MezzeRecord.empty();
         }
 
@@ -5729,7 +5975,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @TruffleBoundary
     private static String buildInterpolatedString(String[] parts, Object[] exprValues) {
-        StringBuilder sb = new StringBuilder();
+        // Pre-size: sum literal chunk lengths + 16 chars per expression slot
+        int estimate = 0;
+        for (String p : parts) {
+            estimate += (p != null) ? p.length() : 16;
+        }
+        StringBuilder sb = new StringBuilder(estimate);
         int exprIdx = 0;
         for (String p : parts) {
             if (p == null) {

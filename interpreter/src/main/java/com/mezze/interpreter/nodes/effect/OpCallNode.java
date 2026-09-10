@@ -295,14 +295,22 @@ public final class OpCallNode extends MezzeNode {
      * try-catch is dead code and PE eliminates it.
      */
     private Object invokePic(Object args) {
-        int closureLen = cachedClosureLen;
-        Object[] callArgs = new Object[closureLen + 1];
-        if (closureLen > 0) {
-            System.arraycopy(cachedClosure, 0, callArgs, 0, closureLen);
-        }
-        callArgs[closureLen] = args;
+        // Closure-length-specialized call: cachedClosureLen is @CompilationFinal,
+        // so the switch folds to a single branch in compiled code. Cases 0–2
+        // eliminate the Object[] allocation entirely; Graal EA scalarizes the
+        // default branch. #63.
         try {
-            return picCallNode.call(callArgs);
+            return switch (cachedClosureLen) {
+                case 0 -> picCallNode.call(args);
+                case 1 -> picCallNode.call(cachedClosure[0], args);
+                case 2 -> picCallNode.call(cachedClosure[0], cachedClosure[1], args);
+                default -> {
+                    Object[] callArgs = new Object[cachedClosureLen + 1];
+                    System.arraycopy(cachedClosure, 0, callArgs, 0, cachedClosureLen);
+                    callArgs[cachedClosureLen] = args;
+                    yield picCallNode.call(callArgs);
+                }
+            };
         } catch (AbortPerformException abort) {
             return handlePicAbort(abort, args);
         }
@@ -493,6 +501,6 @@ public final class OpCallNode extends MezzeNode {
     @TruffleBoundary
     private MezzeSuspend createSuspended(Object args) {
         MezzeThunk thunk = new MezzeThunk(operationName, args, effectHash);
-        return new MezzeSuspend(thunk, Collections.singleton(effectHash));
+        return new MezzeSuspend(thunk, effectHash);
     }
 }

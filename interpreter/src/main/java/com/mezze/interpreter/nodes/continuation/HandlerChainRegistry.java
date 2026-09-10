@@ -83,6 +83,18 @@ public final class HandlerChainRegistry {
         HandlerChainRegistry dispatching;
         HandlerChainRegistry dispatchPool;
 
+        // Generation counter for snapshot caching — incremented on every push/pop.
+        // Snapshot is reused when depth + generation haven't changed.
+        long generation;
+        HandlerChainEntry[] cachedSnapshot;
+        int cachedSnapshotDepth;
+        long cachedSnapshotGen;
+
+        // Reusable ScopedPopResult — avoids one allocation per scoped
+        // handler pop. Safe because BDSL PopHandlerChainScoped reads the
+        // fields immediately and never stores the reference across pops.
+        final ScopedPopResult reusablePopResult = new ScopedPopResult();
+
         /** Grow all parallel arrays when depth reaches capacity. */
         void grow() {
             int newCap = handlers.length * 2;
@@ -221,6 +233,7 @@ public final class HandlerChainRegistry {
         s.effectHashes[d] = effectHash;
         // scopes[d] and prevScopes[d] stay null — no scope hooks.
         s.depth = d + 1;
+        s.generation++;
         s.bdslHandleDepth++;
         invalidateAssumptions(effectHash);
     }
@@ -238,6 +251,7 @@ public final class HandlerChainRegistry {
         s.handlers[d] = null;
         s.effectHashes[d] = null;
         s.depth = d;
+        s.generation++;
         s.bdslHandleDepth--;
         invalidateAssumptions(effectHash);
     }
@@ -260,6 +274,7 @@ public final class HandlerChainRegistry {
         s.scopes[d] = scope;
         s.prevScopes[d] = prevScope;
         s.depth = d + 1;
+        s.generation++;
         s.bdslHandleDepth++;
         invalidateAssumptions(effectHash);
     }
@@ -268,11 +283,16 @@ public final class HandlerChainRegistry {
      * Result of {@link #popScoped()} — carries the handler record, scope
      * value, and previous scope that PopHandlerChainScoped needs.
      * Only allocated for scoped effects (6 of 19 stdlib effects).
+     *
+     * <p>Fields are mutable so the per-thread instance on EffectState can
+     * be reused across pops. Safe because BDSL PopHandlerChainScoped
+     * reads the fields immediately in the same @TruffleBoundary turn.
      */
     public static final class ScopedPopResult {
-        public final MezzeRecord handler;
-        public final Object scope;
-        public final Object prevScope;
+        public MezzeRecord handler;
+        public Object scope;
+        public Object prevScope;
+        ScopedPopResult() {} // Per-thread reuse
         ScopedPopResult(MezzeRecord handler, Object scope, Object prevScope) {
             this.handler = handler;
             this.scope = scope;
@@ -283,23 +303,27 @@ public final class HandlerChainRegistry {
     /**
      * Scoped pop: returns handler + scope data for finalize_scope
      * invocation. Used by BDSL PopHandlerChainScoped @Operation.
+     * Returns the per-thread reusable ScopedPopResult — callers must
+     * read fields before the next popScoped call.
      */
     @TruffleBoundary
     public static ScopedPopResult popScoped() {
         EffectState s = STATE.get();
         int d = s.depth - 1;
-        MezzeRecord handler = s.handlers[d];
         com.mezze.language.typedast.Hash effectHash = s.effectHashes[d];
-        Object scope = s.scopes[d];
-        Object prevScope = s.prevScopes[d];
+        ScopedPopResult result = s.reusablePopResult;
+        result.handler = s.handlers[d];
+        result.scope = s.scopes[d];
+        result.prevScope = s.prevScopes[d];
         s.handlers[d] = null;
         s.effectHashes[d] = null;
         s.scopes[d] = null;
         s.prevScopes[d] = null;
         s.depth = d;
+        s.generation++;
         s.bdslHandleDepth--;
         invalidateAssumptions(effectHash);
-        return new ScopedPopResult(handler, scope, prevScope);
+        return result;
     }
 
     // ----------------------------------------------------------------
@@ -331,6 +355,7 @@ public final class HandlerChainRegistry {
         s.handlers[d] = handler;
         s.effectHashes[d] = effectHash;
         s.depth = d + 1;
+        s.generation++;
         invalidateAssumptions(effectHash);
     }
 
@@ -342,6 +367,7 @@ public final class HandlerChainRegistry {
         s.handlers[d] = null;
         s.effectHashes[d] = null;
         s.depth = d;
+        s.generation++;
         invalidateAssumptions(effectHash);
     }
 
@@ -411,6 +437,7 @@ public final class HandlerChainRegistry {
         s.scopes[d] = null;
         s.prevScopes[d] = null;
         s.depth = d;
+        s.generation++;
         s.bdslHandleDepth--;
         invalidateAssumptions(effectHash);
         BdslHandleFrame frame = (scope != null || prevScope != null)
@@ -500,6 +527,7 @@ public final class HandlerChainRegistry {
     @TruffleBoundary
     public static void truncateHandlerChainTo(int depth) {
         EffectState s = STATE.get();
+        if (s.depth > depth) s.generation++;
         while (s.depth > depth) {
             int d = s.depth - 1;
             s.handlers[d] = null;
@@ -517,6 +545,10 @@ public final class HandlerChainRegistry {
         EffectState s = STATE.get();
         int size = s.depth;
         if (size == 0) return EMPTY_ENTRY_CHAIN;
+        // Reuse cached snapshot when the chain hasn't changed since last snapshot.
+        if (s.cachedSnapshot != null && s.cachedSnapshotDepth == size && s.cachedSnapshotGen == s.generation) {
+            return s.cachedSnapshot;
+        }
         // Snapshot in innermost-first order (matches old ArrayDeque
         // convention): snapshot[0] = innermost (top of stack),
         // snapshot[size-1] = outermost (bottom of stack).
@@ -525,19 +557,34 @@ public final class HandlerChainRegistry {
             snapshot[i] = new HandlerChainEntry(
                 s.handlers[size - 1 - i], s.effectHashes[size - 1 - i]);
         }
+        s.cachedSnapshot = snapshot;
+        s.cachedSnapshotDepth = size;
+        s.cachedSnapshotGen = s.generation;
         return snapshot;
     }
 
     @TruffleBoundary
     public static void installHandlerChainEntries(HandlerChainEntry[] chain) {
-        // chain is innermost-first. Install in reverse so outermost
-        // goes at lower depth index, innermost at higher (top).
-        // Uses pushChainOnly — no bdslHandleDepth increment, since
-        // these are chain entries from a parent thread, not BDSL
-        // Handle catch boundaries on THIS thread.
+        if (chain.length == 0) return;
+        EffectState s = STATE.get();
+        // Ensure capacity for all entries at once.
+        while (s.depth + chain.length > s.handlers.length) s.grow();
+        // Bulk install: outermost first (chain is innermost-first, iterate
+        // backwards). Inlined from pushChainOnly to avoid per-entry
+        // generation++ and invalidateAssumptions — these are inherited
+        // chain entries from the parent thread, NOT new handler registrations.
+        // Installing them on a spawned thread does not change what handlers
+        // are available on any existing thread; existing compiled dispatch
+        // on other threads remains valid. No bdslHandleDepth increment
+        // since there is no BDSL Handle catch boundary on this call path.
         for (int i = chain.length - 1; i >= 0; i--) {
-            pushChainOnly(chain[i].handler(), chain[i].effectHash());
+            int d = s.depth;
+            s.handlers[d] = chain[i].handler();
+            s.effectHashes[d] = chain[i].effectHash();
+            s.depth = d + 1;
         }
+        // Single generation bump for snapshot cache invalidation.
+        s.generation++;
     }
 
     @TruffleBoundary

@@ -2424,9 +2424,9 @@ public final class NativeDispatch extends MezzeNode {
         Object current = variant;
 
         while (current instanceof MezzeVariant v) {
-            if (v.getConstructorName().equals(com.mezze.language.ast.BuiltinTypes.NIL)) {
+            if (v.getTag() == MezzeVariant.NIL_TAG) {
                 break;
-            } else if (v.getConstructorName().equals(com.mezze.language.ast.BuiltinTypes.CONS)) {
+            } else if (v.getTag() == MezzeVariant.CONS_TAG) {
                 // Cons always has 2 fields (head, tail) → always MezzeRecord.
                 Object pv = v.getPayloadValue();
                 if (!(pv instanceof MezzeRecord payload)) break;

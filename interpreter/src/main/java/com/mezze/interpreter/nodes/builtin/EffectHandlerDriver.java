@@ -47,7 +47,8 @@ public final class EffectHandlerDriver {
     public static final class AbortPerformException extends com.oracle.truffle.api.exception.AbstractTruffleException {
         public final Object value;
         public AbortPerformException(Object value) {
-            super();
+            // Suppress stack trace capture — never read, costs ~1-5µs per abort. #57.
+            super(null, null, 0, null);
             this.value = value;
         }
     }
@@ -75,7 +76,7 @@ public final class EffectHandlerDriver {
                 com.mezze.language.typedast.Hash effectHash,
                 String opName,
                 Object args) {
-            super();
+            super(null, null, 0, null);  // suppress stack trace — never read
             this.effectHash = effectHash;
             this.opName = opName;
             this.args = args;

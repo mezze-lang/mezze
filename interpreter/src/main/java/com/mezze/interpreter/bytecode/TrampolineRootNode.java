@@ -64,6 +64,7 @@ import com.oracle.truffle.api.nodes.RootNode;
  */
 public final class TrampolineRootNode extends RootNode {
 
+    @CompilerDirectives.CompilationFinal
     private RootCallTarget innerTarget;
     private final String name;
 
@@ -399,6 +400,7 @@ public final class TrampolineRootNode extends RootNode {
         return rec.getFieldIndex(parameterNames[0]) < 0;
     }
 
+    @com.oracle.truffle.api.nodes.ExplodeLoop
     private void unpackRecord(com.mezze.interpreter.values.MezzeRecord rec, Object[] flat) {
         Object shape = rec.getShape();
         int[] indices = cachedFieldIndices;

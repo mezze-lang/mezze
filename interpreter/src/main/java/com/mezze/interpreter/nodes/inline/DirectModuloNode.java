@@ -1,6 +1,7 @@
 package com.mezze.interpreter.nodes.inline;
 
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
@@ -26,6 +27,7 @@ public abstract class DirectModuloNode extends MezzeNode {
     @ForceQuickening
     public static long modLongs(long left, long right) {
         if (right == 0) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
             throw new ArithmeticException("Modulo by zero");
         }
         return left % right;

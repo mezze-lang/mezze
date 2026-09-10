@@ -119,8 +119,10 @@ public abstract class NativeBridgeNode extends MezzeNode {
     @NodeInfo(shortName = "native-bridge-1")
     public static final class OneArg extends NativeBridgeNode {
         @Child private MezzeNode arg;
+        @CompilerDirectives.CompilationFinal
         private final Handler1 handler;
         private final boolean needsCallNode;
+        @CompilerDirectives.CompilationFinal
         @Child private IndirectCallNode callNode;
 
         OneArg(MezzeNode arg, Handler1 handler, boolean needsCallNode) {
@@ -401,8 +403,10 @@ public abstract class NativeBridgeNode extends MezzeNode {
     public static final class TwoArg extends NativeBridgeNode {
         @Child private MezzeNode arg0;
         @Child private MezzeNode arg1;
+        @CompilerDirectives.CompilationFinal
         private final Handler2 handler;
         private final boolean needsCallNode;
+        @CompilerDirectives.CompilationFinal
         @Child private IndirectCallNode callNode;
 
         TwoArg(MezzeNode arg0, MezzeNode arg1, Handler2 handler, boolean needsCallNode) {

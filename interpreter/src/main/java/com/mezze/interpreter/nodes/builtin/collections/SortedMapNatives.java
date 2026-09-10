@@ -178,7 +178,6 @@ public final class SortedMapNatives {
 
     // ==================== Higher-Order Functions ====================
 
-    @TruffleBoundary
     public static MezzeSortedMap filter(MezzeSortedMap map, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
@@ -192,7 +191,6 @@ public final class SortedMapNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static Object fold(MezzeSortedMap map, Object init, MezzeFunction f,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare3(f, "acc", "k", "v");
@@ -203,7 +201,6 @@ public final class SortedMapNatives {
         return acc;
     }
 
-    @TruffleBoundary
     public static MezzeSortedMap mapValues(MezzeSortedMap map, MezzeFunction f,
                                            com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
@@ -215,7 +212,6 @@ public final class SortedMapNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static boolean any(MezzeSortedMap map, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
@@ -228,7 +224,6 @@ public final class SortedMapNatives {
         return false;
     }
 
-    @TruffleBoundary
     public static boolean all(MezzeSortedMap map, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
@@ -241,7 +236,6 @@ public final class SortedMapNatives {
         return true;
     }
 
-    @TruffleBoundary
     public static boolean none(MezzeSortedMap map, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
@@ -254,7 +248,6 @@ public final class SortedMapNatives {
         return true;
     }
 
-    @TruffleBoundary
     public static MezzeVariant find(MezzeSortedMap map, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
@@ -270,7 +263,6 @@ public final class SortedMapNatives {
         return MezzeVariant.none();
     }
 
-    @TruffleBoundary
     public static long count(MezzeSortedMap map, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
@@ -305,7 +297,6 @@ public final class SortedMapNatives {
         return value;
     }
 
-    @TruffleBoundary
     public static MezzeSortedMap update(MezzeSortedMap map, Object key, MezzeFunction f,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
@@ -324,7 +315,6 @@ public final class SortedMapNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static MezzeSortedMap mergeWith(MezzeSortedMap m1, MezzeSortedMap m2, MezzeFunction f,
                                            com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(f, "l", "r");
@@ -371,7 +361,6 @@ public final class SortedMapNatives {
 
     // ==================== Task #15: Additional Operations ====================
 
-    @TruffleBoundary
     public static MezzeRecord partition(MezzeSortedMap map, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
@@ -565,7 +554,6 @@ public final class SortedMapNatives {
 
     // ==================== Additional Higher-Order Functions ====================
 
-    @TruffleBoundary
     public static MezzeSortedMap mapKeys(MezzeSortedMap map, MezzeFunction f,
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
@@ -577,7 +565,6 @@ public final class SortedMapNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static MezzeSortedMap filterKeys(MezzeSortedMap map, MezzeFunction predicate,
                                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -591,7 +578,6 @@ public final class SortedMapNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static MezzeSortedMap filterValues(MezzeSortedMap map, MezzeFunction predicate,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");

@@ -21,12 +21,24 @@ import com.oracle.truffle.api.nodes.RootNode;
  * These are top-level values compiled as zero-param FunctionIRs. When read in
  * non-call position (e.g., `pi / 2.0`), the thunk is called to get the actual
  * value instead of returning the MezzeFunction wrapper.
+ *
+ * <p>After warmup the resolved value is cached as a {@link CompilationFinal}
+ * constant visible to Graal PE. Subsequent reads are a simple field load —
+ * no {@code @TruffleBoundary} crossing, no ConcurrentHashMap lookup.
+ * {@link MezzeSuspend} values are NOT cached because their forced result is
+ * handler-context-sensitive. #54.
  */
 @NodeInfo(shortName = "read-global-by-hash")
 public final class ReadGlobalByHashNode extends MezzeNode {
 
+    /** Hoisted from per-call System.getenv inside @TruffleBoundary. */
+    private static final boolean USE_SLOT_TABLE = !"0".equals(System.getenv("MEZZE_EAGER"));
+
     @CompilationFinal
     private final Hash hash;
+
+    @CompilationFinal private boolean resolved;
+    @CompilationFinal private Object cachedValue;
 
     // For forcing MezzeSuspend values
     @com.oracle.truffle.api.nodes.Node.Child
@@ -38,7 +50,24 @@ public final class ReadGlobalByHashNode extends MezzeNode {
 
     @Override
     public Object execute(VirtualFrame frame) {
-        return lookupInContext();
+        if (resolved) {
+            return cachedValue;
+        }
+        return resolveAndCache();
+    }
+
+    private Object resolveAndCache() {
+        Object value = lookupInContext();
+        // MezzeSuspend values are handler-context-sensitive — force result
+        // depends on the current handler scope, so we must NOT cache them.
+        // Everything else (plain values, auto-evaluated thunks, functions)
+        // is stable once resolved from a content-addressed hash.
+        if (!(value instanceof MezzeSuspend)) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            cachedValue = value;
+            resolved = true;
+        }
+        return value;
     }
 
     @TruffleBoundary
@@ -51,7 +80,7 @@ public final class ReadGlobalByHashNode extends MezzeNode {
         // #392 — SlotEntry.resolveValue must NOT auto-evaluate; the thunk's
         // result is handler-context-sensitive and belongs in per-Context
         // caching, not per-Engine.
-        if (!"0".equals(System.getenv("MEZZE_EAGER"))) {
+        if (USE_SLOT_TABLE) {
             var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
             var slot = lang.getSlotTable().get(hash);
             if (slot != null && slot.isPublished()) {

@@ -58,9 +58,10 @@ public final class ConcurrencyNatives {
         }
 
         private void wakeWaiters() {
-            Thread waiter;
-            while ((waiter = waiters.poll()) != null) {
-                LockSupport.unpark(waiter);
+            // Drain-loop: O(N) with no iterator allocation, no CHS overhead.
+            Thread t;
+            while ((t = waiters.poll()) != null) {
+                LockSupport.unpark(t);
             }
         }
 
@@ -954,6 +955,8 @@ public final class ConcurrencyNatives {
     public static class MezzeChannel {
         final BlockingQueue<Object> queue;
         private volatile boolean closed = false;
+        // Waiters registered by channelRecvAnyTimeout — unparked on offer.
+        final ConcurrentLinkedQueue<Thread> selectWaiters = new ConcurrentLinkedQueue<>();
 
         public MezzeChannel(int capacity) {
             // capacity <= 0 means unbounded (LinkedBlockingQueue)
@@ -1007,7 +1010,15 @@ public final class ConcurrencyNatives {
         MezzeChannel ch = getChannel(args, "ch");
         Object val = getField(args, "val");
         if (ch.isClosed()) return false;
-        return ch.queue.offer(val);
+        boolean sent = ch.queue.offer(val);
+        if (sent) {
+            // Wake any threads parked in channelRecvAnyTimeout select.
+            Thread w;
+            while ((w = ch.selectWaiters.poll()) != null) {
+                LockSupport.unpark(w);
+            }
+        }
+        return sent;
     }
 
     @TruffleBoundary
@@ -1046,35 +1057,59 @@ public final class ConcurrencyNatives {
     public static Object channelRecvAnyTimeout(MezzeRecord args) {
         Object[] channels = getArray(args, "channels");
         long ms = getLong(args, "ms");
-        long deadline = System.currentTimeMillis() + ms;
+        long deadlineNanos = System.nanoTime() + ms * 1_000_000L;
 
-        // Poll until timeout
-        while (System.currentTimeMillis() < deadline) {
-            for (int i = 0; i < channels.length; i++) {
-                MezzeChannel ch;
-                if (channels[i] instanceof MezzeChannel c) {
-                    ch = c;
-                } else if (channels[i] instanceof MezzeRecord rec) {
-                    ch = getChannelFromRecord(rec);
-                } else {
-                    continue;
+        // Resolve MezzeChannel handles once up front.
+        MezzeChannel[] resolved = new MezzeChannel[channels.length];
+        for (int i = 0; i < channels.length; i++) {
+            if (channels[i] instanceof MezzeChannel c) {
+                resolved[i] = c;
+            } else if (channels[i] instanceof MezzeRecord rec) {
+                resolved[i] = getChannelFromRecord(rec);
+            }
+            // null entries (unresolvable) are skipped in the poll loop
+        }
+
+        Thread self = Thread.currentThread();
+
+        // Register this thread as a select waiter on every channel so
+        // channelTrySend unparks us immediately — no sleep-polling.
+        for (MezzeChannel ch : resolved) {
+            if (ch != null) ch.selectWaiters.add(self);
+        }
+
+        try {
+            while (true) {
+                // Scan all channels for a ready value.
+                for (int i = 0; i < resolved.length; i++) {
+                    MezzeChannel ch = resolved[i];
+                    if (ch == null) continue;
+                    Object val = ch.queue.poll();
+                    if (val != null) {
+                        return createSome(MezzeRecord.fromFields(
+                            new String[]{"index", "val"},
+                            new Object[]{(long) i, val}
+                        ));
+                    }
                 }
-                Object val = ch.queue.poll();
-                if (val != null) {
-                    return createSome(MezzeRecord.fromFields(
-                        new String[]{"index", "val"},
-                        new Object[]{(long) i, val}
-                    ));
+
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0) break;
+
+                // Park until a sender unparks us or the deadline expires.
+                LockSupport.parkNanos(remainingNanos);
+
+                if (Thread.interrupted()) {
+                    throw new CancellationException("Channel select cancelled");
                 }
             }
-            try {
-                Thread.sleep(1);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new CancellationException("Channel select cancelled");
+            return createNone();
+        } finally {
+            // Deregister from all channels.
+            for (MezzeChannel ch : resolved) {
+                if (ch != null) ch.selectWaiters.remove(self);
             }
         }
-        return createNone();
     }
 
     private static MezzeChannel getChannelFromRecord(MezzeRecord rec) {
@@ -1195,6 +1230,8 @@ public final class ConcurrencyNatives {
         private final AtomicReference<String> error = new AtomicReference<>(null);
         private final AtomicBoolean processing = new AtomicBoolean(false);
         private final ConcurrentLinkedQueue<AgentAction> actionQueue = new ConcurrentLinkedQueue<>();
+        // Threads parked in await() — unparked when processing finishes or errors.
+        private final ConcurrentLinkedQueue<Thread> awaitWaiters = new ConcurrentLinkedQueue<>();
 
         public MezzeAgent(Object initialState) {
             this.state = new AtomicReference<>(initialState);
@@ -1284,6 +1321,12 @@ public final class ConcurrencyNatives {
                 } finally {
                     processing.set(false);
 
+                    // Wake all threads parked in await().
+                    Thread w;
+                    while ((w = awaitWaiters.poll()) != null) {
+                        LockSupport.unpark(w);
+                    }
+
                     // Check if more actions were added while we were finishing
                     if (!actionQueue.isEmpty() && error.get() == null) {
                         processQueue();
@@ -1298,21 +1341,34 @@ public final class ConcurrencyNatives {
          * Wait for all pending actions to complete.
          * Returns true if completed within timeout, false otherwise.
          * timeout_ms of 0 means wait indefinitely.
+         *
+         * Uses LockSupport.park instead of sleep-polling — the processing
+         * thread unparks us when processing finishes or errors.
          */
         public boolean await(long timeoutMs) {
-            long start = System.currentTimeMillis();
-            while (!actionQueue.isEmpty() || processing.get()) {
-                if (timeoutMs > 0 && System.currentTimeMillis() - start > timeoutMs) {
-                    return false;
+            long deadlineNanos = timeoutMs > 0
+                ? System.nanoTime() + timeoutMs * 1_000_000L
+                : Long.MAX_VALUE;
+
+            Thread self = Thread.currentThread();
+            awaitWaiters.add(self);
+            try {
+                while (!actionQueue.isEmpty() || processing.get()) {
+                    long remainingNanos = deadlineNanos - System.nanoTime();
+                    if (remainingNanos <= 0) return false;
+
+                    if (deadlineNanos == Long.MAX_VALUE) {
+                        LockSupport.park();
+                    } else {
+                        LockSupport.parkNanos(remainingNanos);
+                    }
+
+                    if (Thread.interrupted()) return false;
                 }
-                try {
-                    Thread.sleep(1);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return false;
-                }
+                return true;
+            } finally {
+                awaitWaiters.remove(self);
             }
-            return true;
         }
 
         @Override public String toString() { return "<agent>"; }

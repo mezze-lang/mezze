@@ -2,6 +2,7 @@ package com.mezze.interpreter.nodes.inline;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
@@ -27,6 +28,7 @@ public abstract class DirectDivideNode extends MezzeNode {
     @ForceQuickening
     public static long divLongs(long left, long right) {
         if (right == 0) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
             throw new com.mezze.interpreter.values.MezzeGuestException("Division by zero");
         }
         return left / right;

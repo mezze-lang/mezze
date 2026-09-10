@@ -61,6 +61,15 @@ public final class MezzeSuspend implements TruffleObject {
         this.unhandledEffects = unhandledEffects.toArray(new Hash[0]);
     }
 
+    /** Singleton fast-path — avoids Set.toArray allocation. */
+    public MezzeSuspend(MezzeThunk computation, Hash singleEffect) {
+        this.computation = computation;
+        this.bodyNode = null;
+        this.bodyFrame = null;
+        this.chainSnapshot = null;
+        this.unhandledEffects = new Hash[] { singleEffect };
+    }
+
     /**
      * Path E constructor — capture a full body continuation instead of a
      * single deferred op-call. Body doesn't run; execution defers until

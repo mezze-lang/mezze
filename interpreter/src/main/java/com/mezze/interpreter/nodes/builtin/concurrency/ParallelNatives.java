@@ -71,7 +71,10 @@ public final class ParallelNatives {
     private static final ThreadLocal<Integer> PARALLELISM_HINT = new InheritableThreadLocal<>();
 
     /** Backpressure semaphore for LoomParallelWith { max_concurrent }.
-     *  Null means unbounded (LoomParallel default). */
+     *  Null means unbounded (LoomParallel default).
+     *  Plain ThreadLocal (NOT Inheritable): inheriting the semaphore into
+     *  nested joins causes deadlock when all permits are held by outer
+     *  joins and inner joins compete for the same pool. */
     private static final ThreadLocal<Semaphore> LOOM_SEMAPHORE = new ThreadLocal<>();
 
     /**
@@ -361,13 +364,14 @@ public final class ParallelNatives {
         boolean callerIsVirtual = Thread.currentThread().isVirtual();
         boolean leftInline = (virtual == callerIsVirtual);
 
-        AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
-        AtomicReference<Throwable> errSink = new AtomicReference<>();
+        // Reuse per-thread JoinContext — eliminates 4 allocations per join
+        // (2 AtomicReference + 2 Object[1]) on steady-state paths.
+        JoinContext ctx = JOIN_CTX.get();
+        ctx.reset();
 
         Env env = MezzeContext.get(node).getEnv();
 
         // Right side: always a fresh Truffle thread of the requested kind.
-        Object[] rightResultHolder = new Object[1];
         Thread rightThread = env.newTruffleThreadBuilder(() -> {
             if (sem != null) {
                 try { sem.acquire(); } catch (InterruptedException e) {
@@ -376,15 +380,14 @@ public final class ParallelNatives {
                 }
             }
             try {
-                SpawnSupport.runBatchTask(chain, parentScope, opSink, errSink, () ->
-                    rightResultHolder[0] = callThunk(rightFn, callNode));
+                SpawnSupport.runBatchTask(chain, parentScope, ctx.opSink, ctx.errSink, () ->
+                    ctx.rightResult = callThunk(rightFn, callNode));
             } finally {
                 if (sem != null) sem.release();
             }
         }).virtual(virtual).build();
         rightThread.start();
 
-        Object[] leftResultHolder = new Object[1];
         Thread leftThread = null;
         if (!leftInline) {
             leftThread = env.newTruffleThreadBuilder(() -> {
@@ -395,8 +398,8 @@ public final class ParallelNatives {
                     }
                 }
                 try {
-                    SpawnSupport.runBatchTask(chain, parentScope, opSink, errSink, () ->
-                        leftResultHolder[0] = callThunk(leftFn, callNode));
+                    SpawnSupport.runBatchTask(chain, parentScope, ctx.opSink, ctx.errSink, () ->
+                        ctx.leftResult = callThunk(leftFn, callNode));
                 } finally {
                     if (sem != null) sem.release();
                 }
@@ -405,12 +408,6 @@ public final class ParallelNatives {
         } else {
             if (sem != null) {
                 try { sem.acquire(); } catch (InterruptedException e) {
-                    // Thread interrupted mid-join (cancellation). Re-set the
-                    // interrupt flag and propagate the InterruptedException as
-                    // the cause via the cause-carrying MezzeGuestException:
-                    // routing to CancellationException here would change which
-                    // handlers catch it, so we keep it a guest-fatal throw that
-                    // preserves the cause (#387 / S8.1-E).
                     Thread.currentThread().interrupt();
                     throw new MezzeGuestException("Parallel.join interrupted", e);
                 }
@@ -418,8 +415,8 @@ public final class ParallelNatives {
             try {
                 // Same-thread inline: skip the redundant chain reinstall.
                 SpawnSupport.runBatchTask(
-                    chain, parentScope, opSink, errSink,
-                    () -> leftResultHolder[0] = callThunk(leftFn, callNode),
+                    chain, parentScope, ctx.opSink, ctx.errSink,
+                    () -> ctx.leftResult = callThunk(leftFn, callNode),
                     /* sameThreadChain = */ true);
             } finally {
                 if (sem != null) sem.release();
@@ -434,15 +431,40 @@ public final class ParallelNatives {
             throw new MezzeGuestException("Parallel.join interrupted waiting for peer", e);
         }
 
-        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel join", callNode);
+        SpawnSupport.propagateBatchFailure(ctx.opSink, ctx.errSink, "parallel join", callNode);
 
         return MezzeRecord.fromFields(
             LR_FIELDS,
-            new Object[]{leftResultHolder[0], rightResultHolder[0]}
+            new Object[]{ctx.leftResult, ctx.rightResult}
         );
     }
 
     private static final String[] LR_FIELDS = new String[]{"l", "r"};
+
+    // ==================== JoinContext pool ====================
+
+    /**
+     * Reusable per-join context — consolidates 4 per-join allocations
+     * (2 AtomicReference + 2 Object[1]) into a single object pooled
+     * per-thread. Thread.join() provides happens-before so plain fields
+     * suffice for result holders.
+     */
+    static final class JoinContext {
+        final AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
+        final AtomicReference<Throwable> errSink = new AtomicReference<>();
+        Object leftResult;
+        Object rightResult;
+
+        void reset() {
+            opSink.set(null);
+            errSink.set(null);
+            leftResult = null;
+            rightResult = null;
+        }
+    }
+
+    private static final ThreadLocal<JoinContext> JOIN_CTX =
+        ThreadLocal.withInitial(JoinContext::new);
 
     // ==================== Helpers ====================
 

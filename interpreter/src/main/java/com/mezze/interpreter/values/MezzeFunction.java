@@ -64,7 +64,7 @@ public final class MezzeFunction implements TruffleObject {
                          String[] parameterNames, java.util.Map<String, Object> partialArgs) {
         this.callTarget = callTarget;
         this.name = name;
-        this.closureValues = closureValues != null ? closureValues : EMPTY_CLOSURE;
+        this.closureValues = (closureValues == null || closureValues.length == 0) ? EMPTY_CLOSURE : closureValues;
         this.closureLength = this.closureValues.length;
         this.parameterNames = parameterNames != null ? parameterNames : EMPTY_PARAMS;
         this.partialArgs = partialArgs;

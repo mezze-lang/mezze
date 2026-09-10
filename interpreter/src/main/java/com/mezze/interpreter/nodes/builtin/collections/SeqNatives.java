@@ -346,7 +346,6 @@ public final class SeqNatives {
      * (`Ok { val = ... }` / `Err { error = ... }`). Anything else is
      * propagated verbatim as a successful element.
      */
-    @TruffleBoundary
     public static MezzeVariant tryMap(MezzeSeq seq, MezzeFunction mapper,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = mapper.getClosureValues();
@@ -383,7 +382,6 @@ public final class SeqNatives {
         return MezzeVariant.ok(MezzeSeq.fromArray(result));
     }
 
-    @TruffleBoundary
     public static MezzeSeq flatMap(MezzeSeq seq, MezzeFunction mapper,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
@@ -707,7 +705,6 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(arr);
     }
 
-    @TruffleBoundary
     public static MezzeSeq sortBy(MezzeSeq seq, MezzeFunction cmpFn,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] arr = seq.toArray();
@@ -756,7 +753,6 @@ public final class SeqNatives {
         return seq.sliding((int) windowSize);
     }
 
-    @TruffleBoundary
     public static MezzeSeq takeWhile(MezzeSeq seq, MezzeFunction predicate,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
@@ -773,7 +769,6 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(results.toArray());
     }
 
-    @TruffleBoundary
     public static MezzeSeq dropWhile(MezzeSeq seq, MezzeFunction predicate,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         int dropCount = 0;
@@ -866,7 +861,6 @@ public final class SeqNatives {
         return MezzeVariant.some(maxVal);
     }
 
-    @TruffleBoundary
     public static MezzeVariant minBy(MezzeSeq seq, MezzeFunction keyFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeVariant.none();
@@ -883,7 +877,6 @@ public final class SeqNatives {
         return MezzeVariant.some(minElem);
     }
 
-    @TruffleBoundary
     public static MezzeVariant maxBy(MezzeSeq seq, MezzeFunction keyFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeVariant.none();
@@ -991,7 +984,6 @@ public final class SeqNatives {
 
     // ==================== Group By ====================
 
-    @TruffleBoundary
     public static MezzeSeq groupBy(MezzeSeq seq, MezzeFunction keyFn,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
@@ -1018,7 +1010,6 @@ public final class SeqNatives {
         return zipWithIndex(seq);  // Same as zip_with_index
     }
 
-    @TruffleBoundary
     public static MezzeRecord forEach(MezzeSeq seq, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         CallTarget innerTarget = ScalarBypass.tryResolve(fn);
@@ -1058,7 +1049,6 @@ public final class SeqNatives {
         );
     }
 
-    @TruffleBoundary
     public static MezzeRecord span(MezzeSeq seq, MezzeFunction predicate,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         int splitIdx = 0;
@@ -1094,7 +1084,6 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(result.toArray());
     }
 
-    @TruffleBoundary
     public static MezzeSeq dedupBy(MezzeSeq seq, MezzeFunction keyFn,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return seq;
@@ -1131,7 +1120,6 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(arr);
     }
 
-    @TruffleBoundary
     public static MezzeSeq fillWith(long count, MezzeFunction fn,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] arr = new Object[(int) count];
@@ -1167,7 +1155,6 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(groups.toArray());
     }
 
-    @TruffleBoundary
     public static MezzeSeq groupConsecutiveBy(MezzeSeq seq, MezzeFunction keyFn,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeSeq.empty();
@@ -1242,7 +1229,6 @@ public final class SeqNatives {
         return MezzeVariant.none();
     }
 
-    @TruffleBoundary
     public static MezzeVariant binarySearchBy(MezzeSeq seq, Object target, MezzeFunction cmpFn,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         int lo = 0, hi = seq.size() - 1;
@@ -1260,7 +1246,6 @@ public final class SeqNatives {
 
     // ==================== Sort By Key ====================
 
-    @TruffleBoundary
     public static MezzeSeq sortByKey(MezzeSeq seq, MezzeFunction keyFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         // Pre-compute keys to avoid calling keyFn multiple times per element
@@ -1498,7 +1483,6 @@ public final class SeqNatives {
 
     // ==================== Advanced Zip Operations ====================
 
-    @TruffleBoundary
     public static MezzeSeq zipWith(MezzeSeq seq1, MezzeSeq seq2, MezzeFunction fn) {
         int minLen = Math.min(seq1.size(), seq2.size());
         Object[] result = new Object[minLen];
@@ -1700,7 +1684,6 @@ public final class SeqNatives {
         return true;
     }
 
-    @TruffleBoundary
     public static boolean isSortedBy(MezzeSeq seq, MezzeFunction keyFn) {
         if (seq.size() <= 1) return true;
         Object prevKey = keyFn.getCallTarget().call(prepareArgs(keyFn, seq.get(0)));
@@ -1782,7 +1765,6 @@ public final class SeqNatives {
 
     // ==================== Update Operations ====================
 
-    @TruffleBoundary
     public static MezzeVariant updateAt(MezzeSeq seq, long index, MezzeFunction fn) {
         if (index < 0 || index >= seq.size()) {
             return MezzeVariant.none();

@@ -116,7 +116,6 @@ public final class DequeNatives {
         return deque.reverse();
     }
 
-    @TruffleBoundary
     public static MezzeDeque map(MezzeDeque deque, MezzeFunction mapper,
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(mapper, "x");
@@ -128,7 +127,6 @@ public final class DequeNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static MezzeDeque filter(MezzeDeque deque, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "x");
@@ -143,7 +141,6 @@ public final class DequeNatives {
     }
 
     /**
-     * #403: drop {@code @TruffleBoundary} so PE can trace the loop.
      * Uses ScalarCall for zero-alloc scalar bypass on the hot path.
      */
     public static Object fold(MezzeDeque deque, Object init, MezzeFunction folder,
@@ -229,7 +226,6 @@ public final class DequeNatives {
 
     // ==================== Predicate Operations ====================
 
-    @TruffleBoundary
     public static boolean any(MezzeDeque deque, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "x");
@@ -242,7 +238,6 @@ public final class DequeNatives {
         return false;
     }
 
-    @TruffleBoundary
     public static boolean all(MezzeDeque deque, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "x");
@@ -255,13 +250,11 @@ public final class DequeNatives {
         return true;
     }
 
-    @TruffleBoundary
     public static boolean none(MezzeDeque deque, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         return !any(deque, predicate, callNode);
     }
 
-    @TruffleBoundary
     public static MezzeVariant find(MezzeDeque deque, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "x");
@@ -274,7 +267,6 @@ public final class DequeNatives {
         return MezzeVariant.none();
     }
 
-    @TruffleBoundary
     public static long count(MezzeDeque deque, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "x");
@@ -367,7 +359,6 @@ public final class DequeNatives {
 
     // ==================== Additional Operations ====================
 
-    @TruffleBoundary
     public static MezzeVariant reduce(MezzeDeque deque, MezzeFunction f,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (deque.isEmpty()) {
@@ -382,7 +373,6 @@ public final class DequeNatives {
         return MezzeVariant.some(acc);
     }
 
-    @TruffleBoundary
     public static MezzeDeque flatMap(MezzeDeque deque, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
@@ -398,7 +388,6 @@ public final class DequeNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static MezzeRecord partition(MezzeDeque deque, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -496,7 +485,6 @@ public final class DequeNatives {
 
     // ==================== Min/Max By ====================
 
-    @TruffleBoundary
     public static MezzeVariant minBy(MezzeDeque deque, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (deque.isEmpty()) return MezzeVariant.none();
@@ -513,7 +501,6 @@ public final class DequeNatives {
         return MezzeVariant.some(minElem);
     }
 
-    @TruffleBoundary
     public static MezzeVariant maxBy(MezzeDeque deque, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (deque.isEmpty()) return MezzeVariant.none();
@@ -573,7 +560,6 @@ public final class DequeNatives {
         return MezzeVariant.none();
     }
 
-    @TruffleBoundary
     public static MezzeVariant findIndex(MezzeDeque deque, MezzeFunction predicate,
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -590,7 +576,6 @@ public final class DequeNatives {
 
     // ==================== Slicing Operations ====================
 
-    @TruffleBoundary
     public static MezzeDeque takeWhile(MezzeDeque deque, MezzeFunction predicate,
                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -606,7 +591,6 @@ public final class DequeNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static MezzeDeque dropWhile(MezzeDeque deque, MezzeFunction predicate,
                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -645,7 +629,6 @@ public final class DequeNatives {
         );
     }
 
-    @TruffleBoundary
     public static MezzeRecord span(MezzeDeque deque, MezzeFunction predicate,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -673,7 +656,6 @@ public final class DequeNatives {
 
     // ==================== Transformation Operations ====================
 
-    @TruffleBoundary
     public static MezzeDeque scan(MezzeDeque deque, Object init, MezzeFunction f,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(f, "acc", "x");
@@ -702,7 +684,6 @@ public final class DequeNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static MezzeDeque dedupBy(MezzeDeque deque, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
@@ -902,7 +883,6 @@ public final class DequeNatives {
 
     // ── forEach / first / last ──────────────────────────────────
 
-    @TruffleBoundary
     public static MezzeRecord forEach(MezzeDeque deque, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(fn, "x");

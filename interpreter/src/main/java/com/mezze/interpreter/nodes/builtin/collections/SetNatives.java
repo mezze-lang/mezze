@@ -127,7 +127,6 @@ public final class SetNatives {
 
     // ==================== Transform Operations ====================
 
-    @TruffleBoundary
     public static MezzeSet filter(MezzeSet set, MezzeFunction predicate,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -141,7 +140,6 @@ public final class SetNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static MezzeSet map(MezzeSet set, MezzeFunction mapper,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(mapper, "val");
@@ -153,7 +151,6 @@ public final class SetNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static Object fold(MezzeSet set, Object init, MezzeFunction folder,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(folder, "acc", "x");
@@ -178,7 +175,6 @@ public final class SetNatives {
 
     // ==================== Predicate Operations ====================
 
-    @TruffleBoundary
     public static boolean any(MezzeSet set, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -191,7 +187,6 @@ public final class SetNatives {
         return false;
     }
 
-    @TruffleBoundary
     public static boolean all(MezzeSet set, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -204,13 +199,11 @@ public final class SetNatives {
         return true;
     }
 
-    @TruffleBoundary
     public static boolean none(MezzeSet set, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         return !any(set, predicate, callNode);
     }
 
-    @TruffleBoundary
     public static MezzeVariant find(MezzeSet set, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -223,7 +216,6 @@ public final class SetNatives {
         return MezzeVariant.none();
     }
 
-    @TruffleBoundary
     public static long count(MezzeSet set, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -239,7 +231,6 @@ public final class SetNatives {
 
     // ==================== ForEach ====================
 
-    @TruffleBoundary
     public static Object forEach(MezzeSet set, MezzeFunction f,
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
@@ -312,7 +303,6 @@ public final class SetNatives {
 
     // ==================== Additional Operations ====================
 
-    @TruffleBoundary
     public static MezzeVariant reduce(MezzeSet set, MezzeFunction f,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (set.isEmpty()) {
@@ -327,7 +317,6 @@ public final class SetNatives {
         return MezzeVariant.some(acc);
     }
 
-    @TruffleBoundary
     public static MezzeVariant minBy(MezzeSet set, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (set.isEmpty()) {
@@ -346,7 +335,6 @@ public final class SetNatives {
         return MezzeVariant.some(minElem);
     }
 
-    @TruffleBoundary
     public static MezzeVariant maxBy(MezzeSet set, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (set.isEmpty()) {
@@ -365,7 +353,6 @@ public final class SetNatives {
         return MezzeVariant.some(maxElem);
     }
 
-    @TruffleBoundary
     public static MezzeRecord partition(MezzeSet set, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
@@ -428,7 +415,6 @@ public final class SetNatives {
 
     // ==================== Task #20: Additional Operations ====================
 
-    @TruffleBoundary
     public static MezzeSet flatMap(MezzeSet set, MezzeFunction f,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
@@ -442,7 +428,6 @@ public final class SetNatives {
         return result;
     }
 
-    @TruffleBoundary
     public static MezzeList groupBy(MezzeSet set, MezzeFunction keyFn,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(keyFn, "val");
@@ -484,7 +469,6 @@ public final class SetNatives {
      * Apply a function that returns Option to each element and collect only the Some values.
      * Similar to flatMap but specifically for Option-returning functions.
      */
-    @TruffleBoundary
     public static MezzeSet filterMap(MezzeSet set, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
@@ -502,7 +486,6 @@ public final class SetNatives {
      * Filter elements and transform them in one pass, returning a Seq.
      * The function returns Option[B] - None filters out, Some(b) includes b.
      */
-    @TruffleBoundary
     public static Object[] collectArray(MezzeSet set, MezzeFunction f,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
@@ -519,7 +502,6 @@ public final class SetNatives {
     /**
      * Like filterMap but returns a List for ordered result.
      */
-    @TruffleBoundary
     public static MezzeList collectList(MezzeSet set, MezzeFunction f,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");

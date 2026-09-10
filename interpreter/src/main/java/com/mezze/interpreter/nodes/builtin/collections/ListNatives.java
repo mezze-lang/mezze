@@ -409,21 +409,16 @@ public final class ListNatives {
     public static MezzeRecord partition(MezzeList list, MezzeFunction predicate,
 
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         Object[] src = list.toArray();
         Object[] matching = new Object[src.length];
         Object[] nonMatching = new Object[src.length];
         int matchCount = 0;
         int nonMatchCount = 0;
 
-        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         for (int i = 0; i < src.length; i++) {
             Object element = src[i];
-            Object result;
-            if (innerTarget != null) {
-                result = callNode.call(innerTarget, prepareScalarArgs1(predicate, element));
-            } else {
-                result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
-            }
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 matching[matchCount++] = element;
             } else {
@@ -529,24 +524,19 @@ public final class ListNatives {
         return MezzeList.of(arr);
     }
 
-    @TruffleBoundary
     public static MezzeList sortBy(MezzeList list, MezzeFunction cmpFn,
 
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.size() <= 1) return list;
-
+        var ctx = ScalarCall.prepare2(cmpFn, "a", "b");
         Object[] arr = list.toArray();
-
-        // Sort using comparator function that takes {a, b} record
         java.util.Arrays.sort(arr, (elemA, elemB) -> {
-            Object cmpResult = callNode.call(cmpFn.getCallTarget(),
-                prepareArgsComparator(cmpFn, elemA, elemB));
+            Object cmpResult = ctx.call2(callNode, elemA, elemB);
             if (cmpResult instanceof Long) {
                 return ((Long) cmpResult).intValue();
             }
             return 0;
         });
-
         return MezzeList.of(arr);
     }
 
@@ -564,33 +554,6 @@ public final class ListNatives {
 
     // ==================== Helper Methods ====================
 
-    private static Object[] prepareArgs(MezzeFunction fn, Object arg) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        // Use fast wrapper - no @TruffleBoundary
-        args[closureValues.length] = MezzeRecord.wrapX(arg);
-        return args;
-    }
-
-    /** Scalar-ABI 1-arg: bypass record wrapping for BDSL callees. */
-    private static Object[] prepareScalarArgs1(MezzeFunction fn, Object arg) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = arg;  // raw scalar, no MezzeRecord
-        return args;
-    }
-
-    /** Scalar-ABI 2-arg: bypass record wrapping for BDSL callees. */
-    private static Object[] prepareScalarArgs2(MezzeFunction fn, Object arg1, Object arg2) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 2];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = arg1;      // raw scalar
-        args[closureValues.length + 1] = arg2;  // raw scalar
-        return args;
-    }
 
     /**
      * #403: shared 2-arg fold loop for foldLeft/foldRight/reduce/scan.
@@ -648,24 +611,6 @@ public final class ListNatives {
         return acc;
     }
 
-    private static Object[] prepareArgsTwo(MezzeFunction fn, Object arg1, Object arg2) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        // Use fast wrapper - no @TruffleBoundary
-        args[closureValues.length] = MezzeRecord.wrapAccX(arg1, arg2);
-        return args;
-    }
-
-    private static Object[] prepareArgsComparator(MezzeFunction fn, Object arg1, Object arg2) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        // Use fast wrapper - no @TruffleBoundary
-        args[closureValues.length] = MezzeRecord.wrapAB(arg1, arg2);
-        return args;
-    }
-
     @TruffleBoundary
     private static boolean deepEquals(Object a, Object b) {
         if (a == b) return true;
@@ -713,16 +658,16 @@ public final class ListNatives {
         return MezzeVariant.some(maxVal);
     }
 
-    @TruffleBoundary
     public static MezzeVariant minBy(MezzeList list, MezzeFunction keyFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return MezzeVariant.none();
+        var ctx = ScalarCall.prepare1(keyFn, "x");
         Object[] src = list.toArray();
         Object minElem = src[0];
-        Object minKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, minElem));
+        Object minKey = ctx.call1(callNode, minElem);
         for (int i = 1; i < src.length; i++) {
             Object elem = src[i];
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = ctx.call1(callNode, elem);
             if (compare(key, minKey) < 0) {
                 minElem = elem;
                 minKey = key;
@@ -731,16 +676,16 @@ public final class ListNatives {
         return MezzeVariant.some(minElem);
     }
 
-    @TruffleBoundary
     public static MezzeVariant maxBy(MezzeList list, MezzeFunction keyFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return MezzeVariant.none();
+        var ctx = ScalarCall.prepare1(keyFn, "x");
         Object[] src = list.toArray();
         Object maxElem = src[0];
-        Object maxKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, maxElem));
+        Object maxKey = ctx.call1(callNode, maxElem);
         for (int i = 1; i < src.length; i++) {
             Object elem = src[i];
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = ctx.call1(callNode, elem);
             if (compare(key, maxKey) > 0) {
                 maxElem = elem;
                 maxKey = key;
@@ -814,14 +759,14 @@ public final class ListNatives {
 
     // ==================== Group By ====================
 
-    @TruffleBoundary
     public static MezzeList groupBy(MezzeList list, MezzeFunction keyFn,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(keyFn, "x");
         Object[] src = list.toArray();
         java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
         for (int i = 0; i < src.length; i++) {
             Object elem = src[i];
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = ctx.call1(callNode, elem);
             groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(elem);
         }
         Object[] result = new Object[groups.size()];
@@ -855,23 +800,12 @@ public final class ListNatives {
         return MezzeList.of(result);
     }
 
-    @TruffleBoundary
     public static MezzeRecord forEach(MezzeList list, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(fn, "x");
         Object[] src = list.toArray();
-        CallTarget innerTarget = ScalarBypass.tryResolve(fn);
-        if (innerTarget != null) {
-            Object[] closureValues = fn.getClosureValues();
-            Object[] args = new Object[closureValues.length + 1];
-            System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-            for (int i = 0; i < src.length; i++) {
-                args[closureValues.length] = src[i];
-                callNode.call(innerTarget, args);
-            }
-        } else {
-            for (int i = 0; i < src.length; i++) {
-                callNode.call(fn.getCallTarget(), prepareArgs(fn, src[i]));
-            }
+        for (int i = 0; i < src.length; i++) {
+            ctx.call1(callNode, src[i]);
         }
         return MezzeRecord.empty();
     }
@@ -895,13 +829,13 @@ public final class ListNatives {
         );
     }
 
-    @TruffleBoundary
     public static MezzeRecord span(MezzeList list, MezzeFunction predicate,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         Object[] src = list.toArray();
         int splitIdx = 0;
         for (int i = 0; i < src.length; i++) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, src[i]));
+            Object result = ctx.call1(callNode, src[i]);
             if (result instanceof Boolean && (Boolean) result) {
                 splitIdx++;
             } else {
@@ -933,18 +867,18 @@ public final class ListNatives {
         return MezzeList.of(result.toArray());
     }
 
-    @TruffleBoundary
     public static MezzeList dedupBy(MezzeList list, MezzeFunction keyFn,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return list;
+        var ctx = ScalarCall.prepare1(keyFn, "x");
         Object[] src = list.toArray();
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
         Object lastElem = src[0];
-        Object lastKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, lastElem));
+        Object lastKey = ctx.call1(callNode, lastElem);
         result.add(lastElem);
         for (int i = 1; i < src.length; i++) {
             Object elem = src[i];
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = ctx.call1(callNode, elem);
             if (!java.util.Objects.equals(key, lastKey)) {
                 result.add(elem);
                 lastElem = elem;
@@ -971,12 +905,12 @@ public final class ListNatives {
         return MezzeList.of(arr);
     }
 
-    @TruffleBoundary
     public static MezzeList fillWith(long count, MezzeFunction fn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(fn, "i");
         Object[] arr = new Object[(int) count];
         for (int i = 0; i < count; i++) {
-            arr[i] = callNode.call(fn.getCallTarget(), prepareArgsIndex(fn, (long) i));
+            arr[i] = ctx.call1(callNode, (long) i);
         }
         return MezzeList.of(arr);
     }
@@ -1007,20 +941,20 @@ public final class ListNatives {
         return MezzeList.of(groups.toArray());
     }
 
-    @TruffleBoundary
     public static MezzeList groupConsecutiveBy(MezzeList list, MezzeFunction keyFn,
                                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return MezzeList.empty();
+        var ctx = ScalarCall.prepare1(keyFn, "x");
         Object[] src = list.toArray();
         java.util.ArrayList<Object> groups = new java.util.ArrayList<>();
         java.util.ArrayList<Object> currentGroup = new java.util.ArrayList<>();
         Object firstElem = src[0];
-        Object currentKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, firstElem));
+        Object currentKey = ctx.call1(callNode, firstElem);
         currentGroup.add(firstElem);
 
         for (int i = 1; i < src.length; i++) {
             Object elem = src[i];
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = ctx.call1(callNode, elem);
             if (java.util.Objects.equals(key, currentKey)) {
                 currentGroup.add(elem);
             } else {
@@ -1036,13 +970,13 @@ public final class ListNatives {
 
     // ==================== FlatMap/TakeWhile/DropWhile ====================
 
-    @TruffleBoundary
     public static MezzeList flatMap(MezzeList list, MezzeFunction mapper,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(mapper, "x");
         Object[] src = list.toArray();
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
         for (int i = 0; i < src.length; i++) {
-            Object mapped = callNode.call(mapper.getCallTarget(), prepareArgs(mapper, src[i]));
+            Object mapped = ctx.call1(callNode, src[i]);
             if (mapped instanceof MezzeList innerList) {
                 Object[] innerSrc = innerList.toArray();
                 for (int j = 0; j < innerSrc.length; j++) {
@@ -1053,14 +987,14 @@ public final class ListNatives {
         return MezzeList.of(results.toArray());
     }
 
-    @TruffleBoundary
     public static MezzeList takeWhile(MezzeList list, MezzeFunction predicate,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         Object[] src = list.toArray();
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
         for (int i = 0; i < src.length; i++) {
             Object element = src[i];
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            Object result = ctx.call1(callNode, element);
             if (result instanceof Boolean && (Boolean) result) {
                 results.add(element);
             } else {
@@ -1070,13 +1004,13 @@ public final class ListNatives {
         return MezzeList.of(results.toArray());
     }
 
-    @TruffleBoundary
     public static MezzeList dropWhile(MezzeList list, MezzeFunction predicate,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         Object[] src = list.toArray();
         int dropCount = 0;
         for (int i = 0; i < src.length; i++) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, src[i]));
+            Object result = ctx.call1(callNode, src[i]);
             if (result instanceof Boolean && (Boolean) result) {
                 dropCount++;
             } else {
@@ -1088,19 +1022,18 @@ public final class ListNatives {
 
     // ==================== None/Count ====================
 
-    @TruffleBoundary
     public static boolean none(MezzeList list, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         return !any(list, predicate, callNode);
     }
 
-    @TruffleBoundary
     public static long count(MezzeList list, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(predicate, "x");
         Object[] src = list.toArray();
         long cnt = 0;
         for (int i = 0; i < src.length; i++) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, src[i]));
+            Object result = ctx.call1(callNode, src[i]);
             if (result instanceof Boolean && (Boolean) result) {
                 cnt++;
             }
@@ -1142,16 +1075,6 @@ public final class ListNatives {
     }
 
     // ==================== Helper for fillWith ====================
-
-    private static Object[] prepareArgsIndex(MezzeFunction fn, long index) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"i"}, new Object[]{index}
-        );
-        return args;
-    }
 
     private static int compare(Object a, Object b) {
         if (a instanceof Long && b instanceof Long) {
@@ -1267,18 +1190,17 @@ public final class ListNatives {
 
     // ==================== Task #19: Transformation Operations ====================
 
-    @TruffleBoundary
     public static MezzeList sortByKey(MezzeList list, MezzeFunction keyFn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.size() <= 1) return list;
-
+        var ctx = ScalarCall.prepare1(keyFn, "x");
         Object[] src = list.toArray();
 
         // Build array of {element, key} pairs
         Object[][] pairs = new Object[src.length][2];
         for (int i = 0; i < src.length; i++) {
             Object elem = src[i];
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = ctx.call1(callNode, elem);
             pairs[i][0] = elem;
             pairs[i][1] = key;
         }
@@ -1522,15 +1444,14 @@ public final class ListNatives {
         return Integer.compare(src1.length, src2.length);
     }
 
-    @TruffleBoundary
     public static long lexicographicCompare(MezzeList list1, MezzeList list2, MezzeFunction cmp,
                                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare2(cmp, "a", "b");
         Object[] src1 = list1.toArray();
         Object[] src2 = list2.toArray();
         int minLen = Math.min(src1.length, src2.length);
         for (int i = 0; i < minLen; i++) {
-            Object result = callNode.call(cmp.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"a", "b"}, new Object[]{src1[i], src2[i]})});
+            Object result = ctx.call2(callNode, src1[i], src2[i]);
             if (result instanceof Long l && l != 0) {
                 return l < 0 ? -1L : 1L;
             }
@@ -1550,14 +1471,13 @@ public final class ListNatives {
         return true;
     }
 
-    @TruffleBoundary
     public static boolean isSortedBy(MezzeList list, MezzeFunction cmp,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.size() <= 1) return true;
+        var ctx = ScalarCall.prepare2(cmp, "a", "b");
         Object[] src = list.toArray();
         for (int i = 1; i < src.length; i++) {
-            Object result = callNode.call(cmp.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"a", "b"}, new Object[]{src[i - 1], src[i]})});
+            Object result = ctx.call2(callNode, src[i - 1], src[i]);
             if (result instanceof Long l && l > 0) {
                 return false;
             }
@@ -1693,16 +1613,15 @@ public final class ListNatives {
      * Binary search with a custom comparator function.
      * List MUST be sorted according to the comparator.
      */
-    @TruffleBoundary
     public static MezzeVariant binarySearchBy(MezzeList list, Object target, MezzeFunction cmp,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare2(cmp, "a", "b");
         Object[] src = list.toArray();
         int lo = 0;
         int hi = src.length - 1;
         while (lo <= hi) {
             int mid = lo + (hi - lo) / 2;
-            Object cmpResult = callNode.call(cmp.getCallTarget(),
-                new Object[]{MezzeRecord.fromFields(new String[]{"a", "b"}, new Object[]{src[mid], target})});
+            Object cmpResult = ctx.call2(callNode, src[mid], target);
             int comparison = 0;
             if (cmpResult instanceof Long l) {
                 comparison = l.intValue();

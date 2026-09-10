@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.language.typedast.Hash;
+import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.VirtualFrame;
@@ -18,6 +19,9 @@ import com.oracle.truffle.api.nodes.NodeInfo;
  * function and return its result instead of the function itself.
  *
  * This node specifically returns the MezzeFunction without calling it.
+ *
+ * <p>After warmup the resolved function is cached as a {@link CompilationFinal}
+ * constant — no {@code @TruffleBoundary} crossing on steady-state reads. #54.
  */
 @NodeInfo(shortName = "read-global-fn-by-hash")
 public final class ReadGlobalFnByHashNode extends MezzeNode {
@@ -25,13 +29,27 @@ public final class ReadGlobalFnByHashNode extends MezzeNode {
     @CompilationFinal
     private final Hash hash;
 
+    @CompilationFinal private boolean resolved;
+    @CompilationFinal private Object cachedValue;
+
     public ReadGlobalFnByHashNode(Hash hash) {
         this.hash = hash;
     }
 
     @Override
     public Object execute(VirtualFrame frame) {
-        return lookupFunction();
+        if (resolved) {
+            return cachedValue;
+        }
+        return resolveAndCache();
+    }
+
+    private Object resolveAndCache() {
+        Object value = lookupFunction();
+        CompilerDirectives.transferToInterpreterAndInvalidate();
+        cachedValue = value;
+        resolved = true;
+        return value;
     }
 
     @TruffleBoundary

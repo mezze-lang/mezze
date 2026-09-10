@@ -631,18 +631,12 @@ public final class AsyncNatives {
         // inner+delegating-outer pattern.
         MezzePromise promise = new MezzePromise(null, semaphore);
 
-        Thread vThread = env.newTruffleThreadBuilder(() -> runPromiseTask(handlerChain, parentScope, promise, () -> {
-            if (semaphore != null) {
-                semaphore.acquireUninterruptibly();
-            }
-            try {
-                return callNode.call(callTarget, closureValues);
-            } finally {
-                if (semaphore != null) {
-                    semaphore.release();
-                }
-            }
-        })).virtual(true).build();
+        // runPromiseTaskDirect: single lambda (the Runnable), no inner
+        // TaskBody lambda — saves ~100 bytes garbage per spawn.
+        Thread vThread = env.newTruffleThreadBuilder(() ->
+            runPromiseTaskDirect(handlerChain, parentScope, promise,
+                callTarget, closureValues, callNode, semaphore)
+        ).virtual(true).build();
 
         promise.setExecutingThread(vThread);
         vThread.start();
@@ -698,10 +692,10 @@ public final class AsyncNatives {
 
         MezzePromise promise = new MezzePromise(null, null);
 
-        // Platform thread (not virtual)
-        Thread thread = env.newTruffleThreadBuilder(
-            () -> runPromiseTask(handlerChain, parentScope, promise,
-                () -> callNode.call(callTarget, fullArgs))
+        // Platform thread (not virtual). runPromiseTaskDirect: single lambda.
+        Thread thread = env.newTruffleThreadBuilder(() ->
+            runPromiseTaskDirect(handlerChain, parentScope, promise,
+                callTarget, fullArgs, callNode, null)
         ).build();
 
         promise.setExecutingThread(thread);
@@ -798,9 +792,10 @@ public final class AsyncNatives {
         // the spawn site; reader: cancel() which only fires post-spawn).
         MezzePromise promise = new MezzePromise(null, null);
 
-        Thread vThread = env.newTruffleThreadBuilder(
-            () -> runPromiseTask(handlerChain, parentScope, promise,
-                () -> callNode.call(f.getCallTarget(), fullArgs))
+        // runPromiseTaskDirect: single lambda, no inner TaskBody.
+        Thread vThread = env.newTruffleThreadBuilder(() ->
+            runPromiseTaskDirect(handlerChain, parentScope, promise,
+                f.getCallTarget(), fullArgs, callNode, null)
         ).virtual(true).build();
 
         promise.setExecutingThread(vThread);
@@ -1198,10 +1193,55 @@ public final class AsyncNatives {
     }
 
     /** Block until the promise resolves; return a `Result 'a AsyncError`
-     *  variant. Replaces the throw-on-failure behavior of awaitOp. */
-    @TruffleBoundary
+     *  variant. Replaces the throw-on-failure behavior of awaitOp.
+     *
+     *  <p>Fast-path: if the promise is already done, classify the terminal
+     *  outcome directly — single {@code @TruffleBoundary}, no
+     *  {@code await()}/{@code shouldSampleThisCall()}/spin/park/throw.
+     *  Saves ~150-300ns per completed-promise await vs the old path that
+     *  crossed two boundaries and threw+caught for FAILED/CANCELLED. */
     public static Object promiseAwaitResult(MezzeRecord args) {
         MezzePromise p = getPromise(args, "p");
+        if (p.isDone()) {
+            return promiseAwaitResultDone(p);
+        }
+        return promiseAwaitResultSlowPath(p);
+    }
+
+    /** Already-done promise: single @TruffleBoundary, no await()/spin/park/throw.
+     *  Reads terminal state once and classifies directly. Since outcomes are
+     *  single-CAS terminal transitions, the state is frozen after isDone(). */
+    @TruffleBoundary
+    private static Object promiseAwaitResultDone(MezzePromise p) {
+        int state = p.snapshotState();
+
+        if (state == MezzePromise.COMPLETED) {
+            Object value = p.snapshotResult();
+            // Effect propagation: MezzeSuspend forcing
+            if (value instanceof MezzeSuspend suspended) {
+                Object forced = suspended.force(IndirectCallNode.getUncached());
+                return MezzeVariant.ok(forced);
+            }
+            // Effect propagation: unhandled op-call re-raise
+            OpCall pending = p.getUnhandledOpCall();
+            if (pending != null) {
+                return dispatchUnhandledOp(pending);
+            }
+            return MezzeVariant.ok(value);
+        }
+        if (state == MezzePromise.FAILED) {
+            return MezzeVariant.err(asyncErrorFromResult(p.snapshotResult()));
+        }
+        if (state == MezzePromise.CANCELLED) {
+            return MezzeVariant.err(createAsyncCancelled(p.getCancelReason()));
+        }
+        return MezzeVariant.err(createAsyncFailed(
+            "promise in unexpected terminal state " + state));
+    }
+
+    /** Slow path — promise still pending, must block via await(). */
+    @TruffleBoundary
+    private static Object promiseAwaitResultSlowPath(MezzePromise p) {
         Object value;
         try {
             value = p.await();
@@ -1218,37 +1258,16 @@ public final class AsyncNatives {
             if (state == MezzePromise.FAILED) {
                 return MezzeVariant.err(asyncErrorFromResult(p.snapshotResult()));
             }
-            // Some other RuntimeException — re-throw.
             throw e;
         }
-        // Same propagation logic as awaitPromise — MezzeSuspend forcing
-        // and unhandled-op re-raise still happen, those are NOT failure modes
-        // but the body's effect propagation.
+        // Effect propagation
         if (value instanceof MezzeSuspend suspended) {
             Object forced = suspended.force(IndirectCallNode.getUncached());
             return MezzeVariant.ok(forced);
         }
         OpCall pending = p.getUnhandledOpCall();
         if (pending != null) {
-            // Chain-dispatch is the only path from an unhandled spawn-side
-            // op back to the outer perform on this thread.
-            if (HandlerChainRegistry.handlerChainDepth() > 0) {
-                Object dispatched = com.mezze.interpreter.nodes.effect.OpCallNode
-                    .dispatchOpOnChain(
-                        HandlerChainRegistry.snapshotHandlerChainEntries(),
-                        pending.opName(),
-                        pending.args(),
-                        pending.effectHash(),
-                        IndirectCallNode.getUncached());
-                if (dispatched != com.mezze.interpreter.nodes.effect.OpCallNode.DISPATCH_NO_MATCH) {
-                    return MezzeVariant.ok(dispatched);
-                }
-                throw new EffectHandlerDriver.TaskUnhandledOpException(pending);
-            }
-            // No handler — surface as AsyncFailed so caller sees Result Err.
-            return MezzeVariant.err(createAsyncFailed(
-                "Spawned task raised effect operation '" + pending.opName()
-                + "' with no handler available at await site."));
+            return dispatchUnhandledOp(pending);
         }
         // Classify by final state.
         int state = p.snapshotState();
@@ -1259,6 +1278,26 @@ public final class AsyncNatives {
             default -> MezzeVariant.err(createAsyncFailed(
                 "promise.await returned with unexpected state " + state));
         };
+    }
+
+    /** Shared unhandled-op dispatch for both done and slow paths. */
+    private static Object dispatchUnhandledOp(OpCall pending) {
+        if (HandlerChainRegistry.handlerChainDepth() > 0) {
+            Object dispatched = com.mezze.interpreter.nodes.effect.OpCallNode
+                .dispatchOpOnChain(
+                    HandlerChainRegistry.snapshotHandlerChainEntries(),
+                    pending.opName(),
+                    pending.args(),
+                    pending.effectHash(),
+                    IndirectCallNode.getUncached());
+            if (dispatched != com.mezze.interpreter.nodes.effect.OpCallNode.DISPATCH_NO_MATCH) {
+                return MezzeVariant.ok(dispatched);
+            }
+            throw new EffectHandlerDriver.TaskUnhandledOpException(pending);
+        }
+        return MezzeVariant.err(createAsyncFailed(
+            "Spawned task raised effect operation '" + pending.opName()
+            + "' with no handler available at await site."));
     }
 
     /** Convert a MezzePromise's stored result-on-failure into an AsyncError
@@ -1312,12 +1351,42 @@ public final class AsyncNatives {
             promise.setUnhandledOpCall(tue.opCall);
             promise.complete(null);
         } catch (CancellationException ce) {
-            // Native blocking ops translate InterruptedException to
-            // CancellationException so cancel-during-blocking surfaces as
-            // a typed AsyncCancelled result on await rather than a generic
-            // task-failed runtime error. If the parent already CAS'd to
-            // CANCELLED with a reason, this cancel(null) is a no-op;
-            // otherwise we finalize with null → ExternalInterrupt.
+            promise.cancel(null);
+        } catch (Throwable e) {
+            promise.fail(e);
+        } finally {
+            if (installed) HandlerChainRegistry.clearHandlerChain();
+        }
+    }
+
+    /**
+     * Direct call variant — eliminates the inner TaskBody lambda per spawn.
+     * Calls callTarget with args directly, with optional semaphore gating.
+     * Saves ~100 bytes garbage per spawn (one fewer lambda capture object).
+     */
+    private static void runPromiseTaskDirect(
+            HandlerChainEntry[] chain, Object scope, MezzePromise promise,
+            com.oracle.truffle.api.CallTarget callTarget, Object[] args,
+            IndirectCallNode callNode, java.util.concurrent.Semaphore semaphore) {
+        boolean installed = false;
+        try {
+            if (scope != null) HandlerChainRegistry.restoreScopeVar(scope);
+            if (chain.length > 0) {
+                HandlerChainRegistry.installHandlerChainEntries(chain);
+                installed = true;
+            }
+            if (semaphore != null) semaphore.acquireUninterruptibly();
+            Object result;
+            try {
+                result = callNode.call(callTarget, args);
+            } finally {
+                if (semaphore != null) semaphore.release();
+            }
+            promise.complete(result);
+        } catch (TaskUnhandledOpException tue) {
+            promise.setUnhandledOpCall(tue.opCall);
+            promise.complete(null);
+        } catch (CancellationException ce) {
             promise.cancel(null);
         } catch (Throwable e) {
             promise.fail(e);

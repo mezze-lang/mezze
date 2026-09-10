@@ -7659,19 +7659,85 @@ public final class BytecodeCompiler {
             b.endConditional();
             return;
         }
+        // Count consecutive variant cases starting at idx.
+        int variantEnd = idx;
+        while (variantEnd < cases.size()
+                && cases.get(variantEnd).getPattern() instanceof PatternIR.Variant) {
+            variantEnd++;
+        }
+        int variantCount = variantEnd - idx;
+
+        if (variantCount >= 2) {
+            // Optimized path: read the tag ONCE into a local, then dispatch
+            // via PrimEquals(tagLocal, tagConstant). This gives Graal PE
+            // the canonical pattern for IntegerSwitchNode folding — one
+            // value compared against dense int constants. Eliminates N
+            // repeated VariantTagEquals tag reads from the scrutinee.
+            BytecodeLocal tagLocal = b.createLocal();
+            b.beginBlock();
+            b.beginStoreLocal(tagLocal);
+            b.beginReadVariantTag();
+            b.emitLoadLocal(scrutineeLocal);
+            b.endReadVariantTag();
+            b.endStoreLocal();
+            emitVariantSwitchArm(cases, idx, variantEnd, scrutineeLocal,
+                    tagLocal, b, argCount, localMap);
+            b.endBlock();
+            return;
+        }
+
+        // Single variant case — use existing VariantTagEquals path.
         PatternIR.Variant v = (PatternIR.Variant) pat;
         b.beginConditional();
-        // Condition.
         b.beginVariantTagEquals(v.getTag(), v.getTagName());
         b.emitLoadLocal(scrutineeLocal);
         b.endVariantTagEquals();
-        // Then-branch. Bind each captured field of the payload record:
-        // for a pattern like Some { value = v }, fieldNames=["value"],
-        // fieldSlots=[slot(v)]. Read v = payload.value. When the pattern
-        // is a bare payload variable Some v — no {} — fieldNames = [v]
-        // and the AST also does a record-field extraction; that same
-        // shape wouldn't typecheck without an actual record payload, so
-        // treat both identically.
+        emitVariantArmBody(v, c, cases, idx, scrutineeLocal, b, argCount, localMap);
+        emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
+        b.endConditional();
+    }
+
+    /**
+     * Emit one arm of the optimized variant switch dispatch. Compares the
+     * pre-read tag local against each arm's tag constant via PrimEquals.
+     */
+    private void emitVariantSwitchArm(java.util.List<CaseIR> cases, int idx,
+                                       int variantEnd,
+                                       BytecodeLocal scrutineeLocal,
+                                       BytecodeLocal tagLocal,
+                                       MezzeBytecodeRootNodeGen.Builder b,
+                                       int argCount, BytecodeLocal[] localMap) {
+        if (idx >= variantEnd) {
+            // Past the variant run — hand off to remaining cases (wildcard, etc.)
+            emitMatchChain(cases, idx, scrutineeLocal, b, argCount, localMap);
+            return;
+        }
+        CaseIR c = cases.get(idx);
+        PatternIR.Variant v = (PatternIR.Variant) c.getPattern();
+
+        b.beginConditional();
+        // Condition: PrimEquals(tagLocal, tagConstant)
+        b.beginPrimEquals();
+        b.emitLoadLocal(tagLocal);
+        b.emitLoadConstant((long) v.getTag());
+        b.endPrimEquals();
+        // Then-branch: bindings + body
+        emitVariantArmBody(v, c, cases, idx, scrutineeLocal, b, argCount, localMap);
+        // Else-branch: next arm
+        emitVariantSwitchArm(cases, idx + 1, variantEnd, scrutineeLocal,
+                tagLocal, b, argCount, localMap);
+        b.endConditional();
+    }
+
+    /**
+     * Emit the bindings + guarded body for a single variant match arm.
+     * Shared between the optimized switch path and the single-arm path.
+     */
+    private void emitVariantArmBody(PatternIR.Variant v, CaseIR c,
+                                     java.util.List<CaseIR> cases, int idx,
+                                     BytecodeLocal scrutineeLocal,
+                                     MezzeBytecodeRootNodeGen.Builder b,
+                                     int argCount, BytecodeLocal[] localMap) {
         b.beginBlock();
         var names = v.getFieldNames();
         var slots = v.getFieldSlots();
@@ -7713,9 +7779,6 @@ public final class BytecodeCompiler {
         }
         emitCaseGuardsAndBody(c, cases, idx, scrutineeLocal, b, argCount, localMap);
         b.endBlock();
-        // Else-branch (tag mismatch) — recurse.
-        emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
-        b.endConditional();
     }
 
     /**
