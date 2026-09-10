@@ -9,6 +9,7 @@ import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.util.TypeAnnotationMatcher
+import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.parsedast.*
 import com.mezze.language.typedast.Hash
@@ -412,7 +413,14 @@ class AbilityResolver(
         return when (annotation) {
             is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
             is ParsedSeqType -> MezzeType.SeqType(resolveTypeAnnotation(annotation.elementType))
-            else -> WellKnownTypeApp.of(annotation.toString(), emptyList())
+            // L-07: any OTHER shape (ParsedTypeApp, qualified, function, record, …)
+            // previously became `WellKnownTypeApp.of(annotation.toString(), [])` — a
+            // bogus nullary type-app whose constructor is the RENDERED STRING, which
+            // could spuriously satisfy or fail an ability constraint on a container/
+            // function co-operand. Delegate to the real converter so the structure is
+            // preserved. (Named/Seq kept verbatim above to avoid changing the
+            // established unbound-'a → nullary-app behavior the caller relies on.)
+            else -> TypeAnnotationConverter.convert(annotation)
         }
     }
 

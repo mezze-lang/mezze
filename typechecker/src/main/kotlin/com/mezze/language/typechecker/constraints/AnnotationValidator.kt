@@ -5,6 +5,7 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.typechecker.solving.ConstraintSolver
+import com.mezze.language.typechecker.solving.UnificationResult
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashConstants
@@ -378,16 +379,22 @@ internal class AnnotationValidator(
                 // catch it by the rendered `'`-prefixed name here.
                 if (prettyPrintType(annotatedType).startsWith("'")) continue
 
-                // Compare by RENDERED name, not structural equality: an annotation's
-                // `Money` (a bare TypeApplication) and the impl/solver's `Money`
-                // (which may be a VariantType or reach via a different path) are the
-                // same type here but `==`-unequal — a naive `!=` falsely rejected a
-                // CORRECT `having 'out = Money`. Two types that print identically
-                // are the same for this annotation check.
+                // L-10: compare via Unification.unify, NOT rendered-name equality.
+                // The name compare was introduced to dodge a false rejection where the
+                // annotation's `Money` (a bare TypeApplication) and the solver's `Money`
+                // (a VariantType) are the SAME type but `==`-unequal — unify resolves
+                // that representational mismatch (via expandTypeApplicationToVariant)
+                // internally, so it keeps that acceptance. But unify also keys nominal
+                // sameness on TypeIdentity.Declared.hash (identityVerdict), so two
+                // structurally-distinct types that merely PRINT identically (a shadowed
+                // `Money` with a different hash) no longer pass. prettyPrintType stays
+                // for the human-readable error messages only.
                 val annotatedName = prettyPrintType(annotatedType)
+                fun sameType(a: MezzeType, b: MezzeType): Boolean =
+                    com.mezze.language.typechecker.solving.unify(a, b, registry) is UnificationResult.Success
 
                 val resolved = resolvedForAbility[name]
-                if (resolved != null && resolved !is MezzeType.VarType && annotatedName != prettyPrintType(resolved)) {
+                if (resolved != null && resolved !is MezzeType.VarType && !sameType(annotatedType, resolved)) {
                     throw TypeCheckError(
                         "Type annotation for '$varName': `having '$name = $annotatedName` " +
                         "but ability '$abilityName' resolves '$name to ${prettyPrintType(resolved)}.",
@@ -399,7 +406,7 @@ internal class AnnotationValidator(
 
                 // (b) generic receiver: compare against the impls' declared values.
                 val declared = implDeclaredHaving[abilityName]?.get(name)
-                if (!declared.isNullOrEmpty() && declared.none { prettyPrintType(it) == annotatedName }) {
+                if (!declared.isNullOrEmpty() && declared.none { sameType(annotatedType, it) }) {
                     val expected = declared.map { prettyPrintType(it) }.sorted().joinToString(" | ")
                     throw TypeCheckError(
                         "Type annotation for '$varName': `having '$name = $annotatedName` " +

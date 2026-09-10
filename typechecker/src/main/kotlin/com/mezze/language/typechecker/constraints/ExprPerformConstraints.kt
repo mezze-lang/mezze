@@ -561,7 +561,19 @@ internal fun ExpressionConstraintGenerator.generateEffectCall(expr: ParsedEffect
     val collector = ConstraintCollector()
     collector.merge(argResult)
     collector.constraints.addAll(additionalConstraints)
-    collector.effects.add(effectName)
+    // L-28 (#312): the effect set an op call performs must be the SAME regardless of
+    // spelling — `Effect::op {}` (this path) vs `receiver.op {}` (the member-access
+    // path in ExprEffectOpConstraints). That path already computes the op's own
+    // declared effect row and uses it (falling back to just the parent effect when
+    // the op declares no own row — preserving EffectAssociatedTypesInterpreterTest).
+    // This path previously added ONLY the parent effectName, so `Database::query {}`
+    // yielded {Database} while `db.query {}` yielded {Database, Log}. Mirror the exact
+    // #312 rule here so both spellings agree.
+    val opOwnEffects = effectDecl?.operations
+        ?.firstOrNull { it.name == operationName }
+        ?.effects?.toSet().orEmpty()
+    val operationEffects = if (effectName in opOwnEffects) opOwnEffects else setOf(effectName)
+    collector.effects.addAll(operationEffects)
     if (effectInstance != null) collector.effectInstances.add(effectInstance)
 
     return collector.toResult(resultType)
