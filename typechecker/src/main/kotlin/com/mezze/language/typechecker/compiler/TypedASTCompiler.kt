@@ -1948,7 +1948,21 @@ class TypedASTCompiler(
                             else MakeRecordIR(argIR.fields.filter { it.name !in strip }, src)
                             return emitCallDirect(specialized, finalArgIR, expr.isTailCall, src)
                         }
-                        val enrichedArgIR = injectDictFields(argIR, expr.arg, aliasDictMethods, src)
+                        // Derive constraint types + generic-ness the same way the
+                        // direct-call ByHash path does (~1846), so dict resolution
+                        // sees the alias's concrete operand types (or forwards from
+                        // the caller when all operands are still vars).
+                        val rawFnType = fn.type as? FunctionType
+                        val rawConstraintTypeArgs = rawFnType?.abilityConstraints
+                            ?.flatMap { it.typeArgs }
+                            ?.map { substitution.apply(it) }
+                            ?: emptyList()
+                        val constraintTypes = rawConstraintTypeArgs.filter { it !is VarType }
+                        val calleeConstraintsAreGeneric = rawConstraintTypeArgs.isNotEmpty() &&
+                            rawConstraintTypeArgs.all { it is VarType }
+                        val enrichedArgIR = injectDictFields(
+                            argIR, expr.arg, aliasDictMethods, constraintTypes, calleeConstraintsAreGeneric, src
+                        )
                         census.byHashDictInject++
                         return emitCallDirect(aliasTargetHash, enrichedArgIR, expr.isTailCall, src)
                     }
