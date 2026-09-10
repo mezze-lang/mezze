@@ -7,6 +7,12 @@ plugins {
     // task below.
     id("com.gradleup.shadow") version "9.4.1"
 }
+// GraalPy Gradle plugin (`org.graalvm.python`) intentionally NOT applied.
+// The plugin's numpy install path (`graalPyInstallPackages`) reliably
+// FAILS on GraalPy 25.0.3 at the Meson AVX2 loop generation step for
+// both numpy 1.26.4 and 2.0.2. The `NumpyInteropTest` gracefully skips
+// (via JUnit Assumptions) when numpy is absent; users can populate the
+// venv manually per `examples/polyglot_numpy/README` if needed.
 
 // Pure Java module for Truffle DSL nodes
 // The converter will be in a separate Kotlin module or in the interpreter module

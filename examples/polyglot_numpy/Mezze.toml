@@ -1,0 +1,10 @@
+[package]
+name = "polyglot_numpy"
+version = "0.1.0"
+
+[[app]]
+name = "polyglot_numpy"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]

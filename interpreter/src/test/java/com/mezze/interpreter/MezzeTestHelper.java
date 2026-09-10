@@ -92,7 +92,7 @@ public final class MezzeTestHelper {
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
-        Context context = Context.newBuilder(MezzeLanguage.ID, "python")
+        Context.Builder builder = Context.newBuilder(MezzeLanguage.ID, "python")
                 .engine(engine)
                 .allowAllAccess(true)
                 .allowCreateThread(true)
@@ -101,8 +101,29 @@ public final class MezzeTestHelper {
                 // requiring a POSIX resource library at runtime.
                 .allowExperimentalOptions(true)
                 .option("python.PosixModuleBackend", "java")
-                .option("python.WarnExperimentalFeatures", "false")
-                .build();
+                .option("python.WarnExperimentalFeatures", "false");
+
+        // If the org.graalvm.python plugin populated the venv, wire its
+        // site-packages onto PythonPath so `import numpy` succeeds.  The
+        // venv lives at <build>/graalpy-venv/venv/ (Linux/macOS layout).
+        String projectDir = System.getProperty("mezze.project.root", ".");
+        Path venvSitePackages = Paths.get(projectDir,
+            "interpreter", "build", "graalpy-venv", "venv", "lib");
+        if (java.nio.file.Files.isDirectory(venvSitePackages)) {
+            try (var stream = java.nio.file.Files.list(venvSitePackages)) {
+                var pyDir = stream
+                    .filter(p -> p.getFileName().toString().startsWith("python"))
+                    .findFirst();
+                if (pyDir.isPresent()) {
+                    Path sitePackages = pyDir.get().resolve("site-packages");
+                    if (java.nio.file.Files.isDirectory(sitePackages)) {
+                        builder.option("python.PythonPath", sitePackages.toString());
+                    }
+                }
+            } catch (java.io.IOException ignored) {}
+        }
+
+        Context context = builder.build();
 
         try {
             Source source = Source.newBuilder(MezzeLanguage.ID, sourceCode, sourcePath)

@@ -1,0 +1,95 @@
+# Polyglot NumPy demo — Mezze drives numpy end-to-end.
+#
+# What this demonstrates: a Mezze program hands data to numpy,
+# invokes numpy's reductions, and gets real numeric answers back
+# through the InteropLibrary — no numpy-specific glue in the
+# Mezze runtime, just the generic `Foreign` surface from
+# `std::polyglot::core`.
+#
+# Prerequisites: numpy installed in a GraalPy venv on the classpath.
+# See `just mez-run-numpy-demo` for the recipe that installs it.
+#
+# Run:  just mez-run-numpy-demo
+use std::effects::log::{println, Console, Log}
+use std::polyglot::core::{
+  Foreign, Context, InteropError, create_context, close_context
+}
+use std::polyglot::python::{ python_eval }
+use std::float
+use std::int
+
+## Coerce a Foreign result to a Mezze Float and print it.
+let show_float: { label: Str, r: Result Foreign InteropError } -> {} <Log>
+  = { label, r } -> match r is
+    Ok { val = f } -> match f.as_float{} is
+      Ok { val = d } -> println { msg = "  $(label) = $(float::to_str { n = d })" }
+      Err { error = _ } -> println { msg = "  $(label): could not coerce to float" }
+    Err { error = _ } -> println { msg = "  $(label): guest error" }
+
+## Coerce a Foreign result to a Mezze Int and print it.
+let show_int: { label: Str, r: Result Foreign InteropError } -> {} <Log>
+  = { label, r } -> match r is
+    Ok { val = f } -> match f.as_int{} is
+      Ok { val = n } -> println { msg = "  $(label) = $(int::to_str { n = n })" }
+      Err { error = _ } -> println { msg = "  $(label): could not coerce to int" }
+    Err { error = _ } -> println { msg = "  $(label): guest error" }
+
+let main = {} -> perform Console in do
+  let ctx = create_context { languages = ["python"], classpath = [] }
+
+  println { msg = "== Mezze x NumPy — polyglot demo ==" }
+  println { msg = "" }
+
+  # ---- Reductions over [1, 2, 3, 4, 5] ----
+  println { msg = "Reductions on numpy.array([1..5]):" }
+  let mean_r = python_eval {
+    context = ctx,
+    source = "float(__import__('numpy').array([1.0, 2.0, 3.0, 4.0, 5.0]).mean())"
+  }
+  let _ = show_float { label = "mean", r = mean_r }
+
+  let sum_r = python_eval {
+    context = ctx,
+    source = "float(__import__('numpy').array([1.0, 2.0, 3.0, 4.0, 5.0]).sum())"
+  }
+  let _ = show_float { label = "sum ", r = sum_r }
+
+  let std_r = python_eval {
+    context = ctx,
+    source = "float(__import__('numpy').array([1.0, 2.0, 3.0, 4.0, 5.0]).std())"
+  }
+  let _ = show_float { label = "std ", r = std_r }
+
+  # ---- arange + first / last ----
+  println { msg = "" }
+  println { msg = "numpy.arange(10) — first + last elements:" }
+  let first_r = python_eval {
+    context = ctx, source = "int(__import__('numpy').arange(10)[0])"
+  }
+  let _ = show_int { label = "first", r = first_r }
+  let last_r = python_eval {
+    context = ctx, source = "int(__import__('numpy').arange(10)[-1])"
+  }
+  let _ = show_int { label = "last ", r = last_r }
+
+  # ---- Linear algebra: dot product ----
+  println { msg = "" }
+  println { msg = "numpy.dot([1,2,3], [4,5,6]):" }
+  let dot_r = python_eval {
+    context = ctx,
+    source = "float(__import__('numpy').dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]))"
+  }
+  let _ = show_float { label = "dot ", r = dot_r }
+
+  # ---- Element-wise arithmetic ----
+  println { msg = "" }
+  println { msg = "sum(np.array([1,2,3]) + np.array([10,20,30])):" }
+  let ew_r = python_eval {
+    context = ctx,
+    source = "float((__import__('numpy').array([1.0, 2.0, 3.0]) + __import__('numpy').array([10.0, 20.0, 30.0])).sum())"
+  }
+  let _ = show_float { label = "sum ", r = ew_r }
+
+  let _ = close_context { it = ctx }
+  println { msg = "" }
+  println { msg = "== done ==" }

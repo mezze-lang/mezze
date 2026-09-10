@@ -171,6 +171,14 @@ test-class module pattern:
     @mkdir -p logs
     ./gradlew :{{module}}:test --no-daemon --tests '{{pattern}}' 2>&1 | tee logs/{{module}}-{{pattern}}.log
 
+# Run the polyglot numpy demo (Mezze x numpy).  Requires numpy in a
+# GraalPy venv on the classpath — see examples/polyglot_numpy/README.md
+# for setup.  Uses `mez exec` under the JVM (native binaries have no
+# polyglot).
+[group('mez')]
+mez-run-numpy-demo: _mez
+    {{mez}} exec examples/polyglot_numpy/src/app.mz
+
 # ============================================================
 # tooling
 # ============================================================
