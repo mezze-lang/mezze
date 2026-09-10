@@ -327,7 +327,17 @@ class TypedAstBuilder(
         val freeVars = collectTypeVarsInOrder(type, sortFields = false)
             .distinctBy { it.name }
             .map { TypeParam(it.name, TypeKind.Star) }
-        val scheme = V2TypeScheme(freeVars, emptyList(), type)
+        // Carry the binding's ability constraints onto the mono scheme. Without this
+        // the scheme is constraint-free, so monomorphization can't resolve a
+        // `having 'out` / dict for a constrained fn propagated through a HOF
+        // (`g = wrap {f = addTen}`), and the dict never gets threaded at runtime.
+        val schemeConstraints = (type as? MezzeType.FunctionType)?.abilityConstraints
+            ?.mapNotNull { c ->
+                c.abilityHash?.let { h ->
+                    com.mezze.language.typedast.TypedAbilityConstraint(abilityHash = h, typeArgs = c.typeArgs)
+                }
+            } ?: emptyList()
+        val scheme = V2TypeScheme(freeVars, schemeConstraints, type)
         val isPublic = decl.visibility == ParsedVisibility.PUBLIC
 
         decls.add(TypedLetDecl(

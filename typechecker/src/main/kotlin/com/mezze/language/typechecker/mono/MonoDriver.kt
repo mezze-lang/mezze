@@ -331,10 +331,18 @@ object MonoDriver {
                         counters.byHashFnTypeOk++
                         fromFn
                     } else {
-                        val fromArg = deriveTypeArgsFromArg(callee, expr.arg.type)
-                        if (fromArg != null && fromArg.all { isConcrete(it) }) {
+                        val fromArg = deriveTypeArgsFromArg(callee, expr.arg.type, allowPartial = true)
+                        // A `having 'out` typeParam (e.g. `NumAdd Int 'a having 'out='b`,
+                        // from a constrained fn propagated through a HOF) is not derivable
+                        // from the argument alone — `'b` only becomes concrete once the
+                        // NumAdd impl is resolved for the (now-concrete) receiver+class
+                        // args. Fill those remaining out-vars from the ability's `having`
+                        // bindings BEFORE the all-concrete gate, so mono can specialize a
+                        // HOF-propagated constrained fn (`g = wrap {f = addTen}`; `g{x=5}`).
+                        val filled = fromArg?.let { fillHavingOutTypeArgs(callee, it, allImpls) }
+                        if (filled != null && filled.all { isConcrete(it) }) {
                             counters.byHashArgTypeOk++
-                            fromArg
+                            filled
                         } else null
                     }
                     if (args != null && args.all { isConcrete(it) }) {
@@ -594,6 +602,12 @@ object MonoDriver {
         typeParams: List<TypeParam>,
         siteType: MezzeType,
         fullSchemeType: MezzeType? = null,
+        // When true, a non-phantom typeParam that the site couldn't bind is left as
+        // its own VarType (unresolved) instead of aborting with null — so a caller
+        // can complete it afterwards (e.g. filling a `having 'out` var via the
+        // resolved ability impl). The caller is responsible for the final
+        // all-concrete check.
+        allowPartial: Boolean = false,
     ): List<MezzeType>? {
         if (typeParams.isEmpty()) return emptyList()
         val phantomProbe = fullSchemeType ?: genericType
@@ -629,6 +643,11 @@ object MonoDriver {
                 // placeholder yields the same specialized body. Pick a
                 // stable value so the spec-hash is deterministic.
                 args.add(MezzeType.IntType)
+            } else if (allowPartial) {
+                // Leave this typeParam unresolved (a var carrying its param name); the
+                // caller will try to complete it (e.g. a `having 'out` via ability
+                // resolution), then run the final all-concrete check.
+                args.add(MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(tp.name)))
             } else {
                 return null
             }
@@ -732,13 +751,94 @@ object MonoDriver {
      *  Only works when the callee's `scheme.type` is a FunctionType. */
     private fun deriveTypeArgsFromArg(
         callee: TypedLetDecl,
-        argSiteType: MezzeType
+        argSiteType: MezzeType,
+        allowPartial: Boolean = false,
     ): List<MezzeType>? {
         val genericFn = callee.scheme.type as? MezzeType.FunctionType ?: return null
         return deriveTypeArgs(
             genericFn.paramType, callee.typeParams, argSiteType,
             fullSchemeType = callee.scheme.type,
+            allowPartial = allowPartial,
         )
+    }
+
+    /**
+     * Fill any typeParam still left as a VarType by [deriveTypeArgsFromArg] using
+     * the callee's `having 'out` ability bindings. A class-param ability like
+     * `NumAdd 'r for 'l having 'out` has an `out` type var that the ARGUMENT can't
+     * pin — it only becomes concrete once the impl is resolved for the (now-derived)
+     * receiver + class args. Without this, a constrained fn propagated through a HOF
+     * (`g = wrap {f = addTen}` : `{x:'a} with NumAdd Int 'a having 'out='b -> 'b`)
+     * has `'b` unresolved at `g{x=5}`, the strict all-concrete gate rejects it, and
+     * no `__dict_add` gets seeded → the dict fn lands in a value slot at runtime.
+     *
+     * For each ability constraint whose args are all concrete after derivation, we
+     * resolve the matching impl and read its `associatedTypeBindings` (the impl's
+     * concrete `out`). We then substitute the constraint's `out` binding var (which
+     * points at the callee's `out` typeParam) with that concrete type in the derived
+     * arg list. Returns [derived] unchanged if there is nothing to fill.
+     */
+    private fun fillHavingOutTypeArgs(
+        callee: TypedLetDecl,
+        derived: List<MezzeType>,
+        abilityImpls: List<TypedAbilityImpl>,
+    ): List<MezzeType> {
+        // Nothing to do if everything is already concrete.
+        if (derived.all { isConcrete(it) }) return derived
+        // The MONO scheme's `type` is constraint-less; the ability constraints live
+        // on `scheme.abilityConstraints` (abilityHash + typeArgs — the typedast
+        // TypedAbilityConstraint has NO associated-type bindings, so we recover the
+        // `out` type structurally from the resolved IMPL, not the constraint).
+        val schemeConstraints = callee.scheme.abilityConstraints
+        if (schemeConstraints.isEmpty()) return derived
+
+        // name -> concrete, from what we've derived so far.
+        val nameToConcrete = HashMap<String, MezzeType>(callee.typeParams.size)
+        for (i in callee.typeParams.indices) nameToConcrete[callee.typeParams[i].name] = derived[i]
+
+        // The set of typeParams still unresolved (candidates for an `out` fill).
+        val unresolvedParamNames = callee.typeParams
+            .filter { nameToConcrete[it.name]?.let { t -> t is MezzeType.VarType && !isConcrete(t) } == true }
+            .map { it.name }
+            .toMutableSet()
+        if (unresolvedParamNames.isEmpty()) return derived
+
+        // For each constraint whose class/receiver args are all concrete, resolve the
+        // impl and read its associated `out`. Fill the unresolved return typeParam.
+        val outFills = HashMap<String, MezzeType>()
+        for (c in schemeConstraints) {
+            val abilityHash = c.abilityHash
+            val concreteArgs = c.typeArgs.map { ta ->
+                if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
+            }
+            if (concreteArgs.isEmpty() || concreteArgs.any { !isConcrete(it) }) continue
+            val candidates = abilityImpls.filter {
+                it.abilityHash == abilityHash && it.targetTypes.size == concreteArgs.size
+            }
+            val match = candidates.firstOrNull { impl ->
+                impl.targetTypes.zip(concreteArgs).all { (target, concrete) -> typeMatchesTarget(concrete, target) }
+            }
+            val m = match ?: continue
+            // The impl's associatedTypeBindings hold the concrete `out` for this
+            // (receiver, class-args) instantiation. There is typically one `out`.
+            val implOut = m.associatedTypeBindings["out"]
+                ?: m.associatedTypeBindings["'out"]
+                ?: m.associatedTypeBindings.values.firstOrNull()
+                ?: continue
+            if (!isConcrete(implOut)) continue
+            // Assign it to the still-unresolved return typeParam. When exactly one param
+            // is unresolved, it IS the `out` (the return); otherwise assign to any
+            // unresolved param that does not appear among the constraint's own args (so
+            // we never clobber a receiver/class-arg var).
+            val argVarNames = c.typeArgs.filterIsInstance<MezzeType.VarType>().map { it.variable.name }.toSet()
+            val target = unresolvedParamNames.firstOrNull { it !in argVarNames } ?: continue
+            outFills[target] = implOut
+            unresolvedParamNames.remove(target)
+        }
+        if (outFills.isEmpty()) return derived
+        return callee.typeParams.indices.map { i ->
+            outFills[callee.typeParams[i].name] ?: derived[i]
+        }
     }
 
     /**
