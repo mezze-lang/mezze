@@ -92,10 +92,16 @@ public final class MezzeTestHelper {
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
-        Context context = Context.newBuilder(MezzeLanguage.ID)
+        Context context = Context.newBuilder(MezzeLanguage.ID, "python")
                 .engine(engine)
                 .allowAllAccess(true)
                 .allowCreateThread(true)
+                // Python (GraalPy) needs experimental options + a JVM-friendly
+                // posix backend when run embedded — the "java" backend avoids
+                // requiring a POSIX resource library at runtime.
+                .allowExperimentalOptions(true)
+                .option("python.PosixModuleBackend", "java")
+                .option("python.WarnExperimentalFeatures", "false")
                 .build();
 
         try {

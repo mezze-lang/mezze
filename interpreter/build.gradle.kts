@@ -90,6 +90,12 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation(project(":parser"))
     testImplementation(project(":typechecker"))
+
+    // GraalPy — polyglot Python for interop tests.  The `python` POM
+    // aggregates the language runtime + stdlib resources.  `python-embedding`
+    // gives us `GraalPyResources` and venv helpers used by the numpy demo.
+    testImplementation("org.graalvm.polyglot:python:25.0.3")
+    testImplementation("org.graalvm.python:python-embedding:25.0.3")
 }
 
 // Shared config applied to both the default `test` task and the

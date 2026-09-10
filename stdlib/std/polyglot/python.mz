@@ -1,0 +1,41 @@
+# Python host-language access (GraalPy).
+#
+# Effect `Python` names a running Python interpreter — the handler
+# carries a polyglot `Context` and the ops route through it.  Every
+# method returns `Result Foreign InteropError` so a Python-side
+# exception is a first-class Mezze value, not a runtime crash.
+#
+# For ad-hoc use (test setup, quick scripts) the plain functions
+# `python_eval` and `python_import` operate directly on a Context and
+# do not require an effect handler.
+use std::polyglot::core::{
+  Foreign, Context, InteropError, create_context, close_context
+}
+
+## Python host effect.
+effect Python where {
+  import_module: { name: Str }   -> Result Foreign InteropError <Python>,
+  eval:          { source: Str } -> Result Foreign InteropError <Python>
+}
+
+## Default Python host — carries the Context the interpreter runs in.
+pub type GraalPy = { context: Context }
+
+impl Python for GraalPy where {
+  import_module = { name }   -> __native_python_import_module { context = context, name = name },
+  eval          = { source } ->
+    __native_polyglot_context_eval { it = context, language = "python", code = source },
+}
+
+## Convenience: evaluate a Python snippet in a Context outside a Python
+## effect handler.  Useful for setup / teardown paths.
+pub let python_eval:
+  { context: Context, source: Str } -> Result Foreign InteropError =
+  { context, source } ->
+    __native_polyglot_context_eval { it = context, language = "python", code = source }
+
+## Convenience: import a Python module by name.
+pub let python_import:
+  { context: Context, name: Str } -> Result Foreign InteropError =
+  { context, name } ->
+    __native_python_import_module { context = context, name = name }

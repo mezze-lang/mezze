@@ -4325,6 +4325,10 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotContextNatives.eval(r, c));
         HANDLERS.put("__native_polyglot_context_binding",
             (r, c) -> PolyglotContextNatives.binding(r, c));
+
+        // Python-specific
+        HANDLERS.put("__native_python_import_module",
+            (r, c) -> PythonNatives.importModule(r, c));
     }
 
     @TruffleBoundary
