@@ -3826,7 +3826,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // specialization deactivates. The DSL re-instantiates it on the
         // next call with a fresh assumption from the CyclicAssumption,
         // re-resolving the handler.
-        @Specialization(assumptions = "handlerStable",
+        @Specialization(assumptions = "effectStable",
                         guards = {"cachedHandler != null", "cachedTarget != null"},
                         excludeForUncached = true)
         public static Object doCached(Hash effectHash, String opName, Object arg,
@@ -3834,7 +3834,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("resolveFieldIndex(cachedHandler, opName)") int cachedFieldIndex,
                 @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
                 @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
-                @Cached("getHandlerStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
+                @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
                 @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
             // Zero-cost effect dispatch: no dispatch fiber, no
             // @TruffleBoundary crossings on the normal path. When the
@@ -3883,9 +3883,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @TruffleBoundary
-        static com.oracle.truffle.api.Assumption getHandlerStableAssumption() {
+        static com.oracle.truffle.api.Assumption getEffectStableAssumption(Hash effectHash) {
             return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
-                .getHandlerChainStableAssumption();
+                .getEffectStableAssumption(effectHash);
         }
 
         static int resolveFieldIndex(MezzeRecord handler, String opName) {
@@ -5374,7 +5374,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // internal `act {}` IndirectCallNode is megamorphic across all Mut
         // call sites and can never be inlined — the root cause of the
         // 500× overhead on Mut-heavy workloads.
-        @Specialization(assumptions = "handlerStable",
+        @Specialization(assumptions = "effectStable",
                         guards = {"cachedHandler != null", "cachedHandlerTarget != null",
                                   "isLocalMutPassthrough(cachedHandlerTarget)",
                                   "cachedActTarget != null",
@@ -5384,7 +5384,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
                 @Cached("resolveMutateIndex(cachedHandler)") int cachedFieldIndex,
                 @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedHandlerTarget,
-                @Cached("getHandlerStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
+                @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
                 @Cached("resolveActCallTarget(actFn)") CallTarget cachedActTarget,
                 @Cached("createInlined(cachedActTarget)") DirectCallNode actCallNode) {
             MezzeFunction fn = (MezzeFunction) actFn;
@@ -5418,7 +5418,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         // Cached handler-dispatch path — still needed for DebugLocalMut
         // and as fallback when the bypass can't fire.
-        @Specialization(assumptions = "handlerStable",
+        @Specialization(assumptions = "effectStable",
                         guards = {"cachedHandler != null", "cachedTarget != null"},
                         excludeForUncached = true)
         public static Object doCached(Hash effectHash, Object actFn,
@@ -5426,7 +5426,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("resolveMutateIndex(cachedHandler)") int cachedFieldIndex,
                 @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
                 @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
-                @Cached("getHandlerStableAssumption()") com.oracle.truffle.api.Assumption handlerStable,
+                @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
                 @Cached("createInlined(cachedTarget)") DirectCallNode callNode,
                 @Cached("resolveActWrapperShape()") MezzeRecord.Shape actShape) {
             MezzeRecord wrapper = MezzeRecord.withAllObjects(actShape, new Object[] { actFn });
@@ -5466,9 +5466,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @TruffleBoundary
-        static com.oracle.truffle.api.Assumption getHandlerStableAssumption() {
+        static com.oracle.truffle.api.Assumption getEffectStableAssumption(Hash effectHash) {
             return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
-                .getHandlerChainStableAssumption();
+                .getEffectStableAssumption(effectHash);
         }
 
         static int resolveMutateIndex(MezzeRecord handler) {

@@ -106,15 +106,61 @@ public final class HandlerChainRegistry {
     }
 
     // ----------------------------------------------------------------
-    // Handler-chain-stable assumption.
+    // Handler-chain-stable assumptions.
+    //
+    // Two levels:
+    //   1. Per-effect CyclicAssumption — keyed by effect hash. Invalidated
+    //      only when a handler for THAT specific effect is pushed/popped.
+    //      Used by PerformD and PerformMutMutateAct so that pushing a
+    //      Console handler doesn't invalidate cached Mut specializations.
+    //   2. Global CyclicAssumption — invalidated on ANY handler push/pop.
+    //      Used by EffectBinding (resume/abort singletons depend on the
+    //      entire chain being empty, not just one effect's handler).
     // ----------------------------------------------------------------
 
     private static final CyclicAssumption HANDLER_CHAIN_STABLE =
         new CyclicAssumption("handler-chain-stable");
 
+    private static final java.util.concurrent.ConcurrentHashMap<
+            com.mezze.language.typedast.Hash, CyclicAssumption> EFFECT_ASSUMPTIONS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Global assumption: valid as long as NO handler push/pop has happened.
+     * Used by EffectBinding where resume/abort singletons depend on the
+     * entire chain state, not a single effect.
+     */
     @TruffleBoundary
     public static Assumption getHandlerChainStableAssumption() {
         return HANDLER_CHAIN_STABLE.getAssumption();
+    }
+
+    /**
+     * Per-effect assumption: valid as long as no handler for THIS specific
+     * effect has been pushed or popped. Used by PerformD and
+     * PerformMutMutateAct so that unrelated handler changes (e.g. Console)
+     * don't invalidate cached Mut or Async dispatch specializations.
+     */
+    @TruffleBoundary
+    public static Assumption getEffectStableAssumption(com.mezze.language.typedast.Hash effectHash) {
+        return getOrCreateEffectAssumption(effectHash).getAssumption();
+    }
+
+    private static CyclicAssumption getOrCreateEffectAssumption(
+            com.mezze.language.typedast.Hash effectHash) {
+        CyclicAssumption existing = EFFECT_ASSUMPTIONS.get(effectHash);
+        if (existing != null) return existing;
+        return EFFECT_ASSUMPTIONS.computeIfAbsent(effectHash,
+            h -> new CyclicAssumption("effect-stable-" + h.getHex().substring(0, 8)));
+    }
+
+    /** Invalidate both per-effect and global assumptions. */
+    private static void invalidateAssumptions(com.mezze.language.typedast.Hash effectHash) {
+        HANDLER_CHAIN_STABLE.invalidate();
+        if (effectHash != null) {
+            CyclicAssumption ea = EFFECT_ASSUMPTIONS.get(effectHash);
+            if (ea != null) ea.invalidate();
+        }
     }
 
     // ----------------------------------------------------------------
@@ -126,13 +172,19 @@ public final class HandlerChainRegistry {
             com.mezze.interpreter.values.MezzeRecord handler,
             com.mezze.language.typedast.Hash effectHash) {
         STATE.get().handlerChain.push(new HandlerChainEntry(handler, effectHash));
-        HANDLER_CHAIN_STABLE.invalidate();
+        invalidateAssumptions(effectHash);
     }
 
     @TruffleBoundary
     public static void popHandlerOffChain() {
-        STATE.get().handlerChain.pop();
-        HANDLER_CHAIN_STABLE.invalidate();
+        var chain = STATE.get().handlerChain;
+        com.mezze.language.typedast.Hash effectHash = null;
+        if (!chain.isEmpty()) {
+            HandlerChainEntry top = chain.peek();
+            if (top != null) effectHash = top.effectHash();
+        }
+        chain.pop();
+        invalidateAssumptions(effectHash);
     }
 
     @TruffleBoundary
@@ -220,7 +272,7 @@ public final class HandlerChainRegistry {
         s.d8HandleStack.push(
             scope == null && prevScope == null ? NO_SCOPE_FRAME
                 : new BdslHandleFrame(scope, prevScope));
-        HANDLER_CHAIN_STABLE.invalidate();
+        invalidateAssumptions(effectHash);
     }
 
     /**
@@ -248,12 +300,17 @@ public final class HandlerChainRegistry {
     @TruffleBoundary
     public static PopResult popHandlerAndExitHandle() {
         EffectState s = STATE.get();
-        // Peek before pop — need handler for finalize_scope.
+        // Peek before pop — need handler for finalize_scope + effect hash
+        // for per-effect assumption invalidation.
         var chain = s.handlerChain;
         com.mezze.interpreter.values.MezzeRecord handler = null;
+        com.mezze.language.typedast.Hash effectHash = null;
         if (!chain.isEmpty()) {
             HandlerChainEntry entry = chain.peek();
-            if (entry != null) handler = entry.handler();
+            if (entry != null) {
+                handler = entry.handler();
+                effectHash = entry.effectHash();
+            }
         }
         var d8 = s.d8HandleStack;
         BdslHandleFrame frame = null;
@@ -264,7 +321,7 @@ public final class HandlerChainRegistry {
         // Pop both.
         chain.pop();
         d8.pop();
-        HANDLER_CHAIN_STABLE.invalidate();
+        invalidateAssumptions(effectHash);
         return new PopResult(handler, frame);
     }
 
