@@ -273,10 +273,20 @@ public final class SpawnSupport {
                     com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.makeAbortFunction();
                 dispatchFiber.pushEffectHandles(resumeFn, abortFn);
 
+                // Closure-length specialization — avoid arraycopy for
+                // the common 0/1/2-capture cases.
                 Object[] closure = op.getClosureValues();
-                Object[] callArgs = new Object[closure.length + 1];
-                System.arraycopy(closure, 0, callArgs, 0, closure.length);
-                callArgs[closure.length] = args;
+                Object[] callArgs = switch (closure.length) {
+                    case 0 -> new Object[]{args};
+                    case 1 -> new Object[]{closure[0], args};
+                    case 2 -> new Object[]{closure[0], closure[1], args};
+                    default -> {
+                        Object[] tmp = new Object[closure.length + 1];
+                        System.arraycopy(closure, 0, tmp, 0, closure.length);
+                        tmp[closure.length] = args;
+                        yield tmp;
+                    }
+                };
 
                 HandlerChainRegistry prev = dispatchFiber.enterDispatch();
                 try {
