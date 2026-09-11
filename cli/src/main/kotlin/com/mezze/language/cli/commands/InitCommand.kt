@@ -88,6 +88,14 @@ class InitCommand {
         val gitignore = File(projectDir, ".gitignore")
         if (!gitignore.exists()) createGitignore(gitignore)
 
+        // Warn if the new project is nested inside an existing one — it's an
+        // independent project (the nearest Mezze.toml wins for any command run
+        // inside it), which is easy to create by accident.
+        ProjectRoot.discover(currentDir)?.let { outer ->
+            println("⚠️  '$projectName' is nested inside the project at ${outer.absolutePath}")
+            println("    It is an independent project — the nearest Mezze.toml wins for commands run inside it.")
+        }
+
         // Materialise the project's `.mez/` store with stdlib seeded in.
         // openProject creates cache.sqlite + stdlib.sqlite + deps.sqlite,
         // attaches them, and installs the parser-cache hook. If

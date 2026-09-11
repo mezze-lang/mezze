@@ -81,11 +81,13 @@ class ExecCommand {
                 || it.startsWith("--insight=")
                 || it.startsWith("--dap=")
         }
-        // Synthesize project fields: use the parent dir as project root
-        // (that's where any `.mz/` cache directory will live) and the
-        // file stem as both module path and app name. `entry` is always
-        // `main` — a standalone script has no way to declare otherwise.
-        val projectDir = scriptFile.parentFile ?: File(".")
+        // Synthesize project fields: file stem as module path + app name, `entry`
+        // always `main` (a standalone script can't declare otherwise). For the
+        // project root — where `.mez/` lives — reuse the enclosing project if the
+        // script sits inside one (walk up to its Mezze.toml), so we don't scatter a
+        // second `.mez/` next to the file; otherwise the script's own dir.
+        val scriptParent = scriptFile.parentFile ?: File(".")
+        val projectDir = ProjectRoot.discover(scriptParent) ?: scriptParent
         val stem = scriptFile.nameWithoutExtension
         val exit = WireRunner.execOnce(
             currentDir = projectDir,

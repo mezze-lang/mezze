@@ -20,10 +20,13 @@ class SyncCommand {
         currentDir: File = File(System.getProperty("user.dir")),
         storeRootOverride: File? = null,
     ): Int {
-        val mezzeToml = File(currentDir, "Mezze.toml")
+        // Walk up to the nearest Mezze.toml so `mez sync` works from any
+        // subdirectory and .deps/ + Mezze.lock land at the project root (ProjectRoot).
+        val root = ProjectRoot.discover(currentDir) ?: currentDir
+        val mezzeToml = File(root, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
-            println("❌ Error: No Mezze.toml found in current directory")
+            println("❌ Error: No Mezze.toml in ${currentDir.absolutePath} or any parent directory")
             println()
             println("This doesn't look like a Mezze package.")
             println("Location: ${currentDir.absolutePath}")
@@ -66,7 +69,7 @@ class SyncCommand {
         // Deps are materialized into each package's `.deps/mezze/<name>-<version>/` —
         // where ModuleResolver.resolveModuleFile searches — so `use <name>::...`
         // resolves with no further wiring.
-        val packagesDir = File(currentDir, ".deps/mezze")
+        val packagesDir = File(root, ".deps/mezze")
         val cacheDir = File(System.getProperty("user.home"), ".mez/cache")
 
         // Global content store: extracted registry packages keyed by sha256, shared
@@ -89,7 +92,7 @@ class SyncCommand {
         var lockOutOfDate = false
 
         try {
-            val count = resolveDeps(currentDir, manifest, storeRoot, isClean, downloader, archive, nodes, failures)
+            val count = resolveDeps(root, manifest, storeRoot, isClean, downloader, archive, nodes, failures)
 
             // Complete graph lock: the root package + every resolved node, deduped + sorted.
             val rootEdges = (manifest.pathDependencies.keys + manifest.dependencies.keys + manifest.devDependencies.keys).sorted()
@@ -102,7 +105,7 @@ class SyncCommand {
                 packages = graph,
             )
 
-            val lockFile = File(currentDir, "Mezze.lock")
+            val lockFile = File(root, "Mezze.lock")
             if (isLocked) {
                 val existing = readLockFile(lockFile)
                 when {
