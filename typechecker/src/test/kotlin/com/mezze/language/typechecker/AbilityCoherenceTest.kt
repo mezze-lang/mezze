@@ -114,4 +114,42 @@ class AbilityCoherenceTest {
         """.trimIndent())
         assertNotNull(e, "duplicate generic `impl Sz for 'a` must be rejected")
     }
+
+    // ── L-13: transparent alias vs underlying overlap (OWNER DECISION) ────
+
+    @Test
+    fun `impl for a transparent alias conflicts with impl for its underlying type`() {
+        // `type Meters = Int` is a TRANSPARENT alias — Meters IS Int — so two
+        // Show impls both ultimately target Int and MUST conflict (coherence).
+        val e = err("""
+            ability Show for 'a where { show: { it: 'a } -> Str }
+            type Meters = Int
+            impl Show for Int where { show = { it } -> "int" }
+            impl Show for Meters where { show = { it } -> "meters" }
+        """.trimIndent())
+        assertNotNull(e, "impl Show for Meters (=Int) must overlap impl Show for Int — V0407")
+    }
+
+    @Test
+    fun `impl for a distinct newtype does NOT conflict with impl for its wrapped type`() {
+        // `newtype` is the NOMINAL wall — UserId is a distinct type from Int, so
+        // both impls are legitimate and must coexist. (Guards against the L-13 fix
+        // over-reaching by resolving newtypes like transparent aliases.)
+        assertNull(err("""
+            ability Show for 'a where { show: { it: 'a } -> Str }
+            newtype UserId = Int
+            impl Show for Int where { show = { it } -> "int" }
+            impl Show for UserId where { show = { it } -> "id" }
+        """.trimIndent()), "impl Show for a newtype must NOT conflict with impl for its wrapped Int")
+    }
+
+    @Test
+    fun `impls for two distinct concrete types do not conflict`() {
+        // Sanity: no false overlap introduced for genuinely different targets.
+        assertNull(err("""
+            ability Show for 'a where { show: { it: 'a } -> Str }
+            impl Show for Int where { show = { it } -> "int" }
+            impl Show for Str where { show = { it } -> "str" }
+        """.trimIndent()), "Int and Str impls are distinct — no conflict")
+    }
 }

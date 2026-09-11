@@ -406,7 +406,25 @@ object DuplicateDeclarationValidator {
         // overlap (`['a]` vs `[Int]`) that the exact-key map misses.
         val priorImplsByLabel = mutableMapOf<String, MutableList<ParsedImplAbilityDecl>>()
 
+        // L-13 (OWNER DECISION 2026-09-11): a TRANSPARENT alias `type Meters = Int`
+        // is the same type as its underlying `Int`, so `impl Show for Meters` and
+        // `impl Show for Int` MUST conflict for coherence. The overlap key and the
+        // structural scan below compared target types as-written, so an alias vs
+        // its underlying got distinct keys and the conflict was silently missed.
+        // Resolve transparent aliases to their underlying annotation FIRST (newtype
+        // is the nominal wall — a ParsedNewtypeDef is NOT resolved, so
+        // `impl for <newtype>` stays distinct from its wrapped type). Cycle-guarded.
+        val aliasTargets: Map<String, ParsedTypeAnnotation> = buildMap {
+            for (td in module.decls.filterIsInstance<ParsedTypeDecl>()) {
+                (td.definition as? ParsedTypeAliasDef)?.let { put(td.name, it.aliasedType) }
+            }
+        }
+
         for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
+            // Normalize each target through transparent aliases so alias-vs-underlying
+            // impls collide (both key and overlap scan use these).
+            val normalizedTargets = impl.targetTypes.map { resolveTransparentAlias(it, aliasTargets, mutableSetOf()) }
+            val normalizedAbilityArgs = impl.abilityTypeArgs.map { resolveTransparentAlias(it, aliasTargets, mutableSetOf()) }
             val targetTypeNames = impl.targetTypes.map { parsedTypeAnnotationToString(it) }
             val implLabel = impl.abilityName ?: "inherent"
             // Overlap key = ability + the STRUCTURE of its type args. It must NOT
@@ -419,8 +437,8 @@ object DuplicateDeclarationValidator {
             // both rendered "Foo_Array_Bar" and collided. `structuralTypeKey`
             // length-delimits each type so distinct shapes stay distinct.
             val key = "${implLabel}::" +
-                impl.abilityTypeArgs.joinToString(",") { structuralTypeKey(it) } + "|" +
-                impl.targetTypes.joinToString(",") { structuralTypeKey(it) }
+                normalizedAbilityArgs.joinToString(",") { structuralTypeKey(it) } + "|" +
+                normalizedTargets.joinToString(",") { structuralTypeKey(it) }
 
             val firstOccurrence = firstImplByKey[key]
             if (firstOccurrence != null) {
@@ -612,6 +630,34 @@ object DuplicateDeclarationValidator {
      * between distinct target types distinguishable from args inside one nested
      * application, so `Foo [Bar]` and `Foo Array Bar` get different keys.
      */
+    /**
+     * L-13: rewrite a type annotation through TRANSPARENT type aliases
+     * (`type Meters = Int` → `Int`), recursively and into type-app args, so
+     * coherence sees an alias and its underlying type as one. `newtype` is NOT in
+     * `aliases` (it's a nominal wall), so newtypes are left as-is. `seen` guards
+     * against a malformed cyclic alias (`type A = B; type B = A`) — on a cycle we
+     * stop and return the annotation as-is rather than loop.
+     */
+    private fun resolveTransparentAlias(
+        ann: ParsedTypeAnnotation,
+        aliases: Map<String, ParsedTypeAnnotation>,
+        seen: MutableSet<String>,
+    ): ParsedTypeAnnotation = when (ann) {
+        is ParsedNamedType -> {
+            val target = aliases[ann.name]
+            if (target != null && seen.add(ann.name)) resolveTransparentAlias(target, aliases, seen) else ann
+        }
+        is ParsedTypeApp -> {
+            // A parameterized alias head resolves; args are normalized element-wise.
+            val head = aliases[ann.constructor]
+            val normArgs = ann.args.map { resolveTransparentAlias(it, aliases, seen) }
+            if (head != null && seen.add(ann.constructor)) resolveTransparentAlias(head, aliases, seen)
+            else ann.copy(args = normArgs)
+        }
+        is ParsedSeqType -> ann.copy(elementType = resolveTransparentAlias(ann.elementType, aliases, seen))
+        else -> ann
+    }
+
     private fun structuralTypeKey(ann: ParsedTypeAnnotation): String = when (ann) {
         is ParsedTypeApp -> "${ann.constructor}(${ann.args.size}:${ann.args.joinToString(",") { structuralTypeKey(it) }})"
         is ParsedQualifiedType -> "${ann.modulePath.joinToString("::")}::${ann.typeName}(${ann.args.size}:${ann.args.joinToString(",") { structuralTypeKey(it) }})"
