@@ -602,6 +602,37 @@ class ExpressionConstraintGenerator {
         return out
     }
 
+    /**
+     * Move-6b (L-34 Part A): ONE callback-row effect-harvest, extracted from the
+     * byte-identical copies in the ability- and inherent-method paths.
+     *
+     * A method whose parameter record has a field that is a FunctionType with an
+     * OPEN effect row (rowVar != null) is effect-polymorphic in its callback: the
+     * effects the caller's actual callback performs flow OUT to the call site.
+     * Harvest them from the concrete argument record, minus whatever the method's
+     * own row catches (row subtraction). If no callback field is effect-open,
+     * nothing is harvested.
+     *
+     * `callbackHostParamType` is the method's (stripped) parameter type; `argType`
+     * is the solved argument record. GEN-TIME name-set union only — deliberately
+     * NOT routed through the solve-time unifyEffectRows (which binds row vars and
+     * previously broke 12 interp tests; see #331/L-34 note). The aggregate-over-
+     * candidates deferred path computes its own caughtByOp/hasRowVar and calls
+     * [harvestCallbackEffectsWith] with them.
+     */
+    internal fun harvestCallbackEffects(callbackHostParamType: MezzeType?, argType: MezzeType): Set<String> {
+        val hasCallbackRowVar = (callbackHostParamType as? MezzeType.RecordType)?.fields?.values?.any { field ->
+            (field as? MezzeType.FunctionType)?.effects?.rowVar != null
+        } == true
+        val caughtByOp = if (callbackHostParamType != null) collectCaughtByAncestor(callbackHostParamType) else emptySet()
+        return harvestCallbackEffectsWith(hasCallbackRowVar, caughtByOp, argType)
+    }
+
+    /** The shared tail: given the (context-computed) row-var presence and the
+     *  caught-by-op set, harvest the callback's effects from the argument. */
+    internal fun harvestCallbackEffectsWith(hasCallbackRowVar: Boolean, caughtByOp: Set<String>, argType: MezzeType): Set<String> =
+        if (hasCallbackRowVar) collectClosureArgEffects(argType) - caughtByOp else emptySet()
+
     internal fun extractArgumentName(expr: ParsedExpr): String? {
         return when (expr) {
             is ParsedRecordLit -> {

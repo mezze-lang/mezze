@@ -543,14 +543,10 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     // any declared CALLBACK PARAM has a row-var — closed rows must not
     // over-propagate. Ability methods usually have pure returns but their
     // callback rows are open (that's what makes them polymorphic in effects).
+    // Move-6b: one shared harvest (was a byte-identical copy in the inherent path).
     val abilityCaughtByOp = collectCaughtByAncestor(strippedMethodType.paramType)
-    val abilityHasCallbackRowVar = (strippedMethodType.paramType as? MezzeType.RecordType)?.fields?.values?.any { field ->
-        (field as? MezzeType.FunctionType)?.effects?.rowVar != null
-    } == true
     val abilityHarvestedEffects: Set<String> =
-        if (abilityHasCallbackRowVar) {
-            collectClosureArgEffects(argumentResult.type) - abilityCaughtByOp
-        } else emptySet()
+        harvestCallbackEffects(strippedMethodType.paramType, argumentResult.type)
 
     // #218: stash the ability's instantiation TyVars into typeArgs so the
     // monomorphizer can substitute them when specializing the enclosing
@@ -1181,15 +1177,9 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     // the E effect silently.
     val inherentFnType = freshMethodType as? MezzeType.FunctionType
     val inherentCaughtByOp = if (inherentFnType != null) collectCaughtByAncestor(inherentFnType.paramType) else emptySet()
-    val inherentHasCallbackRowVar = inherentFnType?.paramType?.let { pt ->
-        (pt as? MezzeType.RecordType)?.fields?.values?.any { field ->
-            (field as? MezzeType.FunctionType)?.effects?.rowVar != null
-        }
-    } == true
+    // Move-6b: shared harvest (identical logic to the ability path above).
     val inherentHarvestedEffects: Set<String> =
-        if (inherentHasCallbackRowVar) {
-            collectClosureArgEffects(argumentResult.type) - inherentCaughtByOp
-        } else emptySet()
+        harvestCallbackEffects(inherentFnType?.paramType, argumentResult.type)
 
     // Emit the inherent method's OWN ability constraints (e.g. an HTTP
     // `.decode {}` whose impl body forwards to a `with FromJson 'a Str` free
@@ -1328,9 +1318,11 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
         .mapNotNull { (_, fnType) -> (fnType as? MezzeType.FunctionType)?.paramType }
         .flatMap { collectCaughtByAncestor(it) }
         .toSet()
+    // Move-6b: shared harvest tail — this path aggregates caughtByOp/hasRowVar over
+    // all deferred candidates, then applies the same row-subtraction as the
+    // ability/inherent paths.
     val deferredHarvestedEffects: Set<String> =
-        if (deferredAnyCallbackRowVar) collectClosureArgEffects(argumentResult.type) - deferredCaughtByOp
-        else emptySet()
+        harvestCallbackEffectsWith(deferredAnyCallbackRowVar, deferredCaughtByOp, argumentResult.type)
 
     val methodCallInfo = ConstraintResult.MethodCallInfo(
         abilityName = null,
