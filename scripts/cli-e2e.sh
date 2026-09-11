@@ -51,17 +51,21 @@ expect "run jar"       "Hello from app!" java -jar .build/app.jar
 if [ "${MEZ_E2E_NATIVE:-1}" = "1" ]; then
   echo "  … building native (one-time shell build can take a few minutes)"
   if "$MEZ" build --native >/tmp/mez-native-$$.log 2>&1; then
-    native="$(find .build -maxdepth 2 -type f -perm -u+x ! -name '*.jar' 2>/dev/null | head -1)"
-    if [ -n "$native" ] && grep -qF "Hello from app!" <<<"$("$native" 2>&1)"; then
-      # Distinguish a genuine AOT image from the JVM-launcher fallback.
-      if file -b "$native" | grep -qiE 'ELF|Mach-O'; then
-        echo "  ✅ build --native + run (AOT binary)"
+    # `build --native` emits two runnable artifacts: `.build/<app>`, a portable
+    # JVM-launcher script, and `.build/<app>-native`, the true AOT image. The
+    # AOT binary is the one we assert on — its presence as an ELF/Mach-O is the
+    # difference between a real native build and the JVM-launcher fallback.
+    native="$(find .build -maxdepth 2 -type f -perm -u+x -name '*-native' 2>/dev/null | head -1)"
+    if [ -n "$native" ] && file -b "$native" | grep -qiE 'ELF|Mach-O'; then
+      if grep -qF "Hello from app!" <<<"$("$native" 2>&1)"; then
+        echo "  ✅ build --native + run (AOT binary: $(file -b "$native" | cut -d, -f1))"
       else
-        echo "  ⚠️  build --native ran, but produced a JVM-launcher fallback, not an AOT"
-        echo "      binary (native-image 'blocklisted methods' — tracked upstream on main)."
+        echo "  ❌ AOT binary built but did not run correctly"; fail=1
       fi
     else
-      echo "  ❌ build --native produced no runnable artifact (looked in .build/)"
+      echo "  ⚠️  build --native ran, but produced no AOT binary (JVM-launcher"
+      echo "      fallback — native-image 'blocklisted methods'). Log tail:"
+      tail -5 /tmp/mez-native-$$.log | sed 's/^/       /'
       fail=1
     fi
   else

@@ -70,7 +70,21 @@ enum class EffectBindingKind {
     }
 
     companion object {
-        fun fromName(name: String): EffectBindingKind? = when (name) {
+        /**
+         * Resolve a binding name to its kind, or null for anything else.
+         *
+         * The parameter is deliberately nullable: a non-null `String` would
+         * make the Kotlin compiler emit a `checkNotNullParameter` guard whose
+         * failure path calls `throwParameterIsNullNPE` → `Throwable.getStackTrace()`.
+         * This method is reachable from the bytecode interpreter's PE'd execute
+         * path (the `isResumeOrAbortKind` specialization guard), and under
+         * native-image that stack-trace-building path reaches SVM's
+         * `Optional.map`-over-lambda machinery — tripping the runtime-compilation
+         * blocklist with hundreds of phantom violations. A nullable param emits
+         * no intrinsic, so the PE'd `when` stays clean. `null` simply falls
+         * through to `else -> null`, identical to any unknown name.
+         */
+        fun fromName(name: String?): EffectBindingKind? = when (name) {
             ScopedEffectConstants.RESUME -> RESUME
             ScopedEffectConstants.ABORT -> ABORT
             ScopedEffectConstants.SCOPE -> SCOPE
