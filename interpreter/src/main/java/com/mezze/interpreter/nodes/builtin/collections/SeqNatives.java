@@ -722,14 +722,30 @@ public final class SeqNatives {
 
     // ==================== Unique/Flatten Operations ====================
 
-    @TruffleBoundary
-    public static MezzeSeq unique(MezzeSeq seq) {
-        return seq.distinct();
+    public static MezzeSeq unique(MezzeSeq seq, MezzeFunction eqFn,
+                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        return distinct(seq, eqFn, callNode);
     }
 
-    @TruffleBoundary
-    public static MezzeSeq distinct(MezzeSeq seq) {
-        return seq.distinct();
+    // Keeps the first occurrence of each element; O(n^2) in the worst case because
+    // Eq is not required to be hashable (only equatable). The primitive/structural
+    // fast path (seq.distinct()) can't be used: it would ignore a custom Eq impl.
+    public static MezzeSeq distinct(MezzeSeq seq, MezzeFunction eqFn,
+                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (seq.isEmpty()) return seq;
+        java.util.ArrayList<Object> result = new java.util.ArrayList<>();
+        for (int i = 0; i < seq.size(); i++) {
+            Object elem = seq.get(i);
+            boolean seen = false;
+            for (int j = 0; j < result.size(); j++) {
+                if (eqCall(eqFn, result.get(j), elem, callNode)) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) result.add(elem);
+        }
+        return MezzeSeq.fromArray(result.toArray());
     }
 
     @TruffleBoundary
@@ -1070,14 +1086,15 @@ public final class SeqNatives {
     // ==================== Dedup ====================
 
     @TruffleBoundary
-    public static MezzeSeq dedup(MezzeSeq seq) {
+    public static MezzeSeq dedup(MezzeSeq seq, MezzeFunction eqFn,
+                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return seq;
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
         Object last = seq.get(0);
         result.add(last);
         for (int i = 1; i < seq.size(); i++) {
             Object curr = seq.get(i);
-            if (!java.util.Objects.equals(curr, last)) {
+            if (!eqCall(eqFn, curr, last, callNode)) {
                 result.add(curr);
                 last = curr;
             }
@@ -1273,21 +1290,21 @@ public final class SeqNatives {
 
     // ==================== Additional Search/Replace Operations ====================
 
-    @TruffleBoundary
-    public static MezzeVariant lastIndexOf(MezzeSeq seq, Object element) {
+    public static MezzeVariant lastIndexOf(MezzeSeq seq, Object element, MezzeFunction eqFn,
+                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         for (int i = seq.size() - 1; i >= 0; i--) {
-            if (java.util.Objects.equals(seq.get(i), element)) {
+            if (eqCall(eqFn, seq.get(i), element, callNode)) {
                 return MezzeVariant.some((long) i);
             }
         }
         return MezzeVariant.none();
     }
 
-    @TruffleBoundary
-    public static MezzeSeq replace(MezzeSeq seq, Object oldVal, Object newVal) {
+    public static MezzeSeq replace(MezzeSeq seq, Object oldVal, Object newVal, MezzeFunction eqFn,
+                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] result = seq.toArray();
         for (int i = 0; i < result.length; i++) {
-            if (java.util.Objects.equals(result[i], oldVal)) {
+            if (eqCall(eqFn, result[i], oldVal, callNode)) {
                 result[i] = newVal;
                 break;  // Only replace first occurrence
             }
@@ -1295,11 +1312,11 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(result);
     }
 
-    @TruffleBoundary
-    public static MezzeSeq replaceAll(MezzeSeq seq, Object oldVal, Object newVal) {
+    public static MezzeSeq replaceAll(MezzeSeq seq, Object oldVal, Object newVal, MezzeFunction eqFn,
+                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] result = seq.toArray();
         for (int i = 0; i < result.length; i++) {
-            if (java.util.Objects.equals(result[i], oldVal)) {
+            if (eqCall(eqFn, result[i], oldVal, callNode)) {
                 result[i] = newVal;
             }
         }
@@ -1333,27 +1350,27 @@ public final class SeqNatives {
         return MezzeVariant.some(MezzeSeq.fromArray(result));
     }
 
-    @TruffleBoundary
-    public static boolean startsWith(MezzeSeq seq, MezzeSeq prefix) {
+    public static boolean startsWith(MezzeSeq seq, MezzeSeq prefix, MezzeFunction eqFn,
+                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (prefix.size() > seq.size()) {
             return false;
         }
         for (int i = 0; i < prefix.size(); i++) {
-            if (!java.util.Objects.equals(seq.get(i), prefix.get(i))) {
+            if (!eqCall(eqFn, seq.get(i), prefix.get(i), callNode)) {
                 return false;
             }
         }
         return true;
     }
 
-    @TruffleBoundary
-    public static boolean endsWith(MezzeSeq seq, MezzeSeq suffix) {
+    public static boolean endsWith(MezzeSeq seq, MezzeSeq suffix, MezzeFunction eqFn,
+                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (suffix.size() > seq.size()) {
             return false;
         }
         int offset = seq.size() - suffix.size();
         for (int i = 0; i < suffix.size(); i++) {
-            if (!java.util.Objects.equals(seq.get(offset + i), suffix.get(i))) {
+            if (!eqCall(eqFn, seq.get(offset + i), suffix.get(i), callNode)) {
                 return false;
             }
         }
@@ -1480,6 +1497,22 @@ public final class SeqNatives {
         // Use fast wrapper - no @TruffleBoundary
         args[closureValues.length] = MezzeRecord.wrapAB(arg1, arg2);
         return args;
+    }
+
+    /**
+     * Element equality via the caller-supplied {@code eq} closure ({@code {a, b} ->
+     * a == b}), which resolves the element type's Mezze {@code Eq} impl at the call
+     * site. Used by contains/index_of/dedup/distinct/etc. instead of JVM
+     * {@code Objects.equals}, so these functions AGREE with the {@code ==} operator
+     * even when the element has a custom {@code Eq} (structural {@code .equals} would
+     * silently diverge — e.g. a record whose {@code Eq} compares only some fields).
+     * The {@code with Eq 'a} constraint on the stdlib signatures guarantees the
+     * closure is always supplied for a type that actually has {@code Eq}.
+     */
+    private static boolean eqCall(MezzeFunction eqFn, Object a, Object b,
+                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object result = callNode.call(eqFn.getCallTarget(), prepareArgsComparator(eqFn, a, b));
+        return result instanceof Boolean && (Boolean) result;
     }
 
     // ==================== Advanced Zip Operations ====================
@@ -1676,13 +1709,22 @@ public final class SeqNatives {
     // ==================== Sorting Checks ====================
 
     @TruffleBoundary
-    public static boolean isSorted(MezzeSeq seq) {
+    // Threads the caller's element comparator so a custom Ord is honoured.
+    public static boolean isSorted(MezzeSeq seq, MezzeFunction cmpFn,
+                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         for (int i = 1; i < seq.size(); i++) {
-            if (compare(seq.get(i - 1), seq.get(i)) > 0) {
+            if (cmpInt(cmpFn, seq.get(i - 1), seq.get(i), callNode) > 0) {
                 return false;
             }
         }
         return true;
+    }
+
+    // Element comparison via the threaded cmp closure ({a, b} -> -1/0/1).
+    private static int cmpInt(MezzeFunction cmpFn, Object a, Object b,
+                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object r = callNode.call(cmpFn.getCallTarget(), prepareArgsComparator(cmpFn, a, b));
+        return (r instanceof Long) ? ((Long) r).intValue() : 0;
     }
 
     public static boolean isSortedBy(MezzeSeq seq, MezzeFunction keyFn) {
@@ -1698,10 +1740,10 @@ public final class SeqNatives {
         return true;
     }
 
-    @TruffleBoundary
-    public static boolean isSortedDescending(MezzeSeq seq) {
+    public static boolean isSortedDescending(MezzeSeq seq, MezzeFunction cmpFn,
+                                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         for (int i = 1; i < seq.size(); i++) {
-            if (compare(seq.get(i - 1), seq.get(i)) < 0) {
+            if (cmpInt(cmpFn, seq.get(i - 1), seq.get(i), callNode) < 0) {
                 return false;
             }
         }
@@ -1716,6 +1758,21 @@ public final class SeqNatives {
         while (lo < hi) {
             int mid = (lo + hi) / 2;
             if (compare(seq.get(mid), target) < 0) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    // Threads the caller's element comparator so a custom Ord is honoured.
+    public static long binarySearchInsertPoint(MezzeSeq seq, Object target, MezzeFunction cmpFn,
+                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        int lo = 0, hi = seq.size();
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (cmpInt(cmpFn, seq.get(mid), target, callNode) < 0) {
                 lo = mid + 1;
             } else {
                 hi = mid;
@@ -1932,12 +1989,18 @@ public final class SeqNatives {
      * Lexicographic comparison returning -1, 0, or 1.
      */
     @TruffleBoundary
-    public static long compareSeqs(MezzeSeq seq1, MezzeSeq seq2) {
+    // Lexicographic comparison threading the caller-supplied element comparator
+    // `cmpFn` ({a, b} -> -1/0/1, resolving the element's Ord impl at the call site),
+    // so `[T]` ordering respects a custom Ord instead of the primitive-only fallback.
+    public static long compareSeqs(MezzeSeq seq1, MezzeSeq seq2, MezzeFunction cmpFn,
+                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         int minLen = Math.min(seq1.size(), seq2.size());
         for (int i = 0; i < minLen; i++) {
-            int cmp = compare(seq1.get(i), seq2.get(i));
-            if (cmp != 0) {
-                return cmp < 0 ? -1L : 1L;
+            Object r = callNode.call(cmpFn.getCallTarget(),
+                prepareArgsComparator(cmpFn, seq1.get(i), seq2.get(i)));
+            long c = (r instanceof Long) ? (Long) r : 0L;
+            if (c != 0) {
+                return c < 0 ? -1L : 1L;
             }
         }
         return Integer.compare(seq1.size(), seq2.size());

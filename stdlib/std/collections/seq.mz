@@ -16,19 +16,28 @@ impl Eq for ['a] where {
   neq = { it, r } -> if __native_seq_equals { l = it, r = r } then False else True,
 }
 
+## Lexicographic sequence comparison, threading an element comparator `cmp`
+## (-1 / 0 / 1). The declared `cmp` param type ties the comparison to the element
+## type — the native op calls `cmp` per element pair instead of a built-in structural
+## comparison, so `[T]` ordering respects T's own `Ord` impl (a custom Ord would
+## otherwise be ignored: the native fell back to primitive/zero comparison).
+let compare_with_cmp
+  : { xs: ['a], ys: ['a], cmp: { a: 'a, b: 'a } -> Int } -> Int = { xs, ys, cmp } ->
+  __native_seq_compare { xs = xs, ys = ys, cmp = cmp }
+
 ## Lexicographic ordering for sequences, requiring the element to be Ord.
-## `__native_seq_compare` compares elements, so the `with Ord 'a` preconditions
-## are load-bearing: without them `[T] < [T]` would type-check for a T with no
-## Ord and crash at runtime (#224). The native-delegating body can't infer this.
+## The `with Ord 'a` preconditions are load-bearing: without them `[T] < [T]` would
+## type-check for a T with no Ord (#224). The element comparator is threaded via
+## `compare_with_cmp` so a user Ord impl is honoured.
 impl Ord for ['a] where {
   lt: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } ->
-    __native_seq_compare { xs = it, ys = r } == (0 - 1),
+    compare_with_cmp { xs = it, ys = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } == (0 - 1),
   le: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } ->
-    __native_seq_compare { xs = it, ys = r } != 1,
+    compare_with_cmp { xs = it, ys = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } != 1,
   gt: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } ->
-    __native_seq_compare { xs = it, ys = r } == 1,
+    compare_with_cmp { xs = it, ys = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } == 1,
   ge: { it: ['a], r: ['a] } with Ord 'a -> Bool = { it, r } ->
-    __native_seq_compare { xs = it, ys = r } != (0 - 1),
+    compare_with_cmp { xs = it, ys = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } != (0 - 1),
 }
 
 ## Returns the number of elements.
@@ -100,12 +109,16 @@ pub let drop_while
   = { xs, p } -> __native_seq_drop_while { xs = xs, p = p }
 
 ## Returns True if the sequence contains the element.
-pub let contains: { xs: ['a], x: 'a } -> Bool = { xs, x } ->
-  __native_seq_contains { xs = xs, x = x }
+## `with Eq 'a`: the native op compares via the element's Eq impl (threaded as `eq`),
+## so this AGREES with `==` even for a custom Eq (structural equality would diverge).
+pub let contains: { xs: ['a], x: 'a } with Eq 'a -> Bool = { xs, x } -> do
+  let target = x
+  any { xs = xs, p = { x } -> x == target }
 
 ## Returns the index of the first occurrence, or None.
-pub let index_of: { xs: ['a], x: 'a } -> Option Int = { xs, x } ->
-  __native_seq_index_of { xs = xs, x = x }
+pub let index_of: { xs: ['a], x: 'a } with Eq 'a -> Option Int = { xs, x } -> do
+  let target = x
+  find_index { xs = xs, p = { x } -> x == target }
 
 ## Returns the first element matching the predicate, or None.
 pub let find: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
@@ -195,11 +208,20 @@ pub let sort_by
   -> ['a] <...>
   = { xs, cmp } -> __native_seq_sort_by { xs = xs, cmp = { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1 }
 
+## Removes duplicate elements by an explicit equality. The declared `eq` param type
+## ties the comparison to the element type (the trick `sort`/`sort_by` uses so the
+## `with Eq 'a` wrappers below type-check): a top-level `let` signature's type var does
+## not flow into body annotations, but a param's declared type does unify with the arg.
+let unique_with_eq: { xs: ['a], eq: { a: 'a, b: 'a } -> Bool } -> ['a] = { xs, eq } ->
+  __native_seq_unique { xs = xs, eq = eq }
+
 ## Removes duplicate elements, keeping the first occurrence.
-pub let unique: { xs: ['a] } -> ['a] = { xs } -> __native_seq_unique { xs = xs }
+pub let unique: { xs: ['a] } with Eq 'a -> ['a] = { xs } ->
+  unique_with_eq { xs = xs, eq = { a, b } -> a == b }
 
 ## Alias for unique.
-pub let distinct: { xs: ['a] } -> ['a] = { xs } -> __native_seq_distinct { xs = xs }
+pub let distinct: { xs: ['a] } with Eq 'a -> ['a] = { xs } ->
+  unique_with_eq { xs = xs, eq = { a, b } -> a == b }
 
 ## Flattens a sequence of sequences into a single sequence.
 pub let flatten: { xss: [['a]] } -> ['a] = { xss } -> __native_seq_flatten { xs = xss }
@@ -311,8 +333,12 @@ pub let span
   -> { l: ['a], r: ['a] } <...>
   = { xs, p } -> __native_seq_span { xs = xs, p = p }
 
+let dedup_with_eq: { xs: ['a], eq: { a: 'a, b: 'a } -> Bool } -> ['a] = { xs, eq } ->
+  __native_seq_dedup { xs = xs, eq = eq }
+
 ## Removes consecutive duplicate elements.
-pub let dedup: { xs: ['a] } -> ['a] = { xs } -> __native_seq_dedup { xs = xs }
+pub let dedup: { xs: ['a] } with Eq 'a -> ['a] = { xs } ->
+  dedup_with_eq { xs = xs, eq = { a, b } -> a == b }
 
 ## Removes consecutive duplicates by a key function.
 pub let dedup_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['a] <...> = { xs, f } ->
@@ -358,8 +384,9 @@ pub let rotate_right: { xs: ['a], n: Int } -> ['a] = { xs, n } ->
   __native_seq_rotate_right { xs = xs, n = n }
 
 ## Binary search in a sorted sequence, returning the index or None.
-pub let binary_search: { xs: ['a], x: 'a } -> Option Int = { xs, x } ->
-  __native_seq_binary_search { xs = xs, x = x }
+## Delegates to binary_search_by with the element's Ord (so a custom Ord is honoured).
+pub let binary_search: { xs: ['a], x: 'a } with Ord 'a -> Option Int = { xs, x } ->
+  binary_search_by { xs = xs, x = x, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Binary search with a custom comparator.
 pub let binary_search_by
@@ -371,17 +398,29 @@ pub let binary_search_by
 pub let sort_by_key: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['a] <...> = { xs, f } ->
   __native_seq_sort_by_key { xs = xs, f = f }
 
+let last_index_of_with_eq
+  : { xs: ['a], x: 'a, eq: { a: 'a, b: 'a } -> Bool } -> Option Int = { xs, x, eq } ->
+  __native_seq_last_index_of { xs = xs, x = x, eq = eq }
+
 ## Returns the index of the last occurrence, or None.
-pub let last_index_of: { xs: ['a], x: 'a } -> Option Int = { xs, x } ->
-  __native_seq_last_index_of { xs = xs, x = x }
+pub let last_index_of: { xs: ['a], x: 'a } with Eq 'a -> Option Int = { xs, x } ->
+  last_index_of_with_eq { xs = xs, x = x, eq = { a, b } -> a == b }
+
+let replace_with_eq
+  : { xs: ['a], old: 'a, new_val: 'a, eq: { a: 'a, b: 'a } -> Bool } -> ['a] = { xs, old, new_val, eq } ->
+  __native_seq_replace { xs = xs, old = old, new_val = new_val, eq = eq }
 
 ## Replaces the first occurrence of old with new_val.
-pub let replace: { xs: ['a], old: 'a, new_val: 'a } -> ['a] = { xs, old, new_val } ->
-  __native_seq_replace { xs = xs, old = old, new_val = new_val }
+pub let replace: { xs: ['a], old: 'a, new_val: 'a } with Eq 'a -> ['a] = { xs, old, new_val } ->
+  replace_with_eq { xs = xs, old = old, new_val = new_val, eq = { a, b } -> a == b }
+
+let replace_all_with_eq
+  : { xs: ['a], old: 'a, new_val: 'a, eq: { a: 'a, b: 'a } -> Bool } -> ['a] = { xs, old, new_val, eq } ->
+  __native_seq_replace_all { xs = xs, old = old, new_val = new_val, eq = eq }
 
 ## Replaces all occurrences of old with new_val.
-pub let replace_all: { xs: ['a], old: 'a, new_val: 'a } -> ['a] = { xs, old, new_val } ->
-  __native_seq_replace_all { xs = xs, old = old, new_val = new_val }
+pub let replace_all: { xs: ['a], old: 'a, new_val: 'a } with Eq 'a -> ['a] = { xs, old, new_val } ->
+  replace_all_with_eq { xs = xs, old = old, new_val = new_val, eq = { a, b } -> a == b }
 
 ## Inserts an element at index i.
 pub let insert_at: { xs: ['a], i: Int, x: 'a } -> ['a] = { xs, i, x } ->
@@ -391,13 +430,21 @@ pub let insert_at: { xs: ['a], i: Int, x: 'a } -> ['a] = { xs, i, x } ->
 pub let swap: { xs: ['a], i: Int, j: Int } -> Option ['a] = { xs, i, j } ->
   __native_seq_swap { xs = xs, i = i, j = j }
 
+let starts_with_eq
+  : { xs: ['a], prefix: ['a], eq: { a: 'a, b: 'a } -> Bool } -> Bool = { xs, prefix, eq } ->
+  __native_seq_starts_with { xs = xs, prefix = prefix, eq = eq }
+
 ## Returns True if the sequence starts with the given prefix.
-pub let starts_with: { xs: ['a], prefix: ['a] } -> Bool = { xs, prefix } ->
-  __native_seq_starts_with { xs = xs, prefix = prefix }
+pub let starts_with: { xs: ['a], prefix: ['a] } with Eq 'a -> Bool = { xs, prefix } ->
+  starts_with_eq { xs = xs, prefix = prefix, eq = { a, b } -> a == b }
+
+let ends_with_eq
+  : { xs: ['a], suffix: ['a], eq: { a: 'a, b: 'a } -> Bool } -> Bool = { xs, suffix, eq } ->
+  __native_seq_ends_with { xs = xs, suffix = suffix, eq = eq }
 
 ## Returns True if the sequence ends with the given suffix.
-pub let ends_with: { xs: ['a], suffix: ['a] } -> Bool = { xs, suffix } ->
-  __native_seq_ends_with { xs = xs, suffix = suffix }
+pub let ends_with: { xs: ['a], suffix: ['a] } with Eq 'a -> Bool = { xs, suffix } ->
+  ends_with_eq { xs = xs, suffix = suffix, eq = { a, b } -> a == b }
 
 ## Joins string elements with a separator.
 pub let join: { xs: [Str], sep: Str } -> Str = { xs, sep } ->
@@ -448,23 +495,34 @@ pub let stddev: { xs: [Float] } -> Option Float = { xs } -> __native_seq_stddev 
 pub let median: { xs: [Float] } -> Option Float = { xs } -> __native_seq_median { xs = xs }
 
 ## Returns True if elements are in ascending order.
-pub let is_sorted: { xs: ['a] } -> Bool = { xs } -> __native_seq_is_sorted { xs = xs }
+let is_sorted_cmp: { xs: ['a], cmp: { a: 'a, b: 'a } -> Int } -> Bool = { xs, cmp } ->
+  __native_seq_is_sorted { xs = xs, cmp = cmp }
+
+pub let is_sorted: { xs: ['a] } with Ord 'a -> Bool = { xs } ->
+  is_sorted_cmp { xs = xs, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Returns True if elements are sorted by the given key function.
 pub let is_sorted_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> Bool <...> = { xs, f } ->
   __native_seq_is_sorted_by { xs = xs, f = f }
 
 ## Returns True if elements are in descending order.
-pub let is_sorted_descending: { xs: ['a] } -> Bool = { xs } ->
-  __native_seq_is_sorted_descending { xs = xs }
+let is_sorted_descending_cmp: { xs: ['a], cmp: { a: 'a, b: 'a } -> Int } -> Bool = { xs, cmp } ->
+  __native_seq_is_sorted_descending { xs = xs, cmp = cmp }
 
-## Lexicographic comparison of two sequences.
-pub let compare: { xs: ['a], ys: ['a] } -> Int = { xs, ys } ->
-  __native_seq_compare { xs = xs, ys = ys }
+pub let is_sorted_descending: { xs: ['a] } with Ord 'a -> Bool = { xs } ->
+  is_sorted_descending_cmp { xs = xs, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
+
+## Lexicographic comparison of two sequences (respects the element's Ord impl).
+pub let compare: { xs: ['a], ys: ['a] } with Ord 'a -> Int = { xs, ys } ->
+  compare_with_cmp { xs = xs, ys = ys, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Returns the insertion point for x in a sorted sequence.
-pub let binary_search_insert_point: { xs: ['a], x: 'a } -> Int = { xs, x } ->
-  __native_seq_binary_search_insert_point { xs = xs, x = x }
+let binary_search_insert_point_cmp
+  : { xs: ['a], x: 'a, cmp: { a: 'a, b: 'a } -> Int } -> Int = { xs, x, cmp } ->
+  __native_seq_binary_search_insert_point { xs = xs, x = x, cmp = cmp }
+
+pub let binary_search_insert_point: { xs: ['a], x: 'a } with Ord 'a -> Int = { xs, x } ->
+  binary_search_insert_point_cmp { xs = xs, x = x, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Returns the first index where x could be inserted in a sorted sequence.
 pub let lower_bound: { xs: ['a], x: 'a } -> Int = { xs, x } ->
@@ -481,8 +539,9 @@ pub let equal_range
   = { xs, x } -> __native_seq_equal_range { xs = xs, x = x }
 
 ## Counts the number of occurrences of an element.
-pub let count_element: { xs: ['a], x: 'a } -> Int = { xs, x } ->
-  __native_seq_count_element { xs = xs, x = x }
+pub let count_element: { xs: ['a], x: 'a } with Eq 'a -> Int = { xs, x } -> do
+  let target = x
+  count { xs = xs, p = { x } -> x == target }
 
 ## Applies f to the element at index i, or returns None if out of bounds.
 pub let update

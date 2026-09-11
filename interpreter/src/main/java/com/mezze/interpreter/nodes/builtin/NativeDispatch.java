@@ -626,9 +626,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_sort", (r, c) ->
             SeqNatives.sort(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_unique", (r, c) ->
-            SeqNatives.unique(getSeq(r, "xs")));
+            SeqNatives.unique(getSeq(r, "xs"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_distinct", (r, c) ->
-            SeqNatives.distinct(getSeq(r, "xs")));
+            SeqNatives.distinct(getSeq(r, "xs"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_flatten", (r, c) ->
             SeqNatives.flatten(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_equals", (r, c) ->
@@ -737,7 +737,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Dedup
         HANDLERS.put("__native_seq_dedup", (r, c) ->
-            SeqNatives.dedup(getSeq(r, "xs")));
+            SeqNatives.dedup(getSeq(r, "xs"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_dedup_by", (r, c) ->
             SeqNatives.dedupBy(getSeq(r, "xs"), getFunction(r, "f"), c));
 
@@ -779,19 +779,19 @@ public final class NativeDispatch extends MezzeNode {
 
         // Additional Search/Replace Operations
         HANDLERS.put("__native_seq_last_index_of", (r, c) ->
-            SeqNatives.lastIndexOf(getSeq(r, "xs"), getField(r, "x")));
+            SeqNatives.lastIndexOf(getSeq(r, "xs"), getField(r, "x"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_replace", (r, c) ->
-            SeqNatives.replace(getSeq(r, "xs"), getField(r, "old"), getField(r, "new_val")));
+            SeqNatives.replace(getSeq(r, "xs"), getField(r, "old"), getField(r, "new_val"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_replace_all", (r, c) ->
-            SeqNatives.replaceAll(getSeq(r, "xs"), getField(r, "old"), getField(r, "new_val")));
+            SeqNatives.replaceAll(getSeq(r, "xs"), getField(r, "old"), getField(r, "new_val"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_insert_at", (r, c) ->
             SeqNatives.insertAt(getSeq(r, "xs"), getLong(r, "i"), getField(r, "x")));
         HANDLERS.put("__native_seq_swap", (r, c) ->
             SeqNatives.swap(getSeq(r, "xs"), getLong(r, "i"), getLong(r, "j")));
         HANDLERS.put("__native_seq_starts_with", (r, c) ->
-            SeqNatives.startsWith(getSeq(r, "xs"), getSeq(r, "prefix")));
+            SeqNatives.startsWith(getSeq(r, "xs"), getSeq(r, "prefix"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_ends_with", (r, c) ->
-            SeqNatives.endsWith(getSeq(r, "xs"), getSeq(r, "suffix")));
+            SeqNatives.endsWith(getSeq(r, "xs"), getSeq(r, "suffix"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_join", (r, c) ->
             SeqNatives.join(getSeq(r, "xs"), getString(r, "sep")));
 
@@ -825,11 +825,11 @@ public final class NativeDispatch extends MezzeNode {
 
         // Sorting Checks
         HANDLERS.put("__native_seq_is_sorted", (r, c) ->
-            SeqNatives.isSorted(getSeq(r, "xs")));
+            SeqNatives.isSorted(getSeq(r, "xs"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_seq_is_sorted_by", (r, c) ->
             SeqNatives.isSortedBy(getSeq(r, "xs"), getFunction(r, "f")));
         HANDLERS.put("__native_seq_is_sorted_descending", (r, c) ->
-            SeqNatives.isSortedDescending(getSeq(r, "xs")));
+            SeqNatives.isSortedDescending(getSeq(r, "xs"), getFunction(r, "cmp"), c));
 
         // Counting
         HANDLERS.put("__native_seq_count_element", (r, c) ->
@@ -879,7 +879,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Binary search operations
         HANDLERS.put("__native_seq_binary_search_insert_point", (r, c) ->
-            SeqNatives.binarySearchInsertPoint(getSeq(r, "xs"), getField(r, "x")));
+            SeqNatives.binarySearchInsertPoint(getSeq(r, "xs"), getField(r, "x"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_seq_lower_bound", (r, c) ->
             SeqNatives.lowerBound(getSeq(r, "xs"), getField(r, "x")));
         HANDLERS.put("__native_seq_upper_bound", (r, c) ->
@@ -889,7 +889,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Lexicographic comparison (returns -1, 0, 1)
         HANDLERS.put("__native_seq_compare", (r, c) ->
-            SeqNatives.compareSeqs(getSeq(r, "xs"), getSeq(r, "ys")));
+            SeqNatives.compareSeqs(getSeq(r, "xs"), getSeq(r, "ys"), getFunction(r, "cmp"), c));
 
         // Additional combinatorics
         HANDLERS.put("__native_seq_subsequences_non_empty", (r, c) ->
