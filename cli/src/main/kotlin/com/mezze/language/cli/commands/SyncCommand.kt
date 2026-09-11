@@ -13,11 +13,13 @@ import java.io.File
  */
 class SyncCommand {
 
+    /** Returns a process exit code: 0 on success, non-zero if any dependency
+     *  failed to resolve / verify, or `--locked` found the lock out of date. */
     fun execute(
         args: List<String>,
         currentDir: File = File(System.getProperty("user.dir")),
         storeRootOverride: File? = null,
-    ) {
+    ): Int {
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
@@ -27,7 +29,7 @@ class SyncCommand {
             println("Location: ${currentDir.absolutePath}")
             println()
             println("💡 Run 'mezze init' to create a new package first.")
-            return
+            return 1
         }
 
         val isClean = args.contains("--clean")
@@ -44,7 +46,7 @@ class SyncCommand {
             println("Error: ${e.message}")
             println()
             println("💡 Check the syntax of your Mezze.toml file.")
-            return
+            return 1
         }
 
         val hasDeps = manifest.dependencies.isNotEmpty() ||
@@ -55,7 +57,7 @@ class SyncCommand {
             println()
             println("💡 Add a local dep under [path-dependencies] (name = \"../path\"),")
             println("   or a registry dep under [dependencies] (name = \"<url>#sha256:<hash>\").")
-            return
+            return 0
         }
 
         println("📦 Syncing dependencies...")
@@ -83,9 +85,11 @@ class SyncCommand {
         val downloader = PackageDownloader(cacheDir)
         val archive = ArchiveHandler()
         val nodes = mutableListOf<LockedNode>()
+        val failures = mutableListOf<String>()   // deps that could not be resolved/verified
+        var lockOutOfDate = false
 
         try {
-            val count = resolveDeps(currentDir, manifest, storeRoot, isClean, downloader, archive, nodes)
+            val count = resolveDeps(currentDir, manifest, storeRoot, isClean, downloader, archive, nodes, failures)
 
             // Complete graph lock: the root package + every resolved node, deduped + sorted.
             val rootEdges = (manifest.pathDependencies.keys + manifest.dependencies.keys + manifest.devDependencies.keys).sorted()
@@ -97,11 +101,14 @@ class SyncCommand {
             if (isLocked) {
                 val existing = readLockFile(lockFile)
                 when {
-                    existing == null ->
+                    existing == null -> {
                         println("❌ --locked: no Mezze.lock to verify. Run 'mez sync' first.")
+                        lockOutOfDate = true
+                    }
                     existing.packages != freshLock.packages -> {
                         println("❌ --locked: Mezze.lock is out of date with the resolved graph.")
                         println("   Run 'mez sync' (without --locked) to update it.")
+                        lockOutOfDate = true
                     }
                     else -> {
                         println()
@@ -119,8 +126,17 @@ class SyncCommand {
             }
 
             println()
-            println("🎉 Sync complete: $count package(s).")
+            if (failures.isEmpty()) {
+                println("🎉 Sync complete: $count package(s).")
+            } else {
+                println("⚠️  Synced $count package(s); ${failures.size} failed: ${failures.distinct().joinToString(", ")}")
+            }
             println("📂 Dependencies at: ${packagesDir.absolutePath}")
+
+            // A declared dep that can't be resolved/verified (bad checksum, missing
+            // path, unreadable manifest) — or a stale lock under --locked — is a hard
+            // failure: the project won't compile, and CI must see a non-zero exit.
+            return if (failures.isEmpty() && !lockOutOfDate) 0 else 1
         } finally {
             downloader.close()
         }
@@ -149,10 +165,11 @@ class SyncCommand {
         downloader: PackageDownloader,
         archive: ArchiveHandler,
         nodes: MutableList<LockedNode>,
+        failures: MutableList<String>,
     ): Int {
         val seen = HashSet<String>()                              // "<declarerCanonical>::<name>"
         val queue = ArrayDeque<Triple<File, String, DepSpec>>()   // (declaringDir, name, spec)
-        enqueue(queue, rootDir, rootToml, includeDev = true)
+        enqueue(queue, rootDir, rootToml, includeDev = true, failures)
 
         var count = 0
         while (queue.isNotEmpty()) {
@@ -162,11 +179,13 @@ class SyncCommand {
             val target = when (spec) {
                 is DepSpec.Path -> resolvePathTarget(declaringDir, name, spec.rawPath)
                 is DepSpec.Registry -> resolveRegistryTarget(name, spec, storeRoot, isClean, downloader, archive)
-            } ?: continue
+            }
+            if (target == null) { failures.add(name); continue }   // resolver already printed why
 
             val depToml = readToml(File(target, "Mezze.toml"))
             if (depToml == null) {
                 println("  ❌ $name: no readable Mezze.toml in $target")
+                failures.add(name)
                 continue
             }
             val version = depToml.`package`.version
@@ -189,7 +208,7 @@ class SyncCommand {
 
             // Recurse: this dep's own deps resolve against ITS dir. Dev-deps are the
             // top project's only — a dependency's dev-deps are not the consumer's.
-            enqueue(queue, target, depToml, includeDev = false)
+            enqueue(queue, target, depToml, includeDev = false, failures)
         }
         return count
     }
@@ -199,6 +218,7 @@ class SyncCommand {
         dir: File,
         toml: MezzeToml,
         includeDev: Boolean,
+        failures: MutableList<String>,
     ) {
         toml.pathDependencies.forEach { (n, p) -> queue.add(Triple(dir, n, DepSpec.Path(p))) }
         val registry = if (includeDev) toml.dependencies + toml.devDependencies else toml.dependencies
@@ -208,6 +228,7 @@ class SyncCommand {
                 queue.add(Triple(dir, n, DepSpec.Registry(url, sha)))
             } catch (e: IllegalArgumentException) {
                 println("  ❌ $n: ${e.message?.lineSequence()?.firstOrNull() ?: "invalid dependency URL"}")
+                failures.add(n)
             }
         }
     }
