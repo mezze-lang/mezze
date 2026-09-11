@@ -366,32 +366,36 @@ object EmbeddedExec {
             System.err.println("[mezze] Truffle runtime: ${runtime.javaClass.name} (${runtime.name})")
         }
 
-        // Polyglot: enable GraalPy under a per-run env flag. We keep this
-        // OFF by default because loading the python language ~doubles
-        // Context build time and pulls in GraalPy's resource caches — every
-        // non-polyglot user program would pay for something it never uses.
-        // MEZZE_ENABLE_PYTHON=1 opts in; MEZZE_PYTHON_PATH lets the caller
-        // point at a venv site-packages (e.g. numpy). Future work moves
-        // this into Mezze.toml's [polyglot.python] section (see the demo
-        // manifest for the shape).
-        val enablePython = System.getenv("MEZZE_ENABLE_PYTHON") == "1"
-        val pythonPath = System.getenv("MEZZE_PYTHON_PATH")
+        // Polyglot: enable GraalPy iff the project's Mezze.toml declares
+        // [polyglot.python]. Loading the `python` language ~doubles Context
+        // build time and pulls in GraalPy's resource caches, so we stay off
+        // by default — every non-polyglot user program would otherwise pay
+        // for something it never uses.
+        //
+        // Config lives in Mezze.toml, resolved relative to that file's dir
+        // (see PolyglotManifest). The runtime walks up from cwd looking for
+        // a manifest; missing → no polyglot, same behavior as before.
+        val polyglot = com.mezze.interpreter.polyglot.PolyglotManifest.load(File("."))
 
-        val languageIds = if (enablePython) arrayOf(MezzeLanguage.ID, "python") else arrayOf(MezzeLanguage.ID)
+        val languageIds = if (polyglot.enablePython) arrayOf(MezzeLanguage.ID, "python") else arrayOf(MezzeLanguage.ID)
         val contextBuilder = Context.newBuilder(*languageIds)
             .engine(engine)
             .allowAllAccess(true)
             .allowCreateThread(true)
-        if (enablePython) {
+        if (polyglot.enablePython) {
             contextBuilder
                 .allowExperimentalOptions(true)
                 // Java posix backend keeps the embedded GraalPy off host
                 // libc — required when running inside the same JVM as
-                // Mezze without a POSIX resource lib set up.
+                // Mezze without a POSIX resource lib set up. The manifest
+                // may override this via [polyglot.python.options].
                 .option("python.PosixModuleBackend", "java")
                 .option("python.WarnExperimentalFeatures", "false")
-            if (!pythonPath.isNullOrBlank()) {
-                contextBuilder.option("python.PythonPath", pythonPath)
+            if (!polyglot.pythonPath.isNullOrBlank()) {
+                contextBuilder.option("python.PythonPath", polyglot.pythonPath)
+            }
+            for ((k, v) in polyglot.pythonOptions) {
+                contextBuilder.option("python.$k", v)
             }
         }
         val context = contextBuilder.build()

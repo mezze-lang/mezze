@@ -9,13 +9,20 @@ entry = "main"
 
 [dependencies]
 
-# Documentation-only for now: the mez CLI does not yet drive Python
-# enablement from Mezze.toml. `just mez-run-numpy-demo` still sets
-# MEZZE_ENABLE_PYTHON=1 + MEZZE_PYTHON_PATH; future work moves the
-# wiring here so `mez exec` reads it automatically.
+# `[polyglot.python]` opts this project in to the GraalPy Truffle
+# language and points `sys.path` at the venv site-packages numpy was
+# installed into. Bootstrap the venv with `just polyglot-setup-python`
+# (see README).
+#
+# `python_path` is resolved relative to THIS manifest's directory, so
+# committing `../../interpreter/build/graalpy-venv/…` is enough — the
+# caller's cwd doesn't matter.
 [polyglot.python]
-enabled = true
-# Path (relative to the repo root) that GraalPy should add to sys.path
-# so `import numpy` resolves. See examples/polyglot_numpy/README.md for
-# the venv bootstrap steps.
-site-packages = "interpreter/build/graalpy-venv/venv/lib/python3.12/site-packages"
+python_path = "../../interpreter/build/graalpy-venv/venv/lib/python3.12/site-packages"
+
+# Additional `python.<KEY>` Context options forwarded to Truffle. The
+# Java POSIX backend keeps embedded GraalPy off host libc — required
+# when running inside the same JVM as Mezze without a POSIX resource
+# lib set up.
+[polyglot.python.options]
+PosixModuleBackend = "java"

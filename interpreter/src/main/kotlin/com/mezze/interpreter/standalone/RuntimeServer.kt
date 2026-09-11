@@ -261,14 +261,16 @@ object RuntimeServer {
         }
         val engine = engineBuilder.build()
 
-        // Polyglot: enable GraalPy under an env flag. Same rationale as
-        // EmbeddedExec — opt-in because loading `python` adds cost every
-        // non-polyglot program would pay. MEZZE_ENABLE_PYTHON=1 flips it
-        // on; MEZZE_PYTHON_PATH points at a venv site-packages.
-        val enablePython = System.getenv("MEZZE_ENABLE_PYTHON") == "1"
-        val pythonPath = System.getenv("MEZZE_PYTHON_PATH")
+        // Polyglot: enable GraalPy iff the project's Mezze.toml declares
+        // [polyglot.python]. Same rationale as EmbeddedExec — opt-in
+        // because loading `python` adds cost every non-polyglot program
+        // would pay. Config lives in Mezze.toml resolved via the
+        // `mezze.project.root` system property the parent set when
+        // spawning this child.
+        val projectRoot = System.getProperty("mezze.project.root")?.let { File(it) } ?: File(".")
+        val polyglot = com.mezze.interpreter.polyglot.PolyglotManifest.load(projectRoot)
 
-        val languageIds = if (enablePython) arrayOf(MezzeLanguage.ID, "python") else arrayOf(MezzeLanguage.ID)
+        val languageIds = if (polyglot.enablePython) arrayOf(MezzeLanguage.ID, "python") else arrayOf(MezzeLanguage.ID)
         val contextBuilder = Context.newBuilder(*languageIds)
             .engine(engine)
             .allowAllAccess(true)
@@ -281,12 +283,15 @@ object RuntimeServer {
             // inherited fd 2 (parent's terminal); avoids wire frames for
             // dev-tool startup banners.
             .out(wireOut)
-        if (enablePython) {
+        if (polyglot.enablePython) {
             contextBuilder
                 .option("python.PosixModuleBackend", "java")
                 .option("python.WarnExperimentalFeatures", "false")
-            if (!pythonPath.isNullOrBlank()) {
-                contextBuilder.option("python.PythonPath", pythonPath)
+            if (!polyglot.pythonPath.isNullOrBlank()) {
+                contextBuilder.option("python.PythonPath", polyglot.pythonPath)
+            }
+            for ((k, v) in polyglot.pythonOptions) {
+                contextBuilder.option("python.$k", v)
             }
         }
         val context = contextBuilder.build()

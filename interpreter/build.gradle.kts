@@ -100,7 +100,7 @@ dependencies {
     // (Env.parsePublic, Context.eval on "python"). Having them on the
     // runtime classpath is what lets the shadowJar bundle GraalPy into
     // mezze-runtime.jar so `mez exec` can enable the "python" language
-    // when MEZZE_ENABLE_PYTHON=1.
+    // when the project's Mezze.toml declares `[polyglot.python]`.
     runtimeOnly("org.graalvm.python:python-language:25.0.3")
     runtimeOnly("org.graalvm.python:python-resources:25.0.3")
     runtimeOnly("org.graalvm.python:python-launcher:25.0.3")

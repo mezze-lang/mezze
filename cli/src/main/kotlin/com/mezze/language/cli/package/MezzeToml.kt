@@ -52,6 +52,22 @@ data class MezzeToml(
      */
     @SerialName("path-dependencies")
     val pathDependencies: Map<String, String> = emptyMap(),
+    /**
+     * Optional polyglot configuration. Runtime code (`EmbeddedExec`,
+     * `RuntimeServer`) reads these sections independently via
+     * `PolyglotManifest` — the field lives here purely so `mez check`
+     * and friends can validate schema shape. Absence == no polyglot.
+     *
+     *     [polyglot.python]
+     *     python_path = "./venv/lib/python3.12/site-packages"
+     *
+     *     [polyglot.python.options]
+     *     PosixModuleBackend = "java"
+     *
+     *     [polyglot.jvm]
+     *     classpath = ["libs/gson-2.10.jar"]
+     */
+    val polyglot: PolyglotSection? = null,
 )
 
 /**
@@ -66,6 +82,39 @@ data class MezzeToml(
 @Serializable
 data class ToolchainConfig(
     val channel: String? = null,
+)
+
+/** Manifest-level polyglot block. Each language sub-section is optional. */
+@Serializable
+data class PolyglotSection(
+    val python: PythonSection? = null,
+    val jvm: JvmSection? = null,
+)
+
+/**
+ * `[polyglot.python]`. Presence of the section itself opts the run in
+ * to the `python` Truffle language — no boolean flag needed.
+ *
+ * `python_path` is resolved relative to the DIRECTORY of the containing
+ * `Mezze.toml`, so package authors can commit repo-relative paths without
+ * worrying about the caller's cwd. Absolute paths pass through.
+ */
+@Serializable
+data class PythonSection(
+    @SerialName("python_path")
+    val pythonPath: String? = null,
+    val options: Map<String, String> = emptyMap(),
+)
+
+/**
+ * `[polyglot.jvm]`. `classpath` entries are appended to the wire-child
+ * JVM's `-cp` before it spawns, so user Java classes callable via
+ * `java::type("com.foo.Bar")` become resolvable. Paths follow the same
+ * resolution rules as [PythonSection.pythonPath].
+ */
+@Serializable
+data class JvmSection(
+    val classpath: List<String> = emptyList(),
 )
 
 /**

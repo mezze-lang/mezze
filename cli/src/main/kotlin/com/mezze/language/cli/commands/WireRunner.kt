@@ -880,13 +880,22 @@ private class WireSession private constructor(
             // tool jars are visible to Truffle's option parser.
             // installDevTools laid these down at install time.
             val baseClasspath = JvmLauncher.buildClasspath()
-            val classpath = if (devFlags.isNotEmpty()) {
+            val withTools = if (devFlags.isNotEmpty()) {
                 val toolsDir = com.mezze.language.cli.MezzeHome.toolsDir
                 val toolJars = toolsDir.listFiles { f -> f.name.endsWith(".jar") }
                     ?.joinToString(File.pathSeparator) { it.absolutePath }
                     ?: ""
                 if (toolJars.isNotEmpty()) "$baseClasspath${File.pathSeparator}$toolJars" else baseClasspath
             } else baseClasspath
+            // Mezze.toml [polyglot.jvm] classpath entries — user-supplied
+            // Java classes callable via `java::type(...)`. Resolved once
+            // here (parent side) so the child's -cp is fully built before
+            // spawn.
+            val polyglotJvmCp = com.mezze.language.cli.`package`.PolyglotResolver
+                .resolveJvmClasspath(currentDir)
+            val classpath = if (polyglotJvmCp.isEmpty()) withTools else {
+                withTools + File.pathSeparator + polyglotJvmCp.joinToString(File.pathSeparator)
+            }
 
             val command = mutableListOf(java.absolutePath)
             command.addAll(jvmArgs())

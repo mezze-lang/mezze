@@ -206,15 +206,12 @@ polyglot-setup-python:
 # `just polyglot-setup-python`. Uses `mez exec` under the JVM
 # (native binaries have no polyglot at this layer).
 #
-# Wiring: MEZZE_ENABLE_PYTHON=1 flips the runtime Context builder to
-# include "python", and MEZZE_PYTHON_PATH points GraalPy at the venv
-# so `import numpy` resolves. This is the ONLY thing the runtime
-# needs — the demo itself is pure Mezze on top of the generic
-# std::polyglot::core surface.
+# Wiring lives entirely in `examples/polyglot_numpy/Mezze.toml`
+# ([polyglot.python] with python_path + options). No env vars — the
+# runtime walks up from the script's dir, finds the manifest, and
+# turns on GraalPy iff the section is present.
 [group('mez')]
 mez-run-numpy-demo: _mez
-    MEZZE_ENABLE_PYTHON=1 \
-    MEZZE_PYTHON_PATH="{{justfile_directory()}}/interpreter/build/graalpy-venv/venv/lib/python3.12/site-packages" \
     {{mez}} exec examples/polyglot_numpy/src/app.mz
 
 # ============================================================
