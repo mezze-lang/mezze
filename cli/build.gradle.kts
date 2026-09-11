@@ -690,7 +690,10 @@ tasks.register("installNative") {
     description = "Install the versioned mez toolchain + PATH proxy into ~/.mezze/"
     dependsOn("installRuntime", "installDevTools", "installStdlibSources", "installToolchainStdlib", "nativeCompile")
     doLast {
-        val src = layout.buildDirectory.file("native/nativeCompile/mez").get().asFile
+        // Executable name is platform-specific (native-image emits mez.exe on
+        // Windows); the proxy detects itself by extension (ProxyDispatch).
+        val exe = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) "mez.exe" else "mez"
+        val src = layout.buildDirectory.file("native/nativeCompile/$exe").get().asFile
 
         // rm-then-cp to defeat the macOS launch-services kernel cache —
         // overwriting an existing `mez` in place hangs because the cached
@@ -703,11 +706,11 @@ tasks.register("installNative") {
         }
 
         // 1. The versioned toolchain binary.
-        install(File(toolchainDir.get(), "bin/mez"))
+        install(File(toolchainDir.get(), "bin/$exe"))
         // 2. The PATH proxy — a copy of the same binary; ProxyDispatch keys off
         //    its path (~/.mezze/bin/mez), not its version, so any copy works and
         //    the newest install always refreshes it.
-        install(File(mezzeHome.get(), "bin/mez"))
+        install(File(mezzeHome.get(), "bin/$exe"))
 
         // 3. Seed the global default to this version the first time, so a fresh
         //    install resolves to something without requiring `toolchain default`.

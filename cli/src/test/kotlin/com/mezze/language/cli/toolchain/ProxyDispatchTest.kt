@@ -35,6 +35,19 @@ class ProxyDispatchTest {
     }
 
     @Test
+    fun `a Windows-style mez_exe at the proxy path is recognized as the proxy`(@TempDir tmp: Path) {
+        // Windows layout: the only executable is mez.exe (no extension-less mez).
+        val home = tmp.toFile()
+        File(home, "toolchains/0.2.0/bin").mkdirs()
+        File(home, "toolchains/0.2.0/bin/mez.exe").apply { writeText("stub"); setExecutable(true) }
+        File(home, "bin").mkdirs()
+        val self = File(home, "bin/mez.exe")   // proxy invoked as mez.exe
+        val action = ProxyDispatch.decide(self, home, home, null, listOf("check"), ToolchainPaths(home))
+        val re = assertInstanceOf(ProxyDispatch.Action.Reexec::class.java, action)
+        assertEquals(File(home, "toolchains/0.2.0/bin/mez.exe").canonicalFile, re.target.canonicalFile)
+    }
+
+    @Test
     fun `null self (dev or JVM launch) runs in-process`(@TempDir tmp: Path) {
         val home = homeWith(tmp.toFile(), "0.1.0")
         val action = ProxyDispatch.decide(null, home, tmp.toFile(), null, listOf("check"), ToolchainPaths(home))

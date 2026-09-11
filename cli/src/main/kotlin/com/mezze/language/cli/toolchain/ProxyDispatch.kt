@@ -59,7 +59,10 @@ object ProxyDispatch {
      */
     fun decide(self: File?, home: File, cwd: File, env: String?, args: List<String>, paths: ToolchainPaths): Action {
         val selfC = self?.let { canon(it) } ?: return Action.RunInProcess
-        if (selfC != canon(File(home, "bin/mez"))) return Action.RunInProcess
+        // We are the proxy iff we're `<home>/bin/mez` — matched by extension so a
+        // Windows `mez.exe` (or a `.cmd`/`.bat` shim) counts too.
+        val inProxyBin = selfC.parentFile?.let { canon(it) == canon(File(home, "bin")) } == true
+        if (!inProxyBin || selfC.nameWithoutExtension != "mez") return Action.RunInProcess
 
         // Leading `+<channel>` is an explicit, one-shot version selector.
         val explicit = args.firstOrNull()?.takeIf { it.startsWith("+") && it.length > 1 }?.substring(1)
@@ -81,11 +84,12 @@ object ProxyDispatch {
         )
         return when (resolution) {
             is ToolchainResolver.Resolution.Ok -> {
-                val target = File(paths.dirFor(resolution.version), "bin/mez")
+                val binDir = File(paths.dirFor(resolution.version), "bin")
+                val target = toolchainBinary(binDir)
                 when {
-                    !target.isFile -> Action.Fail(
+                    target == null -> Action.Fail(
                         "mez: toolchain '${resolution.version}' is installed but its binary is missing:\n" +
-                            "     ${target.absolutePath}\n" +
+                            "     ${File(binDir, "mez").absolutePath}\n" +
                             "     reinstall it, or pick another with: mez toolchain default <version>",
                         1,
                     )
@@ -128,6 +132,10 @@ object ProxyDispatch {
     }
 
     private fun canon(f: File): File = runCatching { f.canonicalFile }.getOrDefault(f.absoluteFile)
+
+    /** The `mez` executable in [binDir], platform-agnostic (`mez` or `mez.exe`). */
+    private fun toolchainBinary(binDir: File): File? =
+        listOf("mez", "mez.exe").map { File(binDir, it) }.firstOrNull { it.isFile }
 
     /** Nearest `Mezze.toml` walking up from [start]; its `[toolchain] channel = "…"`, or null. */
     private fun readProjectChannel(start: File): String? {
