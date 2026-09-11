@@ -512,16 +512,46 @@ object NativeBuildPath {
      * fresh-compile path and the cache-load path (BuildCache) produce
      * byte-identical CBOR for the same app.
      */
-    fun computeReachableClosure(loweredFunctions: List<FunctionIR>): List<FunctionIR> {
-        val needed = com.mezze.language.stdlib.FunctionIRReachability
-            .collectReferencedHashes(loweredFunctions)
+    /**
+     * The runnable FunctionIR closure reachable from [loweredFunctions].
+     *
+     * A referenced (called) function is resolved from, in order: the functions
+     * just lowered in this pass, then the precompiled stdlib, then — if provided —
+     * [fromStore] (a dependency whose IR was compiled once and cached in the store,
+     * keyed by hash; #46). stdlib functions are leaves here (the runtime embeds
+     * stdlib and resolves those calls itself), but a store-loaded DEPENDENCY
+     * function is NOT embedded — so its own call targets must also be pulled, which
+     * is why store resolution walks transitively.
+     *
+     * [fromStore] is null by default, so with no cached deps this is exactly the
+     * previous behavior (only lowered + stdlib) — a no-op until deps are cached.
+     */
+    fun computeReachableClosure(
+        loweredFunctions: List<FunctionIR>,
+        fromStore: ((com.mezze.language.typedast.Hash) -> FunctionIR?)? = null,
+    ): List<FunctionIR> {
         val stdlibFns = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
         val closureMap = HashMap<com.mezze.language.typedast.Hash, FunctionIR>()
         for (fn in loweredFunctions) closureMap[fn.hash] = fn
-        for (hash in needed) {
+
+        val queue = ArrayDeque(
+            com.mezze.language.stdlib.FunctionIRReachability.collectReferencedHashes(loweredFunctions)
+        )
+        while (queue.isNotEmpty()) {
+            val hash = queue.removeFirst()
             if (hash in closureMap) continue
-            val fn = stdlibFns[hash] ?: continue
-            closureMap[hash] = fn
+            val stdFn = stdlibFns[hash]
+            if (stdFn != null) {
+                closureMap[hash] = stdFn   // stdlib: leaf (resolved by the embedded runtime), as before
+                continue
+            }
+            val depFn = fromStore?.invoke(hash) ?: continue
+            closureMap[hash] = depFn
+            // A cached dependency function is not embedded — its own call targets
+            // must be in the closure too. Walk them transitively.
+            for (h in com.mezze.language.stdlib.FunctionIRReachability.collectReferencedHashes(listOf(depFn))) {
+                if (h !in closureMap) queue.add(h)
+            }
         }
         return closureMap.values.sortedBy { it.hash.hex }
     }
