@@ -364,10 +364,14 @@ public final class ParallelNatives {
         boolean callerIsVirtual = Thread.currentThread().isVirtual();
         boolean leftInline = (virtual == callerIsVirtual);
 
-        // Reuse per-thread JoinContext — eliminates 4 allocations per join
-        // (2 AtomicReference + 2 Object[1]) on steady-state paths.
-        JoinContext ctx = JOIN_CTX.get();
-        ctx.reset();
+        // Fresh JoinContext per join.  Cannot pool via ThreadLocal because
+        // the left-inline path recurses on the SAME thread (binary split),
+        // so nested joinOnTruffleThread calls would share + overwrite the
+        // same ctx — corrupting outer joins' results. Allocation is cheap
+        // (4 fields); the alternative ThreadLocal pool was the root cause
+        // of flaky "expected 5 but was 3" / "expected 8 but was 9" in
+        // ParallelEffectTest with min_chunk=1.
+        JoinContext ctx = new JoinContext();
 
         Env env = MezzeContext.get(node).getEnv();
 
@@ -463,8 +467,8 @@ public final class ParallelNatives {
         }
     }
 
-    private static final ThreadLocal<JoinContext> JOIN_CTX =
-        ThreadLocal.withInitial(JoinContext::new);
+    // ThreadLocal pool removed: left-inline recursion reuses the same
+    // thread, so nested joins would share one ctx and corrupt each other.
 
     // ==================== Helpers ====================
 
@@ -474,9 +478,18 @@ public final class ParallelNatives {
      */
     private static Object callThunk(MezzeFunction f, IndirectCallNode callNode) {
         Object[] closure = f.getClosureValues();
-        Object[] callArgs = new Object[closure.length + 1];
-        System.arraycopy(closure, 0, callArgs, 0, closure.length);
-        callArgs[closure.length] = MezzeRecord.empty();
+        Object empty = MezzeRecord.empty();
+        Object[] callArgs = switch (closure.length) {
+            case 0 -> new Object[]{empty};
+            case 1 -> new Object[]{closure[0], empty};
+            case 2 -> new Object[]{closure[0], closure[1], empty};
+            default -> {
+                Object[] tmp = new Object[closure.length + 1];
+                System.arraycopy(closure, 0, tmp, 0, closure.length);
+                tmp[closure.length] = empty;
+                yield tmp;
+            }
+        };
         return callNode.call(f.getCallTarget(), callArgs);
     }
 
