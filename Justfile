@@ -136,6 +136,13 @@ test-cli:
     @mkdir -p logs
     bash scripts/cli-e2e.sh 2>&1 | tee logs/cli-e2e.log
 
+# Toolchain-proxy dispatch: real ~/.mezze/bin/mez proxy → stub toolchains,
+# every precedence rule. Needs the native CLI (`./gradlew :cli:nativeCompile`).
+[group('test')]
+test-proxy:
+    @mkdir -p logs
+    bash scripts/proxy-e2e.sh 2>&1 | tee logs/proxy-e2e.log
+
 # Just one class:  just test-class typechecker '*AntiHang*'
 [group('test')]
 test-class module pattern:

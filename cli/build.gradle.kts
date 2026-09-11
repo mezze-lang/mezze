@@ -542,6 +542,12 @@ tasks.named("nativeCompile") {
 
 val mezzeHome = providers.systemProperty("user.home").map { File(it, ".mezze") }
 
+// Each install goes into its own versioned toolchain dir; a proxy on the PATH
+// (~/.mezze/bin/mez) dispatches to the pinned one (see ProxyDispatch). This is
+// the layout `mez toolchain` manages and lets several releases coexist.
+val mezzeToolchainVersion: String = project.version.toString()
+val toolchainDir = mezzeHome.map { File(it, "toolchains/$mezzeToolchainVersion") }
+
 /**
  * Install `mezze-runtime.jar` (the slim runtime fat-jar) into
  * ~/.mezze/lib/. This is the only library artifact users need at run
@@ -560,10 +566,10 @@ val mezzeHome = providers.systemProperty("user.home").map { File(it, ".mezze") }
  */
 tasks.register<Copy>("installRuntime") {
     group = "install"
-    description = "Install mezze-runtime.jar into ~/.mezze/lib/"
+    description = "Install mezze-runtime.jar into the versioned toolchain's lib/"
     dependsOn(":interpreter:runtimeShadowJar")
     from(project(":interpreter").layout.buildDirectory.file("libs/mezze-runtime.jar"))
-    into(mezzeHome.map { File(it, "lib") })
+    into(toolchainDir.map { File(it, "lib") })
 }
 
 // A separate configuration that pulls in the GraalVM Truffle dev tools
@@ -604,11 +610,11 @@ tasks.register<Copy>("installDevTools") {
                 // Tools depend on org.graalvm.shadowed.* packages so include those too
                 "icu4j-*.jar", "regex-*.jar")
     }
-    into(mezzeHome.map { File(it, "lib/tools") })
+    into(toolchainDir.map { File(it, "lib/tools") })
     // Wipe the dir before copying so old tool jars from prior installs
     // don't accumulate across upgrades.
     doFirst {
-        val toolsDir = File(mezzeHome.get(), "lib/tools")
+        val toolsDir = File(toolchainDir.get(), "lib/tools")
         if (toolsDir.exists()) toolsDir.listFiles()?.forEach { it.delete() }
     }
 }
@@ -634,41 +640,71 @@ tasks.register<Copy>("installStdlibSources") {
     from(rootProject.projectDir.resolve("stdlib")) {
         include("**/*.mz")
     }
+    // Flat (not under toolchains/<v>/): these .mz files are for LSP
+    // go-to-definition only — the runtime compiles from the binary's embedded
+    // snapshot, not from here — and the LSP resolves them at ~/.mezze/stdlib.
+    // Shared across versions; the latest install wins, which is fine for
+    // cmd-click display.
     into(mezzeHome.map { File(it, "stdlib") })
 }
 
 /**
- * Install the full mez toolchain into ~/.mezze/. ~3 minutes the first
- * time; faster on subsequent runs thanks to incremental compile.
+ * Install the full mez toolchain into ~/.mezze/ as a *versioned* toolchain,
+ * plus the PATH proxy. ~3 minutes the first time; faster after thanks to
+ * incremental compile.
  *
- * Three artifacts go down:
- *   - ~/.mezze/bin/mez               native binary (AOT-compiled CLI)
- *   - ~/.mezze/lib/mezze-runtime.jar slim runtime jar (JVM child for
- *                                    mez dev / mez exec; templated by
+ * Layout (version = project version, e.g. `nightly-…` or `-Pversion=0.1.3`):
+ *   - ~/.mezze/toolchains/<version>/bin/mez           native binary (AOT CLI)
+ *   - ~/.mezze/toolchains/<version>/lib/mezze-runtime.jar   slim runtime jar
+ *                                    (JVM child for mez dev/exec; templated by
  *                                    mez build for user app jars)
- *   - ~/.mezze/stdlib/std/...        stdlib .mz sources for editor
- *                                    go-to-definition (LSP)
+ *   - ~/.mezze/toolchains/<version>/lib/tools/...     Truffle dev tools
+ *   - ~/.mezze/bin/mez               proxy on the PATH → dispatches to the
+ *                                    pinned toolchain (see ProxyDispatch)
+ *   - ~/.mezze/stdlib/std/...        stdlib .mz sources (flat; LSP go-to-def)
+ *   - ~/.mezze/settings.toml         seeded `default = "<version>"` if unset
  *
- * The native binary is NOT self-contained: it spawns a JVM child for
- * `mez dev` / `mez exec` to execute user code (Truffle/Loom need a real
- * JVM). Coupling installRuntime ensures users never end up with a
- * binary that can't find its runtime jar.
+ * Installing several versions this way lets them coexist; `mez toolchain`
+ * lists/pins them and the proxy picks the right one per project. The native
+ * binary is NOT self-contained: it spawns a JVM child for `mez dev` / `mez exec`
+ * (Truffle/Loom need a real JVM), so its runtime jar ships alongside it in the
+ * same versioned lib/.
  */
 tasks.register("installNative") {
     group = "install"
-    description = "Install native `mez` binary + runtime jar + stdlib sources into ~/.mezze/"
+    description = "Install the versioned mez toolchain + PATH proxy into ~/.mezze/"
     dependsOn("installRuntime", "installDevTools", "installStdlibSources", "nativeCompile")
     doLast {
+        val src = layout.buildDirectory.file("native/nativeCompile/mez").get().asFile
+
         // rm-then-cp to defeat the macOS launch-services kernel cache —
         // overwriting an existing `mez` in place hangs because the cached
-        // codesign signature is stale. Deleting first invalidates that
-        // cache so the new inode gets a fresh evaluation.
-        val target = File(mezzeHome.get(), "bin/mez")
-        target.parentFile.mkdirs()
-        if (target.exists()) target.delete()
-        val src = layout.buildDirectory.file("native/nativeCompile/mez").get().asFile
-        src.copyTo(target, overwrite = true)
-        target.setExecutable(true, false)
+        // codesign signature is stale. Deleting first invalidates that cache.
+        fun install(target: File) {
+            target.parentFile.mkdirs()
+            if (target.exists()) target.delete()
+            src.copyTo(target, overwrite = true)
+            target.setExecutable(true, false)
+        }
+
+        // 1. The versioned toolchain binary.
+        install(File(toolchainDir.get(), "bin/mez"))
+        // 2. The PATH proxy — a copy of the same binary; ProxyDispatch keys off
+        //    its path (~/.mezze/bin/mez), not its version, so any copy works and
+        //    the newest install always refreshes it.
+        install(File(mezzeHome.get(), "bin/mez"))
+
+        // 3. Seed the global default to this version the first time, so a fresh
+        //    install resolves to something without requiring `toolchain default`.
+        val settings = File(mezzeHome.get(), "settings.toml")
+        if (!settings.exists() || settings.readLines().none { it.trimStart().startsWith("default") }) {
+            settings.parentFile.mkdirs()
+            val existing = if (settings.exists()) settings.readText().trimEnd('\n') + "\n" else ""
+            settings.writeText(existing + "default = \"$mezzeToolchainVersion\"\n")
+        }
+
+        logger.lifecycle("Installed toolchain $mezzeToolchainVersion → ${toolchainDir.get()}")
+        logger.lifecycle("Proxy → ${File(mezzeHome.get(), "bin/mez")}  (put ~/.mezze/bin on PATH)")
     }
 }
 
@@ -683,18 +719,21 @@ tasks.register("installNative") {
  */
 tasks.register<Delete>("cleanInstall") {
     group = "install"
-    description = "Wipe ~/.mezze/lib, ~/.mezze/cache, ~/.mezze/bin/mez and the cli build outputs"
+    description = "Wipe installed toolchains, proxy, cache, settings + the cli build outputs"
     delete(
         // Repo-side: stale gradle outputs.
         layout.buildDirectory.dir("libs"),
         layout.buildDirectory.dir("native"),
         layout.buildDirectory.file("resources/main/stdlib.sqlite"),
         layout.buildDirectory.file("generated/resources/stdlib.sqlite"),
-        // User-side: previously-installed runtime + the legacy stdlib
-        // sidecar (no longer read by anything; safe to remove).
+        // User-side: every installed toolchain, the proxy, and the resolver's
+        // global default — plus the legacy flat `lib` from pre-versioned
+        // installs (no longer read; safe to remove).
+        mezzeHome.map { File(it, "toolchains") },
+        mezzeHome.map { File(it, "bin/mez") },
+        mezzeHome.map { File(it, "settings.toml") },
         mezzeHome.map { File(it, "lib") },
         mezzeHome.map { File(it, "cache") },
-        mezzeHome.map { File(it, "bin/mez") }
     )
 }
 

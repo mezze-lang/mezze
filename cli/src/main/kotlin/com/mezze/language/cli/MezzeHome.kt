@@ -30,6 +30,15 @@ object MezzeHome {
     val shellNative: File get() = File(libDir, "mez-shell-native")
 
     /**
+     * Absolute path of the running `mez` executable, if discoverable. For an
+     * installed native binary this is the binary itself (e.g. `~/.mezze/bin/mez`
+     * or `~/.mezze/toolchains/<v>/bin/mez`); the toolchain proxy uses it to tell
+     * whether it is running *as the proxy*. Null / a JVM path for dev launches,
+     * which is fine — those never dispatch.
+     */
+    val executable: File? by lazy { runningExecutable() }
+
+    /**
      * Given a `<root>/bin/<exe>` (or a code-source under `<root>/bin` or `<root>/lib`),
      * return `<root>/lib` **iff** it actually holds the runtime jar. Pure — unit-tested.
      */

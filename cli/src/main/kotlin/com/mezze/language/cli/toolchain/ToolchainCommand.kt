@@ -6,10 +6,13 @@ import com.mezze.language.cli.`package`.MezzeToml
 import java.io.File
 
 /**
- * `mez toolchain` — inspect and pin Mezze toolchains. This is the management +
- * resolution layer; installing *multiple* versions side by side lands with the
- * `toolchains/<v>/` layout + proxy. Until then the running (built-in) toolchain is
- * always shown as present, so `list` / `which` / `pin` / `default` are already useful.
+ * `mez toolchain` — inspect, pin, and manage installed Mezze toolchains.
+ *
+ * Toolchains install side by side under `~/.mezze/toolchains/<version>/` and the
+ * `~/.mezze/bin/mez` proxy dispatches to the one this project/host resolves to
+ * (see [ProxyDispatch]). The running (built-in) toolchain is always shown as
+ * present even before it is formally installed, so the commands work in a dev
+ * checkout too.
  */
 class ToolchainCommand {
 
@@ -24,6 +27,7 @@ class ToolchainCommand {
             "which", "show" -> which(paths, currentDir, envVersion)
             "default" -> setDefault(paths, args.getOrNull(1))
             "pin" -> pin(currentDir, args.getOrNull(1))
+            "remove", "uninstall" -> remove(paths, args.getOrNull(1))
             "dir" -> dir(paths, currentDir, envVersion)
             "-h", "--help", "help" -> usage()
             else -> { println("Unknown subcommand: toolchain ${args.first()}"); usage() }
@@ -59,8 +63,8 @@ class ToolchainCommand {
         }
         if (paths.installed().isEmpty()) {
             println()
-            println("Only the built-in toolchain is present. Multi-version install lands with the")
-            println("toolchains/<v>/ layout; pin a project now with: mez toolchain pin <channel>")
+            println("Only the built-in toolchain is present (dev checkout, or not yet installed).")
+            println("Install it with: ./gradlew :cli:installNative   ·   pin a project: mez toolchain pin <channel>")
         }
     }
 
@@ -89,6 +93,24 @@ class ToolchainCommand {
         manifest.writeText(upsertToolchain(manifest.readText(), channel))
         println("✅ pinned [toolchain] channel = \"$channel\" in Mezze.toml")
         println("💡 run 'mez toolchain which' to see the resolved version")
+    }
+
+    private fun remove(paths: ToolchainPaths, version: String?) {
+        if (version.isNullOrBlank()) { println("Usage: mez toolchain remove <version>"); return }
+        val dir = paths.dirFor(version)
+        if (!dir.isDirectory) {
+            println("❌ toolchain '$version' is not installed under ${paths.toolchainsDir.absolutePath}")
+            return
+        }
+        if (version == BuildInfo.VERSION) {
+            println("❌ refusing to remove '$version' — it is the running toolchain.")
+            return
+        }
+        dir.deleteRecursively()
+        println("✅ removed toolchain $version")
+        if (paths.defaultChannel() == version) {
+            println("⚠️  it was the global default — set a new one with: mez toolchain default <version>")
+        }
     }
 
     private fun dir(paths: ToolchainPaths, currentDir: File, envVersion: String?) {
@@ -124,10 +146,11 @@ class ToolchainCommand {
               which                which toolchain is active here, and why
               default <channel>    set the global default channel
               pin <channel>        pin this project (writes [toolchain] to Mezze.toml)
+              remove <version>     uninstall a toolchain (~/.mezze/toolchains/<version>)
               dir                  the active toolchain's directory
 
             A channel is a track ("0.1", "nightly") or an exact version ("0.1.3").
-            Precedence: MEZ_VERSION > project [toolchain] > global default > latest installed.
+            Precedence: +<ver> > MEZ_VERSION > project [toolchain] > global default > latest installed.
             """.trimIndent(),
         )
     }
