@@ -391,23 +391,30 @@ object EmbeddedExec {
             System.err.println("[mezze] Truffle runtime: ${runtime.javaClass.name} (${runtime.name})")
         }
 
-        // Polyglot: enable GraalPy iff either
-        //   (a) an ancestor Mezze.toml declares [polyglot.python], or
+        // Polyglot: enable GraalPy / GraalJS iff either
+        //   (a) an ancestor Mezze.toml declares [polyglot.python] /
+        //       [polyglot.js], or
         //   (b) a sidecar `<binary>-venv/` sits next to the binary
         //       (mez build --native bundled it there).
         //
         // (a) is dev-mode: `cd project && ./binary` picks up the same
         // manifest as `mez exec`. (b) is shipped-binary mode: `cp` the
         // binary + sidecars anywhere and it still discovers its venv.
-        // Loading the `python` language ~doubles Context build time and
-        // pulls in GraalPy's resource caches, so we stay off by default
+        // Loading either language costs Context build time (GraalPy
+        // ~doubles it; GraalJS is cheaper but non-trivial) and pulls in
+        // language-specific resource caches, so both stay off by default
         // — every non-polyglot user program would otherwise pay for
         // something it never uses.
         val selfExe = try { resolveSelfExe() } catch (_: Throwable) { null }
         val polyglot = com.mezze.interpreter.polyglot.PolyglotManifest
             .loadForBinary(File("."), selfExe)
 
-        val languageIds = if (polyglot.enablePython) arrayOf(MezzeLanguage.ID, "python") else arrayOf(MezzeLanguage.ID)
+        val extraLanguages = buildList {
+            if (polyglot.enablePython) add("python")
+            if (polyglot.enableJs) add("js")
+            if (polyglot.enableWasm) add("wasm")
+        }
+        val languageIds = (listOf(MezzeLanguage.ID) + extraLanguages).toTypedArray()
         val contextBuilder = Context.newBuilder(*languageIds)
             .engine(engine)
             .allowAllAccess(true)
@@ -426,6 +433,36 @@ object EmbeddedExec {
             }
             for ((k, v) in polyglot.pythonOptions) {
                 contextBuilder.option("python.$k", v)
+            }
+        }
+        if (polyglot.enableJs) {
+            contextBuilder.allowExperimentalOptions(true)
+            // Silence "language uses experimental options" chatter — same
+            // rationale as GraalPy above; users opting into the section
+            // acknowledge the polyglot cost.
+            // js.ecmascript-version = staging picks up the latest stage-3
+            // proposals GraalJS ships. Default is "latest" — pinning here
+            // just keeps behaviour predictable across GraalJS bumps.
+            contextBuilder.option("js.ecmascript-version", "2024")
+            if (!polyglot.jsNodeModules.isNullOrBlank()) {
+                // CommonJS require support routes through GraalJS's
+                // `js.commonjs-require-cwd` — points at the node_modules
+                // parent for module resolution.
+                contextBuilder.option("js.commonjs-require", "true")
+                contextBuilder.option("js.commonjs-require-cwd", polyglot.jsNodeModules)
+            }
+            for ((k, v) in polyglot.jsOptions) {
+                contextBuilder.option("js.$k", v)
+            }
+        }
+        if (polyglot.enableWasm) {
+            // GraalWasm is opt-in per [polyglot.wasm]; enabling here just
+            // registers the language on the Context and forwards any user-
+            // supplied `wasm.<KEY>` options (e.g. wasi enablement in future
+            // GraalWasm releases). Wasm's opt-ins never gate normal module
+            // parsing — those work with zero extra config.
+            for ((k, v) in polyglot.wasmOptions) {
+                contextBuilder.option("wasm.$k", v)
             }
         }
         val context = contextBuilder.build()

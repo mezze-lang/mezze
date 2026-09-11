@@ -220,6 +220,18 @@ mez-run-numpy-demo: _mez
 mez-run-python-pure-demo: _mez
     {{mez}} exec examples/polyglot_python_pure/src/app.mz
 
+# Run the polyglot JS demo (Mezze x GraalJS). Uses ECMAScript builtins
+# (Math, JSON, Array reductions, Date) — no node_modules required.
+# Serves as the polyglot smoke test that works out-of-the-box.
+#
+# Wiring lives entirely in `examples/polyglot_js/Mezze.toml`
+# ([polyglot.js] presence-only). No env vars — the runtime walks up
+# from the script's dir, finds the manifest, and turns on GraalJS iff
+# the section is present.
+[group('mez')]
+mez-run-js-demo: _mez
+    {{mez}} exec examples/polyglot_js/src/app.mz
+
 # Build the numpy demo as a native binary + run it. Requires the
 # GraalPy venv with numpy at interpreter/build/graalpy-venv/venv/.
 # native-image consumes ~10 GB RAM and takes ~2 min. The venv (185 MB)

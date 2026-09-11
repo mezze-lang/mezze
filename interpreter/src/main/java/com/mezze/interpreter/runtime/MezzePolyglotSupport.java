@@ -89,6 +89,29 @@ public final class MezzePolyglotSupport {
     }
 
     /**
+     * Evaluate a binary Source in a guest language — the only route into
+     * languages that don't accept a text source, chiefly GraalWasm. The
+     * returned Object is whatever the language chooses to represent as the
+     * "top level" of a compiled binary module. For {@code wasm} that's the
+     * module instance whose members are the WebAssembly exports (functions,
+     * memories, globals, tables).
+     *
+     * @param languageId The language ID (e.g. "wasm")
+     * @param bytes The binary payload (owned by the caller — implementations
+     *              may wrap it without copying, so callers must not mutate).
+     * @param name Human-facing name for stack traces / diagnostics.
+     */
+    @TruffleBoundary
+    public Object evalBytes(String languageId, byte[] bytes, String name) {
+        assertLanguageAvailable(languageId);
+        String moduleName = name == null || name.isEmpty() ? "<mezze-module>" : name;
+        org.graalvm.polyglot.io.ByteSequence seq = org.graalvm.polyglot.io.ByteSequence.create(bytes);
+        return env.parsePublic(
+            com.oracle.truffle.api.source.Source.newBuilder(languageId, seq, moduleName).build()
+        ).call();
+    }
+
+    /**
      * Get the top-level bindings (global scope) of a guest language.
      *
      * The previous implementation returned {@code env.getPolyglotBindings()}

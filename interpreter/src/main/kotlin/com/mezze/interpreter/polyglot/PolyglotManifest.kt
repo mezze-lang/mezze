@@ -33,9 +33,32 @@ data class ResolvedPolyglot(
     val pythonOptions: Map<String, String>,
     /** Absolute JVM classpath entries appended before spawning the wire child. */
     val jvmClasspath: List<String>,
+    /** True iff `[polyglot.js]` is present in the manifest. */
+    val enableJs: Boolean = false,
+    /** Absolute path to `node_modules/` for CommonJS require, or null. */
+    val jsNodeModules: String? = null,
+    /** Additional `js.<KEY>` options (KEY as declared in `[polyglot.js.options]`). */
+    val jsOptions: Map<String, String> = emptyMap(),
+    /** True iff `[polyglot.wasm]` is present in the manifest. */
+    val enableWasm: Boolean = false,
+    /** Absolute paths to `.wasm` modules the manifest asked us to preload. */
+    val wasmModules: List<String> = emptyList(),
+    /** Additional `wasm.<KEY>` options (KEY as declared in `[polyglot.wasm.options]`). */
+    val wasmOptions: Map<String, String> = emptyMap(),
 ) {
     companion object {
-        val NONE = ResolvedPolyglot(false, null, emptyMap(), emptyList())
+        val NONE = ResolvedPolyglot(
+            enablePython = false,
+            pythonPath = null,
+            pythonOptions = emptyMap(),
+            jvmClasspath = emptyList(),
+            enableJs = false,
+            jsNodeModules = null,
+            jsOptions = emptyMap(),
+            enableWasm = false,
+            wasmModules = emptyList(),
+            wasmOptions = emptyMap(),
+        )
     }
 }
 
@@ -137,6 +160,9 @@ object PolyglotManifest {
             pythonPath = pythonPath,
             pythonOptions = emptyMap(),
             jvmClasspath = jvmClasspath,
+            enableJs = false,
+            jsNodeModules = null,
+            jsOptions = emptyMap(),
         )
     }
 
@@ -159,7 +185,29 @@ object PolyglotManifest {
         // both contribute).
         val jvm = if (manifest.jvmClasspath.isEmpty()) sidecar.jvmClasspath
         else (sidecar.jvmClasspath + manifest.jvmClasspath).distinct()
-        return ResolvedPolyglot(enablePython, pythonPath, pythonOptions, jvm)
+        // JS mirrors Python: manifest wins on every declared field.
+        val enableJs = manifest.enableJs || sidecar.enableJs
+        val jsNodeModules = manifest.jsNodeModules ?: sidecar.jsNodeModules
+        val jsOptions = if (manifest.jsOptions.isNotEmpty()) manifest.jsOptions
+        else sidecar.jsOptions
+        // Wasm mirrors JS: manifest wins on every declared field.
+        val enableWasm = manifest.enableWasm || sidecar.enableWasm
+        val wasmModules = if (manifest.wasmModules.isEmpty()) sidecar.wasmModules
+        else (sidecar.wasmModules + manifest.wasmModules).distinct()
+        val wasmOptions = if (manifest.wasmOptions.isNotEmpty()) manifest.wasmOptions
+        else sidecar.wasmOptions
+        return ResolvedPolyglot(
+            enablePython = enablePython,
+            pythonPath = pythonPath,
+            pythonOptions = pythonOptions,
+            jvmClasspath = jvm,
+            enableJs = enableJs,
+            jsNodeModules = jsNodeModules,
+            jsOptions = jsOptions,
+            enableWasm = enableWasm,
+            wasmModules = wasmModules,
+            wasmOptions = wasmOptions,
+        )
     }
 
     /** Read + parse + resolve against an explicit manifest file. */
@@ -181,6 +229,12 @@ object PolyglotManifest {
             pythonPath = parser.pythonPath,
             pythonOptions = parser.pythonOptions.toMap(),
             jvmClasspath = parser.jvmClasspath.toList(),
+            jsPresent = parser.jsPresent,
+            jsNodeModules = parser.jsNodeModules,
+            jsOptions = parser.jsOptions.toMap(),
+            wasmPresent = parser.wasmPresent,
+            wasmModules = parser.wasmModules.toList(),
+            wasmOptions = parser.wasmOptions.toMap(),
         )
     }
 
@@ -200,11 +254,19 @@ object PolyglotManifest {
         val base = manifestDir.absoluteFile
         val resolvedPython = sections.pythonPath?.let { resolvePath(it, base) }
         val resolvedClasspath = sections.jvmClasspath.map { resolvePath(it, base) }
+        val resolvedJsNodeModules = sections.jsNodeModules?.let { resolvePath(it, base) }
+        val resolvedWasmModules = sections.wasmModules.map { resolvePath(it, base) }
         return ResolvedPolyglot(
             enablePython = sections.pythonPresent,
             pythonPath = resolvedPython,
             pythonOptions = sections.pythonOptions,
             jvmClasspath = resolvedClasspath,
+            enableJs = sections.jsPresent,
+            jsNodeModules = resolvedJsNodeModules,
+            jsOptions = sections.jsOptions,
+            enableWasm = sections.wasmPresent,
+            wasmModules = resolvedWasmModules,
+            wasmOptions = sections.wasmOptions,
         )
     }
 
@@ -232,6 +294,12 @@ data class PolyglotSections(
     val pythonPath: String?,
     val pythonOptions: Map<String, String>,
     val jvmClasspath: List<String>,
+    val jsPresent: Boolean = false,
+    val jsNodeModules: String? = null,
+    val jsOptions: Map<String, String> = emptyMap(),
+    val wasmPresent: Boolean = false,
+    val wasmModules: List<String> = emptyList(),
+    val wasmOptions: Map<String, String> = emptyMap(),
 )
 
 /**
@@ -249,8 +317,16 @@ private class MiniTomlParser(private val text: String) {
     var pythonPath: String? = null
     val pythonOptions = LinkedHashMap<String, String>()
     val jvmClasspath = mutableListOf<String>()
+    var jsPresent = false
+    var jsNodeModules: String? = null
+    val jsOptions = LinkedHashMap<String, String>()
+    var wasmPresent = false
+    val wasmModules = mutableListOf<String>()
+    val wasmOptions = LinkedHashMap<String, String>()
 
-    private enum class Section { OUTSIDE, PYTHON, PYTHON_OPTIONS, JVM }
+    private enum class Section {
+        OUTSIDE, PYTHON, PYTHON_OPTIONS, JVM, JS, JS_OPTIONS, WASM, WASM_OPTIONS,
+    }
 
     fun parse() {
         var section = Section.OUTSIDE
@@ -275,6 +351,10 @@ private class MiniTomlParser(private val text: String) {
                     "polyglot.python" -> { pythonPresent = true; Section.PYTHON }
                     "polyglot.python.options" -> { pythonPresent = true; Section.PYTHON_OPTIONS }
                     "polyglot.jvm" -> Section.JVM
+                    "polyglot.js" -> { jsPresent = true; Section.JS }
+                    "polyglot.js.options" -> { jsPresent = true; Section.JS_OPTIONS }
+                    "polyglot.wasm" -> { wasmPresent = true; Section.WASM }
+                    "polyglot.wasm.options" -> { wasmPresent = true; Section.WASM_OPTIONS }
                     else -> Section.OUTSIDE
                 }
                 continue
@@ -316,6 +396,24 @@ private class MiniTomlParser(private val text: String) {
                 if (key == "classpath") {
                     jvmClasspath.addAll(parseStringArray(rhs))
                 }
+            }
+            Section.JS -> {
+                if (key == "node_modules") {
+                    jsNodeModules = parseString(rhs) ?: jsNodeModules
+                }
+            }
+            Section.JS_OPTIONS -> {
+                val v = parseString(rhs) ?: return
+                jsOptions[key] = v
+            }
+            Section.WASM -> {
+                if (key == "modules") {
+                    wasmModules.addAll(parseStringArray(rhs))
+                }
+            }
+            Section.WASM_OPTIONS -> {
+                val v = parseString(rhs) ?: return
+                wasmOptions[key] = v
             }
             Section.OUTSIDE -> Unit
         }

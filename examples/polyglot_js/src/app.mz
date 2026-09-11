@@ -1,0 +1,102 @@
+# Polyglot JavaScript demo — Mezze drives GraalJS end-to-end.
+#
+# What this demonstrates: a Mezze program hands data to JavaScript,
+# invokes ECMAScript builtins (Math, JSON, Array), and gets real
+# numeric / string answers back through the InteropLibrary — no
+# JS-specific glue in the Mezze runtime, just the generic `JsForeign`
+# surface from `std::polyglot::js`.
+#
+# The polyglot Context is managed by the runtime from
+# `Mezze.toml [polyglot.js]`; user code sees no `create_context`
+# — just `perform GraalJs in do ... Js.eval { source = ... }`.
+#
+# Run:  just mez-run-js-demo
+use std::effects::log::{println, Console, Log}
+use std::polyglot::core::{ InteropError }
+use std::polyglot::js::{ Js, GraalJs, JsForeign, from_int, from_str }
+use std::float
+use std::int
+
+## Coerce a JsForeign result to a Mezze Float and print it.
+let show_float: { label: Str, r: Result JsForeign InteropError } -> {} <Log>
+  = { label, r } -> match r is
+    Ok { val = f } -> match f.as_float{} is
+      Ok { val = d } -> println { msg = "  $(label) = $(float::to_str { n = d })" }
+      Err { error = _ } -> println { msg = "  $(label): could not coerce to float" }
+    Err { error = _ } -> println { msg = "  $(label): guest error" }
+
+## Coerce a JsForeign result to a Mezze Int and print it.
+let show_int: { label: Str, r: Result JsForeign InteropError } -> {} <Log>
+  = { label, r } -> match r is
+    Ok { val = f } -> match f.as_int{} is
+      Ok { val = n } -> println { msg = "  $(label) = $(int::to_str { n = n })" }
+      Err { error = _ } -> println { msg = "  $(label): could not coerce to int" }
+    Err { error = _ } -> println { msg = "  $(label): guest error" }
+
+## Coerce a JsForeign result to a Mezze Str and print it.
+let show_str: { label: Str, r: Result JsForeign InteropError } -> {} <Log>
+  = { label, r } -> match r is
+    Ok { val = f } -> match f.as_str{} is
+      Ok { val = s } -> println { msg = "  $(label) = $(s)" }
+      Err { error = _ } -> println { msg = "  $(label): could not coerce to str" }
+    Err { error = _ } -> println { msg = "  $(label): guest error" }
+
+let main = {} -> perform Console in perform GraalJs in do
+  println { msg = "== Mezze x JavaScript — polyglot demo ==" }
+  println { msg = "" }
+
+  # ---- Math builtins ----
+  println { msg = "Math:" }
+  let pi_r    = Js.eval { source = "Math.PI" }
+  let _       = show_float { label = "PI     ", r = pi_r }
+
+  let sqrt_r  = Js.eval { source = "Math.sqrt(2)" }
+  let _       = show_float { label = "sqrt(2)", r = sqrt_r }
+
+  let sin_r   = Js.eval { source = "Math.sin(Math.PI / 2)" }
+  let _       = show_float { label = "sin(pi/2)", r = sin_r }
+
+  # ---- JSON parse ----
+  println { msg = "" }
+  println { msg = "JSON.parse(...):" }
+  let name_r  = Js.eval { source = "JSON.parse('{\"name\": \"Alice\", \"age\": 30}').name" }
+  let _       = show_str { label = "name", r = name_r }
+
+  let age_r   = Js.eval { source = "JSON.parse('{\"name\": \"Alice\", \"age\": 30}').age" }
+  let _       = show_int { label = "age ", r = age_r }
+
+  # ---- Array reductions via method dispatch ----
+  println { msg = "" }
+  println { msg = "Array reductions on [1..5]:" }
+  let sum_r   = Js.eval { source = "[1, 2, 3, 4, 5].reduce((a, b) => a + b, 0)" }
+  let _       = show_int { label = "sum  ", r = sum_r }
+
+  let prod_r  = Js.eval { source = "[1, 2, 3, 4, 5].reduce((a, b) => a * b, 1)" }
+  let _       = show_int { label = "prod ", r = prod_r }
+
+  let max_r   = Js.eval { source = "Math.max(...[3, 7, 2, 5])" }
+  let _       = show_int { label = "max  ", r = max_r }
+
+  # ---- String methods ----
+  println { msg = "" }
+  println { msg = "String methods:" }
+  let upper_r = Js.eval { source = "'hello, world'.toUpperCase()" }
+  let _       = show_str { label = "upper ", r = upper_r }
+
+  let slice_r = Js.eval { source = "'JavaScript is fun'.slice(0, 10)" }
+  let _       = show_str { label = "slice ", r = slice_r }
+
+  # ---- Date via new{} ----
+  println { msg = "" }
+  println { msg = "Date via .new{}:" }
+  match Js.eval { source = "Date" } is
+    Ok { val = ctor } -> match ctor.new { args = [] } is
+      Ok { val = d } -> show_int {
+        label = "getFullYear",
+        r = d.method { name = "getFullYear", args = [] },
+      }
+      Err { error = _ } -> println { msg = "  Date: instantiate failed" }
+    Err { error = _ } -> println { msg = "  Date: constructor lookup failed" }
+
+  println { msg = "" }
+  println { msg = "== done ==" }

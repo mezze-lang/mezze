@@ -105,6 +105,26 @@ dependencies {
     runtimeOnly("org.graalvm.python:python-resources:25.0.3")
     runtimeOnly("org.graalvm.python:python-launcher:25.0.3")
 
+    // GraalJS — polyglot JavaScript. Same rationale as GraalPy: depend on
+    // the concrete jars (js-language + js-scriptengine), not the aggregating
+    // POM, so shadowJar can bundle them. `runtimeOnly` because :interpreter
+    // never references GraalJS classes directly — Context.eval("js", …)
+    // routes through the generic polyglot API. Loading `js` is opted-in via
+    // `[polyglot.js]` in the project's Mezze.toml; a plain program that
+    // doesn't declare the section pays zero for these being on the classpath.
+    runtimeOnly("org.graalvm.js:js-language:25.0.3")
+    runtimeOnly("org.graalvm.js:js-scriptengine:25.0.3")
+
+    // GraalWasm — polyglot WebAssembly. Same rationale as GraalPy / GraalJS:
+    // depend on the concrete jar (wasm-language), not the aggregating POM,
+    // so shadowJar can bundle it. `runtimeOnly` because :interpreter never
+    // references GraalWasm classes directly — Context.eval on a
+    // `Source.newBuilder("wasm", ByteSequence.create(bytes), name)` routes
+    // through the generic polyglot API. Loading `wasm` is opted-in via
+    // `[polyglot.wasm]` in the project's Mezze.toml; a plain program that
+    // doesn't declare the section pays zero for this being on the classpath.
+    runtimeOnly("org.graalvm.wasm:wasm-language:25.0.3")
+
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation(project(":parser"))

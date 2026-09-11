@@ -261,16 +261,21 @@ object RuntimeServer {
         }
         val engine = engineBuilder.build()
 
-        // Polyglot: enable GraalPy iff the project's Mezze.toml declares
-        // [polyglot.python]. Same rationale as EmbeddedExec — opt-in
-        // because loading `python` adds cost every non-polyglot program
-        // would pay. Config lives in Mezze.toml resolved via the
-        // `mezze.project.root` system property the parent set when
-        // spawning this child.
+        // Polyglot: enable GraalPy / GraalJS iff the project's Mezze.toml
+        // declares [polyglot.python] / [polyglot.js]. Same rationale as
+        // EmbeddedExec — opt-in because loading extra Truffle languages
+        // adds cost every non-polyglot program would pay. Config lives
+        // in Mezze.toml resolved via the `mezze.project.root` system
+        // property the parent set when spawning this child.
         val projectRoot = System.getProperty("mezze.project.root")?.let { File(it) } ?: File(".")
         val polyglot = com.mezze.interpreter.polyglot.PolyglotManifest.load(projectRoot)
 
-        val languageIds = if (polyglot.enablePython) arrayOf(MezzeLanguage.ID, "python") else arrayOf(MezzeLanguage.ID)
+        val extraLanguages = buildList {
+            if (polyglot.enablePython) add("python")
+            if (polyglot.enableJs) add("js")
+            if (polyglot.enableWasm) add("wasm")
+        }
+        val languageIds = (listOf(MezzeLanguage.ID) + extraLanguages).toTypedArray()
         val contextBuilder = Context.newBuilder(*languageIds)
             .engine(engine)
             .allowAllAccess(true)
@@ -292,6 +297,21 @@ object RuntimeServer {
             }
             for ((k, v) in polyglot.pythonOptions) {
                 contextBuilder.option("python.$k", v)
+            }
+        }
+        if (polyglot.enableJs) {
+            contextBuilder.option("js.ecmascript-version", "2024")
+            if (!polyglot.jsNodeModules.isNullOrBlank()) {
+                contextBuilder.option("js.commonjs-require", "true")
+                contextBuilder.option("js.commonjs-require-cwd", polyglot.jsNodeModules)
+            }
+            for ((k, v) in polyglot.jsOptions) {
+                contextBuilder.option("js.$k", v)
+            }
+        }
+        if (polyglot.enableWasm) {
+            for ((k, v) in polyglot.wasmOptions) {
+                contextBuilder.option("wasm.$k", v)
             }
         }
         val context = contextBuilder.build()

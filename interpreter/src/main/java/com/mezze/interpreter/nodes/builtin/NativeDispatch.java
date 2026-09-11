@@ -4353,6 +4353,27 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.fromBool(r, "python"));
         HANDLERS.put("__native_python_null_val",
             (r, c) -> PolyglotNatives.nullVal(r, "python"));
+
+        // JavaScript — ambient-Env eval / import / require + language-
+        // tagged constructors. Mirrors the Python surface exactly; every
+        // op is a MezzePolyglotSupport.eval("js", ...) or a
+        // language-tagged MezzeForeign construction.
+        HANDLERS.put("__native_js_eval",
+            (r, c) -> JsNatives.eval(r, c));
+        HANDLERS.put("__native_js_import",
+            (r, c) -> JsNatives.importModule(r, c));
+        HANDLERS.put("__native_js_require",
+            (r, c) -> JsNatives.require(r, c));
+        HANDLERS.put("__native_js_from_int",
+            (r, c) -> PolyglotNatives.fromInt(r, "js"));
+        HANDLERS.put("__native_js_from_float",
+            (r, c) -> PolyglotNatives.fromFloat(r, "js"));
+        HANDLERS.put("__native_js_from_str",
+            (r, c) -> PolyglotNatives.fromStr(r, "js"));
+        HANDLERS.put("__native_js_from_bool",
+            (r, c) -> PolyglotNatives.fromBool(r, "js"));
+        HANDLERS.put("__native_js_null_val",
+            (r, c) -> PolyglotNatives.nullVal(r, "js"));
     }
 
     @TruffleBoundary

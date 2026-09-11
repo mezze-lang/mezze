@@ -1,0 +1,188 @@
+## JavaScript codec — encode Mezze values as `JsForeign` and decode back.
+##
+## User sugar:
+##
+##   let x     = 42
+##   let jf    = x.to_js {}              # JsForeign wrapping Number(42)
+##   let back  = Int.from_js { it = jf } # Result Int DecodeError
+##
+## Format-author boilerplate is minimal because a `JsForeign` is a
+## first-class InteropLibrary value: encoding a scalar is
+## `js::from_int { val = ... }`, and decoding is `jf.as_int{}`.
+##
+## Records / lists / maps are NOT implemented here — a caller who wants
+## to hand JS an object should build one explicitly via
+## `Js.eval { source = "({ a: 1, b: 2 })" }` or by driving a JS
+## constructor with `.new{}`. Partial-capability formats compile-error
+## at the offending field per `docs/codec/redesign-2026-09.md`.
+use std::codec::core::{
+  Format,
+  EncodeScalar, EncodeOption,
+  DecodeScalar, DecodeOption,
+  Encode, Decode,
+  CodecCtx, SharedConfig, DecodeError,
+  default_shared,
+  decode_error
+}
+use std::polyglot::core::{ InteropError }
+use std::polyglot::js::{
+  JsForeign,
+  from_int, from_float, from_str, from_bool, null_val
+}
+use std::float
+use std::int
+use std::char
+use std::nat
+
+## Config for the JS codec. Empty knobs — every JS Foreign has one
+## natural representation. Kept as a record for future extension
+## (typed-array preferences, BigInt-vs-Number handling, …).
+pub type JsC = {
+  shared: SharedConfig,
+}
+
+## Default JS codec — identity field-name transform.
+pub let js_default: JsC = { shared = default_shared }
+
+## ---- Format link -------------------------------------------------------
+
+impl Format for JsC having 'out = JsForeign where {
+}
+
+## ---- Tier 2: encode ----------------------------------------------------
+
+impl EncodeScalar for JsC having 'out = JsForeign where {
+  encode_int   = { it, val, ctx } -> from_int   { val = val },
+  encode_float = { it, val, ctx } -> from_float { val = val },
+  encode_str   = { it, val, ctx } -> from_str   { val = val },
+  encode_bool  = { it, val, ctx } -> from_bool  { val = val },
+  encode_frac  = { it, val, ctx } -> from_float { val = __native_frac_to_float { n = val } },
+  encode_bytes = { it, val, ctx } -> from_str   { val = "" },
+  encode_char  = { it, val, ctx } -> from_str   { val = char::to_str { c = val } },
+  encode_nat   = { it, val, ctx } -> from_int   { val = nat::to_int { n = val } },
+}
+
+impl EncodeOption for JsC having 'out = JsForeign where {
+  encode_option = { it, val, ctx } -> match val is
+    Some { val = v } -> v
+    None -> null_val {},
+}
+
+## No `EncodeRecord`, `EncodeList`, `EncodeMap`, `EncodeVariant` for
+## `JsC` — a single Foreign scalar doesn't naturally carry those
+## shapes without a specific JS container choice (Array vs typed
+## array, Object literal vs Map, …). Types containing those shapes
+## will fail Tier-3 auto-derivation at the offending field path —
+## the caller builds the desired JS shape explicitly through
+## `Js.eval { source = ... }`.
+
+## ---- Tier 2: decode ----------------------------------------------------
+
+impl DecodeScalar for JsC having 'in = JsForeign where {
+  decode_int = { it, val, ctx } -> match val.as_int{} is
+    Ok { val = n } -> Ok { val = n }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Int",
+      expected = "Int",
+      found = Some { val = val.type_name{} },
+    },
+  decode_float = { it, val, ctx } -> match val.as_float{} is
+    Ok { val = n } -> Ok { val = n }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Float",
+      expected = "Float",
+      found = Some { val = val.type_name{} },
+    },
+  decode_str = { it, val, ctx } -> match val.as_str{} is
+    Ok { val = s } -> Ok { val = s }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Str",
+      expected = "Str",
+      found = Some { val = val.type_name{} },
+    },
+  decode_bool = { it, val, ctx } -> match val.as_bool{} is
+    Ok { val = b } -> Ok { val = b }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Bool",
+      expected = "Bool",
+      found = Some { val = val.type_name{} },
+    },
+  decode_frac = { it, val, ctx } -> match val.as_float{} is
+    Ok { val = f } -> Ok { val = __native_float_to_frac { f = f } }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Frac",
+      expected = "Frac",
+      found = Some { val = val.type_name{} },
+    },
+  decode_bytes = { it, val, ctx } -> decode_error {
+    path = ctx.path,
+    message = "Bytes not supported by JsC decoder",
+    expected = "Bytes",
+    found = Some { val = val.type_name{} },
+  },
+  decode_char = { it, val, ctx } -> match val.as_str{} is
+    Ok { val = s } -> match char::from_str { s = s } is
+      Some { val = c } -> Ok { val = c }
+      None -> decode_error {
+        path = ctx.path,
+        message = "Expected single-character Foreign",
+        expected = "Char",
+        found = Some { val = s },
+      }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Char",
+      expected = "Char",
+      found = Some { val = val.type_name{} },
+    },
+  decode_nat = { it, val, ctx } -> match val.as_int{} is
+    Ok { val = n } -> match nat::from_int { n = n } is
+      Some { val = k } -> Ok { val = k }
+      None -> decode_error {
+        path = ctx.path,
+        message = "Expected non-negative integer",
+        expected = "Nat",
+        found = Some { val = "negative integer" },
+      }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Nat",
+      expected = "Nat",
+      found = Some { val = val.type_name{} },
+    },
+}
+
+impl DecodeOption for JsC having 'in = JsForeign where {
+  decode_option = { it, val, ctx } ->
+    if val.is_null{} then Ok { val = None }
+    else Ok { val = Some { val = val } },
+}
+
+## ---- Tier 4: sugar abilities + blankets --------------------------------
+
+## Encode any scalar-shaped value to a `JsForeign` via `.to_js{}`.
+ability ToJs for 'a where {
+  to_js:      { it: 'a }              -> JsForeign,
+  to_js_with: { it: 'a, config: JsC } -> JsForeign,
+}
+
+impl ToJs for 'a where {
+  to_js:      { it: 'a }              with Encode JsC 'a -> JsForeign = { it }         -> it.encode { config = js_default },
+  to_js_with: { it: 'a, config: JsC } with Encode JsC 'a -> JsForeign = { it, config } -> it.encode { config = config },
+}
+
+## Decode a target type from a `JsForeign` via `Type.from_js{}`.
+ability FromJs 'a for 'in where {
+  from_js:      { it: 'in }               -> Result 'a DecodeError,
+  from_js_with: { it: 'in, config: JsC }  -> Result 'a DecodeError,
+}
+
+impl FromJs 'a for JsForeign where {
+  from_js:      { it: JsForeign }               with Decode JsC 'a -> Result 'a DecodeError = { it }         -> it.decode { config = js_default },
+  from_js_with: { it: JsForeign, config: JsC }  with Decode JsC 'a -> Result 'a DecodeError = { it, config } -> it.decode { config = config },
+}

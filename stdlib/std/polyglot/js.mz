@@ -1,0 +1,118 @@
+# JavaScript host-language access (GraalJS).
+#
+# `JsForeign` wraps a JS object (module, function, object literal,
+# array, primitive). All JS interop routes through this type —
+# `perform GraalJs in do ...` gives access to `Js.import`,
+# `Js.require`, and `Js.eval`, each yielding
+# `Result JsForeign InteropError`.
+#
+# The `impl JsForeign` block below exposes BOTH JS-idiomatic
+# vocabulary (`.method{}` / `.new{}` / `.call{}` / `.property{}` /
+# `.set_property{}` / `.index{}` / `.set_index{}`) AND the universal
+# InteropLibrary primitives (`.invoke_member{}`, `.get_member{}`,
+# `.as_int{}`, `.array_size{}`, `.array_at{}`, …). Every op routes
+# through the same `__native_polyglot_*` natives.
+use std::polyglot::core::{ InteropError }
+
+## Opaque handle to a JS object. Runtime: same `MezzeForeign` Java
+## class every language uses; the newtype gives Mezze-level type
+## safety against mixing JS and non-JS Foreigns.
+pub newtype JsForeign = __NativeForeign
+
+## JS host effect. Three module-resolution paths are exposed: `eval`
+## for arbitrary expressions, `require` for CommonJS modules (needs
+## `[polyglot.js]` `node_modules` in the manifest), and `import` for
+## ESM dynamic imports.
+effect Js where {
+  import:  { module: Str } -> Result JsForeign InteropError <Js>,
+  require: { module: Str } -> Result JsForeign InteropError <Js>,
+  eval:    { source: Str } -> Result JsForeign InteropError <Js>
+}
+
+## Default JS host — routes all ops through the ambient Truffle Env's
+## GraalJS interpreter. Zero-field: the polyglot Context is managed
+## by the runtime from `Mezze.toml [polyglot.js]`; the handler
+## carries no user-visible configuration.
+pub type GraalJs = {}
+
+impl Js for GraalJs where {
+  import  = { module } -> __native_js_import  { module = module },
+  require = { module } -> __native_js_require { module = module },
+  eval    = { source } -> __native_js_eval    { source = source },
+}
+
+## Inherent methods on JsForeign — JS-idiomatic vocabulary AND the
+## universal InteropLibrary primitives. Every op routes through the
+## same `__native_polyglot_*` natives.
+impl JsForeign where {
+  ## ---- JS-idiomatic vocabulary ----
+
+  ## Invoke a method by name (JS `obj.name(...args)`).
+  method       = { it, name, args } ->
+    __native_polyglot_invoke_member { val = it, name = name, args = args },
+  ## Instantiate a constructor (JS `new Ctor(...args)`).
+  new          = { it, args } ->
+    __native_polyglot_instantiate   { val = it, args = args },
+  ## Call a callable (JS `f(...args)`).
+  call         = { it, args } ->
+    __native_polyglot_execute       { val = it, args = args },
+  ## Read a named property (JS `obj.name`).
+  property     = { it, name } ->
+    __native_polyglot_read_member   { val = it, name = name },
+  ## Assign a named property (JS `obj.name = val`).
+  set_property = { it, name, val } ->
+    __native_polyglot_write_member  { val = it, name = name, new_val = val },
+  ## Read an indexed element (JS `arr[i]`).
+  index        = { it, i } ->
+    __native_polyglot_read_array    { val = it, index = i },
+  ## Assign an indexed element (JS `arr[i] = val`). Currently returns
+  ## an error for read-only indexables — a `write_array` interop op
+  ## would be needed to remove that limitation.
+  set_index    = { it, i, val } -> Err {
+    error = TypeError { message = "set_index is not yet supported for JsForeign" },
+  },
+
+  ## ---- Universal InteropLibrary vocabulary ----
+
+  ## Invoke a message-named member with args.
+  invoke_member = { it, method, args } ->
+    __native_polyglot_invoke_member { val = it, name = method, args = args },
+  ## Read a named member.
+  get_member    = { it, name } ->
+    __native_polyglot_read_member   { val = it, name = name },
+  ## Membership predicate.
+  has_member    = { it, name } ->
+    __native_polyglot_has_member    { val = it, name = name },
+  ## Execute a callable Foreign.
+  execute       = { it, args } ->
+    __native_polyglot_execute       { val = it, args = args },
+  ## Instantiate a constructable Foreign.
+  instantiate   = { it, args } ->
+    __native_polyglot_instantiate   { val = it, args = args },
+  ## Read an array element by index.
+  array_at      = { it, index } ->
+    __native_polyglot_read_array    { val = it, index = index },
+  ## Number of elements in an array-shaped Foreign.
+  array_size    = { it } ->
+    __native_polyglot_array_size    { val = it },
+  ## Coerce a numeric Foreign to Int.
+  as_int        = { it } -> __native_polyglot_as_long    { val = it },
+  ## Coerce a string Foreign to Str.
+  as_str        = { it } -> __native_polyglot_as_string  { val = it },
+  ## Coerce a numeric Foreign to Float.
+  as_float      = { it } -> __native_polyglot_as_double  { val = it },
+  ## Coerce a boolean Foreign to Bool.
+  as_bool       = { it } -> __native_polyglot_as_boolean { val = it },
+  ## True iff this Foreign is the guest-language null / undefined.
+  is_null       = { it } -> __native_polyglot_is_null    { val = it },
+  ## Debug name of the underlying guest-language type.
+  type_name     = { it } -> __native_polyglot_type_name  { val = it },
+}
+
+## Constructors — lift a Mezze primitive into a JsForeign so it can
+## be passed as an argument to `.method{}` / `.call{}` etc.
+pub let from_int:   { val: Int   } -> JsForeign = { val } -> __native_js_from_int   { val = val }
+pub let from_float: { val: Float } -> JsForeign = { val } -> __native_js_from_float { val = val }
+pub let from_str:   { val: Str   } -> JsForeign = { val } -> __native_js_from_str   { val = val }
+pub let from_bool:  { val: Bool  } -> JsForeign = { val } -> __native_js_from_bool  { val = val }
+pub let null_val:   {}            -> JsForeign = {}     -> __native_js_null_val    {}

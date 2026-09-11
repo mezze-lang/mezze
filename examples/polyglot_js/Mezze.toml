@@ -1,0 +1,32 @@
+[package]
+name = "polyglot_js"
+version = "0.1.0"
+
+[[app]]
+name = "polyglot_js"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+# `[polyglot.js]` opts this project in to the GraalJS Truffle language.
+# GraalJS ships with no external prerequisites — pure ECMAScript is
+# available out of the box, no venv, no node_modules, so the section
+# is presence-only for this demo.
+#
+# For CommonJS `require(...)` support, set `node_modules`:
+#
+#   [polyglot.js]
+#   node_modules = "./node_modules"
+#
+# The runtime enables `js.commonjs-require = true` + points GraalJS's
+# module resolver at that path when present.
+[polyglot.js]
+
+# Additional `js.<KEY>` Context options forwarded to Truffle. Example:
+#
+#   [polyglot.js.options]
+#   strict = "true"
+#
+# See GraalJS documentation for the full option list.
+[polyglot.js.options]

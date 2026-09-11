@@ -122,7 +122,7 @@ public final class MezzeTestHelper {
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
-        Context.Builder builder = Context.newBuilder(MezzeLanguage.ID, "python")
+        Context.Builder builder = Context.newBuilder(MezzeLanguage.ID, "python", "js", "wasm")
                 .engine(engine)
                 .allowAllAccess(true)
                 .allowCreateThread(true)
@@ -131,7 +131,11 @@ public final class MezzeTestHelper {
                 // requiring a POSIX resource library at runtime.
                 .allowExperimentalOptions(true)
                 .option("python.PosixModuleBackend", "java")
-                .option("python.WarnExperimentalFeatures", "false");
+                .option("python.WarnExperimentalFeatures", "false")
+                // JS (GraalJS): pin ECMAScript version so tests are stable
+                // across GraalJS bumps. No require/import support wired up
+                // here — JsInteropTest exercises `eval` only.
+                .option("js.ecmascript-version", "2024");
         if (pythonIsolate) {
             builder.option("python.IsolateNativeModules", "true");
         }
