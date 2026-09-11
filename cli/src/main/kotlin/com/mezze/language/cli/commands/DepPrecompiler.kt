@@ -9,6 +9,7 @@ import com.mezze.language.store.StoreSerialization
 import com.mezze.language.store.Visibility
 import com.mezze.language.typechecker.TypeCheckResult
 import com.mezze.language.typechecker.TypeChecker
+import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedLetDecl
 import java.io.File
 import java.security.MessageDigest
@@ -53,6 +54,13 @@ object DepPrecompiler {
         val savedRoot = System.getProperty("mezze.project.root")
         try {
             System.setProperty("mezze.project.root", depDir.absolutePath)
+            // Each dep compiles in isolation: reset the process-global resolver +
+            // typechecker module caches (repopulated lazily; the typechecker's
+            // clear re-preloads stdlib) so a previously-precompiled dep's cached
+            // module — e.g. another package's own `core` — can't shadow this dep's
+            // imports. Sequential precompiles in one `sync` otherwise leak state.
+            com.mezze.language.typechecker.ModuleResolver.clearCache()
+            com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
             val source = libFile.readText()
             val parsed = MezzeParser().parseWithRecovery(source, file = libFile.name)
             if (parsed.errors.isNotEmpty()) return
@@ -63,8 +71,17 @@ object DepPrecompiler {
             val typed = res.typedModule ?: return
             val lowered = res.loweredFunctions ?: return
 
-            // The dep's OWN functions = the hashes of the decls it defines.
-            val ownHashes = typed.decls.filterIsInstance<TypedLetDecl>().map { it.hash }.toSet()
+            // The dep's OWN functions = the hashes of the decls it defines PLUS
+            // the synthetic hashes of its ability-impl operations. Ability ops are
+            // lowered as standalone functions keyed by computeOpHash(impl, op)
+            // (see TypedASTCompiler); without them, an ability-heavy dep's methods
+            // would be re-lowered by every consumer instead of served from here.
+            val ownHashes = buildSet {
+                typed.decls.filterIsInstance<TypedLetDecl>().forEach { add(it.hash) }
+                typed.abilityImpls.forEach { impl ->
+                    impl.operations.keys.forEach { opName -> add(Hash.computeOpHash(impl.hash, opName)) }
+                }
+            }
 
             // Store the SAME bytes a from-source build produces: canonicalize
             // iter/seq/list HOF chains into FusedChainIR, exactly as
@@ -106,7 +123,9 @@ object DepPrecompiler {
             }
             if (out.exists()) out.delete()
             java.nio.file.Files.move(tmp.toPath(), out.toPath())
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            if (System.getenv("MEZZE_DEBUG_DEPLOAD") == "1")
+                System.err.println("[DepPrecompiler] $depModulePath precompile failed: ${e.javaClass.simpleName}: ${e.message}")
             // Best-effort: any failure ⇒ no store ⇒ consumer compiles from source.
             runCatching { File(out.parentFile, ".tmp-${out.name}").delete() }
         } finally {
