@@ -68,6 +68,100 @@ object PolyglotManifest {
         return loadFrom(manifest)
     }
 
+    /**
+     * As [load], but for a native binary that may have been shipped
+     * outside its build tree. Falls back to sidecar assets next to
+     * [selfExe] when the manifest is missing OR present but omits a
+     * required section. Two sidecars are recognised:
+     *
+     *   - `<stem>-venv/lib/pythonX.Y/site-packages` for GraalPy
+     *   - `<stem>-jvm/` containing JVM classpath jars
+     *
+     * where `<stem>` is the binary's file-name stem. Both are what
+     * `NativeBuildPath.bundlePolyglotAssets` emits at build time.
+     *
+     * Priority: an explicit `Mezze.toml` in the ancestor chain wins.
+     * That mirrors dev-mode behaviour: developers may `cd project && ./binary`
+     * to iterate against a live venv without redeploying the sidecar.
+     * When no manifest is discovered the sidecars take effect — the
+     * shipped binary "just works" from any cwd.
+     */
+    fun loadForBinary(cwd: File, selfExe: File?): ResolvedPolyglot {
+        val fromManifest = load(cwd)
+        val sidecar = sidecarLookup(selfExe)
+        return merge(fromManifest, sidecar)
+    }
+
+    /**
+     * Look for `<stem>-venv/` and `<stem>-jvm/` next to the binary.
+     * Returns `ResolvedPolyglot.NONE` when the binary path is unknown
+     * or neither sidecar directory exists.
+     */
+    fun sidecarLookup(selfExe: File?): ResolvedPolyglot {
+        if (selfExe == null) return ResolvedPolyglot.NONE
+        val parent = selfExe.parentFile ?: return ResolvedPolyglot.NONE
+        val stem = selfExe.nameWithoutExtension.takeIf { it.isNotEmpty() } ?: selfExe.name
+
+        var enablePython = false
+        var pythonPath: String? = null
+        val venvDir = File(parent, "$stem-venv")
+        if (venvDir.isDirectory) {
+            // The venv dir's presence alone is the "python enabled"
+            // marker: NativeBuildPath writes an empty `<stem>-venv/`
+            // even for pure-stdlib builds that don't need a
+            // `python_path`. Then we look inside for a specific
+            // pythonX.Y/site-packages to feed as `python.PythonPath`.
+            enablePython = true
+            val libDir = File(venvDir, "lib")
+            val pyLibDir = libDir.listFiles { f -> f.isDirectory && f.name.startsWith("python") }
+                ?.maxByOrNull { it.name }
+            val siteDir = pyLibDir?.let { File(it, "site-packages") }
+            if (siteDir?.isDirectory == true) {
+                pythonPath = try { siteDir.canonicalPath } catch (_: Exception) { siteDir.absolutePath }
+            }
+        }
+
+        val jvmClasspath = mutableListOf<String>()
+        val jvmDir = File(parent, "$stem-jvm")
+        if (jvmDir.isDirectory) {
+            jvmDir.listFiles { f -> f.isFile && f.name.endsWith(".jar") }
+                ?.sortedBy { it.name }
+                ?.forEach { f ->
+                    jvmClasspath.add(try { f.canonicalPath } catch (_: Exception) { f.absolutePath })
+                }
+        }
+
+        if (!enablePython && jvmClasspath.isEmpty()) return ResolvedPolyglot.NONE
+        return ResolvedPolyglot(
+            enablePython = enablePython,
+            pythonPath = pythonPath,
+            pythonOptions = emptyMap(),
+            jvmClasspath = jvmClasspath,
+        )
+    }
+
+    /**
+     * Merge two resolved views: explicit [manifest] config wins on any
+     * field it declares; [sidecar] fills the gaps. This gives dev-mode
+     * (running from a project directory) the ability to iterate on
+     * python_path without moving the sidecar, and shipped-binary mode
+     * (`cp` binary + sidecar to /usr/local/bin) full autonomy.
+     */
+    private fun merge(manifest: ResolvedPolyglot, sidecar: ResolvedPolyglot): ResolvedPolyglot {
+        // If the manifest already enabled python with a path, use its
+        // values verbatim. Otherwise let the sidecar contribute.
+        val enablePython = manifest.enablePython || sidecar.enablePython
+        val pythonPath = manifest.pythonPath ?: sidecar.pythonPath
+        val pythonOptions = if (manifest.pythonOptions.isNotEmpty()) manifest.pythonOptions
+        else sidecar.pythonOptions
+        // JVM classpaths concat (sidecar first — user-supplied wins on
+        // duplicate class resolution via Java's usual last-writer rules;
+        // both contribute).
+        val jvm = if (manifest.jvmClasspath.isEmpty()) sidecar.jvmClasspath
+        else (sidecar.jvmClasspath + manifest.jvmClasspath).distinct()
+        return ResolvedPolyglot(enablePython, pythonPath, pythonOptions, jvm)
+    }
+
     /** Read + parse + resolve against an explicit manifest file. */
     fun loadFrom(manifest: File): ResolvedPolyglot {
         val text = try { manifest.readText() } catch (_: Exception) { return ResolvedPolyglot.NONE }

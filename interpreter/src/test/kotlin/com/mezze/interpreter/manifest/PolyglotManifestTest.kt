@@ -159,4 +159,99 @@ class PolyglotManifestTest {
         assertNull(resolved.pythonPath)
         assertTrue(resolved.pythonOptions.isEmpty())
     }
+
+    // ─── sidecar lookup (`mez build --native` bundles beside the binary) ────
+
+    @Test
+    fun `sidecarLookup finds venv site-packages next to binary`(@TempDir tmp: File) {
+        val binary = File(tmp, "myapp").apply { writeBytes(byteArrayOf(0x7F, 0x45, 0x4C, 0x46)) }
+        val venvSite = File(tmp, "myapp-venv/lib/python3.12/site-packages").apply { mkdirs() }
+        val resolved = PolyglotManifest.sidecarLookup(binary)
+        assertTrue(resolved.enablePython, "sidecar venv should enable python")
+        assertEquals(venvSite.canonicalPath, resolved.pythonPath)
+    }
+
+    @Test
+    fun `sidecarLookup enables python on empty venv marker dir`(@TempDir tmp: File) {
+        // Pure-stdlib builds: NativeBuildPath writes an empty
+        // <stem>-venv/ as a marker. sidecarLookup should still enable
+        // python (pythonPath stays null — GraalPy stdlib comes from
+        // resource jars).
+        val binary = File(tmp, "myapp").apply { writeBytes(byteArrayOf(0x7F, 0x45, 0x4C, 0x46)) }
+        File(tmp, "myapp-venv").mkdirs()
+        val resolved = PolyglotManifest.sidecarLookup(binary)
+        assertTrue(resolved.enablePython)
+        assertNull(resolved.pythonPath)
+    }
+
+    @Test
+    fun `sidecarLookup picks newest python subdir when multiple present`(@TempDir tmp: File) {
+        val binary = File(tmp, "myapp").apply { writeBytes(byteArrayOf(0x7F, 0x45, 0x4C, 0x46)) }
+        File(tmp, "myapp-venv/lib/python3.11/site-packages").mkdirs()
+        val newer = File(tmp, "myapp-venv/lib/python3.13/site-packages").apply { mkdirs() }
+        val resolved = PolyglotManifest.sidecarLookup(binary)
+        // maxByOrNull lexicographically → python3.13 wins (13 > 11 as strings).
+        assertEquals(newer.canonicalPath, resolved.pythonPath)
+    }
+
+    @Test
+    fun `sidecarLookup collects jvm jars`(@TempDir tmp: File) {
+        val binary = File(tmp, "myapp").apply { writeBytes(byteArrayOf(0x7F, 0x45, 0x4C, 0x46)) }
+        val jvmDir = File(tmp, "myapp-jvm").apply { mkdirs() }
+        val a = File(jvmDir, "aaa.jar").apply { writeBytes(byteArrayOf()) }
+        val b = File(jvmDir, "bbb.jar").apply { writeBytes(byteArrayOf()) }
+        val txt = File(jvmDir, "readme.txt").apply { writeText("ignore me") }
+        val resolved = PolyglotManifest.sidecarLookup(binary)
+        assertEquals(
+            listOf(a.canonicalPath, b.canonicalPath),
+            resolved.jvmClasspath,
+        )
+        assertTrue(resolved.jvmClasspath.none { it.endsWith(txt.name) })
+    }
+
+    @Test
+    fun `sidecarLookup returns NONE when no sidecars`(@TempDir tmp: File) {
+        val binary = File(tmp, "myapp").apply { writeBytes(byteArrayOf(0x7F, 0x45, 0x4C, 0x46)) }
+        val resolved = PolyglotManifest.sidecarLookup(binary)
+        assertEquals(false, resolved.enablePython)
+        assertNull(resolved.pythonPath)
+        assertTrue(resolved.jvmClasspath.isEmpty())
+    }
+
+    @Test
+    fun `sidecarLookup returns NONE on null binary`() {
+        val resolved = PolyglotManifest.sidecarLookup(null)
+        assertEquals(false, resolved.enablePython)
+    }
+
+    @Test
+    fun `loadForBinary prefers manifest over sidecar for python_path`(@TempDir tmp: File) {
+        val binary = File(tmp, "myapp").apply { writeBytes(byteArrayOf(0x7F, 0x45, 0x4C, 0x46)) }
+        // Sidecar venv present …
+        File(tmp, "myapp-venv/lib/python3.12/site-packages").mkdirs()
+        // … but explicit Mezze.toml points somewhere else.
+        val explicit = File(tmp, "explicit-venv").apply { mkdirs() }
+        File(tmp, "Mezze.toml").writeText(
+            """
+            [package]
+            name = "demo"
+            version = "0.1.0"
+
+            [polyglot.python]
+            python_path = "${explicit.absolutePath}"
+            """.trimIndent()
+        )
+        val resolved = PolyglotManifest.loadForBinary(tmp, binary)
+        assertTrue(resolved.enablePython)
+        assertEquals(explicit.canonicalPath, resolved.pythonPath)
+    }
+
+    @Test
+    fun `loadForBinary falls back to sidecar when manifest absent`(@TempDir tmp: File) {
+        val binary = File(tmp, "myapp").apply { writeBytes(byteArrayOf(0x7F, 0x45, 0x4C, 0x46)) }
+        val venvSite = File(tmp, "myapp-venv/lib/python3.12/site-packages").apply { mkdirs() }
+        val resolved = PolyglotManifest.loadForBinary(tmp, binary)
+        assertTrue(resolved.enablePython)
+        assertEquals(venvSite.canonicalPath, resolved.pythonPath)
+    }
 }

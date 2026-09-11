@@ -42,7 +42,7 @@ enables `python.IsolateNativeModules` so numpy's
 `_multiarray_umath.so` can be loaded from more than one Context in
 the same JVM.
 
-## Run
+## Run (JVM, ~1s)
 
 ```
 just mez-run-numpy-demo
@@ -51,6 +51,49 @@ just mez-run-numpy-demo
 `just` will build the mez CLI if needed. The demo evaluates numpy
 reductions (mean/sum/std), constructor helpers (`arange`), linear
 algebra (`dot`), and element-wise arithmetic.
+
+## Run as a native binary (`mez build --native`)
+
+```
+just native-numpy-demo
+```
+
+This is fully working: `mez build --native` reads
+`[polyglot.python]` from `Mezze.toml`, feeds the required GraalPy
+jars to native-image, and produces a self-contained
+`polyglot_numpy-native` (183 MB) binary plus a sibling
+`polyglot_numpy-native-venv/` (185 MB — the copied site-packages
+with the compiled numpy). The two together are a working relocatable
+deploy: `cp` both to any directory and the binary still produces the
+same reductions.
+
+### Build cost
+
+- native-image build: ~2 min (peak RSS ~10 GB, one-shot per project;
+  the shell binary is cached in `.mez/shell/` so subsequent
+  `mez build --native` runs in this project reuse it and add only
+  the CBOR trailer).
+- venv copy: ~5 s (185 MB of small files).
+
+### Native runtime caveats
+
+- `--macro:truffle-svm` is disabled on polyglot Python builds
+  because GraalPy 25.0.3 reaches ~300 JDK methods on native-image's
+  runtime-compilation blocklist (`HashMap.clear`,
+  `ConcurrentHashMap.clear`, `FileOutputStream.open0`,
+  `Signal.raise`, and friends). With truffle-svm off, the binary
+  uses `DefaultTruffleRuntime` — no Truffle JIT for either Mezze or
+  Python code. Steady-state is slower than JVM mode; startup is
+  much faster. Upstream GraalPy needs to trim its
+  runtime-compilable surface before polyglot binaries can turn PE
+  back on.
+- The 185 MB venv is the biggest single asset shipped alongside
+  the binary. For smaller deploys either
+  (a) trim the venv (`pip uninstall` pip and other non-runtime
+      packages after building numpy), or
+  (b) drop the venv and use the pure-Python-stdlib flow shown in
+      `examples/polyglot_python_pure/` (works with zero-copy 0 MB
+      sidecar).
 
 ## What's demonstrated
 

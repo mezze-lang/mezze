@@ -61,6 +61,8 @@ object NativeBuildPath {
         entryName: String?,
         loweredFunctions: List<FunctionIR>,
         performerRecords: List<Array<String>>,
+        polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved =
+            com.mezze.language.cli.`package`.PolyglotResolver.Resolved.NONE,
         timing: Boolean,
         relativeTime: () -> Long,
     ): File? {
@@ -77,6 +79,7 @@ object NativeBuildPath {
                 loweredFunctions = loweredFunctions,
                 performerRecords = performerRecords,
                 optimized = true,
+                polyglot = polyglot,
                 timing = timing,
                 relativeTime = relativeTime,
             )
@@ -107,6 +110,9 @@ object NativeBuildPath {
         if (timing) System.err.println(
             "[${relativeTime()}ms] -O1: appended ${fnBytes.size + metaBytes.size + 24} bytes to $outBinary"
         )
+        // Ship the venv + JVM classpath jars next to the binary so it can
+        // run from an arbitrary directory. See bundlePolyglotAssets docs.
+        bundlePolyglotAssets(outBinary, polyglot, timing, relativeTime)
         return outBinary
     }
 
@@ -160,6 +166,8 @@ object NativeBuildPath {
         loweredFunctions: List<FunctionIR>,
         performerRecords: List<Array<String>>,
         optimized: Boolean,
+        polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved =
+            com.mezze.language.cli.`package`.PolyglotResolver.Resolved.NONE,
         timing: Boolean,
         relativeTime: () -> Long,
     ): File? {
@@ -194,13 +202,18 @@ object NativeBuildPath {
         // keys so user code that didn't change still picks up a fresh
         // build automatically after upgrade.
         invalidateOnRuntimeShift(cacheDir, findRuntimeJar(), timing, relativeTime)
-        val cacheKey = computeNativeCacheKey(fnBytes, metaBytes, nativeImage, optimized)
+        val cacheKey = computeNativeCacheKey(fnBytes, metaBytes, nativeImage, optimized, polyglot)
         val cacheFile = cacheDir?.let { File(it, "$cacheKey.bin") }
         if (cacheFile != null && cacheFile.exists()) {
             if (timing) System.err.println("[${relativeTime()}ms] native: cache hit ($cacheKey) — copying instead of building")
             cacheFile.copyTo(outBinary, overwrite = true)
             outBinary.setExecutable(true, false)
             try { stagingDir.deleteRecursively() } catch (_: Exception) {}
+            // Bundle venv + user JVM jars alongside the binary even on a
+            // cache hit. The cache stores only the binary itself, but the
+            // sidecar assets are per-project (venv, user jars) and must
+            // be re-materialised into `outputDir/` every build.
+            bundlePolyglotAssets(outBinary, polyglot, timing, relativeTime)
             return outBinary
         }
         if (timing) System.err.println("[${relativeTime()}ms] native: cache miss ($cacheKey) — invoking native-image")
@@ -213,7 +226,7 @@ object NativeBuildPath {
         ))
         if (timing) System.err.println("[${relativeTime()}ms] native: embedded-app.jar (${embeddedJar.length() / 1024}KB)")
 
-        val classpathJars = extractRuntimeClasspath(stagingDir, timing, relativeTime)
+        val classpathJars = extractRuntimeClasspath(stagingDir, timing, relativeTime, polyglot)
         val sanitisedUserJar = sanitiseUserJar(jarFile, stagingDir, timing, relativeTime)
         val logbackConfig = writeSilentLogbackConfig(stagingDir)
 
@@ -225,6 +238,7 @@ object NativeBuildPath {
             outBinary = outBinary,
             optimized = optimized,
             logbackConfig = logbackConfig,
+            polyglot = polyglot,
         )
 
         if (timing) System.err.println("[${relativeTime()}ms] invoking native-image (${cmd.size} args)")
@@ -324,6 +338,12 @@ object NativeBuildPath {
             if (timing) System.err.println("[${relativeTime()}ms] native: shell cache write failed: ${e.message}")
         }
 
+        // Bundle sidecar assets — venv site-packages + user JVM jars —
+        // next to the binary. This is what makes the binary
+        // relocatable: a user can `cp` it (with the sidecars) to
+        // /usr/local/bin and run it from anywhere.
+        bundlePolyglotAssets(outBinary, polyglot, timing, relativeTime)
+
         return outBinary
     }
 
@@ -349,12 +369,20 @@ object NativeBuildPath {
         metaBytes: ByteArray,
         nativeImage: File,
         optimized: Boolean,
+        polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved,
     ): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         digest.update(fnBytes)
         digest.update(metaBytes)
         digest.update(nativeImage.absolutePath.toByteArray())
         digest.update(if (optimized) byteArrayOf(1) else byteArrayOf(0))
+        // Polyglot state changes what native-image is called with —
+        // `--language:python` / user JVM cp jars change the resulting
+        // binary substantially. Mix them into the key so toggling the
+        // manifest section triggers a rebuild instead of reusing an
+        // incompatible cached binary.
+        digest.update(if (polyglot.enablePython) byteArrayOf(1) else byteArrayOf(0))
+        for (cp in polyglot.jvmClasspath.sorted()) digest.update(cp.toByteArray())
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
@@ -593,6 +621,8 @@ object NativeBuildPath {
         stagingDir: File,
         timing: Boolean,
         relativeTime: () -> Long,
+        polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved =
+            com.mezze.language.cli.`package`.PolyglotResolver.Resolved.NONE,
     ): List<File> {
         val cpDir = File(stagingDir, "cp").apply { mkdirs() }
         val all = extractBundledNativeClasspath(cpDir)
@@ -600,12 +630,27 @@ object NativeBuildPath {
             "Native classpath resource not found inside mez. " +
             "Did you build this `mez` with `./gradlew :cli:installNative`?"
         )
-        val drop = listOf(
+        // Polyglot python builds: drop truffle-runtime so the resulting
+        // binary uses DefaultTruffleRuntime (interpreter-only). GraalPy
+        // 25.0.3's static analysis surface reaches ~300 JDK blocklist
+        // methods via Truffle runtime compilation registration, and any
+        // truffle-svm-enabled build aborts with "compilation blocklist
+        // violations". Interpreter-only mode sidesteps the blocklist
+        // check entirely. Mezze code is slower without PE, but the
+        // binary at least builds and runs — same trade-off #401 had
+        // before it was fixed for non-polyglot builds. Upstream GraalPy
+        // needs to trim its runtime-compilable surface before we can
+        // re-enable truffle-svm for python.
+        val polyglotDrops = if (polyglot.enablePython) listOf(
+            "truffle-runtime-",
+        ) else emptyList()
+        val drop = polyglotDrops + listOf(
             // #401: truffle-runtime-* used to be dropped here to force the
             // interpreter-only DefaultTruffleRuntime, since --macro:truffle-svm
-            // was off for user builds. Both are now on by default; keeping
-            // the jar on the classpath is required for the macro's PE hooks
-            // to resolve at build time.
+            // was off for user builds. Both are now on by default for
+            // non-polyglot user builds; keeping the jar on the classpath is
+            // required for the macro's PE hooks to resolve at build time.
+            // (Re-added conditionally above for polyglot.python builds.)
             "sqlite-jdbc-",
             "chromeinspector-tool-",
             "dap-tool-",
@@ -686,15 +731,66 @@ object NativeBuildPath {
         outBinary: File,
         optimized: Boolean,
         logbackConfig: File,
+        polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved,
     ): List<String> {
-        val cp = (classpathJars + sanitisedUserJar + embeddedJar)
+        // Polyglot GraalPy → disable Truffle runtime compilation.
+        //
+        // `--macro:truffle-svm` (in common flags) turns on Truffle
+        // partial evaluation inside the native image. Without polyglot
+        // that gives Mezze user code full JIT via Graal PE, matching JVM
+        // performance for hot loops.
+        //
+        // GraalPy 25.0.3, however, transitively reaches ~300 JDK
+        // methods on native-image's blocklist for runtime compilation
+        // (java.util.HashMap.clear, ConcurrentHashMap.clear,
+        // FileOutputStream.open0, com.oracle.svm.core.posix.Signal.raise,
+        // etc.). Any polyglot-python native build with truffle-svm
+        // enabled aborts with "325 compilation blocklist violations"
+        // during points-to analysis.
+        //
+        // Trade-off: with truffle-svm off, the native binary uses
+        // DefaultTruffleRuntime — no PE, no JIT. Mezze code AND Python
+        // both interpret. Startup is instant, steady-state is slower.
+        // For the current polyglot workflow (numpy demos, scripting)
+        // this is the correct trade until upstream GraalPy trims its
+        // hot paths. The alternative — refusing to build — leaves
+        // polyglot users with no native path at all. #402-followup.
+        // `[polyglot.jvm] classpath` entries are appended to the
+        // native-image -cp. This makes the user's Java classes reachable
+        // from the SVM image; at runtime, `java::type("com.foo.Bar")`
+        // resolves against the embedded classes rather than a user's
+        // separately-installed JAR.
+        val userJvmCpFiles = polyglot.jvmClasspath
+            .mapNotNull { p -> File(p).takeIf { it.exists() } }
+        val cp = (classpathJars + sanitisedUserJar + embeddedJar + userJvmCpFiles)
             .joinToString(File.pathSeparator) { it.absolutePath }
 
         val cmd = mutableListOf(nativeImage.absolutePath)
-        cmd.addAll(NativeImageFlags.common)
+        val commonFlags = if (polyglot.enablePython) {
+            // Drop --macro:truffle-svm for polyglot python builds (see
+            // block comment above). Interpreter-only Truffle avoids the
+            // blocklist violations that upstream GraalPy trips.
+            NativeImageFlags.common.filterNot { it == "--macro:truffle-svm" }
+        } else {
+            NativeImageFlags.common
+        }
+        cmd.addAll(commonFlags)
         cmd.addAll(NativeImageFlags.userInitAtBuildTimeArgs())
 
         cmd.addAll(USER_BUILD_SPECIFIC_FLAGS)
+
+        // GraalPy discovery: python-language.jar ships its own
+        // META-INF/native-image/.../native-image.properties which
+        // native-image auto-applies when the jar is on the classpath.
+        // That covers reflection config, resource config, and the
+        // required `--initialize-at-build-time=com.oracle.graal.python`
+        // etc. — so we don't need `--language:python` on the command
+        // line (and 25.0.3's driver doesn't recognise it as a flag
+        // anyway; the jar-side Args are the supported entry point).
+        //
+        // We only need to pass polyglot state through so the build
+        // gets the JVM classpath jars (see cp assembly above) and the
+        // cache key differentiates polyglot from non-polyglot builds.
         // Point logback at the silent config we just wrote to the staging
         // dir (#193). Has to be an absolute path: relative paths would be
         // resolved against the builder JVM's cwd, which is outputDir.
@@ -852,6 +948,16 @@ object NativeBuildPath {
         "META-INF/native-image/org.graalvm.truffle/truffle-api/native-image.properties",
         "META-INF/native-image/org.graalvm.truffle/truffle-compiler/native-image.properties",
         "META-INF/native-image/org.graalvm.truffle/truffle-runtime/native-image.properties",
+        // Truffle NFI (Native Function Interface). The runtime jar shades
+        // truffle-nfi but not as a separate JPMS module, so the
+        // `ForceOnModulePath = com.oracle.truffle.truffle_nfi` directive in
+        // the fat-jar copy fails with "Module descriptor was not found in
+        // class-path entry". truffle-nfi is only reachable via GraalPy's
+        // C extension loader; for pure-Python programs it's dead code.
+        // Strip the directives; if a future user needs the NFI module,
+        // it must ship as its own jar.
+        "META-INF/native-image/org.graalvm.truffle/truffle-nfi/native-image.properties",
+        "META-INF/native-image/org.graalvm.truffle/truffle-nfi-libffi/native-image.properties",
         "META-INF/native-image/org.graalvm.sdk/graal-sdk/native-image.properties",
         "META-INF/native-image/org.graalvm.sdk/jniutils/native-image.properties",
         "META-INF/native-image/org.graalvm.sdk/word/native-image.properties",
@@ -921,6 +1027,139 @@ object NativeBuildPath {
         // installed by --macro:truffle-svm; the HotSpot copy is dead code.
         "com/oracle/truffle/runtime/hotspot/",
     )
+
+    // ─── polyglot sidecar bundling ──────────────────────────────────────────
+
+    /**
+     * Place polyglot assets next to the produced [outBinary] so it can
+     * run from any directory:
+     *
+     *   - `<binary-stem>-venv/lib/python3.12/site-packages/…` — full
+     *     copy of the venv's site-packages. `EmbeddedExec`'s runtime
+     *     discovery falls back to this path when no `Mezze.toml` is
+     *     found in cwd, so a `cp binary` (with its sibling dir) is a
+     *     working deploy.
+     *   - `<binary-stem>-jvm/…jar` — user JVM classpath jars.
+     *     `EmbeddedExec` adds these to the polyglot Context's host
+     *     classpath at runtime.
+     *
+     * On repeat builds we clean the sibling dirs first so removals in
+     * the source venv don't linger in the target.
+     */
+    private fun bundlePolyglotAssets(
+        outBinary: File,
+        polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved,
+        timing: Boolean,
+        relativeTime: () -> Long,
+    ) {
+        val stem = outBinary.nameWithoutExtension.takeIf { it.isNotEmpty() } ?: outBinary.name
+
+        // 1) Python venv site-packages. python_path in Mezze.toml
+        //    typically points at `.../lib/pythonX.Y/site-packages/`;
+        //    we mirror that structure so the runtime can auto-discover.
+        //
+        //    When `[polyglot.python]` is declared WITHOUT `python_path`
+        //    (pure-stdlib usage), we still create an empty `<stem>-venv/`
+        //    directory as a marker so `PolyglotManifest.sidecarLookup`
+        //    can enable Python without a site-packages path. This is
+        //    what lets a demo like `polyglot_python_pure` (math /
+        //    statistics only, no wheels) run relocated from the
+        //    project tree.
+        if (polyglot.enablePython) {
+            val destVenv = File(outBinary.parentFile, "$stem-venv")
+            if (destVenv.isDirectory) destVenv.deleteRecursively()
+            destVenv.mkdirs()
+            val srcSitePackages = polyglot.pythonPath?.let { File(it) }
+            if (srcSitePackages != null && srcSitePackages.isDirectory) {
+                // Recover the python version segment from the source
+                // path, defaulting to python3.12. Path shape:
+                //   .../venv/lib/pythonX.Y/site-packages
+                val pyDirName = srcSitePackages.parentFile?.name?.takeIf { it.startsWith("python") }
+                    ?: "python3.12"
+                val destSitePackages = File(destVenv, "lib/$pyDirName/site-packages")
+                destSitePackages.mkdirs()
+                if (timing) System.err.println(
+                    "[${relativeTime()}ms] polyglot: bundling venv → ${destSitePackages.absolutePath}"
+                )
+                try {
+                    copyDirectoryFast(srcSitePackages, destSitePackages)
+                } catch (e: Exception) {
+                    System.err.println(
+                        "Warning: could not bundle venv from ${srcSitePackages.absolutePath}: ${e.message}. " +
+                        "Binary will only run in project directories with Mezze.toml pointing at a valid venv."
+                    )
+                }
+            } else {
+                // Pure-stdlib marker: an empty venv dir is enough for
+                // sidecarLookup to enable python without a path.
+                if (timing) System.err.println(
+                    "[${relativeTime()}ms] polyglot: python enabled, no python_path — writing empty marker at ${destVenv.absolutePath}"
+                )
+                if (polyglot.pythonPath != null && !srcSitePackages!!.isDirectory) {
+                    System.err.println(
+                        "Warning: [polyglot.python].python_path='${polyglot.pythonPath}' does not exist. " +
+                        "Binary will run without a site-packages path."
+                    )
+                }
+            }
+        }
+
+        // 2) User JVM classpath jars — always copy fresh (source paths
+        //    can change per-project). Empty list → skip entirely so
+        //    non-polyglot builds don't create empty dirs.
+        if (polyglot.jvmClasspath.isNotEmpty()) {
+            val destJvm = File(outBinary.parentFile, "$stem-jvm")
+            if (destJvm.isDirectory) destJvm.deleteRecursively()
+            destJvm.mkdirs()
+            for (path in polyglot.jvmClasspath) {
+                val src = File(path)
+                if (!src.exists()) {
+                    System.err.println("Warning: [polyglot.jvm].classpath entry not found: $path — skipping")
+                    continue
+                }
+                val dest = File(destJvm, src.name)
+                try { src.copyTo(dest, overwrite = true) } catch (e: Exception) {
+                    System.err.println("Warning: failed to copy $path → ${dest.absolutePath}: ${e.message}")
+                }
+            }
+            if (timing) System.err.println(
+                "[${relativeTime()}ms] polyglot: bundled ${polyglot.jvmClasspath.size} JVM jar(s) → ${destJvm.absolutePath}"
+            )
+        }
+    }
+
+    /**
+     * Fast directory copy that follows symlinks. Uses a
+     * FileVisitor to walk once. Preferable to `Files.walk` when the
+     * source is dominated by many small files (numpy: ~40 000 files).
+     */
+    private fun copyDirectoryFast(src: File, dest: File) {
+        val srcPath = src.toPath()
+        val destPath = dest.toPath()
+        java.nio.file.Files.walkFileTree(srcPath, object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+            override fun preVisitDirectory(
+                dir: java.nio.file.Path,
+                attrs: java.nio.file.attribute.BasicFileAttributes,
+            ): java.nio.file.FileVisitResult {
+                val target = destPath.resolve(srcPath.relativize(dir))
+                java.nio.file.Files.createDirectories(target)
+                return java.nio.file.FileVisitResult.CONTINUE
+            }
+
+            override fun visitFile(
+                file: java.nio.file.Path,
+                attrs: java.nio.file.attribute.BasicFileAttributes,
+            ): java.nio.file.FileVisitResult {
+                val target = destPath.resolve(srcPath.relativize(file))
+                java.nio.file.Files.copy(
+                    file, target,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.COPY_ATTRIBUTES,
+                )
+                return java.nio.file.FileVisitResult.CONTINUE
+            }
+        })
+    }
 
     // ─── helpers ─────────────────────────────────────────────────────────────
 

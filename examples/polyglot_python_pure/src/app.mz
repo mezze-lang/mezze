@@ -1,0 +1,85 @@
+# Pure-Python-stdlib polyglot demo. Uses only Python's built-in
+# `math` and `statistics` modules — no numpy, no site-packages — so
+# it works end-to-end from a naked GraalPy install and can be built
+# with `mez build --native` on any machine.
+use std::effects::log::{println, Console, Log}
+use std::polyglot::core::{
+  Foreign, Context, InteropError, create_context, close_context
+}
+use std::polyglot::python::{ python_eval }
+use std::float
+use std::int
+
+## Coerce a Foreign result to a Mezze Float and print it.
+let show_float: { label: Str, r: Result Foreign InteropError } -> {} <Log>
+  = { label, r } -> match r is
+    Ok { val = f } -> match f.as_float{} is
+      Ok { val = d } -> println { msg = "  $(label) = $(float::to_str { n = d })" }
+      Err { error = _ } -> println { msg = "  $(label): could not coerce to float" }
+    Err { error = _ } -> println { msg = "  $(label): guest error" }
+
+## Coerce a Foreign result to a Mezze Int and print it.
+let show_int: { label: Str, r: Result Foreign InteropError } -> {} <Log>
+  = { label, r } -> match r is
+    Ok { val = f } -> match f.as_int{} is
+      Ok { val = n } -> println { msg = "  $(label) = $(int::to_str { n = n })" }
+      Err { error = _ } -> println { msg = "  $(label): could not coerce to int" }
+    Err { error = _ } -> println { msg = "  $(label): guest error" }
+
+let main = {} -> perform Console in do
+  let ctx = create_context { languages = ["python"], classpath = [] }
+
+  println { msg = "== Mezze x Python stdlib demo ==" }
+  println { msg = "" }
+
+  # math.sqrt / math.pi — module-level constants + trig.
+  println { msg = "math module:" }
+  let sqrt2 = python_eval {
+    context = ctx, source = "__import__('math').sqrt(2.0)"
+  }
+  let _ = show_float { label = "sqrt(2) ", r = sqrt2 }
+
+  let pi_r = python_eval {
+    context = ctx, source = "__import__('math').pi"
+  }
+  let _ = show_float { label = "pi      ", r = pi_r }
+
+  let sin_r = python_eval {
+    context = ctx, source = "__import__('math').sin(__import__('math').pi / 2)"
+  }
+  let _ = show_float { label = "sin(pi/2)", r = sin_r }
+
+  # statistics — reductions from the stdlib. Same shape as the numpy
+  # demo's reductions but backed by Python only.
+  println { msg = "" }
+  println { msg = "statistics on [2, 4, 4, 4, 5, 5, 7, 9]:" }
+  let mean_r = python_eval {
+    context = ctx,
+    source = "__import__('statistics').mean([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])"
+  }
+  let _ = show_float { label = "mean   ", r = mean_r }
+
+  let median_r = python_eval {
+    context = ctx,
+    source = "__import__('statistics').median([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])"
+  }
+  let _ = show_float { label = "median ", r = median_r }
+
+  let stdev_r = python_eval {
+    context = ctx,
+    source = "__import__('statistics').pstdev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])"
+  }
+  let _ = show_float { label = "pstdev ", r = stdev_r }
+
+  # itertools / functools — a compute pipeline in pure Python.
+  println { msg = "" }
+  println { msg = "reduce(*, range(1, 11)) — 10! via functools:" }
+  let fact_r = python_eval {
+    context = ctx,
+    source = "__import__('functools').reduce(lambda a, b: a * b, range(1, 11))"
+  }
+  let _ = show_int { label = "10!", r = fact_r }
+
+  let _ = close_context { it = ctx }
+  println { msg = "" }
+  println { msg = "== done ==" }

@@ -203,8 +203,7 @@ polyglot-setup-python:
 
 # Run the polyglot numpy demo (Mezze x numpy). Requires numpy in a
 # GraalPy venv on the classpath — bootstrap it with
-# `just polyglot-setup-python`. Uses `mez exec` under the JVM
-# (native binaries have no polyglot at this layer).
+# `just polyglot-setup-python`. Uses `mez exec` under the JVM.
 #
 # Wiring lives entirely in `examples/polyglot_numpy/Mezze.toml`
 # ([polyglot.python] with python_path + options). No env vars — the
@@ -213,6 +212,39 @@ polyglot-setup-python:
 [group('mez')]
 mez-run-numpy-demo: _mez
     {{mez}} exec examples/polyglot_numpy/src/app.mz
+
+# Run the pure-Python-stdlib demo (Mezze x math/statistics/functools).
+# No venv required — GraalPy ships stdlib as classpath resources.
+# Serves as the polyglot smoke test that works out-of-the-box.
+[group('mez')]
+mez-run-python-pure-demo: _mez
+    {{mez}} exec examples/polyglot_python_pure/src/app.mz
+
+# Build the numpy demo as a native binary + run it. Requires the
+# GraalPy venv with numpy at interpreter/build/graalpy-venv/venv/.
+# native-image consumes ~10 GB RAM and takes ~2 min. The venv (185 MB)
+# is copied alongside the binary; both must ship together for the
+# binary to run outside the project.
+[group('mez')]
+native-numpy-demo: _mez
+    @mkdir -p logs
+    cd examples/polyglot_numpy && \
+      MEZZE_TIMING=1 {{absolute_path("./" + mez)}} build --native \
+      2>&1 | tee -a $(pwd)/../../logs/native-numpy-demo.log
+    examples/polyglot_numpy/.build/polyglot_numpy-native \
+      2>&1 | tee -a logs/native-numpy-demo.log
+
+# Build the pure-Python-stdlib demo as a native binary + run it.
+# No venv needed; the binary is a single-file drop (with an empty
+# marker sidecar dir for polyglot python discovery).
+[group('mez')]
+native-python-pure-demo: _mez
+    @mkdir -p logs
+    cd examples/polyglot_python_pure && \
+      MEZZE_TIMING=1 {{absolute_path("./" + mez)}} build --native \
+      2>&1 | tee -a $(pwd)/../../logs/native-python-pure-demo.log
+    examples/polyglot_python_pure/.build/polyglot_python_pure-native \
+      2>&1 | tee -a logs/native-python-pure-demo.log
 
 # ============================================================
 # tooling

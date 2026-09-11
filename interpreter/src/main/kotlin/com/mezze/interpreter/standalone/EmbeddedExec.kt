@@ -66,6 +66,31 @@ object EmbeddedExec {
     }
 
     /**
+     * Resolve the currently-running binary's file path for sidecar
+     * asset discovery. Mirrors `MezzeAppMain.resolveSelfExe` but
+     * lives here so EmbeddedExec doesn't reach into MezzeAppMain's
+     * privates. Returns null when the JVM refuses to disclose argv[0]
+     * (rare — every mainstream JDK 17+ implements ProcessHandle).
+     */
+    private fun resolveSelfExe(): File? {
+        try {
+            val cmd = java.lang.ProcessHandle.current().info().command().orElse(null)
+            if (cmd != null) {
+                val f = File(cmd)
+                if (f.isFile) return f
+            }
+        } catch (_: Throwable) { /* fall through */ }
+        try {
+            val proc = File("/proc/self/exe")
+            if (proc.exists()) {
+                val resolved = proc.toPath().toRealPath().toFile()
+                if (resolved.isFile) return resolved
+            }
+        } catch (_: Throwable) { /* fall through */ }
+        return null
+    }
+
+    /**
      * Where profile / coverage / allocation outputs go. Defaults to
      * the current directory; override via `MEZZE_OUTPUT_DIR`.
      */
@@ -366,16 +391,21 @@ object EmbeddedExec {
             System.err.println("[mezze] Truffle runtime: ${runtime.javaClass.name} (${runtime.name})")
         }
 
-        // Polyglot: enable GraalPy iff the project's Mezze.toml declares
-        // [polyglot.python]. Loading the `python` language ~doubles Context
-        // build time and pulls in GraalPy's resource caches, so we stay off
-        // by default — every non-polyglot user program would otherwise pay
-        // for something it never uses.
+        // Polyglot: enable GraalPy iff either
+        //   (a) an ancestor Mezze.toml declares [polyglot.python], or
+        //   (b) a sidecar `<binary>-venv/` sits next to the binary
+        //       (mez build --native bundled it there).
         //
-        // Config lives in Mezze.toml, resolved relative to that file's dir
-        // (see PolyglotManifest). The runtime walks up from cwd looking for
-        // a manifest; missing → no polyglot, same behavior as before.
-        val polyglot = com.mezze.interpreter.polyglot.PolyglotManifest.load(File("."))
+        // (a) is dev-mode: `cd project && ./binary` picks up the same
+        // manifest as `mez exec`. (b) is shipped-binary mode: `cp` the
+        // binary + sidecars anywhere and it still discovers its venv.
+        // Loading the `python` language ~doubles Context build time and
+        // pulls in GraalPy's resource caches, so we stay off by default
+        // — every non-polyglot user program would otherwise pay for
+        // something it never uses.
+        val selfExe = try { resolveSelfExe() } catch (_: Throwable) { null }
+        val polyglot = com.mezze.interpreter.polyglot.PolyglotManifest
+            .loadForBinary(File("."), selfExe)
 
         val languageIds = if (polyglot.enablePython) arrayOf(MezzeLanguage.ID, "python") else arrayOf(MezzeLanguage.ID)
         val contextBuilder = Context.newBuilder(*languageIds)

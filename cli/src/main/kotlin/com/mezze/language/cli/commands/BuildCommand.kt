@@ -310,12 +310,25 @@ class BuildCommand {
             var nativeBinary: File? = null
             if (nativeBuild) {
                 println()
+                // Read polyglot config ONCE and pass through to the native
+                // build. `NativeBuildPath` uses it to (a) enable
+                // `--language:python` at native-image time and (b) bundle
+                // the venv + user JVM classpath next to the produced
+                // binary so it can ship without those files hanging off
+                // the project tree.
+                val polyglot = com.mezze.language.cli.`package`.PolyglotResolver.resolve(currentDir)
                 if (nativeO2) {
                     val optimizedNI = !quickBuild
                     if (optimizedNI) {
                         println("Compiling native binary -O2 (full AOT, ~2 min — pass --quick for ~30-50s build)...")
                     } else {
                         println("Compiling native binary -O2 (quick mode, ~30-50s)...")
+                    }
+                    if (polyglot.enablePython) {
+                        println("  [polyglot.python] detected — building with --language:python + bundling venv")
+                    }
+                    if (polyglot.jvmClasspath.isNotEmpty()) {
+                        println("  [polyglot.jvm] detected — embedding ${polyglot.jvmClasspath.size} classpath jar(s)")
                     }
                     nativeBinary = NativeBuildPath.build(
                         jarFile = jarFile,
@@ -327,11 +340,15 @@ class BuildCommand {
                         loweredFunctions = loweredFunctions,
                         performerRecords = performerRecords,
                         optimized = optimizedNI,
+                        polyglot = polyglot,
                         timing = timing,
                         relativeTime = { (System.nanoTime() - startTime) / 1_000_000 },
                     )
                 } else {
                     println("Building native binary -O1 (shell + CBOR append)...")
+                    if (polyglot.enablePython || polyglot.jvmClasspath.isNotEmpty()) {
+                        println("  [polyglot.*] declared — bundling venv / classpath jars next to binary")
+                    }
                     nativeBinary = NativeBuildPath.buildShell(
                         jarFile = jarFile,
                         outputDir = targetDir,
@@ -341,6 +358,7 @@ class BuildCommand {
                         entryName = appConfig.entry,
                         loweredFunctions = loweredFunctions,
                         performerRecords = performerRecords,
+                        polyglot = polyglot,
                         timing = timing,
                         relativeTime = { (System.nanoTime() - startTime) / 1_000_000 },
                     )
