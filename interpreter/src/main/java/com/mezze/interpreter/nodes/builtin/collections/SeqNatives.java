@@ -294,19 +294,23 @@ public final class SeqNatives {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
 
-        // Two-pass: first count matches, then collect.
-        boolean[] keep = new boolean[size];
+        // Single-pass: collect matching elements into a growable buffer.
+        // Eliminates the boolean[size] + second seq.get() per kept element
+        // that the old two-pass approach needed.
+        Object[] buf = new Object[Math.min(size, 16)]; // start small, grow as needed
         int count = 0;
+
         CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
         if (innerTarget != null) {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
             for (int i = 0; i < size; i++) {
-                args[closureLen] = seq.get(i);
+                Object elem = seq.get(i);
+                args[closureLen] = elem;
                 Object result = callNode.call(innerTarget, args);
                 if (result instanceof Boolean && (Boolean) result) {
-                    keep[i] = true;
-                    count++;
+                    if (count == buf.length) buf = java.util.Arrays.copyOf(buf, buf.length * 2);
+                    buf[count++] = elem;
                 }
             }
         } else {
@@ -314,23 +318,20 @@ public final class SeqNatives {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closureValues, 0, args, 0, closureLen);
             for (int i = 0; i < size; i++) {
-                args[closureLen] = MezzeRecord.wrapX(seq.get(i));
+                Object elem = seq.get(i);
+                args[closureLen] = MezzeRecord.wrapX(elem);
                 Object result = callNode.call(target, args);
                 if (result instanceof Boolean && (Boolean) result) {
-                    keep[i] = true;
-                    count++;
+                    if (count == buf.length) buf = java.util.Arrays.copyOf(buf, buf.length * 2);
+                    buf[count++] = elem;
                 }
             }
         }
 
         if (count == 0) return MezzeSeq.empty();
-        if (count == size) return seq; // All kept - return original
+        if (count == size) return seq; // All kept — return original
 
-        Object[] results = new Object[count];
-        int idx = 0;
-        for (int i = 0; i < size; i++) {
-            if (keep[i]) results[idx++] = seq.get(i);
-        }
+        Object[] results = (count == buf.length) ? buf : java.util.Arrays.copyOf(buf, count);
         return MezzeSeq.fromArray(results);
     }
 
