@@ -735,11 +735,8 @@ class BuildCommand {
      * Returns null if neither exists — caller surfaces a clear error.
      */
     private fun findRuntimeJar(): File? {
-        // Production install.
-        System.getProperty("user.home")?.let { home ->
-            val installed = File("$home/.mezze/lib/mezze-runtime.jar")
-            if (installed.isFile) return installed
-        }
+        // Production install (self-located to this toolchain's lib).
+        com.mezze.language.cli.MezzeHome.runtimeJar.takeIf { it.isFile }?.let { return it }
         // Dev / IDE.
         System.getProperty("mezze.project.root")?.let { root ->
             val dev = File(root, "interpreter/build/libs/mezze-runtime.jar")

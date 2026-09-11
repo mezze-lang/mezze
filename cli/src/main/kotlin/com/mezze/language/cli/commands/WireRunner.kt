@@ -874,7 +874,7 @@ private class WireSession private constructor(
             // installDevTools laid these down at install time.
             val baseClasspath = JvmLauncher.buildClasspath()
             val classpath = if (devFlags.isNotEmpty()) {
-                val toolsDir = File(System.getProperty("user.home"), ".mezze/lib/tools")
+                val toolsDir = com.mezze.language.cli.MezzeHome.toolsDir
                 val toolJars = toolsDir.listFiles { f -> f.name.endsWith(".jar") }
                     ?.joinToString(File.pathSeparator) { it.absolutePath }
                     ?: ""
