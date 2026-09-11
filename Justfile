@@ -129,6 +129,13 @@ test: (test-one "parser") (test-one "typechecker") (test-one "interpreter")
 [group('test')]
 gate: test (test-one "cli")
 
+# End-to-end CLI smoke: check/exec/dev/build(jar)/build --native against a real app.
+# Needs a built mez (`just build`). MEZ_E2E_NATIVE=0 skips the slow native step.
+[group('test')]
+test-cli:
+    @mkdir -p logs
+    bash scripts/cli-e2e.sh 2>&1 | tee logs/cli-e2e.log
+
 # Just one class:  just test-class typechecker '*AntiHang*'
 [group('test')]
 test-class module pattern:
