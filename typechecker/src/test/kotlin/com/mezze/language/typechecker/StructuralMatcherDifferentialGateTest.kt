@@ -132,6 +132,24 @@ class StructuralMatcherDifferentialGateTest {
     }
 
     @Test
+    fun `distinct same-named type-applications are rejected by every matcher`() {
+        // Two `Widget 'a` from different modules (same constructor name, different
+        // content hash) are DISTINCT declarations — mono unify's TypeApp arm must
+        // not seed one for the other.
+        val wA = TypeApplication(constructor = "Widget", args = listOf(IntType),
+            identity = TypeIdentity.Declared(hash("a"), "Widget"))
+        val wB = TypeApplication(constructor = "Widget", args = listOf(IntType),
+            identity = TypeIdentity.Declared(hash("b"), "Widget"))
+        assertEquals(IdentityVerdict.DISTINCT, identityVerdict(wA.identity, wB.identity),
+            "test setup: two distinct-hash Widget TypeApps should be DISTINCT")
+        for ((x, y, dir) in listOf(Triple(wA, wB, "A→B"), Triple(wB, wA, "B→A"))) {
+            assertFalse(monoTMT(x, y), "MonoTypeOps.typeMatchesTarget matched DISTINCT Widget TypeApps ($dir)")
+            assertFalse(monoUn(x, y), "MonoTypeOps.unify matched DISTINCT Widget TypeApps ($dir)")
+            assertFalse(solverUn(x, y), "Unification.unify matched DISTINCT Widget TypeApps ($dir)")
+        }
+    }
+
+    @Test
     fun `SAME-identity pairs still match — the gate does not over-reject`() {
         // Sanity: identical declarations (same hash) MUST still match, or the veto
         // would break legitimate dispatch. This guards against a future over-fix.

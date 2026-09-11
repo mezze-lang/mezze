@@ -212,8 +212,14 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
             identityVerdict(pattern.identity, v.identity) != IdentityVerdict.DISTINCT &&
             pattern.name == v.name && unify(pattern.wrappedType, v.wrappedType, bindings)
         is MezzeType.TypeApplication -> when {
-            // Same shape on both sides: constructor + args unify.
+            // Same shape on both sides: constructor + args unify. Move-5: gate on
+            // identity NOT being DISTINCT first — two same-named TypeApplications
+            // from different declarations (differing content hash) must not seed for
+            // each other, mirroring typeMatchesTarget (:79) and the solver's
+            // unifyTypeApplications veto. Name match only decides when identity is
+            // UNDETERMINED (a hashless side).
             v is MezzeType.TypeApplication ->
+                identityVerdict(pattern.identity, v.identity) != IdentityVerdict.DISTINCT &&
                 pattern.constructor == v.constructor &&
                 pattern.args.size == v.args.size &&
                 pattern.args.zip(v.args).all { (p2, v2) -> unify(p2, v2, bindings) }
