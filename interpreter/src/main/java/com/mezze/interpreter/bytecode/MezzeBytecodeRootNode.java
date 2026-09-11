@@ -5654,6 +5654,380 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // #84 — Dynamic iter sink operations: descriptor-class PIC
+    //
+    // When an Iter 'a arrives as a function parameter (Opaque source
+    // at compile time), the ChainCanonicalizer can't fuse it.  These
+    // operations replace the @TruffleBoundary IterNatives.fold/forEach/sum
+    // fallback so the fold body (user callback) is visible to the JIT.
+    //
+    // Specialization flow:
+    //   1. Guard on the descriptor class (PIC limit 3) — covers
+    //      Range/Seq/List that stabilise after warmup.
+    //   2. Guard on the folder's CallTarget (PIC) — lets Graal
+    //      devirtualise and inline the fold body.
+    //   3. For simple leaf descriptors (Range, Seq, List, Once, Empty)
+    //      emit a tight counted/indexed loop with the fold call inside.
+    //   4. For complex descriptors (map, filter, flatMap chains)
+    //      materialise elements behind @TruffleBoundary, then fold over
+    //      the materialised array outside the boundary — the fold body
+    //      is still JIT-visible.
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Dynamic fold over an {@code Iter 'a} parameter.
+     * Children: [MezzeIter, init, MezzeFunction (folder)].
+     */
+    @Operation
+    public static final class IterFoldDynamic {
+
+        @Specialization(guards = {
+            "iterFoldTargetMatches(folder, cachedFolderTarget)",
+            "iterFoldDescClass(iter) == cachedDescClass"
+        }, limit = "3", excludeForUncached = true)
+        public static Object doCached(
+                com.mezze.datastructures.iter.MezzeIter iter,
+                Object init,
+                MezzeFunction folder,
+                @Cached("folder.getCallTarget()") CallTarget cachedFolderTarget,
+                @Cached("iterFoldTryScalarResolve(folder)") CallTarget scalarTarget,
+                @Cached("folder.getClosureValues().length") int closureLen,
+                @Cached("iterFoldDescClass(iter)") Class<?> cachedDescClass,
+                @Cached("iterFoldCreateCall(scalarTarget, cachedFolderTarget)") DirectCallNode foldCall,
+                @Bind("$node") Node node) {
+
+            Object[] fClosure = folder.getClosureValues();
+            boolean scalar = scalarTarget != null;
+
+            // Build reusable args array (hoisted before loop)
+            Object[] fArgs;
+            int accSlot, elemSlot;
+            if (scalar) {
+                fArgs = new Object[closureLen + 2];
+                System.arraycopy(fClosure, 0, fArgs, 0, closureLen);
+                accSlot = closureLen;
+                elemSlot = closureLen + 1;
+            } else {
+                fArgs = new Object[closureLen + 1];
+                System.arraycopy(fClosure, 0, fArgs, 0, closureLen);
+                accSlot = -1;
+                elemSlot = closureLen;
+            }
+
+            Object acc = init;
+            com.mezze.datastructures.iter.IterNode desc = iter.getDescriptor();
+
+            if (desc instanceof com.mezze.datastructures.iter.RangeIterNode range) {
+                long i = range.start;
+                long end = range.end;
+                long step = range.step;
+                if (step == 0) return acc;
+                int count = 0;
+                boolean asc = step > 0;
+                while (asc ? i < end : i > end) {
+                    acc = iterFoldCallBody(foldCall, fArgs, acc, (Object) i, scalar, accSlot, elemSlot);
+                    i += step;
+                    count++;
+                }
+                LoopNode.reportLoopCount(node, count);
+            } else if (desc instanceof com.mezze.datastructures.iter.SeqIterNode seqNode) {
+                int n = seqNode.size();
+                for (int idx = 0; idx < n; idx++) {
+                    acc = iterFoldCallBody(foldCall, fArgs, acc, seqNode.get(idx), scalar, accSlot, elemSlot);
+                }
+                LoopNode.reportLoopCount(node, n);
+            } else if (desc instanceof com.mezze.datastructures.iter.ListIterNode listNode) {
+                Object[] arr = iterFoldListToArray(listNode);
+                for (int idx = 0; idx < arr.length; idx++) {
+                    acc = iterFoldCallBody(foldCall, fArgs, acc, arr[idx], scalar, accSlot, elemSlot);
+                }
+                LoopNode.reportLoopCount(node, arr.length);
+            } else if (desc instanceof com.mezze.datastructures.iter.OnceIterNode once) {
+                acc = iterFoldCallBody(foldCall, fArgs, acc, once.value, scalar, accSlot, elemSlot);
+            } else if (desc instanceof com.mezze.datastructures.iter.EmptyIterNode) {
+                // No elements — acc stays as init.
+            } else {
+                // Complex descriptor — collect behind boundary, fold outside it.
+                Object[] elements = com.mezze.interpreter.nodes.builtin.collections.IterNatives.collectToArray(iter);
+                for (int idx = 0; idx < elements.length; idx++) {
+                    acc = iterFoldCallBody(foldCall, fArgs, acc, elements[idx], scalar, accSlot, elemSlot);
+                }
+                LoopNode.reportLoopCount(node, elements.length);
+            }
+
+            return acc;
+        }
+
+        @Specialization(replaces = "doCached")
+        @TruffleBoundary
+        public static Object doUncached(
+                com.mezze.datastructures.iter.MezzeIter iter,
+                Object init,
+                MezzeFunction folder) {
+            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.fold(
+                iter, init, folder, IndirectCallNode.getUncached());
+        }
+
+        // ── helpers ──
+
+        static boolean iterFoldTargetMatches(MezzeFunction fn, CallTarget cached) {
+            return cached != null && fn.getCallTarget() == cached;
+        }
+
+        static Class<?> iterFoldDescClass(com.mezze.datastructures.iter.MezzeIter iter) {
+            return iter.getDescriptor().getClass();
+        }
+
+        /**
+         * Scalar-ABI resolution for a fold function.  Returns the inner
+         * BDSL target if the function is bypassable (no partial args,
+         * no tail calls, no dict params), or null for record ABI.
+         */
+        @TruffleBoundary
+        static CallTarget iterFoldTryScalarResolve(MezzeFunction fn) {
+            if (fn.hasPartialArgs()) return null;
+            CallTarget target = fn.getCallTarget();
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct
+                    && rct.getRootNode() instanceof TrampolineRootNode tramp
+                    && !tramp.hasTailCalls()
+                    && tramp.getInnerTarget() != null) {
+                String[] names = tramp.getParameterNames();
+                if (names != null) {
+                    for (String name : names) {
+                        if (com.mezze.language.ast.MagicParams.INSTANCE.isDict(name)) return null;
+                    }
+                }
+                return tramp.getInnerTarget();
+            }
+            return null;
+        }
+
+        @TruffleBoundary
+        static DirectCallNode iterFoldCreateCall(CallTarget scalarTarget, CallTarget fallbackTarget) {
+            CallTarget effective = scalarTarget != null ? scalarTarget : fallbackTarget;
+            DirectCallNode n = DirectCallNode.create(effective);
+            n.forceInlining();
+            return n;
+        }
+
+        private static Object iterFoldCallBody(DirectCallNode call, Object[] fArgs,
+                Object acc, Object elem, boolean scalar, int accSlot, int elemSlot) {
+            if (scalar) {
+                fArgs[accSlot] = acc;
+                fArgs[elemSlot] = elem;
+            } else {
+                fArgs[elemSlot] = MezzeRecord.wrapAccX(acc, elem);
+            }
+            return call.call(fArgs);
+        }
+
+        @TruffleBoundary
+        static Object[] iterFoldListToArray(com.mezze.datastructures.iter.ListIterNode listNode) {
+            return listNode.list.toArray();
+        }
+    }
+
+    /**
+     * Dynamic for_each over an {@code Iter 'a} parameter.
+     * Children: [MezzeIter, MezzeFunction (callback)].
+     */
+    @Operation
+    public static final class IterForEachDynamic {
+
+        @Specialization(guards = {
+            "iterFoldTargetMatches(callback, cachedCallbackTarget)",
+            "iterFoldDescClass(iter) == cachedDescClass"
+        }, limit = "3", excludeForUncached = true)
+        public static Object doCached(
+                com.mezze.datastructures.iter.MezzeIter iter,
+                MezzeFunction callback,
+                @Cached("callback.getCallTarget()") CallTarget cachedCallbackTarget,
+                @Cached("iterForEachTryScalarResolve(callback)") CallTarget scalarTarget,
+                @Cached("callback.getClosureValues().length") int closureLen,
+                @Cached("iterFoldDescClass(iter)") Class<?> cachedDescClass,
+                @Cached("iterFoldCreateCall(scalarTarget, cachedCallbackTarget)") DirectCallNode cbCall,
+                @Bind("$node") Node node) {
+
+            Object[] closure = callback.getClosureValues();
+            boolean scalar = scalarTarget != null;
+
+            Object[] cArgs;
+            int elemSlot;
+            if (scalar) {
+                cArgs = new Object[closureLen + 1];
+                System.arraycopy(closure, 0, cArgs, 0, closureLen);
+                elemSlot = closureLen;
+            } else {
+                cArgs = new Object[closureLen + 1];
+                System.arraycopy(closure, 0, cArgs, 0, closureLen);
+                elemSlot = closureLen;
+            }
+
+            com.mezze.datastructures.iter.IterNode desc = iter.getDescriptor();
+
+            if (desc instanceof com.mezze.datastructures.iter.RangeIterNode range) {
+                long i = range.start;
+                long end = range.end;
+                long step = range.step;
+                if (step == 0) return MezzeRecord.empty();
+                int count = 0;
+                boolean asc = step > 0;
+                while (asc ? i < end : i > end) {
+                    iterForEachCallBody(cbCall, cArgs, (Object) i, scalar, elemSlot);
+                    i += step;
+                    count++;
+                }
+                LoopNode.reportLoopCount(node, count);
+            } else if (desc instanceof com.mezze.datastructures.iter.SeqIterNode seqNode) {
+                int n = seqNode.size();
+                for (int idx = 0; idx < n; idx++) {
+                    iterForEachCallBody(cbCall, cArgs, seqNode.get(idx), scalar, elemSlot);
+                }
+                LoopNode.reportLoopCount(node, n);
+            } else if (desc instanceof com.mezze.datastructures.iter.ListIterNode listNode) {
+                Object[] arr = iterFoldListToArray(listNode);
+                for (int idx = 0; idx < arr.length; idx++) {
+                    iterForEachCallBody(cbCall, cArgs, arr[idx], scalar, elemSlot);
+                }
+                LoopNode.reportLoopCount(node, arr.length);
+            } else if (desc instanceof com.mezze.datastructures.iter.OnceIterNode once) {
+                iterForEachCallBody(cbCall, cArgs, once.value, scalar, elemSlot);
+            } else if (desc instanceof com.mezze.datastructures.iter.EmptyIterNode) {
+                // noop
+            } else {
+                Object[] elements = com.mezze.interpreter.nodes.builtin.collections.IterNatives.collectToArray(iter);
+                for (int idx = 0; idx < elements.length; idx++) {
+                    iterForEachCallBody(cbCall, cArgs, elements[idx], scalar, elemSlot);
+                }
+                LoopNode.reportLoopCount(node, elements.length);
+            }
+
+            return MezzeRecord.empty();
+        }
+
+        @Specialization(replaces = "doCached")
+        @TruffleBoundary
+        public static Object doUncached(
+                com.mezze.datastructures.iter.MezzeIter iter,
+                MezzeFunction callback) {
+            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.forEach(
+                iter, callback, IndirectCallNode.getUncached());
+        }
+
+        // Reuse helpers from IterFoldDynamic via qualified name.
+
+        static boolean iterFoldTargetMatches(MezzeFunction fn, CallTarget cached) {
+            return IterFoldDynamic.iterFoldTargetMatches(fn, cached);
+        }
+
+        static Class<?> iterFoldDescClass(com.mezze.datastructures.iter.MezzeIter iter) {
+            return IterFoldDynamic.iterFoldDescClass(iter);
+        }
+
+        @TruffleBoundary
+        static CallTarget iterForEachTryScalarResolve(MezzeFunction fn) {
+            return IterFoldDynamic.iterFoldTryScalarResolve(fn);
+        }
+
+        @TruffleBoundary
+        static DirectCallNode iterFoldCreateCall(CallTarget scalarTarget, CallTarget fallbackTarget) {
+            return IterFoldDynamic.iterFoldCreateCall(scalarTarget, fallbackTarget);
+        }
+
+        private static void iterForEachCallBody(DirectCallNode call, Object[] cArgs,
+                Object elem, boolean scalar, int elemSlot) {
+            if (scalar) {
+                cArgs[elemSlot] = elem;
+            } else {
+                cArgs[elemSlot] = MezzeRecord.wrapX(elem);
+            }
+            call.call(cArgs);
+        }
+
+        @TruffleBoundary
+        static Object[] iterFoldListToArray(com.mezze.datastructures.iter.ListIterNode listNode) {
+            return IterFoldDynamic.iterFoldListToArray(listNode);
+        }
+
+        private static MezzeRecord wrapX(Object x) {
+            return MezzeRecord.wrapX(x);
+        }
+    }
+
+    /**
+     * Dynamic sum over an {@code Iter 'a} parameter.
+     * Children: [MezzeIter].  No user callback — just accumulates.
+     */
+    @Operation
+    public static final class IterSumDynamic {
+
+        @Specialization(guards = "iterFoldDescClass(iter) == cachedDescClass",
+                        limit = "3", excludeForUncached = true)
+        public static long doCached(
+                com.mezze.datastructures.iter.MezzeIter iter,
+                @Cached("iterFoldDescClass(iter)") Class<?> cachedDescClass,
+                @Bind("$node") Node node) {
+
+            com.mezze.datastructures.iter.IterNode desc = iter.getDescriptor();
+            long acc = 0;
+
+            if (desc instanceof com.mezze.datastructures.iter.RangeIterNode range) {
+                long i = range.start;
+                long end = range.end;
+                long step = range.step;
+                if (step == 0) return 0;
+                int count = 0;
+                boolean asc = step > 0;
+                while (asc ? i < end : i > end) {
+                    acc += i;
+                    i += step;
+                    count++;
+                }
+                LoopNode.reportLoopCount(node, count);
+            } else if (desc instanceof com.mezze.datastructures.iter.SeqIterNode seqNode) {
+                int n = seqNode.size();
+                for (int idx = 0; idx < n; idx++) {
+                    acc += (Long) seqNode.get(idx);
+                }
+                LoopNode.reportLoopCount(node, n);
+            } else if (desc instanceof com.mezze.datastructures.iter.ListIterNode listNode) {
+                Object[] arr = iterSumListToArray(listNode);
+                for (int idx = 0; idx < arr.length; idx++) {
+                    acc += (Long) arr[idx];
+                }
+                LoopNode.reportLoopCount(node, arr.length);
+            } else if (desc instanceof com.mezze.datastructures.iter.OnceIterNode once) {
+                acc = (Long) once.value;
+            } else if (desc instanceof com.mezze.datastructures.iter.EmptyIterNode) {
+                // stays 0
+            } else {
+                Object[] elements = com.mezze.interpreter.nodes.builtin.collections.IterNatives.collectToArray(iter);
+                for (int idx = 0; idx < elements.length; idx++) {
+                    acc += (Long) elements[idx];
+                }
+                LoopNode.reportLoopCount(node, elements.length);
+            }
+
+            return acc;
+        }
+
+        @Specialization(replaces = "doCached")
+        @TruffleBoundary
+        public static long doUncached(com.mezze.datastructures.iter.MezzeIter iter) {
+            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.sum(iter);
+        }
+
+        static Class<?> iterFoldDescClass(com.mezze.datastructures.iter.MezzeIter iter) {
+            return IterFoldDynamic.iterFoldDescClass(iter);
+        }
+
+        @TruffleBoundary
+        static Object[] iterSumListToArray(com.mezze.datastructures.iter.ListIterNode listNode) {
+            return IterFoldDynamic.iterFoldListToArray(listNode);
+        }
+    }
+
     /**
      * Fast path for {@code perform Mut mutate { act = <lambda> }}: pop
      * the raw act lambda (no wrapper record on the operand stack).

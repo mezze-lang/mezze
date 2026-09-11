@@ -315,6 +315,20 @@ public final class IterNatives {
         return first[0] ? com.mezze.interpreter.values.MezzeVariant.none() : com.mezze.interpreter.values.MezzeVariant.some(acc[0]);
     }
 
+    /**
+     * Collect all elements from an iter descriptor into an Object[].
+     * Used by the BDSL IterFoldDynamic/IterForEachDynamic ops:
+     * complex descriptors (map/filter chains) are materialized behind
+     * this @TruffleBoundary, then the fold/forEach loop runs outside
+     * the boundary so the JIT can inline the user callback.
+     */
+    @TruffleBoundary
+    public static Object[] collectToArray(MezzeIter it) {
+        java.util.ArrayList<Object> buf = new java.util.ArrayList<>();
+        walkElements(it.getDescriptor(), buf::add, IndirectCallNode.getUncached());
+        return buf.toArray();
+    }
+
     @TruffleBoundary
     public static Object toSeq(MezzeIter it, IndirectCallNode callNode) {
         java.util.ArrayList<Object> buf = new java.util.ArrayList<>();

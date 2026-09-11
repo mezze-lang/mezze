@@ -3432,7 +3432,53 @@ public final class BytecodeCompiler {
                             }
                         }
                     }
+                    // ── #84: Dynamic iter sink bypasses ──
+                    // Replace @TruffleBoundary IterNatives.fold/forEach/sum with
+                    // BDSL operations whose fold body is JIT-visible.
+                    if ("__native_iter_fold".equals(recName) && mr.getFields().size() == 3) {
+                        NodeIR itNode = null, initNode = null, fNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("it".equals(fld.getName())) itNode = fld.getValue();
+                            else if ("init".equals(fld.getName())) initNode = fld.getValue();
+                            else if ("f".equals(fld.getName())) fNode = fld.getValue();
+                        }
+                        if (itNode != null && initNode != null && fNode != null) {
+                            b.beginIterFoldDynamic();
+                            emitNode(itNode, b, argCount, localMap);
+                            emitNode(initNode, b, argCount, localMap);
+                            emitNode(fNode, b, argCount, localMap);
+                            b.endIterFoldDynamic();
+                            return;
+                        }
+                    }
+                    if ("__native_iter_for_each".equals(recName) && mr.getFields().size() == 2) {
+                        NodeIR itNode = null, fNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("it".equals(fld.getName())) itNode = fld.getValue();
+                            else if ("f".equals(fld.getName())) fNode = fld.getValue();
+                        }
+                        if (itNode != null && fNode != null) {
+                            b.beginIterForEachDynamic();
+                            emitNode(itNode, b, argCount, localMap);
+                            emitNode(fNode, b, argCount, localMap);
+                            b.endIterForEachDynamic();
+                            return;
+                        }
+                    }
+                    if ("__native_iter_sum".equals(recName) && mr.getFields().size() == 1) {
+                        NodeIR itNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("it".equals(fld.getName())) itNode = fld.getValue();
+                        }
+                        if (itNode != null) {
+                            b.beginIterSumDynamic();
+                            emitNode(itNode, b, argCount, localMap);
+                            b.endIterSumDynamic();
+                            return;
+                        }
+                    }
                 }
+
                 // CallNativeRecordWithNode removed — SVM blocklist can't
                 // respect @TruffleBoundary on BDSL ops.  All handlers now
                 // route through CallNativeRecord (#402).
