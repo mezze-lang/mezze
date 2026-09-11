@@ -158,6 +158,13 @@ test-pkg:
     @mkdir -p logs
     bash scripts/pkg-e2e.sh 2>&1 | tee logs/pkg-e2e.log
 
+# Package IR reuse (#46): a dep precompiled once gets the SAME function hashes a
+# consumer's compile produces (the fromStore reuse invariant). Needs `just build`.
+[group('test')]
+test-pkg-reuse:
+    @mkdir -p logs
+    bash scripts/pkg-reuse-e2e.sh 2>&1 | tee logs/pkg-reuse-e2e.log
+
 # Just one class:  just test-class typechecker '*AntiHang*'
 [group('test')]
 test-class module pattern:

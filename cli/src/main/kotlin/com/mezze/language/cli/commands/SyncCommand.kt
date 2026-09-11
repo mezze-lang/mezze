@@ -198,6 +198,12 @@ class SyncCommand {
         val safeFailures = java.util.Collections.synchronizedList(failures)
         val printLock = Any()
         val count = java.util.concurrent.atomic.AtomicInteger(0)
+        // Library deps to compile-once after resolution, as (depDir, libRelPath,
+        // moduleName). Collected on pool threads; the compile itself runs
+        // sequentially below because DepPrecompiler swaps a global sysprop.
+        val precompileTargets = java.util.Collections.synchronizedList(
+            mutableListOf<Triple<File, String, String>>()
+        )
 
         // Resolve ONE dep; return its own direct deps (the next wave). Runs on a pool thread.
         fun process(declaringDir: File, name: String, spec: DepSpec): List<Triple<File, String, DepSpec>> {
@@ -229,6 +235,10 @@ class SyncCommand {
                     is DepSpec.Registry -> LockedNode(name, version, source = "registry", url = spec.url, checksum = "sha256:${spec.sha256}", dependencies = edges)
                 }
             )
+            // A library dep gets compiled once (below) into a shared store, so
+            // consumers load its IR instead of recompiling it. Apps have no
+            // [lib] entry → nothing to share.
+            depToml.lib?.let { precompileTargets.add(Triple(target, it.path, name)) }
             // This dep's own deps resolve against ITS dir. Dev-deps are the top
             // project's only — a dependency's dev-deps are not the consumer's.
             return directDepsOf(target, depToml, includeDev = false, safeFailures, printLock)
@@ -251,6 +261,31 @@ class SyncCommand {
             }
         } finally {
             pool.shutdown()
+        }
+
+        // Compile-once: each library dep is compiled from source into a shared,
+        // content-addressed store the first time it's seen, so every consuming
+        // project loads its IR instead of recompiling it. Sequential (each
+        // compile temporarily swaps the global project-root sysprop); order-free
+        // (every dep compiles independently from its own source). Idempotent and
+        // best-effort — a miss just means the consumer compiles from source.
+        //
+        // Gated OFF by default: the produced stores are content-hash-verified to
+        // match a consumer's own compile (so fromStore lookups will hit), but the
+        // consumer read-side — hydrating dep typed-interfaces so deps aren't
+        // re-lowered, then serving their IR through computeReachableClosure's
+        // fromStore hook — isn't wired yet. Until it is, precompiling would only
+        // add cost to `sync` with no payoff. Flip the default when the read-side
+        // lands. Opt in now with MEZZE_PRECOMPILE_DEPS=1 (used by the reuse tests).
+        val distinctTargets = precompileTargets.distinctBy { it.first.canonicalPath }
+        if (distinctTargets.isNotEmpty() && System.getenv("MEZZE_PRECOMPILE_DEPS") == "1") {
+            var compiled = 0
+            for ((depDir, libRel, moduleName) in distinctTargets) {
+                if (DepPrecompiler.compiledStoreFile(depDir).isFile) continue
+                DepPrecompiler.precompile(depDir, libRel, moduleName)
+                if (DepPrecompiler.compiledStoreFile(depDir).isFile) compiled++
+            }
+            if (compiled > 0) println("  ⚙️  precompiled $compiled dependenc${if (compiled == 1) "y" else "ies"}")
         }
         return count.get()
     }
