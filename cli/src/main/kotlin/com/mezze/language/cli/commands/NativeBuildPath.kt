@@ -407,10 +407,7 @@ object NativeBuildPath {
      * interpreter/build/libs/.
      */
     private fun findRuntimeJar(): File? {
-        System.getProperty("user.home")?.let { home ->
-            val installed = File("$home/.mezze/lib/mezze-runtime.jar")
-            if (installed.isFile) return installed
-        }
+        com.mezze.language.cli.MezzeHome.runtimeJar.takeIf { it.isFile }?.let { return it }
         System.getProperty("mezze.project.root")?.let { root ->
             val dev = File(root, "interpreter/build/libs/mezze-runtime.jar")
             if (dev.isFile) return dev

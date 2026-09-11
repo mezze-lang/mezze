@@ -52,7 +52,7 @@ object JvmLauncher {
             ?: error("mezze-runtime.jar not found in ~/.mezze/lib/ or sibling locations. Reinstall mez.")
         jars.add(runtimeJar.absolutePath)
 
-        val mezLib = File(System.getProperty("user.home"), ".mezze/lib")
+        val mezLib = MezzeHome.libDir
         for ((language, version) in polyglotDeps) {
             val jarName = when (language) {
                 "python" -> "graalpy-$version.jar"
@@ -92,7 +92,7 @@ object JvmLauncher {
      *   3. Sibling to the `mez` binary or `../lib/` (relocatable installs).
      */
     private fun findRuntimeJar(): File? {
-        val installed = File(System.getProperty("user.home"), ".mezze/lib/mezze-runtime.jar")
+        val installed = MezzeHome.runtimeJar
         if (installed.exists()) return installed
 
         val projectRoot = System.getProperty("mezze.project.root")
