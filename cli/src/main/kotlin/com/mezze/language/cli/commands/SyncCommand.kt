@@ -270,15 +270,13 @@ class SyncCommand {
         // (every dep compiles independently from its own source). Idempotent and
         // best-effort — a miss just means the consumer compiles from source.
         //
-        // Gated OFF by default: the produced stores are content-hash-verified to
-        // match a consumer's own compile (so fromStore lookups will hit), but the
-        // consumer read-side — hydrating dep typed-interfaces so deps aren't
-        // re-lowered, then serving their IR through computeReachableClosure's
-        // fromStore hook — isn't wired yet. Until it is, precompiling would only
-        // add cost to `sync` with no payoff. Flip the default when the read-side
-        // lands. Opt in now with MEZZE_PRECOMPILE_DEPS=1 (used by the reuse tests).
+        // On by default: the consumer read-side is wired (DepStoreLoader feeds
+        // PrecompiledDeps → the typechecker serves this IR instead of re-lowering
+        // deps, and computeReachableClosure carries it into the closure). Disable
+        // with MEZZE_PRECOMPILE_DEPS=0 to force every consumer to compile deps
+        // from source.
         val distinctTargets = precompileTargets.distinctBy { it.first.canonicalPath }
-        if (distinctTargets.isNotEmpty() && System.getenv("MEZZE_PRECOMPILE_DEPS") == "1") {
+        if (distinctTargets.isNotEmpty() && System.getenv("MEZZE_PRECOMPILE_DEPS") != "0") {
             var compiled = 0
             for ((depDir, libRel, moduleName) in distinctTargets) {
                 if (DepPrecompiler.compiledStoreFile(depDir).isFile) continue

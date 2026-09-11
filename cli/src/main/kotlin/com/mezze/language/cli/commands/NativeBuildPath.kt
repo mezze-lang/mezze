@@ -545,10 +545,13 @@ object NativeBuildPath {
                 closureMap[hash] = stdFn   // stdlib: leaf (resolved by the embedded runtime), as before
                 continue
             }
-            val depFn = fromStore?.invoke(hash) ?: continue
+            // A cached dependency function: served from PrecompiledDeps (populated
+            // by the CLI from the dep stores) or the explicit fromStore fallback.
+            // Unlike stdlib it is NOT embedded in the runtime, so it must be
+            // carried in the closure and its own call targets walked transitively.
+            val depFn = com.mezze.language.typechecker.PrecompiledDeps.preloweredFunctions[hash]
+                ?: fromStore?.invoke(hash) ?: continue
             closureMap[hash] = depFn
-            // A cached dependency function is not embedded — its own call targets
-            // must be in the closure too. Walk them transitively.
             for (h in com.mezze.language.stdlib.FunctionIRReachability.collectReferencedHashes(listOf(depFn))) {
                 if (h !in closureMap) queue.add(h)
             }

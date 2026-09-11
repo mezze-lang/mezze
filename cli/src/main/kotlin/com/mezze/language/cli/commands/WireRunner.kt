@@ -429,6 +429,10 @@ object WireRunner {
         val ast = parseResult.module
         if (timing) System.err.println("[${ms()}ms] parsed")
 
+        // #46: load precompiled dependency IR so the typechecker serves it
+        // instead of re-lowering deps. No-op when no dep has a compiled store.
+        DepStoreLoader.load(currentDir)
+
         val typeChecker = TypeChecker(strictTopLevel = true)
         val rawResult = try {
             typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)

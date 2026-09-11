@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 #
-# Package IR-reuse test (#46): a dependency compiled once into a shared,
-# content-addressed store gets the SAME function hashes a consumer's own
-# compile produces — the property the fromStore reuse hook relies on.
+# Package IR-reuse test (#46): a dependency compiled once into its shared,
+# content-addressed store is REUSED by a consumer instead of being re-lowered.
 #
-# app → greet → core (path deps). `MEZZE_PRECOMPILE_DEPS=1 mez sync` compiles
-# greet + core into per-dep compiled-<compiler>.sqlite stores; `mez build`
-# then compiles the consumer, persisting its whole closure. Every IR blob in a
-# dep's precompiled store MUST appear (same hash) in the consumer's closure —
-# otherwise reuse would silently never hit.
+# app → greet → core (path deps). `mez sync` compiles greet + core into per-dep
+# compiled-<compiler>.sqlite stores. `mez build` then compiles the consumer;
+# because the read-side is wired (DepStoreLoader → PrecompiledDeps → the
+# typechecker serves that IR), the consumer does NOT re-lower any dep function.
 #
-# `dev --no-watch` runs in-memory and does NOT persist blobs; the consumer
-# reference set comes from `build`, which does. Needs a built mez
+# Assertions:
+#   1. each dep gets a compiled store,
+#   2. NONE of a dep's functions carry IR in the consumer's own compiled set
+#      (src.sqlite) — proof they were served, not recompiled, and
+#   3. the program still runs end to end (value flows core → greet → app).
+#
+# `dev --no-watch` runs in-memory and does NOT persist blobs; the consumer's
+# compiled set comes from `build`, which does. Needs a built mez
 # (`just build`) and sqlite3 (fetched via nix).
 set -uo pipefail
 
@@ -49,16 +53,17 @@ EOF
 ( cd app   && "$MEZ" add greet --path ../greet >/dev/null 2>&1 )
 
 cd app
-echo "package IR-reuse e2e — precompiled dep hashes vs consumer compile:"
+echo "package IR-reuse e2e — a precompiled dep is reused, not re-lowered:"
 
-MEZZE_PRECOMPILE_DEPS=1 "$MEZ" sync >/dev/null 2>&1
+# Precompile is on by default now that the read-side is wired.
+"$MEZ" sync >/dev/null 2>&1
 for dep in greet core; do
   store="$(ls "$W"/$dep/compiled-*.sqlite 2>/dev/null | head -1)"
   [ -n "$store" ] && echo "  ✅ $dep precompiled → $(basename "$store")" \
     || { echo "  ❌ $dep not precompiled"; fail=1; }
 done
 
-# Consumer build persists the full closure (dev --no-watch does not).
+# Consumer build persists its freshly-lowered set (dev --no-watch does not).
 "$MEZ" build >/dev/null 2>&1
 CONS="$W/app/.mez/store/src.sqlite"
 [ -f "$CONS" ] || { echo "  ❌ consumer store missing after build"; exit 1; }
@@ -67,15 +72,18 @@ for dep in greet core; do
   store="$(ls "$W"/$dep/compiled-*.sqlite 2>/dev/null | head -1)"
   [ -n "$store" ] || continue
   hashes="$(SQL "$store" 'SELECT hash FROM blobs WHERE ir IS NOT NULL;')"
-  n=0; miss=0
+  n=0; relowered=0
   while IFS= read -r h; do
     [ -n "$h" ] || continue
     n=$((n+1))
-    if [ "$(SQL "$CONS" "SELECT count(*) FROM blobs WHERE hash='$h';")" != "1" ]; then
-      echo "  ❌ $dep: hash $h absent from consumer compile"; miss=1; fail=1
+    # The consumer must not have lowered this dep function itself: it may keep a
+    # typed-only interface blob, but never IR (which only scatterFunctionIRs of
+    # its OWN loweredFunctions would write).
+    if [ "$(SQL "$CONS" "SELECT count(*) FROM blobs WHERE hash='$h' AND ir IS NOT NULL;")" != "0" ]; then
+      echo "  ❌ $dep: $h was RE-LOWERED by the consumer (carries IR)"; relowered=1; fail=1
     fi
   done <<< "$hashes"
-  [ "$miss" = 0 ] && echo "  ✅ $dep: all $n IR hash(es) match the consumer's compile"
+  [ "$relowered" = 0 ] && echo "  ✅ $dep: none of its $n fn(s) re-lowered — served from the compiled store"
 done
 
 # Behavior still correct end to end.
@@ -84,6 +92,6 @@ grep -qF "value-from-core" <<<"$out" && echo "  ✅ run → value-from-core" \
   || { echo "  ❌ run did not print value-from-core"; fail=1; }
 
 echo
-[ "$fail" = 0 ] && echo "✅ pkg-reuse-e2e: precompiled dep IR is hash-identical to a consumer compile" \
+[ "$fail" = 0 ] && echo "✅ pkg-reuse-e2e: precompiled deps are reused, not re-lowered" \
   || echo "❌ pkg-reuse-e2e: FAILURES above"
 exit "$fail"

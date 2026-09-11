@@ -4,6 +4,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.parsedast.*
 import com.mezze.language.truffleir.FunctionIR
+import com.mezze.language.typechecker.PrecompiledDeps
 import com.mezze.language.typechecker.PrecompiledStdlib
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.codec.CodecGenerator
@@ -218,6 +219,11 @@ private fun compileModule(
     val preludeHashes = mutableSetOf<Hash>()
     preludeHashes.addAll(PrecompiledStdlib.preloweredFunctions.keys)
     preludeHashes.addAll(PrecompiledStdlib.stdlibDeclHashes)
+    // #46 read-side: a dependency already compiled into its shared store is a
+    // leaf here, exactly like stdlib — its hash in the leaf-set means the loop
+    // below (and TypedASTCompiler) serves its IR instead of re-lowering it.
+    // Empty unless the CLI populated PrecompiledDeps from the dep stores.
+    preludeHashes.addAll(PrecompiledDeps.declHashes)
 
     val preludeModuleHashes = PrecompiledStdlib.stdlibModuleHashes
     val importedModules = mutableListOf<TypedModule>()
@@ -262,7 +268,8 @@ private fun compileModule(
         recordShapes = recordShapesForMono,
     )
 
-    val stdlibFns = try { PrecompiledStdlib.preloweredFunctions } catch (_: Throwable) { emptyMap() }
+    val stdlibFns = (try { PrecompiledStdlib.preloweredFunctions } catch (_: Throwable) { emptyMap<Hash, FunctionIR>() }) +
+        PrecompiledDeps.preloweredFunctions   // #46: serve cached dep IR, don't re-lower
     val stdlibDictMethods = try { PrecompiledStdlib.preloweredDictMethods } catch (_: Throwable) { emptyMap() }
     val compiler = TypedASTCompiler(
         abilityImpls = allAbilityImpls,

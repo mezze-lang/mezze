@@ -426,6 +426,10 @@ class BuildCommand {
         // module from scratch.
         StoreHydrator.hydrate(store, modulePath, timing = timing)
 
+        // #46: load precompiled dependency IR so the typechecker serves it
+        // instead of re-lowering deps. No-op when no dep has a compiled store.
+        DepStoreLoader.load(currentDir)
+
         val typeChecker = TypeChecker(strictTopLevel = true)
         val rawResult = try {
             typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
