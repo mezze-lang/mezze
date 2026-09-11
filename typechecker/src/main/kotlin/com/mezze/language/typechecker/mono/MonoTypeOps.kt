@@ -179,9 +179,16 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
             unify(pattern.paramType, v.paramType, bindings) &&
             unify(pattern.returnType, v.returnType, bindings)
         is MezzeType.RecordType -> v is MezzeType.RecordType &&
+            // Move-5/differential-gate: two provably-DISTINCT declared records
+            // (same fields, different content hash) are different types and must
+            // not seed a specialization for each other — mirrors typeMatchesTarget
+            // and the solver's unifyRecords veto. Anonymous/UNDETERMINED still fall
+            // through to the structural match below.
+            identityVerdict(pattern.identity, v.identity) != IdentityVerdict.DISTINCT &&
             pattern.fields.keys == v.fields.keys &&
             pattern.fields.all { (k, t) -> unify(t, v.fields[k]!!, bindings) }
         is MezzeType.VariantType -> v is MezzeType.VariantType &&
+            identityVerdict(pattern.identity, v.identity) != IdentityVerdict.DISTINCT &&
             pattern.constructors.keys == v.constructors.keys &&
             pattern.constructors.all { (k, pT) ->
                 val vT = v.constructors[k]
@@ -198,6 +205,11 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
         is MezzeType.MapType -> unifyMap(pattern.keyType, pattern.valueType, v, bindings)
         is MezzeType.SortedMapType -> unifySortedMap(pattern.keyType, pattern.valueType, v, bindings)
         is MezzeType.NewtypeType -> v is MezzeType.NewtypeType &&
+            // Move-5: newtype is a nominal wall — two DISTINCT declared newtypes
+            // (same name, different hash: the newtype-two-faces hazard) must not
+            // seed for each other. Name-match only decides when identity is
+            // UNDETERMINED (a hashless/legacy side), mirroring the solver.
+            identityVerdict(pattern.identity, v.identity) != IdentityVerdict.DISTINCT &&
             pattern.name == v.name && unify(pattern.wrappedType, v.wrappedType, bindings)
         is MezzeType.TypeApplication -> when {
             // Same shape on both sides: constructor + args unify.
