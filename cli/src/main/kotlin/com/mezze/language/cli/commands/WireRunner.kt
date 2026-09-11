@@ -397,7 +397,10 @@ object WireRunner {
     /** Set up the project store + typechecker singletons. */
     private fun initStore(currentDir: File) {
         System.setProperty("mezze.project.root", currentDir.absolutePath)
-        val store = SQLiteMezzeStore.openProject(currentDir)
+        // Opens + invalidates cache written by a different mez version, so
+        // `mez exec` / `mez dev` never run stale IR after a toolchain switch
+        // (see ProjectStore). Covers both — they route through here.
+        val store = ProjectStore.open(currentDir)
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
     }

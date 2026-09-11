@@ -240,7 +240,9 @@ class CheckCommand {
         }
 
         val source = appFile.readText()
-        val store = SQLiteMezzeStore.openProject(currentDir)
+        // Opens + invalidates cache written by a different mez version — so a
+        // toolchain switch never type-checks against stale IR (see ProjectStore).
+        val store = ProjectStore.open(currentDir)
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
 
