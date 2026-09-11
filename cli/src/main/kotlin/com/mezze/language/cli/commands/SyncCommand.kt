@@ -178,76 +178,102 @@ class SyncCommand {
         nodes: MutableList<LockedNode>,
         failures: MutableList<String>,
     ): Int {
-        val seen = HashSet<String>()                              // "<declarerCanonical>::<name>"
-        val queue = ArrayDeque<Triple<File, String, DepSpec>>()   // (declaringDir, name, spec)
-        enqueue(queue, rootDir, rootToml, includeDev = true, failures)
+        // Concurrency: fetching is network-bound, so the graph is walked in parallel
+        // WAVES — every dep in the current frontier is resolved/fetched at once, then
+        // their own deps form the next wave. seen (dedup) is a concurrent set;
+        // resolveRegistryTarget serializes per-sha (below) so a diamond fetches once.
+        val seen = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()  // "<declarerCanonical>::<name>"
+        val safeNodes = java.util.Collections.synchronizedList(nodes)
+        val safeFailures = java.util.Collections.synchronizedList(failures)
+        val printLock = Any()
+        val count = java.util.concurrent.atomic.AtomicInteger(0)
 
-        var count = 0
-        while (queue.isNotEmpty()) {
-            val (declaringDir, name, spec) = queue.removeFirst()
-            if (!seen.add("${declaringDir.canonicalPath}::$name")) continue
-
+        // Resolve ONE dep; return its own direct deps (the next wave). Runs on a pool thread.
+        fun process(declaringDir: File, name: String, spec: DepSpec): List<Triple<File, String, DepSpec>> {
             val target = when (spec) {
-                is DepSpec.Path -> resolvePathTarget(declaringDir, name, spec.rawPath)
-                is DepSpec.Registry -> resolveRegistryTarget(name, spec, storeRoot, isClean, downloader, archive)
+                is DepSpec.Path -> resolvePathTarget(declaringDir, name, spec.rawPath, printLock)
+                is DepSpec.Registry -> resolveRegistryTarget(name, spec, storeRoot, isClean, downloader, archive, printLock)
             }
-            if (target == null) { failures.add(name); continue }   // resolver already printed why
+            if (target == null) { safeFailures.add(name); return emptyList() }
 
             val depToml = readToml(File(target, "Mezze.toml"))
             if (depToml == null) {
-                println("  ❌ $name: no readable Mezze.toml in $target")
-                failures.add(name)
-                continue
+                synchronized(printLock) { println("  ❌ $name: no readable Mezze.toml in $target") }
+                safeFailures.add(name)
+                return emptyList()
             }
             val version = depToml.`package`.version
-
             // Link into the DECLARING package's own .deps/mezze so its `use` resolves.
-            val depsDir = File(declaringDir, ".deps/mezze").also { it.mkdirs() }
-            materializeSymlink(depsDir, name, target, version)
-            count++
+            File(declaringDir, ".deps/mezze").also { it.mkdirs() }.let {
+                materializeSymlink(it, name, target, version)
+            }
+            count.incrementAndGet()
             val where = if (declaringDir == rootDir) "" else "  (into ${declaringDir.name}/.deps)"
-            println("  ✅ $name-$version -> ${target.path}$where")
+            synchronized(printLock) { println("  ✅ $name-$version -> ${target.path}$where") }
 
-            // Record this node in the graph lock, with its own direct-dep edges.
             val edges = (depToml.pathDependencies.keys + depToml.dependencies.keys).sorted()
-            nodes.add(
+            safeNodes.add(
                 when (spec) {
                     is DepSpec.Path -> LockedNode(name, version, source = "path", path = target.path, dependencies = edges)
                     is DepSpec.Registry -> LockedNode(name, version, source = "registry", url = spec.url, checksum = "sha256:${spec.sha256}", dependencies = edges)
                 }
             )
-
-            // Recurse: this dep's own deps resolve against ITS dir. Dev-deps are the
-            // top project's only — a dependency's dev-deps are not the consumer's.
-            enqueue(queue, target, depToml, includeDev = false, failures)
+            // This dep's own deps resolve against ITS dir. Dev-deps are the top
+            // project's only — a dependency's dev-deps are not the consumer's.
+            return directDepsOf(target, depToml, includeDev = false, safeFailures, printLock)
         }
-        return count
+
+        var frontier = directDepsOf(rootDir, rootToml, includeDev = true, safeFailures, printLock)
+        if (frontier.isEmpty()) return 0
+
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(
+            minOf(16, maxOf(4, Runtime.getRuntime().availableProcessors() * 2)),
+        )
+        try {
+            while (frontier.isNotEmpty()) {
+                // Dedup this wave against everything seen (thread-safe first-writer-wins).
+                val fresh = frontier.filter { seen.add("${it.first.canonicalPath}::${it.second}") }
+                val futures = fresh.map { (dir, name, spec) ->
+                    pool.submit(java.util.concurrent.Callable { process(dir, name, spec) })
+                }
+                frontier = futures.flatMap { it.get() }
+            }
+        } finally {
+            pool.shutdown()
+        }
+        return count.get()
     }
 
-    private fun enqueue(
-        queue: ArrayDeque<Triple<File, String, DepSpec>>,
+    /** A package's direct deps as (declaringDir, name, spec) triples. Pure (no I/O). */
+    private fun directDepsOf(
         dir: File,
         toml: MezzeToml,
         includeDev: Boolean,
         failures: MutableList<String>,
-    ) {
-        toml.pathDependencies.forEach { (n, p) -> queue.add(Triple(dir, n, DepSpec.Path(p))) }
+        printLock: Any,
+    ): List<Triple<File, String, DepSpec>> {
+        val out = mutableListOf<Triple<File, String, DepSpec>>()
+        toml.pathDependencies.forEach { (n, p) -> out.add(Triple(dir, n, DepSpec.Path(p))) }
         val registry = if (includeDev) toml.dependencies + toml.devDependencies else toml.dependencies
         registry.forEach { (n, fullUrl) ->
             try {
                 val (url, sha) = parseDependencyUrl(fullUrl)
-                queue.add(Triple(dir, n, DepSpec.Registry(url, sha)))
+                out.add(Triple(dir, n, DepSpec.Registry(url, sha)))
             } catch (e: IllegalArgumentException) {
-                println("  ❌ $n: ${e.message?.lineSequence()?.firstOrNull() ?: "invalid dependency URL"}")
+                synchronized(printLock) { println("  ❌ $n: ${e.message?.lineSequence()?.firstOrNull() ?: "invalid dependency URL"}") }
                 failures.add(n)
             }
         }
+        return out
     }
 
-    private fun resolvePathTarget(declaringDir: File, name: String, rawPath: String): File? {
+    /** Per-sha200 lock so concurrent waves fetching the SAME content (diamonds) fetch once. */
+    private val shaLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+    private fun resolvePathTarget(declaringDir: File, name: String, rawPath: String, printLock: Any): File? {
         val target = File(rawPath).let { if (it.isAbsolute) it else File(declaringDir, rawPath) }.canonicalFile
         if (!target.isDirectory || !File(target, "Mezze.toml").exists()) {
-            println("  ❌ $name: '$rawPath' (from ${declaringDir.name}) is not a Mezze package (resolved: $target)")
+            synchronized(printLock) { println("  ❌ $name: '$rawPath' (from ${declaringDir.name}) is not a Mezze package (resolved: $target)") }
             return null
         }
         return target
@@ -260,22 +286,27 @@ class SyncCommand {
         isClean: Boolean,
         downloader: PackageDownloader,
         archive: ArchiveHandler,
+        printLock: Any,
     ): File? {
         val storeDir = File(storeRoot, spec.sha256)
-        if (File(storeDir, "Mezze.toml").exists() && !isClean) return storeDir   // content-addressed cache hit
+        // Serialize per content hash: two waves needing the same sha download+extract
+        // once; the loser sees the cache hit. Different shas run fully in parallel.
+        synchronized(shaLocks.computeIfAbsent(spec.sha256) { Any() }) {
+            if (File(storeDir, "Mezze.toml").exists() && !isClean) return storeDir   // content-addressed cache hit
 
-        val archiveFile = try {
-            downloader.downloadPackage(name, spec.url, spec.sha256)
-        } catch (e: Exception) {
-            println((e.message ?: "❌ $name: download failed").prependIndent("  "))
-            return null
-        }
-        return try {
-            extractIntoStore(archive, archiveFile, storeDir, name)
-            storeDir
-        } catch (e: ArchiveException) {
-            println((e.message ?: "❌ $name: extract failed").prependIndent("  "))
-            null
+            val archiveFile = try {
+                downloader.downloadPackage(name, spec.url, spec.sha256)
+            } catch (e: Exception) {
+                synchronized(printLock) { println((e.message ?: "❌ $name: download failed").prependIndent("  ")) }
+                return null
+            }
+            return try {
+                extractIntoStore(archive, archiveFile, storeDir, name)
+                storeDir
+            } catch (e: ArchiveException) {
+                synchronized(printLock) { println((e.message ?: "❌ $name: extract failed").prependIndent("  ")) }
+                null
+            }
         }
     }
 
