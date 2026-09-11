@@ -29,8 +29,12 @@ import java.security.MessageDigest
  */
 class BuildCommand {
 
-    fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
+    fun execute(args: List<String>, invocationDir: File = File(System.getProperty("user.dir"))) {
         val msg = CliMessages()
+        // Resolve the project root by walking up to the nearest Mezze.toml, so
+        // `mez build` works from any subdirectory and writes .build/ + .mez/ at the
+        // root (see ProjectRoot). `currentDir` is the root everywhere below.
+        val currentDir = ProjectRoot.discover(invocationDir) ?: invocationDir
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {

@@ -44,7 +44,11 @@ class DevCommand {
         }
 
         val msg = CliMessages()
-        val mezzeToml = File(currentDir, "Mezze.toml")
+        // Walk up to the nearest Mezze.toml so `mez dev` works from any
+        // subdirectory and uses the root's .mez/ (see ProjectRoot). Single-file
+        // `mez exec <file>` never reaches here — ExecCommand runs it standalone.
+        val root = ProjectRoot.discover(currentDir) ?: currentDir
+        val mezzeToml = File(root, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
             System.err.println(msg.noManifest())
@@ -76,7 +80,7 @@ class DevCommand {
             manifest.app.first()
         }
 
-        val appFile = File(currentDir, appConfig.path)
+        val appFile = File(root, appConfig.path)
         if (!appFile.exists()) {
             System.err.println(msg.appFileNotFound(appFile))
             return
@@ -92,9 +96,9 @@ class DevCommand {
         }
 
         val exit = if (noWatch) {
-            WireRunner.execOnce(currentDir, appFile, entryName, modulePath, appConfig.name, devFlags, appArgs = appArgs)
+            WireRunner.execOnce(root, appFile, entryName, modulePath, appConfig.name, devFlags, appArgs = appArgs)
         } else {
-            WireRunner.watch(currentDir, appFile, entryName, modulePath, appConfig.name, devFlags)
+            WireRunner.watch(root, appFile, entryName, modulePath, appConfig.name, devFlags)
         }
         kotlin.system.exitProcess(exit)
     }

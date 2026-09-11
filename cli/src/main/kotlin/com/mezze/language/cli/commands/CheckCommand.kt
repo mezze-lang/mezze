@@ -212,9 +212,14 @@ class CheckCommand {
             kotlin.system.exitProcess(exitCode)
         }
 
-        val mezzeToml = File(currentDir, "Mezze.toml")
+        // Resolve the project root by walking up to the nearest Mezze.toml, so
+        // `mez check` works from any subdirectory and the .mez/ store lands at the
+        // root (see ProjectRoot). Falls back to cwd only for the no-project error.
+        val root = ProjectRoot.discover(currentDir) ?: currentDir
+        val mezzeToml = File(root, "Mezze.toml")
         if (!mezzeToml.exists()) {
-            bail("No Mezze.toml found. Use 'mez check <file>' for single-file mode.", 1)
+            bail("No Mezze.toml in ${currentDir.absolutePath} or any parent. " +
+                "Run 'mez init' to create a project, or 'mez check <file>' for a single file.", 1)
         }
 
         val manifest = try {
@@ -234,7 +239,7 @@ class CheckCommand {
             manifest.app.first()
         }
 
-        val appFile = File(currentDir, appConfig.path)
+        val appFile = File(root, appConfig.path)
         if (!appFile.exists()) {
             bail("App file not found: ${appFile.absolutePath}", 1)
         }
@@ -242,7 +247,7 @@ class CheckCommand {
         val source = appFile.readText()
         // Opens + invalidates cache written by a different mez version — so a
         // toolchain switch never type-checks against stale IR (see ProjectStore).
-        val store = ProjectStore.open(currentDir)
+        val store = ProjectStore.open(root)
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
 
@@ -265,7 +270,7 @@ class CheckCommand {
             // Run via the result-returning lower-level API so we can show
             // ALL collected errors (#218), not just the first one — sibling
             // declarations with independent failures used to be hidden.
-            val rawResult = typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
+            val rawResult = typeChecker.checkParsedModule(ast, root.toPath(), enablePrelude = true)
             val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
             when (rawResult) {
