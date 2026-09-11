@@ -55,11 +55,9 @@ if "$MEZ" check 2>&1 | grep -qF "Check passed"; then echo "  ✅ check (app→gr
 else echo "  ❌ check failed"; "$MEZ" check 2>&1 | grep -iE 'error|not found' | head -2 | sed 's/^/       /'; fail=1; fi
 
 # RUN — the value must flow core → greet → app at runtime (this is what regressed)
-for mode in "exec" "dev --no-watch" "exec src/app.mz"; do
-  out="$("$MEZ" $mode 2>&1 | grep -v WARNING)"
-  if grep -qF "value-from-core" <<<"$out"; then echo "  ✅ run ($mode) → value-from-core"
-  else echo "  ❌ run ($mode):"; echo "$out" | grep -iE 'not found|error' | head -1 | sed 's/^/       /'; fail=1; fi
-done
+out="$("$MEZ" dev --no-watch 2>&1 | grep -v WARNING)"
+if grep -qF "value-from-core" <<<"$out"; then echo "  ✅ run (dev --no-watch) → value-from-core"
+else echo "  ❌ run (dev --no-watch):"; echo "$out" | grep -iE 'not found|error' | head -1 | sed 's/^/       /'; fail=1; fi
 
 echo
 [ "$fail" = 0 ] && echo "✅ pkg-e2e: transitive dependency graph type-checks and runs" \

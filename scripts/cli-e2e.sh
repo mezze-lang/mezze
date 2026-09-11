@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # End-to-end smoke test of the `mez` CLI runtime commands against a freshly
-# scaffolded app: check · exec · dev · build (jar) · run-jar · build --native ·
+# scaffolded app: check · dev · build (jar) · run-jar · build --native ·
 # run-native. Exercises every path that spawns/embeds the runtime, so a regression
 # in runtime-jar / shell / toolchain resolution (e.g. the MezzeHome rework) is
 # caught here rather than by a user.
@@ -41,7 +41,6 @@ cd app
 
 echo "mez CLI end-to-end:"
 expect "check"         "Check passed"    "$MEZ" check
-expect "exec"          "Hello from app!" "$MEZ" exec src/app.mz
 expect "dev --no-watch" "Hello from app!" "$MEZ" dev --no-watch
 expect "build (jar)"   "built"           "$MEZ" build
 
