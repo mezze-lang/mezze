@@ -8,8 +8,10 @@ import java.io.File
  * Handle `mezze sync` command to download and install all dependencies
  *
  * Usage:
- *   mezze sync              # Download all dependencies
- *   mezze sync --clean      # Delete and re-download everything
+ *   mez sync              # Fetch/resolve all dependencies
+ *   mez sync --clean      # Re-download deps (bypass the content-store cache)
+ *   mez sync --force      # Clear the compiled cache → next build recompiles from source
+ *   mez sync --locked     # Verify Mezze.lock matches (CI); fail on drift
  */
 class SyncCommand {
 
@@ -35,8 +37,17 @@ class SyncCommand {
             return 1
         }
 
-        val isClean = args.contains("--clean")
+        val isClean = args.contains("--clean")     // re-download deps (bypass content-store cache)
+        val isForce = args.contains("--force")     // wipe the compiled cache → next build recompiles from source
         val isLocked = args.contains("--locked")   // verify against Mezze.lock instead of writing it
+
+        // --force: clear the project's compiled cache (.mez/store) so the next
+        // check/build/dev recompiles everything from source — the escape hatch for
+        // "recompile past the cache", independent of the content-hash reuse gates.
+        if (isForce) {
+            com.mezze.language.codebase.SQLiteMezzeStore.wipeProjectFiles(root)
+            println("🔨 --force: cleared the compiled cache; the next build recompiles from source.")
+        }
 
         // Read Mezze.toml
         val tomlContent = mezzeToml.readText()
