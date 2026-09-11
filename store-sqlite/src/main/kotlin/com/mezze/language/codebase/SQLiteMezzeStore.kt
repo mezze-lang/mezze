@@ -187,7 +187,23 @@ class SQLiteMezzeStore private constructor(
          *  6. Install the parser-cache hook so ModuleResolver consults
          *     parsed_modules before invoking the parser (slice A).
          */
-        fun openProject(projectRoot: File): SQLiteMezzeStore {
+        fun openProject(projectRoot: File): SQLiteMezzeStore =
+            try {
+                openProjectOnce(projectRoot)
+            } catch (e: java.sql.SQLException) {
+                // A cache file is corrupt/malformed ("database disk image is
+                // malformed", "file is not a database", truncated -wal, …). `.mez/`
+                // is pure derived cache, so the safe, self-healing recovery is to
+                // wipe it and rebuild from source on this run — not crash.
+                System.err.println(
+                    "mez: cache at ${com.mezze.language.store.ProjectLayout.storeDir(projectRoot)} " +
+                        "was unreadable (${e.message?.take(80)}); rebuilding it from source.",
+                )
+                wipeProjectFiles(projectRoot)
+                openProjectOnce(projectRoot) // if THIS fails it's a real problem — let it surface
+            }
+
+        private fun openProjectOnce(projectRoot: File): SQLiteMezzeStore {
             val srcFile = resolveSrcFile(projectRoot)
             val stdlibFile = resolveStdlibFile(projectRoot)
             val depsFile = resolveDepsFile(projectRoot)
@@ -197,22 +213,28 @@ class SQLiteMezzeStore private constructor(
             ensureDepsFile(depsFile)
 
             val conn = DriverManager.getConnection("jdbc:sqlite:${srcFile.absolutePath}")
-            val store = SQLiteMezzeStore(conn, readOnly = false)
-            store.configurePragmas()
-            store.initSchema()
-            store.attachAuxDb(DB_STDLIB, stdlibFile)
-            store.attachAuxDb(DB_DEPS, depsFile)
-            // Both attached files were created in advance by ensureStdlib /
-            // ensureDeps, but defensive schema apply ensures they have the
-            // expected tables — important when a stale or partially-written
-            // file is on disk.
-            store.applyBaselineSchemaTo(DB_STDLIB)
-            store.applyBaselineSchemaTo(DB_DEPS)
+            return try {
+                val store = SQLiteMezzeStore(conn, readOnly = false)
+                store.configurePragmas()
+                store.initSchema()
+                store.attachAuxDb(DB_STDLIB, stdlibFile)
+                store.attachAuxDb(DB_DEPS, depsFile)
+                // Both attached files were created in advance by ensureStdlib /
+                // ensureDeps, but defensive schema apply ensures they have the
+                // expected tables — important when a stale or partially-written
+                // file is on disk.
+                store.applyBaselineSchemaTo(DB_STDLIB)
+                store.applyBaselineSchemaTo(DB_DEPS)
 
-            com.mezze.language.parser.ParsedModuleCacheHolder.set(
-                StoreParsedModuleCache(store)
-            )
-            return store
+                com.mezze.language.parser.ParsedModuleCacheHolder.set(
+                    StoreParsedModuleCache(store)
+                )
+                store
+            } catch (e: Throwable) {
+                // Release the file handle before the caller wipes + retries.
+                runCatching { conn.close() }
+                throw e
+            }
         }
 
         /**

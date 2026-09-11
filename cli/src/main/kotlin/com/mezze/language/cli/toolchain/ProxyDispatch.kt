@@ -113,7 +113,18 @@ object ProxyDispatch {
     }
 
     private fun exec(target: File, args: List<String>): Int {
-        val proc = ProcessBuilder(listOf(target.absolutePath) + args).inheritIO().start()
+        val proc = try {
+            ProcessBuilder(listOf(target.absolutePath) + args).inheritIO().start()
+        } catch (e: java.io.IOException) {
+            // The binary exists (we checked isFile) but won't run — corrupt,
+            // wrong arch, or not executable. Say so and how to fix, not a trace.
+            System.err.println("mez: the toolchain binary could not be started:")
+            System.err.println("     ${target.absolutePath}")
+            System.err.println("     ${e.message}")
+            System.err.println("     It looks corrupt or not executable — reinstall this toolchain")
+            System.err.println("     (e.g. 'mez toolchain install <tarball>', or rebuild it).")
+            return 126 // conventional "command found but not executable"
+        }
         // Forward termination to the dispatched toolchain. An interactive Ctrl-C
         // already signals the whole foreground process group (proxy + child + its
         // JVM), but if the proxy is killed by PID alone the child would orphan —
