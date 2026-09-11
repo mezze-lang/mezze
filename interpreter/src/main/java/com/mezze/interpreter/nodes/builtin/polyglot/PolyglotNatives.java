@@ -402,6 +402,20 @@ public final class PolyglotNatives {
         }
     }
 
+    @TruffleBoundary
+    public static MezzeVariant writeArray(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        long index = getLong(args, "index");
+        Object newVal = getField(args, "new_val");
+        Object raw = newVal instanceof MezzeForeign mf ? mf.getDelegate() : newVal;
+        try {
+            InteropLibrary.getUncached().writeArrayElement(f.getDelegate(), index, raw);
+            return MezzeVariant.ok(MezzeRecord.empty());
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
     // ==================== Execution ====================
 
     @TruffleBoundary

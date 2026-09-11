@@ -65,12 +65,9 @@ impl JsForeign where {
   ## Read an indexed element (JS `arr[i]`).
   index        = { it, i } ->
     __native_polyglot_read_array    { val = it, index = i },
-  ## Assign an indexed element (JS `arr[i] = val`). Currently returns
-  ## an error for read-only indexables — a `write_array` interop op
-  ## would be needed to remove that limitation.
-  set_index    = { it, i, val } -> Err {
-    error = TypeError { message = "set_index is not yet supported for JsForeign" },
-  },
+  ## Assign an indexed element (JS `arr[i] = val`).
+  set_index    = { it, i, val } ->
+    __native_polyglot_write_array   { val = it, index = i, new_val = val },
 
   ## ---- Universal InteropLibrary vocabulary ----
 

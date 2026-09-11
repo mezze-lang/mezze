@@ -197,6 +197,50 @@ class JsInteropTest {
     }
 
     @Test
+    fun `js set_index writes then reads back`() {
+        // eval into a global so subsequent set_index / index calls see
+        // the same array. `arr[1] = 99` then `arr[1]` should yield 99.
+        val result = eval(
+            """
+            use std::polyglot::js::{ Js, GraalJs, from_int }
+            perform GraalJs in do
+              let a_r = Js.eval { source = "globalThis.__mez_set_arr = [1, 2, 3]; globalThis.__mez_set_arr" }
+              match a_r is
+                Ok { val = arr } ->
+                  match arr.set_index { i = 1, val = from_int { val = 99 } } is
+                    Ok { val = _ } ->
+                      match arr.index { i = 1 } is
+                        Ok { val = e } -> e.as_int{}
+                        Err { error } -> Err { error = error }
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(99L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `js set_index on frozen array yields Err`() {
+        // A frozen array rejects element writes; GraalJS reports the
+        // rejection through an InteropException that translateException
+        // maps to an InteropError variant, surfacing as Err on the
+        // Mezze side.
+        val result = eval(
+            """
+            use std::polyglot::js::{ Js, GraalJs, from_int }
+            perform GraalJs in do
+              let a_r = Js.eval { source = "Object.freeze([1, 2, 3])" }
+              match a_r is
+                Ok { val = arr } ->
+                  arr.set_index { i = 0, val = from_int { val = 99 } }
+                Err { error } -> Err { error = error }
+            """.trimIndent()
+        )
+        assertErr(result)
+    }
+
+    @Test
     fun `js array length via inherent array_size`() {
         val result = eval(
             """

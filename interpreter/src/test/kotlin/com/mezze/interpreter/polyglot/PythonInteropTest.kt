@@ -144,6 +144,50 @@ class PythonInteropTest {
     }
 
     @Test
+    fun `python list set_item writes then reads back`() {
+        // `lst[1] = 99` then read `lst[1]` — round-trip on a mutable
+        // Python list through the writeArrayElement InteropLibrary
+        // message.
+        val result = eval(
+            """
+            use std::polyglot::python::{ Python, GraalPy, from_int }
+            perform GraalPy in do
+              let a_r = Python.eval { source = "[10, 20, 30]" }
+              match a_r is
+                Ok { val = lst } ->
+                  match lst.set_item { i = 1, val = from_int { val = 99 } } is
+                    Ok { val = _ } ->
+                      match lst.array_at { index = 1 } is
+                        Ok { val = e } -> e.as_int{}
+                        Err { error } -> Err { error = error }
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(99L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `python list set_item out of bounds yields Err`() {
+        // Python raises IndexError on out-of-range list assignment;
+        // GraalPy surfaces that as a PolyglotException / InteropException
+        // which translateException converts to an InteropError variant.
+        val result = eval(
+            """
+            use std::polyglot::python::{ Python, GraalPy, from_int }
+            perform GraalPy in do
+              let a_r = Python.eval { source = "[1, 2, 3]" }
+              match a_r is
+                Ok { val = lst } ->
+                  lst.set_item { i = 99, val = from_int { val = 42 } }
+                Err { error } -> Err { error = error }
+            """.trimIndent()
+        )
+        assertErr(result)
+    }
+
+    @Test
     fun `python list len via inherent method`() {
         val result = eval(
             """

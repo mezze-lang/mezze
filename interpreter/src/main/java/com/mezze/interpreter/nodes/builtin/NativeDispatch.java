@@ -4297,6 +4297,8 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.arraySize(r));
         HANDLERS.put("__native_polyglot_read_array",
             (r, c) -> PolyglotNatives.readArray(r));
+        HANDLERS.put("__native_polyglot_write_array",
+            (r, c) -> PolyglotNatives.writeArray(r));
 
         // Execution
         HANDLERS.put("__native_polyglot_is_executable",
