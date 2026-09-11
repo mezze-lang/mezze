@@ -130,6 +130,39 @@ class SyncRegistryDepsTest {
     }
 
     @Test
+    fun `diamond graph fetches the shared registry dep once (parallel + per-sha lock)`(@TempDir tmp: Path) {
+        val root = tmp.toFile()
+        val store = File(root, "store")
+
+        // leaf — the shared bottom of the diamond
+        val leafSrc = File(root, "leaf-src").also { pkg(it, "leaf") }
+        val leafTar = File(root, "leaf.tar.gz").also { tarGz(leafSrc, it) }
+        val leafHash = sha256(leafTar)
+        val leafDep = "${leafTar.toURI()}#sha256:$leafHash"
+
+        // two middles, BOTH depending on the same leaf tarball (same sha)
+        val m1 = File(root, "m1-src").also { pkg(it, "m1", mapOf("leaf" to leafDep)) }
+        val m1Tar = File(root, "m1.tar.gz").also { tarGz(m1, it) }; val m1Hash = sha256(m1Tar)
+        val m2 = File(root, "m2-src").also { pkg(it, "m2", mapOf("leaf" to leafDep)) }
+        val m2Tar = File(root, "m2.tar.gz").also { tarGz(m2, it) }; val m2Hash = sha256(m2Tar)
+
+        // app depends on both middles — same wave, fetched in parallel
+        val app = File(root, "app").also {
+            pkg(it, "app", mapOf("m1" to "${m1Tar.toURI()}#sha256:$m1Hash", "m2" to "${m2Tar.toURI()}#sha256:$m2Hash"))
+        }
+
+        SyncCommand().execute(emptyList(), currentDir = app, storeRootOverride = store)
+
+        assertNotNull(depLink(app, "m1")); assertNotNull(depLink(app, "m2"))
+        // leaf extracted exactly once (shared content-store entry), despite two
+        // concurrent middles both pulling it — the per-sha lock serialized it.
+        assertEquals(1, store.listFiles()?.count { it.name == leafHash }, "leaf stored once")
+        // …and linked into BOTH middles' store-entry .deps
+        assertNotNull(File(store, "$m1Hash/.deps/mezze").listFiles()?.firstOrNull { it.name.startsWith("leaf-") })
+        assertNotNull(File(store, "$m2Hash/.deps/mezze").listFiles()?.firstOrNull { it.name.startsWith("leaf-") })
+    }
+
+    @Test
     fun `transitive remote dep lands in the store entry's own deps`(@TempDir tmp: Path) {
         val root = tmp.toFile()
         val store = File(root, "store")
