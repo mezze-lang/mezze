@@ -422,24 +422,13 @@ class ExpressionConstraintGenerator {
         }
     }
 
-    internal fun extractTypeVariables(type: MezzeType): List<TypeVar> {
-        return when (type) {
-            is MezzeType.VarType -> listOf(type.variable)
-            is MezzeType.FunctionType -> {
-                extractTypeVariables(type.paramType) + extractTypeVariables(type.returnType)
-            }
-            is MezzeType.RecordType -> {
-                type.fields.values.flatMap { extractTypeVariables(it) }
-            }
-            is MezzeType.VariantType -> {
-                type.constructors.values.filterNotNull().flatMap { extractTypeVariables(it) } +
-                type.typeArgs.flatMap { extractTypeVariables(it) }
-            }
-            is MezzeType.ParametricBuiltin -> type.typeArgs.flatMap { extractTypeVariables(it) }
-            is MezzeType.TypeApplication -> type.args.flatMap { extractTypeVariables(it) }
-            else -> emptyList()
-        }
-    }
+    // S-06/L-30: removed the dead `extractTypeVariables` walker. It was NOT
+    // ability-aware (dropped abilityConstraints + EffectRow assoc-types) — the
+    // latent 'out-leak hazard the audit flagged — and had ZERO external callers.
+    // The live free-var walks are the ability-aware getFreeTypeVariables
+    // (instantiation) and ast.solving.collectFreeTypeVars (generalization); those
+    // are the single source of truth. Deleting the divergent walker removes the
+    // trap of a future caller reintroducing the leak.
 
     internal fun wrapCallResultWithEffects(
         valueType: MezzeType,
