@@ -166,6 +166,38 @@ class StructuralMatcherDifferentialGateTest {
     }
 
     @Test
+    fun `TypeAnnotationMatcher agrees with identity on same-name distinct-hash types`() {
+        // The 4th matcher (TypeAnnotationMatcher) compares a MezzeType against a
+        // PARSED annotation, so it can't join the MezzeType-pair matrix directly —
+        // but it must honor the same identity discipline: a hashless annotation
+        // `Color` matches a Declared `Color` type by NAME (the annotation has no
+        // hash to key on — the sound UNDETERMINED fallback), and it must NOT then
+        // be treated as interchangeable with a DIFFERENT declared `Color`. This pins
+        // that the annotation matcher's name-fallback only fires for the hashless
+        // annotation side, never to equate two distinct declared types.
+        val colorA = declaredVariant("Color", "a", listOf("Red", "Green", "Blue"))
+        val colorB = declaredVariant("Color", "b", listOf("Red", "Green", "Blue"))
+        val colorAnn = com.mezze.language.parsedast.ParsedNamedType(
+            "Color", com.mezze.language.parsedast.Loc("t.mz", 1, 1, 1, 1))
+
+        // A hashless `Color` annotation matches EITHER declared Color by name — that
+        // is the intended UNDETERMINED behavior (the annotation carries no identity).
+        assertTrue(
+            com.mezze.language.typechecker.util.TypeAnnotationMatcher
+                .typeMatchesAnnotation(colorA, colorAnn, emptyMap()),
+            "hashless `Color` annotation should match declared Color A by name")
+        assertTrue(
+            com.mezze.language.typechecker.util.TypeAnnotationMatcher
+                .typeMatchesAnnotation(colorB, colorAnn, emptyMap()),
+            "hashless `Color` annotation should match declared Color B by name")
+        // But the two declared Colors themselves remain DISTINCT to the identity
+        // core and the MezzeType matchers (already asserted elsewhere) — the
+        // annotation matcher's name-match does NOT collapse them.
+        assertEquals(IdentityVerdict.DISTINCT, identityVerdict(colorA.identity, colorB.identity))
+        assertFalse(monoTMT(colorA, colorB), "the two declared Colors stay DISTINCT to MonoTypeOps")
+    }
+
+    @Test
     fun `primitives match themselves and not each other across every matcher`() {
         assertTrue(solverUn(IntType, IntType))
         assertTrue(monoTMT(IntType, IntType))
