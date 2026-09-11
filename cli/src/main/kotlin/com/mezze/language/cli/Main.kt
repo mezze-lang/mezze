@@ -83,13 +83,20 @@ private fun detectProjectRoot(): File? {
     return null
 }
 
-fun main(args: Array<String>) {
+fun main(rawArgs: Array<String>) {
     // Toolchain proxy: if this binary is running as ~/.mezze/bin/mez, resolve
     // the pinned toolchain and re-exec its own binary (then exit). A no-op for
     // a toolchain's own binary or a dev/JVM launch, so everything below runs
     // exactly as before in those cases. Must be first — before any store /
     // stdlib / project-root setup, which the dispatched binary redoes itself.
-    com.mezze.language.cli.toolchain.ProxyDispatch.maybeReexecAndExit(args)
+    com.mezze.language.cli.toolchain.ProxyDispatch.maybeReexecAndExit(rawArgs)
+
+    // A leading `+<version>` selects the toolchain and is consumed by the proxy
+    // when it dispatches. If we reach here we're running in-process instead — a
+    // toolchain's own binary, or a proxy-handled `toolchain` command — so drop a
+    // leading `+ver` rather than mistake it for the command name.
+    val args = if (rawArgs.firstOrNull()?.let { it.startsWith("+") && it.length > 1 } == true)
+        rawArgs.drop(1).toTypedArray() else rawArgs
 
     // Register the SQLite-backed store opener so PrecompiledStdlib can
     // hydrate from `stdlib.sqlite` without reflection. Must happen before
