@@ -15,6 +15,18 @@ import kotlinx.serialization.decodeFromByteArray
 @OptIn(ExperimentalSerializationApi::class)
 object StoreSerialization {
 
+    /**
+     * Compatibility version of the compiled-IR + interface format that crosses a
+     * package boundary. A consumer loads a dependency's shipped compiled IR only
+     * when its stamp equals this; otherwise it recompiles from the shipped source
+     * (the never-fail fallback). Bump per `planned_features/package-management/
+     * versioning-governance.md`: any change to lowered-IR shape/encoding, the
+     * interface format, or the hash-closure inputs — never for a pure optimization
+     * that leaves the bytes identical. Distinct from `SQLiteMezzeStore.SCHEMA_VERSION`
+     * (on-disk table layout) and `BuildInfo.VERSION` (toolchain release identity).
+     */
+    const val IR_VERSION: Int = 1
+
     private val cbor = Cbor {
         ignoreUnknownKeys = true
         encodeDefaults = false

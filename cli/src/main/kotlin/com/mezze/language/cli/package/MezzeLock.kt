@@ -26,6 +26,13 @@ import java.io.File
 data class MezzeLock(
     val version: Int = 2,
     val root: String = "",
+    /**
+     * The compiled-IR compat version the graph was resolved under
+     * (`StoreSerialization.IR_VERSION`). Records which IR format a consumer would
+     * need to load any shipped compiled dep IR as-is vs. recompile from source
+     * (see versioning-governance.md). Defaulted so older locks still parse.
+     */
+    val ir: Int = 0,
     val packages: List<LockedNode> = emptyList(),
 )
 
