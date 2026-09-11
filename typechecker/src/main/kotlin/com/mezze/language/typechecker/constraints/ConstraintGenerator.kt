@@ -485,6 +485,24 @@ class ConstraintGenerator(
                 item.value.loc, abilityConstrainedVars + havingVars + associatedTypeNameVars,
                 unresolvedOutVarIds
             )
+        } else {
+            // A non-function annotation that is (or contains only) type VARIABLES is
+            // a promise of full polymorphism — `let x : 'a = 5` claims x works at
+            // EVERY type (∀a. a). The body `5` is only Int, so the annotation
+            // over-generalizes and must be rejected (matching Haskell's `x :: a;
+            // x = 5` → "No instance for Num a"). The ParsedFunctionType branch above
+            // already enforces this INSIDE function types via
+            // validatePolymorphismPreserved; run the same check for the top-level
+            // scalar case, which previously slipped through (alphaEquivalent's
+            // `VarType -> true` accepted it and silently narrowed x to Int). A bare
+            // scalar annotation has no ability/having/associated-type exemptions.
+            val annotationVars = com.mezze.language.ast.collectTypeVarsInOrder(preConvertedAnnotationType)
+            if (annotationVars.isNotEmpty()) {
+                annotationValidator.validatePolymorphismPreserved(
+                    preConvertedAnnotationType, substitution, varName,
+                    item.value.loc, emptySet(), emptySet()
+                )
+            }
         }
 
         // #274-B: run even when annotation.effects is null (annotation

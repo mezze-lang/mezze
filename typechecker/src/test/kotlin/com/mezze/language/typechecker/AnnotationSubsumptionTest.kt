@@ -18,10 +18,11 @@ import java.nio.file.Paths
  * by asserting the inferred TYPE on the accept cases and the REJECTION on the
  * widen cases.
  *
- * Note on `let g: 'a = 5`: the checker ACCEPTS it and infers `g : Int` — the
- * annotation var unifies with the body and NARROWS to Int; it does NOT become
- * `forall a. a`. This is sound (verified by the double-view rejection test); it
- * is pinned as current behaviour, not a leak.
+ * Note on `let g: 'a = 5`: a lone annotation variable is a promise of FULL
+ * polymorphism (`g : forall a. a` — usable at every type), which the body `5`
+ * (only Int) cannot fulfil. It is REJECTED, matching Haskell's `x :: a; x = 5`
+ * ("No instance for Num a"). This is the same over-generalization the
+ * function-return case rejects, applied to a top-level scalar binding.
  */
 class AnnotationSubsumptionTest {
     private lateinit var parser: MezzeParser
@@ -71,18 +72,19 @@ class AnnotationSubsumptionTest {
             "annotation over-generalizes a param the body constrains — must reject")
     }
 
-    // ── the `let g: 'a = 5` case: accepted, NARROWED to Int (sound) ──────
+    // ── the `let g: 'a = 5` case: REJECTED (annotation over-generalizes) ──
 
-    @Test fun `a fully-variable annotation on a literal narrows to the concrete body type`() {
-        assertEquals("Int", typeOf("g", "let g: 'a = 5"))
+    @Test fun `a lone type-variable annotation on a concrete literal is rejected`() {
+        // `g : 'a` promises g works at every type (forall a. a); the body `5` is
+        // only Int, so the annotation is more general than the body. REJECT —
+        // same rule as the function-return widen case, and matching Haskell's
+        // `x :: a; x = 5`.
+        assertNotNull(err("let g: 'a = 5"),
+            "a bare type-var annotation on a concrete body over-generalizes — must reject")
     }
 
-    @Test fun `the narrowed literal is monomorphic - a second incompatible view is rejected`() {
-        // Proves `let g: 'a = 5` did NOT become forall a. a: viewing g as Str fails.
-        assertNotNull(err("""
-            let g: 'a = 5
-            let a: Int = g
-            let b: Str = g
-        """), "g:'a=5 is Int, not forall a.a — the Str view must be rejected")
+    @Test fun `a lone type-variable annotation on a concrete string is also rejected`() {
+        assertNotNull(err("let g: 'a = \"hi\""),
+            "the rule is about generality, not the specific concrete type — reject for Str body too")
     }
 }
