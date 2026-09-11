@@ -108,8 +108,24 @@ object ProxyDispatch {
         }
     }
 
-    private fun exec(target: File, args: List<String>): Int =
-        ProcessBuilder(listOf(target.absolutePath) + args).inheritIO().start().waitFor()
+    private fun exec(target: File, args: List<String>): Int {
+        val proc = ProcessBuilder(listOf(target.absolutePath) + args).inheritIO().start()
+        // Forward termination to the dispatched toolchain. An interactive Ctrl-C
+        // already signals the whole foreground process group (proxy + child + its
+        // JVM), but if the proxy is killed by PID alone the child would orphan —
+        // so tear it down on shutdown. Long-running children (mez dev, mez lsp)
+        // then always stop with the proxy.
+        val hook = Thread {
+            proc.destroy()
+            if (!proc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) proc.destroyForcibly()
+        }
+        Runtime.getRuntime().addShutdownHook(hook)
+        return try {
+            proc.waitFor()
+        } finally {
+            runCatching { Runtime.getRuntime().removeShutdownHook(hook) }
+        }
+    }
 
     private fun canon(f: File): File = runCatching { f.canonicalFile }.getOrDefault(f.absoluteFile)
 
