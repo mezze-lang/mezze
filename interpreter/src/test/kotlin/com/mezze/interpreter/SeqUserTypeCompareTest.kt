@@ -25,14 +25,22 @@ class SeqUserTypeCompareTest {
     @Test fun pGeP()       { assertEquals(true,  run("let main = {} -> [ { x = 2, y = 0 } ] >= [ { x = 1, y = 0 } ]\nmain {}")) }
     @Test fun pLeP()       { assertEquals(true,  run("let main = {} -> [ { x = 1, y = 0 } ] <= [ { x = 1, y = 0 } ]\nmain {}")) }
     @Test fun pGtP()       { assertEquals(false, run("let main = {} -> [ { x = 1, y = 0 } ] > [ { x = 2, y = 0 } ]\nmain {}")) }
-    // NESTED containers of a user type (`[[P]]`) still throw DictFallback[lt]: the
-    // recovered element `'a = [P]` is itself a container whose Ord op needs its OWN
-    // `__dict_lt = Ord P` forwarded recursively (Step 2 / recursive dict wrapping —
-    // not yet done). Single-level `[P]` (the common case) works. Disabled, documented.
-    @org.junit.jupiter.api.Disabled("nested [[P]] needs recursive dict wrapping; see project_impl_op_with_constraint_dropped")
-    @Test fun nestedSort() { assertEquals(2L, run("let main = {} -> seq::size { xs = seq::sort { xs = [ [ { x = 2, y = 0 } ], [ { x = 1, y = 0 } ] ] } }\nmain {}")) }
-    @org.junit.jupiter.api.Disabled("nested [[P]] needs recursive dict wrapping; see project_impl_op_with_constraint_dropped")
-    @Test fun nestedLt()   { assertEquals(true, run("let main = {} -> [ [ { x = 1, y = 0 } ] ] < [ [ { x = 2, y = 0 } ] ]\nmain {}")) }
+    // NESTED containers of a user type, arbitrary depth. Three pieces make these
+    // work: (1) spec-salted lambda hashes — the same source comparator lambda
+    // compiles to DIFFERENT FunctionIRs per specialization, and the type-blind
+    // expr hash collided them all onto one registry slot; (2) refToDictedOp —
+    // an injected dict op that itself needs dicts (`[[[P]]]`: the dict comparing
+    // `[P]`-elements is the seq Ord op, which needs `Ord P`) gets a recursive
+    // no-capture wrapper supplying them; (3) spec-typeArgs last-resort dict
+    // resolution — mono's name-based substitution misses renamed/field-stamped
+    // type vars (sort's comparator), so inside a spec an unresolved dict falls
+    // back to element-first resolution against the spec's own typeArgs.
+    @Test fun nestedLt()    { assertEquals(true, run("let main = {} -> [ [ { x = 1, y = 0 } ] ] < [ [ { x = 2, y = 0 } ] ]\nmain {}")) }
+    @Test fun nestedLtFalse() { assertEquals(false, run("let main = {} -> [ [ { x = 2, y = 0 } ] ] < [ [ { x = 1, y = 0 } ] ]\nmain {}")) }
+    @Test fun nested3Lt()   { assertEquals(true, run("let main = {} -> [ [ [ { x = 1, y = 0 } ] ] ] < [ [ [ { x = 2, y = 0 } ] ] ]\nmain {}")) }
+    @Test fun nestedSort()  { assertEquals(2L, run("let main = {} -> seq::size { xs = seq::sort { xs = [ [ { x = 2, y = 0 } ], [ { x = 1, y = 0 } ] ] } }\nmain {}")) }
+    @Test fun nestedSortOrder() { assertEquals(1L, run("let main = {} -> match seq::first { xs = seq::sort { xs = [ [ { x = 2, y = 0 } ], [ { x = 1, y = 0 } ] ] } } is\n  Some { val = inner } -> match seq::first { xs = inner } is\n    Some { val = p } -> p.x\n    None -> 0 - 1\n  None -> 0 - 1\nmain {}")) }
+    @Test fun nested3Sort() { assertEquals(2L, run("let main = {} -> seq::size { xs = seq::sort { xs = [ [ [ { x = 2, y = 0 } ] ], [ [ { x = 1, y = 0 } ] ] ] } }\nmain {}")) }
 
     // regressions — must still work
     @Test fun intLt()      { assertEquals(true, run("let main = {} -> [1,2] < [1,3]\nmain {}")) }

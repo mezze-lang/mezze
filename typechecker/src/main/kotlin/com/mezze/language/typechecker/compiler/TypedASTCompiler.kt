@@ -889,10 +889,25 @@ class TypedASTCompiler(
             if (spec.specializedHash in compiledHashes) continue
             currentCaptureNames = emptyMap()
             val body = spec.specializedBody
-            val fn = if (body is TypedLambda) {
-                compileFunctionBody(spec.specializedHash, "", body.params, body.body, body.loc)
-            } else {
-                compileFunctionBody(spec.specializedHash, "", emptyList(), body, body.loc)
+            // Salt nested-lambda hashes with the spec hash: the SAME source lambda
+            // (e.g. the seq Ord op's `{a,b} -> if a<b …` comparator) compiles to a
+            // DIFFERENT FunctionIR per specialization (captures/dispatch differ once
+            // types are pinned), but TypedASTHasher.hashExpr is type-blind, so all
+            // versions collide on one hash and the last one registered wins — a
+            // generic invocation then runs a spec's zero-capture body with a
+            // closure-values-prefixed arg array, shifting every arg by one
+            // (`[[P]] < [[P]]` saw xs = the Ord-dict MezzeFunction).
+            specLambdaSalt = spec.specializedHash
+            specTypeArgs = spec.typeArgs
+            val fn = try {
+                if (body is TypedLambda) {
+                    compileFunctionBody(spec.specializedHash, "", body.params, body.body, body.loc)
+                } else {
+                    compileFunctionBody(spec.specializedHash, "", emptyList(), body, body.loc)
+                }
+            } finally {
+                specLambdaSalt = null
+                specTypeArgs = null
             }
             functions.add(fn)
             compiledHashes.add(spec.specializedHash)
@@ -1716,13 +1731,21 @@ class TypedASTCompiler(
                         val resolvedHash = if (dictMethodName == "decode" && perSiteDecode != null) perSiteDecode
                             else resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
                         if (resolvedHash != null) {
-                            fields.add(FieldIR(dictParamName, ReadGlobalFnByHashIR(resolvedHash, src)))
+                            // refToDictedOp wraps the resolved op when IT needs its
+                            // own dicts (nested containers: `[[[P]]]`).
+                            fields.add(FieldIR(dictParamName, refToDictedOp(resolvedHash, concreteTypesForDict, src)))
                         } else {
                             // Forward from caller's dict params if available
                             val callerDictIdx = currentParamNames.indexOf(dictParamName)
                             if (callerDictIdx >= 0) {
                                 val slot = currentCaptureCount + callerDictIdx
                                 fields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
+                            } else {
+                                // Inside a mono-spec compile: last-resort resolve
+                                // against the spec's own typeArgs (see specTypeArgs).
+                                resolveDictFromSpecTypeArgs(dictMethodName, src)?.let {
+                                    fields.add(FieldIR(dictParamName, it))
+                                }
                             }
                         }
                     }
@@ -2173,7 +2196,11 @@ class TypedASTCompiler(
                 resolveOpHashFromConcreteTypes(methodName, concreteTypes)
             }
             if (opHash != null) {
-                dictFields.add(FieldIR(dictParamName, ReadGlobalFnByHashIR(opHash, src)))
+                // refToDictedOp wraps the resolved op when IT needs its own dicts —
+                // e.g. `sort { xs = [[P]] }`: sort's Ord dict is the seq Ord op
+                // (comparing [P]'s), which needs its own element dict (`Ord P`).
+                dictFields.add(FieldIR(dictParamName,
+                    refToDictedOp(opHash, constraintTypes + concreteTypes, src)))
             } else {
                 // 3. Fallback: forward from caller if available
                 val callerDictIdx = currentParamNames.indexOf(dictParamName)
@@ -2182,8 +2209,15 @@ class TypedASTCompiler(
                     dictFields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
                 } else {
                     val callerCaptureIdx = currentCaptureNames[dictParamName]
+                    val specResolved = if (callerCaptureIdx == null)
+                        resolveDictFromSpecTypeArgs(methodName, src) else null
                     if (callerCaptureIdx != null) {
                         dictFields.add(FieldIR(dictParamName, ReadCaptureIR(callerCaptureIdx, SlotKind.OBJECT, src)))
+                    } else if (specResolved != null) {
+                        // 4. Inside a mono-spec compile whose NAME-based substitution
+                        // missed this receiver's type var: resolve against the spec's
+                        // own typeArgs (see specTypeArgs).
+                        dictFields.add(FieldIR(dictParamName, specResolved))
                     } else {
                         // Don't inject a sentinel — leave the field absent so the
                         // callee's trampoline resolves DictFallback for primitive ops
@@ -2345,6 +2379,82 @@ class TypedASTCompiler(
      * For example, wrapping `encode_value` when called with Int:
      *   {x} -> encode_value {x = x, __dict_encode = <captured_int_encode_fn>}
      */
+    /** Wrapper hashes already extracted this compile — avoid duplicate FunctionIRs. */
+    private val builtDictedOpWrappers = mutableSetOf<Hash>()
+
+    /**
+     * Reference to a resolved op `opHash` for dict injection, wrapping it in a
+     * dict-supplying closure when the op ITSELF needs `__dict_<m>` params — the
+     * nested-container case: for `[[[P]]]` the dict comparing `[P]`-elements is the
+     * seq Ord op, which needs its own element dict (`Ord P`). RECURSIVE and
+     * depth-independent: each sub-dict is resolved element-first against
+     * `concreteTypes` descended one container level, and recursively wrapped.
+     * The wrapper has NO captures (sub-dict IRs are self-contained global refs or
+     * nested wrappers), so it is frame-independent and safe to inline anywhere.
+     * Returns a bare `ReadGlobalFnByHashIR` when no dicts are needed or a sub-dict
+     * can't be resolved concretely (runtime DictFallback still covers primitives).
+     */
+    private fun refToDictedOp(opHash: Hash, concreteTypes: List<MezzeType>, src: SourceInfo, depth: Int = 0): NodeIR {
+        val needed = dictMethodsForHash[opHash] ?: emptySet()
+        if (needed.isEmpty() || depth > 8) return ReadGlobalFnByHashIR(opHash, src)
+        // Descend one container level: the sub-op dispatches on the ELEMENT of the
+        // current element (element placed FIRST so it wins over the container impl).
+        val deeper = elementFirst(concreteTypes)
+        val resolvedDicts = mutableListOf<Pair<String, NodeIR>>()
+        for (methodName in needed.sorted()) {
+            val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
+            val subHash = resolveOpHashFromConcreteTypes(methodName, deeper)
+            if (subHash != null) {
+                resolvedDicts.add(dictParamName to refToDictedOp(subHash, deeper, src, depth + 1))
+            } else {
+                // Unresolvable concretely; forwarding from the enclosing frame would
+                // be invalid inside the wrapper's own frame — leave the op bare.
+                return ReadGlobalFnByHashIR(opHash, src)
+            }
+        }
+        // The wrapper's params = the op's regular params (prelowered FunctionIR is
+        // authoritative for stdlib ops; drop the synthetic __dict_* params).
+        val preParams = hashToFunctionIR[opHash]?.paramNames
+        val regularParamNames = if (preParams != null) {
+            preParams.filterNot { com.mezze.language.ast.MagicParams.isDict(it) }
+        } else {
+            (declIndex?.get(opHash)?.value as? TypedLambda)?.params?.map { it.name }
+                ?: listOf(Keywords.IT, Keywords.R)
+        }
+        val hashBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+        hashBuilder.append("dicted_op")
+        hashBuilder.append(opHash.hex)
+        for ((name, _) in resolvedDicts) hashBuilder.append(name)
+        for (t in deeper) com.mezze.language.ast.hashing.appendTypeInScope(hashBuilder, t)
+        val wrapperHash = Hash(hashBuilder.build().toFullHexString())
+        if (builtDictedOpWrappers.add(wrapperHash)) {
+            // Body: opHash { p0 = slot0, …, __dict_m = <inlined sub-dict IR> }.
+            // Frame = [param0..paramN] (no captures).
+            val innerArgFields = mutableListOf<FieldIR>()
+            for ((i, paramName) in regularParamNames.withIndex()) {
+                innerArgFields.add(FieldIR(paramName, ReadLocalIR(i, SlotKind.OBJECT, src)))
+            }
+            for ((name, subDictIR) in resolvedDicts) {
+                innerArgFields.add(FieldIR(name, subDictIR))
+            }
+            extractedFunctions.add(FunctionIR(
+                hash = wrapperHash,
+                name = "dicted_op",
+                qualifiedName = "dicted_op",
+                paramSlots = regularParamNames.map { SlotKind.OBJECT },
+                paramNames = regularParamNames,
+                localSlots = emptyList(),
+                localNames = emptyList(),
+                captureSlots = emptyList(),
+                captureNames = emptyList(),
+                body = CallDirectIR(opHash, listOf(MakeRecordIR(innerArgFields, src)), false, src),
+                sourceFile = src.fileIndex.toString(),
+                sourceSection = src
+            ))
+        }
+        return MakeLambdaIR(wrapperHash, emptyList(), src)
+    }
+
     private fun tryWrapDictFunction(
         expr: TypedExpr,
         contextConcreteTypes: List<MezzeType>,
@@ -2490,6 +2600,54 @@ class TypedASTCompiler(
         }
     }
 
+    /** Non-null while compiling a mono specialization's body (set to the spec hash).
+     *  Nested lambdas extracted during that compile get their hash salted with it. */
+    private var specLambdaSalt: Hash? = null
+
+    /** The mono specialization's concrete type args, non-null while compiling its
+     *  body. LAST-RESORT dict resolution: the monomorphizer's NAME-based body
+     *  substitution misses type vars whose name differs from the decl's typeParams
+     *  (generalization renames `'a`→`'p237`; lambda params get field-name-stamped
+     *  vars), so a comparator inside the spec can keep a VarType receiver and its
+     *  callee's dict then resolves to nothing — the spec emits a bare call that hits
+     *  the primitive-only runtime fallback (`sort { xs = [[P]] }`). When normal
+     *  resolution fails INSIDE a spec, resolve against these typeArgs element-first:
+     *  the spec knows exactly what `'a` is. */
+    private var specTypeArgs: List<MezzeType>? = null
+
+    /** Element-first expansion: for each container type, its element precedes it, so
+     *  dict resolution prefers the ELEMENT impl over the container impl. */
+    private fun elementFirst(types: List<MezzeType>): List<MezzeType> = types.flatMap { t ->
+        val e = containerElementType(t)
+        if (e != null && e !is VarType) listOf(e, t) else listOf(t)
+    }
+
+    /** Last-resort dict resolution inside a mono-spec compile (see [specTypeArgs]). */
+    private fun resolveDictFromSpecTypeArgs(methodName: String, src: SourceInfo): NodeIR? {
+        val args = specTypeArgs ?: return null
+        val deeper = elementFirst(args)
+        val opHash = resolveOpHashFromConcreteTypes(methodName, deeper) ?: return null
+        return refToDictedOp(opHash, deeper, src)
+    }
+
+    /** Hash for an extracted lambda's FunctionIR. TypedASTHasher.hashExpr is
+     *  type-blind, so the SAME source lambda inside a generic body and inside each
+     *  of its mono specializations would collide on one hash while compiling to
+     *  DIFFERENT FunctionIRs (capture lists and dispatch differ once types are
+     *  pinned) — last registration wins and other callers run the wrong frame
+     *  layout. Salting with the enclosing spec hash keeps every version distinct;
+     *  outside spec compilation the plain hash is unchanged (stable stdlib
+     *  prelowering, recursive-let self-references, closure keying). */
+    private fun saltedLambdaHash(expr: TypedExpr): Hash {
+        val base = com.mezze.language.typedast.TypedASTHasher.hashExpr(expr)
+        val salt = specLambdaSalt ?: return base
+        val b = com.mezze.language.ast.hashing.MezzeHashBuilder()
+        b.append("spec_lambda")
+        b.append(base.hex)
+        b.append(salt.hex)
+        return Hash(b.build().toFullHexString())
+    }
+
     private fun compileLambda(expr: TypedLambda, src: SourceInfo): NodeIR {
         // Save parent's capture info BEFORE overwriting for the child.
         // This is needed to resolve captures from grandparent scope:
@@ -2548,7 +2706,7 @@ class TypedASTCompiler(
         currentCaptureNames = captureNameMap
 
         // Extract lambda as a separate FunctionIR
-        val lambdaHash = com.mezze.language.typedast.TypedASTHasher.hashExpr(expr)
+        val lambdaHash = saltedLambdaHash(expr)
         val lambdaCaptureInfo = expr.captures.map { c -> c.name to typeToSlotKind(c.type) } +
             dictsToCapture.map { it.first to SlotKind.OBJECT }
         val fnIR = compileFunctionBody(
@@ -2618,7 +2776,7 @@ class TypedASTCompiler(
                     // pre-compute its hash and register so compileVar can resolve self-references
                     // to MakeLambdaIR(self_hash, self_captures) instead of ReadCaptureIR.
                     if (stmt.isRecursive && stmtValue is TypedLambda) {
-                        val lambdaHash = com.mezze.language.typedast.TypedASTHasher.hashExpr(stmtValue)
+                        val lambdaHash = saltedLambdaHash(stmtValue)
                         val captureKinds = stmtValue.captures.map { typeToSlotKind(it.type) }
                         recursiveLetLambdas[stmt.name] = RecursiveLetInfo(lambdaHash, captureKinds)
                     }
