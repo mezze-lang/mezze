@@ -151,6 +151,13 @@ test-dist:
     @mkdir -p logs
     bash scripts/dist-e2e.sh 2>&1 | tee logs/dist-e2e.log
 
+# Package management: a transitive local dep graph (app → greet → core) that must
+# type-check AND run. Needs a built mez (`just build`).
+[group('test')]
+test-pkg:
+    @mkdir -p logs
+    bash scripts/pkg-e2e.sh 2>&1 | tee logs/pkg-e2e.log
+
 # Just one class:  just test-class typechecker '*AntiHang*'
 [group('test')]
 test-class module pattern:

@@ -225,7 +225,17 @@ class TypeChecker(
             precompiled.compiledPrelude.mergeInto(parentContext)
         } else if (hasUserImports || shouldInjectPrelude) {
             val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "."))
-            val importResolver = if (precompiled != null && (currentPath == projectRoot || currentPath.startsWith(projectRoot))) {
+            // A module inside a dependency (…/.deps/mezze/<pkg>/…) is NOT part of the
+            // top project, even though path-deps symlink it under the project dir. It
+            // must resolve ITS OWN imports against ITS OWN .deps, so it can never use
+            // the project-rooted global resolver — re-root to its own dir instead.
+            // Without this, a dep-of-a-dep (app→greet→core) type-checks but fails to
+            // compile/run: greet's `use core` is searched in app/.deps, where core
+            // isn't linked (it's under greet/.deps).
+            val insideDependency = currentPath.toString()
+                .contains("${java.io.File.separator}.deps${java.io.File.separator}")
+            val importResolver = if (precompiled != null && !insideDependency &&
+                    (currentPath == projectRoot || currentPath.startsWith(projectRoot))) {
                 precompiled.importResolver
             } else {
                 val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
