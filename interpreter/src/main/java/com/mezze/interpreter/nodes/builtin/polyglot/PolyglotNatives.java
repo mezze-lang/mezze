@@ -264,27 +264,52 @@ public final class PolyglotNatives {
 
     @TruffleBoundary
     public static MezzeForeign fromInt(MezzeRecord args) {
-        return new MezzeForeign(getLong(args, "val"), "mezze");
+        return fromInt(args, "mezze");
+    }
+
+    @TruffleBoundary
+    public static MezzeForeign fromInt(MezzeRecord args, String sourceLanguage) {
+        return new MezzeForeign(getLong(args, "val"), sourceLanguage);
     }
 
     @TruffleBoundary
     public static MezzeForeign fromFloat(MezzeRecord args) {
-        return new MezzeForeign(getDouble(args, "val"), "mezze");
+        return fromFloat(args, "mezze");
+    }
+
+    @TruffleBoundary
+    public static MezzeForeign fromFloat(MezzeRecord args, String sourceLanguage) {
+        return new MezzeForeign(getDouble(args, "val"), sourceLanguage);
     }
 
     @TruffleBoundary
     public static MezzeForeign fromStr(MezzeRecord args) {
-        return new MezzeForeign(getString(args, "val"), "mezze");
+        return fromStr(args, "mezze");
+    }
+
+    @TruffleBoundary
+    public static MezzeForeign fromStr(MezzeRecord args, String sourceLanguage) {
+        return new MezzeForeign(getString(args, "val"), sourceLanguage);
     }
 
     @TruffleBoundary
     public static MezzeForeign fromBool(MezzeRecord args) {
-        return new MezzeForeign(getBool(args, "val"), "mezze");
+        return fromBool(args, "mezze");
+    }
+
+    @TruffleBoundary
+    public static MezzeForeign fromBool(MezzeRecord args, String sourceLanguage) {
+        return new MezzeForeign(getBool(args, "val"), sourceLanguage);
     }
 
     @TruffleBoundary
     public static MezzeForeign nullVal(@SuppressWarnings("unused") MezzeRecord args) {
-        return new MezzeForeign(MezzeNull.INSTANCE, "mezze");
+        return nullVal(args, "mezze");
+    }
+
+    @TruffleBoundary
+    public static MezzeForeign nullVal(@SuppressWarnings("unused") MezzeRecord args, String sourceLanguage) {
+        return new MezzeForeign(MezzeNull.INSTANCE, sourceLanguage);
     }
 
     // ==================== Members ====================

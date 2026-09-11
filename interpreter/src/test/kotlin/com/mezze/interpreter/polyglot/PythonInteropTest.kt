@@ -11,13 +11,14 @@ import org.junit.jupiter.api.Test
 /**
  * Integration tests for std::polyglot::python.
  *
- * Every test spins up a fresh polyglot Context with `languages =
- * ["python"]` and drives the Python interpreter through the same
- * `impl Foreign` surface that the JVM tests use — read_member,
- * invoke_member, array ops, execute — proving the interop layer is
- * language-agnostic.
+ * Every test performs the `GraalPy` handler for the `Python` effect
+ * — `Python.eval` / `Python.import` drive the interpreter through
+ * the same `impl PyForeign` surface (member / array / execute / attr /
+ * item / iter / len) the JVM tests use for `JvmForeign`, proving the
+ * interop layer is language-agnostic while keeping per-language type
+ * safety at compile time.
  *
- * Numpy-specific coverage lives in [NumpyInteropTest].  Pure-Python
+ * Numpy-specific coverage lives in [NumpyInteropTest]. Pure-Python
  * (math, str methods, list, dict) round-trips exercise the interop
  * layer without any Python-package resolution.
  */
@@ -47,17 +48,15 @@ class PythonInteropTest {
     // ==================== Smoke ====================
 
     @Test
-    fun `python_eval 1 plus 1 coerced to int equals 2`() {
+    fun `python eval 1 plus 1 coerced to int equals 2`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "1 + 1" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = f } -> f.as_int{}
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "1 + 1" }
+              match r is
+                Ok { val = f } -> f.as_int{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -70,14 +69,12 @@ class PythonInteropTest {
     fun `python string upper via eval`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "'hello'.upper()" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = f } -> f.as_string{}
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "'hello'.upper()" }
+              match r is
+                Ok { val = f } -> f.as_str{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -87,20 +84,18 @@ class PythonInteropTest {
     // ==================== Modules ====================
 
     @Test
-    fun `import math and read pi`() {
+    fun `import math and read pi via attr`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_import }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let mod_r = python_import { context = ctx, name = "math" }
-            let _ = close_context { it = ctx }
-            match mod_r is
-              Ok { val = m } ->
-                match m.read_member { name = "pi" } is
-                  Ok { val = p } -> p.as_float{}
-                  Err { error } -> Err { error = error }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let mod_r = Python.import { module = "math" }
+              match mod_r is
+                Ok { val = m } ->
+                  match m.attr { name = "pi" } is
+                    Ok { val = p } -> p.as_float{}
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -109,20 +104,18 @@ class PythonInteropTest {
     }
 
     @Test
-    fun `import math and call sqrt of 16`() {
+    fun `import math and call sqrt of 16 via method`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_import }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let mod_r = python_import { context = ctx, name = "math" }
-            let _ = close_context { it = ctx }
-            match mod_r is
-              Ok { val = m } ->
-                match m.invoke_member { name = "sqrt", args = [16] } is
-                  Ok { val = r } -> r.as_float{}
-                  Err { error } -> Err { error = error }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy, from_int }
+            perform GraalPy in do
+              let mod_r = Python.import { module = "math" }
+              match mod_r is
+                Ok { val = m } ->
+                  match m.method { name = "sqrt", args = [from_int { val = 16 }] } is
+                    Ok { val = r } -> r.as_float{}
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -132,20 +125,18 @@ class PythonInteropTest {
     // ==================== Collections ====================
 
     @Test
-    fun `python list array_size and read_array`() {
+    fun `python list array_size and array_at`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "[10, 20, 30]" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = lst } ->
-                match lst.read_array { index = 1 } is
-                  Ok { val = e } -> e.as_int{}
-                  Err { error } -> Err { error = error }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "[10, 20, 30]" }
+              match r is
+                Ok { val = lst } ->
+                  match lst.array_at { index = 1 } is
+                    Ok { val = e } -> e.as_int{}
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -153,40 +144,37 @@ class PythonInteropTest {
     }
 
     @Test
-    fun `python list has array elements`() {
+    fun `python list len via inherent method`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "[1, 2, 3]" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = lst } -> lst.has_array_elements{}
-              Err { error = _ } -> False
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "[1, 2, 3]" }
+              match r is
+                Ok { val = lst } -> lst.len{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
-        assertEquals(true, result)
+        val v = assertOk(result)
+        assertEquals(3L, v.getPayloadFieldByName("val"))
     }
 
     @Test
-    fun `python object attribute read_member returns value`() {
+    fun `python object attribute attr returns value`() {
         // Python dicts are exposed as hash-entry objects (not member
-        // objects) through InteropLibrary — `read_member` targets object
-        // ATTRIBUTES.  Use a class with attributes to test member read.
+        // objects) through InteropLibrary — `attr` targets object
+        // ATTRIBUTES.  Use a class with attributes to test.
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "type('X', (), {'a': 1, 'b': 2})" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = cls } ->
-                match cls.read_member { name = "a" } is
-                  Ok { val = v } -> v.as_int{}
-                  Err { error } -> Err { error = error }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "type('X', (), {'a': 1, 'b': 2})" }
+              match r is
+                Ok { val = cls } ->
+                  match cls.attr { name = "a" } is
+                    Ok { val = v } -> v.as_int{}
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -194,20 +182,15 @@ class PythonInteropTest {
     }
 
     @Test
-    fun `python dict values accessed via subscript`() {
-        // For dict-like objects, subscript ([]) is exposed as
-        // invoke_member "__getitem__".  This tests that GraalPy
-        // exposes it through the interop surface.
+    fun `python dict values accessed via method get`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "{'a': 1, 'b': 2}.get('a')" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = v } -> v.as_int{}
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy, from_str }
+            perform GraalPy in do
+              let r = Python.eval { source = "{'a': 1, 'b': 2}.get('a')" }
+              match r is
+                Ok { val = v } -> v.as_int{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -217,20 +200,18 @@ class PythonInteropTest {
     // ==================== Functions ====================
 
     @Test
-    fun `python lambda executed with args`() {
+    fun `python lambda call with args`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "lambda x, y: x + y" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = f } ->
-                match f.execute { args = [3, 4] } is
-                  Ok { val = s } -> s.as_int{}
-                  Err { error } -> Err { error = error }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy, from_int }
+            perform GraalPy in do
+              let r = Python.eval { source = "lambda x, y: x + y" }
+              match r is
+                Ok { val = f } ->
+                  match f.call { args = [from_int { val = 3 }, from_int { val = 4 }] } is
+                    Ok { val = s } -> s.as_int{}
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -238,20 +219,18 @@ class PythonInteropTest {
     }
 
     @Test
-    fun `python lambda square`() {
+    fun `python lambda square via call`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let f_r = python_eval { context = ctx, source = "(lambda x: x * x)" }
-            let _ = close_context { it = ctx }
-            match f_r is
-              Ok { val = f } ->
-                match f.execute { args = [7] } is
-                  Ok { val = s } -> s.as_int{}
-                  Err { error } -> Err { error = error }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy, from_int }
+            perform GraalPy in do
+              let f_r = Python.eval { source = "(lambda x: x * x)" }
+              match f_r is
+                Ok { val = f } ->
+                  match f.call { args = [from_int { val = 7 }] } is
+                    Ok { val = s } -> s.as_int{}
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -261,17 +240,15 @@ class PythonInteropTest {
     // ==================== Errors ====================
 
     @Test
-    fun `invoke_member on non-existent method yields Err`() {
+    fun `method on non-existent method yields Err`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "'hello'" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = s } -> s.invoke_member { name = "wrong_method", args = [] }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "'hello'" }
+              match r is
+                Ok { val = s } -> s.method { name = "wrong_method", args = [] }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         assertErr(result)
@@ -281,12 +258,8 @@ class PythonInteropTest {
     fun `python syntax error yields Err`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "this is not python <<>>" }
-            let _ = close_context { it = ctx }
-            r
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in Python.eval { source = "this is not python <<>>" }
             """.trimIndent()
         )
         assertErr(result)
@@ -296,28 +269,20 @@ class PythonInteropTest {
     fun `import of non-existent module yields Err`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_import }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_import { context = ctx, name = "definitely_not_a_real_module_xyz123" }
-            let _ = close_context { it = ctx }
-            r
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in Python.import { module = "definitely_not_a_real_module_xyz123" }
             """.trimIndent()
         )
         assertErr(result)
     }
 
     @Test
-    fun `import_module rejects unsafe module name`() {
+    fun `import rejects unsafe module name`() {
         // Guard against ' quote breakout in the import expression.
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_import }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_import { context = ctx, name = "os'; import sys #" }
-            let _ = close_context { it = ctx }
-            r
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in Python.import { module = "os'; import sys #" }
             """.trimIndent()
         )
         assertErr(result)
@@ -326,53 +291,47 @@ class PythonInteropTest {
     // ==================== Type predicates ====================
 
     @Test
-    fun `python int is_number`() {
+    fun `python int as_int works`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "42" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = f } -> f.is_number{}
-              Err { error = _ } -> False
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "42" }
+              match r is
+                Ok { val = f } -> f.as_int{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
-        assertEquals(true, result)
+        val v = assertOk(result)
+        assertEquals(42L, v.getPayloadFieldByName("val"))
     }
 
     @Test
-    fun `python string is_string`() {
+    fun `python string as_str works`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "'x'" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = f } -> f.is_string{}
-              Err { error = _ } -> False
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "'x'" }
+              match r is
+                Ok { val = f } -> f.as_str{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
-        assertEquals(true, result)
+        val v = assertOk(result)
+        assertEquals("x", v.getPayloadFieldByName("val"))
     }
 
     @Test
     fun `python None Ok wraps foreign`() {
-        // Python's None is NOT interop-null by default (GraalPy exposes it
-        // as a first-class TruffleObject).  What we CAN test: eval("None")
+        // Python's None is NOT interop-null by default (GraalPy exposes
+        // it as a first-class TruffleObject). What we CAN test: eval("None")
         // succeeds, returning some Foreign — the exact type coercion is
         // Python-implementation-defined.
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "None" }
-            let _ = close_context { it = ctx }
-            r
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in Python.eval { source = "None" }
             """.trimIndent()
         )
         assertOk(result)
@@ -381,20 +340,25 @@ class PythonInteropTest {
     // ==================== Cross-language ====================
 
     @Test
-    fun `python max function invoked with mezze integers`() {
+    fun `python max function called with mezze integers`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "max" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = f } ->
-                match f.execute { args = [3, 7, 2, 5] } is
-                  Ok { val = m } -> m.as_int{}
-                  Err { error } -> Err { error = error }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy, from_int }
+            perform GraalPy in do
+              let r = Python.eval { source = "max" }
+              match r is
+                Ok { val = f } ->
+                  match f.call {
+                    args = [
+                      from_int { val = 3 },
+                      from_int { val = 7 },
+                      from_int { val = 2 },
+                      from_int { val = 5 },
+                    ],
+                  } is
+                    Ok { val = m } -> m.as_int{}
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -405,14 +369,12 @@ class PythonInteropTest {
     fun `python list len via builtins`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "len([1, 2, 3, 4, 5])" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = f } -> f.as_int{}
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "len([1, 2, 3, 4, 5])" }
+              match r is
+                Ok { val = f } -> f.as_int{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)

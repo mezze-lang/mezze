@@ -23,11 +23,11 @@ import kotlin.math.abs
  * `interpreter/build/graalpy-venv/venv/lib/python3.12/site-packages/`
  * (see `examples/polyglot_numpy/README.md` for setup instructions —
  * GraalPy 25.0.3 currently CANNOT build numpy from source, so a
- * prebuilt patched wheel is required).  Each test probes
+ * prebuilt patched wheel is required). Each test probes
  * `importlib.util.find_spec('numpy')` before running — if numpy is
- * absent we skip via JUnit Assumptions rather than failing.  These
+ * absent we skip via JUnit Assumptions rather than failing. These
  * are NOT @Disabled — they run when numpy is available, skip cleanly
- * when it isn't.  `MezzeTestHelper` auto-wires `python.PythonPath`
+ * when it isn't. `MezzeTestHelper` auto-wires `python.PythonPath`
  * onto that venv path when the directory exists.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -39,14 +39,12 @@ class NumpyInteropTest {
     fun probeNumpy() {
         val probe = MezzeTestHelper.runWithPythonIsolate(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "__import__('importlib.util').util.find_spec('numpy') is not None" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = f } -> f.as_bool{}
-              Err { error = _ } -> Ok { val = False }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "__import__('importlib.util').util.find_spec('numpy') is not None" }
+              match r is
+                Ok { val = f } -> f.as_bool{}
+                Err { error = _ } -> Ok { val = False }
             """.trimIndent()
         )
         numpyAvailable = if (probe is MezzeVariant && probe.isOk) {
@@ -82,32 +80,26 @@ class NumpyInteropTest {
     // ==================== Import + top-level ====================
 
     @Test
-    fun `import numpy returns Ok Foreign`() {
+    fun `import numpy returns Ok PyForeign`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_import }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_import { context = ctx, name = "numpy" }
-            let _ = close_context { it = ctx }
-            r
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in Python.import { module = "numpy" }
             """.trimIndent()
         )
         assertOk(result)
     }
 
     @Test
-    fun `numpy has_member of array`() {
+    fun `numpy has_member array`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_import }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let mod_r = python_import { context = ctx, name = "numpy" }
-            let _ = close_context { it = ctx }
-            match mod_r is
-              Ok { val = np } -> np.has_member { name = "array" }
-              Err { error = _ } -> False
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let mod_r = Python.import { module = "numpy" }
+              match mod_r is
+                Ok { val = np } -> np.has_member { name = "array" }
+                Err { error = _ } -> False
             """.trimIndent()
         )
         assertEquals(true, result)
@@ -123,14 +115,12 @@ class NumpyInteropTest {
         // Same pattern the sum/std tests below already use.
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "float(__import__('numpy').array([1.0, 2.0, 3.0]).mean())" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = m } -> m.as_float{}
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "float(__import__('numpy').array([1.0, 2.0, 3.0]).mean())" }
+              match r is
+                Ok { val = m } -> m.as_float{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -141,14 +131,12 @@ class NumpyInteropTest {
     fun `numpy array sum of 1 2 3 is 6`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "float(__import__('numpy').array([1.0, 2.0, 3.0]).sum())" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = m } -> m.as_float{}
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "float(__import__('numpy').array([1.0, 2.0, 3.0]).sum())" }
+              match r is
+                Ok { val = m } -> m.as_float{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -159,19 +147,17 @@ class NumpyInteropTest {
     fun `numpy array std of 1 2 3 approximately 0_8165`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "float(__import__('numpy').array([1.0, 2.0, 3.0]).std())" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = m } -> m.as_float{}
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "float(__import__('numpy').array([1.0, 2.0, 3.0]).std())" }
+              match r is
+                Ok { val = m } -> m.as_float{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
         val std = v.getPayloadFieldByName("val") as Double
-        // population std of [1,2,3] = sqrt(2/3) ≈ 0.8165
+        // population std of [1,2,3] = sqrt(2/3) ~ 0.8165
         assertTrue(abs(std - 0.8164965809277260) < 1e-9, "std=$std")
     }
 
@@ -181,17 +167,15 @@ class NumpyInteropTest {
     fun `numpy zeros of size 5 returns 5-element array of 0`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "__import__('numpy').zeros(5)" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = arr } ->
-                match arr.array_size{} is
-                  Ok { val = n } -> n
-                  Err { error } -> Err { error = error }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "__import__('numpy').zeros(5)" }
+              match r is
+                Ok { val = arr } ->
+                  match arr.array_size{} is
+                    Ok { val = n } -> n
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         assertEquals(5L, result)
@@ -201,64 +185,60 @@ class NumpyInteropTest {
     fun `numpy arange 10 first and last elements`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "list(map(int, __import__('numpy').arange(10)))" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = lst } ->
-                match lst.read_array { index = 0 } is
-                  Ok { val = first } ->
-                    match first.as_int{} is
-                      Ok { val = f } ->
-                        match lst.read_array { index = 9 } is
-                          Ok { val = last } -> last.as_int{}
-                          Err { error } -> Err { error = error }
-                      Err { error } -> Err { error = error }
-                  Err { error } -> Err { error = error }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "list(map(int, __import__('numpy').arange(10)))" }
+              match r is
+                Ok { val = lst } ->
+                  match lst.array_at { index = 0 } is
+                    Ok { val = first } ->
+                      match first.as_int{} is
+                        Ok { val = f } ->
+                          match lst.array_at { index = 9 } is
+                            Ok { val = last } -> last.as_int{}
+                            Err { error } -> Err { error = error }
+                        Err { error } -> Err { error = error }
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
         assertEquals(9L, v.getPayloadFieldByName("val"))
     }
 
-    // ==================== Method invoke via Foreign ====================
+    // ==================== Method invoke via PyForeign ====================
 
     @Test
-    fun `numpy array mean via invoke_member on module`() {
-        // Import numpy, get .array, execute it with a python list, then
-        // invoke .mean() — end-to-end via the Foreign surface only.
-        // The `.mean()` result is a numpy.float64 scalar (see the note
-        // on `mean of 1 2 3 is 2`); chain `.item()` on the Foreign
-        // surface to get a native Python float back before `.as_float{}`.
+    fun `numpy array mean via method on module`() {
+        // Import numpy, get .array via attr, call it with a python
+        // list, then invoke .mean() — end-to-end via the PyForeign
+        // surface only. The `.mean()` result is a numpy.float64
+        // scalar; chain `.item()` on the Foreign surface to get a
+        // native Python float back before `.as_float{}`.
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_import, python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let mod_r = python_import { context = ctx, name = "numpy" }
-            let lst_r = python_eval { context = ctx, source = "[10.0, 20.0, 30.0, 40.0]" }
-            let _ = close_context { it = ctx }
-            match mod_r is
-              Ok { val = np } ->
-                match np.read_member { name = "array" } is
-                  Ok { val = ctor } ->
-                    match lst_r is
-                      Ok { val = lst } ->
-                        match ctor.execute { args = [lst] } is
-                          Ok { val = arr } ->
-                            match arr.invoke_member { name = "mean", args = [] } is
-                              Ok { val = m } ->
-                                match m.invoke_member { name = "item", args = [] } is
-                                  Ok { val = p } -> p.as_float{}
-                                  Err { error } -> Err { error = error }
-                              Err { error } -> Err { error = error }
-                          Err { error } -> Err { error = error }
-                      Err { error } -> Err { error = error }
-                  Err { error } -> Err { error = error }
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let mod_r = Python.import { module = "numpy" }
+              let lst_r = Python.eval { source = "[10.0, 20.0, 30.0, 40.0]" }
+              match mod_r is
+                Ok { val = np } ->
+                  match np.attr { name = "array" } is
+                    Ok { val = ctor } ->
+                      match lst_r is
+                        Ok { val = lst } ->
+                          match ctor.call { args = [lst] } is
+                            Ok { val = arr } ->
+                              match arr.method { name = "mean", args = [] } is
+                                Ok { val = m } ->
+                                  match m.method { name = "item", args = [] } is
+                                    Ok { val = p } -> p.as_float{}
+                                    Err { error } -> Err { error = error }
+                                Err { error } -> Err { error = error }
+                            Err { error } -> Err { error = error }
+                        Err { error } -> Err { error = error }
+                    Err { error } -> Err { error = error }
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -271,14 +251,12 @@ class NumpyInteropTest {
     fun `numpy elementwise add`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "float((__import__('numpy').array([1.0, 2.0, 3.0]) + __import__('numpy').array([10.0, 20.0, 30.0])).sum())" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = m } -> m.as_float{}
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "float((__import__('numpy').array([1.0, 2.0, 3.0]) + __import__('numpy').array([10.0, 20.0, 30.0])).sum())" }
+              match r is
+                Ok { val = m } -> m.as_float{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -289,14 +267,12 @@ class NumpyInteropTest {
     fun `numpy dot product`() {
         val result = eval(
             """
-            use std::polyglot::core::{ create_context, close_context }
-            use std::polyglot::python::{ python_eval }
-            let ctx = create_context { languages = ["python"], classpath = [] }
-            let r = python_eval { context = ctx, source = "float(__import__('numpy').dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]))" }
-            let _ = close_context { it = ctx }
-            match r is
-              Ok { val = m } -> m.as_float{}
-              Err { error } -> Err { error = error }
+            use std::polyglot::python::{ Python, GraalPy }
+            perform GraalPy in do
+              let r = Python.eval { source = "float(__import__('numpy').dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]))" }
+              match r is
+                Ok { val = m } -> m.as_float{}
+                Err { error } -> Err { error = error }
             """.trimIndent()
         )
         val v = assertOk(result)

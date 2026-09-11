@@ -1,28 +1,120 @@
 # JVM host-language access.
 #
-# Look up JVM classes (fully-qualified) and hand them back as Foreign
-# values.  `instantiate` (from std::polyglot::core) constructs instances;
-# `invoke_member` calls methods; `read_member` reads static fields.
+# `JvmForeign` wraps a Java host object (class, instance, array,
+# Iterable, executable). All JVM interop routes through this type:
+# `perform JvmHost in do ... let cls = Jvm.class { name = ... }`
+# yields a `Result JvmForeign InteropError` — an idiomatic method
+# call then reads `.new{}` / `.method{}` / `.field{}` on the class.
 #
-# Requires the enclosing polyglot Context to allow host class lookup —
-# `allowAllAccess(true)` or `allowHostClassLookup` on the builder.
-use std::polyglot::core::{ Foreign, InteropError }
+# Requires the enclosing polyglot Context to allow host class lookup
+# — `allowAllAccess(true)` in test / dev, or explicit
+# `allowHostClassLookup` in production.
+use std::polyglot::core::{ InteropError }
 
-## Effect that names a JVM host — the handler decides whether class
-## lookup is permitted (production configurations may deny host access
-## while tests permit it).
+## Opaque handle to a JVM host object. Runtime: same `MezzeForeign`
+## Java class every language uses; the newtype gives Mezze-level type
+## safety against mixing JVM and non-JVM Foreigns.
+pub newtype JvmForeign = __NativeForeign
+
+## JVM host effect. `class` performs a fully-qualified host class
+## lookup — the returned Foreign is a Java `Class` interop object,
+## instantiable (`.new{}`) and member-invocable (`.static{}`).
 effect Jvm where {
-  class: { name: Str } -> Result Foreign InteropError <Jvm>
+  class: { name: Str } -> Result JvmForeign InteropError <Jvm>
 }
 
-## Default JVM host — allows any class the runtime can see.
+## Default JVM host — delegates to whatever host class lookup is
+## permitted by the surrounding polyglot Context. Zero configuration:
+## host access is a Context-level policy decision, not a handler knob.
 pub type JvmHost = {}
 
 impl Jvm for JvmHost where {
   class = { name } -> __native_jvm_class { name = name }
 }
 
-## Convenience: look up a class outside an effect handler (uses the
-## enclosing Env's host lookup permissions directly).
-pub let class: { name: Str } -> Result Foreign InteropError = { name } ->
+## Inherent methods on JvmForeign — Java-idiomatic vocabulary AND
+## the universal InteropLibrary primitives. Every op routes through
+## the same `__native_polyglot_*` natives.
+impl JvmForeign where {
+  ## ---- Java-idiomatic vocabulary ----
+
+  ## Invoke an instance method by name.
+  method     = { it, name, args } ->
+    __native_polyglot_invoke_member { val = it, name = name, args = args },
+  ## Instantiate a class Foreign.
+  new        = { it, args } ->
+    __native_polyglot_instantiate { val = it, args = args },
+  ## Invoke a static method — same as `method` at the interop level;
+  ## separately named for the Java-side reader.
+  static     = { it, name, args } ->
+    __native_polyglot_invoke_member { val = it, name = name, args = args },
+  ## Read the `INSTANCE` singleton member (Kotlin `object` / Java
+  ## enum-style singleton).
+  instance   = { it } ->
+    __native_polyglot_read_member { val = it, name = "INSTANCE" },
+  ## Read a field / static field by name.
+  field      = { it, name } ->
+    __native_polyglot_read_member { val = it, name = name },
+  ## Read a named enum constant off an enum class Foreign.
+  enum_value = { it, name } ->
+    __native_polyglot_read_member { val = it, name = name },
+  ## Look up the runtime `Class` of this Foreign via `getClass()`.
+  class_of   = { it } ->
+    __native_polyglot_invoke_member { val = it, name = "getClass", args = [] },
+  ## Java `cls.isInstance(it)` — cls must be a `Class` Foreign.
+  instanceof = { it, cls } ->
+    match __native_polyglot_invoke_member { val = cls, name = "isInstance", args = [it] } is
+      Ok { val = f } -> match __native_polyglot_as_boolean { val = f } is
+        Ok { val = b } -> b
+        Err { error = _ } -> False
+      Err { error = _ } -> False,
+
+  ## ---- Universal InteropLibrary vocabulary ----
+
+  ## Invoke a message-named member with args.
+  invoke_member = { it, method, args } ->
+    __native_polyglot_invoke_member { val = it, name = method, args = args },
+  ## Read a named member.
+  get_member    = { it, name } ->
+    __native_polyglot_read_member    { val = it, name = name },
+  ## Membership predicate.
+  has_member    = { it, name } ->
+    __native_polyglot_has_member     { val = it, name = name },
+  ## Execute a callable Foreign.
+  execute       = { it, args } ->
+    __native_polyglot_execute        { val = it, args = args },
+  ## Instantiate a constructable Foreign.
+  instantiate   = { it, args } ->
+    __native_polyglot_instantiate    { val = it, args = args },
+  ## Read an array element by index.
+  array_at      = { it, index } ->
+    __native_polyglot_read_array     { val = it, index = index },
+  ## Number of elements in an array-shaped Foreign.
+  array_size    = { it } ->
+    __native_polyglot_array_size     { val = it },
+  ## Coerce a numeric Foreign to Int.
+  as_int        = { it } -> __native_polyglot_as_long    { val = it },
+  ## Coerce a string Foreign to Str.
+  as_str        = { it } -> __native_polyglot_as_string  { val = it },
+  ## Coerce a numeric Foreign to Float.
+  as_float      = { it } -> __native_polyglot_as_double  { val = it },
+  ## Coerce a boolean Foreign to Bool.
+  as_bool       = { it } -> __native_polyglot_as_boolean { val = it },
+  ## True iff this Foreign is the guest-language null.
+  is_null       = { it } -> __native_polyglot_is_null    { val = it },
+  ## Debug name of the underlying guest-language type.
+  type_name     = { it } -> __native_polyglot_type_name  { val = it },
+}
+
+## Constructors — lift a Mezze primitive into a JvmForeign so it
+## can be passed as an argument to `.method{}` / `.new{}` etc.
+pub let from_int:   { val: Int   } -> JvmForeign = { val } -> __native_jvm_from_int   { val = val }
+pub let from_float: { val: Float } -> JvmForeign = { val } -> __native_jvm_from_float { val = val }
+pub let from_str:   { val: Str   } -> JvmForeign = { val } -> __native_jvm_from_str   { val = val }
+pub let from_bool:  { val: Bool  } -> JvmForeign = { val } -> __native_jvm_from_bool  { val = val }
+pub let null_val:   {}            -> JvmForeign = {}     -> __native_jvm_null_val    {}
+
+## Convenience: look up a host class outside a `perform Jvm` scope
+## — uses the enclosing Env's host-lookup permissions directly.
+pub let class: { name: Str } -> Result JvmForeign InteropError = { name } ->
   __native_jvm_class { name = name }

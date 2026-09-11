@@ -4312,11 +4312,23 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_polyglot_type_name",
             (r, c) -> PolyglotNatives.typeName(r));
 
-        // JVM host access
+        // JVM host access + language-tagged constructors
         HANDLERS.put("__native_jvm_class",
             (r, c) -> JvmNatives.lookupClass(r, c));
+        HANDLERS.put("__native_jvm_from_int",
+            (r, c) -> PolyglotNatives.fromInt(r, "jvm"));
+        HANDLERS.put("__native_jvm_from_float",
+            (r, c) -> PolyglotNatives.fromFloat(r, "jvm"));
+        HANDLERS.put("__native_jvm_from_str",
+            (r, c) -> PolyglotNatives.fromStr(r, "jvm"));
+        HANDLERS.put("__native_jvm_from_bool",
+            (r, c) -> PolyglotNatives.fromBool(r, "jvm"));
+        HANDLERS.put("__native_jvm_null_val",
+            (r, c) -> PolyglotNatives.nullVal(r, "jvm"));
 
-        // Context lifecycle
+        // Context lifecycle (LEGACY — retained for source compat with
+        // any out-of-tree Mezze code still using the old API; the new
+        // stdlib routes through the ambient Env, not through these).
         HANDLERS.put("__native_polyglot_context_create",
             (r, c) -> PolyglotContextNatives.create(r));
         HANDLERS.put("__native_polyglot_context_close",
@@ -4326,9 +4338,21 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_polyglot_context_binding",
             (r, c) -> PolyglotContextNatives.binding(r, c));
 
-        // Python-specific
+        // Python — ambient-Env eval / import + language-tagged constructors
+        HANDLERS.put("__native_python_eval",
+            (r, c) -> PythonNatives.eval(r, c));
         HANDLERS.put("__native_python_import_module",
             (r, c) -> PythonNatives.importModule(r, c));
+        HANDLERS.put("__native_python_from_int",
+            (r, c) -> PolyglotNatives.fromInt(r, "python"));
+        HANDLERS.put("__native_python_from_float",
+            (r, c) -> PolyglotNatives.fromFloat(r, "python"));
+        HANDLERS.put("__native_python_from_str",
+            (r, c) -> PolyglotNatives.fromStr(r, "python"));
+        HANDLERS.put("__native_python_from_bool",
+            (r, c) -> PolyglotNatives.fromBool(r, "python"));
+        HANDLERS.put("__native_python_null_val",
+            (r, c) -> PolyglotNatives.nullVal(r, "python"));
     }
 
     @TruffleBoundary
