@@ -152,11 +152,9 @@ fun main(args: Array<String>) {
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
             "toolchain" -> handleToolchainCommand(remainingArgs)
-            // Package management (add/remove/sync) is unwired pending #108.
-            // The implementations exist but the dependency-resolution backend
-            // (deps.sqlite, mezze_packages/) isn't connected to the rest of
-            // the pipeline, so users would see misleading "success" messages.
-            // Re-enable in dispatcher + showUsage when #108 lands.
+            "sync" -> handleSyncCommand(remainingArgs)
+            "add" -> handleAddCommand(remainingArgs)
+            "remove" -> handleRemoveCommand(remainingArgs)
             else -> {
                 println("Error: Unknown command: $command")
                 println()
@@ -458,6 +456,18 @@ private fun handleToolchainCommand(args: List<String>) {
     com.mezze.language.cli.toolchain.ToolchainCommand().execute(args)
 }
 
+private fun handleSyncCommand(args: List<String>) {
+    com.mezze.language.cli.commands.SyncCommand().execute(args)
+}
+
+private fun handleAddCommand(args: List<String>) {
+    com.mezze.language.cli.commands.AddCommand().executeAdd(args)
+}
+
+private fun handleRemoveCommand(args: List<String>) {
+    com.mezze.language.cli.commands.AddCommand().executeRemove(args)
+}
+
 private fun readStdin(): String {
     val lines = mutableListOf<String>()
     var line = readLine()
@@ -663,9 +673,9 @@ private fun handleInitCommand(args: List<String>) {
     com.mezze.language.cli.commands.InitCommand().execute(args)
 }
 
-// AddCommand / SyncCommand classes remain in tree — re-wire here when the
-// dependency-resolution backend (#108) lands: deps.sqlite + Mezze.lock +
-// pipeline reads from mezze_packages/.
+// add / remove / sync are wired above (handleAddCommand/handleSyncCommand):
+// the dependency-resolution backend (content store + Mezze.lock + path/url deps
+// resolved into .deps/) is in place from the package-management work.
 
 /**
  * Start the Language Server Protocol server

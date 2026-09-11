@@ -1,235 +1,164 @@
 package com.mezze.language.cli.commands
 
-import com.akuleshov7.ktoml.Toml
 import com.mezze.language.cli.`package`.*
 import java.io.File
 
 /**
- * Handle `mezze add` command to add dependencies to Mezze.toml
+ * `mez add` / `mez remove` — edit Mezze.toml's dependency sections **in place**,
+ * line-based, so the user's comments and formatting are preserved (we never
+ * re-serialize the manifest).
  *
- * Usage:
- *   mezze add <url>                # Add to [dependencies]
- *   mezze add --dev <url>          # Add to [dev-dependencies]
- *   mezze remove <package_name>    # Remove dependency
+ *   mez add <name> --path ../x                 # [path-dependencies]
+ *   mez add <name> --url <url>#sha256:<hash>   # [dependencies]
+ *   mez add <url>#sha256:<hash>                # [dependencies], name derived from url
+ *   mez add ... --dev                          # [dev-dependencies] (registry deps)
+ *   mez remove <name>                          # from whichever dependency section
  */
 class AddCommand {
 
+    private companion object {
+        const val DEPS = "[dependencies]"
+        const val DEV = "[dev-dependencies]"
+        const val PATH = "[path-dependencies]"
+        val DEP_SECTIONS = setOf(DEPS, DEV, PATH)
+    }
+
     fun executeAdd(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
-        val mezzeToml = File(currentDir, "Mezze.toml")
+        val toml = File(currentDir, "Mezze.toml")
+        if (!toml.exists()) return noManifest(currentDir)
 
-        if (!mezzeToml.exists()) {
-            println("❌ Error: No Mezze.toml found in current directory")
-            println()
-            println("This doesn't look like a Mezze package.")
-            println("Location: ${currentDir.absolutePath}")
-            println()
-            println("💡 Run 'mezze init' to create a new package first.")
-            return
-        }
+        val p = parseArgs(args)
+        val isDev = "--dev" in p.flags
 
-        // Parse flags
-        val isDevDependency = args.contains("--dev")
-        val urlArg = args.firstOrNull { !it.startsWith("--") }
-
-        if (urlArg == null) {
-            println("❌ Error: Missing dependency URL")
-            println()
-            println("Usage:")
-            println("  mezze add <url>           # Add regular dependency")
-            println("  mezze add --dev <url>     # Add dev dependency")
-            println()
-            println("Example:")
-            println("  mezze add \"https://github.com/mezze-lang/json/releases/download/v1.2.3/json.tar.gz#sha256:abc123...\"")
-            return
-        }
-
-        // Validate and parse URL
-        val (url, checksum) = try {
-            parseDependencyUrl(urlArg)
-        } catch (e: IllegalArgumentException) {
-            println(e.message)
-            return
-        }
-
-        val packageName = try {
-            extractPackageNameFromUrl(urlArg)
-        } catch (e: IllegalArgumentException) {
-            println(e.message)
-            return
-        }
-
-        // Read existing Mezze.toml
-        val tomlContent = mezzeToml.readText()
-        val manifest = try {
-            Toml.decodeFromString(MezzeToml.serializer(), tomlContent)
-        } catch (e: Exception) {
-            println("❌ Error: Failed to parse Mezze.toml")
-            println()
-            println("The manifest file has invalid TOML syntax.")
-            println("Error: ${e.message}")
-            println()
-            println("💡 Check the syntax of your Mezze.toml file.")
-            return
-        }
-
-        // Check if package already exists
-        val existingInDeps = manifest.dependencies.containsKey(packageName)
-        val existingInDevDeps = manifest.devDependencies.containsKey(packageName)
-
-        if (isDevDependency && existingInDevDeps) {
-            println("⚠️  Package '$packageName' is already in [dev-dependencies]")
-            println()
-            println("Current URL: ${manifest.devDependencies[packageName]}")
-            println("New URL:     $urlArg")
-            println()
-            print("Replace? [y/N]: ")
-            val response = readLine()?.trim()?.lowercase()
-            if (response != "y" && response != "yes") {
-                println("Cancelled.")
-                return
+        val (name, value, section) = when {
+            p.flags.containsKey("--path") -> {
+                val path = p.flags["--path"] ?: return usage("add <name> --path <dir>")
+                val n = p.positionals.firstOrNull() ?: return usage("add <name> --path <dir>")
+                if (!checkName(n)) return
+                Triple(n, path, PATH)
             }
-        } else if (!isDevDependency && existingInDeps) {
-            println("⚠️  Package '$packageName' is already in [dependencies]")
-            println()
-            println("Current URL: ${manifest.dependencies[packageName]}")
-            println("New URL:     $urlArg")
-            println()
-            print("Replace? [y/N]: ")
-            val response = readLine()?.trim()?.lowercase()
-            if (response != "y" && response != "yes") {
-                println("Cancelled.")
-                return
+            p.flags.containsKey("--url") -> {
+                val url = p.flags["--url"] ?: return usage("add <name> --url <url>#sha256:<hash>")
+                val n = p.positionals.firstOrNull() ?: return usage("add <name> --url <url>#sha256:<hash>")
+                if (!checkName(n) || !checkUrl(url)) return
+                Triple(n, url, if (isDev) DEV else DEPS)
+            }
+            else -> {
+                val url = p.positionals.firstOrNull()
+                    ?: return usage("add <name> --path <dir>   |   add <url>#sha256:<hash>")
+                if (!checkUrl(url)) return
+                val n = try { extractPackageNameFromUrl(url) } catch (e: IllegalArgumentException) { println(e.message); return }
+                Triple(n, url, if (isDev) DEV else DEPS)
             }
         }
 
-        // Update Mezze.toml by appending or modifying
-        updateMezzeToml(mezzeToml, packageName, urlArg, isDevDependency)
-
-        if (isDevDependency) {
-            println("✅ Added $packageName to [dev-dependencies]")
-        } else {
-            println("✅ Added $packageName to [dependencies]")
-        }
+        toml.writeText(upsert(toml.readText(), section, name, value))
+        println("✅ ${section.trim('[', ']')}: $name = \"$value\"")
         println()
-        println("💡 Run 'mezze sync' to download the dependency.")
+        println("💡 Run 'mez sync' to materialize it.")
     }
 
     fun executeRemove(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
-        val mezzeToml = File(currentDir, "Mezze.toml")
+        val toml = File(currentDir, "Mezze.toml")
+        if (!toml.exists()) return noManifest(currentDir)
 
-        if (!mezzeToml.exists()) {
-            println("❌ Error: No Mezze.toml found in current directory")
-            println()
-            println("💡 Run 'mezze init' to create a new package first.")
+        val name = parseArgs(args).positionals.firstOrNull() ?: return usage("remove <name>")
+        val (updated, removed) = removeFromDepSections(toml.readText(), name)
+        if (!removed) {
+            println("❌ '$name' is not a dependency.")
             return
         }
-
-        val packageName = args.firstOrNull()
-
-        if (packageName == null) {
-            println("❌ Error: Missing package name")
-            println()
-            println("Usage:")
-            println("  mezze remove <package_name>")
-            println()
-            println("Example:")
-            println("  mezze remove json")
-            return
-        }
-
-        // Read existing Mezze.toml
-        val tomlContent = mezzeToml.readText()
-        val manifest = try {
-            Toml.decodeFromString(MezzeToml.serializer(), tomlContent)
-        } catch (e: Exception) {
-            println("❌ Error: Failed to parse Mezze.toml")
-            println()
-            println(e.message)
-            return
-        }
-
-        // Check if package exists
-        val inDeps = manifest.dependencies.containsKey(packageName)
-        val inDevDeps = manifest.devDependencies.containsKey(packageName)
-
-        if (!inDeps && !inDevDeps) {
-            println("❌ Error: Package '$packageName' not found in dependencies")
-            println()
-            println("Available packages:")
-            if (manifest.dependencies.isNotEmpty()) {
-                println("  [dependencies]:")
-                manifest.dependencies.keys.forEach { println("    - $it") }
-            }
-            if (manifest.devDependencies.isNotEmpty()) {
-                println("  [dev-dependencies]:")
-                manifest.devDependencies.keys.forEach { println("    - $it") }
-            }
-            return
-        }
-
-        // Remove from Mezze.toml
-        removeDependencyFromToml(mezzeToml, packageName)
-
-        if (inDeps) {
-            println("✅ Removed $packageName from [dependencies]")
-        } else {
-            println("✅ Removed $packageName from [dev-dependencies]")
-        }
+        toml.writeText(updated)
+        println("✅ Removed $name")
         println()
-        println("💡 Run 'mezze sync' to update the lock file.")
+        println("💡 Run 'mez sync' to update.")
     }
 
-    private fun updateMezzeToml(mezzeToml: File, packageName: String, url: String, isDevDep: Boolean) {
-        val lines = mezzeToml.readLines().toMutableList()
+    // --- arg parsing -------------------------------------------------------
 
-        val sectionName = if (isDevDep) "[dev-dependencies]" else "[dependencies]"
-        val sectionIndex = lines.indexOfFirst { it.trim() == sectionName }
+    private data class Parsed(val positionals: List<String>, val flags: Map<String, String?>)
 
-        if (sectionIndex == -1) {
-            // Section doesn't exist, add it at the end
-            if (lines.lastOrNull()?.isNotBlank() == true) {
-                lines.add("")
+    /** `--path`/`--url` consume the next token as their value; `--dev` is a bare flag. */
+    private fun parseArgs(args: List<String>): Parsed {
+        val positionals = mutableListOf<String>()
+        val flags = mutableMapOf<String, String?>()
+        var i = 0
+        while (i < args.size) {
+            val a = args[i]
+            when {
+                a == "--path" || a == "--url" -> { flags[a] = args.getOrNull(i + 1); i++ }
+                a.startsWith("--") -> flags[a] = null
+                else -> positionals.add(a)
             }
-            lines.add(sectionName)
-            lines.add("$packageName = \"$url\"")
-        } else {
-            // Section exists, find where to add/update
-            var insertIndex = sectionIndex + 1
-
-            // Skip to next non-comment line or next section
-            while (insertIndex < lines.size) {
-                val line = lines[insertIndex].trim()
-
-                // Check if this is the package we want to update
-                if (line.startsWith("$packageName =")) {
-                    lines[insertIndex] = "$packageName = \"$url\""
-                    mezzeToml.writeText(lines.joinToString("\n"))
-                    return
-                }
-
-                // Stop at next section
-                if (line.startsWith("[") && line.endsWith("]")) {
-                    break
-                }
-
-                insertIndex++
-            }
-
-            // Package not found, insert at the end of the section
-            lines.add(insertIndex, "$packageName = \"$url\"")
+            i++
         }
-
-        mezzeToml.writeText(lines.joinToString("\n"))
+        return Parsed(positionals, flags)
     }
 
-    private fun removeDependencyFromToml(mezzeToml: File, packageName: String) {
-        val lines = mezzeToml.readLines().toMutableList()
+    // --- manifest editing (line-based, formatting-preserving) --------------
 
-        // Remove all lines that start with the package name
-        val filtered = lines.filterNot { line ->
-            line.trim().startsWith("$packageName =")
+    /** Add or replace `name = "value"` inside [section], creating the section if absent. */
+    private fun upsert(text: String, section: String, name: String, value: String): String {
+        val lines = text.split("\n").toMutableList()
+        val entry = "$name = \"$value\""
+        val keyRe = Regex("^\\s*${Regex.escape(name)}\\s*=")
+        val secIdx = lines.indexOfFirst { it.trim() == section }
+
+        if (secIdx == -1) {
+            if (lines.lastOrNull()?.isNotBlank() == true) lines.add("")
+            lines.add(section)
+            lines.add(entry)
+            return lines.joinToString("\n")
         }
 
-        mezzeToml.writeText(filtered.joinToString("\n"))
+        var i = secIdx + 1
+        while (i < lines.size) {
+            if (keyRe.containsMatchIn(lines[i])) {          // key already present -> replace
+                lines[i] = entry
+                return lines.joinToString("\n")
+            }
+            val t = lines[i].trim()
+            if (t.startsWith("[") && t.endsWith("]")) break // hit next section
+            i++
+        }
+        lines.add(i, entry)
+        return lines.joinToString("\n")
+    }
+
+    /** Remove `name = …` but ONLY inside dependency sections (never touches [package] etc). */
+    private fun removeFromDepSections(text: String, name: String): Pair<String, Boolean> {
+        val keyRe = Regex("^\\s*${Regex.escape(name)}\\s*=")
+        val out = mutableListOf<String>()
+        var current = ""
+        var removed = false
+        for (line in text.split("\n")) {
+            val t = line.trim()
+            if (t.startsWith("[") && t.endsWith("]")) {
+                current = t
+                out.add(line)
+            } else if (current in DEP_SECTIONS && keyRe.containsMatchIn(line)) {
+                removed = true // drop this line
+            } else {
+                out.add(line)
+            }
+        }
+        return out.joinToString("\n") to removed
+    }
+
+    // --- small helpers -----------------------------------------------------
+
+    private fun checkName(n: String): Boolean =
+        try { validatePackageName(n); true } catch (e: IllegalArgumentException) { println(e.message); false }
+
+    private fun checkUrl(u: String): Boolean =
+        try { parseDependencyUrl(u); true } catch (e: IllegalArgumentException) { println(e.message); false }
+
+    private fun noManifest(dir: File) {
+        println("❌ No Mezze.toml in ${dir.absolutePath}")
+        println("💡 Run 'mez init' to create a package first.")
+    }
+
+    private fun usage(form: String) {
+        println("Usage: mez $form")
     }
 }

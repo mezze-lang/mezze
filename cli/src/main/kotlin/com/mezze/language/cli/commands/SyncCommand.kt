@@ -13,7 +13,11 @@ import java.io.File
  */
 class SyncCommand {
 
-    fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
+    fun execute(
+        args: List<String>,
+        currentDir: File = File(System.getProperty("user.dir")),
+        storeRootOverride: File? = null,
+    ) {
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
@@ -27,6 +31,7 @@ class SyncCommand {
         }
 
         val isClean = args.contains("--clean")
+        val isLocked = args.contains("--locked")   // verify against Mezze.lock instead of writing it
 
         // Read Mezze.toml
         val tomlContent = mezzeToml.readText()
@@ -42,163 +47,246 @@ class SyncCommand {
             return
         }
 
-        // Combine dependencies and dev-dependencies
-        val allDependencies = manifest.dependencies + manifest.devDependencies
-
-        if (allDependencies.isEmpty()) {
+        val hasDeps = manifest.dependencies.isNotEmpty() ||
+            manifest.devDependencies.isNotEmpty() ||
+            manifest.pathDependencies.isNotEmpty()
+        if (!hasDeps) {
             println("✅ No dependencies to sync.")
             println()
-            println("💡 Add dependencies with: mezze add <url>")
+            println("💡 Add a local dep under [path-dependencies] (name = \"../path\"),")
+            println("   or a registry dep under [dependencies] (name = \"<url>#sha256:<hash>\").")
             return
         }
 
-        println("📦 Syncing ${allDependencies.size} package(s)...")
+        println("📦 Syncing dependencies...")
         println()
 
-        // Create directories
-        val packagesDir = File(currentDir, "mezze_packages")
+        // Deps are materialized into each package's `.deps/mezze/<name>-<version>/` —
+        // where ModuleResolver.resolveModuleFile searches — so `use <name>::...`
+        // resolves with no further wiring.
+        val packagesDir = File(currentDir, ".deps/mezze")
         val cacheDir = File(System.getProperty("user.home"), ".mez/cache")
 
+        // Global content store: extracted registry packages keyed by sha256, shared
+        // across ALL projects (fetch once, ever). Override with MEZZE_STORE_DIR (tests).
+        val storeRoot = storeRootOverride
+            ?: System.getenv("MEZZE_STORE_DIR")?.takeIf { it.isNotBlank() }?.let { File(it) }
+            ?: File(System.getProperty("user.home"), ".mezze/store")
+
         if (isClean && packagesDir.exists()) {
-            println("🧹 Cleaning mezze_packages/...")
+            println("🧹 Cleaning .deps/mezze/...")
             packagesDir.deleteRecursively()
         }
-
         packagesDir.mkdirs()
         cacheDir.mkdirs()
 
-        // Download and extract packages
         val downloader = PackageDownloader(cacheDir)
-        val archiveHandler = ArchiveHandler()
-        val lockedPackages = mutableListOf<LockedPackage>()
+        val archive = ArchiveHandler()
+        val nodes = mutableListOf<LockedNode>()
 
         try {
-            for ((packageName, fullUrl) in allDependencies) {
-                println("📦 Processing $packageName...")
+            val count = resolveDeps(currentDir, manifest, storeRoot, isClean, downloader, archive, nodes)
 
-                // Parse URL
-                val (url, checksum) = try {
-                    parseDependencyUrl(fullUrl)
-                } catch (e: IllegalArgumentException) {
-                    println("❌ Error in $packageName:")
-                    println(e.message)
-                    println()
-                    continue
-                }
+            // Complete graph lock: the root package + every resolved node, deduped + sorted.
+            val rootEdges = (manifest.pathDependencies.keys + manifest.dependencies.keys + manifest.devDependencies.keys).sorted()
+            val rootNode = LockedNode(manifest.`package`.name, manifest.`package`.version, source = "root", dependencies = rootEdges)
+            val graph = (listOf(rootNode) + nodes).distinctBy { it.name }.sortedBy { it.name }
+            val freshLock = MezzeLock(version = 2, root = manifest.`package`.name, packages = graph)
 
-                // Extract version from URL
-                val version = extractVersionFromUrl(url)
-
-                // Download
-                val archiveFile = try {
-                    downloader.downloadPackage(packageName, url, checksum)
-                } catch (e: PackageDownloadException) {
-                    println(e.message)
-                    println()
-                    continue
-                } catch (e: Exception) {
-                    println("❌ Error downloading $packageName:")
-                    println(e.message)
-                    println()
-                    continue
-                }
-
-                // Extract
-                val packageDir = File(packagesDir, "$packageName-$version")
-
-                // Skip extraction if already extracted (unless --clean)
-                if (packageDir.exists() && !isClean) {
-                    println("  ✅ Already extracted $packageName")
-                } else {
-                    if (packageDir.exists()) {
-                        packageDir.deleteRecursively()
-                    }
-
-                    packageDir.mkdirs()
-
-                    try {
-                        archiveHandler.extractTarGz(archiveFile, packageDir)
-                    } catch (e: ArchiveException) {
-                        println(e.message)
-                        println()
-                        continue
-                    }
-
-                    // Find package root (might be nested in a directory)
-                    val packageRoot = archiveHandler.findPackageRoot(packageDir)
-
-                    // Validate structure
-                    try {
-                        archiveHandler.validatePackageStructure(packageRoot, packageName)
-                    } catch (e: ArchiveException) {
-                        println(e.message)
-                        println()
-                        // Don't skip - package might still be usable
-                    }
-                }
-
-                // Add to lock file
-                lockedPackages.add(
-                    LockedPackage(
-                        name = packageName,
-                        version = version,
-                        url = url,
-                        checksum = "sha256:$checksum"
-                    )
-                )
-
-                println()
-            }
-
-            // Write lock file
             val lockFile = File(currentDir, "Mezze.lock")
-            val existingLock = readLockFile(lockFile)
-            val newLock = mergeLockFile(existingLock, lockedPackages)
-
-            try {
-                writeLockFile(lockFile, newLock)
-                println("✅ Updated Mezze.lock")
-            } catch (e: Exception) {
-                println("⚠️  Warning: Failed to update Mezze.lock")
-                println("   ${e.message}")
+            if (isLocked) {
+                val existing = readLockFile(lockFile)
+                when {
+                    existing == null ->
+                        println("❌ --locked: no Mezze.lock to verify. Run 'mez sync' first.")
+                    existing.packages != freshLock.packages -> {
+                        println("❌ --locked: Mezze.lock is out of date with the resolved graph.")
+                        println("   Run 'mez sync' (without --locked) to update it.")
+                    }
+                    else -> {
+                        println()
+                        println("🔒 Mezze.lock verified — graph matches (${graph.size} package(s)).")
+                    }
+                }
+            } else {
+                try {
+                    writeLockFile(lockFile, freshLock)
+                    println()
+                    println("🔒 Locked ${graph.size} package(s) in Mezze.lock")
+                } catch (e: Exception) {
+                    println("⚠️  Warning: Failed to update Mezze.lock — ${e.message}")
+                }
             }
 
             println()
-            println("🎉 Successfully synced ${lockedPackages.size} package(s)!")
-            println()
-            println("📂 Packages installed to: ${packagesDir.absolutePath}")
-
+            println("🎉 Sync complete: $count package(s).")
+            println("📂 Dependencies at: ${packagesDir.absolutePath}")
         } finally {
             downloader.close()
         }
     }
 
-    /**
-     * Extract version from URL
-     *
-     * Examples:
-     *   .../releases/download/v1.2.3/... -> "1.2.3"
-     *   .../json-1.2.3.tar.gz -> "1.2.3"
-     */
-    private fun extractVersionFromUrl(url: String): String {
-        // Try to extract from /vX.Y.Z/ pattern
-        val versionRegex = Regex("/v?(\\d+\\.\\d+\\.\\d+(?:-[\\w.]+)?)/")
-        val match = versionRegex.find(url)
-
-        if (match != null) {
-            return match.groupValues[1]
-        }
-
-        // Try to extract from filename
-        val filename = url.substringAfterLast("/").removeSuffix(".tar.gz").removeSuffix(".tgz")
-        val filenameVersionRegex = Regex("-(\\d+\\.\\d+\\.\\d+(?:-[\\w.]+)?)$")
-        val filenameMatch = filenameVersionRegex.find(filename)
-
-        if (filenameMatch != null) {
-            return filenameMatch.groupValues[1]
-        }
-
-        // Fallback: use "unknown"
-        return "unknown"
+    private sealed class DepSpec {
+        data class Path(val rawPath: String) : DepSpec()
+        data class Registry(val url: String, val sha256: String) : DepSpec()
     }
+
+    /**
+     * Walk the whole dependency graph — local `path` deps AND remote `url#sha256`
+     * deps, transitively — linking each dep into its DECLARER's `.deps/mezze/`.
+     * Module resolution roots at each package's own dir, so a dep (a local dir or a
+     * shared content-store entry) resolves *its* imports against *its* `.deps` — a
+     * registry dep's sub-deps land in that store entry's `.deps` (shared, since a
+     * package's deps are a pure function of the package). One `mez sync` sets up the
+     * entire graph. Diamonds dedup and cycles terminate via a seen-set keyed on
+     * declarer+name. Returns the number of packages materialized.
+     */
+    private fun resolveDeps(
+        rootDir: File,
+        rootToml: MezzeToml,
+        storeRoot: File,
+        isClean: Boolean,
+        downloader: PackageDownloader,
+        archive: ArchiveHandler,
+        nodes: MutableList<LockedNode>,
+    ): Int {
+        val seen = HashSet<String>()                              // "<declarerCanonical>::<name>"
+        val queue = ArrayDeque<Triple<File, String, DepSpec>>()   // (declaringDir, name, spec)
+        enqueue(queue, rootDir, rootToml, includeDev = true)
+
+        var count = 0
+        while (queue.isNotEmpty()) {
+            val (declaringDir, name, spec) = queue.removeFirst()
+            if (!seen.add("${declaringDir.canonicalPath}::$name")) continue
+
+            val target = when (spec) {
+                is DepSpec.Path -> resolvePathTarget(declaringDir, name, spec.rawPath)
+                is DepSpec.Registry -> resolveRegistryTarget(name, spec, storeRoot, isClean, downloader, archive)
+            } ?: continue
+
+            val depToml = readToml(File(target, "Mezze.toml"))
+            if (depToml == null) {
+                println("  ❌ $name: no readable Mezze.toml in $target")
+                continue
+            }
+            val version = depToml.`package`.version
+
+            // Link into the DECLARING package's own .deps/mezze so its `use` resolves.
+            val depsDir = File(declaringDir, ".deps/mezze").also { it.mkdirs() }
+            materializeSymlink(depsDir, name, target, version)
+            count++
+            val where = if (declaringDir == rootDir) "" else "  (into ${declaringDir.name}/.deps)"
+            println("  ✅ $name-$version -> ${target.path}$where")
+
+            // Record this node in the graph lock, with its own direct-dep edges.
+            val edges = (depToml.pathDependencies.keys + depToml.dependencies.keys).sorted()
+            nodes.add(
+                when (spec) {
+                    is DepSpec.Path -> LockedNode(name, version, source = "path", path = target.path, dependencies = edges)
+                    is DepSpec.Registry -> LockedNode(name, version, source = "registry", url = spec.url, checksum = "sha256:${spec.sha256}", dependencies = edges)
+                }
+            )
+
+            // Recurse: this dep's own deps resolve against ITS dir. Dev-deps are the
+            // top project's only — a dependency's dev-deps are not the consumer's.
+            enqueue(queue, target, depToml, includeDev = false)
+        }
+        return count
+    }
+
+    private fun enqueue(
+        queue: ArrayDeque<Triple<File, String, DepSpec>>,
+        dir: File,
+        toml: MezzeToml,
+        includeDev: Boolean,
+    ) {
+        toml.pathDependencies.forEach { (n, p) -> queue.add(Triple(dir, n, DepSpec.Path(p))) }
+        val registry = if (includeDev) toml.dependencies + toml.devDependencies else toml.dependencies
+        registry.forEach { (n, fullUrl) ->
+            try {
+                val (url, sha) = parseDependencyUrl(fullUrl)
+                queue.add(Triple(dir, n, DepSpec.Registry(url, sha)))
+            } catch (e: IllegalArgumentException) {
+                println("  ❌ $n: ${e.message?.lineSequence()?.firstOrNull() ?: "invalid dependency URL"}")
+            }
+        }
+    }
+
+    private fun resolvePathTarget(declaringDir: File, name: String, rawPath: String): File? {
+        val target = File(rawPath).let { if (it.isAbsolute) it else File(declaringDir, rawPath) }.canonicalFile
+        if (!target.isDirectory || !File(target, "Mezze.toml").exists()) {
+            println("  ❌ $name: '$rawPath' (from ${declaringDir.name}) is not a Mezze package (resolved: $target)")
+            return null
+        }
+        return target
+    }
+
+    private fun resolveRegistryTarget(
+        name: String,
+        spec: DepSpec.Registry,
+        storeRoot: File,
+        isClean: Boolean,
+        downloader: PackageDownloader,
+        archive: ArchiveHandler,
+    ): File? {
+        val storeDir = File(storeRoot, spec.sha256)
+        if (File(storeDir, "Mezze.toml").exists() && !isClean) return storeDir   // content-addressed cache hit
+
+        val archiveFile = try {
+            downloader.downloadPackage(name, spec.url, spec.sha256)
+        } catch (e: Exception) {
+            println((e.message ?: "❌ $name: download failed").prependIndent("  "))
+            return null
+        }
+        return try {
+            extractIntoStore(archive, archiveFile, storeDir, name)
+            storeDir
+        } catch (e: ArchiveException) {
+            println((e.message ?: "❌ $name: extract failed").prependIndent("  "))
+            null
+        }
+    }
+
+    private fun readToml(manifest: File): MezzeToml? =
+        try {
+            Toml.decodeFromString(MezzeToml.serializer(), manifest.readText())
+        } catch (e: Exception) {
+            null
+        }
+
+    /**
+     * Symlink `<packagesDir>/<name>-<version>` -> target, replacing any stale
+     * `<name>-*` entry first. Symlinks are removed as links (never recurse into the
+     * target — that would delete the dep's own source).
+     */
+    private fun materializeSymlink(packagesDir: File, name: String, target: File, version: String) {
+        packagesDir.listFiles { f -> f.name.startsWith("$name-") }?.forEach { stale ->
+            val p = stale.toPath()
+            if (java.nio.file.Files.isSymbolicLink(p)) java.nio.file.Files.delete(p) else stale.deleteRecursively()
+        }
+        java.nio.file.Files.createSymbolicLink(File(packagesDir, "$name-$version").toPath(), target.toPath())
+    }
+
+    /**
+     * Extract a verified tarball into the content store at [storeDir], atomically:
+     * unpack to a temp dir, find the package root (handles a single nested top-level
+     * dir like GitHub archives), validate it has a Mezze.toml, then move it into
+     * place. On any failure the temp dir is cleaned and [storeDir] is left untouched.
+     */
+    private fun extractIntoStore(archive: ArchiveHandler, archiveFile: File, storeDir: File, packageName: String) {
+        val tmp = File(storeDir.parentFile, ".tmp-${storeDir.name}")
+        tmp.deleteRecursively()
+        tmp.mkdirs()
+        try {
+            archive.extractTarGz(archiveFile, tmp, showProgress = false)
+            val root = archive.findPackageRoot(tmp)
+            archive.validatePackageStructure(root, packageName)   // throws if no Mezze.toml
+            if (storeDir.exists()) storeDir.deleteRecursively()
+            storeDir.parentFile.mkdirs()
+            java.nio.file.Files.move(root.toPath(), storeDir.toPath())
+        } finally {
+            tmp.deleteRecursively()
+        }
+    }
+
 }
