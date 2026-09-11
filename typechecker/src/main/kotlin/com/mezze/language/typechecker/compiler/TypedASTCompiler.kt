@@ -1689,11 +1689,17 @@ class TypedASTCompiler(
                 // that call `fmt.encode_int` where `fmt` is a VarType param internally).
                 val opDictMethods = dictMethodsForHash[opHash]
                 if (opDictMethods != null && opDictMethods.isNotEmpty()) {
-                    // Collect concrete types from all fields for resolution
-                    val concreteTypesForDict = mutableListOf(receiverType)
+                    // Collect concrete types for resolution. ELEMENT-FIRST: prepend a
+                    // container's element type so the dict resolves against the ELEMENT
+                    // impl (`Ord P`) rather than re-matching the container impl
+                    // (`impl Ord for ['a]`). See project_impl_op_with_constraint_dropped.
+                    val concreteTypesForDict = mutableListOf<MezzeType>()
+                    containerElementType(receiverType)?.let { if (it !is VarType) concreteTypesForDict.add(it) }
+                    concreteTypesForDict.add(receiverType)
                     if (expr.arg is TypedRecord) {
                         for (entry in (expr.arg as TypedRecord).entries) {
                             if (entry is TypedRecordEntry.Field) {
+                                containerElementType(entry.value.type)?.let { if (it !is VarType) concreteTypesForDict.add(it) }
                                 concreteTypesForDict.add(entry.value.type)
                             }
                         }
@@ -2222,6 +2228,17 @@ class TypedASTCompiler(
      * Resolve the ability op hash for a given method name using concrete types.
      * Tries each concrete type against the ability op index to find a match.
      */
+    /** The element (or map value) type of a container type, else null. */
+    private fun containerElementType(type: MezzeType): MezzeType? = when (type) {
+        is SeqType -> type.elementType
+        is ListType -> type.elementType
+        is SetType -> type.elementType
+        is SortedSetType -> type.elementType
+        is MapType -> type.valueType
+        is SortedMapType -> type.valueType
+        else -> null
+    }
+
     private fun resolveOpHashFromConcreteTypes(methodName: String, concreteTypes: List<MezzeType>): Hash? {
         // First pass: direct match.
         for (concreteType in concreteTypes) {
@@ -2234,15 +2251,7 @@ class TypedASTCompiler(
         // for the element type, the right impl is `Encode <config> for Str` —
         // extract it from the container's element/value type.
         for (concreteType in concreteTypes) {
-            val elementType: MezzeType? = when (concreteType) {
-                is SeqType -> concreteType.elementType
-                is ListType -> concreteType.elementType
-                is SetType -> concreteType.elementType
-                is SortedSetType -> concreteType.elementType
-                is MapType -> concreteType.valueType
-                is SortedMapType -> concreteType.valueType
-                else -> null
-            }
+            val elementType = containerElementType(concreteType)
             if (elementType != null && elementType !is VarType) {
                 val opHash = tryResolveAbilityOp(methodName, elementType)
                 if (opHash != null) return opHash

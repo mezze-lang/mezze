@@ -145,18 +145,11 @@ object MonoDriver {
                 // `impl.forallVars` order first so any impl-declared var
                 // that also appears keeps its identity; then append any
                 // extra typechecker-fresh names.
-                val actualVarNames = collectVarTypeNames(opType)
-                val typeParams = buildList {
-                    val seen = HashSet<String>()
-                    for (tp in impl.forallVars) {
-                        if (tp.name in actualVarNames && seen.add(tp.name)) add(tp)
-                    }
-                    for (name in actualVarNames) {
-                        if (seen.add(name)) {
-                            add(TypeParam(name = name, kind = TypeKind.Star))
-                        }
-                    }
-                }
+                // Include element-level forallVars (`'a`) that the laundered op
+                // surface type omits, so the substitution reaches an inner comparator
+                // closure's `a < b`. Must match the request-side typeParams in
+                // seedFromMethodCall (both via opDeclTypeParamsWithForall).
+                val (typeParams, _) = opDeclTypeParamsWithForall(opType, impl, null)
                 val synthetic = TypedLetDecl(
                     hash = opHash,
                     name = opName,
@@ -538,17 +531,19 @@ object MonoDriver {
         // sized to `impl.forallVars` but the synthetic decl's `typeParams`
         // is sized differently, triggering Monomorphizer's arity-mismatch
         // fallback for every method-style seed on this impl.
-        val opTypeParams = buildList {
-            val seen = HashSet<String>()
-            val actualNames = collectVarTypeNames(opBody.type)
-            for (tp in match.impl.forallVars) {
-                if (tp.name in actualNames && seen.add(tp.name)) add(tp)
-            }
-            for (name in actualNames) {
-                if (seen.add(name)) add(TypeParam(name = name, kind = TypeKind.Star))
-            }
-        }
-        val args = deriveTypeArgs(opParamType, opTypeParams, callArg.type)
+        // Element-typevar recovery: the op's laundered surface type names its
+        // params after RECORD FIELDS (`it`/`r`/`ret`), not the impl's real element
+        // type var (`'a`). So `deriveTypeArgs` binds it/r/ret but leaves the body's
+        // `'a` (used by an inner comparator closure's `a < b`) unbound — mono then
+        // strips the dict AND leaves `'a` generic, so `a < b` falls to a primitive
+        // node and crashes on user records ([P] < [P]). Recover `'a` by unifying the
+        // impl TARGET (e.g. `['a]`) against the concrete receiver (`[P]`) and append
+        // those forallVars to the synthetic decl's typeParams (same shape the decl
+        // uses in MonoDriver.buildOpDecls). See project_impl_op_with_constraint_dropped.
+        val (opTypeParams, extraForallArgs) = opDeclTypeParamsWithForall(
+            opBody.type, match.impl, receiverType)
+        val baseArgs = deriveTypeArgs(opParamType, opTypeParams.dropLast(extraForallArgs.size), callArg.type)
+        val args = if (baseArgs != null) baseArgs + extraForallArgs else null
         if (args != null && args.all { isConcrete(it) }) {
             // #424: harvest closure args from the method-style call too.
             // For `xs.fold {init = 0, f = {acc,x} -> ...}`, `f` here is
@@ -691,6 +686,67 @@ object MonoDriver {
      *  order. Deterministic ordering matters because these names become
      *  the synthetic ability-op decl's typeParams, and typeParam order
      *  drives the specialization hash. */
+    /**
+     * The synthetic ability-op decl's typeParams, PLUS the impl's element-level
+     * forallVars (`'a`) that the laundered op surface type omits. Returns the full
+     * typeParam list (base field-named vars, then appended forallVars) and the
+     * concrete args for those appended forallVars, recovered by unifying the impl's
+     * TARGET type against the concrete receiver. Base and request derivation share
+     * this so their typeParam arity stays aligned. When `receiverType` is null
+     * (decl-build time — no call site), the appended forallVars carry a fresh var
+     * placeholder and an empty extra-args list. See project_impl_op_with_constraint_dropped.
+     */
+    /** The element type-var NAME of a built-in container type whose element is a bare
+     *  VarType (`[ 'a ]` → "a"), else null. Excludes `Option 'a` / records / nominal
+     *  TypeApplications — only Seq/List/Set/SortedSet/Map/SortedMap containers. */
+    private fun elementVarName(type: MezzeType): String? {
+        val elem = when (type) {
+            is MezzeType.SeqType -> type.elementType
+            is MezzeType.ListType -> type.elementType
+            is MezzeType.SetType -> type.elementType
+            is MezzeType.SortedSetType -> type.elementType
+            is MezzeType.MapType -> type.valueType
+            is MezzeType.SortedMapType -> type.valueType
+            else -> null
+        }
+        return (elem as? MezzeType.VarType)?.variable?.name
+    }
+
+    private fun opDeclTypeParamsWithForall(
+        opType: MezzeType,
+        impl: TypedAbilityImpl,
+        receiverType: MezzeType?
+    ): Pair<List<TypeParam>, List<MezzeType>> {
+        val base = buildList {
+            val seen = HashSet<String>()
+            val actualNames = collectVarTypeNames(opType)
+            for (tp in impl.forallVars) if (tp.name in actualNames && seen.add(tp.name)) add(tp)
+            for (name in actualNames) if (seen.add(name)) add(TypeParam(name = name, kind = TypeKind.Star))
+        }
+        val baseNames = base.map { it.name }.toHashSet()
+        // NARROW to the exact laundering case: a CONTAINER target (Seq/List/Set/…)
+        // whose element type var is dropped from the op's laundered surface type. Other
+        // impls (variant/record like `impl Eq for Option 'a`) keep their existing
+        // typeParams untouched — appending a forallVar there changes the spec arity and
+        // corrupts an already-working derived op. Only recover forallVars that (a) are
+        // missing from the base AND (b) actually appear as the container's element var.
+        val containerElementVarNames = impl.targetTypes
+            .mapNotNull { elementVarName(it) }
+            .toHashSet()
+        val missing = impl.forallVars.filter { it.name !in baseNames && it.name in containerElementVarNames }
+        if (missing.isEmpty()) return base to emptyList()
+        // Recover each missing forallVar's concrete type by unifying the impl target
+        // against the receiver (e.g. `['a]` vs `[P]` → `'a = P`).
+        val bindings = HashMap<String, MezzeType>()
+        if (receiverType != null) {
+            for (target in impl.targetTypes) unify(target, receiverType, bindings)
+        }
+        val extraArgs = missing.map { tp ->
+            bindings[tp.name] ?: MezzeType.VarType(TypeVar.freshWithName(tp.name))
+        }
+        return (base + missing) to extraArgs
+    }
+
     private fun collectVarTypeNames(type: MezzeType): List<String> {
         val seen = LinkedHashSet<String>()
         fun go(t: MezzeType) {

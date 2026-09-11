@@ -425,6 +425,18 @@ class TypedAstBuilder(
         buildAbilityImpl(decl, "<codec-generated>", impls)
     }
 
+    private fun attachAbilityConstraints(
+        expr: TypedExpr,
+        constraints: List<MezzeType.FunctionAbilityConstraint>
+    ): TypedExpr {
+        val fnType = expr.type as? MezzeType.FunctionType ?: return expr
+        val merged = fnType.copy(abilityConstraints = fnType.abilityConstraints + constraints)
+        return when (expr) {
+            is TypedLambda -> expr.copy(type = merged)
+            else -> expr
+        }
+    }
+
     private fun buildAbilityImpl(
         decl: ParsedImplAbilityDecl,
         file: String,
@@ -485,7 +497,24 @@ class TypedAstBuilder(
                 else -> MezzeType.VarType(TypeVar.freshWithName("op_${op.name}"))
             }
             val opExpr = buildExpr(op.implementation, file, ctxType)
-            op.name to opExpr
+            // LAYER 1: carry the op's own `with <Ability> 'a` constraints onto its
+            // compiled FunctionType so the dict-method prescan synthesizes its
+            // `__dict_<method>` param. See project_impl_op_with_constraint_dropped.
+            val opWithConstraints = if (op.abilityConstraints.isNotEmpty()) {
+                val converted = op.abilityConstraints.map { c ->
+                    MezzeType.FunctionAbilityConstraint(
+                        abilityName = c.abilityName,
+                        typeArgs = c.typeArgs.map { convertParsedTypeAnnotation(it) },
+                        abilityHash = registry.lookupAbility(c.abilityName)?.let {
+                            it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it)
+                        } ?: importContext?.importedAbilities?.get(c.abilityName)?.let {
+                            it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it)
+                        }
+                    )
+                }
+                attachAbilityConstraints(opExpr, converted)
+            } else opExpr
+            op.name to opWithConstraints
         }
 
         val hash = decl.contentHash ?: ParsedDeclHasher.hashImplAbilityDecl(decl)
