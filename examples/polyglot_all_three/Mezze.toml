@@ -1,0 +1,24 @@
+[package]
+name = "polyglot_all_three"
+version = "0.1.0"
+
+[[app]]
+name = "polyglot_all_three"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+# JVM interop needs no config beyond declaring the section.
+[polyglot.jvm]
+classpath = []
+
+# Python interop — point at the same venv the numpy demo uses.
+[polyglot.python]
+python_path = "../../interpreter/build/graalpy-venv/venv/lib/python3.12/site-packages"
+
+[polyglot.python.options]
+PosixModuleBackend = "java"
+
+# JavaScript interop needs no config beyond declaring the section.
+[polyglot.js]
