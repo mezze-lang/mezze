@@ -640,12 +640,27 @@ tasks.register<Copy>("installStdlibSources") {
     from(rootProject.projectDir.resolve("stdlib")) {
         include("**/*.mz")
     }
-    // Flat (not under toolchains/<v>/): these .mz files are for LSP
-    // go-to-definition only — the runtime compiles from the binary's embedded
-    // snapshot, not from here — and the LSP resolves them at ~/.mezze/stdlib.
-    // Shared across versions; the latest install wins, which is fine for
-    // cmd-click display.
+    // Flat (shared) copy — the fallback the LSP uses for a dev/JVM launch or a
+    // pre-versioned install. The per-toolchain copy below is preferred when
+    // present (so a pinned project cmd-clicks into ITS version's stdlib source).
     into(mezzeHome.map { File(it, "stdlib") })
+}
+
+/**
+ * Per-toolchain stdlib sources at ~/.mezze/toolchains/<version>/stdlib, so LSP
+ * go-to-definition on a `std::…` symbol lands in the source of the toolchain the
+ * project is pinned to — not whichever version last wrote the flat copy. The
+ * runtime still compiles from the binary's embedded snapshot; this is display
+ * only (MezzeTextDocumentService.toolchainStdlibDir).
+ */
+tasks.register<Copy>("installToolchainStdlib") {
+    group = "install"
+    description = "Install stdlib .mz sources into the versioned toolchain's stdlib/"
+    mustRunAfter(":stdlib:processResources", ":stdlib:compileKotlin")
+    from(rootProject.projectDir.resolve("stdlib")) {
+        include("**/*.mz")
+    }
+    into(toolchainDir.map { File(it, "stdlib") })
 }
 
 /**
@@ -673,7 +688,7 @@ tasks.register<Copy>("installStdlibSources") {
 tasks.register("installNative") {
     group = "install"
     description = "Install the versioned mez toolchain + PATH proxy into ~/.mezze/"
-    dependsOn("installRuntime", "installDevTools", "installStdlibSources", "nativeCompile")
+    dependsOn("installRuntime", "installDevTools", "installStdlibSources", "installToolchainStdlib", "nativeCompile")
     doLast {
         val src = layout.buildDirectory.file("native/nativeCompile/mez").get().asFile
 

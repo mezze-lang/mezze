@@ -1608,6 +1608,23 @@ class MezzeTextDocumentService(
      * paths so cmd-click stays consistent across sessions and so
      * find-references can show meaningful URIs.
      */
+    /**
+     * The running toolchain's own `stdlib/` dir, if this `mez lsp` is a versioned
+     * install (`~/.mezze/toolchains/<v>/bin/mez` → `…/<v>/stdlib`). `mez lsp` runs
+     * in-process in the CLI binary, so the running executable is the active
+     * (pinned) toolchain — we self-locate its stdlib the same way MezzeHome finds
+     * its lib. Null for a dev/JVM launch or a flat install, where the shared
+     * `~/.mezze/stdlib` fallback applies.
+     */
+    private val toolchainStdlibDir: java.io.File? by lazy {
+        val exe = runCatching {
+            ProcessHandle.current().info().command().orElse(null)?.let { java.io.File(it) }
+        }.getOrNull()
+        val binDir = exe?.parentFile ?: return@lazy null
+        val stdlib = java.io.File(binDir.parentFile ?: binDir, "stdlib")
+        stdlib.takeIf { it.isDirectory }
+    }
+
     private fun resolveModulePathToUri(modulePath: String): String? {
         val segments = modulePath.split("::")
         if (segments.isEmpty()) return null
@@ -1617,12 +1634,16 @@ class MezzeTextDocumentService(
         val ws = server.getWorkspaceRoot()
         if (segments[0] == "std") {
             val rest = segments.drop(1).joinToString("/") + ".mz"
-            // 1. ~/.mezze/stdlib/std/<rest>
+            // 1. The ACTIVE toolchain's own stdlib (toolchains/<v>/stdlib), so a
+            //    project pinned to an older toolchain cmd-clicks into THAT
+            //    version's stdlib source, not whichever the flat copy last saw.
+            toolchainStdlibDir?.let { candidates += java.io.File(it, "std/$rest") }
+            // 2. ~/.mezze/stdlib/std/<rest> — flat, shared fallback.
             val home = System.getProperty("user.home")
             if (home != null) {
                 candidates += java.io.File("$home/.mezze/stdlib/std/$rest")
             }
-            // 2. <workspace>/stdlib/std/<rest>
+            // 3. <workspace>/stdlib/std/<rest>
             if (ws != null) {
                 candidates += java.io.File(ws, "stdlib/std/$rest")
             }
