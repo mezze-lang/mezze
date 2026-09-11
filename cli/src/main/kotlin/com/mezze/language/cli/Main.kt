@@ -464,7 +464,8 @@ private fun handleToolchainCommand(args: List<String>) {
 }
 
 private fun handleSyncCommand(args: List<String>) {
-    com.mezze.language.cli.commands.SyncCommand().execute(args)
+    val code = com.mezze.language.cli.commands.SyncCommand().execute(args)
+    if (code != 0) kotlin.system.exitProcess(code)
 }
 
 private fun handleAddCommand(args: List<String>) {

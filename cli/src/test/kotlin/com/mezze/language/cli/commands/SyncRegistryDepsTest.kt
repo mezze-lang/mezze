@@ -110,6 +110,26 @@ class SyncRegistryDepsTest {
     }
 
     @Test
+    fun `sync exit code is 0 on success and non-zero on a checksum failure`(@TempDir tmp: Path) {
+        val root = tmp.toFile()
+        val store = File(root, "store")
+        val srcPkg = File(root, "greet-src").also { pkg(it, "greet") }
+        val tarball = File(root, "greet.tar.gz").also { tarGz(srcPkg, it) }
+        val hash = sha256(tarball)
+
+        // Correct pin → 0.
+        val ok = File(root, "ok").also { pkg(it, "ok", mapOf("greet" to "${tarball.toURI()}#sha256:$hash")) }
+        assertEquals(0, SyncCommand().execute(emptyList(), currentDir = ok, storeRootOverride = store),
+            "a clean sync must exit 0")
+
+        // Wrong pin → non-zero (an integrity failure must fail CI, not pass silently).
+        val bad = File(root, "bad").also { pkg(it, "bad", mapOf("greet" to "${tarball.toURI()}#sha256:${"0".repeat(64)}")) }
+        assertEquals(1, SyncCommand().execute(emptyList(), currentDir = bad, storeRootOverride = store),
+            "a checksum mismatch must exit non-zero")
+        assertNull(depLink(bad, "greet"), "the rejected dep must not be linked")
+    }
+
+    @Test
     fun `transitive remote dep lands in the store entry's own deps`(@TempDir tmp: Path) {
         val root = tmp.toFile()
         val store = File(root, "store")
