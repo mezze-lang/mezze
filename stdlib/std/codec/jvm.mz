@@ -1,0 +1,188 @@
+## JVM codec — encode Mezze values as `JvmForeign` and decode back.
+##
+## User sugar:
+##
+##   let x     = 42
+##   let jf    = x.to_jvm {}               # JvmForeign wrapping Long(42)
+##   let back  = Int.from_jvm { it = jf }  # Result Int DecodeError
+##
+## Format-author boilerplate is minimal because a `JvmForeign` is a
+## first-class InteropLibrary value: encoding a scalar is literally
+## `jvm::from_int { val = ... }`, and decoding is `jf.as_int{}`.
+##
+## Records / lists / maps are NOT implemented here — a caller who wants
+## to hand numpy an int-list should build a Java `ArrayList` explicitly
+## via `jvm::class { name = "java.util.ArrayList" }` and drive it from
+## Mezze. Partial-capability formats compile-error at the offending field
+## per `docs/codec/redesign-2026-09.md`.
+use std::codec::core::{
+  Format,
+  EncodeScalar, EncodeOption,
+  DecodeScalar, DecodeOption,
+  Encode, Decode,
+  CodecCtx, SharedConfig, DecodeError,
+  default_shared,
+  decode_error
+}
+use std::polyglot::core::{ InteropError }
+use std::polyglot::jvm::{
+  JvmForeign,
+  from_int, from_float, from_str, from_bool, null_val
+}
+use std::float
+use std::int
+use std::char
+use std::nat
+
+## Config for the JVM codec. Empty knobs — every JVM Foreign has one
+## natural representation. Kept as a record for future extension
+## (name-transform, wrap-primitives-as-boxed, etc.).
+pub type JvmC = {
+  shared: SharedConfig,
+}
+
+## Default JVM codec — identity field-name transform.
+pub let jvm_default: JvmC = { shared = default_shared }
+
+## ---- Format link -------------------------------------------------------
+
+impl Format for JvmC having 'out = JvmForeign where {
+}
+
+## ---- Tier 2: encode ----------------------------------------------------
+
+impl EncodeScalar for JvmC having 'out = JvmForeign where {
+  encode_int   = { it, val, ctx } -> from_int   { val = val },
+  encode_float = { it, val, ctx } -> from_float { val = val },
+  encode_str   = { it, val, ctx } -> from_str   { val = val },
+  encode_bool  = { it, val, ctx } -> from_bool  { val = val },
+  encode_frac  = { it, val, ctx } -> from_float { val = __native_frac_to_float { n = val } },
+  encode_bytes = { it, val, ctx } -> from_str   { val = "" },
+  encode_char  = { it, val, ctx } -> from_str   { val = char::to_str { c = val } },
+  encode_nat   = { it, val, ctx } -> from_int   { val = nat::to_int { n = val } },
+}
+
+impl EncodeOption for JvmC having 'out = JvmForeign where {
+  encode_option = { it, val, ctx } -> match val is
+    Some { val = v } -> v
+    None -> null_val {},
+}
+
+## No `EncodeRecord`, `EncodeList`, `EncodeMap`, `EncodeVariant` for
+## `JvmC` — a single Foreign scalar doesn't naturally carry those
+## shapes without a specific Java container choice (ArrayList vs
+## LinkedList vs int[], HashMap vs LinkedHashMap, …). Types
+## containing those shapes will fail Tier-3 auto-derivation at the
+## offending field path — the caller builds the desired Java shape
+## explicitly through `jvm::class { ... }`.
+
+## ---- Tier 2: decode ----------------------------------------------------
+
+impl DecodeScalar for JvmC having 'in = JvmForeign where {
+  decode_int = { it, val, ctx } -> match val.as_int{} is
+    Ok { val = n } -> Ok { val = n }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Int",
+      expected = "Int",
+      found = Some { val = val.type_name{} },
+    },
+  decode_float = { it, val, ctx } -> match val.as_float{} is
+    Ok { val = n } -> Ok { val = n }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Float",
+      expected = "Float",
+      found = Some { val = val.type_name{} },
+    },
+  decode_str = { it, val, ctx } -> match val.as_str{} is
+    Ok { val = s } -> Ok { val = s }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Str",
+      expected = "Str",
+      found = Some { val = val.type_name{} },
+    },
+  decode_bool = { it, val, ctx } -> match val.as_bool{} is
+    Ok { val = b } -> Ok { val = b }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Bool",
+      expected = "Bool",
+      found = Some { val = val.type_name{} },
+    },
+  decode_frac = { it, val, ctx } -> match val.as_float{} is
+    Ok { val = f } -> Ok { val = __native_float_to_frac { f = f } }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Frac",
+      expected = "Frac",
+      found = Some { val = val.type_name{} },
+    },
+  decode_bytes = { it, val, ctx } -> decode_error {
+    path = ctx.path,
+    message = "Bytes not supported by JvmC decoder",
+    expected = "Bytes",
+    found = Some { val = val.type_name{} },
+  },
+  decode_char = { it, val, ctx } -> match val.as_str{} is
+    Ok { val = s } -> match char::from_str { s = s } is
+      Some { val = c } -> Ok { val = c }
+      None -> decode_error {
+        path = ctx.path,
+        message = "Expected single-character Foreign",
+        expected = "Char",
+        found = Some { val = s },
+      }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Char",
+      expected = "Char",
+      found = Some { val = val.type_name{} },
+    },
+  decode_nat = { it, val, ctx } -> match val.as_int{} is
+    Ok { val = n } -> match nat::from_int { n = n } is
+      Some { val = k } -> Ok { val = k }
+      None -> decode_error {
+        path = ctx.path,
+        message = "Expected non-negative integer",
+        expected = "Nat",
+        found = Some { val = "negative integer" },
+      }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected Foreign coercible to Nat",
+      expected = "Nat",
+      found = Some { val = val.type_name{} },
+    },
+}
+
+impl DecodeOption for JvmC having 'in = JvmForeign where {
+  decode_option = { it, val, ctx } ->
+    if val.is_null{} then Ok { val = None }
+    else Ok { val = Some { val = val } },
+}
+
+## ---- Tier 4: sugar abilities + blankets --------------------------------
+
+## Encode any scalar-shaped value to a `JvmForeign` via `.to_jvm{}`.
+ability ToJvm for 'a where {
+  to_jvm:      { it: 'a }               -> JvmForeign,
+  to_jvm_with: { it: 'a, config: JvmC } -> JvmForeign,
+}
+
+impl ToJvm for 'a where {
+  to_jvm:      { it: 'a }               with Encode JvmC 'a -> JvmForeign = { it }         -> it.encode { config = jvm_default },
+  to_jvm_with: { it: 'a, config: JvmC } with Encode JvmC 'a -> JvmForeign = { it, config } -> it.encode { config = config },
+}
+
+## Decode a target type from a `JvmForeign` via `Type.from_jvm{}`.
+ability FromJvm 'a for 'in where {
+  from_jvm:      { it: 'in }                -> Result 'a DecodeError,
+  from_jvm_with: { it: 'in, config: JvmC }  -> Result 'a DecodeError,
+}
+
+impl FromJvm 'a for JvmForeign where {
+  from_jvm:      { it: JvmForeign }                with Decode JvmC 'a -> Result 'a DecodeError = { it }         -> it.decode { config = jvm_default },
+  from_jvm_with: { it: JvmForeign, config: JvmC }  with Decode JvmC 'a -> Result 'a DecodeError = { it, config } -> it.decode { config = config },
+}
