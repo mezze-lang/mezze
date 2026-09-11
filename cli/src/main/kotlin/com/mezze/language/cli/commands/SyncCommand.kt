@@ -70,7 +70,10 @@ class SyncCommand {
         // where ModuleResolver.resolveModuleFile searches — so `use <name>::...`
         // resolves with no further wiring.
         val packagesDir = File(root, ".deps/mezze")
-        val cacheDir = File(System.getProperty("user.home"), ".mez/cache")
+        // Download staging for fetched tarballs — under the global mezze home
+        // (honors MEZZE_HOME), NOT a stray ~/.mez/cache. `cleanInstall` wipes
+        // ~/.mezze/cache, so this is now the one it actually cleans.
+        val cacheDir = File(com.mezze.language.cli.MezzeHome.home, "cache")
 
         // Global content store: extracted registry packages keyed by sha256, shared
         // across ALL projects (fetch once, ever). Override with MEZZE_STORE_DIR (tests).
