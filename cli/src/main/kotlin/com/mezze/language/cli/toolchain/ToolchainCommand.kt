@@ -28,6 +28,7 @@ class ToolchainCommand {
             "default" -> setDefault(paths, args.getOrNull(1))
             "pin" -> pin(currentDir, args.getOrNull(1))
             "remove", "uninstall" -> remove(paths, args.getOrNull(1))
+            "install" -> install(paths, args.getOrNull(1))
             "dir" -> dir(paths, currentDir, envVersion)
             "-h", "--help", "help" -> usage()
             else -> { println("Unknown subcommand: toolchain ${args.first()}"); usage() }
@@ -95,6 +96,60 @@ class ToolchainCommand {
         println("💡 run 'mez toolchain which' to see the resolved version")
     }
 
+    /**
+     * Install a toolchain from a release tarball — a local path, or a pinned
+     * `<url>#sha256:<hash>` (verified). The archive's single top-level dir is the
+     * version; it lands at `~/.mezze/toolchains/<version>/` and refreshes the PATH
+     * proxy. Mirrors scripts/install-mez.sh, from inside the CLI. Reuses the
+     * package downloader/extractor.
+     */
+    private fun install(paths: ToolchainPaths, src: String?) {
+        if (src.isNullOrBlank()) {
+            println("Usage: mez toolchain install <tarball-path | url#sha256:<hash>>")
+            return
+        }
+        val tmp = java.io.File.createTempFile("mez-toolchain", "").let { it.delete(); it.mkdirs(); it }
+        try {
+            val tarball = if (src.startsWith("http://") || src.startsWith("https://")) {
+                val hash = src.substringAfter("#sha256:", "").takeIf { it.isNotBlank() }
+                    ?: return println("❌ a remote install must pin a hash: <url>#sha256:<hash>")
+                com.mezze.language.cli.`package`.PackageDownloader(tmp)
+                    .downloadPackage("toolchain", src.substringBefore("#"), hash)
+            } else {
+                java.io.File(src).takeIf { it.isFile } ?: return println("❌ no such tarball: $src")
+            }
+
+            val extractDir = java.io.File(tmp, "x").apply { mkdirs() }
+            com.mezze.language.cli.`package`.ArchiveHandler().extractTarGz(tarball, extractDir, showProgress = false)
+            val root = extractDir.listFiles()?.singleOrNull { it.isDirectory }
+                ?: return println("❌ tarball must contain a single <version>/ directory")
+            val version = root.name
+
+            val dest = paths.dirFor(version)
+            if (dest.exists()) dest.deleteRecursively()
+            dest.parentFile.mkdirs()
+            java.nio.file.Files.move(root.toPath(), dest.toPath())
+
+            // Refresh the proxy with this binary (its path, not version, is what makes it the proxy).
+            val bin = java.io.File(dest, "bin/mez").takeIf { it.isFile } ?: java.io.File(dest, "bin/mez.exe")
+            if (bin.isFile) {
+                val proxy = java.io.File(paths.home, "bin/${bin.name}")
+                proxy.parentFile.mkdirs()
+                if (proxy.exists()) proxy.delete()
+                bin.copyTo(proxy, overwrite = true)
+                proxy.setExecutable(true, false)
+            }
+
+            if (paths.defaultChannel() == null) paths.setDefault(version)
+            println("✅ installed toolchain $version → $dest")
+            println("💡 put ${java.io.File(paths.home, "bin")} on your PATH, then: mez toolchain list")
+        } catch (e: Exception) {
+            println("❌ install failed: ${e.message}")
+        } finally {
+            tmp.deleteRecursively()
+        }
+    }
+
     private fun remove(paths: ToolchainPaths, version: String?) {
         if (version.isNullOrBlank()) { println("Usage: mez toolchain remove <version>"); return }
         val dir = paths.dirFor(version)
@@ -146,6 +201,7 @@ class ToolchainCommand {
               which                which toolchain is active here, and why
               default <channel>    set the global default channel
               pin <channel>        pin this project (writes [toolchain] to Mezze.toml)
+              install <src>        install a release tarball (path | url#sha256:<hash>)
               remove <version>     uninstall a toolchain (~/.mezze/toolchains/<version>)
               dir                  the active toolchain's directory
 
