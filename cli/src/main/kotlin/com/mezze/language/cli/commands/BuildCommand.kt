@@ -115,21 +115,12 @@ class BuildCommand {
             }
         }
 
-        val store = SQLiteMezzeStore.openProject(currentDir)
+        // Opens + invalidates any cache a different mez version wrote (the
+        // stale-IR-at-runtime guard). Shared with check / exec / dev — see
+        // ProjectStore.
+        val store = ProjectStore.open(currentDir)
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
-
-        // Same cache-invalidation gate as mez dev — if this build is run
-        // against a project whose .mez/ was last typechecked by an older
-        // mez binary, the cached IR has stale hashes and would produce a
-        // JAR that crashes at runtime. Nuke and rebuild.
-        run {
-            val current = "${com.mezze.language.cli.BuildInfo.VERSION}+${com.mezze.language.cli.BuildInfo.GIT_SHA}"
-            store.transaction {
-                com.mezze.language.codebase.StoreHydration
-                    .invalidateOnVersionShift(store, current)
-            }
-        }
 
         try {
             val startTime = System.nanoTime()
