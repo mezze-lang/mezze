@@ -1631,6 +1631,25 @@ class MezzeTextDocumentService(
             if (ws != null) {
                 candidates += java.io.File(ws, "src/$rel")
                 candidates += java.io.File(ws, rel)
+
+                // Dependency source: <ws>/.deps/mezze/<pkg>-*/… mirrors
+                // ModuleResolver, so cmd-click on `use greet::{x}` /
+                // `use greet::sub::{x}` lands in the dep's real (symlinked) source.
+                val pkg = segments[0]
+                val depDirs = java.io.File(ws, ".deps/mezze").listFiles()
+                    ?.filter { it.isDirectory && it.name.startsWith("$pkg-") }
+                    ?: emptyList()
+                for (depDir in depDirs) {
+                    if (segments.size == 1) {
+                        // Bare `use <pkg>` → the dep's [lib] entry.
+                        com.mezze.language.typechecker.depLibEntryFile(depDir.toPath())
+                            ?.let { candidates += it.toFile() }
+                    } else {
+                        val rest = segments.drop(1).joinToString("/") + ".mz"
+                        candidates += java.io.File(depDir, "src/$rest")
+                        candidates += java.io.File(depDir, rest)
+                    }
+                }
             }
         }
 

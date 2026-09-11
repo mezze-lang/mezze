@@ -246,6 +246,29 @@ sealed class ModuleError(message: String) : Exception(message) {
     }
 }
 
+/**
+ * A dependency's library entry file, from `[lib] path = "…"` in its `Mezze.toml`
+ * — so `use <pkg>` maps to the package's public library module rather than
+ * requiring the internal file name. Dependency-free line scan (callers in
+ * :typechecker and :lsp can't see :cli's MezzeToml). Null if there is no `[lib]`
+ * section. Shared by the resolver and the LSP's go-to-definition.
+ */
+fun depLibEntryFile(depDir: Path): Path? {
+    val toml = depDir.resolve("Mezze.toml")
+    if (!Files.exists(toml) || !Files.isRegularFile(toml)) return null
+    var inLib = false
+    for (raw in runCatching { Files.readAllLines(toml) }.getOrDefault(emptyList())) {
+        val line = raw.trim()
+        if (line.startsWith("[")) { inLib = line == "[lib]"; continue }
+        if (inLib) {
+            Regex("""^path\s*=\s*"([^"]+)"\s*$""").find(line)?.let {
+                return depDir.resolve(it.groupValues[1])
+            }
+        }
+    }
+    return null
+}
+
 private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {
     var current = startPath.toAbsolutePath()
 
@@ -717,7 +740,7 @@ class ModuleResolver(
                             // dependency's [lib] entry from its Mezze.toml, so a
                             // consumer writes `use greet::{example}` rather than
                             // needing the internal file name `use greet::lib::{…}`.
-                            if (segments.size == 1) libEntryFile(depDir)?.let { add(it) }
+                            if (segments.size == 1) depLibEntryFile(depDir)?.let { add(it) }
                             add(depDir.resolve("src").resolve(restOfPath))
                             add(depDir.resolve(restOfPath))
                         }
@@ -732,28 +755,6 @@ class ModuleResolver(
             }
         }
 
-        return null
-    }
-
-    /**
-     * A dependency's library entry file, from `[lib] path = "…"` in its
-     * `Mezze.toml` — so `use <pkg>` maps to the package's public library module
-     * instead of requiring the internal file name. Dependency-free line scan
-     * (the resolver can't see :cli's MezzeToml). Null if no `[lib]` section.
-     */
-    private fun libEntryFile(depDir: Path): Path? {
-        val toml = depDir.resolve("Mezze.toml")
-        if (!Files.exists(toml) || !Files.isRegularFile(toml)) return null
-        var inLib = false
-        for (raw in runCatching { Files.readAllLines(toml) }.getOrDefault(emptyList())) {
-            val line = raw.trim()
-            if (line.startsWith("[")) { inLib = line == "[lib]"; continue }
-            if (inLib) {
-                Regex("""^path\s*=\s*"([^"]+)"\s*$""").find(line)?.let {
-                    return depDir.resolve(it.groupValues[1])
-                }
-            }
-        }
         return null
     }
 
