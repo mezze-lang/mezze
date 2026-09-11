@@ -1,0 +1,30 @@
+[package]
+name = "polyglot_wasm"
+version = "0.1.0"
+
+[[app]]
+name = "polyglot_wasm"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+# `[polyglot.wasm]` opts this project in to the GraalWasm Truffle
+# language. GraalWasm ships with no external prerequisites — a raw
+# wasm binary is compiled and run directly by the runtime, no toolchain
+# required at runtime.
+#
+# `modules = [...]` lists paths the runtime resolves relative to this
+# manifest and canonicalises to absolute paths (see
+# `src/main/kotlin/com/mezze/interpreter/polyglot/PolyglotManifest.kt`).
+# For this demo the module bytes are embedded in the source as a hex
+# string, so the section is presence-only.
+[polyglot.wasm]
+
+# Additional `wasm.<KEY>` Context options forwarded to Truffle. Example:
+#
+#   [polyglot.wasm.options]
+#   MemoryOverheadMode = "true"
+#
+# See GraalWasm documentation for the full option list.
+[polyglot.wasm.options]

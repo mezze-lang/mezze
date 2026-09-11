@@ -1,0 +1,154 @@
+# Polyglot WebAssembly demo — Mezze drives GraalWasm end-to-end.
+#
+# What this demonstrates: a Mezze program compiles a hand-crafted wasm
+# module in-memory, invokes its exported i32 functions, and writes/reads
+# bytes through its linear memory — every step routed through the
+# generic `WasmForeign` surface from `std::polyglot::wasm`.
+#
+# Unlike JS / Python, wasm's value boundary is deliberately narrow:
+# only numeric primitives (i32, i64, f32, f64) cross. Complex data
+# (strings, records, arrays) lives in the module's linear memory and
+# is addressed by integer offsets. This demo exercises both paths:
+# scalar function calls, and byte-oriented memory access.
+#
+# The embedded module (85 bytes, hand-assembled from the WebAssembly
+# binary format) exports three arithmetic functions and 1 page of
+# memory:
+#   add(i32, i32) -> i32
+#   mul(i32, i32) -> i32
+#   sub(i32, i32) -> i32
+#   memory                 — 64 KiB of linear memory
+#
+# The polyglot Context is managed by the runtime from
+# `Mezze.toml [polyglot.wasm]`; user code sees no `create_context`
+# — just `perform GraalWasm in do ... Wasm.load_module { bytes, name } ...`.
+#
+# Run:  just mez-run-wasm-demo
+use std::collections::bytes as bytes
+use std::effects::log::{println, Console, Log}
+use std::polyglot::core::{ InteropError }
+use std::polyglot::wasm::{ Wasm, GraalWasm, WasmForeign, from_int }
+use std::int
+
+## Coerce a WasmForeign result to a Mezze Int and print it.
+let show_int: { label: Str, r: Result WasmForeign InteropError } -> {} <Log>
+  = { label, r } -> match r is
+    Ok { val = f } -> match f.as_int{} is
+      Ok { val = n } -> println { msg = "  $(label) = $(int::to_str { n = n })" }
+      Err { error = _ } -> println { msg = "  $(label): could not coerce to int" }
+    Err { error = _ } -> println { msg = "  $(label): guest error" }
+
+## Hand-assembled wasm module. 85 bytes; see the doc comment above for
+## the export table. The byte layout is:
+##
+##   magic + version         (8 bytes)
+##   type section: (i32,i32)->i32   (9 bytes)
+##   function section: 3 funcs      (6 bytes)
+##   memory section: 1 page         (5 bytes)
+##   export section: add, mul, sub, memory   (30 bytes)
+##   code section: 3 function bodies         (27 bytes)
+let module_hex: Str = "0061736D0100000001070160027F7F017F0304030000000503010001071C04036164640000036D756C0001037375620002066D656D6F72790200"
+
+let module_hex_code: Str = "0A19030700200020016A0B0700200020016C0B0700200020016B0B"
+
+## Assemble the module bytes from the two hex literals, aborting on
+## parse failure (impossible for a compile-time hex constant). The hex
+## is split across two let-bindings to keep each string literal short
+## enough to avoid slow type-inference on very long single strings.
+let module_bytes: {} -> Bytes = {} -> match bytes::from_hex { s = "$(module_hex)$(module_hex_code)" } is
+  Some { val = b } -> b
+  None -> bytes::empty {}
+
+## Report the outcome of a memory_write { } call — {} on success,
+## a bare error message on failure.
+let show_write: { label: Str, r: Result {} InteropError } -> {} <Log>
+  = { label, r } -> match r is
+    Ok { val = _ } -> println { msg = "  $(label): ok" }
+    Err { error = _ } -> println { msg = "  $(label): failed" }
+
+## Report the outcome of a memory_read — print the byte count.
+let show_read: { label: Str, r: Result Bytes InteropError } -> {} <Log>
+  = { label, r } -> match r is
+    Ok { val = b } -> println {
+      msg = "  $(label): $(int::to_str { n = bytes::size { b = b } }) bytes read: $(bytes::to_hex { b = b })",
+    }
+    Err { error = _ } -> println { msg = "  $(label): failed" }
+
+## Body of the demo, factored out so `main`'s outer `do` block ends
+## with a clean expression. Takes the loaded module and drives every
+## exercise: arithmetic exports, composed calculation, linear memory.
+let run_demo: { mod: WasmForeign } -> {} <Log>
+  = { mod } -> do
+    # ---- Numeric exports ----
+    println { msg = "Arithmetic functions:" }
+    let a = mod.call_export {
+      name = "add",
+      args = [from_int { val = 3 }, from_int { val = 4 }],
+    }
+    let _ = show_int { label = "add(3, 4)  ", r = a }
+
+    let b = mod.call_export {
+      name = "mul",
+      args = [from_int { val = 6 }, from_int { val = 7 }],
+    }
+    let _ = show_int { label = "mul(6, 7)  ", r = b }
+
+    let c = mod.call_export {
+      name = "sub",
+      args = [from_int { val = 100 }, from_int { val = 42 }],
+    }
+    let _ = show_int { label = "sub(100,42)", r = c }
+
+    # ---- Composed: mul(add(3, 4), sub(10, 3)) ----
+    println { msg = "" }
+    println { msg = "Composed calc — mul(add(3, 4), sub(10, 3)):" }
+    let _ = match a is
+      Err { error = _ } -> println { msg = "  aborted: add failed" }
+      Ok { val = sum } -> match mod.call_export {
+        name = "sub",
+        args = [from_int { val = 10 }, from_int { val = 3 }],
+      } is
+        Err { error = _ } -> println { msg = "  aborted: sub failed" }
+        Ok { val = diff } -> show_int {
+          label = "final     ",
+          r = mod.call_export { name = "mul", args = [sum, diff] },
+        }
+
+    # ---- Linear memory ----
+    println { msg = "" }
+    println { msg = "Linear memory:" }
+    match mod.get_export { name = "memory" } is
+      Err { error = _ } -> println { msg = "  memory export lookup failed" }
+      Ok { val = mem } -> run_memory_demo { mem = mem }
+
+## Byte-oriented memory round-trip: write ASCII bytes, read them back.
+let run_memory_demo: { mem: WasmForeign } -> {} <Log>
+  = { mem } -> do
+    let _ = show_int {
+      label = "memory_size",
+      r = mem.memory_size{},
+    }
+    let payload = bytes::from_seq { arr = [72, 105, 44, 32, 87, 65, 83, 77, 33] }
+    let _ = show_write {
+      label = "write \"Hi, WASM!\" at offset 0",
+      r = mem.memory_write { offset = 0, bytes = payload },
+    }
+    show_read {
+      label = "read back  ",
+      r = mem.memory_read { offset = 0, length = 9 },
+    }
+
+let main = {} -> perform Console in perform GraalWasm in do
+  println { msg = "== Mezze x WebAssembly — polyglot demo ==" }
+  println { msg = "" }
+
+  let wasm_bytes = module_bytes {}
+  println { msg = "Module: $(int::to_str { n = bytes::size { b = wasm_bytes } }) bytes" }
+  println { msg = "" }
+
+  let _ = match Wasm.load_module { bytes = wasm_bytes, name = "arith" } is
+    Err { error = _ } -> println { msg = "load_module failed" }
+    Ok { val = mod } -> run_demo { mod = mod }
+
+  println { msg = "" }
+  println { msg = "== done ==" }

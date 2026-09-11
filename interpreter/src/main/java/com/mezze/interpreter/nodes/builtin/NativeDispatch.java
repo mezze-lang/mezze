@@ -4374,6 +4374,31 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.fromBool(r, "js"));
         HANDLERS.put("__native_js_null_val",
             (r, c) -> PolyglotNatives.nullVal(r, "js"));
+
+        // WebAssembly — binary-Source loading + memory access + language-
+        // tagged constructors. Wasm's interop surface is smaller than JS /
+        // Python: there is no source-level eval, only numeric primitives
+        // cross the value boundary, and complex data lives in linear
+        // memory addressed by offset. Everything else (get_export, call,
+        // execute, invoke_member) routes through the same generic
+        // __native_polyglot_* natives every language uses.
+        HANDLERS.put("__native_wasm_load_module",
+            (r, c) -> WasmNatives.loadModule(r, c));
+        HANDLERS.put("__native_wasm_load_file",
+            (r, c) -> WasmNatives.loadFile(r, c));
+        HANDLERS.put("__native_wasm_get_export",
+            (r, c) -> WasmNatives.getExport(r));
+        HANDLERS.put("__native_wasm_memory_read",
+            (r, c) -> WasmNatives.memoryRead(r));
+        HANDLERS.put("__native_wasm_memory_write",
+            (r, c) -> WasmNatives.memoryWrite(r));
+        HANDLERS.put("__native_wasm_memory_size",
+            (r, c) -> WasmNatives.memorySize(r));
+        // Wasm's i32-typed exports reject a boxed Long — store as Integer.
+        HANDLERS.put("__native_wasm_from_int",
+            (r, c) -> WasmNatives.fromInt(r));
+        HANDLERS.put("__native_wasm_from_float",
+            (r, c) -> WasmNatives.fromFloat(r));
     }
 
     @TruffleBoundary
