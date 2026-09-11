@@ -95,7 +95,12 @@ class SyncCommand {
             val rootEdges = (manifest.pathDependencies.keys + manifest.dependencies.keys + manifest.devDependencies.keys).sorted()
             val rootNode = LockedNode(manifest.`package`.name, manifest.`package`.version, source = "root", dependencies = rootEdges)
             val graph = (listOf(rootNode) + nodes).distinctBy { it.name }.sortedBy { it.name }
-            val freshLock = MezzeLock(version = 2, root = manifest.`package`.name, packages = graph)
+            val freshLock = MezzeLock(
+                version = 2,
+                root = manifest.`package`.name,
+                ir = com.mezze.language.store.StoreSerialization.IR_VERSION,
+                packages = graph,
+            )
 
             val lockFile = File(currentDir, "Mezze.lock")
             if (isLocked) {
