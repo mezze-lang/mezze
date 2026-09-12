@@ -572,6 +572,7 @@ class AbilityChecker internal constructor(
         val effectiveHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
         if (typeArgs.size == 1) {
             if (canDeriveAbility(abilityName, typeArgs.first(), effectiveHash)) {
+                registerDerivedShapeImpl(effectiveHash, typeArgs.first())
                 return true
             }
         }
@@ -742,6 +743,47 @@ class AbilityChecker internal constructor(
             contentHash = implKey
         )
         return true
+    }
+
+    /**
+     * Derived `Eq` for an ANONYMOUS record shape. Declared records / variants get
+     * their derived instance generated once, in their declaring module
+     * (ContextBuilder.deriveAbilityImpls); an anonymous `{ p: P }` has no declaring
+     * module, so — like a codec impl — the module that compares it synthesizes the
+     * instance (TypedModuleEmitter → DerivedImplGenerator). Only shapes holding a
+     * DECLARED-impl leaf (a newtype somewhere inside) need one: for an all-structural
+     * shape the runtime's structural equality is already the derived instance, and
+     * generating an impl per record literal would only slow that path down.
+     */
+    private fun registerDerivedShapeImpl(abilityHash: Hash?, type: MezzeType) {
+        if (!WellKnownHashConstants.isEq(abilityHash)) return
+        if (type !is MezzeType.RecordType || type.identity !is TypeIdentity.Anonymous || type.isOpen) return
+        if (containsVarType(type) || !hasDeclaredImplLeaf(type)) return
+        val hashBuilder = MezzeHashBuilder()
+        hashBuilder.append("derived_eq_shape")
+        com.mezze.language.ast.hashing.appendType(hashBuilder, type)
+        val implKey = Hash(hashBuilder.build().toFullHexString())
+        if (generatedCodecImpls.containsKey(implKey)) return
+        generatedCodecImpls[implKey] = GeneratedCodecImpl(
+            abilityName = "Eq",
+            targetTypes = listOf(type),
+            contentHash = implKey,
+        )
+    }
+
+    /** Does [type] contain, at any depth, a component whose `Eq` is a DECLARED
+     *  impl rather than structural — i.e. a newtype? Declared records / variants
+     *  are opened through the registry; a recursive type is cut at its back-edge. */
+    private fun hasDeclaredImplLeaf(type: MezzeType, seen: MutableSet<String> = mutableSetOf()): Boolean {
+        if (type is MezzeType.NewtypeType) return true
+        if (type is MezzeType.TypeApplication) {
+            val decl = registry.lookupType(type.constructor) ?: ModuleResolver.lookupTypeDeclaration(type.constructor)
+            if (decl?.definition is ParsedNewtypeDef) return true
+            if (!seen.add(type.constructor)) return false
+            val expanded = expandTypeApplicationToRecord(type, registry) ?: expandTypeApplicationToVariant(type, registry)
+            if (expanded != null) return hasDeclaredImplLeaf(expanded, seen)
+        }
+        return type.anyChild { hasDeclaredImplLeaf(it, seen) }
     }
 
     /** Missing-Tier-2 report used by [walkTier2Capabilities]. */
@@ -936,7 +978,11 @@ class AbilityChecker internal constructor(
         } || type.anyChild { needsRowClosing(it) }
     }
 
-    private fun canDeriveAbility(
+    /** Structural derivability ONLY — never consults a declared impl for [type]
+     *  itself (fields/constructors recurse through [canDeriveOrHasImpl]). Internal so
+     *  ImplValidator can reject a hand-written impl on a type the compiler already
+     *  derives the ability for (coherence: one instance per type). */
+    internal fun canDeriveAbility(
         abilityName: String,
         type: MezzeType,
         abilityHash: Hash? = null,

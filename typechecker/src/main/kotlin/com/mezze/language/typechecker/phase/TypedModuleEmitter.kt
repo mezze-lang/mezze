@@ -84,6 +84,11 @@ internal fun emitTypedModuleAndLower(
                         if (ci.targetTypes.size != 3) continue
                         codecGen.generateDecodeImpl(ci.targetTypes[0], ci.targetTypes[1], ci.targetTypes[2])
                     }
+                    // Derived Eq for an anonymous record shape (AbilityChecker.registerDerivedShapeImpl).
+                    WellKnownHashConstants.isEq(abilityHash) -> {
+                        val shape = ci.targetTypes.singleOrNull() as? com.mezze.language.ast.MezzeType.RecordType ?: continue
+                        com.mezze.language.typechecker.derive.DerivedImplGenerator.eqImplForShape(shape)
+                    }
                     else -> continue
                 }
                 builder.buildCodecImpl(parsedImpl, extraImpls)

@@ -376,9 +376,12 @@ class TypedASTCompiler(
                         // Try to resolve each dict method from the concrete types.
                         // Only forward to caller when resolution actually fails.
                         for (methodName in calleeDictMethods) {
-                            val resolved = resolveOpHashFromConcreteTypes(methodName, resolvableTypes)
+                            // Callers forward PLAIN slots; a per-var split is decided by
+                            // each function's own body, never inherited from a callee.
+                            val calleeMethod = com.mezze.language.ast.MagicParams.methodOfKey(methodName)
+                            val resolved = resolveOpHashFromConcreteTypes(calleeMethod, resolvableTypes)
                             if (resolved == null) {
-                                out.add(methodName)
+                                out.add(calleeMethod)
                             }
                         }
                     }
@@ -473,8 +476,47 @@ class TypedASTCompiler(
     ): Set<String> {
         val result = mutableSetOf<String>()
         scanExprForVarTypeMethods(expr, result, arrowIsConstrained)
-        return result
+        return normalizeDictKeys(result)
     }
+
+    /** Raw scan keys are `method@var`. A function needing a method for ONE type
+     *  variable keeps the plain `method` slot (unchanged wire shape); only a
+     *  function needing the same method at two or more variables gets a slot per
+     *  variable — the case one shared slot cannot serve (`Result 'a 'e`). */
+    private fun normalizeDictKeys(raw: Set<String>): Set<String> =
+        raw.groupBy { com.mezze.language.ast.MagicParams.methodOfKey(it) }.flatMap { (method, keys) ->
+            val vars = keys.mapNotNull { com.mezze.language.ast.MagicParams.typeVarOfKey(it) }.toSet()
+            if (vars.size >= 2) keys.filter { com.mezze.language.ast.MagicParams.typeVarOfKey(it) != null } else listOf(method)
+        }.toSet()
+
+    /** The dict slot NAME an enclosing function holds for [method] at type var
+     *  [typeVar]: the per-var slot when it has one, else the plain slot, else any
+     *  per-var slot of that method (a caller that only holds one). Null if none. */
+    private fun enclosingDictSlotIn(params: List<String>, captures: Map<String, Int>, method: String, typeVar: String?): String? {
+        fun has(n: String) = params.indexOf(n) >= 0 || captures.containsKey(n)
+        if (typeVar != null) com.mezze.language.ast.MagicParams.dictParamName(com.mezze.language.ast.MagicParams.dictKey(method, typeVar)).let { if (has(it)) return it }
+        com.mezze.language.ast.MagicParams.dictParamName(method).let { if (has(it)) return it }
+        val prefix = com.mezze.language.ast.MagicParams.dictParamName(method) + com.mezze.language.ast.MagicParams.VAR_SEP
+        return (params + captures.keys).firstOrNull { it.startsWith(prefix) }
+    }
+    private fun enclosingDictSlot(method: String, typeVar: String?): String? =
+        enclosingDictSlotIn(currentParamNames, currentCaptureNames, method, typeVar)
+
+    /** Bind an op's impl type variables from the instance head: the impl whose op
+     *  is [opHash] has target `T 'a 'e…`; unify it against each of [types] (the
+     *  receiver / arg types at the site) and collect `'a → …`. Empty when the op
+     *  is not an impl op or nothing binds. */
+    private fun bindImplVarsForOp(opHash: Hash, types: List<MezzeType>): Map<String, MezzeType> {
+        val op = abilityOpIndex.values.asSequence().flatten().firstOrNull { it.opHash == opHash } ?: return emptyMap()
+        val pattern = op.targetTypes.lastOrNull() ?: return emptyMap()
+        val bindings = HashMap<String, MezzeType>()
+        for (t in types) harvestVarBindings(pattern, substitution.apply(t), bindings)
+        return bindings
+    }
+    /** The concrete type a qualified dict key's variable is bound to, or null. */
+    private fun boundTypeForKey(key: String, bindings: Map<String, MezzeType>): MezzeType? =
+        com.mezze.language.ast.MagicParams.typeVarOfKey(key)?.let { v -> bindings[v] ?: bindings["'$v"] }
+            ?.takeIf { it !is VarType && !containsVarType(it) }
 
     /**
      * True iff the arrow carries at least one `with <Ability>` constraint
@@ -685,7 +727,7 @@ class TypedASTCompiler(
                     }
                     if (receiverType is VarType && !recoveredConcrete &&
                         shouldDictDispatchVarTypeOp(methodName, arrowIsConstrained)) {
-                        out.add(methodName)
+                        out.add(com.mezze.language.ast.MagicParams.dictKey(methodName, receiverType.variable.name))
                     }
                     scanExprForVarTypeMethods(fn.record, out, arrowIsConstrained, paramEnv)
                 } else {
@@ -915,6 +957,7 @@ class TypedASTCompiler(
             // (`[[P]] < [[P]]` saw xs = the Ord-dict MezzeFunction).
             specLambdaSalt = spec.specializedHash
             specTypeArgs = spec.typeArgs
+            specGenericHash = spec.genericHash
             val fn = try {
                 if (body is TypedLambda) {
                     compileFunctionBody(spec.specializedHash, "", body.params, body.body, body.loc)
@@ -924,6 +967,7 @@ class TypedASTCompiler(
             } finally {
                 specLambdaSalt = null
                 specTypeArgs = null
+                specGenericHash = null
             }
             functions.add(fn)
             compiledHashes.add(spec.specializedHash)
@@ -1644,9 +1688,10 @@ class TypedASTCompiler(
             // Composes with the from_json recovery above: apply that first, then the
             // variant recovery, so a receiver that is neither is left as the raw var.
             val receiverType =
-                fromJsonInputType
+                (fromJsonInputType
                     ?: resolveVariantReceiverType(fn.record, rawReceiverType)
-                    ?: rawReceiverType
+                    ?: rawReceiverType)
+                    .let { r -> specBoundReceiverType(r) ?: r }
 
             // Try inline ops for primitives
             val inlineOp = tryInlineOp(methodName, receiverType)
@@ -1748,8 +1793,34 @@ class TypedASTCompiler(
                     // one for both. DecodeTargetResolver recovered the concrete target
                     // per call site from usage; use its decoder hash directly.
                     val perSiteDecode = decodeOpBySite[expr.loc]
+                    // STRUCTURAL element binding — how Haskell/Rust resolve this.
+                    // `instance Eq a => Eq [a]` peels exactly ONE constructor per step:
+                    // the instance HEAD is matched against the type and `a` is bound,
+                    // then the constraint is resolved against that binding. Here: unify
+                    // the impl's declared target PATTERN against the receiver, bind the
+                    // impl's own type var, and dispatch the dict on THAT binding.
+                    // The flattened `concreteTypesForDict` pile mixes levels (receiver +
+                    // args + their deep element types) and first-match can land a level
+                    // too deep — `[[P]]` bound P's eq instead of eq-for-`[P]`, so the
+                    // comparator fed a P record to the seq op. Structure, not a bag.
+                    // GUARDED to single-type-param impls with a fully concrete binding;
+                    // every other shape falls through to the old path verbatim, so no
+                    // currently-resolving call site changes behaviour.
+                    val structuralElem: MezzeType? = run {
+                        val op = abilityOpIndex[methodName]?.firstOrNull { it.opHash == opHash }
+                            ?: return@run null
+                        val pattern = op.targetTypes.lastOrNull() ?: return@run null
+                        val impl = abilityImpls.firstOrNull { it.hash == op.implHash } ?: return@run null
+                        val varName = impl.forallVars.singleOrNull()?.name ?: return@run null
+                        val bindings = mutableMapOf<String, MezzeType>()
+                        harvestVarBindings(pattern, receiverType, bindings)
+                        bindings[varName]?.takeIf { it !is VarType && !containsVarType(it) }
+                    }
+                    val opVarBindings = bindImplVarsForOp(opHash, listOf(receiverType))
                     for (dictMethodName in opDictMethods.sorted()) {
                         val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(dictMethodName)
+                        val dictMethod = com.mezze.language.ast.MagicParams.methodOfKey(dictMethodName)
+                        val perVarBound = boundTypeForKey(dictMethodName, opVarBindings)
                         // Per-site decoder wiring, keyed on HASH IDENTITY rather
                         // than the dict slot being literally named "decode": the
                         // pinned hash fills this slot only if it IS the pinned
@@ -1759,23 +1830,32 @@ class TypedASTCompiler(
                         // impls, so a user ability's decode op never pins.)
                         val perSiteMatchesSlot = perSiteDecode != null &&
                             decodeImplByOpHash[perSiteDecode]
-                                ?.let { computeOpHash(it.hash, dictMethodName) == perSiteDecode } == true
-                        val resolvedHash = if (perSiteMatchesSlot) perSiteDecode
-                            else resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
+                                ?.let { computeOpHash(it.hash, dictMethod) == perSiteDecode } == true
+                        val resolvedHash = if (perSiteMatchesSlot) {
+                            perSiteDecode
+                        } else {
+                            (perVarBound?.let { resolveOpHashFromConcreteTypes(dictMethod, listOf(it)) }
+                                ?: structuralElem?.let { resolveOpHashFromConcreteTypes(dictMethod, listOf(it)) }
+                                ?: resolveOpHashFromConcreteTypes(dictMethod, concreteTypesForDict))
+                        }
                         if (resolvedHash != null) {
                             // refToDictedOp wraps the resolved op when IT needs its
-                            // own dicts (nested containers: `[[[P]]]`).
-                            fields.add(FieldIR(dictParamName, refToDictedOp(resolvedHash, concreteTypesForDict, src)))
+                            // own dicts (nested containers: `[[[P]]]`). Seed it with the
+                            // structural binding so each recursion peels exactly one
+                            // container level instead of re-guessing from the flat pile.
+                            val subTypes = perVarBound?.let { listOf(it) } ?: structuralElem?.let { listOf(it) } ?: concreteTypesForDict
+                            fields.add(FieldIR(dictParamName, refToDictedOp(resolvedHash, subTypes, src)))
                         } else {
                             // Forward from caller's dict params if available
-                            val callerDictIdx = currentParamNames.indexOf(dictParamName)
+                            val callerDictIdx = enclosingDictSlot(dictMethod, com.mezze.language.ast.MagicParams.typeVarOfKey(dictMethodName))
+                                ?.let { currentParamNames.indexOf(it) } ?: -1
                             if (callerDictIdx >= 0) {
                                 val slot = currentCaptureCount + callerDictIdx
                                 fields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
                             } else {
                                 // Inside a mono-spec compile: last-resort resolve
                                 // against the spec's own typeArgs (see specTypeArgs).
-                                resolveDictFromSpecTypeArgs(dictMethodName, src)?.let {
+                                resolveDictFromSpecTypeArgs(dictMethod, src)?.let {
                                     fields.add(FieldIR(dictParamName, it))
                                 }
                             }
@@ -1817,8 +1897,7 @@ class TypedASTCompiler(
             val opIsInlineable = methodName in inlineableOps
             val inlineableNeedsDict = opIsInlineable &&
                 abilityOpIndex[methodName]?.isNotEmpty() == true &&
-                (currentParamNames.indexOf(com.mezze.language.ast.MagicParams.dictParamName(methodName)) >= 0 ||
-                    currentCaptureNames[com.mezze.language.ast.MagicParams.dictParamName(methodName)] != null)
+                enclosingDictSlot(methodName, (receiverType as? VarType)?.variable?.name) != null
             if (receiverType is VarType && (!opIsInlineable || inlineableNeedsDict)) {
                 val opCandidates = abilityOpIndex[methodName]
                 // Bug B (#86): also enter this branch when there are no impl
@@ -1828,7 +1907,10 @@ class TypedASTCompiler(
                 // falls through to the regular-call path which compiles the
                 // FieldAccess as `ReadFieldByName`, causing runtime
                 // "Field not found: <method>".
-                val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
+                // The slot for THIS receiver's type variable when the function holds
+                // one per variable, else the plain slot.
+                val dictParamName = enclosingDictSlot(methodName, receiverType.variable.name)
+                    ?: com.mezze.language.ast.MagicParams.dictParamName(methodName)
                 val hasDictParam =
                     currentParamNames.indexOf(dictParamName) >= 0 ||
                     currentCaptureNames[dictParamName] != null
@@ -1872,15 +1954,17 @@ class TypedASTCompiler(
                         }
                         for (dictMethodName in transitiveDictMethods.sorted()) {
                             val innerDictName = com.mezze.language.ast.MagicParams.dictParamName(dictMethodName)
+                            val innerMethod = com.mezze.language.ast.MagicParams.methodOfKey(dictMethodName)
                             // Don't double-inject if the user already wrote this field.
                             if (fields.any { it.name == innerDictName }) continue
-                            val resolvedHash = resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
+                            val resolvedHash = resolveOpHashFromConcreteTypes(innerMethod, concreteTypesForDict)
                             if (resolvedHash != null) {
                                 fields.add(FieldIR(innerDictName, ReadGlobalFnByHashIR(resolvedHash, src)))
                             } else {
                                 // Forward from caller's own dict params (caller is itself polymorphic
                                 // on the same format type).
-                                val callerDictIdx = currentParamNames.indexOf(innerDictName)
+                                val callerDictIdx = enclosingDictSlot(innerMethod, com.mezze.language.ast.MagicParams.typeVarOfKey(dictMethodName))
+                                    ?.let { currentParamNames.indexOf(it) } ?: -1
                                 if (callerDictIdx >= 0) {
                                     val slot = currentCaptureCount + callerDictIdx
                                     fields.add(FieldIR(innerDictName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
@@ -1974,14 +2058,82 @@ class TypedASTCompiler(
                             // otherwise resolution falls to the arg types where the xs
                             // container falsely matches the blanket `impl Ord for ['a]`.
                             .let { bindConstraintArgsViaArg(rawFnType, expr.arg, it) }
-                        val constraintTypes = rawConstraintTypeArgs.filter { it !is VarType }
+                        // STRUCTURAL constraint binding for an ability-op callee — the
+                        // instance-head step (`instance Eq a => Eq [a]`: bind `a` from the
+                        // HEAD, then resolve the constraint on that binding). `fn.type` on a
+                        // mono-rewritten `Var(eq, ByHash)` is the field access's already
+                        // SUBSTITUTED arrow (`{it: [P], r: [P]}`), so the unify above has no
+                        // `'a` left to bind: the constraint arg stays generic, forwarding
+                        // finds nothing (a captureless comparator), and resolution falls to
+                        // the ARG types — where `[P]` matches the blanket `impl Eq for ['a]`
+                        // and the callee's `__dict_eq` becomes eq-for-`[P]` instead of `P`'s
+                        // eq. `[[P]] == [[P]]` then handed a P record to the seq op
+                        // ("Expected MezzeSeq for field 'l'"). NOTE the op's declared ARROW
+                        // is no use here either: it is LAUNDERED — its params are vars named
+                        // after the record fields (`{it: 'it, r: 'r}`), so unifying it binds
+                        // `it`/`r`, never `'a`. The structure survives only in the impl's
+                        // TARGET pattern (`['a]`): unify THAT against the receiver field's
+                        // actual type and take the impl's forall var from the bindings —
+                        // exactly what the field-access site does. The op is found by HASH,
+                        // never by name; non-op callees and failed bindings keep the
+                        // previous behaviour verbatim.
+                        val structuralConstraintTypes: List<MezzeType> = run {
+                            // Locate the op and its impl by HASH.
+                            var found: Pair<TypedAbilityImpl, String>? = null
+                            for (impl in abilityImpls) {
+                                for (opName in impl.operations.keys) {
+                                    if (computeOpHash(impl.hash, opName) == calleeHash) {
+                                        found = impl to opName
+                                        break
+                                    }
+                                }
+                                if (found != null) break
+                            }
+                            val (impl, opName) = found ?: return@run emptyList()
+                            // Single-type-param impls only (`['a]`, `List 'a`, …); anything
+                            // else keeps the old path.
+                            val varName = impl.forallVars.singleOrNull()?.name ?: return@run emptyList()
+                            val pattern = impl.targetTypes.lastOrNull() ?: return@run emptyList()
+                            // The receiver field is the op's OWN first param, read off its
+                            // lambda — the same structural derivation TypedAstBuilder uses.
+                            val recvField = (impl.operations[opName] as? TypedLambda)
+                                ?.params?.firstOrNull()?.name ?: return@run emptyList()
+                            val recvActual = (expr.arg as? TypedRecord)?.entries
+                                ?.filterIsInstance<TypedRecordEntry.Field>()
+                                ?.firstOrNull { it.name == recvField }
+                                ?.let { substitution.apply(it.value.type) }
+                                ?: return@run emptyList()
+                            val bindings = mutableMapOf<String, MezzeType>()
+                            harvestVarBindings(pattern, recvActual, bindings)
+                            val bound = bindings[varName]
+                                ?.takeIf { it !is VarType && !containsVarType(it) }
+                                ?: return@run emptyList()
+                            listOf(bound)
+                        }
+                        val constraintTypes =
+                            if (structuralConstraintTypes.isNotEmpty()) structuralConstraintTypes
+                            else rawConstraintTypeArgs.filter { it !is VarType }
                         // When ALL constraint type args are still VarType after substitution,
                         // we're inside a generic function body calling another generic function.
                         // In this case, prefer forwarding dicts from the caller over resolving
                         // from concrete types (which may match a wrong blanket container impl).
-                        val calleeConstraintsAreGeneric = rawConstraintTypeArgs.isNotEmpty() &&
-                            rawConstraintTypeArgs.all { it is VarType }
-                        val enrichedArgIR = injectDictFields(argIR, expr.arg, calleeDictMethods, constraintTypes, calleeConstraintsAreGeneric, src)
+                        // A structural binding above is a concrete answer, so it overrides this.
+                        val calleeConstraintsAreGeneric = structuralConstraintTypes.isEmpty() &&
+                            rawConstraintTypeArgs.isNotEmpty() && rawConstraintTypeArgs.all { it is VarType }
+                        // Every callee type var → its type here: an impl op binds through
+                        // its instance head against the arg record's fields, a generic let
+                        // through its declared arrow against the actual arg type.
+                        val calleeVarBindings: Map<String, MezzeType> = run {
+                            val argTypes = (expr.arg as? TypedRecord)?.entries
+                                ?.filterIsInstance<TypedRecordEntry.Field>()
+                                ?.map { substitution.apply(it.value.type) } ?: emptyList()
+                            val fromImpl = bindImplVarsForOp(calleeHash, argTypes)
+                            if (fromImpl.isNotEmpty()) return@run fromImpl
+                            val fromArrow = HashMap<String, MezzeType>()
+                            rawFnType?.let { harvestVarBindings(it.paramType, substitution.apply(expr.arg.type), fromArrow) }
+                            fromArrow
+                        }
+                        val enrichedArgIR = injectDictFields(argIR, expr.arg, calleeDictMethods, constraintTypes, calleeConstraintsAreGeneric, src, calleeVarBindings)
                         census.byHashDictInject++
                         emitCallDirect(calleeHash, enrichedArgIR, expr.isTailCall, src)
                     } else if (isNonLambdaUserLet(calleeHash)) {
@@ -2267,7 +2419,10 @@ class TypedASTCompiler(
         dictMethods: Set<String>,
         constraintTypes: List<MezzeType>,
         calleeConstraintsAreGeneric: Boolean,
-        src: SourceInfo
+        src: SourceInfo,
+        // Callee type var → type at this site (instance head / declared arrow
+        // unified against the actuals); serves the per-var dict slots.
+        varBindings: Map<String, MezzeType> = emptyMap(),
     ): NodeIR {
         // Collect concrete types from the argument record as fallback. Refresh
         // each field's type against the final substitution and, for a nullary
@@ -2320,18 +2475,49 @@ class TypedASTCompiler(
         val dictFields = mutableListOf<FieldIR>()
         for (methodName in dictMethods.sorted()) {
             val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
+            val dictMethod = com.mezze.language.ast.MagicParams.methodOfKey(methodName)
+            val keyVar = com.mezze.language.ast.MagicParams.typeVarOfKey(methodName)
+            // The caller's own slot for this key (per-var when it holds one).
+            val callerSlot = enclosingDictSlot(dictMethod, keyVar) ?: dictParamName
+            // A per-var key: the callee wants THIS variable's dict. Bound to a
+            // concrete type here → resolve that type's impl; bound to one of the
+            // caller's own variables → forward the caller's slot for it.
+            if (keyVar != null) {
+                val boundHere = boundTypeForKey(methodName, varBindings)
+                if (boundHere != null) {
+                    val perVarHash = resolveOpHashFromConcreteTypes(dictMethod, listOf(boundHere))
+                    if (perVarHash != null) {
+                        dictFields.add(FieldIR(dictParamName, refToDictedOp(perVarHash, listOf(boundHere), src)))
+                        continue
+                    }
+                }
+                val boundVar = (varBindings[keyVar] ?: varBindings["'$keyVar"]) as? VarType
+                val forwardSlot = enclosingDictSlot(dictMethod, boundVar?.variable?.name)
+                if (forwardSlot != null) {
+                    val idx = currentParamNames.indexOf(forwardSlot)
+                    if (idx >= 0) {
+                        dictFields.add(FieldIR(dictParamName, ReadLocalIR(currentCaptureCount + idx, SlotKind.OBJECT, src)))
+                        continue
+                    }
+                    val cap = currentCaptureNames[forwardSlot]
+                    if (cap != null) {
+                        dictFields.add(FieldIR(dictParamName, ReadCaptureIR(cap, SlotKind.OBJECT, src)))
+                        continue
+                    }
+                }
+            }
 
             // When constraints are generic, prefer forwarding from caller
             if (calleeConstraintsAreGeneric) {
                 // 1a. Forward from caller param
-                val callerDictIdx = currentParamNames.indexOf(dictParamName)
+                val callerDictIdx = currentParamNames.indexOf(callerSlot)
                 if (callerDictIdx >= 0) {
                     val slot = currentCaptureCount + callerDictIdx
                     dictFields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
                     continue
                 }
                 // 1b. Forward from caller capture
-                val callerCaptureIdx = currentCaptureNames[dictParamName]
+                val callerCaptureIdx = currentCaptureNames[callerSlot]
                 if (callerCaptureIdx != null) {
                     dictFields.add(FieldIR(dictParamName, ReadCaptureIR(callerCaptureIdx, SlotKind.OBJECT, src)))
                     continue
@@ -2340,10 +2526,10 @@ class TypedASTCompiler(
 
             // 2. Resolve from concrete types
             val opHash = if (constraintTypes.isNotEmpty()) {
-                resolveOpHashFromConcreteTypes(methodName, constraintTypes)
-                    ?: resolveOpHashFromConcreteTypes(methodName, concreteTypes)
+                resolveOpHashFromConcreteTypes(dictMethod, constraintTypes)
+                    ?: resolveOpHashFromConcreteTypes(dictMethod, concreteTypes)
             } else {
-                resolveOpHashFromConcreteTypes(methodName, concreteTypes)
+                resolveOpHashFromConcreteTypes(dictMethod, concreteTypes)
             }
             if (opHash != null) {
                 // refToDictedOp wraps the resolved op when IT needs its own dicts —
@@ -2353,12 +2539,12 @@ class TypedASTCompiler(
                     refToDictedOp(opHash, constraintTypes + concreteTypes, src)))
             } else {
                 // 3. Fallback: forward from caller if available
-                val callerDictIdx = currentParamNames.indexOf(dictParamName)
+                val callerDictIdx = currentParamNames.indexOf(callerSlot)
                 if (callerDictIdx >= 0) {
                     val slot = currentCaptureCount + callerDictIdx
                     dictFields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
                 } else {
-                    val callerCaptureIdx = currentCaptureNames[dictParamName]
+                    val callerCaptureIdx = currentCaptureNames[callerSlot]
                     val specResolved = if (callerCaptureIdx == null)
                         resolveDictFromSpecTypeArgs(methodName, src) else null
                     if (callerCaptureIdx != null) {
@@ -2420,6 +2606,15 @@ class TypedASTCompiler(
         is SortedSetType -> type.elementType
         is MapType -> type.valueType
         is SortedMapType -> type.valueType
+        // A container has TWO representations: the ParametricBuiltin cases above and
+        // `TypeApplication("List"|"Map"|…, args)` (see Unification ~299, which already
+        // bridges the SEQ pair). Only the former were handled, so `List P == List P`
+        // yielded NO element type — element-first dict resolution couldn't descend, no
+        // `__dict_eq` was injected, and the comparator reached the native as a
+        // captureless stub whose `a == b` fell back to STRUCTURAL equality, silently
+        // ignoring the element's Eq impl. Take the LAST arg structurally (mirrors
+        // Map/SortedMap → valueType); never key on the constructor NAME.
+        is TypeApplication -> type.args.lastOrNull()
         else -> null
     }
 
@@ -2550,12 +2745,15 @@ class TypedASTCompiler(
         // Descend one container level: the sub-op dispatches on the ELEMENT of the
         // current element (element placed FIRST so it wins over the container impl).
         val deeper = elementFirst(concreteTypes)
+        val opVarBindings = bindImplVarsForOp(opHash, concreteTypes)
         val resolvedDicts = mutableListOf<Pair<String, NodeIR>>()
         for (methodName in needed.sorted()) {
             val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
-            val subHash = resolveOpHashFromConcreteTypes(methodName, deeper)
+            val dictMethod = com.mezze.language.ast.MagicParams.methodOfKey(methodName)
+            val subTypes = boundTypeForKey(methodName, opVarBindings)?.let { listOf(it) } ?: deeper
+            val subHash = resolveOpHashFromConcreteTypes(dictMethod, subTypes)
             if (subHash != null) {
-                resolvedDicts.add(dictParamName to refToDictedOp(subHash, deeper, src, depth + 1))
+                resolvedDicts.add(dictParamName to refToDictedOp(subHash, subTypes, src, depth + 1))
             } else {
                 // Unresolvable concretely; forwarding from the enclosing frame would
                 // be invalid inside the wrapper's own frame — leave the op bare.
@@ -2629,12 +2827,14 @@ class TypedASTCompiler(
         val resolvedDicts = mutableListOf<Pair<String, NodeIR>>() // dictParamName -> resolved value IR
         for (methodName in dictMethods.sorted()) {
             val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
-            val opHash = resolveOpHashFromConcreteTypes(methodName, allConcreteTypes)
+            val dictMethod = com.mezze.language.ast.MagicParams.methodOfKey(methodName)
+            val opHash = resolveOpHashFromConcreteTypes(dictMethod, allConcreteTypes)
             if (opHash != null) {
                 resolvedDicts.add(dictParamName to ReadGlobalFnByHashIR(opHash, src))
             } else {
                 // Try forwarding from caller's dict params
-                val callerDictIdx = currentParamNames.indexOf(dictParamName)
+                val callerDictIdx = (enclosingDictSlot(dictMethod, com.mezze.language.ast.MagicParams.typeVarOfKey(methodName)) ?: dictParamName)
+                    .let { currentParamNames.indexOf(it) }
                 if (callerDictIdx >= 0) {
                     val slot = currentCaptureCount + callerDictIdx
                     resolvedDicts.add(dictParamName to ReadLocalIR(slot, SlotKind.OBJECT, src))
@@ -2764,6 +2964,27 @@ class TypedASTCompiler(
      *  resolution fails INSIDE a spec, resolve against these typeArgs element-first:
      *  the spec knows exactly what `'a` is. */
     private var specTypeArgs: List<MezzeType>? = null
+    /** The generic function / impl op the spec being compiled was cut from. */
+    private var specGenericHash: Hash? = null
+
+    /**
+     * Inside a mono specialization of an IMPL OP, a receiver still typed by one of
+     * the impl's own type variables — `'a` in `impl Eq for Result 'a 'e`, which
+     * the name-based spec substitution never reaches — is bound through the
+     * instance head against the spec's type args (`Result 'a 'e` vs `Result P Str`
+     * → `'a = P`), so the compare dispatches P's impl directly. Its dict slot was
+     * stripped with the spec, and the element-first guess over the type args
+     * cannot tell `'a` from `'e`. Null outside a spec, for a let spec, or when
+     * the variable does not bind to a concrete type.
+     */
+    private fun specBoundReceiverType(receiver: MezzeType): MezzeType? {
+        if (receiver !is VarType) return null
+        val origin = specGenericHash ?: return null
+        val args = specTypeArgs ?: return null
+        val bindings = bindImplVarsForOp(origin, args)
+        val name = receiver.variable.name
+        return (bindings[name] ?: bindings["'$name"])?.takeIf { it !is VarType && !containsVarType(it) }
+    }
 
     /** Element-first expansion: for each container type, its element precedes it, so
      *  dict resolution prefers the ELEMENT impl over the container impl. */
@@ -2838,7 +3059,10 @@ class TypedASTCompiler(
         // Only keep dicts the parent actually has — otherwise we'd try to
         // capture a slot that doesn't exist.
         val dictsToCapture = lambdaDictMethods.mapNotNull { method ->
-            val dictName = com.mezze.language.ast.MagicParams.dictParamName(method)
+            // Raw `method@var` keys resolve to whichever slot the PARENT holds for
+            // that (method, var) — per-var when it has one, else the plain one.
+            val dictName = enclosingDictSlotIn(parentParamNames, parentCaptureNames, com.mezze.language.ast.MagicParams.methodOfKey(method), com.mezze.language.ast.MagicParams.typeVarOfKey(method))
+                ?: com.mezze.language.ast.MagicParams.dictParamName(com.mezze.language.ast.MagicParams.methodOfKey(method))
             val parentParamIdx = parentParamNames.indexOf(dictName)
             if (parentParamIdx >= 0) {
                 dictName to (parentCaptureCount + parentParamIdx)
@@ -2846,7 +3070,7 @@ class TypedASTCompiler(
                 val parentCaptureIdx = parentCaptureNames[dictName]
                 if (parentCaptureIdx != null) dictName to parentCaptureIdx else null
             }
-        }
+        }.distinctBy { it.first }
         // Register the lambda's dict needs so compileFunctionBody adds them as
         // captures (not params — params are fixed by the indirect-call ABI).
         // We DON'T put them in dictMethodsForHash here because that would make
@@ -3938,7 +4162,35 @@ class TypedASTCompiler(
     private fun resolveVariantReceiverType(node: TypedExpr, currentType: MezzeType): MezzeType? {
         if (currentType !is VarType) return null
         if (node !is com.mezze.language.typedast.TypedVariantConstruct) return null
-        return variantTypeByConstructor[node.tag]
+        val payloadType = node.payload?.let { substitution.apply(it.type) }
+        variantTypeByConstructor[node.tag]?.let { declared ->
+            // A payload-carrying construct binds the declared type's params from
+            // the ACTUAL payload (`Wrap { p = P }` on `type W 'a = | Wrap { p: 'a }`
+            // → `W P`), so the impl selected for the receiver can also select its
+            // ELEMENT dict — a bare `W 'a` picks the impl but leaves `Eq 'a` unbound.
+            val declaredPayload = declared.constructors[node.tag]
+            if (payloadType == null || declaredPayload == null) return declared
+            val bindings = HashMap<String, MezzeType>()
+            harvestVarBindings(declaredPayload, payloadType, bindings)
+            return if (bindings.isEmpty()) declared
+                else com.mezze.language.typechecker.solving.substituteTypeParamsByName(declared, bindings)
+        }
+        // Option / Result are compiler-known synthetic variants with no typed decl
+        // behind printTypeDefs: rebuild the nominal application, binding the param
+        // the constructed payload fixes and leaving the other fresh.
+        fun payloadField(name: String): MezzeType =
+            (payloadType as? RecordType)?.fields?.get(name) ?: VarType(TypeVar.freshWithName("a"))
+        return when (node.tag) {
+            com.mezze.language.ast.BuiltinTypes.SOME ->
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.OPTION, listOf(payloadField(com.mezze.language.ast.BuiltinTypes.VAL_FIELD)))
+            com.mezze.language.ast.BuiltinTypes.NONE ->
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.OPTION, listOf(VarType(TypeVar.freshWithName("a"))))
+            com.mezze.language.ast.BuiltinTypes.OK ->
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.RESULT, listOf(payloadField(com.mezze.language.ast.BuiltinTypes.VAL_FIELD), VarType(TypeVar.freshWithName("e"))))
+            com.mezze.language.ast.BuiltinTypes.ERR ->
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.RESULT, listOf(VarType(TypeVar.freshWithName("a")), payloadField(com.mezze.language.ast.BuiltinTypes.ERROR_FIELD)))
+            else -> null
+        }
     }
 
     /**

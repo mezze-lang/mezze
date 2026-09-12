@@ -1331,7 +1331,7 @@ private fun formatFieldMismatch(
     return if (isShallow) baseMessage else "$baseMessage ($cleanedInner)"
 }
 
-private fun substituteTypeParamsByName(type: MezzeType, subst: Map<String, MezzeType>): MezzeType {
+internal fun substituteTypeParamsByName(type: MezzeType, subst: Map<String, MezzeType>): MezzeType {
     // Only a type var is replaced (by name, tolerating the `'` prefix either
     // way); every other node just recurses via transformChildren, which
     // rebuilds it with copy() and so preserves typeName/typeHash/rowVar/effects.

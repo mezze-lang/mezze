@@ -1098,12 +1098,18 @@ public final class ListNatives {
     // ==================== Task #17: Additional Operations ====================
 
     @TruffleBoundary
-    public static boolean equals(MezzeList list1, MezzeList list2) {
+    // Elementwise via the caller-supplied eq closure (the element's Eq impl), so
+    // `List T == List T` agrees with `==` on the elements. Structural deepEquals
+    // bottomed out in MezzeRecord.equals and ignored a custom Eq.
+    public static boolean equals(MezzeList list1, MezzeList list2, MezzeFunction eqFn,
+                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list1.size() != list2.size()) return false;
+        var ctx = ScalarCall.prepare2(eqFn, "a", "b");
         Object[] src1 = list1.toArray();
         Object[] src2 = list2.toArray();
         for (int i = 0; i < src1.length; i++) {
-            if (!deepEquals(src1[i], src2[i])) {
+            Object result = ctx.call2(callNode, src1[i], src2[i]);
+            if (!(result instanceof Boolean bool) || !bool) {
                 return false;
             }
         }

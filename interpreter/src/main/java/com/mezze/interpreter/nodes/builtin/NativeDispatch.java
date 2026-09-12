@@ -632,7 +632,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_flatten", (r, c) ->
             SeqNatives.flatten(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_equals", (r, c) ->
-            SeqNatives.equals(getSeq(r, "l"), getSeq(r, "r")));
+            SeqNatives.equals(getSeq(r, "l"), getSeq(r, "r"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_intersperse", (r, c) ->
             SeqNatives.intersperse(getSeq(r, "xs"), getField(r, "sep")));
         HANDLERS.put("__native_seq_chunk", (r, c) ->
@@ -1137,7 +1137,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Task #17: Additional operations
         HANDLERS.put("__native_list_equals", (r, c) ->
-            ListNatives.equals(getList(r, "xs"), getList(r, "ys")));
+            ListNatives.equals(getList(r, "xs"), getList(r, "ys"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_list_index_of", (r, c) ->
             ListNatives.indexOf(getList(r, "xs"), getField(r, "x")));
         HANDLERS.put("__native_list_last_index_of", (r, c) ->

@@ -877,12 +877,23 @@ class Monomorphizer(
     private fun rewriteClosureMethodCallsByReceiver(expr: TypedExpr): TypedExpr {
         if (implIndex.isEmpty()) return expr
         // op name → all (targetTypes, opHash) an impl provides.
-        data class OpTarget(val targets: List<MezzeType>, val opHash: Hash)
+        // `receiverField` is the op's OWN first param name, read off the impl's
+        // lambda — the field the callee expects its receiver under. Needed
+        // because the rewrite below erases the field access, after which the
+        // receiver can only travel inside the arg record.
+        data class OpTarget(val targets: List<MezzeType>, val opHash: Hash, val receiverField: String?)
         val opTargets = HashMap<String, MutableList<OpTarget>>()
         for (impl in implIndex.values) {
             for (opName in impl.operations.keys) {
                 opTargets.getOrPut(opName) { mutableListOf() }
-                    .add(OpTarget(impl.targetTypes, Hash.computeOpHash(impl.hash, opName)))
+                    .add(
+                        OpTarget(
+                            impl.targetTypes,
+                            Hash.computeOpHash(impl.hash, opName),
+                            (impl.operations[opName] as? com.mezze.language.typedast.TypedLambda)
+                                ?.params?.firstOrNull()?.name,
+                        )
+                    )
             }
         }
         if (opTargets.isEmpty()) return expr
@@ -897,14 +908,14 @@ class Monomorphizer(
         fun isUserDeclaredTarget(t: MezzeType): Boolean =
             t is MezzeType.TypeApplication && t.identity is com.mezze.language.ast.TypeIdentity.Declared
 
-        fun resolveOpHash(fieldName: String, receiverType: MezzeType): Hash? {
+        fun resolveOpTarget(fieldName: String, receiverType: MezzeType): OpTarget? {
             val cands = opTargets[fieldName] ?: return null
             // Concrete receiver: dispatch precisely by matching its type to an
             // impl target (exactly one match, else leave untouched — a no/ambiguous
             // match means this wasn't a deferred call on this concrete type).
             if (receiverType !is MezzeType.VarType) {
                 val matches = cands.filter { c -> c.targets.any { typeMatchesTarget(receiverType, it) } }
-                matches.singleOrNull()?.let { return it.opHash }
+                matches.singleOrNull()?.let { return it }
                 // No structural match — but the receiver may be the EXPANDED form of
                 // the impl's nominal target (e.g. `Item` inlined to its RecordType
                 // `{name,price,qty}`, which typeMatchesTarget won't equate with
@@ -919,7 +930,7 @@ class Monomorphizer(
             // its own impl target. Never a numeric operator (those are multi-impl,
             // builtin-target — excluded — and resolved by primitive inlining).
             val sole = cands.singleOrNull() ?: return null
-            return if (sole.targets.all { isUserDeclaredTarget(it) }) sole.opHash else null
+            return if (sole.targets.all { isUserDeclaredTarget(it) }) sole else null
         }
 
         fun rw(e: TypedExpr): TypedExpr = when (e) {
@@ -927,11 +938,18 @@ class Monomorphizer(
                 val fn = e.function
                 val newArg = rw(e.arg)
                 if (fn is TypedFieldAccess) {
-                    val opHash = resolveOpHash(fn.field, fn.record.type)
-                    if (opHash != null) {
+                    val target = resolveOpTarget(fn.field, fn.record.type)
+                    if (target != null) {
+                        // Erasing the field access strands the receiver unless it
+                        // rides in the arg record. Method syntax already folded it
+                        // there (TypedAstBuilder), but operator desugaring — `a == b`
+                        // becomes FieldAccess(record=a, field=eq) with arg `{r = b}` —
+                        // leaves it only in fn.record, so the callee saw a record
+                        // missing its first param and returned a partially-applied
+                        // function instead of a Bool (`[T] == [T]` was always false).
                         e.copy(
-                            function = TypedVar(fn.field, BindingRef.ByHash(opHash), fn.type, fn.loc),
-                            arg = newArg,
+                            function = TypedVar(fn.field, BindingRef.ByHash(target.opHash), fn.type, fn.loc),
+                            arg = injectReceiver(newArg, rw(fn.record), target.receiverField),
                         )
                     } else e.copy(function = fn.copy(record = rw(fn.record)), arg = newArg)
                 } else e.copy(function = rw(fn), arg = newArg)
@@ -1018,14 +1036,53 @@ class Monomorphizer(
      *  self last, see project_classparam_runtime_dispatch_tuple). Returns null
      *  on no match or genuine ambiguity — the caller falls through to the
      *  unmodified TypedFieldAccess call, which the compiler resolves separately. */
-    private fun selectOpHash(entries: List<OpEntry>, receiverType: MezzeType): Hash? {
-        if (entries.size == 1) return entries.first().opHash
+    private fun selectOpEntry(entries: List<OpEntry>, receiverType: MezzeType): OpEntry? {
+        if (entries.size == 1) return entries.first()
         val matches = entries.filter { e ->
             val recvTarget = e.impl.targetTypes.lastOrNull() ?: return@filter false
             typeMatchesTarget(receiverType, recvTarget)
         }
-        val unique = matches.map { it.opHash }.distinct()
+        val unique = matches.distinctBy { it.opHash }
         return if (unique.size == 1) unique.first() else null
+    }
+
+    private fun selectOpHash(entries: List<OpEntry>, receiverType: MezzeType): Hash? =
+        selectOpEntry(entries, receiverType)?.opHash
+
+    /** Prepend `fieldName = receiver` to [arg] unless it already binds that
+     *  field. Mirrors the receiver-folding in TypedAstBuilder's member-call
+     *  lowering, so a rewritten op call carries its receiver whether the call
+     *  came from method syntax (already folded) or operator desugaring (not).
+     *  Returns [arg] untouched when the receiver name is unknown or the arg
+     *  isn't a record — the shapes the old code already handled correctly. */
+    private fun injectReceiver(
+        arg: TypedExpr,
+        receiver: TypedExpr,
+        fieldName: String?,
+    ): TypedExpr {
+        if (fieldName == null) return arg
+        if (arg !is com.mezze.language.typedast.TypedRecord) return arg
+        val alreadyBound = arg.entries.any {
+            it is com.mezze.language.typedast.TypedRecordEntry.Field && it.name == fieldName
+        }
+        if (alreadyBound) return arg
+        val receiverEntry = com.mezze.language.typedast.TypedRecordEntry.Field(
+            fieldName,
+            receiver,
+            receiver.loc,
+        )
+        val fieldTypes = LinkedHashMap<String, MezzeType>()
+        fieldTypes[fieldName] = receiver.type
+        for (e in arg.entries) {
+            if (e is com.mezze.language.typedast.TypedRecordEntry.Field) {
+                fieldTypes[e.name] = e.value.type
+            }
+        }
+        return com.mezze.language.typedast.TypedRecord(
+            entries = listOf(receiverEntry) + arg.entries,
+            type = MezzeType.RecordType(fieldTypes),
+            loc = arg.loc,
+        )
     }
 
     private fun rewriteCalls(expr: TypedExpr, opsByName: Map<String, List<OpEntry>>): TypedExpr {
@@ -1035,22 +1092,38 @@ class Monomorphizer(
                 val rewrittenArg = rewriteCalls(expr.arg, opsByName)
                 if (fn is TypedFieldAccess) {
                     val entries = opsByName[fn.field]
-                    val opHash = entries?.let { selectOpHash(it, fn.record.type) }
-                    if (opHash != null) {
+                    val entry = entries?.let { selectOpEntry(it, fn.record.type) }
+                    if (entry != null) {
                         // Rewrite `receiver.method({it = receiver, …})` to a
                         // direct ByHash call. The function position becomes a
-                        // TypedVar bound to the op-hash; the arg record is
-                        // unchanged. fn.type is the (already-substituted)
-                        // method function type, e.g. {it: Int} -> Str.
+                        // TypedVar bound to the op-hash. fn.type is the
+                        // (already-substituted) method function type, e.g.
+                        // {it: Int} -> Str.
                         val direct = TypedVar(
                             name = fn.field,
-                            binding = BindingRef.ByHash(opHash),
+                            binding = BindingRef.ByHash(entry.opHash),
                             type = fn.type,
                             loc = fn.loc,
                         )
+                        // Once the field access is gone the receiver can only
+                        // reach the callee through the arg record. Method-call
+                        // syntax already folded it in (TypedAstBuilder), but
+                        // operator desugaring (`a == b`) leaves the receiver in
+                        // fn.record and passes only `{r = b}` — dropping it
+                        // there calls `eq` with a missing first param, which
+                        // then returns a partially-applied function instead of
+                        // a Bool. Re-add it under the op's OWN first-param
+                        // name, read off the impl, never a hardcoded "it".
+                        val receiverField =
+                            (entry.impl.operations[fn.field] as? com.mezze.language.typedast.TypedLambda)
+                                ?.params?.firstOrNull()?.name
                         return expr.copy(
                             function = direct,
-                            arg = rewrittenArg,
+                            arg = injectReceiver(
+                                arg = rewrittenArg,
+                                receiver = rewriteCalls(fn.record, opsByName),
+                                fieldName = receiverField,
+                            ),
                         )
                     }
                     // Not a constraint-driven method — still recurse into the

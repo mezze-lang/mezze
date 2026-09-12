@@ -10,26 +10,47 @@ impl Default for List 'a where {
   default = {} -> empty {}
 }
 
-## Structural equality for lists.
+## Elementwise list equality, threading an element equality `eq`. The declared
+## `eq` param type ties the comparator closure to the element type (a top-level
+## let's `with Eq 'a` does NOT flow into body annotations — the sort_by pattern),
+## so the native compares each pair via `eq` instead of JVM structural equality.
+let list_equals_with_eq
+  : { xs: List 'a, ys: List 'a, eq: { a: 'a, b: 'a } -> Bool } -> Bool = { xs, ys, eq } ->
+  __native_list_equals { xs = xs, ys = ys, eq = eq }
+
+## Lexicographic list comparison, threading an element comparator `cmp` (-1/0/1).
+## Same tying trick as above; delegates to the existing comparator-taking native.
+let list_compare_with_cmp
+  : { xs: List 'a, ys: List 'a, cmp: { a: 'a, b: 'a } -> Int } -> Int = { xs, ys, cmp } ->
+  __native_list_lexicographic_compare { xs = xs, ys = ys, cmp = cmp }
+
+## Equality for lists, elementwise via the element's Eq impl.
+## Was structural (`__native_list_equals` → deepEquals → MezzeRecord.equals), which
+## IGNORED a custom element Eq and silently disagreed with `==` on the elements.
+## The `with Eq 'a` preconditions are load-bearing: without them `List T == List T`
+## would type-check for a T with no Eq.
 impl Eq for List 'a where {
-  eq = { it, r } -> __native_list_equals { xs = it, ys = r },
-  neq = { it, r } -> if __native_list_equals { xs = it, ys = r } then False else True,
+  eq: { it: List 'a, r: List 'a } with Eq 'a -> Bool = { it, r } ->
+    list_equals_with_eq { xs = it, ys = r, eq = { a, b } -> a == b },
+  neq: { it: List 'a, r: List 'a } with Eq 'a -> Bool = { it, r } ->
+    if list_equals_with_eq { xs = it, ys = r, eq = { a, b } -> a == b } then False else True,
 }
 
 ## Lexicographic ordering for lists, requiring the element to be Ord.
-## `__native_list_compare` compares elements, so without the `with Ord 'a`
-## preconditions `List T < List T` would type-check for a T with no Ord and
-## crash at runtime (#224). The body delegates to the native compare, so the
-## precondition can't be inferred from the body and must be explicit.
+## The `with Ord 'a` preconditions are load-bearing: without them `List T < List T`
+## would type-check for a T with no Ord (#224). The element comparator is threaded
+## via `list_compare_with_cmp` so a user Ord impl is honoured — the old
+## `__native_list_compare` fell back to `System.identityHashCode` for records, so
+## ordering was not merely wrong but unstable across runs.
 impl Ord for List 'a where {
   lt: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } ->
-    __native_list_compare { xs = it, ys = r } == (0 - 1),
+    list_compare_with_cmp { xs = it, ys = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } == (0 - 1),
   le: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } ->
-    __native_list_compare { xs = it, ys = r } != 1,
+    list_compare_with_cmp { xs = it, ys = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } != 1,
   gt: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } ->
-    __native_list_compare { xs = it, ys = r } == 1,
+    list_compare_with_cmp { xs = it, ys = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } == 1,
   ge: { it: List 'a, r: List 'a } with Ord 'a -> Bool = { it, r } ->
-    __native_list_compare { xs = it, ys = r } != (0 - 1),
+    list_compare_with_cmp { xs = it, ys = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } != (0 - 1),
 }
 
 ## Creates an empty list.
@@ -389,8 +410,8 @@ pub let distinct: { xs: List 'a } -> List 'a = { xs } -> __native_list_distinct 
 pub let flatten: { xss: List (List 'a) } -> List 'a = { xss } -> concat { xss = xss }
 
 ## Returns True if the two lists are equal.
-pub let equals: { xs: List 'a, ys: List 'a } -> Bool = { xs, ys } ->
-  __native_list_equals { xs = xs, ys = ys }
+pub let equals: { xs: List 'a, ys: List 'a } with Eq 'a -> Bool = { xs, ys } ->
+  list_equals_with_eq { xs = xs, ys = ys, eq = { a, b } -> a == b }
 
 ## Returns the index of the first occurrence, or None.
 pub let index_of: { xs: List 'a, x: 'a } -> Option Int = { xs, x } ->
@@ -484,8 +505,8 @@ pub let stddev: { xs: List Float } -> Option Float = { xs } -> __native_list_std
 pub let median: { xs: List Float } -> Option Float = { xs } -> __native_list_median { xs = xs }
 
 ## Lexicographic comparison; returns -1, 0, or 1.
-pub let compare: { xs: List 'a, ys: List 'a } -> Int = { xs, ys } ->
-  __native_list_compare { xs = xs, ys = ys }
+pub let compare: { xs: List 'a, ys: List 'a } with Ord 'a -> Int = { xs, ys } ->
+  list_compare_with_cmp { xs = xs, ys = ys, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Lexicographic comparison with a custom comparator.
 pub let lexicographic_compare

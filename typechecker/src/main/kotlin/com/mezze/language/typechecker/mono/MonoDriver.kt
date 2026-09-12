@@ -714,6 +714,27 @@ object MonoDriver {
             is MezzeType.SortedSetType -> type.elementType
             is MezzeType.MapType -> type.valueType
             is MezzeType.SortedMapType -> type.valueType
+            // The same built-in containers in their OTHER representation. An impl
+            // target like `List 'a` reaches here as `TypeApplication("List", ['a])`,
+            // not `ListType` (two representations; MonoTypeOps.unify bridges them
+            // the same way at its SEQ/LIST/SET/MAP arms). Without this arm the
+            // element var of a List/Set/Map impl was never recovered, the spec never
+            // bound `'a`, and its comparator closure stayed GENERIC — so
+            // `List P == List P` fell back to structural equality. Still excludes
+            // `Option 'a`, records and nominal user types, exactly as before.
+            is MezzeType.TypeApplication -> when {
+                type.args.size == 1 && (
+                    type.constructor == com.mezze.language.ast.BuiltinTypes.SEQ ||
+                    type.constructor == com.mezze.language.ast.BuiltinTypes.LIST ||
+                    type.constructor == com.mezze.language.ast.BuiltinTypes.SET ||
+                    type.constructor == com.mezze.language.ast.BuiltinTypes.SORTED_SET
+                ) -> type.args[0]
+                type.args.size == 2 && (
+                    type.constructor == com.mezze.language.ast.BuiltinTypes.MAP ||
+                    type.constructor == com.mezze.language.ast.BuiltinTypes.SORTED_MAP
+                ) -> type.args[1]
+                else -> null
+            }
             else -> null
         }
         return (elem as? MezzeType.VarType)?.variable?.name

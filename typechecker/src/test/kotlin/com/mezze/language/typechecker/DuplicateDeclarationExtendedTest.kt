@@ -218,6 +218,45 @@ class DuplicateDeclarationExtendedTest {
     }
 
     @Test
+    fun `test explicit Eq impl on a record that derives Eq is a duplicate`() {
+        // Records derive Eq (structurally) when every field has Eq, and the
+        // compiler OWNS that instance. A hand-written impl is a SECOND instance
+        // for the same type — a duplicate under coherence, never an override.
+        val code = """
+            use std::abilities::compare::{ Eq }
+            type P = { x: Int, y: Int }
+            impl Eq for P where {
+                eq = { it, r } -> it.x == r.x,
+                neq = { it, r } -> if it.x == r.x then False else True,
+            }
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("already implemented") == true ||
+                   exception.message?.contains("derive") == true)
+    }
+
+    @Test
+    fun `test explicit Eq impl on a newtype is its only impl and passes`() {
+        // Newtypes derive NOTHING, so this is the type's one Eq — legal, and it is
+        // exactly what container Eq (`[Q] == [Q]`) must dispatch to.
+        val code = """
+            use std::abilities::compare::{ Eq }
+            newtype Q = Int
+            let unq: { n: Q } -> Int = { n } -> match n is
+              Q.(v) -> v
+            impl Eq for Q where {
+                eq = { it, r } -> unq { n = it } == unq { n = r },
+                neq = { it, r } -> if unq { n = it } == unq { n = r } then False else True,
+            }
+        """.trimIndent()
+
+        parseAndTypeCheck(code)
+    }
+
+    @Test
     fun `test ability implementation for different types should pass`() {
         val code = """
             use std::int

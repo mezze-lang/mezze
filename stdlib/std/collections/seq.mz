@@ -10,10 +10,23 @@ impl Default for ['a] where {
   default = {} -> []
 }
 
-## Structural equality for sequences.
+## Elementwise sequence equality, threading an element equality `eq`. The declared
+## `eq` param type ties the comparator closure to the element type (a top-level let's
+## `with Eq 'a` doesn't flow into body annotations — the sort_by pattern), so the
+## native compares each pair via `eq` instead of structural equality and `[T] == [T]`
+## agrees with the element's own Eq impl.
+let seq_equals_with_eq
+  : { l: ['a], r: ['a], eq: { a: 'a, b: 'a } -> Bool } -> Bool = { l, r, eq } ->
+  __native_seq_equals { l = l, r = r, eq = eq }
+
+## Equality for sequences, elementwise via the element's Eq impl.
+## The `with Eq 'a` preconditions are load-bearing: without them `[T] == [T]`
+## would type-check for a T with no Eq.
 impl Eq for ['a] where {
-  eq = { it, r } -> __native_seq_equals { l = it, r = r },
-  neq = { it, r } -> if __native_seq_equals { l = it, r = r } then False else True,
+  eq: { it: ['a], r: ['a] } with Eq 'a -> Bool = { it, r } ->
+    seq_equals_with_eq { l = it, r = r, eq = { a, b } -> a == b },
+  neq: { it: ['a], r: ['a] } with Eq 'a -> Bool = { it, r } ->
+    if seq_equals_with_eq { l = it, r = r, eq = { a, b } -> a == b } then False else True,
 }
 
 ## Lexicographic sequence comparison, threading an element comparator `cmp`
@@ -267,7 +280,8 @@ pub let range_step: { start: Int, end: Int, step: Int } -> [Int] = { start, end,
   __native_seq_range_step { start = start, end = end, step = step }
 
 ## Returns True if the two sequences are equal.
-pub let equals: { l: ['a], r: ['a] } -> Bool = { l, r } -> __native_seq_equals { l = l, r = r }
+pub let equals: { l: ['a], r: ['a] } with Eq 'a -> Bool = { l, r } ->
+  seq_equals_with_eq { l = l, r = r, eq = { a, b } -> a == b }
 
 ## Creates an empty sequence.
 pub let empty: {} -> ['a] = {} -> __native_seq_empty {}

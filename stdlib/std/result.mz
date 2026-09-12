@@ -16,23 +16,6 @@ impl Tryable for Result 'a 'e having 'inner = 'a where {
 
 }
 
-impl Eq for Result 'a 'e where {
-  eq = { it, r } -> match it is
-    Ok { val = l } -> match r is
-      Ok { val = r_val } -> l == r_val
-      Err { error = _ } -> False
-    Err { error = l_err } -> match r is
-      Ok { val = _ } -> False
-      Err { error = r_err } -> l_err == r_err,
-  neq = { it, r } -> match it is
-    Ok { val = l } -> match r is
-      Ok { val = r_val } -> l != r_val
-      Err { error = _ } -> True
-    Err { error = l_err } -> match r is
-      Ok { val = _ } -> True
-      Err { error = r_err } -> l_err != r_err,
-}
-
 ## Apply f to the success value, leaving errors untouched.
 pub let map
   : { result: Result 'a 'e, f: { val: 'a } -> 'b <...> }

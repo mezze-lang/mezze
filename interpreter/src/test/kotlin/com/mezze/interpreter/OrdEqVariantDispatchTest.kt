@@ -55,17 +55,19 @@ class OrdEqVariantDispatchTest {
     }
 
     @Test
-    fun `Eq impl on a variant dispatches to the user impl, not structural equals`() {
-        // The impl returns True for ALL pairs; a structural fallback would give
-        // False for Red vs Green — so a True result proves the impl dispatched.
+    fun `Eq impl on a newtype dispatches to the user impl, not structural equals`() {
+        // A variant DERIVES Eq (a hand-written impl on it is a duplicate), so the
+        // legal home of a non-structural Eq is a newtype. The impl returns True for
+        // ALL pairs; a structural fallback would give False for 1 vs 2 — so a True
+        // result proves the impl dispatched.
         assertEquals(true, eval("""
             use std::abilities::compare::{ Eq }
-            type Color = | Red, Green |
+            newtype Color = Int
             impl Eq for Color where {
               eq = { it, r } -> True,
               neq = { it, r } -> False,
             }
-            Red == Green
+            Color.(1) == Color.(2)
         """.trimIndent()))
     }
 
@@ -138,17 +140,17 @@ class OrdEqVariantDispatchTest {
     @Test
     fun `equality inside a generic with-Eq body dispatches to the user impl`() {
         // The Eq impl reports ALL Colors equal; a structural fallback would say
-        // Red != Green. A generic `with Eq 'a` helper calling `a == b` must use
-        // the impl — so Red vs Green comes back True.
+        // 1 != 2. A generic `with Eq 'a` helper calling `a == b` must use the
+        // impl — so Color.(1) vs Color.(2) comes back True.
         assertEquals(true, eval("""
             use std::abilities::compare::{ Eq }
-            type Color = | Red, Green |
+            newtype Color = Int
             impl Eq for Color where {
               eq = { it, r } -> True,
               neq = { it, r } -> False,
             }
             let same : { a: 'a, b: 'a } with Eq 'a -> Bool = { a, b } -> a == b
-            same { a = Red, b = Green }
+            same { a = Color.(1), b = Color.(2) }
         """.trimIndent()))
     }
 }

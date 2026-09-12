@@ -250,7 +250,12 @@ data class ParsedImplAbilityDecl(
     override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
-    val contentHash: com.mezze.language.typedast.Hash? = null
+    val contentHash: com.mezze.language.typedast.Hash? = null,
+    /** Compiler-DERIVED instance (structural `Eq` for a record / variant — the
+     *  `#[derive]` the compiler writes itself). Never produced by the parser. It is
+     *  the type's one instance, so coherence validation must not treat it as a
+     *  duplicate of the derivation it embodies. */
+    val derived: Boolean = false
 ) : ParsedDecl {
     val isInherent: Boolean get() = target is ParsedImplTarget.Inherent
 

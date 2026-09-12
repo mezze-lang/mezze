@@ -815,9 +815,16 @@ public final class SeqNatives {
 
     // ==================== Equality ====================
 
-    @TruffleBoundary
-    public static boolean equals(MezzeSeq seq1, MezzeSeq seq2) {
-        return seq1.equals(seq2);
+    // Elementwise via the caller-supplied eq closure (the element's Eq impl), so
+    // `[T] == [T]` agrees with `==` on the elements — structural MezzeSeq.equals
+    // would ignore a custom Eq.
+    public static boolean equals(MezzeSeq seq1, MezzeSeq seq2, MezzeFunction eqFn,
+                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (seq1.size() != seq2.size()) return false;
+        for (int i = 0; i < seq1.size(); i++) {
+            if (!eqCall(eqFn, seq1.get(i), seq2.get(i), callNode)) return false;
+        }
+        return true;
     }
 
     // ==================== Conversion ====================
@@ -1514,7 +1521,8 @@ public final class SeqNatives {
      */
     private static boolean eqCall(MezzeFunction eqFn, Object a, Object b,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object result = callNode.call(eqFn.getCallTarget(), prepareArgsComparator(eqFn, a, b));
+        Object[] args = prepareArgsComparator(eqFn, a, b);
+        Object result = callNode.call(eqFn.getCallTarget(), args);
         return result instanceof Boolean && (Boolean) result;
     }
 

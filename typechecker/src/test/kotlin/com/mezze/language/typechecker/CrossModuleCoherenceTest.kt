@@ -117,16 +117,20 @@ class CrossModuleCoherenceTest {
 
     @Test
     fun `user CAN impl Eq for a new user type`() {
-        // Sanity: coherence check must not over-reject.
+        // Sanity: coherence check must not over-reject. A NEWTYPE derives nothing,
+        // so its hand-written Eq is the type's one instance (a record would derive
+        // Eq itself and a hand-written impl would be a duplicate).
         val r = checkWithPrelude(
             """
             use std::abilities::compare::{ Eq }
 
-            type UserId = { val: Int }
+            newtype UserId = Int
+            let unwrap: { u: UserId } -> Int = { u } -> match u is
+              UserId.(v) -> v
 
             impl Eq for UserId where {
-              eq  = { it, r } -> it.val == r.val,
-              neq = { it, r } -> it.val != r.val,
+              eq  = { it, r } -> unwrap { u = it } == unwrap { u = r },
+              neq = { it, r } -> unwrap { u = it } != unwrap { u = r },
             }
             """
         )

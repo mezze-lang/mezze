@@ -907,65 +907,69 @@ class CodecGenerator(
     // MezzeType → ParsedTypeAnnotation
     // ---------------------------------------------------------------------
 
-    private fun mezzeTypeToAnnotation(type: MezzeType): ParsedTypeAnnotation {
-        PrimitiveTypes.toName(type)?.let { return ParsedNamedType(it, GEN_LOC) }
-        return when (type) {
-            is MezzeType.VarType -> ParsedNamedType(type.variable.name, GEN_LOC)
-            is MezzeType.RecordType -> {
-                // A nominal record (e.g. `type Point = { x: Int, y: Int }`) has a
-                // `Declared` identity. The runtime ability dispatcher matches a
-                // record receiver against a `TypeApplication` target by nominal
-                // name (TypedASTCompiler.typeMatchesTarget), so the impl target
-                // must be `Point`, not the anonymous structural `{x,y}` shape —
-                // otherwise `p.encode {…}` falls back to a bytecode field read.
-                val named = type.identity.displayNameOrNull()
-                if (named != null) ParsedNamedType(named, GEN_LOC)
-                else ParsedRecordType(
-                    entries = type.fields.map { (name, fieldType) ->
-                        ParsedRecordTypeEntry(name, mezzeTypeToAnnotation(fieldType), GEN_LOC)
-                    },
-                    loc = GEN_LOC,
-                )
-            }
-            is MezzeType.VariantType -> {
-                val named = type.identity.displayNameOrNull()
-                if (named != null) ParsedNamedType(named, GEN_LOC)
-                else ParsedVariantType(
-                    constructors = type.constructors.map { (n, payload) ->
-                        ParsedVariantTypeCtor(n, payload?.let { mezzeTypeToAnnotation(it) }, GEN_LOC)
-                    },
-                    loc = GEN_LOC,
-                )
-            }
-            is MezzeType.ListType    -> ParsedTypeApp("List", listOf(mezzeTypeToAnnotation(type.elementType)), GEN_LOC)
-            is MezzeType.SeqType     -> ParsedSeqType(mezzeTypeToAnnotation(type.elementType), GEN_LOC)
-            is MezzeType.SetType     -> ParsedTypeApp("Set", listOf(mezzeTypeToAnnotation(type.elementType)), GEN_LOC)
-            is MezzeType.SortedSetType -> ParsedTypeApp("SortedSet", listOf(mezzeTypeToAnnotation(type.elementType)), GEN_LOC)
-            is MezzeType.MapType     -> ParsedTypeApp(
-                "Map",
-                listOf(mezzeTypeToAnnotation(type.keyType), mezzeTypeToAnnotation(type.valueType)),
-                GEN_LOC,
-            )
-            is MezzeType.SortedMapType -> ParsedTypeApp(
-                "SortedMap",
-                listOf(mezzeTypeToAnnotation(type.keyType), mezzeTypeToAnnotation(type.valueType)),
-                GEN_LOC,
-            )
-            is MezzeType.TypeApplication -> ParsedTypeApp(
-                type.constructor,
-                type.args.map { mezzeTypeToAnnotation(it) },
-                GEN_LOC,
-            )
-            is MezzeType.FunctionType -> ParsedFunctionType(
-                paramType = mezzeTypeToAnnotation(type.paramType),
-                returnType = mezzeTypeToAnnotation(type.returnType),
-                loc = GEN_LOC,
-            )
-            else -> throw IllegalArgumentException("Cannot convert MezzeType to ParsedTypeAnnotation: $type")
-        }
-    }
+    private fun mezzeTypeToAnnotation(type: MezzeType): ParsedTypeAnnotation = mezzeTypeToParsedAnnotation(type, GEN_LOC)
 
     companion object {
         private val GEN_LOC = Loc("<generated>", 0, 0, 0, 0)
+    }
+}
+
+/** [MezzeType] → the parsed annotation naming it, for compiler-synthesized decls
+ *  (codec and derived impls). Declared shapes go by NAME; anonymous ones structurally. */
+internal fun mezzeTypeToParsedAnnotation(type: MezzeType, loc: Loc): ParsedTypeAnnotation {
+    PrimitiveTypes.toName(type)?.let { return ParsedNamedType(it, loc) }
+    return when (type) {
+        is MezzeType.VarType -> ParsedNamedType(type.variable.name, loc)
+        is MezzeType.RecordType -> {
+            // A nominal record (e.g. `type Point = { x: Int, y: Int }`) has a
+            // `Declared` identity. The runtime ability dispatcher matches a
+            // record receiver against a `TypeApplication` target by nominal
+            // name (TypedASTCompiler.typeMatchesTarget), so the impl target
+            // must be `Point`, not the anonymous structural `{x,y}` shape —
+            // otherwise `p.encode {…}` falls back to a bytecode field read.
+            val named = type.identity.displayNameOrNull()
+            if (named != null) ParsedNamedType(named, loc)
+            else ParsedRecordType(
+                entries = type.fields.map { (name, fieldType) ->
+                    ParsedRecordTypeEntry(name, mezzeTypeToParsedAnnotation(fieldType, loc), loc)
+                },
+                loc = loc,
+            )
+        }
+        is MezzeType.VariantType -> {
+            val named = type.identity.displayNameOrNull()
+            if (named != null) ParsedNamedType(named, loc)
+            else ParsedVariantType(
+                constructors = type.constructors.map { (n, payload) ->
+                    ParsedVariantTypeCtor(n, payload?.let { mezzeTypeToParsedAnnotation(it, loc) }, loc)
+                },
+                loc = loc,
+            )
+        }
+        is MezzeType.ListType    -> ParsedTypeApp("List", listOf(mezzeTypeToParsedAnnotation(type.elementType, loc)), loc)
+        is MezzeType.SeqType     -> ParsedSeqType(mezzeTypeToParsedAnnotation(type.elementType, loc), loc)
+        is MezzeType.SetType     -> ParsedTypeApp("Set", listOf(mezzeTypeToParsedAnnotation(type.elementType, loc)), loc)
+        is MezzeType.SortedSetType -> ParsedTypeApp("SortedSet", listOf(mezzeTypeToParsedAnnotation(type.elementType, loc)), loc)
+        is MezzeType.MapType     -> ParsedTypeApp(
+            "Map",
+            listOf(mezzeTypeToParsedAnnotation(type.keyType, loc), mezzeTypeToParsedAnnotation(type.valueType, loc)),
+            loc,
+        )
+        is MezzeType.SortedMapType -> ParsedTypeApp(
+            "SortedMap",
+            listOf(mezzeTypeToParsedAnnotation(type.keyType, loc), mezzeTypeToParsedAnnotation(type.valueType, loc)),
+            loc,
+        )
+        is MezzeType.TypeApplication -> ParsedTypeApp(
+            type.constructor,
+            type.args.map { mezzeTypeToParsedAnnotation(it, loc) },
+            loc,
+        )
+        is MezzeType.FunctionType -> ParsedFunctionType(
+            paramType = mezzeTypeToParsedAnnotation(type.paramType, loc),
+            returnType = mezzeTypeToParsedAnnotation(type.returnType, loc),
+            loc = loc,
+        )
+        else -> throw IllegalArgumentException("Cannot convert MezzeType to ParsedTypeAnnotation: $type")
     }
 }

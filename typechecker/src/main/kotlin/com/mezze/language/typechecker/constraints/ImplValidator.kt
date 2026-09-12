@@ -64,6 +64,47 @@ internal class ImplValidator(
             param to convertTypeAnnotation(targetType)
         }
 
+        // Coherence: the compiler DERIVES Eq/Inspect for records and variants
+        // (structurally — when every field / constructor has the ability) and it
+        // OWNS that instance. A hand-written impl for such a type is a SECOND
+        // instance for the same type: a duplicate, never an override. Only a
+        // declared nominal receiver is a candidate — builtin shapes (`['a]`, `Bool`)
+        // are not derived this way, and a newtype derives nothing, so its impl is
+        // the type's one legitimate instance. Derivability is decided by the SAME
+        // structural predicate the solver uses, keyed on the ability's hash.
+        // A declared receiver arrives in one of TWO shapes (the two-representations
+        // landmine): alias-expanded `type P = {..}` / `type V = | ..` is a
+        // RecordType / VariantType carrying the declaration's identity, while
+        // `Option 'a` / a newtype is a TypeApplication — read the identity off
+        // whichever shape came, never the constructor name.
+        run {
+            // The compiler-generated derived instance IS the one instance — never a
+            // duplicate of itself (DerivedImplGenerator).
+            if (impl.derived) return@run
+            val receiverAnn = impl.targetTypes.lastOrNull() ?: return@run
+            val receiver = convertTypeAnnotation(receiverAnn)
+            val identity = (receiver as? com.mezze.language.ast.MezzeType.RecordType)?.identity
+                ?: (receiver as? com.mezze.language.ast.MezzeType.VariantType)?.identity
+                ?: (receiver as? com.mezze.language.ast.MezzeType.TypeApplication)?.identity
+                ?: return@run
+            if (identity !is com.mezze.language.ast.TypeIdentity.Declared) return@run
+            if (receiver is com.mezze.language.ast.MezzeType.TypeApplication &&
+                registry.lookupType(receiver.constructor)?.definition is com.mezze.language.parsedast.ParsedNewtypeDef
+            ) return@run
+            val abilityHash = registry.resolveAbilityHash(abilityName)
+            val derives = com.mezze.language.typechecker.solving.AbilityChecker(context, registry)
+                .canDeriveAbility(abilityName, receiver, abilityHash)
+            if (derives) {
+                throw TypeCheckError(
+                    "Duplicate ability impl: `$abilityName` is derived by the compiler for " +
+                    "`${identity.displayName}` (records and variants derive it structurally), so it is " +
+                    "already implemented — a hand-written impl is a second instance for the same type.",
+                    impl.loc,
+                    code = ErrorCode.V0407_OVERLAPPING_INSTANCE,
+                )
+            }
+        }
+
         // Associated-type bindings (`having 'out = Str`) must substitute into the op
         // signatures too — otherwise a declared return type of `'out` stays an
         // unconstrained var and the body's actual type unifies against it freely

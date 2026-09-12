@@ -27,12 +27,25 @@ object MagicParams {
     /** True if [name] is a dict param specifically. */
     fun isDict(name: String): Boolean = name.startsWith(DICT_PREFIX)
 
-    /** Build the dict-param name for [methodName]. */
+    /**
+     * A dict param is keyed by METHOD, and — when one function needs the same
+     * method for two different type variables (`impl Eq for Result 'a 'e`
+     * compares an `'a` payload and an `'e` payload) — by the type variable too:
+     * key `eq@a` → param `__dict_eq@a`. A function needing a method for a single
+     * variable keeps the plain `eq` / `__dict_eq` (byte-identical to before).
+     */
+    const val VAR_SEP = "@"
+    fun dictKey(methodName: String, typeVar: String): String = "$methodName$VAR_SEP${typeVar.removePrefix("'")}"
+    fun methodOfKey(key: String): String = key.substringBefore(VAR_SEP)
+    fun typeVarOfKey(key: String): String? = key.substringAfter(VAR_SEP, "").ifEmpty { null }
+
+    /** Build the dict-param name for a dict KEY (plain method or `method@var`). */
     fun dictParamName(methodName: String): String = "$DICT_PREFIX$methodName"
 
-    /** Strip the prefix off a dict-param name, returning the method name. */
+    /** The METHOD a dict param serves (var qualifier dropped) — what the runtime's
+     *  primitive fallback and the op index are keyed on. */
     fun dictMethodOf(paramName: String): String? =
-        if (paramName.startsWith(DICT_PREFIX)) paramName.removePrefix(DICT_PREFIX) else null
+        if (paramName.startsWith(DICT_PREFIX)) methodOfKey(paramName.removePrefix(DICT_PREFIX)) else null
 
     // ── Compiler-internal magic IDENTIFIER prefixes / sentinels ──────────────
     // Same "one source of truth" intent as the params above: these are a private

@@ -1,5 +1,8 @@
 package com.mezze.language.typechecker.emit
 
+import com.mezze.language.typechecker.solving.expandTypeApplicationToRecord
+import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
+import com.mezze.language.typechecker.solving.substituteTypeParamsByName
 import com.mezze.language.ast.*
 import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.parser.MezzeParser as ParserBridge
@@ -36,6 +39,20 @@ class TypedAstBuilder(
     private val implDeclarations: Map<String, ParsedPerformerDecl>,
 ) {
     private val substitution: Substitution get() = solved.substitution
+
+    /** Param types for the NEXT ability-op lambda built (see buildAbilityImpl):
+     *  the ability's declared op signature with the impl's class args substituted.
+     *  They type `it`/`r` and everything read off them inside the body; the
+     *  lambda's own surface type is still emitted laundered (fresh vars per
+     *  param), exactly as before — mono keys specializations off that surface. */
+    private var pendingOpParamTypes: Map<String, MezzeType>? = null
+
+    /** True while building a seeded ability-impl op body (see [pendingOpParamTypes]).
+     *  Only there are match-bound names typed STRUCTURALLY off the scrutinee: the
+     *  solver never produced entries for these bodies. Everywhere else the solver's
+     *  loc-keyed bindings are authoritative and a structural guess must not
+     *  override an absence the compiler already relies on (codec bodies). */
+    private var typingImplOpBody: Boolean = false
     private val tailCallLocations: Set<Loc> get() = solved.tailCallLocations
     private val mustBeOpenRowVars: Set<RowVar> get() = solved.mustBeOpenRowVars
     private val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo>
@@ -422,7 +439,11 @@ class TypedAstBuilder(
     }
 
     fun buildCodecImpl(decl: ParsedImplAbilityDecl, impls: MutableList<TypedAbilityImpl>) {
-        buildAbilityImpl(decl, "<codec-generated>", impls)
+        // Codec bodies dispatch every step through `config`'s Tier-2 methods and
+        // were shaped for untyped params — keep them as they were. A DERIVED shape
+        // impl (anonymous-record Eq) built through this same path does compare
+        // components, so it is seeded like any hand-written impl.
+        buildAbilityImpl(decl, "<codec-generated>", impls, seedOpParams = decl.derived)
     }
 
     private fun attachAbilityConstraints(
@@ -440,20 +461,21 @@ class TypedAstBuilder(
     private fun buildAbilityImpl(
         decl: ParsedImplAbilityDecl,
         file: String,
-        impls: MutableList<TypedAbilityImpl>
+        impls: MutableList<TypedAbilityImpl>,
+        seedOpParams: Boolean = true,
     ) {
         val loc = decl.loc
 
-        val abilityHash = when (val target = decl.target) {
+        val abilityDecl: ParsedAbilityDecl? = when (val target = decl.target) {
             is ParsedImplTarget.Named -> {
                 val abilityName = target.ability.localName
-                val abilityDecl = registry.lookupAbility(abilityName)
+                registry.lookupAbility(abilityName)
                     ?: importContext?.importedAbilities?.get(abilityName)
                     ?: error("Ability '$abilityName' not found in declarations or imports")
-                abilityDecl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(abilityDecl)
             }
-            is ParsedImplTarget.Inherent -> Hash.ZERO
+            is ParsedImplTarget.Inherent -> null
         }
+        val abilityHash = abilityDecl?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) } ?: Hash.ZERO
 
         // Full class-arg tuple (concrete `abilityTypeArgs` before `for` + `targetTypes`
         // after), positional to the ability's type params ("extra params first, self
@@ -487,6 +509,25 @@ class TypedAstBuilder(
                     constraintResults[key]?.type?.let { substitution.apply(it) }
                 } else null
 
+            // An ability op is built against the ability's DECLARED op signature with
+            // the impl's class-arg tuple substituted for the ability's type params
+            // (`Eq.eq: { it: 'a, r: 'a } -> Bool` under `impl Eq for W` → `{ it: W,
+            // r: W } -> Bool`) — exactly what ImplValidator checked the body against.
+            // Building it against a fresh unknown instead left `it`/`r` and every
+            // field / payload read off them untyped, so a component `==` in the body
+            // fell to the structural default and never dispatched the component's
+            // own impl (a newtype field's declared Eq was silently ignored). Only the
+            // params are seeded from it (pendingOpParamTypes); the op's emitted
+            // surface type stays the laundered one mono already specializes on.
+            val declaredOpType: MezzeType.FunctionType? = abilityDecl?.let { ad ->
+                val abilityOp = ad.operations.firstOrNull { it.name == op.name } ?: return@let null
+                val classArgs = ad.typeParams.zip(targetTypes).toMap()
+                typeVarCache.clear()
+                MezzeType.FunctionType(
+                    paramType = substituteTypeParamsByName(convertParsedTypeAnnotation(abilityOp.paramType), classArgs),
+                    returnType = substituteTypeParamsByName(convertParsedTypeAnnotation(abilityOp.returnType), classArgs),
+                )
+            }
             val ctxType: MezzeType = when {
                 isInherent && solvedFn != null -> solvedFn
                 isInherent && targetTypeForOp != null && solvedReturn != null ->
@@ -496,7 +537,30 @@ class TypedAstBuilder(
                     )
                 else -> MezzeType.VarType(TypeVar.freshWithName("op_${op.name}"))
             }
-            val opExpr = buildExpr(op.implementation, file, ctxType)
+            // Only COMPILER-DERIVED impls are seeded for now. Seeding hand-written
+            // impl bodies too is right in principle (their `it.q == r.q` on a
+            // newtype field falls to structural equality today) but measured
+            // wrong in practice: the compiler's dispatch was tuned on untyped impl
+            // bodies — a typed receiver makes `val.decode { config }` inside
+            // `impl FromJson for Str` resolve by receiver (every generated decoder
+            // has receiver `Json`) instead of through the enclosing `__dict_decode`,
+            // and typed `it: ['a]` shifts the container Eq/Ord impls' dict needs
+            // (18 stdlib ops lose their `eq`/`lt` dicts). That is the compiler
+            // re-deriving dispatch from reconstructed types; it is fixed by
+            // elaborating evidence once, not by widening this seed.
+            val seedThisOp = seedOpParams && decl.derived && !isInherent && op.implementation is ParsedLambda &&
+                declaredOpType != null
+            if (seedThisOp) {
+                pendingOpParamTypes = (declaredOpType.paramType as? MezzeType.RecordType)?.fields
+            }
+            val prevTypingImplOpBody = typingImplOpBody
+            typingImplOpBody = seedThisOp
+            val opExpr = try {
+                buildExpr(op.implementation, file, ctxType)
+            } finally {
+                typingImplOpBody = prevTypingImplOpBody
+                pendingOpParamTypes = null
+            }
             // LAYER 1: carry the op's own `with <Ability> 'a` constraints onto its
             // compiled FunctionType so the dict-method prescan synthesizes its
             // `__dict_<method>` param. See project_impl_op_with_constraint_dropped.
@@ -705,7 +769,17 @@ class TypedAstBuilder(
                 TypedVar(name, binding, type, loc)
             }
             is ParsedLambda -> {
-                val params = buildLambdaParams(expr.params, contextType, loc)
+                val seededParamTypes = pendingOpParamTypes
+                pendingOpParamTypes = null
+                val params = if (seededParamTypes != null) {
+                    buildLambdaParams(
+                        expr.params,
+                        MezzeType.FunctionType(MezzeType.RecordType(seededParamTypes), MezzeType.VarType(TypeVar.freshWithName("ret"))),
+                        loc,
+                    )
+                } else {
+                    buildLambdaParams(expr.params, contextType, loc)
+                }
 
                 val savedContext = mutableMapOf<String, MezzeType?>()
                 for (param in params) {
@@ -748,7 +822,11 @@ class TypedAstBuilder(
                 // with annotated effect arrows.
                 val ctxFnType = substitution.apply(contextType) as? MezzeType.FunctionType
                 val paramRecordType = ctxFnType?.paramType
-                    ?: MezzeType.RecordType(params.associate { p -> p.name to p.type })
+                    ?: MezzeType.RecordType(params.associate { p ->
+                        // Seeded ability-op params keep the laundered surface (see
+                        // pendingOpParamTypes): typed locals, untyped signature.
+                        p.name to (if (seededParamTypes != null) MezzeType.VarType(TypeVar.freshWithName(p.name)) else p.type)
+                    })
                 // Propagate `with <Ability>` constraints from the enclosing arrow so
                 // the compiler's prescan can see them on the TypedLambda's type when
                 // deciding which method calls need dict-passing (Bug B / #86).
@@ -778,10 +856,15 @@ class TypedAstBuilder(
                 // `a.b.c` chain reads as closed records at every level.
                 val receiverType = closeGeneratedRowVars(substitution.apply(receiver.type), mustBeOpenRowVars)
 
-                val fieldType = when (receiverType) {
-                    is MezzeType.RecordType -> receiverType.fields[memberName]
-                        ?: substitution.apply(contextType)
-                    else -> substitution.apply(contextType)
+                // The solver's refined type for this read (effect rows and all) wins
+                // whenever it has one. Only when it left the read UNKNOWN is the type
+                // taken off the receiver's declared shape — in either representation
+                // (alias-expanded RecordType or nominal TypeApplication), which is what
+                // an ability-impl body needs: its reads never went through the solver.
+                val solvedFieldType = substitution.apply(contextType)
+                val fieldType = when {
+                    solvedFieldType !is MezzeType.VarType -> solvedFieldType
+                    else -> (declaredShape(receiverType) as? MezzeType.RecordType)?.fields?.get(memberName) ?: solvedFieldType
                 }.let { closeGeneratedRowVars(it, mustBeOpenRowVars) }
 
                 TypedFieldAccess(
@@ -883,8 +966,9 @@ class TypedAstBuilder(
                     val elseBranch = buildExpr(falseCase!!.body, file, thenBranch.type)
                     TypedIf(scrutinee, thenBranch, elseBranch, thenBranch.type, loc)
                 } else {
+                    val scrutineeShapeType = substitution.apply(scrutinee.type)
                     val cases = expr.cases.map { c ->
-                        buildMatchCase(c, file, contextType)
+                        buildMatchCase(c, file, contextType, scrutineeShapeType)
                     }
                     val resultType = cases.firstOrNull()?.body?.type ?: substitution.apply(contextType)
                     // S5.0 (#376): stamp the UNERASED source-level scrutinee type
@@ -1375,7 +1459,12 @@ class TypedAstBuilder(
         return TypedBlock(stmts, result, result.type, expr.loc)
     }
 
-    private fun buildMatchCase(case: ParsedMatchCase, file: String, contextType: MezzeType): TypedCase {
+    private fun buildMatchCase(
+        case: ParsedMatchCase,
+        file: String,
+        contextType: MezzeType,
+        scrutineeType: MezzeType? = null,
+    ): TypedCase {
         val patterns = case.patterns.map { buildPattern(it, file) }
         val bindingNames = case.patterns.flatMap { p -> p.extractBindings() }.toMutableList()
 
@@ -1395,10 +1484,19 @@ class TypedAstBuilder(
         // the placeholder's `(name, id=0)` identity never matches the solver's
         // `(<fresh-name>, id=N)`, so substitution.apply returns it unchanged.
         val solverBindings = matchCaseBindings[case.loc] ?: emptyMap()
+        // The solver's per-case binding types cover bodies it solved as module
+        // bindings. An ability-impl op body is validated by ImplValidator instead
+        // and leaves no entry here, so fall back to the STRUCTURAL read of the
+        // pattern against the scrutinee's declared shape (`Wrap { p = l }` on a
+        // `W` scrutinee binds `l : P`). Untyped bindings made every `==` on a
+        // payload inside an impl body fall to the structural default.
+        val structuralBindings: Map<String, MezzeType> =
+            if (scrutineeType == null || !typingImplOpBody) emptyMap()
+            else case.patterns.fold(emptyMap()) { acc, p -> acc + patternBindingTypes(p, scrutineeType) }
         val resolvedTypes = bindingNames.associateWith { name ->
             val solverTy = solverBindings[name]
             if (solverTy != null) substitution.apply(solverTy)
-            else MezzeType.VarType(TypeVar.freshWithName(name))
+            else structuralBindings[name] ?: MezzeType.VarType(TypeVar.freshWithName(name))
         }
 
         val bindings = bindingNames.map { name ->
@@ -1428,6 +1526,65 @@ class TypedAstBuilder(
         popScope()
 
         return TypedCase(patterns, bindings, guard, body, case.loc, typedIfLetBindings)
+    }
+
+    /** A declared nominal type in whichever representation it arrived, opened to
+     *  its record / variant shape (registry-backed); anything else unchanged. */
+    private fun declaredShape(type: MezzeType): MezzeType {
+        val applied = substitution.apply(type)
+        if (applied !is MezzeType.TypeApplication) return applied
+        // Opening a declared type re-converts its parsed annotations against the
+        // MODULE registry, which has no imported effects/abilities — a field typed
+        // `{} -> Int <Log>` with `Log` imported throws. That read is only a fallback
+        // for shapes the solver left untyped, so an unopenable shape just stays
+        // nominal (the solver's own type, when it has one, is used first anyway).
+        return try {
+            expandTypeApplicationToRecord(applied, registry)
+                ?: expandTypeApplicationToVariant(applied, registry)
+                ?: applied
+        } catch (_: com.mezze.language.typechecker.TypeCheckError) {
+            applied
+        }
+    }
+
+    /** Binding name → type, read structurally off [pattern] matched against a
+     *  value of [type]. Only shapes the type actually exposes are typed; a
+     *  binding whose type can't be read this way is simply absent. */
+    private fun patternBindingTypes(pattern: ParsedPattern, type: MezzeType?): Map<String, MezzeType> {
+        val shape = type?.let { declaredShape(it) }
+        return when (pattern) {
+            is ParsedVariablePattern -> if (shape != null) mapOf(pattern.name to shape) else emptyMap()
+            is ParsedWildcardPattern -> emptyMap()
+            is ParsedLiteralPattern -> emptyMap()
+            is ParsedStringInterpPattern -> emptyMap()
+            is ParsedNewtypePattern -> emptyMap()
+            is ParsedConstructorPattern -> {
+                val payloadType = (shape as? MezzeType.VariantType)?.constructors?.get(pattern.constructor)
+                pattern.payload?.let { patternBindingTypes(it, payloadType) } ?: emptyMap()
+            }
+            is ParsedRecordPattern -> {
+                val fields = (shape as? MezzeType.RecordType)?.fields
+                pattern.entries.fold(emptyMap()) { acc, entry ->
+                    val fieldType = fields?.get(entry.name)
+                    val sub = entry.pattern
+                    acc + when {
+                        sub != null -> patternBindingTypes(sub, fieldType)
+                        fieldType != null -> mapOf(entry.name to fieldType)
+                        else -> emptyMap()
+                    }
+                }
+            }
+            is ParsedSeqPattern -> {
+                val elementType = when (shape) {
+                    is MezzeType.SeqType -> shape.elementType
+                    is MezzeType.ListType -> shape.elementType
+                    else -> null
+                }
+                val elements = pattern.elements.fold(emptyMap<String, MezzeType>()) { acc, e -> acc + patternBindingTypes(e, elementType) }
+                val rest = pattern.restPattern
+                if (rest != null && shape != null && elementType != null) elements + (rest to shape) else elements
+            }
+        }
     }
 
     private fun buildPattern(pattern: ParsedPattern, file: String): TypedPattern {

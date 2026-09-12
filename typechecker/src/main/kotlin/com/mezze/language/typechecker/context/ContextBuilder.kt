@@ -179,6 +179,22 @@ class ContextBuilder {
             ctx = addAbilityImpl(ctx, abilityImplDecl, allParsedAbilityDeclsForHash, importedAbilities, file)
         }
 
+        // DERIVED instances — Rust `#[derive]` / Haskell `deriving`, written by the
+        // compiler: every record / variant this module OWNS whose components all have
+        // `Eq` gets a generated `impl Eq` (DerivedImplGenerator). It is the type's ONE
+        // instance and is exported like any hand-written impl. Decided only now, with
+        // the explicit impls already in `ctx`, so a newtype field's declared `Eq`
+        // counts — derivation is conditional, and a shape holding a newtype with no
+        // `Eq` simply gets no instance (`==` on it stays a type error).
+        val derivedImplDecls = deriveAbilityImpls(
+            module, typeDecls, abilityImplDecls, importedTypes,
+            allParsedAbilityDeclsForHash, effectDecls, currentModulePath, ctx,
+        )
+        for (derivedDecl in derivedImplDecls) {
+            resolvedAbilityImplDecls.add(derivedDecl)
+            ctx = addAbilityImpl(ctx, derivedDecl, allParsedAbilityDeclsForHash, importedAbilities, file)
+        }
+
         validateAbilities(
             module, abilityDecls, abilityImplDecls,
             typeDecls, importedTypes, importedAbilities,
@@ -195,7 +211,9 @@ class ContextBuilder {
         val implDeclarationsMap: Map<String, ParsedPerformerDecl> = resolvedParsedPerformerDecls.associateBy { it.performerName } +
             importedImpls
 
-        val resolvedMod = if (convertedPerformerDecls.isEmpty()) {
+        // The resolved module is what the constraint generator typechecks and what
+        // importers index (ProgramIndex), so derived impls ride along in it.
+        val resolvedMod = if (convertedPerformerDecls.isEmpty() && derivedImplDecls.isEmpty()) {
             module
         } else {
             val resolvedDecls = module.decls.map { decl ->
@@ -204,7 +222,7 @@ class ContextBuilder {
                 } else {
                     decl
                 }
-            }
+            } + derivedImplDecls
             ParsedModule(module.path, resolvedDecls)
         }
 
@@ -217,6 +235,61 @@ class ContextBuilder {
             implDeclarations = implDeclarationsMap,
             resolvedModule = resolvedMod,
         )
+    }
+
+    /**
+     * The derived `Eq` instances this module owns — one generated impl per record /
+     * variant that (a) is DECLARED here or is a builtin synthetic variant whose home
+     * module this is (Option → std::option, Result → std::result), so the instance
+     * exists exactly once program-wide; (b) is not a primitive (`Bool` is a native
+     * BoolType with its own impl); (c) has no hand-written `Eq` impl here (that one
+     * is rejected as a duplicate by ImplValidator — one error, not two); and (d)
+     * structurally derives `Eq` by the solver's own predicate, with every explicit
+     * impl already in [ctx] so a newtype component's declared `Eq` counts.
+     * Needs `Eq` nameable in this module (its decl in scope), as a source impl would.
+     */
+    private fun deriveAbilityImpls(
+        module: ParsedModule,
+        typeDecls: Map<String, ParsedTypeDecl>,
+        explicitImpls: List<ParsedImplAbilityDecl>,
+        importedTypes: Map<String, ParsedTypeDecl>,
+        allAbilityDecls: Map<String, ParsedAbilityDecl>,
+        effectDecls: Map<String, ParsedEffectDecl>,
+        currentModulePath: String?,
+        ctx: TypingContext,
+    ): List<ParsedImplAbilityDecl> {
+        val eqDecl = allAbilityDecls["Eq"] ?: return emptyList()
+        val eqHash = eqDecl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(eqDecl)
+        if (!WellKnownHashConstants.isEq(eqHash)) return emptyList()
+
+        val declaredHere = module.decls.filterIsInstance<ParsedTypeDecl>().map { it.name }.toSet()
+        val homeHere = currentModulePath?.let { BuiltinTypeRegistry.getLocalTypesForModule(ModulePath.parse(it)) } ?: emptySet()
+        val explicitEqTargets = explicitImpls
+            .filter { it.abilityName == "Eq" }
+            .mapNotNull { impl ->
+                when (val t = impl.targetTypes.lastOrNull()) {
+                    is ParsedNamedType -> t.name
+                    is ParsedTypeApp -> t.constructor
+                    else -> null
+                }
+            }
+            .toSet()
+        val registry = DeclarationRegistry.from(typeDecls + importedTypes, allAbilityDecls, effectDecls)
+        val checker = com.mezze.language.typechecker.solving.AbilityChecker(ctx, registry)
+
+        return typeDecls.values.mapNotNull { decl ->
+            if (decl.name !in declaredHere && decl.name !in homeHere) return@mapNotNull null
+            if (PrimitiveTypes.fromName(decl.name) != null) return@mapNotNull null
+            if (decl.name in explicitEqTargets) return@mapNotNull null
+            val generated = com.mezze.language.typechecker.derive.DerivedImplGenerator.eqImpl(decl)
+                ?: return@mapNotNull null
+            val receiver = MezzeType.TypeApplication(
+                decl.name,
+                generated.forallVars.map { MezzeType.VarType(TypeVar.freshWithName(it)) },
+            )
+            if (!checker.canDeriveAbility("Eq", receiver, eqHash)) return@mapNotNull null
+            generated.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(generated))
+        }
     }
 
     private fun validateAbilities(
