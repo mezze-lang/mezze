@@ -400,6 +400,16 @@ object TrivialWrapperInliner {
                 // arguments may themselves contain wrappable calls), so
                 // we don't have to re-walk after substitution.
                 val rewrittenArgs = node.args.map { rewrite(it, wrappers, stats) }
+                // Closure-capture gate: a `MakeLambdaIR` arg that captures values
+                // (`__dict_<m>` closures like a `cmp = {a,b}-> a<b`) reads those from
+                // the CALLER's frame slots. Substituting it into the wrapper body
+                // relocates it into the callee's frame, where those slot indices point
+                // at unrelated values → the dict is lost and the comparator falls to a
+                // primitive op (`Cannot compare MezzeRecord`). Never inline such a site.
+                if (rewrittenArgs.any { it is MakeLambdaIR && it.captures.isNotEmpty() }) {
+                    stats.sitesSkippedHeavyArg++
+                    return node.copy(args = rewrittenArgs)
+                }
                 // Multi-read gate: any param the wrapper reads more than
                 // once must have a cheap-to-duplicate arg here, because
                 // substitution will inline that arg AST at every read

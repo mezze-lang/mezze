@@ -1931,10 +1931,17 @@ class TypedASTCompiler(
                     val calleeDictMethods = dictMethodsForHash[calleeHash]
                     if (calleeDictMethods != null && calleeDictMethods.isNotEmpty()) {
                         val rawFnType = fn.type as? FunctionType
-                        val rawConstraintTypeArgs = rawFnType?.abilityConstraints
+                        val rawConstraintTypeArgs = (rawFnType?.abilityConstraints
                             ?.flatMap { it.typeArgs }
                             ?.map { substitution.apply(it) }
-                            ?: emptyList()
+                            ?: emptyList())
+                            // KEY-constrained callees (min_by's `with Ord 'b` where 'b is
+                            // f's RETURN type): the constraint arg stays a generalized var
+                            // the module substitution can't solve. Bind it by unifying the
+                            // callee's param type against the actual arg type ('b -> K),
+                            // otherwise resolution falls to the arg types where the xs
+                            // container falsely matches the blanket `impl Ord for ['a]`.
+                            .let { bindConstraintArgsViaArg(rawFnType, expr.arg, it) }
                         val constraintTypes = rawConstraintTypeArgs.filter { it !is VarType }
                         // When ALL constraint type args are still VarType after substitution,
                         // we're inside a generic function body calling another generic function.
@@ -2037,10 +2044,11 @@ class TypedASTCompiler(
                         // sees the alias's concrete operand types (or forwards from
                         // the caller when all operands are still vars).
                         val rawFnType = fn.type as? FunctionType
-                        val rawConstraintTypeArgs = rawFnType?.abilityConstraints
+                        val rawConstraintTypeArgs = (rawFnType?.abilityConstraints
                             ?.flatMap { it.typeArgs }
                             ?.map { substitution.apply(it) }
-                            ?: emptyList()
+                            ?: emptyList())
+                            .let { bindConstraintArgsViaArg(rawFnType, expr.arg, it) }
                         val constraintTypes = rawConstraintTypeArgs.filter { it !is VarType }
                         val calleeConstraintsAreGeneric = rawConstraintTypeArgs.isNotEmpty() &&
                             rawConstraintTypeArgs.all { it is VarType }
@@ -2111,6 +2119,116 @@ class TypedASTCompiler(
      * @param src source info for generated IR nodes
      * @return argIR with injected dict fields, or original argIR if resolution fails
      */
+    /**
+     * Bind still-generic ability-constraint type args by unifying the callee's
+     * param type against the call-site argument's actual type. A KEY-constrained
+     * callee (`min_by: { xs: ['a], f: {x:'a} -> 'b } with Ord 'b`) carries a
+     * generalized 'b the module substitution never solves; unifying the param
+     * record against the concrete arg record (`f: {x:E} -> K`) binds 'b -> K so
+     * dict resolution targets the KEY's impl instead of guessing from arg types
+     * (where the xs container falsely matches the blanket `impl Ord for ['a]`).
+     * Leaves already-concrete args and unbindable vars untouched.
+     */
+    private fun bindConstraintArgsViaArg(
+        rawFnType: FunctionType?,
+        argExpr: TypedExpr,
+        rawArgs: List<MezzeType>
+    ): List<MezzeType> {
+        if (rawFnType == null || rawArgs.none { it is VarType }) return rawArgs
+        val bindings = mutableMapOf<String, MezzeType>()
+        val pattern = substitution.apply(rawFnType.paramType)
+        harvestVarBindings(pattern, substitution.apply(argExpr.type), bindings)
+        // Second chance for KEY vars the type-level harvest missed: a callback arg's
+        // stamped return type is often LAUNDERED to a fresh var (`{x} -> x.k` — the
+        // field access never gets K stamped through the generic 'a; the 95da1766
+        // family). Recover it from the lambda EXPRESSION structurally.
+        harvestFromCallbackEntries(pattern, argExpr, bindings)
+        if (bindings.isEmpty()) return rawArgs
+        return rawArgs.map { t ->
+            if (t is VarType) {
+                val bound = bindings[t.variable.name]
+                if (bound != null && bound !is VarType) substitution.apply(bound) else t
+            } else t
+        }
+    }
+
+    /** For each callback field whose declared return is a still-unbound pattern var
+     *  (`f: { x: 'a } -> 'b`), recover the ACTUAL return type from the lambda
+     *  expression when its stamped type was laundered: direct body type if concrete,
+     *  else a `param.field` body resolved against the param's (possibly
+     *  harvest-bound) record type — the same recovery scanExprForVarTypeMethods
+     *  uses for the frame-slot fix. */
+    private fun harvestFromCallbackEntries(pattern: MezzeType, argExpr: TypedExpr, out: MutableMap<String, MezzeType>) {
+        if (pattern !is RecordType || argExpr !is TypedRecord) return
+        for (entry in argExpr.entries) {
+            if (entry !is TypedRecordEntry.Field) continue
+            val pT = pattern.fields[entry.name] as? FunctionType ?: continue
+            val retVar = pT.returnType as? VarType ?: continue
+            if (out.containsKey(retVar.variable.name)) continue
+            val lam = entry.value as? TypedLambda ?: continue
+            val recovered = recoverLambdaReturnType(lam, out) ?: continue
+            out[retVar.variable.name] = recovered
+        }
+    }
+
+    private fun recoverLambdaReturnType(lam: TypedLambda, bindings: Map<String, MezzeType>): MezzeType? {
+        val direct = substitution.apply(lam.body.type)
+        if (direct !is VarType) return direct
+        val body = lam.body
+        if (body is TypedFieldAccess) {
+            val base = body.record
+            if (base is TypedVar) {
+                var baseT: MezzeType? = lam.params.find { it.name == base.name }?.type?.let { substitution.apply(it) }
+                if (baseT is VarType) baseT = bindings[(baseT as VarType).variable.name]
+                val rt = baseT as? RecordType ?: return null
+                val f = rt.fields[body.field]?.let { substitution.apply(it) }
+                if (f != null && f !is VarType) return f
+            }
+        }
+        return null
+    }
+
+    /** Best-effort structural harvest of `patternVar -> concreteValue` bindings.
+     *  Unlike MonoTypeOps.unify this never FAILS: var-vs-var pairs and shape
+     *  mismatches are simply skipped (unify's refuse-to-bind-free-var rule exists
+     *  to gate mono SEEDING; here we only want whatever concrete bindings the
+     *  call site does pin down). Handles both container representations
+     *  (SeqType/... and TypeApplication("Seq", ...)). First binding wins. */
+    private fun harvestVarBindings(pattern: MezzeType, value: MezzeType, out: MutableMap<String, MezzeType>) {
+        when (pattern) {
+            is VarType -> {
+                if (value !is VarType) out.putIfAbsent(pattern.variable.name, value)
+            }
+            is FunctionType -> if (value is FunctionType) {
+                harvestVarBindings(pattern.paramType, value.paramType, out)
+                harvestVarBindings(pattern.returnType, value.returnType, out)
+            }
+            is RecordType -> if (value is RecordType) {
+                for ((k, t) in pattern.fields) value.fields[k]?.let { harvestVarBindings(t, it, out) }
+            }
+            is SeqType -> if (value is SeqType) harvestVarBindings(pattern.elementType, value.elementType, out)
+                else if (value is TypeApplication && value.constructor == com.mezze.language.ast.BuiltinTypes.SEQ && value.args.size == 1) harvestVarBindings(pattern.elementType, value.args[0], out)
+            is ListType -> if (value is ListType) harvestVarBindings(pattern.elementType, value.elementType, out)
+                else if (value is TypeApplication && value.constructor == com.mezze.language.ast.BuiltinTypes.LIST && value.args.size == 1) harvestVarBindings(pattern.elementType, value.args[0], out)
+            is SetType -> if (value is SetType) harvestVarBindings(pattern.elementType, value.elementType, out)
+                else if (value is TypeApplication && value.constructor == com.mezze.language.ast.BuiltinTypes.SET && value.args.size == 1) harvestVarBindings(pattern.elementType, value.args[0], out)
+            is SortedSetType -> if (value is SortedSetType) harvestVarBindings(pattern.elementType, value.elementType, out)
+                else if (value is TypeApplication && value.constructor == com.mezze.language.ast.BuiltinTypes.SORTED_SET && value.args.size == 1) harvestVarBindings(pattern.elementType, value.args[0], out)
+            is MapType -> if (value is MapType) { harvestVarBindings(pattern.keyType, value.keyType, out); harvestVarBindings(pattern.valueType, value.valueType, out) }
+            is SortedMapType -> if (value is SortedMapType) { harvestVarBindings(pattern.keyType, value.keyType, out); harvestVarBindings(pattern.valueType, value.valueType, out) }
+            is TypeApplication -> when {
+                value is TypeApplication && pattern.constructor == value.constructor && pattern.args.size == value.args.size ->
+                    pattern.args.zip(value.args).forEach { (p, v) -> harvestVarBindings(p, v, out) }
+                pattern.constructor == com.mezze.language.ast.BuiltinTypes.SEQ && pattern.args.size == 1 && value is SeqType ->
+                    harvestVarBindings(pattern.args[0], value.elementType, out)
+                pattern.constructor == com.mezze.language.ast.BuiltinTypes.LIST && pattern.args.size == 1 && value is ListType ->
+                    harvestVarBindings(pattern.args[0], value.elementType, out)
+                else -> {}
+            }
+            else -> {}
+        }
+    }
+
     private fun injectDictFields(
         argIR: NodeIR,
         argExpr: TypedExpr,
@@ -2638,13 +2756,24 @@ class TypedASTCompiler(
      *  layout. Salting with the enclosing spec hash keeps every version distinct;
      *  outside spec compilation the plain hash is unchanged (stable stdlib
      *  prelowering, recursive-let self-references, closure keying). */
-    private fun saltedLambdaHash(expr: TypedExpr): Hash {
+    private fun saltedLambdaHash(expr: TypedExpr, dictCaptures: List<Pair<String, Int>> = emptyList()): Hash {
         val base = com.mezze.language.typedast.TypedASTHasher.hashExpr(expr)
-        val salt = specLambdaSalt ?: return base
+        val salt = specLambdaSalt
+        if (salt == null && dictCaptures.isEmpty()) return base
         val b = com.mezze.language.ast.hashing.MezzeHashBuilder()
         b.append("spec_lambda")
         b.append(base.hex)
-        b.append(salt.hex)
+        if (salt != null) b.append(salt.hex)
+        // The expr hash is type- and environment-blind: textually identical
+        // comparator closures in different parents capture their `__dict_<m>` from
+        // DIFFERENT parent frame slots (is_sorted's dict sits at slot 1, min_by's at
+        // slot 2). Without folding the capture layout in, all copies collide onto
+        // one registry entry and last-registration-wins executes the wrong slots —
+        // the #106 collision, environment flavor. See SeqKeyOrdTest.
+        for ((name, slot) in dictCaptures) {
+            b.append(name)
+            b.append(slot.toString())
+        }
         return Hash(b.build().toFullHexString())
     }
 
@@ -2706,7 +2835,7 @@ class TypedASTCompiler(
         currentCaptureNames = captureNameMap
 
         // Extract lambda as a separate FunctionIR
-        val lambdaHash = saltedLambdaHash(expr)
+        val lambdaHash = saltedLambdaHash(expr, dictsToCapture)
         val lambdaCaptureInfo = expr.captures.map { c -> c.name to typeToSlotKind(c.type) } +
             dictsToCapture.map { it.first to SlotKind.OBJECT }
         val fnIR = compileFunctionBody(

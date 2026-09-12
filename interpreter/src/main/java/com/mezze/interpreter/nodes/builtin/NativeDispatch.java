@@ -697,9 +697,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_max", (r, c) ->
             SeqNatives.max(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_min_by", (r, c) ->
-            SeqNatives.minBy(getSeq(r, "xs"), getFunction(r, "f"), c));
+            SeqNatives.minBy(getSeq(r, "xs"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_seq_max_by", (r, c) ->
-            SeqNatives.maxBy(getSeq(r, "xs"), getFunction(r, "f"), c));
+            SeqNatives.maxBy(getSeq(r, "xs"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_seq_sum", (r, c) ->
             SeqNatives.sum(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_sum_float", (r, c) ->
@@ -775,7 +775,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Sort By Key
         HANDLERS.put("__native_seq_sort_by_key", (r, c) ->
-            SeqNatives.sortByKey(getSeq(r, "xs"), getFunction(r, "f"), c));
+            SeqNatives.sortByKey(getSeq(r, "xs"), getFunction(r, "f"), getFunction(r, "cmp"), c));
 
         // Additional Search/Replace Operations
         HANDLERS.put("__native_seq_last_index_of", (r, c) ->
@@ -827,7 +827,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_is_sorted", (r, c) ->
             SeqNatives.isSorted(getSeq(r, "xs"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_seq_is_sorted_by", (r, c) ->
-            SeqNatives.isSortedBy(getSeq(r, "xs"), getFunction(r, "f")));
+            SeqNatives.isSortedBy(getSeq(r, "xs"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_seq_is_sorted_descending", (r, c) ->
             SeqNatives.isSortedDescending(getSeq(r, "xs"), getFunction(r, "cmp"), c));
 
@@ -881,11 +881,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_binary_search_insert_point", (r, c) ->
             SeqNatives.binarySearchInsertPoint(getSeq(r, "xs"), getField(r, "x"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_seq_lower_bound", (r, c) ->
-            SeqNatives.lowerBound(getSeq(r, "xs"), getField(r, "x")));
+            SeqNatives.lowerBound(getSeq(r, "xs"), getField(r, "x"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_seq_upper_bound", (r, c) ->
-            SeqNatives.upperBound(getSeq(r, "xs"), getField(r, "x")));
+            SeqNatives.upperBound(getSeq(r, "xs"), getField(r, "x"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_seq_equal_range", (r, c) ->
-            SeqNatives.equalRange(getSeq(r, "xs"), getField(r, "x")));
+            SeqNatives.equalRange(getSeq(r, "xs"), getField(r, "x"), getFunction(r, "cmp"), c));
 
         // Lexicographic comparison (returns -1, 0, 1)
         HANDLERS.put("__native_seq_compare", (r, c) ->

@@ -878,7 +878,9 @@ public final class SeqNatives {
         return MezzeVariant.some(maxVal);
     }
 
-    public static MezzeVariant minBy(MezzeSeq seq, MezzeFunction keyFn,
+    // Keys are compared via the threaded comparator (the key type's Ord impl),
+    // not the primitive-only compare() — see SeqKeyOrdTest.
+    public static MezzeVariant minBy(MezzeSeq seq, MezzeFunction keyFn, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeVariant.none();
         Object minElem = seq.get(0);
@@ -886,7 +888,7 @@ public final class SeqNatives {
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
             Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
-            if (compare(key, minKey) < 0) {
+            if (cmpInt(cmpFn, key, minKey, callNode) < 0) {
                 minElem = elem;
                 minKey = key;
             }
@@ -894,7 +896,7 @@ public final class SeqNatives {
         return MezzeVariant.some(minElem);
     }
 
-    public static MezzeVariant maxBy(MezzeSeq seq, MezzeFunction keyFn,
+    public static MezzeVariant maxBy(MezzeSeq seq, MezzeFunction keyFn, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeVariant.none();
         Object maxElem = seq.get(0);
@@ -902,7 +904,7 @@ public final class SeqNatives {
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
             Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
-            if (compare(key, maxKey) > 0) {
+            if (cmpInt(cmpFn, key, maxKey, callNode) > 0) {
                 maxElem = elem;
                 maxKey = key;
             }
@@ -1264,7 +1266,7 @@ public final class SeqNatives {
 
     // ==================== Sort By Key ====================
 
-    public static MezzeSeq sortByKey(MezzeSeq seq, MezzeFunction keyFn,
+    public static MezzeSeq sortByKey(MezzeSeq seq, MezzeFunction keyFn, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         // Pre-compute keys to avoid calling keyFn multiple times per element
         int size = seq.size();
@@ -1275,10 +1277,11 @@ public final class SeqNatives {
             keys[i] = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elements[i]));
         }
 
-        // Sort indices by key
+        // Sort indices by key, comparing keys via the threaded comparator
+        // (the key type's Ord impl), not the primitive-only compare().
         Integer[] indices = new Integer[size];
         for (int i = 0; i < size; i++) indices[i] = i;
-        Arrays.sort(indices, (a, b) -> compare(keys[a], keys[b]));
+        Arrays.sort(indices, (a, b) -> cmpInt(cmpFn, keys[a], keys[b], callNode));
 
         // Reorder elements
         Object[] result = new Object[size];
@@ -1727,12 +1730,15 @@ public final class SeqNatives {
         return (r instanceof Long) ? ((Long) r).intValue() : 0;
     }
 
-    public static boolean isSortedBy(MezzeSeq seq, MezzeFunction keyFn) {
+    // Keys are compared via the threaded comparator (the key type's Ord impl),
+    // not the primitive-only compare() — see SeqKeyOrdTest.
+    public static boolean isSortedBy(MezzeSeq seq, MezzeFunction keyFn, MezzeFunction cmpFn,
+                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.size() <= 1) return true;
-        Object prevKey = keyFn.getCallTarget().call(prepareArgs(keyFn, seq.get(0)));
+        Object prevKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, seq.get(0)));
         for (int i = 1; i < seq.size(); i++) {
-            Object currKey = keyFn.getCallTarget().call(prepareArgs(keyFn, seq.get(i)));
-            if (compare(prevKey, currKey) > 0) {
+            Object currKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, seq.get(i)));
+            if (cmpInt(cmpFn, prevKey, currKey, callNode) > 0) {
                 return false;
             }
             prevKey = currKey;
@@ -1752,20 +1758,6 @@ public final class SeqNatives {
 
     // ==================== Advanced Binary Search ====================
 
-    @TruffleBoundary
-    public static long binarySearchInsertPoint(MezzeSeq seq, Object target) {
-        int lo = 0, hi = seq.size();
-        while (lo < hi) {
-            int mid = (lo + hi) / 2;
-            if (compare(seq.get(mid), target) < 0) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        return lo;
-    }
-
     // Threads the caller's element comparator so a custom Ord is honoured.
     public static long binarySearchInsertPoint(MezzeSeq seq, Object target, MezzeFunction cmpFn,
                                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -1781,17 +1773,17 @@ public final class SeqNatives {
         return lo;
     }
 
-    @TruffleBoundary
-    public static long lowerBound(MezzeSeq seq, Object target) {
-        return binarySearchInsertPoint(seq, target);
+    public static long lowerBound(MezzeSeq seq, Object target, MezzeFunction cmpFn,
+                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        return binarySearchInsertPoint(seq, target, cmpFn, callNode);
     }
 
-    @TruffleBoundary
-    public static long upperBound(MezzeSeq seq, Object target) {
+    public static long upperBound(MezzeSeq seq, Object target, MezzeFunction cmpFn,
+                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         int lo = 0, hi = seq.size();
         while (lo < hi) {
             int mid = (lo + hi) / 2;
-            if (compare(seq.get(mid), target) <= 0) {
+            if (cmpInt(cmpFn, seq.get(mid), target, callNode) <= 0) {
                 lo = mid + 1;
             } else {
                 hi = mid;
@@ -1800,11 +1792,11 @@ public final class SeqNatives {
         return lo;
     }
 
-    @TruffleBoundary
-    public static MezzeRecord equalRange(MezzeSeq seq, Object target) {
+    public static MezzeRecord equalRange(MezzeSeq seq, Object target, MezzeFunction cmpFn,
+                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         return MezzeRecord.fromFields(
             FIELD_START_END,
-            new Object[]{lowerBound(seq, target), upperBound(seq, target)}
+            new Object[]{lowerBound(seq, target, cmpFn, callNode), upperBound(seq, target, cmpFn, callNode)}
         );
     }
 
