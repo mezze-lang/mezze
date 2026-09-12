@@ -90,6 +90,15 @@ public final class ConcurrencyNatives {
      * after the abort has cleared {@code currentTransaction}.
      */
     private static final ThreadLocal<List<Transaction.ReadEntry>> stmRetryReadSet = new ThreadLocal<>();
+    /**
+     * Nesting depth for stmAtomic's own retry loop. When > 0, a nested
+     * stmAtomic call runs f against the existing transaction instead of
+     * creating its own — the outer stmAtomic's retry loop governs
+     * commit/retry. Separate from transactionNestingDepth which tracks
+     * stmBeginTransaction/stmCommitTransaction (the effect-handler scope
+     * path).
+     */
+    private static final ThreadLocal<Integer> atomicNestingDepth = ThreadLocal.withInitial(() -> 0);
     private static final AtomicLong globalVersion = new AtomicLong(0);
     private static final ReentrantLock commitLock = new ReentrantLock();
 
@@ -109,6 +118,7 @@ public final class ConcurrencyNatives {
     public static void resetPerThreadStmState() {
         currentTransaction.remove();
         transactionNestingDepth.remove();
+        atomicNestingDepth.remove();
         stmRetryPending.remove();
         stmRetryReadSet.remove();
     }
@@ -1417,6 +1427,22 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static Object stmAtomic(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeFunction f = getFunction(args, "f");
+
+        // Nested stmAtomic: run f against the existing transaction and let
+        // the outer stmAtomic's retry loop govern commit. Creating an
+        // independent Transaction here would (a) commit the inner's writes
+        // prematurely, (b) leave the outer's ThreadLocal clobbered to null
+        // when the inner's finally runs currentTransaction.remove().
+        //
+        // We check atomicNestingDepth (not currentTransaction) because the
+        // perform OptimisticSTM scope also sets currentTransaction via
+        // stmBeginTransaction — stmAtomic must still manage its own
+        // transaction and retry loop in that case.
+        int atomicDepth = atomicNestingDepth.get();
+        if (atomicDepth > 0) {
+            return callNode.call(f.getCallTarget(), f.getClosureValues());
+        }
+
         int maxRetries = 1000;
         for (int i = 0; i < maxRetries; i++) {
             Transaction txn = new Transaction();
@@ -1424,6 +1450,7 @@ public final class ConcurrencyNatives {
             boolean blocked = false;
             try {
                 Object result;
+                atomicNestingDepth.set(atomicDepth + 1);
                 try {
                     result = callNode.call(f.getCallTarget(), f.getClosureValues());
                 } catch (StmRetryException retry) {
@@ -1442,6 +1469,8 @@ public final class ConcurrencyNatives {
                     blocked = true;
                     blockUntilReadSetChanged(txn);
                     continue;
+                } finally {
+                    atomicNestingDepth.set(atomicDepth);
                 }
                 Transaction current = currentTransaction.get();
                 if (current != null && current.commit()) {

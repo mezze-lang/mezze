@@ -957,7 +957,6 @@ public final class AsyncNatives {
         Object parentScope = HandlerChainRegistry.lookupScopeVar();
 
         MezzePromise promise = new MezzePromise(null, null);
-        scope.addChild(promise);
 
         Thread vThread = env.newTruffleThreadBuilder(() -> {
             // Pin this scope as current on the spawned thread so any nested
@@ -994,7 +993,13 @@ public final class AsyncNatives {
             }
         }).virtual(true).build();
 
+        // Set the executing thread BEFORE publishing the promise into the
+        // scope's child list. Without this, a concurrent cancelAll() could
+        // find the promise via scope.children, CAS it to CANCELLED, but
+        // skip the interrupt() because executingThread is still null — the
+        // vThread would then run un-interrupted. #92.
         promise.setExecutingThread(vThread);
+        scope.addChild(promise);
         vThread.start();
 
         return promise;

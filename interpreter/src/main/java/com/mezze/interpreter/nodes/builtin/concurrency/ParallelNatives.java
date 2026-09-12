@@ -88,6 +88,60 @@ public final class ParallelNatives {
             @Override protected Long initialValue() { return 1L; }
         };
 
+    /**
+     * Saved scope state for nested scopes on the same thread. Left-inline
+     * joins run on the caller's thread, so a library function that opens
+     * its own {@code perform LoomParallelWith {…} in …} from inside an
+     * outer parallel section would clobber the outer's hints without
+     * save/restore. This mirrors the pattern
+     * {@code AsyncNatives.CURRENT_SCOPE} already uses correctly.
+     */
+    private record ScopeState(Integer parallelism, Semaphore semaphore, Long minChunk) {}
+    private static final ThreadLocal<java.util.ArrayDeque<ScopeState>> SCOPE_STACK = new ThreadLocal<>();
+
+    private static void pushScopeState() {
+        java.util.ArrayDeque<ScopeState> stack = SCOPE_STACK.get();
+        if (stack == null) {
+            stack = new java.util.ArrayDeque<>(4);
+            SCOPE_STACK.set(stack);
+        }
+        stack.push(new ScopeState(
+            PARALLELISM_HINT.get(),
+            LOOM_SEMAPHORE.get(),
+            MIN_CHUNK_HINT.get()
+        ));
+    }
+
+    private static void popScopeState() {
+        java.util.ArrayDeque<ScopeState> stack = SCOPE_STACK.get();
+        if (stack == null || stack.isEmpty()) {
+            // No saved state — clear to defaults (legacy behavior).
+            PARALLELISM_HINT.remove();
+            LOOM_SEMAPHORE.remove();
+            MIN_CHUNK_HINT.remove();
+            return;
+        }
+        ScopeState prev = stack.pop();
+        if (prev.parallelism() != null) {
+            PARALLELISM_HINT.set(prev.parallelism());
+        } else {
+            PARALLELISM_HINT.remove();
+        }
+        if (prev.semaphore() != null) {
+            LOOM_SEMAPHORE.set(prev.semaphore());
+        } else {
+            LOOM_SEMAPHORE.remove();
+        }
+        if (prev.minChunk() != null) {
+            MIN_CHUNK_HINT.set(prev.minChunk());
+        } else {
+            MIN_CHUNK_HINT.remove();
+        }
+        if (stack.isEmpty()) {
+            SCOPE_STACK.remove();
+        }
+    }
+
     // ==================== LoomParallel ====================
     //
     // Both LoomParallel (Mezze API) and OSThreadParallel (phase 1
@@ -103,6 +157,10 @@ public final class ParallelNatives {
      */
     @TruffleBoundary
     public static MezzeRecord loomParallelInit(MezzeRecord args, MezzeNode node) {
+        // Save the current scope state so nested scopes on the same thread
+        // (via left-inline joins) don't clobber the outer's hints.
+        pushScopeState();
+
         // Accept both `max_concurrent` (LoomParallelWith) and `pool_size`
         // (OSThreadParallelWith) as the concurrency hint — during phase 1
         // they're the same knob. Phase 2 splits them.
@@ -130,9 +188,11 @@ public final class ParallelNatives {
      */
     @TruffleBoundary
     public static MezzeRecord loomParallelFinalize(MezzeRecord args) {
-        PARALLELISM_HINT.remove();
-        LOOM_SEMAPHORE.remove();
-        MIN_CHUNK_HINT.remove();
+        // Restore the outer scope's hints (if any) instead of clearing
+        // to defaults. Without this, nested scopes on the same thread
+        // (via left-inline joins) would wipe the outer's max_concurrent
+        // and min_chunk config.
+        popScopeState();
         return MezzeRecord.empty();
     }
 
