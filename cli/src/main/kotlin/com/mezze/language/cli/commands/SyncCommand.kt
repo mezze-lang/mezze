@@ -28,12 +28,12 @@ class SyncCommand {
         val mezzeToml = File(root, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
-            println("❌ Error: No Mezze.toml in ${currentDir.absolutePath} or any parent directory")
+            println("${Glyphs.ERROR} Error: No Mezze.toml in ${currentDir.absolutePath} or any parent directory")
             println()
             println("This doesn't look like a Mezze package.")
             println("Location: ${currentDir.absolutePath}")
             println()
-            println("💡 Run 'mezze init' to create a new package first.")
+            println("${Glyphs.TIP} Run 'mezze init' to create a new package first.")
             return 1
         }
 
@@ -46,7 +46,7 @@ class SyncCommand {
         // "recompile past the cache", independent of the content-hash reuse gates.
         if (isForce) {
             com.mezze.language.codebase.SQLiteMezzeStore.wipeProjectFiles(root)
-            println("🔨 --force: cleared the compiled cache; the next build recompiles from source.")
+            println("${Glyphs.HAMMER} --force: cleared the compiled cache; the next build recompiles from source.")
         }
 
         // Read Mezze.toml
@@ -54,12 +54,12 @@ class SyncCommand {
         val manifest = try {
             Toml.decodeFromString(MezzeToml.serializer(), tomlContent)
         } catch (e: Exception) {
-            println("❌ Error: Failed to parse Mezze.toml")
+            println("${Glyphs.ERROR} Error: Failed to parse Mezze.toml")
             println()
             println("The manifest file has invalid TOML syntax.")
             println("Error: ${e.message}")
             println()
-            println("💡 Check the syntax of your Mezze.toml file.")
+            println("${Glyphs.TIP} Check the syntax of your Mezze.toml file.")
             return 1
         }
 
@@ -67,14 +67,14 @@ class SyncCommand {
             manifest.devDependencies.isNotEmpty() ||
             manifest.pathDependencies.isNotEmpty()
         if (!hasDeps) {
-            println("✅ No dependencies to sync.")
+            println("${Glyphs.OK} No dependencies to sync.")
             println()
-            println("💡 Add a local dep under [path-dependencies] (name = \"../path\"),")
+            println("${Glyphs.TIP} Add a local dep under [path-dependencies] (name = \"../path\"),")
             println("   or a registry dep under [dependencies] (name = \"<url>#sha256:<hash>\").")
             return 0
         }
 
-        println("📦 Syncing dependencies...")
+        println("${Glyphs.PACKAGE} Syncing dependencies...")
         println()
 
         // Deps are materialized into each package's `.deps/mezze/<name>-<version>/` —
@@ -93,7 +93,7 @@ class SyncCommand {
             ?: File(System.getProperty("user.home"), ".mezze/store")
 
         if (isClean && packagesDir.exists()) {
-            println("🧹 Cleaning .deps/mezze/...")
+            println("${Glyphs.BROOM} Cleaning .deps/mezze/...")
             packagesDir.deleteRecursively()
         }
         packagesDir.mkdirs()
@@ -124,36 +124,36 @@ class SyncCommand {
                 val existing = readLockFile(lockFile)
                 when {
                     existing == null -> {
-                        println("❌ --locked: no Mezze.lock to verify. Run 'mez sync' first.")
+                        println("${Glyphs.ERROR} --locked: no Mezze.lock to verify. Run 'mez sync' first.")
                         lockOutOfDate = true
                     }
                     existing.packages != freshLock.packages -> {
-                        println("❌ --locked: Mezze.lock is out of date with the resolved graph.")
+                        println("${Glyphs.ERROR} --locked: Mezze.lock is out of date with the resolved graph.")
                         println("   Run 'mez sync' (without --locked) to update it.")
                         lockOutOfDate = true
                     }
                     else -> {
                         println()
-                        println("🔒 Mezze.lock verified — graph matches (${graph.size} package(s)).")
+                        println("${Glyphs.LOCK} Mezze.lock verified — graph matches (${graph.size} package(s)).")
                     }
                 }
             } else {
                 try {
                     writeLockFile(lockFile, freshLock)
                     println()
-                    println("🔒 Locked ${graph.size} package(s) in Mezze.lock")
+                    println("${Glyphs.LOCK} Locked ${graph.size} package(s) in Mezze.lock")
                 } catch (e: Exception) {
-                    println("⚠️  Warning: Failed to update Mezze.lock — ${e.message}")
+                    println("${Glyphs.WARN}  Warning: Failed to update Mezze.lock — ${e.message}")
                 }
             }
 
             println()
             if (failures.isEmpty()) {
-                println("🎉 Sync complete: $count package(s).")
+                println("${Glyphs.PARTY} Sync complete: $count package(s).")
             } else {
-                println("⚠️  Synced $count package(s); ${failures.size} failed: ${failures.distinct().joinToString(", ")}")
+                println("${Glyphs.WARN}  Synced $count package(s); ${failures.size} failed: ${failures.distinct().joinToString(", ")}")
             }
-            println("📂 Dependencies at: ${packagesDir.absolutePath}")
+            println("${Glyphs.FOLDER} Dependencies at: ${packagesDir.absolutePath}")
 
             // A declared dep that can't be resolved/verified (bad checksum, missing
             // path, unreadable manifest) — or a stale lock under --locked — is a hard
@@ -204,18 +204,25 @@ class SyncCommand {
         val precompileTargets = java.util.Collections.synchronizedList(
             mutableListOf<Triple<File, String, String>>()
         )
+        // Live progress across the parallel download waves + the sequential
+        // precompile below (sticky status line on a TTY; discrete lines when piped).
+        val reporter = SyncReporter()
 
         // Resolve ONE dep; return its own direct deps (the next wave). Runs on a pool thread.
         fun process(declaringDir: File, name: String, spec: DepSpec): List<Triple<File, String, DepSpec>> {
             val target = when (spec) {
                 is DepSpec.Path -> resolvePathTarget(declaringDir, name, spec.rawPath, printLock)
-                is DepSpec.Registry -> resolveRegistryTarget(name, spec, storeRoot, isClean, downloader, archive, printLock)
+                is DepSpec.Registry -> resolveRegistryTarget(name, spec, storeRoot, isClean, downloader, archive, printLock, reporter)
             }
-            if (target == null) { safeFailures.add(name); return emptyList() }
+            if (target == null) {
+                safeFailures.add(name)
+                reporter.failed("  ${Glyphs.ERROR} $name: could not resolve", name)
+                return emptyList()
+            }
 
             val depToml = readToml(File(target, "Mezze.toml"))
             if (depToml == null) {
-                synchronized(printLock) { println("  ❌ $name: no readable Mezze.toml in $target") }
+                reporter.failed("  ${Glyphs.ERROR} $name: no readable Mezze.toml in $target", name)
                 safeFailures.add(name)
                 return emptyList()
             }
@@ -226,7 +233,7 @@ class SyncCommand {
             }
             count.incrementAndGet()
             val where = if (declaringDir == rootDir) "" else "  (into ${declaringDir.name}/.deps)"
-            synchronized(printLock) { println("  ✅ $name-$version -> ${target.path}$where") }
+            reporter.resolved("  ${Glyphs.OK} $name-$version -> ${target.path}$where", name)
 
             val edges = (depToml.pathDependencies.keys + depToml.dependencies.keys).sorted()
             safeNodes.add(
@@ -254,6 +261,7 @@ class SyncCommand {
             while (frontier.isNotEmpty()) {
                 // Dedup this wave against everything seen (thread-safe first-writer-wins).
                 val fresh = frontier.filter { seen.add("${it.first.canonicalPath}::${it.second}") }
+                fresh.forEach { reporter.discovered() }
                 val futures = fresh.map { (dir, name, spec) ->
                     pool.submit(java.util.concurrent.Callable { process(dir, name, spec) })
                 }
@@ -280,10 +288,15 @@ class SyncCommand {
             var compiled = 0
             for ((depDir, libRel, moduleName) in distinctTargets) {
                 if (DepPrecompiler.compiledStoreFile(depDir).isFile) continue
+                reporter.compileStart(moduleName)
                 DepPrecompiler.precompile(depDir, libRel, moduleName)
                 if (DepPrecompiler.compiledStoreFile(depDir).isFile) compiled++
+                reporter.compileDone()
             }
-            if (compiled > 0) println("  ⚙️  precompiled $compiled dependenc${if (compiled == 1) "y" else "ies"}")
+            reporter.finish()
+            if (compiled > 0) println("  ${Glyphs.GEAR}  precompiled $compiled dependenc${if (compiled == 1) "y" else "ies"}")
+        } else {
+            reporter.finish()
         }
         return count.get()
     }
@@ -304,7 +317,7 @@ class SyncCommand {
                 val (url, sha) = parseDependencyUrl(fullUrl)
                 out.add(Triple(dir, n, DepSpec.Registry(url, sha)))
             } catch (e: IllegalArgumentException) {
-                synchronized(printLock) { println("  ❌ $n: ${e.message?.lineSequence()?.firstOrNull() ?: "invalid dependency URL"}") }
+                synchronized(printLock) { println("  ${Glyphs.ERROR} $n: ${e.message?.lineSequence()?.firstOrNull() ?: "invalid dependency URL"}") }
                 failures.add(n)
             }
         }
@@ -317,7 +330,7 @@ class SyncCommand {
     private fun resolvePathTarget(declaringDir: File, name: String, rawPath: String, printLock: Any): File? {
         val target = File(rawPath).let { if (it.isAbsolute) it else File(declaringDir, rawPath) }.canonicalFile
         if (!target.isDirectory || !File(target, "Mezze.toml").exists()) {
-            synchronized(printLock) { println("  ❌ $name: '$rawPath' (from ${declaringDir.name}) is not a Mezze package (resolved: $target)") }
+            synchronized(printLock) { println("  ${Glyphs.ERROR} $name: '$rawPath' (from ${declaringDir.name}) is not a Mezze package (resolved: $target)") }
             return null
         }
         return target
@@ -331,6 +344,7 @@ class SyncCommand {
         downloader: PackageDownloader,
         archive: ArchiveHandler,
         printLock: Any,
+        reporter: SyncReporter,
     ): File? {
         val storeDir = File(storeRoot, spec.sha256)
         // Serialize per content hash: two waves needing the same sha download+extract
@@ -339,16 +353,20 @@ class SyncCommand {
             if (File(storeDir, "Mezze.toml").exists() && !isClean) return storeDir   // content-addressed cache hit
 
             val archiveFile = try {
-                downloader.downloadPackage(name, spec.url, spec.sha256)
+                downloader.downloadPackage(
+                    name, spec.url, spec.sha256,
+                    onStart = { total -> reporter.downloadStart(name, total) },
+                    onProgress = { received -> reporter.downloadProgress(name, received) },
+                )
             } catch (e: Exception) {
-                synchronized(printLock) { println((e.message ?: "❌ $name: download failed").prependIndent("  ")) }
+                synchronized(printLock) { println((e.message ?: "${Glyphs.ERROR} $name: download failed").prependIndent("  ")) }
                 return null
             }
             return try {
                 extractIntoStore(archive, archiveFile, storeDir, name)
                 storeDir
             } catch (e: ArchiveException) {
-                synchronized(printLock) { println((e.message ?: "❌ $name: extract failed").prependIndent("  ")) }
+                synchronized(printLock) { println((e.message ?: "${Glyphs.ERROR} $name: extract failed").prependIndent("  ")) }
                 null
             }
         }
