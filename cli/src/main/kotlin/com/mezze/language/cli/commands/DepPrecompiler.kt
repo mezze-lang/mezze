@@ -49,16 +49,19 @@ object DepPrecompiler {
         val libFile = File(depDir, libRelPath)
         if (!libFile.isFile) return
 
-        // Resolution for the dep's own imports must root at the dep (its own
-        // .deps), so save + restore the global project-root around the compile.
-        val savedRoot = System.getProperty("mezze.project.root")
         try {
-            System.setProperty("mezze.project.root", depDir.absolutePath)
-            // Each dep compiles in isolation: reset the process-global resolver +
-            // typechecker module caches (repopulated lazily; the typechecker's
-            // clear re-preloads stdlib) so a previously-precompiled dep's cached
-            // module — e.g. another package's own `core` — can't shadow this dep's
-            // imports. Sequential precompiles in one `sync` otherwise leak state.
+            // Resolve the dep's own imports against ITS OWN dir, via a FRESH
+            // per-dir resolver — NOT the process-global one. checkParsedModule
+            // only reaches for the shared precompiled.importResolver when
+            // currentPath == the `mezze.project.root` sysprop; so we deliberately
+            // leave that sysprop pointing at the consumer (never the dep dir) and
+            // pass the dep dir as currentPath. currentPath != projectRoot then
+            // forces ModuleLoader.fromPath(depDir), which roots at the dep and
+            // finds its `.deps`. Setting the sysprop to depDir instead routed
+            // every dep through one shared resolver, so a prior dep's root shadowed
+            // the next dep's imports (order-dependent "module not found").
+            // Still clear the companion module caches so a stale cross-dep entry
+            // can't shadow either (the typechecker's clear re-preloads stdlib).
             com.mezze.language.typechecker.ModuleResolver.clearCache()
             com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
             val source = libFile.readText()
@@ -123,14 +126,9 @@ object DepPrecompiler {
             }
             if (out.exists()) out.delete()
             java.nio.file.Files.move(tmp.toPath(), out.toPath())
-        } catch (e: Throwable) {
-            if (System.getenv("MEZZE_DEBUG_DEPLOAD") == "1")
-                System.err.println("[DepPrecompiler] $depModulePath precompile failed: ${e.javaClass.simpleName}: ${e.message}")
+        } catch (_: Throwable) {
             // Best-effort: any failure ⇒ no store ⇒ consumer compiles from source.
             runCatching { File(out.parentFile, ".tmp-${out.name}").delete() }
-        } finally {
-            if (savedRoot != null) System.setProperty("mezze.project.root", savedRoot)
-            else System.clearProperty("mezze.project.root")
         }
     }
 
