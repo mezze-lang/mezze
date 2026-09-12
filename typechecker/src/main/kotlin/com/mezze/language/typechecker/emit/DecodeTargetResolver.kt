@@ -25,7 +25,101 @@ import com.mezze.language.typedast.*
  */
 object DecodeTargetResolver {
 
-    private val FROM_JSON = setOf("from_json", "from_json_with")
+    /**
+     * An auto-derived codec decoder impl, identified by ABILITY CONTENT HASH
+     * (WellKnownHashConstants — the generated stdlib name→hash table is the
+     * single sanctioned name binding). No op-name or shape matching: a user
+     * ability that happens to declare a `decode` op never qualifies.
+     */
+    fun isCodecDecodeImpl(impl: TypedAbilityImpl): Boolean =
+        com.mezze.language.typechecker.WellKnownHashConstants
+            .isDecodeFlavoredCodec(impl.abilityHash)
+
+    /** The derived decoder impl's op key — data read from the impl, never a
+     *  literal. Codec generation emits exactly one operation per decode impl. */
+    fun decodeOpName(impl: TypedAbilityImpl): String = impl.operations.keys.first()
+
+    /**
+     * Decode ENTRY-POINT operations: ops (of any impl in scope) whose own
+     * signature carries a `with <decode-flavored ability> …` constraint —
+     * stdlib `from_json`/`from_json_with` (`with Decode JsonC 'a`), or a user
+     * codec's own entry op (e.g. `from_csv` constrained on a decode-flavored
+     * ability). Keyed by the constraint's ABILITY HASH; the returned op-name
+     * set is derived data used only to spot candidate call sites
+     * pre-resolution (the receiver is still a bare var there — nothing else
+     * identifies the call yet). Also returns the entry ops' owning ability
+     * hashes, which feed the constraint-target filter in [resolveDecl].
+     */
+    fun entryPointOps(
+        impls: List<TypedAbilityImpl>,
+        lets: List<TypedLetDecl> = emptyList(),
+    ): Pair<Set<String>, Set<Hash>> {
+        val names = HashSet<String>()
+        val owningAbilityHashes = HashSet<Hash>()
+        // Entry LET decls (e.g. http's `from_json_result` — `with FromJson …`)
+        // and entry op hashes, so WRAPPER ops whose bodies CALL an entry decl
+        // by hash are entries too (http's inherent `from_json` on
+        // Result Response has no written constraint of its own).
+        val entryCalleeHashes = HashSet<Hash>()
+        fun constraintIsEntry(c: MezzeType.FunctionAbilityConstraint): Boolean =
+            com.mezze.language.typechecker.WellKnownHashConstants
+                .isDecodeFlavoredCodec(c.abilityHash) ||
+                (c.abilityHash != null && c.abilityHash in owningAbilityHashes)
+        fun bodyCallsEntry(e: TypedExpr): Boolean {
+            if (e is TypedCall) {
+                val f = e.function
+                if (f is TypedVar) {
+                    val b = f.binding
+                    if (b is BindingRef.ByHash && b.hash in entryCalleeHashes) return true
+                }
+                if (f is TypedFieldAccess && f.field in names) return true
+            }
+            return children(e).any(::bodyCallsEntry)
+        }
+        // Level 0: the decode-ENTRY abilities' ops — GENERATED data from the
+        // stdlib ability declarations (WellKnownHashConstants), needed because
+        // stdlib typed modules are snapshot-loaded and their impls are not in
+        // scope here. Impls of an entry ability found in scope also contribute
+        // (covers locally-visible entry abilities the same way).
+        names.addAll(com.mezze.language.typechecker.WellKnownHashConstants.decodeEntryOpNames)
+        owningAbilityHashes.addAll(
+            com.mezze.language.typechecker.WellKnownHashConstants.decodeEntryAbilityHashes)
+        for (impl in impls) {
+            if (com.mezze.language.typechecker.WellKnownHashConstants
+                    .isDecodeEntryAbility(impl.abilityHash)) {
+                names.addAll(impl.operations.keys)
+                owningAbilityHashes.add(impl.abilityHash)
+            }
+        }
+        // Fixpoint: each round can promote lets (by constraint) and impl ops
+        // (by constraint, or by body-calling an already-known entry by hash).
+        var changed = true
+        while (changed) {
+            changed = false
+            for (decl in lets) {
+                if (decl.hash in entryCalleeHashes) continue
+                val cs = (decl.scheme.type as? MezzeType.FunctionType)?.abilityConstraints ?: continue
+                if (cs.any(::constraintIsEntry)) {
+                    entryCalleeHashes.add(decl.hash); changed = true
+                }
+            }
+            for (impl in impls) {
+                for ((opName, opBody) in impl.operations) {
+                    val opHash = Hash.computeOpHash(impl.hash, opName)
+                    if (opHash in entryCalleeHashes) continue
+                    val cs = (opBody.type as? MezzeType.FunctionType)?.abilityConstraints
+                    val isEntry = (cs?.any(::constraintIsEntry) == true) || bodyCallsEntry(opBody)
+                    if (isEntry) {
+                        names.add(opName)
+                        owningAbilityHashes.add(impl.abilityHash)
+                        entryCalleeHashes.add(opHash)
+                        changed = true
+                    }
+                }
+            }
+        }
+        return names to owningAbilityHashes
+    }
 
     data class Result(val module: TypedModule, val decodeOpBySite: Map<Loc, Hash>)
 
@@ -36,14 +130,22 @@ object DecodeTargetResolver {
      * onto one decoder, and (2) return `decodeOpBySite` for the compiler's dict
      * wiring.
      */
-    fun process(module: TypedModule): Result {
-        val decodeImpls = module.abilityImpls.filter { it.operations.containsKey("decode") && it.targetTypes.size == 3 }
+    fun process(module: TypedModule, importedModules: List<TypedModule> = emptyList()): Result {
+        val decodeImpls = module.abilityImpls.filter(::isCodecDecodeImpl)
         if (decodeImpls.isEmpty()) return Result(module, emptyMap())
+        // Entry-point ops derive from every impl AND let in scope — the stdlib
+        // FromJson-for-Str impl and wrapper lets (http's from_json_result) live
+        // in IMPORTED modules, not the user module.
+        val scopeImpls = module.abilityImpls + importedModules.flatMap { it.abilityImpls }
+        val scopeLets = (module.decls + importedModules.flatMap { it.decls })
+            .filterIsInstance<TypedLetDecl>()
+        val (entryOps, entryAbilityHashes) = entryPointOps(scopeImpls, scopeLets)
+        if (entryOps.isEmpty()) return Result(module, emptyMap())
 
         val opBySite = HashMap<Loc, Hash>()
         val refBySite = HashMap<Loc, AbilityImplRef>()
         for (decl in module.decls) {
-            if (decl is TypedLetDecl) resolveDecl(decl, decodeImpls, opBySite, refBySite)
+            if (decl is TypedLetDecl) resolveDecl(decl, decodeImpls, entryOps, entryAbilityHashes, opBySite, refBySite)
         }
         if (opBySite.isEmpty()) return Result(module, emptyMap())
         val stamped = module.copy(decls = module.decls.map { d ->
@@ -74,11 +176,16 @@ object DecodeTargetResolver {
         decodeImpls: List<TypedAbilityImpl>,
     ): Map<Loc, Hash> {
         if (decodeImpls.isEmpty() || importedModules.isEmpty()) return emptyMap()
+        val (entryOps, entryAbilityHashes) = entryPointOps(
+            importedModules.flatMap { it.abilityImpls } + decodeImpls,
+            importedModules.flatMap { it.decls }.filterIsInstance<TypedLetDecl>(),
+        )
+        if (entryOps.isEmpty()) return emptyMap()
         val opBySite = HashMap<Loc, Hash>()
         val refSink = HashMap<Loc, AbilityImplRef>()
         for (m in importedModules) {
             for (decl in m.decls) {
-                if (decl is TypedLetDecl) resolveDecl(decl, decodeImpls, opBySite, refSink)
+                if (decl is TypedLetDecl) resolveDecl(decl, decodeImpls, entryOps, entryAbilityHashes, opBySite, refSink)
             }
         }
         return opBySite
@@ -86,7 +193,9 @@ object DecodeTargetResolver {
 
     private fun stampExpr(e: TypedExpr, refBySite: Map<Loc, AbilityImplRef>): TypedExpr {
         val rebuilt = withChildren(e) { stampExpr(it, refBySite) }
-        if (rebuilt is TypedCall && rebuilt.function.let { it is TypedFieldAccess && it.field in FROM_JSON }) {
+        // refBySite is keyed by the entry-point call Locs collected in
+        // resolveDecl — membership IS the identification; no name check.
+        if (rebuilt is TypedCall && refBySite.containsKey(rebuilt.loc)) {
             refBySite[rebuilt.loc]?.let { ref ->
                 val inst = rebuilt.instantiation ?: TypeInstantiation()
                 return rebuilt.copy(instantiation = inst.copy(abilityImpls = inst.abilityImpls + ref))
@@ -106,60 +215,73 @@ object DecodeTargetResolver {
     private fun resolveDecl(
         decl: TypedLetDecl,
         decodeImpls: List<TypedAbilityImpl>,
+        entryOps: Set<String>,
+        entryAbilityHashes: Set<Hash>,
         out: MutableMap<Loc, Hash>,
         refOut: MutableMap<Loc, AbilityImplRef>,
     ) {
         val root = decl.value
-        // from_json call sites, in pre-order.
-        val fromJsonLocs = ArrayList<Loc>()
+        // Entry-point call sites (from_json / a user codec's entry op), in
+        // pre-order. `entryOps` is DERIVED data (ops constrained on a
+        // decode-flavored ability) — see [entryPointOps]; the receiver is a
+        // bare var at these sites, so the derived op-name set is the only
+        // available pre-resolution signal.
+        val entryLocs = ArrayList<Loc>()
         // A concrete decode target per call, from usage reconstruction — its leaf
         // types may be `?` and it does NOT see through list elements.
         val reconTargets = ArrayList<MezzeType>()
         run {
             fun go(e: TypedExpr) {
-                if (e is TypedCall && e.function.let { it is TypedFieldAccess && it.field in FROM_JSON }) fromJsonLocs.add(e.loc)
+                if (e is TypedCall && e.function.let { it is TypedFieldAccess && it.field in entryOps }) entryLocs.add(e.loc)
                 if (e is TypedLambda && e.params.isNotEmpty())
                     reconstructBinder(e.body, e.params.first().name, 0)?.let { reconTargets.add(it) }
                 for (c in children(e)) go(c)
             }
             go(root)
         }
-        if (fromJsonLocs.isEmpty()) return
+        if (entryLocs.isEmpty()) return
 
-        // Fast path: exactly one derived decoder in scope — every from_json here
-        // decodes into it. No reconstruction needed, and it is immune to access
-        // patterns reconstruction can't see through (`list.first {}`, `match`).
+        // Fast path: exactly one derived decoder in scope — every entry call
+        // here decodes into it. No reconstruction needed, and it is immune to
+        // access patterns reconstruction can't see through (`list.first {}`, `match`).
         if (decodeImpls.size == 1) {
             val impl = decodeImpls[0]
-            val opHash = Hash.computeOpHash(impl.hash, "decode")
+            val opHash = Hash.computeOpHash(impl.hash, decodeOpName(impl))
             val ref = AbilityImplRef(impl.abilityHash, impl.hash, impl.targetTypes[1])
-            for (loc in fromJsonLocs) { out[loc] = opHash; refOut[loc] = ref }
+            for (loc in entryLocs) { out[loc] = opHash; refOut[loc] = ref }
             return
         }
 
-        // AUTHORITATIVE targets: the FromJson/Decode constraints the typechecker
+        // AUTHORITATIVE targets: the entry/decode constraints the typechecker
         // resolved onto this decl's function type. These are FULLY concrete —
         // list elements and all — unlike usage reconstruction. Present only when
         // the decode surfaces on the signature (not a fully-discharged do-block
         // local), so we fall back to recon for the rest.
+        // Constraint membership is by ABILITY HASH: either a decode-flavored
+        // codec ability, or the entry ops' own owning ability (FromJson-style
+        // wrapper abilities) — never by ability NAME.
+        val decodeAbilityHashes = decodeImpls.map { it.abilityHash }.toSet()
         val constraintTargets = ArrayList<MezzeType>()
         (decl.scheme.type as? MezzeType.FunctionType)?.abilityConstraints
-            ?.filter { it.abilityName == "FromJson" || it.abilityName == "Decode" }
+            ?.filter {
+                it.abilityHash != null &&
+                    (it.abilityHash in decodeAbilityHashes || it.abilityHash in entryAbilityHashes)
+            }
             ?.forEach { c -> c.typeArgs.firstOrNull()?.let { constraintTargets.add(it) } }
 
         // Prefer constraint targets when they cover every call; else recon.
         val targets: List<MezzeType> = when {
-            constraintTargets.size == fromJsonLocs.size -> constraintTargets
-            reconTargets.size == fromJsonLocs.size -> reconTargets
+            constraintTargets.size == entryLocs.size -> constraintTargets
+            reconTargets.size == entryLocs.size -> reconTargets
             else -> return  // ambiguous count — don't risk a wrong pairing
         }
 
-        for (i in fromJsonLocs.indices) {
+        for (i in entryLocs.indices) {
             val matches = decodeImpls.filter { shapeMatches(it.targetTypes[1], targets[i]) }
             val impl = (if (matches.size == 1) matches[0]
                         else matches.firstOrNull { structural(it.targetTypes[1]) == structural(targets[i]) }) ?: continue
-            out[fromJsonLocs[i]] = Hash.computeOpHash(impl.hash, "decode")
-            refOut[fromJsonLocs[i]] = AbilityImplRef(impl.abilityHash, impl.hash, impl.targetTypes[1])
+            out[entryLocs[i]] = Hash.computeOpHash(impl.hash, decodeOpName(impl))
+            refOut[entryLocs[i]] = AbilityImplRef(impl.abilityHash, impl.hash, impl.targetTypes[1])
         }
     }
 

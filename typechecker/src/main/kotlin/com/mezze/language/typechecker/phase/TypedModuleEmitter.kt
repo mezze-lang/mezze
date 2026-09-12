@@ -113,14 +113,18 @@ internal fun emitTypedModuleAndLower(
         // solving, so codegen can't tell two different-shape decodes apart. Recover
         // each call's concrete target structurally (from usage) and map it to the
         // matching derived decoder's op hash.
-        val decodeResult = com.mezze.language.typechecker.emit.DecodeTargetResolver.process(emittedTypedModule!!)
+        // Entry-point ops (from_json etc.) are DERIVED from impls/lets carrying
+        // decode-flavored ability-constraint hashes — those live in imports.
+        val importedModulesForDecode = loadedModules.values.mapNotNull { it.typedModule }
+        val decodeResult = com.mezze.language.typechecker.emit.DecodeTargetResolver
+            .process(emittedTypedModule!!, importedModulesForDecode)
         emittedTypedModule = decodeResult.module
         // Cross-module from_json wrapper: also wire `from_json` calls that live in
         // IMPORTED module bodies (a generic wrapper compiled here as an additional
         // module) to THIS module's derived decoder. Keyed by the derived decode
         // impls on the emitted module; a no-op when nothing was derived.
         val derivedDecodeImpls = emittedTypedModule!!.abilityImpls
-            .filter { it.operations.containsKey("decode") && it.targetTypes.size == 3 }
+            .filter(com.mezze.language.typechecker.emit.DecodeTargetResolver::isCodecDecodeImpl)
         val importedForDecode = loadedModules.values.mapNotNull { it.typedModule }
         val importedDecodeOps = com.mezze.language.typechecker.emit.DecodeTargetResolver
             .processImportedCalls(importedForDecode, derivedDecodeImpls)

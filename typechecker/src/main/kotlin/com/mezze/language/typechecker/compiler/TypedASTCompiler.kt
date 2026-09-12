@@ -195,8 +195,16 @@ class TypedASTCompiler(
      */
     private val decodeImplByOpHash = mutableMapOf<Hash, TypedAbilityImpl>()
 
-    /** Codec entry points that dispatch their inner `.decode` on the target type. */
-    private val FROM_JSON_METHODS = setOf("from_json", "from_json_with")
+    /** Codec entry points that dispatch their inner decode on the target type.
+     *  DERIVED (never literals): ops/lets whose signatures carry a constraint
+     *  on a decode-flavored ability HASH, plus wrappers that call them by hash
+     *  — stdlib from_json/from_json_with, http's inherent from_json, or a user
+     *  codec's entry op. Lazy: needs declIndex, which callers set just before
+     *  [compile]; first read happens during compilation. */
+    private val decodeEntryOpNames: Set<String> by lazy {
+        com.mezze.language.typechecker.emit.DecodeTargetResolver
+            .entryPointOps(abilityImpls, declIndex?.values?.toList() ?: emptyList()).first
+    }
 
     init {
         // Build ability operation index
@@ -206,7 +214,15 @@ class TypedASTCompiler(
                 abilityOpIndex.getOrPut(opName) { mutableListOf() }.add(
                     AbilityOp(impl.hash, impl.targetTypes, opHash)
                 )
-                if (opName == "decode") decodeImplByOpHash[opHash] = impl
+                // Codec decoder index — keyed by ABILITY CONTENT HASH
+                // (WellKnownHashConstants decode-flavored set), shared with
+                // DecodeTargetResolver so both ends select the same population.
+                // Previously any impl with an op named `decode` landed here, so
+                // a USER ability's decode op could be mistaken for a codec
+                // decoder (name-dispatch hole).
+                if (com.mezze.language.typechecker.emit.DecodeTargetResolver.isCodecDecodeImpl(impl)) {
+                    decodeImplByOpHash[opHash] = impl
+                }
             }
         }
     }
@@ -1611,7 +1627,7 @@ class TypedASTCompiler(
             // for a directly-typed receiver. Keyed on structure (the decoder's input
             // type), never on names.
             val fromJsonInputType: MezzeType? =
-                if (rawReceiverType is VarType && methodName in FROM_JSON_METHODS)
+                if (rawReceiverType is VarType && methodName in decodeEntryOpNames)
                     decodeOpBySite[expr.loc]
                         ?.let { decodeImplByOpHash[it] }
                         ?.targetTypes?.lastOrNull()
@@ -1734,7 +1750,17 @@ class TypedASTCompiler(
                     val perSiteDecode = decodeOpBySite[expr.loc]
                     for (dictMethodName in opDictMethods.sorted()) {
                         val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(dictMethodName)
-                        val resolvedHash = if (dictMethodName == "decode" && perSiteDecode != null) perSiteDecode
+                        // Per-site decoder wiring, keyed on HASH IDENTITY rather
+                        // than the dict slot being literally named "decode": the
+                        // pinned hash fills this slot only if it IS the pinned
+                        // codec impl's op for this slot's method — i.e. the slot
+                        // and the DecodeTargetResolver pin refer to the same op.
+                        // (decodeImplByOpHash holds only structurally codec-shaped
+                        // impls, so a user ability's decode op never pins.)
+                        val perSiteMatchesSlot = perSiteDecode != null &&
+                            decodeImplByOpHash[perSiteDecode]
+                                ?.let { computeOpHash(it.hash, dictMethodName) == perSiteDecode } == true
+                        val resolvedHash = if (perSiteMatchesSlot) perSiteDecode
                             else resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
                         if (resolvedHash != null) {
                             // refToDictedOp wraps the resolved op when IT needs its

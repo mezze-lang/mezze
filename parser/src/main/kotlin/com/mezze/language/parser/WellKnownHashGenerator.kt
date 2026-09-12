@@ -18,6 +18,7 @@ fun main(args: Array<String>) {
 
     // (typed Hash end-to-end).
     val abilities = mutableMapOf<String, Hash>() // name → content hash
+    val abilityOps = mutableMapOf<String, List<String>>() // name → op names (from the decl)
     val effects = mutableMapOf<String, Hash>()
     val types = mutableMapOf<String, Hash>()     // user-defined types in stdlib
 
@@ -29,6 +30,7 @@ fun main(args: Array<String>) {
                 when (decl) {
                     is ParsedAbilityDecl -> {
                         abilities[decl.name] = decl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(decl)
+                        abilityOps[decl.name] = decl.operations.map { it.name }
                     }
                     is ParsedEffectDecl -> {
                         effects[decl.name] = decl.contentHash ?: ParsedDeclHasher.hashEffectDecl(decl)
@@ -82,10 +84,10 @@ fun main(args: Array<String>) {
     val keptAbilities = setOf(
         // is<Ability> anchors
         "Eq", "Ord", "Inspect", "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod",
-        // codec-set members (codecAbilitySet / encode|decode-flavored)
+        // codec-set members (codecAbilitySet / encode|decode-flavored / decode-entry)
         "Encode", "EncodeRepr", "Decode", "DecodeRepr",
         "StreamEncode", "StreamDecode", "DecodeFormat",
-        "StreamFormat", "StreamDecodeFormat", "Format",
+        "StreamFormat", "StreamDecodeFormat", "Format", "FromJson",
         // referenced directly by external code
         "LogicalAnd", "LogicalOr",
     )
@@ -176,6 +178,40 @@ fun main(args: Array<String>) {
     for (name in decodeFlavored) {
         if (abilities.containsKey(name)) {
             sb.appendLine("        ABILITY_${name.uppercase()},")
+        }
+    }
+    sb.appendLine("    )")
+    sb.appendLine()
+
+    // Decode ENTRY abilities: their ops are the user-facing, target-directed
+    // decode entry points (from_json …) — the decode target stays a bare var
+    // through solving, so the per-call-site decoder resolver must wire them.
+    // Downstream code keys on these HASHES; this generator list is the single
+    // sanctioned name→hash binding for stdlib abilities.
+    val decodeEntry = listOf("FromJson")
+    sb.appendLine("    private val decodeEntrySet = setOf(")
+    for (name in decodeEntry) {
+        if (abilities.containsKey(name)) {
+            sb.appendLine("        ABILITY_${name.uppercase()},")
+        }
+    }
+    sb.appendLine("    )")
+    sb.appendLine()
+    sb.appendLine("    /** Ability whose ops are target-directed decode ENTRY points (from_json …). */")
+    sb.appendLine("    fun isDecodeEntryAbility(hash: Hash?): Boolean = hash != null && hash in decodeEntrySet")
+    sb.appendLine()
+    sb.appendLine("    /** Decode-entry ability hashes, for seeding derived entry sets. */")
+    sb.appendLine("    val decodeEntryAbilityHashes: Set<Hash> get() = decodeEntrySet")
+    sb.appendLine()
+    // Op NAMES of the decode-entry abilities, read from the stdlib ability
+    // DECLARATIONS at generation time — generated data, not hand-written
+    // literals. Needed because stdlib typed modules are snapshot-loaded and
+    // their impls are not in scope where entry call sites are identified.
+    sb.appendLine("    /** Op names of the decode-entry abilities (from their stdlib declarations). */")
+    sb.appendLine("    val decodeEntryOpNames: Set<String> = setOf(")
+    for (name in decodeEntry) {
+        for (op in abilityOps[name].orEmpty()) {
+            sb.appendLine("        \"$op\",")
         }
     }
     sb.appendLine("    )")

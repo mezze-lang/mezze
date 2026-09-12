@@ -460,13 +460,20 @@ object MonoDriver {
     ) {
         val callLoc = call.loc
         val callArg = call.arg
-        // Codec entry points (`from_json`) dispatch their inner `.decode` on the
-        // TARGET type, which stays a bare var here — mono can't resolve that
-        // inner op, so a specialized copy would bake `val.decode` as a failing
-        // field access. Leave them GENERIC: the compiler's per-call-site decoder
-        // wiring (DecodeTargetResolver -> __dict_decode) handles them correctly.
-        if (fa.field == "from_json" || fa.field == "from_json_with") return
         val candidates = abilityOpIndex[fa.field] ?: return
+        // Codec ENTRY-POINT ops (from_json / a user codec's entry op) dispatch
+        // their inner decode on the TARGET type, which stays a bare var here —
+        // mono can't resolve that inner op, so a specialized copy would bake it
+        // as a failing field access. Leave them GENERIC: the compiler's
+        // per-call-site decoder wiring handles them. Identified by the op's own
+        // decode-flavored ability-constraint HASH, never by op name.
+        if (candidates.any { entry ->
+                (entry.impl.operations[fa.field]?.type as? MezzeType.FunctionType)
+                    ?.abilityConstraints?.any {
+                        com.mezze.language.typechecker.WellKnownHashConstants
+                            .isDecodeFlavoredCodec(it.abilityHash)
+                    } == true
+            }) return
         val genericCandidates = candidates.filter { it.impl.forallVars.isNotEmpty() }
         if (genericCandidates.isEmpty()) return
         counters.methodGenericVisited++
