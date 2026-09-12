@@ -20,4 +20,6 @@ object Glyphs {
     const val DOWNLOAD = "⬇"
     const val CHECK = "✓"
     const val CROSS = "✗"
+    const val BAR_FULL = "█"
+    const val BAR_EMPTY = "░"
 }

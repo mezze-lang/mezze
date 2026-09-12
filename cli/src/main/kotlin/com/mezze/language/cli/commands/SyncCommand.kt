@@ -9,6 +9,7 @@ import java.io.File
  *
  * Usage:
  *   mez sync              # Fetch/resolve all dependencies
+ *   mez sync --verbose    # Also print a line per resolved package (-v)
  *   mez sync --clean      # Re-download deps (bypass the content-store cache)
  *   mez sync --force      # Clear the compiled cache → next build recompiles from source
  *   mez sync --locked     # Verify Mezze.lock matches (CI); fail on drift
@@ -40,6 +41,7 @@ class SyncCommand {
         val isClean = args.contains("--clean")     // re-download deps (bypass content-store cache)
         val isForce = args.contains("--force")     // wipe the compiled cache → next build recompiles from source
         val isLocked = args.contains("--locked")   // verify against Mezze.lock instead of writing it
+        val isVerbose = args.contains("--verbose") || args.contains("-v")  // per-package lines, not just the bar
 
         // --force: clear the project's compiled cache (.mez/store) so the next
         // check/build/dev recompiles everything from source — the escape hatch for
@@ -106,7 +108,7 @@ class SyncCommand {
         var lockOutOfDate = false
 
         try {
-            val count = resolveDeps(root, manifest, storeRoot, isClean, downloader, archive, nodes, failures)
+            val count = resolveDeps(root, manifest, storeRoot, isClean, isVerbose, downloader, archive, nodes, failures)
 
             // Complete graph lock: the root package + every resolved node, deduped + sorted.
             val rootEdges = (manifest.pathDependencies.keys + manifest.dependencies.keys + manifest.devDependencies.keys).sorted()
@@ -184,6 +186,7 @@ class SyncCommand {
         rootToml: MezzeToml,
         storeRoot: File,
         isClean: Boolean,
+        verbose: Boolean,
         downloader: PackageDownloader,
         archive: ArchiveHandler,
         nodes: MutableList<LockedNode>,
@@ -205,8 +208,9 @@ class SyncCommand {
             mutableListOf<Triple<File, String, String>>()
         )
         // Live progress across the parallel download waves + the sequential
-        // precompile below (sticky status line on a TTY; discrete lines when piped).
-        val reporter = SyncReporter()
+        // precompile below: a sticky progress bar on a TTY. --verbose adds a line
+        // per resolved package; failures always print.
+        val reporter = SyncReporter(verbose = verbose)
 
         // Resolve ONE dep; return its own direct deps (the next wave). Runs on a pool thread.
         fun process(declaringDir: File, name: String, spec: DepSpec): List<Triple<File, String, DepSpec>> {
@@ -285,6 +289,8 @@ class SyncCommand {
         // from source.
         val distinctTargets = precompileTargets.distinctBy { it.first.canonicalPath }
         if (distinctTargets.isNotEmpty() && System.getenv("MEZZE_PRECOMPILE_DEPS") != "0") {
+            val toCompile = distinctTargets.filterNot { DepPrecompiler.compiledStoreFile(it.first).isFile }
+            reporter.beginCompile(toCompile.size)
             var compiled = 0
             for ((depDir, libRel, moduleName) in distinctTargets) {
                 if (DepPrecompiler.compiledStoreFile(depDir).isFile) continue
