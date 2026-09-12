@@ -1709,11 +1709,17 @@ class TypedASTCompiler(
                     // impl (`Ord P`) rather than re-matching the container impl
                     // (`impl Ord for ['a]`). See project_impl_op_with_constraint_dropped.
                     val concreteTypesForDict = mutableListOf<MezzeType>()
+                    // Expr-based element recovery FIRST: a seq literal of nullary
+                    // variant constructors (`[Low] < [High]`) carries a LAUNDERED
+                    // VarType element on its TYPE (#13 orphan-var), so the type-based
+                    // path below can't see `Sev`; the expression tree still can.
+                    extractConcreteElementTypeFromExpr(fn.record)?.let { concreteTypesForDict.add(it) }
                     containerElementType(receiverType)?.let { if (it !is VarType) concreteTypesForDict.add(it) }
                     concreteTypesForDict.add(receiverType)
                     if (expr.arg is TypedRecord) {
                         for (entry in (expr.arg as TypedRecord).entries) {
                             if (entry is TypedRecordEntry.Field) {
+                                extractConcreteElementTypeFromExpr(entry.value)?.let { concreteTypesForDict.add(it) }
                                 containerElementType(entry.value.type)?.let { if (it !is VarType) concreteTypesForDict.add(it) }
                                 concreteTypesForDict.add(entry.value.type)
                             }
@@ -3934,6 +3940,15 @@ class TypedASTCompiler(
             val elemType = substitution.apply(element.type)
             val recovered = resolveVariantReceiverType(element, elemType)
             if (recovered != null) return recovered
+            // Nested seq literal whose OWN element type is laundered (e.g.
+            // `[[Low]]` — the inner `[Low]`'s element is an orphan VarType, #13):
+            // recurse into the inner literal and rebuild the concrete container
+            // type, so `[[Low]]` recovers `SeqType(Sev)` and each nesting level's
+            // dict resolves against the right element impl.
+            if (element is com.mezze.language.typedast.TypedSeq &&
+                (elemType !is SeqType || elemType.elementType is VarType)) {
+                extractConcreteElementTypeFromExpr(element)?.let { return SeqType(it) }
+            }
             if (elemType !is VarType) return elemType
         }
         return null

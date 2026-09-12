@@ -42,6 +42,26 @@ class SeqUserTypeCompareTest {
     @Test fun nestedSortOrder() { assertEquals(1L, run("let main = {} -> match seq::first { xs = seq::sort { xs = [ [ { x = 2, y = 0 } ], [ { x = 1, y = 0 } ] ] } } is\n  Some { val = inner } -> match seq::first { xs = inner } is\n    Some { val = p } -> p.x\n    None -> 0 - 1\n  None -> 0 - 1\nmain {}")) }
     @Test fun nested3Sort() { assertEquals(2L, run("let main = {} -> seq::size { xs = seq::sort { xs = [ [ [ { x = 2, y = 0 } ] ], [ [ { x = 1, y = 0 } ] ] ] } }\nmain {}")) }
 
+    // USER VARIANT elements (not just records): a variant with a custom Ord
+    // (severity ranking) must drive seq comparison and sort the same way.
+    private val variantHead = """
+        use std::collections::seq
+        use std::abilities::compare::{ Eq, Ord }
+        type Sev = | Low, Mid, High |
+        let rank: { s: Sev } -> Int = { s } -> match s is
+          Low -> 0
+          Mid -> 1
+          High -> 2
+        impl Eq for Sev where { eq = { it, r } -> rank { s = it } == rank { s = r }, neq = { it, r } -> if rank { s = it } == rank { s = r } then False else True, }
+        impl Ord for Sev where { lt = { it, r } -> rank { s = it } < rank { s = r }, le = { it, r } -> rank { s = it } <= rank { s = r }, gt = { it, r } -> rank { s = it } > rank { s = r }, ge = { it, r } -> rank { s = it } >= rank { s = r }, }
+    """.trimIndent()
+    private fun runV(body: String) = MezzeTestHelper.run("$variantHead\n$body")
+
+    @Test fun variantLt()     { assertEquals(true, runV("let main = {} -> [ Low ] < [ High ]\nmain {}")) }
+    @Test fun variantLtFalse(){ assertEquals(false, runV("let main = {} -> [ High ] < [ Low ]\nmain {}")) }
+    @Test fun variantSort()   { assertEquals(0L, runV("let main = {} -> match seq::first { xs = seq::sort { xs = [ High, Low, Mid ] } } is\n  Some { val = s } -> rank { s = s }\n  None -> 0 - 1\nmain {}")) }
+    @Test fun variantNestedLt(){ assertEquals(true, runV("let main = {} -> [ [ Low ] ] < [ [ High ] ]\nmain {}")) }
+
     // regressions — must still work
     @Test fun intLt()      { assertEquals(true, run("let main = {} -> [1,2] < [1,3]\nmain {}")) }
     @Test fun strLt()      { assertEquals(true, run("let main = {} -> [\"a\"] < [\"b\"]\nmain {}")) }
