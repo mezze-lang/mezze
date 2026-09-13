@@ -89,11 +89,22 @@ class DevCommand {
         val modulePath = manifest.`package`.name
         val entryName = appConfig.entry
 
-        val envReport = com.mezze.language.cli.EnvironmentCheck.probe()
-        if (com.mezze.language.cli.EnvironmentCheck.isCriticalFailure(envReport)) {
-            println(com.mezze.language.cli.EnvironmentCheck.longReport(envReport))
-            kotlin.system.exitProcess(1)
+        // Resolve the JDK/GraalVM and adapt: a too-old/missing JDK is a hard,
+        // graceful stop; anything runnable proceeds, warning once if degraded
+        // (non-GraalVM → interpreter, or a mismatched line). --require-jit turns
+        // that warning into a failure for CI.
+        val resolved = com.mezze.language.cli.GraalvmResolver.resolve()
+        if (!resolved.canRun) {
+            throw com.mezze.language.cli.MezzeCliError(
+                resolved.degradeReason ?: "no usable JDK found",
+                hint = "install GraalVM ${com.mezze.language.cli.BuildInfo.GRAAL_LINE} (see `mez doctor`), " +
+                    "or set MEZZE_GRAALVM_HOME",
+            )
         }
+        com.mezze.language.cli.GraalvmResolver.requirementFailure(
+            resolved, requireJit = args.contains("--require-jit"), requireNative = false,
+        )?.let { throw com.mezze.language.cli.MezzeCliError(it, hint = "see `mez doctor`") }
+        com.mezze.language.cli.GraalvmResolver.warnIfDegraded(resolved)
 
         val exit = if (noWatch) {
             WireRunner.execOnce(root, appFile, entryName, modulePath, appConfig.name, devFlags, appArgs = appArgs)

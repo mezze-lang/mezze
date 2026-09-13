@@ -918,10 +918,17 @@ private class WireSession private constructor(
         ): WireSession? {
             fun ms() = (System.nanoTime() - t0) / 1_000_000
 
-            val java = JvmLauncher.findJava() ?: run {
-                System.err.println("Error: Java 21+ required.")
-                return null
-            }
+            // Use the JDK the resolver classified (same precedence + GraalVM
+            // detection the dev/build entry warned about), falling back to the
+            // legacy finder only if resolution somehow came back empty. The
+            // caller (DevCommand) has already hard-stopped on an unrunnable JDK
+            // and warned on a degraded one, so here we just need the executable.
+            val java = com.mezze.language.cli.GraalvmResolver.resolve().javaExe
+                ?: JvmLauncher.findJava()
+                ?: run {
+                    System.err.println("${Glyphs.CROSS} no JDK 21+ found — see `mez doctor`")
+                    return null
+                }
             // Base classpath = mezze-runtime.jar. When dev flags are
             // present, also append ~/.mezze/lib/tools/*.jar so the
             // chromeinspector / profiler / coverage / dap / insight

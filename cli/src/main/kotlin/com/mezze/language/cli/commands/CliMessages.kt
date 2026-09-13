@@ -35,6 +35,15 @@ class CliMessages(private val color: Boolean = System.console() != null) {
      * that `--verbose` reveals the full trace. The trace itself is printed
      * separately by the caller under `--verbose`; this method never emits it.
      */
+    /** A yellow `⚠ <headline>` line plus dimmed, indented hint lines. */
+    fun warning(headline: String, vararg hints: String): String {
+        val sb = StringBuilder(yellow("${Glyphs.WARN} ") + bold(headline))
+        for (h in hints) sb.append("\n    ").append(dim(h))
+        return sb.toString()
+    }
+
+    private fun yellow(s: String) = if (color) "$ESC[33m$s$ESC[0m" else s
+
     fun generalError(message: String, hint: String? = null, showTraceHint: Boolean = true): String {
         val sb = StringBuilder(red("${Glyphs.CROSS} ") + bold(message))
         if (hint != null) sb.append("\n    ").append(dim(hint))

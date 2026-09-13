@@ -103,21 +103,39 @@ class BuildCommand {
             return
         }
 
-        // Fail fast if native-image is needed but missing. -O2 always
-        // needs it; -O1 needs it only when no cached shell binary exists
-        // (first build triggers an automatic -O2 to create the shell).
-        val needsNativeImage = nativeBuild && (nativeO2 || !NativeBuildPath.hasShellBinary())
-        if (needsNativeImage) {
-            val envReport = com.mezze.language.cli.EnvironmentCheck.probe()
-            if (com.mezze.language.cli.EnvironmentCheck.isCriticalFailure(envReport)) {
-                println(com.mezze.language.cli.EnvironmentCheck.longReport(envReport))
-                kotlin.system.exitProcess(2)
-            }
-            if (NativeImageRunner.locate() == null) {
-                println(NativeImageRunner.missingMessage())
-                kotlin.system.exitProcess(2)
-            }
+        // Resolve the JDK/GraalVM up front. A jar build runs on any JDK 21+
+        // (interpreter if not GraalVM — warn, don't block). A native build is
+        // the ONE path that cannot degrade: it needs a matching-line GraalVM
+        // with native-image, so it hard-fails cleanly here instead of letting
+        // native-image die deep in the build with a cryptic trace.
+        val resolved = com.mezze.language.cli.GraalvmResolver.resolve()
+        if (!resolved.canRun) {
+            throw com.mezze.language.cli.MezzeCliError(
+                resolved.degradeReason ?: "no usable JDK found",
+                hint = "install GraalVM ${com.mezze.language.cli.BuildInfo.GRAAL_LINE} (see `mez doctor`), " +
+                    "or set MEZZE_GRAALVM_HOME",
+            )
         }
+        // -O2 always needs native-image; -O1 needs it only when no cached shell
+        // binary exists (first build triggers an automatic -O2 to create it).
+        val needsNativeImage = nativeBuild && (nativeO2 || !NativeBuildPath.hasShellBinary())
+        if (needsNativeImage && !resolved.native) {
+            throw com.mezze.language.cli.MezzeCliError(
+                "mez build --native needs GraalVM ${com.mezze.language.cli.BuildInfo.GRAAL_LINE} " +
+                    "with native-image (have: ${resolved.version ?: "no JDK"})",
+                hint = "install a matching GraalVM (see `mez doctor`), set MEZZE_GRAALVM_HOME, " +
+                    "or drop --native to build a JVM jar",
+            )
+        }
+        // --require-jit / --require-native: turn a would-be warning into a hard
+        // CI failure. (jar builds are fine on a plain JDK unless required.)
+        com.mezze.language.cli.GraalvmResolver.requirementFailure(
+            resolved,
+            requireJit = args.contains("--require-jit"),
+            requireNative = args.contains("--require-native"),
+        )?.let { throw com.mezze.language.cli.MezzeCliError(it, hint = "see `mez doctor`") }
+        // Warn once if degraded (e.g. plain JDK → jar runs without Truffle JIT).
+        if (!needsNativeImage) com.mezze.language.cli.GraalvmResolver.warnIfDegraded(resolved)
 
         // Opens + invalidates any cache a different mez version wrote (the
         // stale-IR-at-runtime guard). Shared with check / exec / dev — see
@@ -365,6 +383,17 @@ class BuildCommand {
                 }
             }
 
+            // A native build was requested but produced no binary → native-image
+            // failed (it already reported why, honoring --verbose). Fail loudly
+            // instead of printing a green "✓ built" summary that omits the native
+            // artifact — the old behaviour reported success on a failed build.
+            if (nativeBuild && nativeBinary == null) {
+                throw com.mezze.language.cli.MezzeCliError(
+                    "native build failed — no binary produced",
+                    hint = "re-run with --verbose for the native-image output",
+                )
+            }
+
             val buildTime = (System.nanoTime() - startTime) / 1_000_000
 
             // Paths relative to project root — what the user types to run.
@@ -387,8 +416,14 @@ class BuildCommand {
                 warningCount = warningCount,
             ))
 
+        } catch (e: com.mezze.language.cli.MezzeCliError) {
+            // Already a graceful, typed error (e.g. native build produced no
+            // binary) — let the top-level boundary render it (message + hint,
+            // trace only under --verbose) rather than flattening it here.
+            throw e
         } catch (e: Exception) {
             System.err.println(CliMessages().buildFailed(e.message))
+            if (com.mezze.language.cli.CliContext.verbose) e.printStackTrace()
             kotlin.system.exitProcess(1)
         } finally {
             store.close()

@@ -148,6 +148,14 @@ test-proxy:
     @mkdir -p logs
     bash scripts/proxy-e2e.sh 2>&1 | tee logs/proxy-e2e.log
 
+# GraalVM detection + graceful degrade: real native mez → stub JDKs driving every
+# classification (matching/other-line/plain/too-old/none) + --require-* gates.
+# Needs the native CLI (`./gradlew :cli:nativeCompile`).
+[group('test')]
+test-graalvm:
+    @mkdir -p logs
+    bash scripts/graalvm-e2e.sh 2>&1 | tee logs/graalvm-e2e.log
+
 # Multi-version distribution: install two REAL toolchains side by side and check
 # every selection mechanism (default / Mezze.toml pin / +ver / MEZ_VERSION / remove).
 # Needs two installed versions, e.g. `-Pversion=0.1.0` and `-Pversion=0.2.0 :cli:installNative`.

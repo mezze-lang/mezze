@@ -1,6 +1,15 @@
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
+// The GraalVM/Truffle line this build bundles. Single source of truth for the
+// Truffle/graal-sdk dependency versions AND the value baked into BuildInfo so
+// the runtime GraalVM resolver can compare a host GraalVM against what we want
+// (matching line → JIT + native; different line → degrade with a warning).
+// `graalLine` is the major.minor ("25.0") used for that comparison and for the
+// ~/.mezze/graalvm/<line> provisioning slot.
+val graalVersion = "25.0.3"
+val graalLine = graalVersion.split(".").take(2).joinToString(".")
+
 plugins {
     kotlin("jvm")
     kotlin("plugin.serialization")
@@ -141,9 +150,14 @@ val generateBuildInfo by tasks.registering {
         proc.inputStream.bufferedReader().readLine()?.trim() ?: "unknown"
     } catch (_: Exception) { "unknown" }
 
+    val graalVersionProp = graalVersion
+    val graalLineProp = graalLine
+
     inputs.property("version", versionString)
     inputs.property("timestamp", timestamp)
     inputs.property("gitSha", gitSha)
+    inputs.property("graalVersion", graalVersionProp)
+    inputs.property("graalLine", graalLineProp)
     outputs.dir(outputDir)
 
     doLast {
@@ -157,6 +171,13 @@ val generateBuildInfo by tasks.registering {
                 const val VERSION: String = "$versionString"
                 const val BUILD_TIMESTAMP: String = "$timestamp"
                 const val GIT_SHA: String = "$gitSha"
+
+                /** Full GraalVM/Truffle version this build bundles (e.g. "25.0.3"). */
+                const val GRAAL_VERSION: String = "$graalVersionProp"
+
+                /** GraalVM line (major.minor, e.g. "25.0") a host GraalVM must match
+                 *  for JIT + native-image; a different line degrades with a warning. */
+                const val GRAAL_LINE: String = "$graalLineProp"
             }
         """.trimIndent())
     }
