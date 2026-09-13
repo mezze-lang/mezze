@@ -245,9 +245,24 @@ data class BindingKey(
 object ModulePathConventions {
     const val STDLIB_PREFIX = "std::"
 
+    /** External polyglot-provider packages follow the `mezze_<lang>` module
+     *  convention (see `SyncCommand.inferProviderLanguages`). Their source
+     *  files legitimately call `__native_*` intrinsics — they're the only
+     *  code paths, outside stdlib, allowed to. */
+    const val POLYGLOT_PROVIDER_PREFIX = "mezze_"
+
     // Null means "no module context" → never stdlib.
     fun isStdlib(modulePath: String?): Boolean =
         modulePath != null && modulePath.startsWith(STDLIB_PREFIX)
+
+    /** Returns true for stdlib and for `mezze_<lang>` provider-package
+     *  modules — the two source families permitted to reference
+     *  `__native_*` intrinsics. See `ExprLiteralConstraints` (#109). */
+    fun isNativeCapable(modulePath: String?): Boolean {
+        if (modulePath == null) return false
+        return modulePath.startsWith(STDLIB_PREFIX) ||
+            modulePath.startsWith(POLYGLOT_PROVIDER_PREFIX)
+    }
 }
 
 object Keywords {

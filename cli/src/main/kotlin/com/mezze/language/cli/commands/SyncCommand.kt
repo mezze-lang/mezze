@@ -561,7 +561,15 @@ class SyncCommand {
         val names = manifest.dependencies.keys +
             manifest.devDependencies.keys +
             manifest.pathDependencies.keys
-        return names.mapNotNull { n -> n.removePrefix("mezze-").takeIf { it != n && it.isNotEmpty() } }.toSet()
+        // Accept both `mezze-<lang>` (github repo-style, e.g. `mezze-python`) and
+        // `mezze_<lang>` (Mezze module-name-style, e.g. `mezze_python`) as the
+        // provider-package convention. Package keys become Mezze module segments
+        // and thus can't contain hyphens; users writing `use mezze_python::...`
+        // must use the underscore form as their `[dependencies]` key.
+        return names.mapNotNull { n ->
+            val stripped = n.removePrefix("mezze-").let { if (it == n) it.removePrefix("mezze_") else it }
+            stripped.takeIf { it != n && it.isNotEmpty() }
+        }.toSet()
     }
 
 }

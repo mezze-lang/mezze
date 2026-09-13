@@ -372,7 +372,11 @@ class TypeChecker(
             performerAddedEffects = buildResult.performerAddedEffects,
             abilityNames = abilityNames,
             effectNames = effectNames,
-            isStdlibModule = ModulePathConventions.isStdlib(currentModulePath),
+            // `isStdlibModule` here doubles as the "may reference `__native_*`
+            // intrinsics" gate. Widened to include `mezze_<lang>` external
+            // polyglot-provider packages — same trust boundary, both flavours
+            // ship their `__native_*` calls through the same review process.
+            isStdlibModule = ModulePathConventions.isNativeCapable(currentModulePath),
             sharedGeneratedCodecImpls = sharedGeneratedCodecImpls,
         )
 
