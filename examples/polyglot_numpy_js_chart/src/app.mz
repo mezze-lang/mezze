@@ -66,16 +66,6 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
   println { msg = "== Mezze x NumPy x asciichart — polyglot pipeline ==" }
   println { msg = "" }
 
-  # Warm up GraalJS from the mez-runtime-eval thread BEFORE any
-  # numpy call. numpy's native extensions touch the Truffle Context
-  # from Python's own thread machinery, and GraalJS is
-  # single-threaded — first thread to enter it "owns" it forever.
-  # Doing a trivial JS eval up front stakes that claim on the right
-  # thread so the real render call below doesn't get bounced with
-  # "Multi threaded access requested by thread ... but is not
-  # allowed for language(s) js". Discardable side effect only.
-  let _ = Js.eval { source = "1" }
-
   # ---- Step 1: NumPy → JSON, chain-coerce to Mezze Str ----
   println { msg = "[1] numpy: sampling N(0, 1), 1000 points, seed=42" }
   # Inline `Python.eval{...}.as_str{}` — the Result-flavored inherent impl
