@@ -893,8 +893,25 @@ private class WireSession private constructor(
             // spawn.
             val polyglotJvmCp = com.mezze.language.cli.`package`.PolyglotResolver
                 .resolveJvmClasspath(currentDir)
-            val classpath = if (polyglotJvmCp.isEmpty()) withTools else {
-                withTools + File.pathSeparator + polyglotJvmCp.joinToString(File.pathSeparator)
+            // Commit 5 — walk Mezze.lock's resolved packages, read each
+            // package's `[jars]` table, verify each jar's sha256 against
+            // `~/.mezze/store/jars/<sha>/`, and append the verified jars
+            // to the classpath. Missing store entries log a warning and
+            // are skipped so a partially-synced project still boots; a
+            // sha256 mismatch is a hard skip with a clean-sync hint.
+            val resolvedJarsReport = com.mezze.language.cli.`package`.ResolvedJarsClasspath.collect(currentDir)
+            for (w in resolvedJarsReport.warnings) System.err.println("[mez] $w")
+            val resolvedJarsCp = resolvedJarsReport.asClasspath()
+            val classpath = buildString {
+                append(withTools)
+                if (polyglotJvmCp.isNotEmpty()) {
+                    append(File.pathSeparator)
+                    append(polyglotJvmCp.joinToString(File.pathSeparator))
+                }
+                if (resolvedJarsCp.isNotEmpty()) {
+                    append(File.pathSeparator)
+                    append(resolvedJarsCp)
+                }
             }
 
             val command = mutableListOf(java.absolutePath)
