@@ -26,22 +26,30 @@ public final class MezzeTestHelper {
     private static final MezzeParser parser = new MezzeParser();
     private static final TypeChecker typeChecker = new TypeChecker();
 
-    // Shared engine for general test execution performance.
-    // engine.Compilation=false disables Truffle PE/JIT — even though
-    // truffle-runtime is on the classpath (HotSpotTruffleRuntime), tests
-    // run interpreted to avoid per-test JIT warmup (~1-3s each).
-    // Production (mez build output) leaves this on the default (true).
-    private static final Engine sharedEngine = Engine.newBuilder()
-        .allowExperimentalOptions(true)
-        .option("engine.WarnInterpreterOnly", "false")
-        .option("engine.Compilation", "false")
-        .build();
+    // Per-test Engine for correctness tests: an Engine holds strong
+    // references to every RootNode/CallTarget its Language creates
+    // (Truffle's internal retention), so a long-lived shared Engine
+    // across ~thousands of tests leaks CallTargets and blows the heap.
+    // engine.Compilation=false disables Truffle PE/JIT anyway (so the
+    // usual "share to warm the JIT" argument doesn't apply here — tests
+    // run interpreted to avoid per-test JIT warmup), which means the
+    // fresh-per-test cost is negligible. Production (mez build output)
+    // leaves Compilation on the default (true).
+    private static Engine newInterpreterEngine() {
+        return Engine.newBuilder()
+            .allowExperimentalOptions(true)
+            .option("engine.WarnInterpreterOnly", "false")
+            .option("engine.Compilation", "false")
+            .build();
+    }
 
     // Separate engine for benchmarks: JIT ON, with PE+compilation, so
     // measurements reflect production perf (mez build / native image).
     // Bench callers must warm up before timing — Truffle needs ~hundreds
     // of executions before a CallTarget compiles. Use `runJit()` from
     // the bench harness; correctness tests should keep using `run()`.
+    // Kept as a shared static specifically because bench iterations WANT
+    // CallTargets (and their compiled code) to persist across calls.
     private static final Engine jitEngine = Engine.newBuilder()
         .allowExperimentalOptions(true)
         .option("engine.WarnInterpreterOnly", "false")
@@ -63,7 +71,10 @@ public final class MezzeTestHelper {
      * Execute a Mezze program from source code with custom project root.
      */
     public static Object run(String sourceCode, Path projectRoot) {
-        return runWith(sourceCode, projectRoot, sharedEngine);
+        // Fresh Engine per test, closed after — see newInterpreterEngine()
+        // for why. The `ownEngine=true` flag tells runWith to close it.
+        Engine engine = newInterpreterEngine();
+        return runWith(sourceCode, projectRoot, engine, true);
     }
 
     /**
@@ -75,10 +86,10 @@ public final class MezzeTestHelper {
      * first call pays compile cost, subsequent calls are warm.
      */
     public static Object runJit(String sourceCode) {
-        return runWith(sourceCode, null, jitEngine);
+        return runWith(sourceCode, null, jitEngine, false);
     }
 
-    private static Object runWith(String sourceCode, Path projectRoot, Engine engine) {
+    private static Object runWith(String sourceCode, Path projectRoot, Engine engine, boolean ownEngine) {
         Path root = projectRoot != null
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));
@@ -111,6 +122,9 @@ public final class MezzeTestHelper {
             return MezzeLanguage.getLastExecutionResult();
         } finally {
             try { context.close(true); } catch (Exception ignored) {}
+            if (ownEngine) {
+                try { engine.close(); } catch (Exception ignored) {}
+            }
         }
     }
 
@@ -244,8 +258,10 @@ public final class MezzeTestHelper {
         PrintStream captureStream = new PrintStream(baos);
         PrintStream originalOut = System.out;
 
+        // Fresh Engine per test — see newInterpreterEngine().
+        Engine engine = newInterpreterEngine();
         Context context = Context.newBuilder(MezzeLanguage.ID)
-                .engine(sharedEngine)
+                .engine(engine)
                 .allowAllAccess(true)
                 .allowCreateThread(true)
                 .out(captureStream)
@@ -265,7 +281,8 @@ public final class MezzeTestHelper {
             return new RunResult(result, output);
         } finally {
             System.setOut(originalOut);
-            context.close(true);
+            try { context.close(true); } catch (Exception ignored) {}
+            try { engine.close(); } catch (Exception ignored) {}
         }
     }
 }

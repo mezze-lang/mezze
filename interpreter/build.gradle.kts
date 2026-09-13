@@ -175,7 +175,7 @@ fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
         "--add-modules=jdk.incubator.vector"
     )
 
-    maxHeapSize = "4g"
+    maxHeapSize = "2g"
 }
 
 // Names that mark a JUnit class as a benchmark / profiler / stress test
