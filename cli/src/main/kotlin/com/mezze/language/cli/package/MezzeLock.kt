@@ -1,6 +1,7 @@
 package com.mezze.language.cli.`package`
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -42,6 +43,19 @@ data class MezzeLock(
      * same way it treats package graph drift.
      */
     val jars: List<LockedJar> = emptyList(),
+    /**
+     * Every `[maven]` coord (root's + every dep's) plus their
+     * transitives, as resolved by Apache Aether at sync time.
+     * Deduped on `coord` and stable-sorted. `mez sync --locked`
+     * treats a mismatch here (a coord added / removed / re-hashed)
+     * as drift.
+     *
+     * `resolved_file_path` is the maven-layout relative path
+     * (`<group>/<artifact>/<version>/<artifact>-<version>.jar`)
+     * under `~/.mezze/cache/maven/` — repeatable across machines
+     * because Aether writes the same layout everywhere.
+     */
+    val maven: List<LockedMaven> = emptyList(),
 )
 
 /**
@@ -51,6 +65,29 @@ data class MezzeLock(
  * is the package that first claimed this sha, kept as an informational
  * back-pointer to the origin.
  */
+/**
+ * One `[maven]` coord (root's + every dep's + transitives) as pinned
+ * in the lock. `coord` is Aether-normalized (`<group>:<artifact>:<version>`);
+ * `resolved_file_path` is relative to the maven cache dir so the lock
+ * stays portable. `transitive_from` names the coord that pulled this
+ * one in — an artifact declared directly has itself, keeping the
+ * origin chain readable.
+ */
+@Serializable
+data class LockedMaven(
+    val coord: String,
+    /** Relative path within `~/.mezze/cache/maven/` (maven layout). */
+    @SerialName("resolved_file_path")
+    val resolvedFilePath: String,
+    /** sha256 hex of the jar's bytes (64 chars). */
+    val sha256: String,
+    /** Coord that pulled this artifact in — self-reference for direct declarations. */
+    @SerialName("transitive_from")
+    val transitiveFrom: String,
+    /** Package that first declared this coord in the resolved graph. */
+    val declaredBy: String,
+)
+
 @Serializable
 data class LockedJar(
     val name: String,

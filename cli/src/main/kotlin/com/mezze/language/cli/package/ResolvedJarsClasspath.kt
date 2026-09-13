@@ -72,12 +72,46 @@ object ResolvedJarsClasspath {
                 val tomlFile = tomlForNode(projectRoot, node) ?: continue
                 collectFromToml(tomlFile, store, entries, warnings)
             }
+            // Every locked maven artifact contributes to the wire
+            // classpath too — pinned to the exact file the resolver
+            // wrote (relative path under `~/.mezze/cache/maven/`), with
+            // a sha256 re-verification for the same supply-chain guarantee
+            // the `[jars]` handler gives.
+            collectFromLockMaven(lock.maven, entries, warnings)
         }
 
         // Dedup on sha256 — the same jar can be declared by both a user
         // project and one of its deps; we want it on the classpath once.
         val distinct = entries.distinctBy { it.sha256 }
         return Report(distinct, warnings)
+    }
+
+    /** Where Aether wrote the maven-layout cache (`~/.mezze/cache/maven/`). */
+    private fun defaultMavenCacheDir(): File =
+        File(com.mezze.language.cli.MezzeHome.home, "cache/maven")
+
+    private fun collectFromLockMaven(
+        maven: List<LockedMaven>,
+        entries: MutableList<JarEntry>,
+        warnings: MutableList<String>,
+    ) {
+        if (maven.isEmpty()) return
+        val cacheDir = defaultMavenCacheDir()
+        for (m in maven) {
+            val jar = File(cacheDir, m.resolvedFilePath)
+            if (!jar.isFile) {
+                warnings += "[maven].${m.coord}: not in cache at ${jar.absolutePath} — run 'mez sync'"
+                continue
+            }
+            if (System.getenv("MEZZE_SKIP_JAR_VERIFY") != "1") {
+                val actual = sha256Hex(jar)
+                if (!actual.equals(m.sha256, ignoreCase = true)) {
+                    warnings += "[maven].${m.coord}: sha256 mismatch — expected ${m.sha256}, got $actual — skipping (retry 'mez sync --clean')"
+                    continue
+                }
+            }
+            entries += JarEntry(name = m.coord, declaredUrl = m.coord, sha256 = m.sha256, jarPath = jar)
+        }
     }
 
     /** Where extracted jars live (`~/.mezze/store/jars/<sha>/…`). */

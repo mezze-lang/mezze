@@ -92,6 +92,13 @@ object PolyglotValidator {
         // ─── `[jars]` URL shape ─────────────────────────────
         toml.jars.forEach { (name, spec) -> validateJarSpec(name, spec, errors, lineIndex) }
 
+        // ─── `[maven]` coord shape + `[[maven-repo]]` shape ───────
+        // Use `mavenNormalized` — ktoml keeps the quoted-key wrappers as
+        // part of the raw key, and the validator's user-facing error
+        // paths should show the unquoted form.
+        toml.mavenNormalized.forEach { (key, version) -> validateMavenEntry(key, version, errors, lineIndex) }
+        validateMavenRepos(toml.mavenRepos, errors, lineIndex)
+
         // ─── Cross-check: packages declared but no provider on deps ───
         if (providerLanguagesInDeps.isNotEmpty() || dependsOnProviderCheck(toml)) {
             crossCheckProviders(toml, providerLanguagesInDeps, errors, lineIndex)
@@ -179,6 +186,77 @@ object PolyglotValidator {
         // both are valid, and either can appear in a manifest.
         if (!urlPart.startsWith("http://") && !urlPart.startsWith("https://") && !urlPart.startsWith("file:")) {
             errors += Error(loc, "URL scheme must be http/https/file — got: $urlPart")
+        }
+    }
+
+    // ─── `[maven]` "group:artifact" = "version" ────────────────
+
+    /** `group:artifact` — one colon, both halves non-empty. */
+    private val MAVEN_KEY = Regex("[A-Za-z0-9_.\\-]+:[A-Za-z0-9_.\\-]+")
+
+    /**
+     * Validate one `[maven]` entry.
+     *
+     *   - Key must be `group:artifact` (one colon, both non-empty,
+     *     only maven-legal characters).
+     *   - Value must be a non-blank version. We stay lenient on the
+     *     version shape — maven accepts semver, dates, `LATEST`,
+     *     ranges — and let Aether surface a "bad version" at resolve
+     *     time with a proper error path.
+     */
+    private fun validateMavenEntry(
+        key: String,
+        version: String,
+        errors: MutableList<Error>,
+        lineIndex: LineIndex?,
+    ) {
+        val loc = Location("[maven].\"$key\"", lineIndex?.locate("[maven]", "\"$key\"") ?: -1)
+        if (!MAVEN_KEY.matches(key)) {
+            errors += Error(
+                loc,
+                "maven key must be '<group>:<artifact>' — got '$key'",
+            )
+        }
+        if (version.isBlank()) {
+            errors += Error(loc, "maven version must not be blank")
+        }
+    }
+
+    /**
+     * Validate `[[maven-repo]]` entries. `url` must end with `/`
+     * because Aether treats it as a base URI; missing trailing slash
+     * silently breaks resolution for some repos. Reject blank ids so
+     * the dedup key in the sync walker stays sane.
+     */
+    private fun validateMavenRepos(
+        repos: List<MavenRepoConfig>,
+        errors: MutableList<Error>,
+        lineIndex: LineIndex?,
+    ) {
+        for ((i, r) in repos.withIndex()) {
+            val loc = Location("[[maven-repo]][$i]", lineIndex?.locate("[[maven-repo]]", "id") ?: -1)
+            if (r.id.isBlank()) errors += Error(loc, "id must not be blank")
+            if (r.url.isBlank()) {
+                errors += Error(loc, "url must not be blank")
+            } else {
+                if (!r.url.endsWith("/")) {
+                    errors += Error(loc, "url must end with '/' — got '${r.url}'")
+                }
+                if (!r.url.startsWith("http://") && !r.url.startsWith("https://") && !r.url.startsWith("file:")) {
+                    errors += Error(loc, "url scheme must be http/https/file — got '${r.url}'")
+                }
+            }
+        }
+        // Duplicate ids collapse silently at the resolver level — flag
+        // it here so users see the shadowing up front.
+        val seen = mutableSetOf<String>()
+        for ((i, r) in repos.withIndex()) {
+            if (!seen.add(r.id) && r.id.isNotBlank()) {
+                errors += Error(
+                    Location("[[maven-repo]][$i]", lineIndex?.locate("[[maven-repo]]", "id") ?: -1),
+                    "duplicate id '${r.id}' — each maven-repo id must be unique",
+                )
+            }
         }
     }
 

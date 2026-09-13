@@ -90,6 +90,64 @@ data class MezzeToml(
      * `mez sync` verifies each sha256 against `~/.mezze/store/jars/<sha>/`.
      */
     val jars: Map<String, String> = emptyMap(),
+    /**
+     * Universal `[maven]` table — a map of `"group:artifact" = "version"`.
+     * Resolved through Apache Aether into `~/.mezze/cache/maven/`, with
+     * proper transitive-dep handling + Maven Central as the default
+     * remote. Any `[[maven-repo]]` entries below add extra remotes.
+     *
+     *     [maven]
+     *     "org.graalvm.python:python-language" = "25.0.3"
+     *
+     * The key is deliberately `group:artifact` (not the whole coord)
+     * so pinning a version doesn't require rewriting the key. `mez sync`
+     * assembles the actual coord internally as `<key>:<value>`.
+     *
+     * Same as `[jars]`: works in user projects (extra classpath) AND in
+     * provider packages (declaring language jars). New-schema-additive
+     * with `[jars]` — a manifest may declare both during migration.
+     */
+    val maven: Map<String, String> = emptyMap(),
+    /**
+     * Additional maven remotes for `[maven]` resolution beyond Maven
+     * Central. Array-of-tables so multiple can be declared:
+     *
+     *     [[maven-repo]]
+     *     id  = "mezze-lang"
+     *     url = "https://raw.githubusercontent.com/mezze-lang/mezze-maven/main/"
+     *
+     * `url` MUST end with `/` (Aether treats it as a base URI); `id`
+     * must be unique per manifest — the sync walker merges across the
+     * graph and dedupes on `id`.
+     */
+    @SerialName("maven-repo")
+    val mavenRepos: List<MavenRepoConfig> = emptyList(),
+) {
+    /**
+     * `[maven]` keys are always quoted in TOML (they contain `:`, a
+     * non-bare-key character). ktoml keeps the quotes as part of the
+     * key string, so we strip them once at the model boundary — every
+     * consumer sees `group:artifact` in its unquoted form.
+     */
+    val mavenNormalized: Map<String, String>
+        get() = maven.mapKeys { (k, _) -> stripTomlQuotes(k) }
+}
+
+private fun stripTomlQuotes(s: String): String =
+    if (s.length >= 2 && ((s.startsWith("\"") && s.endsWith("\"")) || (s.startsWith("'") && s.endsWith("'")))) {
+        s.substring(1, s.length - 1)
+    } else {
+        s
+    }
+
+/**
+ * One `[[maven-repo]]` entry — an extra remote maven repo the resolver
+ * consults after Central. See [MezzeToml.mavenRepos].
+ */
+@Serializable
+data class MavenRepoConfig(
+    val id: String,
+    val url: String,
 )
 
 /**

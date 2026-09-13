@@ -26,6 +26,8 @@ class SyncCommand {
         githubCacheOverride: File? = null,
         /** Replaces `https://github.com/` when composing clone URLs. Tests point this at a local bare repo. */
         githubBaseUrlOverride: String? = null,
+        /** Where Aether writes the maven cache. Defaults to `<MezzeHome>/cache/maven`. Tests use a temp dir. */
+        mavenCacheOverride: File? = null,
     ): Int {
         // Walk up to the nearest Mezze.toml so `mez sync` works from any
         // subdirectory and .deps/ + Mezze.lock land at the project root (ProjectRoot).
@@ -151,6 +153,21 @@ class SyncCommand {
             // classpath, and a partial install would silently break.
             val lockedJars = fetchJarsForGraph(root, manifest, graph, storeRoot, isClean, failures)
 
+            // ── [maven] resolve phase (Aether) ─────────────
+            //
+            // Every resolved package (and the root) contributes to a
+            // deduped list of maven coords + repos. Aether fetches
+            // each into `~/.mezze/cache/maven/` (isolated from the
+            // user's `~/.m2/`); the returned jars go on the wire
+            // child's classpath alongside `[jars]` entries and lock
+            // as `LockedMaven` rows.
+            //
+            // Version conflicts across the graph follow Aether's
+            // nearest-wins policy; the merge logs a warning when the
+            // same coord's version differs across packages so the
+            // drift is visible in `mez sync` output.
+            val lockedMaven = resolveMavenForGraph(root, manifest, graph, storeRoot, mavenCacheOverride, failures)
+
             // ── [polyglot.<lang>].packages install phase ────
             //
             // For every language the user declared `packages` under
@@ -174,6 +191,7 @@ class SyncCommand {
                 ir = com.mezze.language.store.StoreSerialization.IR_VERSION,
                 packages = graph,
                 jars = lockedJars,
+                maven = lockedMaven,
             )
 
             val lockFile = File(root, "Mezze.lock")
@@ -191,6 +209,11 @@ class SyncCommand {
                     }
                     existing.jars != freshLock.jars -> {
                         println("${Glyphs.ERROR} --locked: Mezze.lock is out of date with the resolved [jars] set.")
+                        println("   Run 'mez sync' (without --locked) to update it.")
+                        lockOutOfDate = true
+                    }
+                    existing.maven != freshLock.maven -> {
+                        println("${Glyphs.ERROR} --locked: Mezze.lock is out of date with the resolved [maven] set.")
                         println("   Run 'mez sync' (without --locked) to update it.")
                         lockOutOfDate = true
                     }
@@ -658,6 +681,115 @@ class SyncCommand {
             .distinctBy { it.sha256 }
             .sortedBy { it.sha256 }
             .map { t -> LockedJar(name = t.name, url = t.spec, sha256 = t.sha256, declaredBy = t.declaredBy) }
+    }
+
+    /**
+     * Walk the resolved graph (root + every dep) for `[maven]` +
+     * `[[maven-repo]]` entries, resolve them all through Aether into
+     * `~/.mezze/cache/maven/`, and return the deduped list of locked
+     * maven artifacts for the Mezze.lock snapshot.
+     *
+     * Merge rules:
+     *   - Coords: same `group:artifact` under different versions ⇒
+     *     Aether picks nearest-wins on the union; a warning line is
+     *     printed so the user sees the collision.
+     *   - Repos: default `central` is always first; user + package
+     *     entries append (Central-shadowing is a footgun, so we
+     *     forbid an `id = "central"` collision). Deduped on `id` in
+     *     graph order — first-declarer wins.
+     *
+     * A resolve failure surfaces via [failures] so `mez sync` exits
+     * non-zero and CI catches the drift. Partial success is
+     * intentionally not supported — a missing jar breaks the wire
+     * child later, and we want the error at sync time.
+     */
+    private fun resolveMavenForGraph(
+        projectRoot: File,
+        rootToml: MezzeToml,
+        graph: List<LockedNode>,
+        storeRoot: File,
+        mavenCacheOverride: File?,
+        failures: MutableList<String>,
+    ): List<LockedMaven> {
+        // `group:artifact` -> (version, declaredBy). LinkedHashMap for
+        // stable insertion order so a re-sync produces the same lock.
+        data class CoordEntry(val version: String, val declaredBy: String)
+        val coords = LinkedHashMap<String, CoordEntry>()
+        val repos = LinkedHashMap<String, MavenResolver.MavenRemote>() // id -> remote
+
+        fun addFromToml(toml: MezzeToml, declaredBy: String) {
+            for ((key, version) in toml.mavenNormalized) {
+                val prev = coords[key]
+                if (prev == null) {
+                    coords[key] = CoordEntry(version, declaredBy)
+                } else if (prev.version != version) {
+                    // Version collision — let Aether's nearest-wins
+                    // decide, but log it so the drift is visible.
+                    println("  ${Glyphs.WARN} [maven].$key: declared with both ${prev.version} (${prev.declaredBy}) and $version ($declaredBy) — Aether will pick one")
+                }
+            }
+            for (r in toml.mavenRepos) {
+                if (r.id == "central") {
+                    println("  ${Glyphs.WARN} [[maven-repo]] id='central' from $declaredBy shadows Maven Central — skipping")
+                    continue
+                }
+                if (!repos.containsKey(r.id)) {
+                    repos[r.id] = MavenResolver.MavenRemote(id = r.id, url = r.url)
+                }
+            }
+        }
+
+        addFromToml(rootToml, rootToml.`package`.name)
+        for (node in graph) {
+            if (node.source == "root") continue
+            val depToml = tomlForNode(projectRoot, node, storeRoot) ?: continue
+            addFromToml(depToml, node.name)
+        }
+
+        if (coords.isEmpty()) return emptyList()
+
+        // Cache is under MezzeHome ("~/.mezze/cache/maven/"), NOT
+        // MEZZE_STORE_DIR — the store is for content-addressed dep
+        // archives keyed on sha256; maven artifacts live in a
+        // conventional maven-layout dir shared across projects. Tests
+        // pass `mavenCacheOverride` to keep runs hermetic.
+        val cacheDir = (mavenCacheOverride ?: File(com.mezze.language.cli.MezzeHome.home, "cache/maven")).apply { mkdirs() }
+
+        val coordList = coords.entries.map { (ga, entry) -> "$ga:${entry.version}" }
+        val declaredByCoord = coords.entries.associate { (ga, entry) -> "$ga:${entry.version}" to entry.declaredBy }
+
+        println("  ${Glyphs.DOWNLOAD} resolving ${coordList.size} maven coord(s) via Aether → ${cacheDir.absolutePath}")
+        val resolved = try {
+            MavenResolver.resolve(coordList, cacheDir.toPath(), repos.values.toList())
+        } catch (e: MavenResolver.MavenResolverException) {
+            println("  ${Glyphs.ERROR} ${e.message}")
+            failures.add("[maven]")
+            return emptyList()
+        }
+
+        // Compute the `resolved_file_path` relative to the cache dir
+        // (portable across machines: maven writes the same layout
+        // everywhere). `transitive_from` names the direct-declared
+        // coord that pulled each artifact in — self-reference when the
+        // coord was declared directly.
+        val directCoords = coordList.toSet()
+        val cacheAbsolute = cacheDir.absolutePath
+        return resolved.map { r ->
+            val abs = r.file.toFile().absolutePath
+            val rel = if (abs.startsWith(cacheAbsolute + File.separator)) {
+                abs.substring(cacheAbsolute.length + 1)
+            } else {
+                abs
+            }
+            val direct = if (r.coord in directCoords) r.coord else directCoords.firstOrNull() ?: r.coord
+            LockedMaven(
+                coord = r.coord,
+                resolvedFilePath = rel,
+                sha256 = r.sha256,
+                transitiveFrom = direct,
+                declaredBy = declaredByCoord[r.coord] ?: declaredByCoord[direct] ?: rootToml.`package`.name,
+            )
+        }.distinctBy { it.coord }.sortedBy { it.coord }
     }
 
     /**

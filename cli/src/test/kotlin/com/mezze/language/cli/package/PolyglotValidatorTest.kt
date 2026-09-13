@@ -230,6 +230,104 @@ class PolyglotValidatorTest {
         assertEquals(7, err.location.line)
     }
 
+    // ─── `[maven]` + `[[maven-repo]]` ─────────
+
+    @Test
+    fun `well-formed maven table validates`() {
+        val text = """
+            [package]
+            name = "demo"
+            version = "0.1.0"
+
+            [maven]
+            "org.graalvm.python:python-language" = "25.0.3"
+
+            [[maven-repo]]
+            id  = "mezze-lang"
+            url = "https://raw.githubusercontent.com/mezze-lang/mezze-maven/main/"
+        """.trimIndent()
+        val report = PolyglotValidator.validate(parse(text), rawText = text)
+        assertTrue(report.ok, "expected no errors, got: ${report.renderAll()}")
+    }
+
+    @Test
+    fun `maven key without colon is rejected`() {
+        val text = """
+            [package]
+            name = "demo"
+            version = "0.1.0"
+
+            [maven]
+            "org.graalvm.python-language" = "25.0.3"
+        """.trimIndent()
+        val report = PolyglotValidator.validate(parse(text), rawText = text)
+        assertFalse(report.ok)
+        assertTrue(
+            report.errors.any { it.message.contains("group>:<artifact") },
+            "expected group:artifact hint, got: ${report.renderAll()}",
+        )
+    }
+
+    @Test
+    fun `maven version must not be blank`() {
+        val text = """
+            [package]
+            name = "demo"
+            version = "0.1.0"
+
+            [maven]
+            "org.example:foo" = ""
+        """.trimIndent()
+        val report = PolyglotValidator.validate(parse(text), rawText = text)
+        assertFalse(report.ok)
+        assertTrue(
+            report.errors.any { it.message.contains("blank") },
+            "expected blank-version error, got: ${report.renderAll()}",
+        )
+    }
+
+    @Test
+    fun `maven-repo url must end with a slash`() {
+        val text = """
+            [package]
+            name = "demo"
+            version = "0.1.0"
+
+            [[maven-repo]]
+            id  = "mezze-lang"
+            url = "https://raw.githubusercontent.com/mezze-lang/mezze-maven/main"
+        """.trimIndent()
+        val report = PolyglotValidator.validate(parse(text), rawText = text)
+        assertFalse(report.ok)
+        assertTrue(
+            report.errors.any { it.message.contains("must end with '/'") },
+            "expected trailing-slash error, got: ${report.renderAll()}",
+        )
+    }
+
+    @Test
+    fun `maven-repo duplicate ids are flagged`() {
+        val text = """
+            [package]
+            name = "demo"
+            version = "0.1.0"
+
+            [[maven-repo]]
+            id  = "mezze-lang"
+            url = "https://a.example.com/"
+
+            [[maven-repo]]
+            id  = "mezze-lang"
+            url = "https://b.example.com/"
+        """.trimIndent()
+        val report = PolyglotValidator.validate(parse(text), rawText = text)
+        assertFalse(report.ok)
+        assertTrue(
+            report.errors.any { it.message.contains("duplicate id") },
+            "expected duplicate-id error, got: ${report.renderAll()}",
+        )
+    }
+
     // ─── accumulation ────────────────────────
 
     @Test
