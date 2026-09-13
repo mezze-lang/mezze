@@ -34,6 +34,32 @@ data class MezzeLock(
      */
     val ir: Int = 0,
     val packages: List<LockedNode> = emptyList(),
+    /**
+     * Every `[jars]` entry named on the resolved graph, deduped on
+     * `sha256` and stable-sorted. `mez sync` fetches each into
+     * `~/.mezze/store/jars/<sha256>/`; `--locked` verification treats a
+     * mismatch here (a jar added / removed / re-hashed) as drift, the
+     * same way it treats package graph drift.
+     */
+    val jars: List<LockedJar> = emptyList(),
+)
+
+/**
+ * One `[jars]` table entry as pinned in the lock. The `name` is the
+ * key the entry had in its source manifest (possibly under multiple
+ * packages — the first-declaring one wins for the label); `declaredBy`
+ * is the package that first claimed this sha, kept as an informational
+ * back-pointer to the origin.
+ */
+@Serializable
+data class LockedJar(
+    val name: String,
+    /** Full spec verbatim (`<url>#sha256:<hex>`). */
+    val url: String,
+    /** sha256 hex (64 chars) — the store key. */
+    val sha256: String,
+    /** Package name that first declared this jar in the resolved graph. */
+    val declaredBy: String,
 )
 
 @Serializable

@@ -140,11 +140,23 @@ class SyncCommand {
             val rootEdges = (manifest.pathDependencies.keys + manifest.dependencies.keys + manifest.devDependencies.keys).sorted()
             val rootNode = LockedNode(manifest.`package`.name, manifest.`package`.version, source = "root", dependencies = rootEdges)
             val graph = (listOf(rootNode) + nodes).distinctBy { it.name }.sortedBy { it.name }
+
+            // ── [jars] fetch phase ──────────────────────────
+            //
+            // Every resolved package (and the root) contributes to a
+            // single deduped list of jars. Fetched in parallel (per-sha
+            // lock; diamonds fetch once) and placed at
+            // `<store>/jars/<sha256>/<basename>.jar`. A failure here is
+            // a hard failure — the wire child needs those jars on its
+            // classpath, and a partial install would silently break.
+            val lockedJars = fetchJarsForGraph(root, manifest, graph, storeRoot, isClean, failures)
+
             val freshLock = MezzeLock(
                 version = 2,
                 root = manifest.`package`.name,
                 ir = com.mezze.language.store.StoreSerialization.IR_VERSION,
                 packages = graph,
+                jars = lockedJars,
             )
 
             val lockFile = File(root, "Mezze.lock")
@@ -157,6 +169,11 @@ class SyncCommand {
                     }
                     existing.packages != freshLock.packages -> {
                         println("${Glyphs.ERROR} --locked: Mezze.lock is out of date with the resolved graph.")
+                        println("   Run 'mez sync' (without --locked) to update it.")
+                        lockOutOfDate = true
+                    }
+                    existing.jars != freshLock.jars -> {
+                        println("${Glyphs.ERROR} --locked: Mezze.lock is out of date with the resolved [jars] set.")
                         println("   Run 'mez sync' (without --locked) to update it.")
                         lockOutOfDate = true
                     }
@@ -539,6 +556,123 @@ class SyncCommand {
         } finally {
             tmp.deleteRecursively()
         }
+    }
+
+    /**
+     * Walk the resolved graph (root + every node) for `[jars]` entries,
+     * fetch each unique sha via [JarFetcher], and return the deduped
+     * list of locked jars for the Mezze.lock snapshot. Fetch failures
+     * push into [failures] so the top-level sync exits non-zero and CI
+     * catches the drift.
+     *
+     * A jar declared under different names in different packages
+     * collapses to one lock entry keyed on sha256; the winning `name`
+     * / `declaredBy` come from whichever tomlkey the walk hit first.
+     */
+    private fun fetchJarsForGraph(
+        projectRoot: File,
+        rootToml: MezzeToml,
+        graph: List<LockedNode>,
+        storeRoot: File,
+        isClean: Boolean,
+        failures: MutableList<String>,
+    ): List<LockedJar> {
+        // (sha256 → first-seen task) collected in stable graph order so
+        // the same input graph always produces the same lock output —
+        // clean diffs.
+        val tasks = LinkedHashMap<String, JarFetcher.Task>()
+
+        fun addFromToml(toml: MezzeToml, declaredBy: String) {
+            for ((name, spec) in toml.jars) {
+                val sha = spec.substringAfter("#sha256:", missingDelimiterValue = "").lowercase()
+                if (sha.length != 64 || !sha.matches(Regex("[0-9a-f]{64}"))) {
+                    // The validator already caught malformed specs; this
+                    // is defence in depth (a corrupt dep manifest that
+                    // slipped through validation shouldn't crash sync).
+                    failures.add("[jars].$name")
+                    println("  ${Glyphs.ERROR} [jars].$name: bad #sha256 in '$spec'")
+                    continue
+                }
+                val url = spec.substringBefore("#sha256:")
+                if (tasks.putIfAbsent(sha, JarFetcher.Task(name, spec, url, sha, declaredBy)) != null) {
+                    // Duplicate sha under a different name — diamond
+                    // dedup handles it; keep the first winner's label
+                    // (stable across syncs).
+                }
+            }
+        }
+
+        // Root project first, then every non-root node in graph order.
+        addFromToml(rootToml, rootToml.`package`.name)
+        for (node in graph) {
+            if (node.source == "root") continue
+            val depToml = tomlForNode(projectRoot, node, storeRoot) ?: continue
+            addFromToml(depToml, node.name)
+        }
+
+        if (tasks.isEmpty()) return emptyList()
+
+        val fetcher = JarFetcher(storeRoot)
+        val outcomes = fetcher.fetchAll(tasks.values.toList(), isClean = isClean)
+
+        // Report + fail-collect. Group by sha so a single failed sha
+        // (declared under several names) surfaces as one line, not N.
+        val bySha = outcomes.groupBy { when (it) { is JarFetcher.Outcome.Ok -> it.task.sha256; is JarFetcher.Outcome.Failed -> it.task.sha256 } }
+        var newlyFetched = 0
+        for ((_, group) in bySha) {
+            val first = group.first()
+            when (first) {
+                is JarFetcher.Outcome.Ok -> if (!first.cached) newlyFetched++
+                is JarFetcher.Outcome.Failed -> {
+                    val t = first.task
+                    println("  ${Glyphs.ERROR} [jars].${t.name}: ${first.reason}")
+                    failures.add("[jars].${t.name}")
+                }
+            }
+        }
+        if (newlyFetched > 0) {
+            println("  ${Glyphs.DOWNLOAD} fetched $newlyFetched jar${if (newlyFetched == 1) "" else "s"} into $storeRoot/jars/")
+        }
+
+        // Only the successful outcomes make it into the lock — a jar
+        // that failed to fetch is not "pinned" (the drift check would
+        // otherwise mask the failure).
+        return outcomes.mapNotNull { o -> (o as? JarFetcher.Outcome.Ok)?.task }
+            .distinctBy { it.sha256 }
+            .sortedBy { it.sha256 }
+            .map { t -> LockedJar(name = t.name, url = t.spec, sha256 = t.sha256, declaredBy = t.declaredBy) }
+    }
+
+    /**
+     * Locate the on-disk `Mezze.toml` for a resolved graph node. Path
+     * deps land at `node.path`; content-addressed deps (registry /
+     * github) live under `<storeRoot>/<sha>/`. Github deps use the
+     * commit sha the ref resolved to; that value's also what
+     * [ResolvedJarsClasspath] uses, so the two views stay in sync.
+     */
+    private fun tomlForNode(projectRoot: File, node: LockedNode, storeRoot: File): MezzeToml? {
+        val tomlFile: File? = when (node.source) {
+            "path" -> node.path?.let { File(File(it), "Mezze.toml") }?.takeIf { it.isFile }
+            "registry" -> {
+                val checksum = node.checksum?.removePrefix("sha256:") ?: return null
+                File(storeRoot, "$checksum/Mezze.toml").takeIf { it.isFile }
+            }
+            "github" -> {
+                // ResolvedJarsClasspath keys github store entries on the
+                // resolved commit sha, so re-encoding that sha via
+                // `sha256(commit)` here would find a stale path. The
+                // GithubDepFetcher writes the store dir under
+                // `sha256(commit)` — the `checksum` field on the
+                // LockedNode already carries it.
+                val checksum = node.checksum?.removePrefix("sha256:")
+                if (checksum != null) File(storeRoot, "$checksum/Mezze.toml").takeIf { it.isFile }
+                else node.ref?.let { r ->
+                    File(projectRoot, ".deps/mezze/${node.name}-$r/Mezze.toml").takeIf { it.isFile }
+                }
+            }
+            else -> null
+        }
+        return tomlFile?.let { readToml(it) }
     }
 
     /**

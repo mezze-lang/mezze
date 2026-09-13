@@ -174,7 +174,10 @@ object PolyglotValidator {
             errors += Error(loc, "sha256 must be 64 hex chars — got ${hash.length} chars")
         }
         val urlPart = spec.substringBefore("#sha256:")
-        if (!urlPart.startsWith("http://") && !urlPart.startsWith("https://") && !urlPart.startsWith("file://")) {
+        // `file:` covers both the two-slash absolute form (`file:///tmp/…`) and
+        // the single-slash form JDK's `File.toURI()` emits (`file:/tmp/…`) —
+        // both are valid, and either can appear in a manifest.
+        if (!urlPart.startsWith("http://") && !urlPart.startsWith("https://") && !urlPart.startsWith("file:")) {
             errors += Error(loc, "URL scheme must be http/https/file — got: $urlPart")
         }
     }
