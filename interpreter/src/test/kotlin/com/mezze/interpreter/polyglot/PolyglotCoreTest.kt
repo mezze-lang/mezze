@@ -420,4 +420,43 @@ class PolyglotCoreTest {
         val lib = com.oracle.truffle.api.interop.InteropLibrary.getUncached(got.delegate)
         assertEquals(99L, lib.asLong(got.delegate))
     }
+
+    // ==================== Chained let-bound match: static-dispatch bug ====================
+    //
+    // Regression: same-named inherent methods across the four `<Lang>Foreign`
+    // newtypes (they all wrap the same MezzeForeign Java class) crashed at
+    // runtime with `DictFallback[invoke_member]: unsupported unary type
+    // MezzeForeign` when the solver left an intermediate match result's type
+    // as a bare VarType. The receiver dispatch fell through to runtime
+    // dict-passing which cannot disambiguate the four candidates on shared
+    // Java class alone. Fixed in TypedASTCompiler by structurally recovering
+    // the concrete receiver type at compile time — pattern bindings off a
+    // concrete scrutinee combined with the polyglot Result-preservation
+    // shape (Ok arm threads receiver via `it`, Err arm reconstructs Err) —
+    // and routing static dispatch on the recovered type.
+
+    @Test
+    fun `chained let-bound match with inherent method dispatches statically`() {
+        val result = eval(
+            """
+            use std::polyglot::jvm as jvm
+            use std::polyglot::jvm::{ JvmForeign }
+            use std::polyglot::core::{ InteropError }
+            let uuid_class = jvm::class { name = "java.util.UUID" }
+            let uuid_val = match uuid_class is
+              Ok  { val = c } -> c.static { name = "randomUUID", args = [] }
+              Err { error }   -> Err { error = error }
+            match uuid_val is
+              Ok  { val = u } -> u.invoke_member { method = "toString", args = [] }
+              Err { error }   -> Err { error = error }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        val got = v.getPayloadFieldByName("val") as MezzeForeign
+        val lib = com.oracle.truffle.api.interop.InteropLibrary.getUncached(got.delegate)
+        assertTrue(lib.isString(got.delegate), "expected UUID.toString() to yield a String Foreign")
+        val s = lib.asString(got.delegate)
+        // UUIDs are 36 chars: 8-4-4-4-12
+        assertEquals(36, s.length, "UUID string should be 36 chars, got '$s'")
+    }
 }

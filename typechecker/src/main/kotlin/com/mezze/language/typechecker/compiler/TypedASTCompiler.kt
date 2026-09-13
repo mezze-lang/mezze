@@ -127,6 +127,31 @@ class TypedASTCompiler(
      *  emit the scalar calling convention. */
     private var currentFunctionHash: Hash? = null
 
+    /**
+     * Structurally-derived concrete types for locals in the CURRENT function scope.
+     *
+     * Backs the fix for #polyglot-newtype-dispatch: per-language `Foreign` newtypes
+     * (`JvmForeign`, `PyForeign`, ...) all newtype over the same `MezzeForeign` Java
+     * class, and expose same-named inherent methods (`.invoke_member`, `.get_member`).
+     * When the solver leaves the receiver's `TypedVar.type` as a bare VarType
+     * (destructuring off a let whose RHS type never fully unified), the emit path
+     * used to fall through to runtime dict-dispatch on the shared `MezzeForeign`
+     * class, which can't disambiguate between the four candidates → DictFallback
+     * crash at runtime. Static dispatch is the ONLY sound path for these methods.
+     *
+     * This map is populated whenever the compiler can structurally derive a concrete
+     * receiver type from AST context — a let-binding's RHS shape, a match pattern's
+     * scrutinee, etc. (see `deriveConcreteType`). At field-access dispatch, when
+     * `receiverType is VarType` and `fn.record` is a local, we consult this map;
+     * a concrete override routes the call to static dispatch (line ~1747), never
+     * to the dict-passing branch. Empty entries mean "no override" — behavior for
+     * receivers the solver already resolved is unchanged.
+     *
+     * Keyed by SLOT INDEX (not name) so nested scopes with shadowed names don't
+     * collide. Saved/restored by compileBlock/compileMatch just like localsByName.
+     */
+    private val slotConcreteTypes = mutableMapOf<Int, MezzeType>()
+
     /** Pre-populated at compile() start: hash → callee's paramNames (regular + dict),
      *  in callee declaration order. Used by emitCallDirect to decide scalar ABI for
      *  cross-function direct calls (extends self-recursive coverage from #61).
@@ -1692,6 +1717,26 @@ class TypedASTCompiler(
                     ?: resolveVariantReceiverType(fn.record, rawReceiverType)
                     ?: rawReceiverType)
                     .let { r -> specBoundReceiverType(r) ?: r }
+                    .let { r ->
+                        // Polyglot-newtype-dispatch recovery (see slotConcreteTypes
+                        // field comment). Only fire when: (a) receiver stayed a bare
+                        // VarType through raw + variant-recovery + spec-bound stages,
+                        // (b) `fn.record` is a local with an override, AND (c) the
+                        // override actually gives us an unambiguous ability op for
+                        // this method name at this call site. Guard (c) is what
+                        // keeps this from over-firing on codec paths (from_json /
+                        // map / get_or), where a pattern-binding walker populates
+                        // slotConcreteTypes with a legitimate binding type that
+                        // happens NOT to be the receiver at some later dispatch.
+                        if (r is VarType && fn.record is TypedVar &&
+                            (fn.record as TypedVar).binding is BindingRef.Local) {
+                            val slot = localsByName[(fn.record as TypedVar).name]
+                            val override = slot?.let { slotConcreteTypes[it] }
+                            if (override != null &&
+                                tryResolveAbilityOp(methodName, override, expr.arg) != null) override
+                            else r
+                        } else r
+                    }
 
             // Try inline ops for primitives
             val inlineOp = tryInlineOp(methodName, receiverType)
@@ -2986,6 +3031,203 @@ class TypedASTCompiler(
         return (bindings[name] ?: bindings["'$name"])?.takeIf { it !is VarType && !containsVarType(it) }
     }
 
+    /**
+     * Structural walk to derive a CONCRETE type for [expr] when the solver left
+     * `expr.type` as a bare VarType. Only returns a concrete type; every path that
+     * would otherwise yield a VarType (or contain one) returns null so the caller
+     * knows to fall back to the annotated type.
+     *
+     * Backs the `slotConcreteTypes` map (see field comment). The receiver's static
+     * type for same-named-inherent-method dispatch across nominal newtypes MUST be
+     * concrete at compile time — runtime dispatch keys on Java class, which is the
+     * shared `MezzeForeign` wrapper for every `<Lang>Foreign` newtype, so it can't
+     * disambiguate. This helper is the "walk the type environment" step: when
+     * `expr.type` is a fresh VarType (destructuring off a poly let, an unsolved
+     * match branch, ...) we look at what the expression STRUCTURALLY has to be.
+     *
+     * Handled shapes:
+     * - `TypedCall` on a `ByHash` callee (or a `TypedFieldAccess` callee)
+     *   whose FunctionType return is already concrete. The Ok arm of the
+     *   polyglot chain lands here for the inner nested-match case.
+     * - `TypedMatch` — recurse on arms; every arm's derived type must agree.
+     *   When arm-derivation doesn't converge but the scrutinee is a concrete
+     *   `Result A B` and the match shape is "Ok arm threads `val` as `it`,
+     *   Err arm reconstructs Err" (see [matchPreservesResultShape]), fall
+     *   back to the scrutinee's Result type. This is the narrow heuristic
+     *   that lets `let uuid_val = match uuid_class is …` recover
+     *   `Result JvmForeign InteropError` for the outer let.
+     * - `TypedVar` whose slot has an override in `slotConcreteTypes` —
+     *   recover through the local scope. Enables the chain of
+     *   `let uuid_val = match …` → `match uuid_val is Ok { val = u } → …`.
+     *
+     * Any shape not on this list (or one containing a VarType) returns null.
+     * The caller treats null as "no override" — original receiverType stays.
+     */
+    private fun deriveConcreteType(expr: TypedExpr): MezzeType? = when (expr) {
+        is TypedCall -> {
+            val fn = expr.function
+            val calleeReturn = when {
+                fn is TypedVar && fn.binding is BindingRef.ByHash ->
+                    (fn.type as? FunctionType)?.returnType
+                fn is TypedFieldAccess ->
+                    (fn.type as? FunctionType)?.returnType
+                        ?: (expr.type as? FunctionType)?.returnType
+                else -> null
+            }
+            calleeReturn?.takeIf { it !is VarType && !containsVarTypeDeep(it) }
+        }
+        is TypedMatch -> run {
+            val scrutineeConcrete: MezzeType? = run {
+                val stated = expr.scrutinee.type
+                if (stated !is VarType && !containsVarTypeDeep(stated)) stated
+                else deriveConcreteType(expr.scrutinee)
+            }
+            var chosen: MezzeType? = null
+            var mismatch = false
+            for (case in expr.cases) {
+                val armType = deriveConcreteType(case.body) ?: continue
+                if (chosen == null) chosen = armType
+                else if (chosen != armType) { mismatch = true; break }
+            }
+            if (mismatch) null
+            else chosen ?: run {
+                // Result-preservation heuristic (see slotConcreteTypes field
+                // comment) — narrow polyglot-chain shape: Ok arm threads the
+                // pattern-bound val as `it`, Err arm reconstructs Err.
+                if (scrutineeConcrete is TypeApplication &&
+                    scrutineeConcrete.constructor == "Result" &&
+                    matchPreservesResultShape(expr)) scrutineeConcrete
+                else null
+            }
+        }
+        is TypedVar -> {
+            val binding = expr.binding
+            if (binding is BindingRef.Local) {
+                localsByName[expr.name]?.let { slotConcreteTypes[it] }
+            } else null
+        }
+        else -> null
+    }
+
+    /**
+     * Result-preservation shape detector for the polyglot chain (see the
+     * heuristic call site in `deriveConcreteType`'s TypedMatch handler).
+     *
+     * Returns true only for two-arm matches with:
+     *  - `Ok { val = <v> } -> <call> { it = <v>, ... }` — the Ok arm's body
+     *    is a call that threads the pattern-bound val through as the ability
+     *    method's `it` receiver.
+     *  - `Err { error = <e> } -> Err { error = <e> }` — the Err arm's body
+     *    reconstructs Err with the same `error` binding.
+     *
+     * Any other shape returns false — an Ok arm that re-wraps
+     * (`Ok { val = f(c) }`), a rebranded error, or a scalar body all fall
+     * through to null derivation, preserving pre-fix behaviour for every
+     * code path that isn't this specific idiom.
+     */
+    private fun matchPreservesResultShape(expr: TypedMatch): Boolean {
+        if (expr.cases.size != 2) return false
+        var sawOk = false
+        var sawErr = false
+        for (case in expr.cases) {
+            val pat = case.patterns.firstOrNull() as? TypedVariantPattern ?: return false
+            val payload = pat.payload as? TypedRecordPattern ?: return false
+            when (pat.tag) {
+                "Ok" -> {
+                    val valBinding = payload.fields.firstOrNull { it.name == "val" }
+                        ?.let { it.pattern as? TypedVarPattern }?.name ?: return false
+                    val body = case.body as? TypedCall ?: return false
+                    val argRec = body.arg as? TypedRecord ?: return false
+                    val itField = argRec.entries.filterIsInstance<TypedRecordEntry.Field>()
+                        .firstOrNull { it.name == Keywords.IT } ?: return false
+                    val itVar = itField.value as? TypedVar ?: return false
+                    if (itVar.name != valBinding) return false
+                    sawOk = true
+                }
+                "Err" -> {
+                    // `Err { error }` shorthand: TypedFieldPattern.pattern is
+                    // null and the field binds under its own name. `Err {
+                    // error = X }` explicit: field.pattern is a TypedVarPattern
+                    // named X.
+                    val errorFp = payload.fields.firstOrNull { it.name == "error" } ?: return false
+                    val errorBinding = when (val sub = errorFp.pattern) {
+                        null -> errorFp.name
+                        is TypedVarPattern -> sub.name
+                        else -> return false
+                    }
+                    val body = case.body as? TypedVariantConstruct ?: return false
+                    if (body.tag != "Err") return false
+                    val bodyRec = body.payload as? TypedRecord ?: return false
+                    val errorEntry = bodyRec.entries.filterIsInstance<TypedRecordEntry.Field>()
+                        .firstOrNull { it.name == "error" } ?: return false
+                    val errorVar = errorEntry.value as? TypedVar ?: return false
+                    if (errorVar.name != errorBinding) return false
+                    sawErr = true
+                }
+                else -> return false
+            }
+        }
+        return sawOk && sawErr
+    }
+
+    /**
+     * Read pattern binding types structurally off a CONCRETE scrutinee type.
+     * Mirrors `TypedAstBuilder.patternBindingTypes` (which is emit-side, on the
+     * ParsedPattern; this one is compile-side on the TypedPattern) — used to
+     * populate `slotConcreteTypes` for match-case pattern bindings when we've
+     * recovered a concrete scrutinee type via `deriveConcreteType`. Handles the
+     * shapes the polyglot dispatch bug lives in: `Ok { val = u }` off a
+     * `Result JvmForeign InteropError` binds `u : JvmForeign`.
+     *
+     * Only records entries with concrete types; VarType payloads (an unsolved
+     * generic scrutinee) contribute nothing.
+     */
+    private fun readPatternBindings(pattern: TypedPattern, scrutinee: MezzeType, out: MutableMap<String, MezzeType>) {
+        when (pattern) {
+            is TypedVarPattern -> {
+                if (scrutinee !is VarType && !containsVarTypeDeep(scrutinee)) out[pattern.name] = scrutinee
+            }
+            is TypedVariantPattern -> {
+                val payloadType: MezzeType? = when (scrutinee) {
+                    is VariantType -> scrutinee.constructors[pattern.tag]
+                    is TypeApplication -> {
+                        // Well-known variants (Result/Option) — pull the constructor's
+                        // payload shape from the type args. Only handled shapes that
+                        // are relevant to the current bug are covered; anything else
+                        // returns null and the pattern binding is left unresolved (safe:
+                        // dispatch just doesn't get an override).
+                        when (scrutinee.constructor) {
+                            "Result" -> when (pattern.tag) {
+                                "Ok"  -> scrutinee.args.getOrNull(0)?.let { MezzeType.RecordType(linkedMapOf("val" to it)) }
+                                "Err" -> scrutinee.args.getOrNull(1)?.let { MezzeType.RecordType(linkedMapOf("error" to it)) }
+                                else -> null
+                            }
+                            "Option" -> when (pattern.tag) {
+                                "Some" -> scrutinee.args.getOrNull(0)?.let { MezzeType.RecordType(linkedMapOf("val" to it)) }
+                                else -> null
+                            }
+                            else -> null
+                        }
+                    }
+                    else -> null
+                }
+                if (payloadType != null && pattern.payload != null) {
+                    readPatternBindings(pattern.payload as TypedPattern, payloadType, out)
+                }
+            }
+            is TypedRecordPattern -> {
+                val fields = (scrutinee as? MezzeType.RecordType)?.fields ?: return
+                for (fp in pattern.fields) {
+                    val fieldType = fields[fp.name] ?: continue
+                    val sub = fp.pattern
+                    if (sub != null) readPatternBindings(sub, fieldType, out)
+                    else if (fieldType !is VarType && !containsVarTypeDeep(fieldType)) out[fp.name] = fieldType
+                }
+            }
+            else -> {}
+        }
+    }
+
     /** Element-first expansion: for each container type, its element precedes it, so
      *  dict resolution prefers the ELEMENT impl over the container impl. */
     private fun elementFirst(types: List<MezzeType>): List<MezzeType> = types.flatMap { t ->
@@ -3151,11 +3393,19 @@ class TypedASTCompiler(
         val savedLocalMappings = localsByName.toMap()
         val savedRecursiveLets = recursiveLetLambdas.toMap()
         val savedFnAliases = localFnAliases.toMap()
+        val savedSlotConcreteTypes = slotConcreteTypes.toMap()
         val stmts = expr.statements.map { stmt ->
             when (stmt) {
                 is TypedStatement.Let -> {
                     val slot = forceAllocLocal(stmt.name)
                     val stmtValue = stmt.value
+                    // Recover a concrete type structurally when the solver left
+                    // `stmt.type` as a bare VarType (do-block let over an
+                    // under-solved match, etc.). See `slotConcreteTypes`. Only
+                    // populate when the annotated type isn't already concrete.
+                    if (stmt.type is VarType || containsVarTypeDeep(stmt.type)) {
+                        deriveConcreteType(stmtValue)?.let { slotConcreteTypes[slot] = it }
+                    }
 
                     // RECURSIVE LET REGISTRATION: If this is a recursive let-bound lambda,
                     // pre-compute its hash and register so compileVar can resolve self-references
@@ -3222,11 +3472,24 @@ class TypedASTCompiler(
         recursiveLetLambdas.putAll(savedRecursiveLets)
         localFnAliases.clear()
         localFnAliases.putAll(savedFnAliases)
+        slotConcreteTypes.clear()
+        slotConcreteTypes.putAll(savedSlotConcreteTypes)
         return BlockIR(stmts, resultIR, src)
     }
 
     private fun compileMatch(expr: TypedMatch, src: SourceInfo): NodeIR {
         val scrutineeIR = compileExpr(expr.scrutinee)
+        // Derive a concrete scrutinee type from AST context when the solver left
+        // `expr.scrutinee.type` as a bare VarType. This is the "walk the type
+        // environment" step for polyglot newtype dispatch: `match uuid_val is`
+        // where `uuid_val`'s let-binding RHS was `match ... -> c.static { ... }`.
+        // `slotConcreteTypes` was populated in compileBlock; deriveConcreteType
+        // walks through TypedVar → slot → RHS.
+        val concreteScrutineeType: MezzeType? = run {
+            val stated = expr.scrutinee.type
+            if (stated !is VarType && !containsVarTypeDeep(stated)) return@run stated
+            deriveConcreteType(expr.scrutinee)
+        }
         // Use flatMap to expand or-patterns (cases with multiple patterns) into
         // separate CaseIR entries sharing the same body. This way `[] | [_] -> True`
         // becomes two CaseIR entries: one for `[]` and one for `[_]`.
@@ -3237,12 +3500,29 @@ class TypedASTCompiler(
             patternsToEmit.map { pat ->
                 // Push a new scope for this match case's bindings
                 val caseScope = mutableMapOf<String, Int>()
+                val savedSlotConcreteTypesInCase = slotConcreteTypes.toMap()
 
                 // Allocate slots for pattern bindings (always fresh)
                 val bindings = case.bindings.map { b ->
                     val slot = forceAllocLocal(b.name)
                     caseScope[b.name] = slot
                     BindingIR(slot, typeToSlotKind(b.type))
+                }
+
+                // Structurally derive concrete types for pattern bindings whose
+                // declared PatternBinding.type is a VarType (solver left them
+                // unresolved — see slotConcreteTypes field comment). Reads the
+                // concrete scrutinee type recovered above against the pattern
+                // shape, so `Ok { val = u }` off `Result JvmForeign _` binds
+                // `u : JvmForeign` even when case.bindings[i].type is `'u`.
+                if (concreteScrutineeType != null && pat != null) {
+                    val derived = mutableMapOf<String, MezzeType>()
+                    readPatternBindings(pat, concreteScrutineeType, derived)
+                    for (b in case.bindings) {
+                        if (b.type !is VarType && !containsVarTypeDeep(b.type)) continue
+                        val slot = caseScope[b.name] ?: continue
+                        derived[b.name]?.let { slotConcreteTypes[slot] = it }
+                    }
                 }
 
                 // Push scope so nested expressions use these bindings at depth 0
@@ -3463,6 +3743,8 @@ class TypedASTCompiler(
 
                 // Pop scope
                 scopeStack.removeLast()
+                slotConcreteTypes.clear()
+                slotConcreteTypes.putAll(savedSlotConcreteTypesInCase)
 
                 CaseIR(patternIR, bindings, guardIR, bodyIR, locToSourceInfo(case.loc), ifLetIRs)
             }

@@ -71,11 +71,9 @@ let main = {} -> perform Console, JvmHost, GraalPy, GraalJs in do
   let uuid_val = match uuid_class is
     Ok  { val = c } -> c.static { name = "randomUUID", args = [] }
     Err { error }   -> Err { error = error }
-  # UUID.toString via free-function-style: build a helper that unpacks Result then dispatches statically
-  let uuid_to_str : { u: JvmForeign } -> Result JvmForeign InteropError
-    = { u } -> u.invoke_member { method = "toString", args = [] }
+  # UUID.toString: expect static dispatch off u : JvmForeign
   let uuid_str = match uuid_val is
-    Ok  { val = u } -> uuid_to_str { u = u }
+    Ok  { val = u } -> u.invoke_member { method = "toString", args = [] }
     Err { error }   -> Err { error = error }
   let _ = show_jvm_str { label = "JVM  UUID       ", r = uuid_str }
 
