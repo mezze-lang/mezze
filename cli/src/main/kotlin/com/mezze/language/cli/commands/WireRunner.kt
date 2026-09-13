@@ -31,6 +31,8 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.InputStream
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import java.io.OutputStream
 
 /**
@@ -517,6 +519,50 @@ private class WireSession private constructor(
     @Volatile private var childExitCode: Int = -1
 
     /**
+     * Captured tail of the child's real stderr (fd 2). Normal user stderr rides
+     * the wire as STDERR_DATA frames; fd 2 only carries the pre-wire fatal path
+     * — a RuntimeServer startup crash, or a Truffle/libgraal init failure — which
+     * used to dump a raw JVM stack trace straight to the terminal via
+     * redirectError(INHERIT). We PIPE it and drain it here instead, so on a
+     * crash we can show a graceful message by default and the raw trace only
+     * under --verbose. Bounded so a runaway child can't exhaust memory.
+     */
+    private val childStderr = StringBuilder()
+    private val childStderrLock = Any()
+
+    /** Attach a drain thread to the child's piped stderr. Called from start(). */
+    private fun captureStderr(errStream: InputStream) {
+        thread(isDaemon = true, name = "mez-child-stderr") {
+            try {
+                errStream.bufferedReader().forEachLine { line ->
+                    synchronized(childStderrLock) {
+                        if (childStderr.length < 64 * 1024) childStderr.append(line).append('\n')
+                    }
+                }
+            } catch (_: Exception) { /* stream closed on child exit — done */ }
+        }
+    }
+
+    /** The captured child stderr tail, trimmed; empty if the child said nothing on fd 2. */
+    private fun childStderrText(): String = synchronized(childStderrLock) { childStderr.toString().trim() }
+
+    /**
+     * Print the reason a child crash occurred, honouring --verbose: the raw
+     * captured stderr (usually a JVM/Truffle trace) only when verbose, otherwise
+     * a one-line pointer. Keeps a hard child crash from ever dumping a trace by
+     * default while still making it one flag away.
+     */
+    private fun reportChildStderr() {
+        val captured = childStderrText()
+        if (captured.isEmpty()) return
+        if (com.mezze.language.cli.CliContext.verbose) {
+            System.err.println(captured)
+        } else {
+            System.err.println("    (re-run with --verbose for the underlying error)")
+        }
+    }
+
+    /**
      * Parent-side mirror of the runId the child will assign to the next
      * (or current) run. Used to tag STDIN_DATA frames so the child can
      * drop bytes intended for a prior run after a `mez dev` reload (#243
@@ -656,14 +702,16 @@ private class WireSession private constructor(
                 if (ec >= 0) {
                     val signal = signalFromExitCode(ec)
                     val msg = if (signal != null) {
-                        "Error: RuntimeServer killed by $signal (exit $ec)"
+                        "${Glyphs.CROSS} the runtime was killed by $signal"
                     } else {
-                        "Error: RuntimeServer exited unexpectedly (exit $ec)"
+                        "${Glyphs.CROSS} the runtime exited unexpectedly (exit $ec)"
                     }
                     System.err.println(msg)
+                    reportChildStderr()
                     RunOutcome(exitCode = ec, reason = "crashed")
                 } else {
-                    System.err.println("Error: RuntimeServer exited unexpectedly")
+                    System.err.println("${Glyphs.CROSS} the runtime exited unexpectedly")
+                    reportChildStderr()
                     RunOutcome(exitCode = 1, reason = "crashed")
                 }
             }
@@ -924,8 +972,14 @@ private class WireSession private constructor(
             // Truffle Engine. Order doesn't matter; they're flag-named.
             command.addAll(devFlags)
 
+            // PIPE (not INHERIT) the child's stderr: the child's normal user
+            // output rides the wire as STDERR_DATA frames, so fd 2 only ever
+            // carries the pre-wire fatal path (a RuntimeServer startup crash or a
+            // Truffle/libgraal init failure). Capturing it lets us show a graceful
+            // message by default and the raw trace only under --verbose, instead
+            // of dumping a JVM stack trace straight to the terminal.
             val process = ProcessBuilder(command)
-                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                .redirectError(ProcessBuilder.Redirect.PIPE)
                 .start()
             val hook = Thread { if (process.isAlive) process.destroy() }
             Runtime.getRuntime().addShutdownHook(hook)
@@ -934,10 +988,21 @@ private class WireSession private constructor(
             val fromChild = BufferedInputStream(process.inputStream)
 
             val session = WireSession(process, toChild, fromChild, hook, timing)
+            session.captureStderr(process.errorStream)
             if (timing) System.err.println("[${ms()}ms] RuntimeServer spawned")
 
-            // Perform handshake before returning.
+            // Perform handshake before returning. A handshake failure is the
+            // classic runtime-startup crash symptom (e.g. a Truffle/libgraal init
+            // mismatch): the child JVM dies before WELCOME. Surface a graceful
+            // message + the captured stderr (raw trace only under --verbose)
+            // instead of silently returning null and leaving the user with
+            // nothing to act on.
             session.handshake() ?: run {
+                // Give the child's exit + stderr drain a beat to settle so the
+                // captured message is complete before we report it.
+                try { process.onExit().get(500, TimeUnit.MILLISECONDS) } catch (_: Exception) {}
+                System.err.println("${Glyphs.CROSS} the runtime failed to start")
+                session.reportChildStderr()
                 session.close()
                 return null
             }

@@ -23,8 +23,22 @@ class CliMessages(private val color: Boolean = System.console() != null) {
 
     /** A red `✗ <headline>` line plus dimmed, indented hint lines. */
     private fun error(headline: String, vararg hints: String): String {
-        val sb = StringBuilder(red("✗ ") + bold(headline))
+        val sb = StringBuilder(red("${Glyphs.CROSS} ") + bold(headline))
         for (h in hints) sb.append("\n    ").append(dim(h))
+        return sb.toString()
+    }
+
+    /**
+     * The general error renderer used by the top-level boundary: a red
+     * `✗ <message>` line, an optional dimmed `<hint>` line, and — only when
+     * [showTraceHint] (i.e. NOT already in verbose mode) — a dimmed reminder
+     * that `--verbose` reveals the full trace. The trace itself is printed
+     * separately by the caller under `--verbose`; this method never emits it.
+     */
+    fun generalError(message: String, hint: String? = null, showTraceHint: Boolean = true): String {
+        val sb = StringBuilder(red("${Glyphs.CROSS} ") + bold(message))
+        if (hint != null) sb.append("\n    ").append(dim(hint))
+        if (showTraceHint) sb.append("\n    ").append(dim("re-run with --verbose for the full stack trace"))
         return sb.toString()
     }
 
@@ -69,7 +83,7 @@ class CliMessages(private val color: Boolean = System.console() != null) {
 
     /** A red `✗ build failed` line with the underlying detail. */
     fun buildFailed(detail: String?): String {
-        val head = if (color) "$esc27[31m✗ build failed$esc27[0m" else "✗ build failed"
+        val head = if (color) "$esc27[31m${Glyphs.CROSS} build failed$esc27[0m" else "${Glyphs.CROSS} build failed"
         return if (detail != null) "$head\n    ${dim2(detail)}" else head
     }
 
@@ -102,9 +116,9 @@ class CliMessages(private val color: Boolean = System.console() != null) {
         }
         if (warningCount > 0) {
             val w = if (warningCount == 1) "1 warning" else "$warningCount warnings"
-            sb.append("    ").append(yellow2("⚠ built with $w")).append('\n')
+            sb.append("    ").append(yellow2("${Glyphs.WARN} built with $w")).append('\n')
         }
-        sb.append("  ").append(green2("✓ built in $durationLabel")).append("\n\n")
+        sb.append("  ").append(green2("${Glyphs.CHECK} built in $durationLabel")).append("\n\n")
         sb.append("  ").append(bold2("Run")).append('\n')
         for ((label, runPath, _) in artifacts) {
             sb.append("    ").append(runPath)

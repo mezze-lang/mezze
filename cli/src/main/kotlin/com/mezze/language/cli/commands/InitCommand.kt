@@ -12,9 +12,14 @@ import java.security.MessageDigest
  *
  * Usage:
  *   mezze init <name>              # Interactive mode - creates folder <name>
+ *   mezze init .                   # Initialise the CURRENT directory in place
  *   mezze init <name> --lib        # Create library package
  *   mezze init <name> --app        # Create app package
  *   mezze init <name> --lib --app  # Create both library and app
+ *
+ * `init .` is for an existing repo: it writes into the current directory
+ * (refusing only if a Mezze.toml is already there) and APPENDS the mez ignore
+ * patterns to an existing .gitignore rather than overwriting it.
  */
 class InitCommand {
 
@@ -51,21 +56,36 @@ class InitCommand {
             return
         }
 
-        val targetDir = File(currentDir, projectName)
-        if (targetDir.exists()) {
-            println("Error: folder '$projectName' already exists at ${targetDir.absolutePath}")
-            return
-        }
-        if (!targetDir.mkdirs()) {
-            println("Error: failed to create folder '$projectName'")
-            return
+        // `mez init .` initialises the CURRENT directory in place (for an
+        // existing repo), rather than creating a subfolder. The package name
+        // then comes from the dir's own name, and an existing Mezze.toml is a
+        // hard stop (don't clobber a real project) while an existing .gitignore
+        // is fine — ensureGitignore appends the mez entries it's missing.
+        val inPlace = projectName == "."
+        val targetDir = if (inPlace) currentDir else File(currentDir, projectName)
+        if (inPlace) {
+            if (File(targetDir, "Mezze.toml").exists()) {
+                println("Error: this directory is already a Mezze project (Mezze.toml exists)")
+                return
+            }
+        } else {
+            if (targetDir.exists()) {
+                println("Error: folder '$projectName' already exists at ${targetDir.absolutePath}")
+                return
+            }
+            if (!targetDir.mkdirs()) {
+                println("Error: failed to create folder '$projectName'")
+                return
+            }
         }
 
         val projectDir = targetDir
         val mezzeToml = File(projectDir, "Mezze.toml")
 
-        // Get package name from project name
-        val packageName = projectName.lowercase().replace("-", "_")
+        // Get package name from the project name — or, for in-place init, from
+        // the current directory's own name.
+        val nameForPackage = if (inPlace) projectDir.absoluteFile.name else projectName
+        val packageName = nameForPackage.lowercase().replace("-", "_")
 
         try {
             validatePackageName(packageName)
@@ -86,18 +106,20 @@ class InitCommand {
         if (createApp) createAppFile(File(srcDir, "app.mz"), packageName)
 
         val gitignore = File(projectDir, ".gitignore")
-        if (!gitignore.exists()) createGitignore(gitignore)
+        ensureGitignore(gitignore)
 
         // Warn if the new project is nested inside an existing one — it's an
         // independent project (the nearest Mezze.toml wins for any command run
-        // inside it), which is easy to create by accident.
-        ProjectRoot.discover(currentDir)?.let { outer ->
-            println("⚠️  '$projectName' is nested inside the project at ${outer.absolutePath}")
+        // inside it), which is easy to create by accident. Discover from the
+        // ENCLOSING dir: for in-place init the project's own Mezze.toml already
+        // exists here, so searching from projectDir would spuriously find itself.
+        (projectDir.parentFile ?: currentDir).let { ProjectRoot.discover(it) }?.let { outer ->
+            println("${Glyphs.WARN}  '$nameForPackage' is nested inside the project at ${outer.absolutePath}")
             println("    It is an independent project — the nearest Mezze.toml wins for commands run inside it.")
         }
 
         // Materialise the project's `.mez/` store with stdlib seeded in.
-        // openProject creates cache.sqlite + stdlib.sqlite + deps.sqlite,
+        // openProject creates src.sqlite + stdlib.sqlite + deps.sqlite,
         // attaches them, and installs the parser-cache hook. If
         // createApp, also pre-typecheck the entry so the first
         // `mez dev` hits the warm-cache fast path.
@@ -124,7 +146,7 @@ class InitCommand {
         println("Created $packageName ($kindLabel) in ${targetDir.absolutePath}")
         println()
         println("Next steps")
-        println("  cd $projectName")
+        if (!inPlace) println("  cd $nameForPackage")
         when {
             createLib && !createApp -> println("  mez check       type-check your library")
             createApp && !createLib -> {
@@ -210,7 +232,7 @@ class InitCommand {
             }
         """.trimIndent()
 
-        file.writeText(content)
+        file.writeText(formatScaffold(content))
     }
 
     private fun createAppFile(file: File, packageName: String) {
@@ -221,7 +243,19 @@ class InitCommand {
                 println { msg = "Hello from $packageName!" }
         """.trimIndent()
 
-        file.writeText(content)
+        file.writeText(formatScaffold(content))
+    }
+
+    /**
+     * Run a scaffold template through the formatter so a fresh project starts in
+     * canonical mez style (and stays `mez fmt --check`-clean). Best-effort: if the
+     * template somehow fails to format, fall back to the raw source — a scaffold
+     * must never block `mez init`. Ensures a trailing newline either way.
+     */
+    private fun formatScaffold(source: String): String = try {
+        com.mezze.language.formatter.Formatter().format(source)
+    } catch (_: Exception) {
+        if (source.endsWith("\n")) source else source + "\n"
     }
 
     /**
@@ -286,7 +320,50 @@ class InitCommand {
     }
 
     private fun createGitignore(file: File) {
-        val content = """
+        file.writeText(GITIGNORE_CONTENT)
+    }
+
+    /**
+     * Create `.gitignore` if absent; if it already exists (common — the repo
+     * predates `mez init`, or the user ran `git init` first), APPEND only the
+     * mez-specific entries it's missing rather than skip it entirely. Skipping
+     * was the old behaviour and left `.deps/`, `.mez/`, `.build/` untracked-but-
+     * not-ignored in any pre-existing repo — the exact footgun (`.deps` full of
+     * symlinks committed by accident) this avoids.
+     */
+    private fun ensureGitignore(file: File) {
+        if (!file.exists()) {
+            createGitignore(file)
+            return
+        }
+        val existing = file.readText()
+        val addition = gitignoreAdditions(existing) ?: return
+        file.appendText(addition)
+    }
+
+    companion object {
+        /** The mez-specific ignore patterns, checked line-by-line when appending. */
+        private val MEZ_IGNORE_PATTERNS = listOf(".build/", "*.jar", "Mezze.lock", ".deps/", ".mez/")
+
+        /**
+         * The text to append to an EXISTING `.gitignore` so it ignores the
+         * mez-generated files it's missing — or null if it already covers them
+         * all. Pure (no disk) so it's unit-testable. A pattern counts as present
+         * when it appears as a whole trimmed line, so we neither re-add `.mez/`
+         * the user already ignores nor get fooled by it inside a comment.
+         */
+        fun gitignoreAdditions(existing: String): String? {
+            val existingLines = existing.lineSequence().map { it.trim() }.toSet()
+            val missing = MEZ_IGNORE_PATTERNS.filter { it !in existingLines }
+            if (missing.isEmpty()) return null
+            return buildString {
+                if (existing.isNotEmpty() && !existing.endsWith("\n")) append('\n')
+                append("\n# Added by `mez init` — Mezze generated files (safe to delete, rebuilt).\n")
+                missing.forEach { append(it).append('\n') }
+            }
+        }
+
+        private val GITIGNORE_CONTENT = """
             # Mezze build artifacts (default — change `out` in Mezze.toml's
             # [build] section if you use a different output directory).
             .build/
@@ -309,7 +386,5 @@ class InitCommand {
             .DS_Store
             Thumbs.db
         """.trimIndent()
-
-        file.writeText(content)
     }
 }

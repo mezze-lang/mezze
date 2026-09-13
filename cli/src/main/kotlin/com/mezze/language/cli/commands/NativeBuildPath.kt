@@ -263,9 +263,10 @@ object NativeBuildPath {
         // failure, dump the log so the user can see what broke. Set
         // MEZZE_NATIVE_VERBOSE=1 to opt back into INHERIT (stream straight
         // to the user's terminal).
-        val verbose = System.getenv("MEZZE_NATIVE_VERBOSE")?.let {
-            it == "1" || it.equals("true", ignoreCase = true)
-        } ?: timing // timing implies the user already wants the noise
+        val verbose = com.mezze.language.cli.CliContext.verbose ||
+            (System.getenv("MEZZE_NATIVE_VERBOSE")?.let {
+                it == "1" || it.equals("true", ignoreCase = true)
+            } ?: timing) // --verbose, the env var, or timing → stream the noise
         val logFile = if (!verbose) {
             File.createTempFile("mez-native-image-", ".log").apply { deleteOnExit() }
         } else null
@@ -296,8 +297,8 @@ object NativeBuildPath {
                 }
                 System.err.println("--- end native-image output ---")
             }
-            println("Error: native-image failed (exit $exit). " +
-                if (logFile != null) "See output above for details. Re-run with MEZZE_NATIVE_VERBOSE=1 to stream output live."
+            System.err.println("${Glyphs.CROSS} native-image failed (exit $exit). " +
+                if (logFile != null) "See output above for details. Re-run with --verbose to stream output live."
                 else "See output above for details.")
             return null
         }

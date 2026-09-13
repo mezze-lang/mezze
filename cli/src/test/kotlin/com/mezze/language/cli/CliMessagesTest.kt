@@ -121,4 +121,33 @@ class CliMessagesTest {
         assertTrue(m.contains("build failed"))
         assertTrue(m.contains("disk full"))
     }
+
+    // ── general error boundary (F1) ─────────────────────────────────────
+
+    @Test
+    fun `general error shows message and optional hint`() {
+        val m = msg().generalError("something broke", hint = "try turning it off and on")
+        assertTrue(m.contains("something broke"), "shows the message")
+        assertTrue(m.contains("try turning it off and on"), "shows the hint")
+    }
+
+    @Test
+    fun `general error offers the verbose trace hint by default`() {
+        val m = msg().generalError("boom", hint = null, showTraceHint = true)
+        assertTrue(m.contains("--verbose"), "points the user at --verbose for the trace")
+    }
+
+    @Test
+    fun `general error omits the verbose hint when already verbose`() {
+        val m = msg().generalError("boom", hint = null, showTraceHint = false)
+        assertFalse(m.contains("--verbose"), "no trace hint when already in verbose mode")
+    }
+
+    @Test
+    fun `general error never prints a raw stack trace itself`() {
+        // The renderer must NOT embed a trace; the caller prints it separately
+        // only under --verbose. A trace's tell-tale is "\tat " frame lines.
+        val m = msg().generalError("boom", hint = "fix it")
+        assertFalse(m.contains("\tat "), "generalError must not contain stack frames")
+    }
 }

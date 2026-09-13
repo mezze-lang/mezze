@@ -95,8 +95,18 @@ fun main(rawArgs: Array<String>) {
     // when it dispatches. If we reach here we're running in-process instead — a
     // toolchain's own binary, or a proxy-handled `toolchain` command — so drop a
     // leading `+ver` rather than mistake it for the command name.
-    val args = if (rawArgs.firstOrNull()?.let { it.startsWith("+") && it.length > 1 } == true)
+    val argsAfterProxy = if (rawArgs.firstOrNull()?.let { it.startsWith("+") && it.length > 1 } == true)
         rawArgs.drop(1).toTypedArray() else rawArgs
+
+    // Global verbosity: parse `--verbose`/`-V` (and legacy MEZZE_DEBUG/MEZZE_VERBOSE)
+    // once, up front, so the error boundary and child-process output below can
+    // decide graceful-message vs. full-trace consistently everywhere. It's a
+    // GLOBAL flag valid in any position (`mez --verbose dev`, `mez dev --verbose`),
+    // so recognise and strip it from the whole arg list BEFORE the command name
+    // is taken — otherwise `mez --verbose <cmd>` mistakes `--verbose` for the
+    // command.
+    com.mezze.language.cli.CliContext.initFrom(argsAfterProxy)
+    val args = argsAfterProxy.filter { it != "--verbose" && it != "-V" }.toTypedArray()
 
     // Register the SQLite-backed store opener so PrecompiledStdlib can
     // hydrate from `stdlib.sqlite` without reflection. Must happen before
@@ -172,6 +182,9 @@ fun main(rawArgs: Array<String>) {
     } catch (e: TypeCheckError) {
         printTypeError(e)
         kotlin.system.exitProcess(1)
+    } catch (e: com.mezze.language.cli.MezzeCliError) {
+        printCliError(e)
+        kotlin.system.exitProcess(1)
     } catch (e: Exception) {
         printGeneralError(e)
         kotlin.system.exitProcess(1)
@@ -210,6 +223,7 @@ private fun showHelp() {
     println("GLOBAL OPTIONS:")
     println("  -h, --help        Show this help message")
     println("  -v, --version     Show version information")
+    println("  -V, --verbose     Show full error traces + diagnostic output")
     println("  --explain <CODE>  Show long-form docs for an error code (e.g. T0201)")
     println()
     println("EXAMPLES:")
@@ -287,9 +301,11 @@ private fun showCommandHelp(command: String) {
         }
         
         "init" -> {
-            println("USAGE: mezze init [options]")
+            println("USAGE: mez init <name>|. [options]")
             println()
-            println("Create a new Mezze package in the current directory")
+            println("Create a new Mezze package. `<name>` makes a new folder;")
+            println("`.` initialises the current directory in place (for an existing")
+            println("repo — appends to an existing .gitignore, refuses if Mezze.toml exists).")
             println()
             println("OPTIONS:")
             println("  --lib              Create a library package")
@@ -298,7 +314,8 @@ private fun showCommandHelp(command: String) {
             println("  -h, --help         Show this help message")
             println()
             println("EXAMPLES:")
-            println("  mez init my_app                  # Create app (default)")
+            println("  mez init my_app                  # Create app in a new folder")
+            println("  mez init .                       # Initialise the current directory")
             println("  mez init my_lib --lib            # Create library")
             println("  mez init my_pkg --lib --app      # Create both")
             println()
@@ -377,9 +394,12 @@ private fun showCommandHelp(command: String) {
             println("  mez build --out dist           # Write to dist/ instead")
             println("  mez build --native             # Also build native binary")
             println()
+            println("FLAGS:")
+            println("  --verbose, -V           Stream native-image output live + show full")
+            println("                         error traces (default: capture, dump on failure)")
+            println()
             println("ENV VARS:")
-            println("  MEZZE_NATIVE_VERBOSE=1  Stream native-image output live")
-            println("                         (default: capture + dump on failure)")
+            println("  MEZZE_NATIVE_VERBOSE=1  Alias for --verbose (native-image output)")
             println()
             println("OUTPUT DIR (precedence: --out flag > [build].out in Mezze.toml > .build/):")
             println("  Single app:    <out>/<package-name>.jar + launcher")
@@ -876,18 +896,34 @@ private fun printTypeError(error: TypeCheckError) {
     println("Hint: For more help, see: https://mezze-lang.org/docs/type-errors")
 }
 
+/**
+ * A typed, user-facing CLI error: polished message + optional hint to stderr;
+ * the underlying cause's stack trace only under `--verbose`. This is the
+ * graceful path commands opt into by throwing [MezzeCliError].
+ */
+private fun printCliError(error: com.mezze.language.cli.MezzeCliError) {
+    val verbose = com.mezze.language.cli.CliContext.verbose
+    val msg = com.mezze.language.cli.commands.CliMessages()
+    // Only offer the "--verbose for trace" hint when there's actually a cause
+    // to show and we're not already verbose.
+    val showTraceHint = !verbose && error.cause != null
+    System.err.println(msg.generalError(error.message, error.hint, showTraceHint))
+    if (verbose) error.cause?.printStackTrace()
+}
+
+/**
+ * Backstop for genuinely unexpected exceptions that weren't wrapped in a
+ * [MezzeCliError]. Renders a graceful one-liner to stderr by default; the raw
+ * JVM/Truffle stack trace appears ONLY under `--verbose`, so a normal command
+ * never dumps a trace at the user. (Was: an unconditional printStackTrace to
+ * stdout with an "Error: Error" header.)
+ */
 private fun printGeneralError(error: Exception) {
-    println("Error: Error")
-    println("-".repeat(50))
-    println("${error.javaClass.simpleName}")
-    println("   ${error.message ?: "Unknown error"}")
-    println()
-    
-    // Show stack trace for debugging if it's not a known user error
-    if (error !is TypeCheckError && error !is PolyglotException) {
-        println("Debug: Debug Information:")
-        error.printStackTrace()
-    }
+    val verbose = com.mezze.language.cli.CliContext.verbose
+    val msg = com.mezze.language.cli.commands.CliMessages()
+    val detail = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+    System.err.println(msg.generalError(detail, hint = null, showTraceHint = !verbose))
+    if (verbose) error.printStackTrace()
 }
 
 /**
