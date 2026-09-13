@@ -111,6 +111,33 @@ mez dev          # run it
 
 …or run a single file: `mez exec app.mz`.
 
+### GraalVM & performance
+
+`mez` runs on **any JDK 21+** out of the box (interpreter — great for `mez check`,
+the LSP, `mez dev`, and everyday programs). **GraalVM** adds two things: the
+Truffle **JIT** (much faster hot loops) and **`mez build --native`** (AOT
+binaries). mez never installs a GraalVM for you — it detects the one you have and
+degrades with a clear warning if it's missing or a different version. Bring your
+own, however you like:
+
+```bash
+mez doctor        # what mez found + the exact install command for your setup
+```
+
+Point mez at a GraalVM with `MEZZE_GRAALVM_HOME` (it wins over `GRAALVM_HOME` /
+`JAVA_HOME` / `PATH`). With Nix, set it to the store path in your shell:
+
+```nix
+# devenv.nix / flake.nix devShell
+packages = [ pkgs.graalvm-ce ];
+env.MEZZE_GRAALVM_HOME = "${pkgs.graalvm-ce}";   # immutable store path, GC-safe
+```
+
+`mez build --native` is the one command that *requires* a matching-line GraalVM
+(with `native-image`); everything else runs degraded-but-working without one. Add
+`--require-jit` / `--require-native` to make a missing capability a hard failure
+in CI. Run any command with `--verbose` for full diagnostics and stack traces.
+
 ---
 
 ## The `mez` CLI
@@ -125,6 +152,7 @@ mez dev          # run it
 | `mez fmt` | format source |
 | `mez index` | build the content-addressed store |
 | `mez lsp` | language server (editor integration) |
+| `mez doctor` | report the JDK/GraalVM mez found + how to set up JIT/native |
 
 ---
 
