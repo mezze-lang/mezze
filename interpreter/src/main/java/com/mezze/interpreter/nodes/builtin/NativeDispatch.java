@@ -4350,79 +4350,19 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_jvm_null_val",
             (r, c) -> PolyglotNatives.nullVal(r, "jvm"));
 
-        // Context lifecycle (LEGACY — retained for source compat with
-        // any out-of-tree Mezze code still using the old API; the new
-        // stdlib routes through the ambient Env, not through these).
-        HANDLERS.put("__native_polyglot_context_create",
-            (r, c) -> PolyglotContextNatives.create(r));
-        HANDLERS.put("__native_polyglot_context_close",
-            (r, c) -> PolyglotContextNatives.close(r));
-        HANDLERS.put("__native_polyglot_context_eval",
-            (r, c) -> PolyglotContextNatives.eval(r, c));
-        HANDLERS.put("__native_polyglot_context_binding",
-            (r, c) -> PolyglotContextNatives.binding(r, c));
-
-        // Python — ambient-Env eval / import + language-tagged constructors
-        HANDLERS.put("__native_python_eval",
-            (r, c) -> PythonNatives.eval(r, c));
-        HANDLERS.put("__native_python_import_module",
-            (r, c) -> PythonNatives.importModule(r, c));
-        HANDLERS.put("__native_python_from_int",
-            (r, c) -> PolyglotNatives.fromInt(r, "python"));
-        HANDLERS.put("__native_python_from_float",
-            (r, c) -> PolyglotNatives.fromFloat(r, "python"));
-        HANDLERS.put("__native_python_from_str",
-            (r, c) -> PolyglotNatives.fromStr(r, "python"));
-        HANDLERS.put("__native_python_from_bool",
-            (r, c) -> PolyglotNatives.fromBool(r, "python"));
-        HANDLERS.put("__native_python_null_val",
-            (r, c) -> PolyglotNatives.nullVal(r, "python"));
-
-        // JavaScript — ambient-Env eval / import / require + language-
-        // tagged constructors. Mirrors the Python surface exactly; every
-        // op is a MezzePolyglotSupport.eval("js", ...) or a
-        // language-tagged MezzeForeign construction.
-        HANDLERS.put("__native_js_eval",
-            (r, c) -> JsNatives.eval(r, c));
-        HANDLERS.put("__native_js_import",
-            (r, c) -> JsNatives.importModule(r, c));
-        HANDLERS.put("__native_js_require",
-            (r, c) -> JsNatives.require(r, c));
-        HANDLERS.put("__native_js_from_int",
-            (r, c) -> PolyglotNatives.fromInt(r, "js"));
-        HANDLERS.put("__native_js_from_float",
-            (r, c) -> PolyglotNatives.fromFloat(r, "js"));
-        HANDLERS.put("__native_js_from_str",
-            (r, c) -> PolyglotNatives.fromStr(r, "js"));
-        HANDLERS.put("__native_js_from_bool",
-            (r, c) -> PolyglotNatives.fromBool(r, "js"));
-        HANDLERS.put("__native_js_null_val",
-            (r, c) -> PolyglotNatives.nullVal(r, "js"));
-
-        // WebAssembly — binary-Source loading + memory access + language-
-        // tagged constructors. Wasm's interop surface is smaller than JS /
-        // Python: there is no source-level eval, only numeric primitives
-        // cross the value boundary, and complex data lives in linear
-        // memory addressed by offset. Everything else (get_export, call,
-        // execute, invoke_member) routes through the same generic
-        // __native_polyglot_* natives every language uses.
-        HANDLERS.put("__native_wasm_load_module",
-            (r, c) -> WasmNatives.loadModule(r, c));
-        HANDLERS.put("__native_wasm_load_file",
-            (r, c) -> WasmNatives.loadFile(r, c));
-        HANDLERS.put("__native_wasm_get_export",
-            (r, c) -> WasmNatives.getExport(r));
-        HANDLERS.put("__native_wasm_memory_read",
-            (r, c) -> WasmNatives.memoryRead(r));
-        HANDLERS.put("__native_wasm_memory_write",
-            (r, c) -> WasmNatives.memoryWrite(r));
-        HANDLERS.put("__native_wasm_memory_size",
-            (r, c) -> WasmNatives.memorySize(r));
-        // Wasm's i32-typed exports reject a boxed Long — store as Integer.
-        HANDLERS.put("__native_wasm_from_int",
-            (r, c) -> WasmNatives.fromInt(r));
-        HANDLERS.put("__native_wasm_from_float",
-            (r, c) -> WasmNatives.fromFloat(r));
+        // Python / JavaScript / WebAssembly and any other non-JVM guest
+        // language arrive via user-installed polyglot provider packages
+        // (`mezze-python`, `mezze-js`, `mezze-wasm`, …). Each package
+        // ships a `polyglot-<lang>-natives.jar` on the wire child's
+        // classpath and a `META-INF/services/com.mezze.interpreter.spi
+        // .NativePlugin` entry pointing at its `Polyglot<Lang>Plugin`.
+        // Plugin discovery happens once at class-load time of this file
+        // (see the ServiceLoader hookup near the top of registerAll),
+        // and each plugin calls `overrideHandler` to install its own
+        // `__native_<lang>_*` handlers on top of the language-agnostic
+        // kernel above. Bare `mez` — with no provider jars on the
+        // classpath — leaves those names unbound, and any Mezze source
+        // that tries to call one gets a normal "unknown native" error.
     }
 
     @TruffleBoundary

@@ -4,7 +4,6 @@ import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 import com.mezze.interpreter.values.MezzeForeign;
 import com.mezze.interpreter.values.MezzeNull;
-import com.mezze.interpreter.values.MezzePolyglotContext;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -77,8 +76,10 @@ public final class PolyglotNatives {
 
     /**
      * Translate a Truffle interop exception into an InteropError variant.
-     * Public because JvmNatives and PolyglotContextNatives share the same
-     * error surface.
+     * Public because JvmNatives and every out-of-tree language-native
+     * plugin (e.g. `polyglot-python-natives`, `polyglot-js-natives`)
+     * shares this error surface — one canonical mapping across every
+     * guest language.
      */
     @TruffleBoundary
     public static MezzeVariant translateException(Throwable t) {
@@ -158,12 +159,6 @@ public final class PolyglotNatives {
         Object v = getField(r, name);
         if (v instanceof Boolean b) return b;
         throw new NativeTypeMismatchException("Expected Boolean for field '" + name + "'");
-    }
-
-    static MezzePolyglotContext getContext(MezzeRecord r, String name) {
-        Object v = getField(r, name);
-        if (v instanceof MezzePolyglotContext c) return c;
-        throw new NativeTypeMismatchException("Expected polyglot Context for field '" + name + "'");
     }
 
     /**
