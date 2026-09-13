@@ -8,11 +8,10 @@ plugins {
     id("com.gradleup.shadow") version "9.4.1"
 }
 // GraalPy Gradle plugin (`org.graalvm.python`) intentionally NOT applied.
-// The plugin's numpy install path (`graalPyInstallPackages`) reliably
-// FAILS on GraalPy 25.0.3 at the Meson AVX2 loop generation step for
-// both numpy 1.26.4 and 2.0.2. The `NumpyInteropTest` gracefully skips
-// (via JUnit Assumptions) when numpy is absent; users can populate the
-// venv manually per `examples/polyglot_numpy/README` if needed.
+// GraalPy no longer ships in bare `mez` — it arrives through the
+// `mezze-python` provider package, whose `[jars]` table lists the
+// concrete graalpy jars and whose `polyglot-python-natives.jar`
+// registers the `__native_python_*` handlers on top of this kernel.
 
 // Pure Java module for Truffle DSL nodes
 // The converter will be in a separate Kotlin module or in the interpreter module
@@ -92,47 +91,25 @@ dependencies {
     // DSL-JSON - high performance JSON library (byte-level, no reflection, GraalVM native-image compatible)
     implementation("com.dslplatform:dsl-json:2.0.2")
 
-    // GraalPy — polyglot Python. Depend on the concrete jars, NOT the
-    // aggregating `org.graalvm.polyglot:python` POM: shadowJar cannot
-    // expand a POM artifact and fails with "Cannot expand ZIP ...pom".
-    // `runtimeOnly` because :interpreter never references GraalPy classes
-    // by symbol — everything goes through the generic polyglot API
-    // (Env.parsePublic, Context.eval on "python"). Having them on the
-    // runtime classpath is what lets the shadowJar bundle GraalPy into
-    // mezze-runtime.jar so `mez exec` can enable the "python" language
-    // when the project's Mezze.toml declares `[polyglot.python]`.
-    runtimeOnly("org.graalvm.python:python-language:25.0.3")
-    runtimeOnly("org.graalvm.python:python-resources:25.0.3")
-    runtimeOnly("org.graalvm.python:python-launcher:25.0.3")
-
-    // GraalJS — polyglot JavaScript. Same rationale as GraalPy: depend on
-    // the concrete jars (js-language + js-scriptengine), not the aggregating
-    // POM, so shadowJar can bundle them. `runtimeOnly` because :interpreter
-    // never references GraalJS classes directly — Context.eval("js", …)
-    // routes through the generic polyglot API. Loading `js` is opted-in via
-    // `[polyglot.js]` in the project's Mezze.toml; a plain program that
-    // doesn't declare the section pays zero for these being on the classpath.
-    runtimeOnly("org.graalvm.js:js-language:25.0.3")
-    runtimeOnly("org.graalvm.js:js-scriptengine:25.0.3")
-
-    // GraalWasm — polyglot WebAssembly. Same rationale as GraalPy / GraalJS:
-    // depend on the concrete jar (wasm-language), not the aggregating POM,
-    // so shadowJar can bundle it. `runtimeOnly` because :interpreter never
-    // references GraalWasm classes directly — Context.eval on a
-    // `Source.newBuilder("wasm", ByteSequence.create(bytes), name)` routes
-    // through the generic polyglot API. Loading `wasm` is opted-in via
-    // `[polyglot.wasm]` in the project's Mezze.toml; a plain program that
-    // doesn't declare the section pays zero for this being on the classpath.
-    runtimeOnly("org.graalvm.wasm:wasm-language:25.0.3")
+    // Polyglot language providers (Python, JS, WebAssembly, …) are NOT
+    // bundled here. Bare `mez` ships with the language-agnostic polyglot
+    // kernel (`std::polyglot::core` + Truffle InteropLibrary bridge) and
+    // JVM interop; every other guest language arrives via a user-installed
+    // provider package (`mezze-python`, `mezze-js`, `mezze-wasm`, …). The
+    // provider package declares the concrete `graal-<lang>-language` jars
+    // it needs under `[jars]` — `mez sync` fetches those into the store
+    // and puts them on the wire child's classpath at boot. The provider
+    // also ships a `polyglot-<lang>-natives.jar` (a ServiceLoader
+    // `NativePlugin`) whose static registration installs the
+    // `__native_<lang>_*` handlers on top of this kernel. Result: bare
+    // `mez` has NO python/js/wasm engine on its classpath and refuses
+    // to enable those languages on the Context — exactly the shape a
+    // hostable runtime should have.
 
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation(project(":parser"))
     testImplementation(project(":typechecker"))
-
-    // python-embedding — GraalPyResources + venv helpers used by the
-    // NumpyInteropTest harness. Tests only; not needed at runtime.
-    testImplementation("org.graalvm.python:python-embedding:25.0.3")
 }
 
 // Shared config applied to both the default `test` task and the
@@ -312,18 +289,14 @@ val runtimeShadowJar = tasks.register<com.github.jengelman.gradle.plugins.shadow
     // Truffle discovers languages/instruments via ServiceLoader —
     // META-INF/services/com.oracle.truffle.api.provider.TruffleLanguageProvider
     // lists every language impl. Every contributing jar (mezze,
-    // python-language, regex, nfi, ...) ships its own copy of that
-    // file; the runtime jar has to contain every line, or the language
-    // never registers and Context.newBuilder(...,"python") fails at
-    // runtime with "Could not find option with name python.PythonPath".
-    //
-    // Two knobs are needed together. mergeServiceFiles() installs the
-    // transformer that concatenates copies from configuration deps.
-    // duplicatesStrategy = INCLUDE stops Gradle's default Copy
-    // machinery from silently dropping duplicates before the
-    // transformer sees them — the annotation-processor output of
-    // :interpreter and python-language.jar both write the same path,
-    // and INCLUDE is what lets both reach the merge.
+    // regex, nfi, …) ships its own copy of that file; the runtime jar
+    // has to contain every line the merged classpath contributes.
+    // Bare `mez` only bundles :interpreter's own service files —
+    // language provider jars (`python-language`, `js-language`, …) are
+    // absent here and only land on the wire child's classpath when a
+    // user installs `mezze-python` / `mezze-js` etc. `mergeServiceFiles`
+    // still runs because Truffle tools (profiler, coverage, …) also
+    // contribute service files and their entries must round-trip.
     mergeServiceFiles()
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
 
