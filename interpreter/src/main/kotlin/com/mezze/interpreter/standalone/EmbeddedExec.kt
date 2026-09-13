@@ -452,12 +452,18 @@ object EmbeddedExec {
             // across GraalJS bumps. `latest` (the GraalJS default)
             // silently changes when users update the provider.
             contextBuilder.option("js.ecmascript-version", "2024")
-            if (!polyglot.jsNodeModules.isNullOrBlank()) {
-                // CommonJS require support routes through GraalJS's
-                // `js.commonjs-require-cwd` — points at the node_modules
-                // parent for module resolution.
+            // CommonJS require: prefer the user's explicit `node_modules`
+            // override; otherwise auto-derive from the JS provider's
+            // `runtime_dir` under `.deps/mezze/*/Mezze.toml` — with
+            // mezze-js@0.2.1's `runtime_dir = .deps/node`, packages land
+            // at `.deps/node/node_modules/<pkg>/` and require walking up
+            // from `.deps/node` finds them naturally.
+            val jsCwd = polyglot.jsNodeModules?.takeIf { it.isNotBlank() }
+                ?: com.mezze.interpreter.polyglot.PolyglotManifest
+                    .findProviderRuntimeDir(File("."), "js")
+            if (jsCwd != null) {
                 contextBuilder.option("js.commonjs-require", "true")
-                contextBuilder.option("js.commonjs-require-cwd", polyglot.jsNodeModules)
+                contextBuilder.option("js.commonjs-require-cwd", jsCwd)
             }
             for ((k, v) in polyglot.jsOptions) {
                 contextBuilder.option("js.$k", v)
@@ -472,6 +478,21 @@ object EmbeddedExec {
         }
         val context = contextBuilder.build()
         mark("Context built")
+
+        // Auto-warm each declared guest language on this thread BEFORE
+        // handing the Context to user code. GraalJS in particular is
+        // single-threaded per Context — the first thread to enter it
+        // "owns" it forever. When a language (e.g. NumPy) later spins
+        // up worker threads that touch the Context first, subsequent
+        // access from the main thread trips the multi-threaded-access
+        // guard with the cryptic "not allowed for language(s) js"
+        // error. A no-op eval on this thread stakes the claim so the
+        // real evals below run without bouncing.
+        //
+        // WASM is skipped: its "eval" isn't source-string driven the
+        // same way (module instantiation, not expression evaluation),
+        // and it isn't affected by the same thread-ownership rule.
+        warmupPolyglotLanguages(context, extraLanguages)
 
         try {
             val projectRoot = java.nio.file.Paths.get(".")
@@ -536,6 +557,35 @@ object EmbeddedExec {
         } finally {
             context.close(true)
             mark("context closed")
+        }
+    }
+
+    /**
+     * Evaluate a minimal no-op snippet in each declared guest language on
+     * the current thread so the Context's single-threaded languages pin
+     * this thread as their owner BEFORE user code runs. Silently ignores
+     * failures — a bad snippet must not crash Context boot. INFO-level
+     * announce only when [MEZZE_DEBUG] is set to keep normal runs quiet.
+     */
+    private fun warmupPolyglotLanguages(context: Context, languages: List<String>) {
+        val debug = System.getenv("MEZZE_DEBUG") != null
+        for (lang in languages) {
+            val snippet = when (lang) {
+                "js" -> "1"
+                "python" -> "1"
+                // WASM has no eval-a-string surface — instantiation is
+                // module-driven, and the thread-ownership pin doesn't
+                // apply the same way. Skip.
+                else -> continue
+            }
+            try {
+                context.eval(lang, snippet)
+                if (debug) System.err.println("[mezze] polyglot: warmed $lang")
+            } catch (_: Throwable) {
+                // Silent by design — warmup is best-effort. Any error
+                // here would resurface at the user's first real eval
+                // with a much clearer message from GraalVM.
+            }
         }
     }
 }

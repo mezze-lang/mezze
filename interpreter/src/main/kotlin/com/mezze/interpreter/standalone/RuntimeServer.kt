@@ -315,9 +315,18 @@ object RuntimeServer {
         }
         if (enableJs) {
             contextBuilder.option("js.ecmascript-version", "2024")
-            if (!polyglot.jsNodeModules.isNullOrBlank()) {
+            // CommonJS require: prefer the user's explicit `node_modules`
+            // override; else auto-derive from the JS provider's
+            // `runtime_dir` under `.deps/mezze/*/Mezze.toml`. With
+            // mezze-js@0.2.1's `runtime_dir = .deps/node`, packages land
+            // at `.deps/node/node_modules/<pkg>/` and CommonJS require
+            // resolution walks up from `.deps/node` to find them.
+            val jsCwd = polyglot.jsNodeModules?.takeIf { it.isNotBlank() }
+                ?: com.mezze.interpreter.polyglot.PolyglotManifest
+                    .findProviderRuntimeDir(projectRoot, "js")
+            if (jsCwd != null) {
                 contextBuilder.option("js.commonjs-require", "true")
-                contextBuilder.option("js.commonjs-require-cwd", polyglot.jsNodeModules)
+                contextBuilder.option("js.commonjs-require-cwd", jsCwd)
             }
             for ((k, v) in polyglot.jsOptions) {
                 contextBuilder.option("js.$k", v)
@@ -331,6 +340,12 @@ object RuntimeServer {
         val context = contextBuilder.build()
 
         val state = ServerState(context, engine, runIdCarrier, jitEnabled)
+        // Stash the declared guest languages so the eval worker can
+        // auto-warm them on ITS thread before the first user eval.
+        // (Warming here on `main` would pin GraalJS to the wrong
+        // thread — user code runs on the mez-runtime-eval single-
+        // thread executor, not on RuntimeServer.main.)
+        state.polyglotLanguagesToWarm = extraLanguages
 
         // Hand-written DAP debugger. When --dap is set (JIT runtime only), start
         // our MezzeDapServer on a SEPARATE socket and a GraalDapBridge that
@@ -735,6 +750,20 @@ object RuntimeServer {
             }
         }
 
+        // Auto-warm each declared guest language on THIS thread (the
+        // eval worker) before user code runs. GraalJS is single-
+        // threaded per Context — first thread in "owns" it, and later
+        // access from a different thread trips the multi-threaded-
+        // access guard ("not allowed for language(s) js"). NumPy's
+        // native workers touching the Context first is the usual
+        // trigger. A no-op eval per language stakes the claim on the
+        // right thread. Once per Context — flip a flag so subsequent
+        // LOADs don't repeat the work.
+        if (!state.polyglotWarmed && state.polyglotLanguagesToWarm.isNotEmpty()) {
+            warmupPolyglotLanguages(state.context, state.polyglotLanguagesToWarm)
+            state.polyglotWarmed = true
+        }
+
         var dapExitCode = 0
         try {
             state.context.eval(source)
@@ -826,6 +855,39 @@ object RuntimeServer {
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
+
+    /**
+     * Evaluate a minimal no-op snippet in each declared guest language on
+     * the current thread. Called once at the top of the first [handleLoad]
+     * (on the eval worker) so single-threaded guests like GraalJS pin the
+     * right thread as their owner BEFORE user code — and specifically
+     * before a language like NumPy spins up its own native workers that
+     * would otherwise stake the claim on the wrong thread.
+     *
+     * Silently swallows any failure — the warmup snippet must never crash
+     * Context boot. INFO-level trace only under [MEZZE_DEBUG] to keep
+     * regular runs quiet. WASM is intentionally skipped: no source-string
+     * eval surface, and it isn't affected by the same thread-ownership
+     * rule.
+     */
+    private fun warmupPolyglotLanguages(context: Context, languages: List<String>) {
+        val debug = System.getenv("MEZZE_DEBUG") != null
+        for (lang in languages) {
+            val snippet = when (lang) {
+                "js" -> "1"
+                "python" -> "1"
+                else -> continue
+            }
+            try {
+                context.eval(lang, snippet)
+                if (debug) System.err.println("[mezze] polyglot: warmed $lang")
+            } catch (_: Throwable) {
+                // Best-effort — a bad snippet or provider hiccup here
+                // should surface at the user's first real eval with a
+                // clearer message from GraalVM.
+            }
+        }
+    }
 
     /**
      * POSIX signal number for the names we may receive over the wire.
@@ -930,6 +992,15 @@ private class ServerState(
     @Volatile var dapAttachLatch: java.util.concurrent.CountDownLatch? = null
     /** Wire-fed stdin buffer; reset between runs. */
     var stdinBuffer: WireStdinBuffer? = null
+    /**
+     * Guest languages the manifest asked for that this engine actually
+     * has installed — the eval worker warms each one on its own thread
+     * before the first `context.eval` so GraalJS's single-thread lock
+     * pins the RIGHT thread (see [warmupPolyglotLanguages]).
+     */
+    @Volatile var polyglotLanguagesToWarm: List<String> = emptyList()
+    /** Set once the eval worker has run [warmupPolyglotLanguages]. */
+    @Volatile var polyglotWarmed: Boolean = false
     /**
      * Single-slot rendezvous for the password round-trip. Holds the parent's
      * reply (PasswordReply: string or null = EOF/cancelled) for one

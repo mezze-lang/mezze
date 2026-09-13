@@ -131,6 +131,36 @@ object PolyglotManifest {
     }
 
     /**
+     * Walk every subdirectory of `<projectRoot>/.deps/mezze/` looking for
+     * a package whose `[polyglot.provider]` claims [language], and return
+     * that provider's `runtime_dir` resolved to an absolute path under
+     * [projectRoot].
+     *
+     * Used by the runtime to auto-derive language-specific config
+     * (e.g. `js.commonjs-require-cwd`) from the provider that installed
+     * the packages — so a user project that opts in via
+     * `[polyglot.<lang>].packages = [...]` doesn't also have to
+     * hand-write a path pointing at wherever the provider decided to
+     * put them.
+     */
+    fun findProviderRuntimeDir(projectRoot: File, language: String): String? {
+        val depsDir = File(projectRoot, ".deps/mezze")
+        if (!depsDir.isDirectory) return null
+        val entries = depsDir.listFiles() ?: return null
+        for (entry in entries) {
+            val depManifest = File(entry, MANIFEST_NAME)
+            if (!depManifest.isFile) continue
+            val text = try { depManifest.readText() } catch (_: Exception) { continue }
+            val sections = try { parse(text) } catch (_: Exception) { continue }
+            val prov = sections.provider ?: continue
+            if (prov.language != language) continue
+            val dir = prov.runtimeDir ?: continue
+            return resolvePath(dir, projectRoot.absoluteFile)
+        }
+        return null
+    }
+
+    /**
      * As [load], but for a native binary that may have been shipped
      * outside its build tree. Falls back to sidecar assets next to
      * [selfExe] when the manifest is missing OR present but omits a
