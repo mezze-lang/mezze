@@ -1,25 +1,27 @@
-# Polyglot interop — shared surface.
+# Polyglot interop — shared kernel.
 #
 # The polyglot layer bridges Mezze values to guest-language objects via
-# the Truffle InteropLibrary. Every guest language ships its own opaque
-# `<Lang>Foreign` newtype (see `std::polyglot::jvm::JvmForeign`,
-# `std::polyglot::python::PyForeign`) so the compiler prevents
-# accidental cross-language mixing. All wrappers share the runtime
-# implementation `MezzeForeign`, so per-type tagging is zero-cost at
-# runtime.
+# the Truffle InteropLibrary. JVM interop lives alongside this kernel in
+# `std::polyglot::jvm` — Mezze always runs on the JVM, so `JvmForeign`
+# ships built-in. Every additional guest language (Python, JS, Wasm, …)
+# arrives via an installable provider package (`mezze-python`,
+# `mezze-js`, `mezze-wasm`) declared in the project's `Mezze.toml`;
+# each package defines its own opaque `<Lang>Foreign` newtype so the
+# compiler prevents accidental cross-language mixing. All wrappers
+# share the runtime implementation `MezzeForeign`, so per-type tagging
+# is zero-cost at runtime.
 #
-# Each `<Lang>Foreign` type ships an inherent impl block that exposes
-# BOTH the language's idiomatic vocabulary (Java: `method`, `new`,
-# `static`, `field`, `class_of`, `instanceof`; Python: `method`, `new`,
-# `call`, `attr`, `item`, `iter`, `next`, `len`) AND the universal
-# InteropLibrary vocabulary (`invoke_member`, `get_member`, `execute`,
-# `instantiate`, `array_at`, `array_size`, `as_int`, `as_str`,
-# `as_float`, `as_bool`, `is_null`, `type_name`). Every op routes
-# through the same underlying `__native_polyglot_*` primitives.
+# Each `<Lang>Foreign` type ships an inherent impl block exposing BOTH
+# the language's idiomatic vocabulary AND the universal InteropLibrary
+# vocabulary (`invoke_member`, `get_member`, `execute`, `instantiate`,
+# `array_at`, `array_size`, `as_int`, `as_str`, `as_float`, `as_bool`,
+# `is_null`, `type_name`). Every op routes through the same underlying
+# `__native_polyglot_*` primitives — the language-agnostic kernel this
+# module registers.
 #
 # The polyglot Context is managed inside the runtime by the effect
 # handler machinery — user code just writes
-#   `perform GraalPy in do … let m = Python.import { module = "math" } …`
+#   `perform JvmHost in do … let c = Jvm.class { name = "java.util.UUID" } …`
 # and never sees the underlying Truffle Context.
 use std::result
 
