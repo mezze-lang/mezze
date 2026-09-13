@@ -143,6 +143,28 @@ public final class NativeDispatch extends MezzeNode {
 
     private static void initHandlers() {
         registerAllHandlers();
+        loadPluginsViaServiceLoader();
+    }
+
+    /**
+     * Discover third-party native-handler packs via
+     * {@link java.util.ServiceLoader}. Each {@code NativePlugin} registers
+     * its handlers by calling {@link #overrideHandler}. Runs once, after all
+     * built-in handlers are in place. Failures are logged and swallowed so a
+     * broken plugin cannot brick the interpreter.
+     */
+    private static void loadPluginsViaServiceLoader() {
+        var iter = java.util.ServiceLoader.load(com.mezze.interpreter.spi.NativePlugin.class);
+        for (var plugin : iter) {
+            try {
+                plugin.register();
+                java.util.logging.Logger.getLogger("NativeDispatch")
+                    .info("Registered native plugin: " + plugin.name());
+            } catch (Throwable t) {
+                java.util.logging.Logger.getLogger("NativeDispatch")
+                    .warning("Native plugin " + plugin.name() + " failed to register: " + t);
+            }
+        }
     }
 
     private static void registerAllHandlers() {
