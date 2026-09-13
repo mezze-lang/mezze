@@ -22,6 +22,10 @@ class SyncCommand {
         args: List<String>,
         currentDir: File = File(System.getProperty("user.dir")),
         storeRootOverride: File? = null,
+        /** Where `github:` deps are `git clone`d to. Defaults to `<MezzeHome>/cache/git`. Tests use a temp dir. */
+        githubCacheOverride: File? = null,
+        /** Replaces `https://github.com/` when composing clone URLs. Tests point this at a local bare repo. */
+        githubBaseUrlOverride: String? = null,
     ): Int {
         // Walk up to the nearest Mezze.toml so `mez sync` works from any
         // subdirectory and .deps/ + Mezze.lock land at the project root (ProjectRoot).
@@ -65,6 +69,22 @@ class SyncCommand {
             return 1
         }
 
+        // Semantic validation of `[polyglot.*]` and `[jars]` — surface every
+        // failure in one pass with a source-location + did-you-mean hint. The
+        // cross-check (packages declared but no provider on deps) reads the
+        // literal `mezze-<lang>` naming convention out of the [dependencies]
+        // table, so a well-authored user manifest that maps `mezze-python →
+        // github:…` satisfies the check without any manual provider hint.
+        val providerLangs = inferProviderLanguages(manifest)
+        val validation = PolyglotValidator.validate(manifest, rawText = tomlContent, providerLanguagesInDeps = providerLangs)
+        if (!validation.ok) {
+            println("${Glyphs.ERROR} Error: Mezze.toml has ${validation.errors.size} problem(s):")
+            for (e in validation.errors) println("  - ${e.render()}")
+            println()
+            println("${Glyphs.TIP} Fix these and rerun 'mez sync'.")
+            return 1
+        }
+
         val hasDeps = manifest.dependencies.isNotEmpty() ||
             manifest.devDependencies.isNotEmpty() ||
             manifest.pathDependencies.isNotEmpty()
@@ -103,12 +123,18 @@ class SyncCommand {
 
         val downloader = PackageDownloader(cacheDir)
         val archive = ArchiveHandler()
+        // Per-`(owner,repo,ref)` clone cache. Shared across all projects (like
+        // the content store) since a github ref resolves to the same bytes for
+        // everyone. Tests inject a temp dir to keep runs hermetic.
+        val gitCacheDir = githubCacheOverride ?: File(cacheDir, "git")
+        gitCacheDir.mkdirs()
+        val githubFetcher = GithubDepFetcher(gitCacheDir, githubBaseUrlOverride)
         val nodes = mutableListOf<LockedNode>()
         val failures = mutableListOf<String>()   // deps that could not be resolved/verified
         var lockOutOfDate = false
 
         try {
-            val count = resolveDeps(root, manifest, storeRoot, isClean, isVerbose, downloader, archive, nodes, failures)
+            val count = resolveDeps(root, manifest, storeRoot, isClean, isVerbose, downloader, archive, githubFetcher, nodes, failures)
 
             // Complete graph lock: the root package + every resolved node, deduped + sorted.
             val rootEdges = (manifest.pathDependencies.keys + manifest.dependencies.keys + manifest.devDependencies.keys).sorted()
@@ -169,6 +195,7 @@ class SyncCommand {
     private sealed class DepSpec {
         data class Path(val rawPath: String) : DepSpec()
         data class Registry(val url: String, val sha256: String) : DepSpec()
+        data class Github(val owner: String, val repo: String, val ref: String) : DepSpec()
     }
 
     /**
@@ -189,6 +216,7 @@ class SyncCommand {
         verbose: Boolean,
         downloader: PackageDownloader,
         archive: ArchiveHandler,
+        githubFetcher: GithubDepFetcher,
         nodes: MutableList<LockedNode>,
         failures: MutableList<String>,
     ): Int {
@@ -212,11 +240,21 @@ class SyncCommand {
         // per resolved package; failures always print.
         val reporter = SyncReporter(verbose = verbose)
 
+        // For a github dep we don't know the resolved commit sha until AFTER the
+        // clone — the store dir is keyed on `sha256(commit)` — so `process` needs
+        // to hand that back to the caller for the lock. Keyed by declarer + name.
+        val githubResolved = java.util.concurrent.ConcurrentHashMap<String, GithubResolved>()
+
         // Resolve ONE dep; return its own direct deps (the next wave). Runs on a pool thread.
         fun process(declaringDir: File, name: String, spec: DepSpec): List<Triple<File, String, DepSpec>> {
             val target = when (spec) {
                 is DepSpec.Path -> resolvePathTarget(declaringDir, name, spec.rawPath, printLock)
                 is DepSpec.Registry -> resolveRegistryTarget(name, spec, storeRoot, isClean, downloader, archive, printLock, reporter)
+                is DepSpec.Github -> {
+                    val res = resolveGithubTarget(name, spec, storeRoot, isClean, githubFetcher, printLock, reporter)
+                    if (res != null) githubResolved["${declaringDir.canonicalPath}::$name"] = res
+                    res?.storeDir
+                }
             }
             if (target == null) {
                 safeFailures.add(name)
@@ -244,6 +282,19 @@ class SyncCommand {
                 when (spec) {
                     is DepSpec.Path -> LockedNode(name, version, source = "path", path = target.path, dependencies = edges)
                     is DepSpec.Registry -> LockedNode(name, version, source = "registry", url = spec.url, checksum = "sha256:${spec.sha256}", dependencies = edges)
+                    is DepSpec.Github -> {
+                        // The commit sha the ref resolved to at sync time is
+                        // what pins reproducibility — `main` may shift, this
+                        // sha won't. Recorded verbatim from `git rev-parse HEAD`.
+                        val res = githubResolved["${declaringDir.canonicalPath}::$name"]
+                        LockedNode(
+                            name, version, source = "github",
+                            owner = spec.owner, repo = spec.repo, ref = spec.ref,
+                            commit = res?.commit,
+                            checksum = res?.let { "sha256:${it.storeSha}" },
+                            dependencies = edges,
+                        )
+                    }
                 }
             )
             // A library dep gets compiled once (below) into a shared store, so
@@ -320,8 +371,18 @@ class SyncCommand {
         val registry = if (includeDev) toml.dependencies + toml.devDependencies else toml.dependencies
         registry.forEach { (n, fullUrl) ->
             try {
-                val (url, sha) = parseDependencyUrl(fullUrl)
-                out.add(Triple(dir, n, DepSpec.Registry(url, sha)))
+                if (fullUrl.startsWith("github:")) {
+                    // `github:<owner>/<repo>@<ref>` — checked out live via git,
+                    // pinned by resolved commit sha in the lock. Sits in
+                    // `[dependencies]` alongside URL#sha256 deps because it's
+                    // remote content that can go stale; `[path-dependencies]`
+                    // is for local mutable trees only.
+                    val (owner, repo, ref) = parseGithubDep(fullUrl)
+                    out.add(Triple(dir, n, DepSpec.Github(owner, repo, ref)))
+                } else {
+                    val (url, sha) = parseDependencyUrl(fullUrl)
+                    out.add(Triple(dir, n, DepSpec.Registry(url, sha)))
+                }
             } catch (e: IllegalArgumentException) {
                 synchronized(printLock) { println("  ${Glyphs.ERROR} $n: ${e.message?.lineSequence()?.firstOrNull() ?: "invalid dependency URL"}") }
                 failures.add(n)
@@ -378,6 +439,66 @@ class SyncCommand {
         }
     }
 
+    /** Result of a successful github fetch — the store dir the symlink points at plus what to write into the lock. */
+    private data class GithubResolved(val storeDir: File, val commit: String, val storeSha: String)
+
+    /**
+     * Fetch a `github:` dep the same way registry deps are handled: reuse the
+     * content-addressed `~/.mezze/store/<sha>/` if it already exists, otherwise
+     * `git clone` into the shared cache, resolve HEAD, and copy the checkout
+     * (minus `.git/`) into the store. Two waves needing the same repo/ref/commit
+     * serialize on the resolved sha via [shaLocks] — no duplicate clones.
+     *
+     * Failures (git not on PATH, ref doesn't exist, unreadable clone) surface
+     * as `null` here; the caller records the failure and continues so one bad
+     * dep doesn't block the rest.
+     */
+    private fun resolveGithubTarget(
+        name: String,
+        spec: DepSpec.Github,
+        storeRoot: File,
+        isClean: Boolean,
+        githubFetcher: GithubDepFetcher,
+        printLock: Any,
+        reporter: SyncReporter,
+    ): GithubResolved? {
+        // We must clone before we know the sha, but we do want to dedupe
+        // parallel fetches of the same (owner,repo,ref). Serialize on the
+        // cache-clone-dir key first — waves for the same repo/ref share the
+        // clone. Then, once we know the commit sha, we're already in the
+        // consistent state that `<sha>/` needs.
+        val cloneKey = "${spec.owner}/${spec.repo}@${spec.ref}"
+        synchronized(shaLocks.computeIfAbsent(cloneKey) { Any() }) {
+            val fetched: GithubDepFetcher.Fetched = try {
+                githubFetcher.fetch(spec.owner, spec.repo, spec.ref)
+            } catch (e: GithubFetchException) {
+                synchronized(printLock) { println((e.message ?: "${Glyphs.ERROR} $name: git fetch failed").prependIndent("  ")) }
+                return null
+            }
+            val storeDir = File(storeRoot, fetched.storeSha)
+            // Content-addressed cache hit — different declarers landing on
+            // the same commit share this exact store entry.
+            if (File(storeDir, "Mezze.toml").exists() && !isClean) {
+                return GithubResolved(storeDir, fetched.commit, fetched.storeSha)
+            }
+            return try {
+                githubFetcher.materializeStore(fetched.cloneDir, storeDir)
+                if (!File(storeDir, "Mezze.toml").exists()) {
+                    synchronized(printLock) {
+                        println("  ${Glyphs.ERROR} $name: repository has no Mezze.toml at its root (${spec.owner}/${spec.repo}@${spec.ref})")
+                    }
+                    return null
+                }
+                GithubResolved(storeDir, fetched.commit, fetched.storeSha)
+            } catch (e: Exception) {
+                synchronized(printLock) {
+                    println("  ${Glyphs.ERROR} $name: failed to materialize github dep — ${e.message}")
+                }
+                null
+            }
+        }
+    }
+
     private fun readToml(manifest: File): MezzeToml? =
         try {
             Toml.decodeFromString(MezzeToml.serializer(), manifest.readText())
@@ -418,6 +539,29 @@ class SyncCommand {
         } finally {
             tmp.deleteRecursively()
         }
+    }
+
+    /**
+     * Provider-language set for the cross-check in `PolyglotValidator`: every
+     * `[dependencies]` / `[dev-dependencies]` / `[path-dependencies]` entry
+     * named `mezze-<lang>` counts as a provider for `<lang>`. This lets a user
+     * project like:
+     *
+     *   [polyglot.python]
+     *   packages = ["numpy"]
+     *
+     *   [dependencies]
+     *   mezze-python = "github:mezze-lang/mezze-python@1.0.0"
+     *
+     * satisfy the cross-check without any extra wiring. If the project author
+     * uses a non-standard provider name, the validator surfaces the mismatch
+     * so they see the convention up-front.
+     */
+    private fun inferProviderLanguages(manifest: com.mezze.language.cli.`package`.MezzeToml): Set<String> {
+        val names = manifest.dependencies.keys +
+            manifest.devDependencies.keys +
+            manifest.pathDependencies.keys
+        return names.mapNotNull { n -> n.removePrefix("mezze-").takeIf { it != n && it.isNotEmpty() } }.toSet()
     }
 
 }

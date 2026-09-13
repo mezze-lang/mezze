@@ -40,7 +40,7 @@ data class MezzeLock(
 data class LockedNode(
     val name: String,
     val version: String,
-    /** "root" | "path" | "registry" */
+    /** "root" | "path" | "registry" | "github" */
     val source: String = "registry",
     /** resolved path — path deps only (informational; local + mutable, no integrity) */
     val path: String? = null,
@@ -48,6 +48,14 @@ data class LockedNode(
     val url: String? = null,
     /** "sha256:…" integrity — registry deps only */
     val checksum: String? = null,
+    /** github deps only — owner segment of `github:<owner>/<repo>@<ref>` */
+    val owner: String? = null,
+    /** github deps only — repo segment */
+    val repo: String? = null,
+    /** github deps only — the ref (tag/branch/sha) the user wrote */
+    val ref: String? = null,
+    /** github deps only — the 40-char commit sha the ref resolved to at sync time */
+    val commit: String? = null,
     /** direct dependency names — the graph edges */
     val dependencies: List<String> = emptyList(),
 )

@@ -255,6 +255,65 @@ data class AppConfig(
 )
 
 /**
+ * Parse a `github:<owner>/<repo>@<ref>` short form (used in `[dependencies]`)
+ * into its three components.
+ *
+ * Example: `"github:mezze-lang/mezze-python@1.0.0"` → `Triple("mezze-lang", "mezze-python", "1.0.0")`.
+ *
+ * The `<ref>` may be a tag, branch, or commit sha — anything `git clone --branch`
+ * accepts. Missing `@ref` and malformed `owner/repo` are hard errors: they
+ * cannot pass through as unresolvable specs because that would silently break
+ * reproducibility.
+ */
+fun parseGithubDep(spec: String): Triple<String, String, String> {
+    if (!spec.startsWith("github:")) {
+        throw IllegalArgumentException(
+            "Not a github dependency spec: $spec\n\n" +
+                "💡 GitHub deps look like: github:<owner>/<repo>@<ref>\n" +
+                "   Example: mezze-python = \"github:mezze-lang/mezze-python@1.0.0\""
+        )
+    }
+    val body = spec.removePrefix("github:")
+    val atIdx = body.lastIndexOf('@')
+    if (atIdx <= 0 || atIdx == body.length - 1) {
+        throw IllegalArgumentException(
+            "Invalid github dependency spec: $spec\n" +
+                "   Missing '@<ref>' — a tag, branch, or commit sha is required for reproducibility.\n\n" +
+                "💡 Format: github:<owner>/<repo>@<ref>\n" +
+                "   Example: mezze-python = \"github:mezze-lang/mezze-python@1.0.0\""
+        )
+    }
+    val ownerRepo = body.substring(0, atIdx)
+    val ref = body.substring(atIdx + 1)
+    val slash = ownerRepo.indexOf('/')
+    if (slash <= 0 || slash == ownerRepo.length - 1 || ownerRepo.indexOf('/', slash + 1) != -1) {
+        throw IllegalArgumentException(
+            "Invalid github dependency spec: $spec\n" +
+                "   Expected exactly one '/' between owner and repo, got '$ownerRepo'.\n\n" +
+                "💡 Format: github:<owner>/<repo>@<ref>"
+        )
+    }
+    val owner = ownerRepo.substring(0, slash)
+    val repo = ownerRepo.substring(slash + 1)
+    // Guard against shell/URL metacharacters — the components flow into a
+    // ProcessBuilder-invoked `git clone` URL, so refuse anything exotic.
+    val safe = Regex("[A-Za-z0-9._\\-]+")
+    if (!owner.matches(safe) || !repo.matches(safe)) {
+        throw IllegalArgumentException(
+            "Invalid github owner/repo in $spec — only letters, digits, '.', '_', '-' are allowed."
+        )
+    }
+    if (ref.isBlank() || ref.any { it.isWhitespace() } ||
+        ref.contains("..") || ref.startsWith("-") ||
+        ref.any { c -> c in "\"'`$();|&<>\\" }) {
+        throw IllegalArgumentException(
+            "Invalid github ref '$ref' in $spec — refuse whitespace, shell metacharacters, or '..'."
+        )
+    }
+    return Triple(owner, repo, ref)
+}
+
+/**
  * Parse dependency URL with checksum
  *
  * Example: "https://github.com/user/pkg/releases/download/v1.0.0/pkg.tar.gz#sha256:abc123..."
