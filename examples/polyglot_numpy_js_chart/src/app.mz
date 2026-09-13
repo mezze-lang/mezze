@@ -1,0 +1,119 @@
+# Polyglot pipeline demo — NumPy computes stats, an npm charting
+# library renders them.
+#
+# The point: two provider packages (`mezze-python`, `mezze-js`)
+# declared side-by-side in `Mezze.toml` compose into one Mezze
+# program that hosts BOTH GraalPy and GraalJS in the same JVM.
+# `mez sync` fetches the provider sources, resolves the Graal jars
+# via Aether, and runs each provider's install template (`pip` for
+# numpy, `npm` for asciichart). `mez exec` then boots the shared
+# polyglot Context and runs this file end-to-end.
+#
+# Flow:
+#   1. Python side — draw 1000 samples from N(0, 1), reduce with
+#      numpy to (mean, std), bucket with `numpy.histogram(_, 20)`,
+#      and serialise the whole tuple to a JSON string.
+#   2. Mezze side — coerce the JSON string out of PyForeign and
+#      splice it (unquoted — JSON is a subset of JS object literal
+#      syntax) into a JS eval source.
+#   3. JS side — `require('asciichart')`, plot the 20-bin histogram
+#      to a Unicode line chart, hand the rendered string back.
+#   4. Mezze side — print it.
+#
+# Run:  devenv shell -- just mez sync   # once, per clean checkout
+#       devenv shell -- just mez exec examples/polyglot_numpy_js_chart/src/app.mz
+use std::effects::log::{println, Console, Log}
+use std::polyglot::core::{ InteropError }
+use mezze_python::python::{ Python, GraalPy, PyForeign }
+use mezze_js::js::{ Js, GraalJs, JsForeign }
+use std::float
+use std::int
+use std::str
+
+## Python: one big deterministic expression that draws 1000 samples,
+## reduces + bins them, and emits a JSON string. `numpy` here is
+## whichever install `mez sync` (or `just polyglot-setup-python`)
+## put under the resolved `python.PythonPath`. RNG seeded so the
+## demo is reproducible byte-for-byte.
+let python_stats_src: Str =
+  "__import__('json').dumps((lambda: (lambda np, d: {'mean': float(d.mean()), 'std': float(d.std()), 'counts': np.histogram(d, 20)[0].tolist()})(__import__('numpy'), __import__('numpy').random.default_rng(42).normal(0.0, 1.0, 1000)))())"
+
+## JS: parse the JSON blob (valid JS object literal!), then plot the
+## counts array with asciichart. IIFE keeps `require` + `chart` out
+## of GraalJS's global scope between evals.
+let js_chart_src: { json_blob: Str } -> Str = { json_blob } ->
+  "(function(){const asciichart=require('asciichart');const stats=$(json_blob);return asciichart.plot(stats.counts,{height:12});})()"
+
+## Coerce PyForeign to Mezze Str.
+let py_str: { r: Result PyForeign InteropError } -> Result Str InteropError
+  = { r } -> match r is
+    Ok  { val = f } -> f.as_str{}
+    Err { error }   -> Err { error = error }
+
+## Coerce JsForeign to Mezze Str.
+let js_str: { r: Result JsForeign InteropError } -> Result Str InteropError
+  = { r } -> match r is
+    Ok  { val = f } -> f.as_str{}
+    Err { error }   -> Err { error = error }
+
+## Coerce PyForeign to Mezze Float.
+let py_float: { r: Result PyForeign InteropError } -> Result Float InteropError
+  = { r } -> match r is
+    Ok  { val = f } -> f.as_float{}
+    Err { error }   -> Err { error = error }
+
+let main = {} -> perform Console, GraalPy, GraalJs in do
+  println { msg = "== Mezze x NumPy x asciichart — polyglot pipeline ==" }
+  println { msg = "" }
+
+  # Warm up GraalJS from the mez-runtime-eval thread BEFORE any
+  # numpy call. numpy's native extensions touch the Truffle Context
+  # from Python's own thread machinery, and GraalJS is
+  # single-threaded — first thread to enter it "owns" it forever.
+  # Doing a trivial JS eval up front stakes that claim on the right
+  # thread so the real render call below doesn't get bounced with
+  # "Multi threaded access requested by thread ... but is not
+  # allowed for language(s) js". Discardable side effect only.
+  let _ = Js.eval { source = "1" }
+
+  # ---- Step 1 + 2: NumPy → JSON, coerce to Mezze Str ----
+  println { msg = "[1] numpy: sampling N(0, 1), 1000 points, seed=42" }
+  let json_r = Python.eval { source = python_stats_src }
+  match py_str { r = json_r } is
+    Err { error = _ } -> println { msg = "  python side failed" }
+    Ok  { val = json_blob } -> do
+
+      # Pull mean + std back as scalars too — mostly for the printed
+      # summary. Exercises a second Python.eval round-trip against
+      # the same seed.
+      let mean_r = Python.eval {
+        source = "float(__import__('numpy').random.default_rng(42).normal(0.0, 1.0, 1000).mean())"
+      }
+      let std_r  = Python.eval {
+        source = "float(__import__('numpy').random.default_rng(42).normal(0.0, 1.0, 1000).std())"
+      }
+      let _ = match py_float { r = mean_r } is
+        Ok  { val = m } -> println { msg = "    mean = $(float::to_str { n = m })" }
+        Err { error = _ } -> println { msg = "    mean: coerce failed" }
+      let _ = match py_float { r = std_r } is
+        Ok  { val = s } -> println { msg = "    std  = $(float::to_str { n = s })" }
+        Err { error = _ } -> println { msg = "    std : coerce failed" }
+      let n_bytes = str::size { s = json_blob }
+      println { msg = "    histogram: 20 bins ($(int::to_str { n = n_bytes })-byte JSON payload)" }
+      println { msg = "" }
+
+      # ---- Step 3: hand JSON to JS, get back a rendered chart ----
+      println { msg = "[2] asciichart (via GraalJS `require('asciichart')`):" }
+      println { msg = "" }
+      let chart_r = Js.eval { source = js_chart_src { json_blob = json_blob } }
+      let _ = match js_str { r = chart_r } is
+        Ok  { val = chart } -> println { msg = chart }
+        Err { error } -> match error is
+          NotFound { name = n } -> println { msg = "  js: not found: $(n)" }
+          TypeError { message = m } -> println { msg = "  js: type error: $(m)" }
+          GuestError { message = m, guest_stack = _ } -> println { msg = "  js: guest error: $(m)" }
+          ArityMismatch { expected = _, actual = _ } -> println { msg = "  js: arity mismatch" }
+          UnsupportedMessage -> println { msg = "  js: unsupported message" }
+
+      println { msg = "" }
+      println { msg = "== done ==" }

@@ -1,0 +1,54 @@
+[package]
+name = "polyglot_numpy_js_chart"
+version = "0.1.0"
+
+[[app]]
+name = "polyglot_numpy_js_chart"
+path = "src/app.mz"
+entry = "main"
+
+# Two provider packages in one project — `mezze-python` ships the
+# GraalPy Truffle language + `use mezze_python::python::*` surface;
+# `mezze-js` ships GraalJS + `use mezze_js::js::*`. Together they
+# let one Mezze program drive numpy on one side and a JS charting
+# library on the other, in the same JVM.
+#
+# The `[dependencies]` KEY must match the Mezze module segment
+# consumer code imports (`use mezze_python::...`) because the module
+# resolver looks for `.deps/mezze/<key>-<version>/`; the VALUE points
+# at the GitHub repo whose actual name uses hyphens. Mezze module
+# segments can't contain hyphens, so the key stays underscore.
+[dependencies]
+mezze_python = "github:mezze-lang/mezze-python@0.2.1"
+mezze_js     = "github:mezze-lang/mezze-js@0.1.0"
+
+# `[polyglot.python]` opts this project in to GraalPy. `packages` is
+# the "polyglot-as-a-package" surface: `mez sync` runs the
+# `mezze-python` provider's install template
+# (`graalpy -m pip install --target .deps/python <packages>`) so
+# numpy lands under `.deps/python/`. On dev machines where `graalpy`
+# is not on `PATH`, the fallback `python_path` below picks up the
+# shared GraalPy venv this repo ships (see
+# `just polyglot-setup-python`).
+[polyglot.python]
+packages    = ["numpy>=1.24.0"]
+python_path = "../../interpreter/build/graalpy-venv/venv/lib/python3.12/site-packages"
+
+# GraalPy embedded in the JVM must use the Java POSIX backend to
+# avoid clashing with the host runtime's `libc` state.
+[polyglot.python.options]
+PosixModuleBackend = "java"
+
+# `[polyglot.js]` opts this project in to GraalJS. `packages` drives
+# the `mezze-js` provider's install template
+# (`npm install --prefix .deps/node/node_modules <packages>`), which
+# lands modules under `.deps/node/node_modules/node_modules/asciichart/`
+# — npm reads `--prefix` as the target working directory and creates
+# its own `node_modules/` inside. `node_modules` below is
+# `js.commonjs-require-cwd` — it must be the directory that CONTAINS
+# the modules (not the CWD parent), so it points at the
+# `.deps/node/node_modules/node_modules/` that npm actually produced.
+[polyglot.js]
+packages     = ["asciichart"]
+node_modules = ".deps/node/node_modules/node_modules"
+
