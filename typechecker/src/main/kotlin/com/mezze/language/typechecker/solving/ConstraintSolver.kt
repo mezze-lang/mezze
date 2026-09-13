@@ -857,7 +857,19 @@ class ConstraintSolver(
             ?: ((receiver as? MezzeType.TypeApplication)?.identity as? TypeIdentity.Declared)?.hash
         val typeName = receiverTypeName(receiver)
         val picked = (receiverHash?.let { h -> constraint.candidates.firstOrNull { it.targetTypeHash == h } })
-            ?: typeName?.let { name -> constraint.candidates.firstOrNull { it.targetTypeName == name } }
+            ?: run {
+                // Specificity ladder: mangled name first (`Result_A_B` for a
+                // concrete-arg TypeApplication), constructor-only fallback second
+                // (`Result` matches the generic `impl Result 'a 'e`). Keeps the
+                // deferred solver in sync with legacyInherentImplHash /
+                // DispatchResolver — all three ladders must agree.
+                var found: Constraint.InherentMethodCandidate? = null
+                for (name in com.mezze.language.typechecker.util.receiverTypeNames(receiver)) {
+                    found = constraint.candidates.firstOrNull { it.targetTypeName == name }
+                    if (found != null) break
+                }
+                found
+            }
         if (picked == null) {
             val shown = typeName ?: prettyPrintType(receiver)
             val known = constraint.candidates.map { it.targetTypeName }.distinct().joinToString(", ")

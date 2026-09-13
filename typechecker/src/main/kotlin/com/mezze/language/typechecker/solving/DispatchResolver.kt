@@ -349,9 +349,18 @@ object DispatchResolver {
     ): Hash? {
         if (info.candidateImpls.isNotEmpty()) {
             val hash = declaredHashOf(solvedReceiver)
-            val name = receiverTypeName(solvedReceiver)
-            val picked = (hash?.let { h -> info.candidateImpls.firstOrNull { it.targetTypeHash == h } })
-                ?: name?.let { n -> info.candidateImpls.firstOrNull { it.targetTypeName == n } }
+            val picked = hash?.let { h -> info.candidateImpls.firstOrNull { it.targetTypeHash == h } }
+                ?: run {
+                    // Names in SPECIFICITY order: `Result_Response_HttpError`
+                    // wins over `Result` when the receiver's args are concrete.
+                    // Same fallback [legacyInherentImplHash] uses; both must
+                    // agree so the S2.3 invariant assertion passes.
+                    for (name in com.mezze.language.typechecker.util.receiverTypeNames(solvedReceiver)) {
+                        info.candidateImpls.firstOrNull { it.targetTypeName == name }
+                            ?.let { return@run it }
+                    }
+                    null
+                }
             return picked?.implContentHash ?: info.implContentHash
         }
         return info.implContentHash

@@ -78,27 +78,25 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
 
   # ---- Step 1: NumPy → JSON, chain-coerce to Mezze Str ----
   println { msg = "[1] numpy: sampling N(0, 1), 1000 points, seed=42" }
-  # Bind the effect Result then chain `.as_str {}` — the Result-flavored
-  # inherent impl drops out a `Result Str InteropError` directly.
-  let json_pf_r = Python.eval { source = python_stats_src }
-  let json_r    = json_pf_r.as_str {}
+  # Inline `Python.eval{...}.as_str{}` — the Result-flavored inherent impl
+  # drops out a `Result Str InteropError` directly, so the effect Result
+  # never needs a helper let-binding.
+  let json_r = Python.eval { source = python_stats_src }.as_str {}
   match json_r is
     Err { error = _ } -> println { msg = "  python side failed" }
     Ok  { val = json_blob } -> do
 
-      # Pull mean + std back as scalar `Float`s. Same
-      # bind-then-`.as_float {}` chain — Python already produced
-      # plain `float` on the guest side (via `float(d.mean())`),
-      # so Truffle's `asDouble` accepts it and the Result-flavored
+      # Pull mean + std back as scalar `Float`s. Same inline
+      # `Python.eval{...}.as_float{}` chain — Python already produced
+      # plain `float` on the guest side (via `float(d.mean())`), so
+      # Truffle's `asDouble` accepts it and the Result-flavored
       # `.as_float {}` on the JVM side just unwraps.
-      let mean_pf_r = Python.eval {
+      let mean_r = Python.eval {
         source = "float(__import__('numpy').random.default_rng(42).normal(0.0, 1.0, 1000).mean())"
-      }
-      let mean_r = mean_pf_r.as_float {}
-      let std_pf_r = Python.eval {
+      }.as_float {}
+      let std_r = Python.eval {
         source = "float(__import__('numpy').random.default_rng(42).normal(0.0, 1.0, 1000).std())"
-      }
-      let std_r = std_pf_r.as_float {}
+      }.as_float {}
       let _ = match mean_r is
         Ok  { val = m } -> println { msg = "    mean = $(float::to_str { n = m })" }
         Err { error = _ } -> println { msg = "    mean: coerce failed" }
@@ -115,8 +113,7 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
       # from mezze-js 0.2.0.
       println { msg = "[2] asciichart (via GraalJS `require('asciichart')`):" }
       println { msg = "" }
-      let chart_pf_r = Js.eval { source = js_chart_src { json_blob = json_blob } }
-      let chart_r    = chart_pf_r.as_str {}
+      let chart_r = Js.eval { source = js_chart_src { json_blob = json_blob } }.as_str {}
       let _ = match chart_r is
         Ok  { val = chart } -> println { msg = chart }
         Err { error } -> match error is

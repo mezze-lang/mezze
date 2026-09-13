@@ -353,4 +353,65 @@ class HttpChainTest {
         """)
         assertEquals("https://other.com/foo", result)
     }
+
+    // ===============================================================
+    // Inline effect-op chain on `Result <T> <Err>` — static dispatch
+    // ===============================================================
+    //
+    // Regression for the polyglot `Python.eval{...}.as_str{}` shape,
+    // exercised against the stdlib http module because its
+    // `impl Response` and `impl Result Response HttpError` share method
+    // names (`.text`, `.json`, `.from_json`) — the same "parallel per-
+    // language impls" collision the polyglot providers ship
+    // (`impl PyForeign` + `impl Result PyForeign InteropError`).
+    //
+    // Before the fix, `Http.request{...}.text{}` (receiver is an
+    // effect-op call, NOT a named local) failed to dispatch:
+    //   - constraint gen's "homogeneous fast path" picked whichever
+    //     subset of candidates happened to share a return-type
+    //     signature and DROPPED the other subset. On a receiver whose
+    //     args later solved to the dropped branch, emit picked from a
+    //     set that didn't contain the right target;
+    //   - the deferred solver's fallback matched only the constructor
+    //     name (`Result`) against candidates registered under the
+    //     mangled `Result_Response_HttpError` — no match, T0206 or a
+    //     silent mis-dispatch.
+    //
+    // The fix: fall through to the fully-deferred dispatch when the
+    // homogeneous group doesn't cover EVERY concrete candidate, and
+    // try the mangled receiver-type name FIRST when picking a candidate
+    // (specificity ladder: `Result_A_B` beats generic `Result`).
+    // Verified end-to-end here on `.text` (defined on both Response and
+    // Result Response HttpError) — inline chain must return the
+    // `Result Str HttpError` from `impl Result Response HttpError.text`
+    // (delegates to `text_result`), NOT the bare `Result Str Str`
+    // from `impl Response.text`.
+
+    @Test
+    fun `inline effect-op chain on Result Response HttpError dispatches Result impl`() {
+        val result = eval("""
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, Request, default_http_config, request}
+            use std::collections::map
+            use std::collections::bytes
+
+            perform MockHttpClient { rules = [
+                { methods = [], url = Glob { pattern = "**" },
+                  response = Ok { val = { status = 200, headers = map::empty {},
+                    body = bytes::from_str { s = "the-body" }, url = "" } } }
+            ] } in do
+              let req = request { url = "http://test.com/x" }
+              # Inline chain: `Http.request{...}` is a TypedPerformOp receiver
+              # with declared return `Result Response HttpError`, and `.text{}`
+              # is defined on BOTH `impl Response` AND `impl Result Response
+              # HttpError`. Must dispatch to the Result impl (which delegates to
+              # `text_result` and yields `Result Str HttpError`), NOT the
+              # Response impl (which yields the raw `Result Str Str` from
+              # `body_str`).
+              let result_text = Http.request { req = req, config = default_http_config }.text {}
+              match result_text is
+                Ok  { val = s } -> s
+                Err { error = _ } -> "ERR"
+        """)
+        assertEquals("the-body", result)
+    }
 }

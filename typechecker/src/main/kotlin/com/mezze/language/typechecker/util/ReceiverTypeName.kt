@@ -61,3 +61,59 @@ fun receiverTypeName(type: MezzeType): String? = when (type) {
         ?: if (type.constructors.size == 1) type.constructors.keys.first() else null
     else -> null
 }
+
+/**
+ * The candidate names dispatch can match this receiver against, in
+ * SPECIFICITY order — most-specific FIRST. Callers pick the first hit.
+ *
+ * For a `TypeApplication` with concrete args (`Result Response HttpError`) we
+ * ALSO produce the mangled form `Result_Response_HttpError` — the SAME shape
+ * [AbilityImplFactory.typeNameOf] mints as the `targetTypeName` for
+ * `impl Result Response HttpError`. So the specific impl wins over a same-
+ * constructor generic impl (`impl Result 'a 'e`, registered as just
+ * `"Result"`) when the receiver's args are known: dispatch sees the
+ * concrete args and picks the concrete impl. When args are TypeVars (the
+ * generic-impl receiver at that impl's own body), only the plain constructor
+ * name is produced — matching `impl Result 'a 'e`'s registration.
+ *
+ * Same accepted "no hash → name is the identity fallback" rule as
+ * [receiverTypeName]. Every non-TypeApplication kind produces exactly the
+ * single name [receiverTypeName] returns (or an empty list when that is
+ * null) — so this is a strict superset that never removes a hit.
+ */
+fun receiverTypeNames(type: MezzeType): List<String> = when (type) {
+    is MezzeType.TypeApplication -> {
+        val hasConcreteArg = type.args.any { it !is MezzeType.VarType }
+        if (hasConcreteArg) listOf(mangledTypeAppName(type), type.constructor)
+        else listOf(type.constructor)
+    }
+    else -> receiverTypeName(type)?.let { listOf(it) } ?: emptyList()
+}
+
+/**
+ * Mangled name matching [com.mezze.language.typechecker.util.AbilityImplFactory.typeNameOf]
+ * for a `TypeApplication`: constructor + args joined by `_`, recursing into
+ * nested applications. Only produces a name for concrete-arg positions —
+ * VarType args stay bare, so a partially-instantiated application never
+ * spuriously matches a fully-mangled impl target. Container types
+ * (`Seq/List/Set/Map`) match the `Seq_<Elem>` shape [AbilityImplFactory]
+ * mints for them.
+ */
+private fun mangledTypeAppName(type: MezzeType.TypeApplication): String {
+    val args = type.args.map { arg -> mangledArgName(arg) ?: "'?" }
+    return if (args.isEmpty()) type.constructor
+    else "${type.constructor}_${args.joinToString("_")}"
+}
+
+private fun mangledArgName(arg: MezzeType): String? = when (arg) {
+    is MezzeType.TypeApplication -> mangledTypeAppName(arg)
+    is MezzeType.SeqType -> mangledArgName(arg.elementType)?.let { "Seq_$it" }
+    is MezzeType.ListType -> mangledArgName(arg.elementType)?.let { "List_$it" }
+    is MezzeType.SetType -> mangledArgName(arg.elementType)?.let { "Set_$it" }
+    is MezzeType.MapType -> {
+        val k = mangledArgName(arg.keyType); val v = mangledArgName(arg.valueType)
+        if (k != null && v != null) "Map_${k}_$v" else null
+    }
+    is MezzeType.VarType -> null
+    else -> receiverTypeName(arg)
+}

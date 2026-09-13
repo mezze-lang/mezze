@@ -147,6 +147,14 @@ class TypedASTCompiler(
      * to the dict-passing branch. Empty entries mean "no override" — behavior for
      * receivers the solver already resolved is unchanged.
      *
+     * INLINE receivers (a `TypedCall` / `TypedPerformOp` / `TypedMatch` directly in
+     * the `.method{}` chain, no intermediate `let`) don't populate this map — nothing
+     * to key on. The dispatch site instead invokes `deriveConcreteType(fn.record)`
+     * directly for those, sharing the same structural walk and the same
+     * `tryResolveAbilityOp` uniqueness gate that keeps recovery from over-firing.
+     * Same net effect: an inline `Python.eval{...}.as_str{}` chain routes to
+     * `impl Result PyForeign InteropError` just as the let-bound form does.
+     *
      * Keyed by SLOT INDEX (not name) so nested scopes with shadowed names don't
      * collide. Saved/restored by compileBlock/compileMatch just like localsByName.
      */
@@ -1719,21 +1727,46 @@ class TypedASTCompiler(
                     .let { r -> specBoundReceiverType(r) ?: r }
                     .let { r ->
                         // Polyglot-newtype-dispatch recovery (see slotConcreteTypes
-                        // field comment). Only fire when: (a) receiver stayed a bare
-                        // VarType through raw + variant-recovery + spec-bound stages,
-                        // (b) `fn.record` is a local with an override, AND (c) the
-                        // override actually gives us an unambiguous ability op for
-                        // this method name at this call site. Guard (c) is what
-                        // keeps this from over-firing on codec paths (from_json /
-                        // map / get_or), where a pattern-binding walker populates
-                        // slotConcreteTypes with a legitimate binding type that
-                        // happens NOT to be the receiver at some later dispatch.
-                        if (r is VarType && fn.record is TypedVar &&
-                            (fn.record as TypedVar).binding is BindingRef.Local) {
-                            val slot = localsByName[(fn.record as TypedVar).name]
-                            val override = slot?.let { slotConcreteTypes[it] }
-                            if (override != null &&
-                                tryResolveAbilityOp(methodName, override, expr.arg) != null) override
+                        // field comment). Fires when the receiver stayed a bare
+                        // VarType through raw + variant-recovery + spec-bound stages
+                        // AND we can recover a concrete type structurally.
+                        //
+                        // Two recovery sources, tried in order:
+                        //  (a) Local slot override — populated by compileBlock /
+                        //      compileMatch via deriveConcreteType at bind time.
+                        //      Covers `let x = <expr>; x.method{}` after a
+                        //      poly-let / match-arm binding where the solver left
+                        //      x's stated type as VarType.
+                        //  (b) Inline receiver derivation — invoke
+                        //      deriveConcreteType directly on `fn.record`. Covers
+                        //      `<expr>.method{}` where `<expr>` is a call whose
+                        //      return type is structurally concrete (a
+                        //      TypedPerformOp on an effect op with a declared
+                        //      return; a TypedCall to a ByHash / field-access
+                        //      callee with a concrete FunctionType return; a
+                        //      TypedMatch whose Result-preserving shape recovers
+                        //      the scrutinee's Result type). This is the case
+                        //      that surfaced as an inline chain on a polyglot
+                        //      `Result <Lang>Foreign InteropError` receiver —
+                        //      `Python.eval{...}.as_str{}` — where the outer
+                        //      dispatch never saw a TypedVar-Local to consult.
+                        //
+                        // Both paths gate on `tryResolveAbilityOp` finding a
+                        // unique op for the recovered type at THIS method name,
+                        // so the recovery never over-fires on codec paths
+                        // (from_json / map / get_or) where a pattern-binding
+                        // walker populated slotConcreteTypes with a legitimate
+                        // binding type that isn't this call site's receiver.
+                        if (r is VarType) {
+                            val slotOverride: MezzeType? =
+                                if (fn.record is TypedVar &&
+                                    (fn.record as TypedVar).binding is BindingRef.Local) {
+                                    val slot = localsByName[(fn.record as TypedVar).name]
+                                    slot?.let { slotConcreteTypes[it] }
+                                } else null
+                            val recovered = slotOverride ?: deriveConcreteType(fn.record)
+                            if (recovered != null && recovered !is VarType &&
+                                tryResolveAbilityOp(methodName, recovered, expr.arg) != null) recovered
                             else r
                         } else r
                     }
@@ -3064,6 +3097,17 @@ class TypedASTCompiler(
      * The caller treats null as "no override" — original receiverType stays.
      */
     private fun deriveConcreteType(expr: TypedExpr): MezzeType? = when (expr) {
+        // An effect operation's return type is fixed by its `effect X where { op:
+        // <sig> }` declaration — TypedPerformOp carries the substituted op-return
+        // type directly on the node. Reading it lets an inline
+        // `<Effect>.<op>{...}.<method>{}` recover the concrete Result-typed receiver
+        // even when the outer dispatch's `substitution.apply(...)` leaves the site
+        // as a bare VarType (the polyglot `Python.eval{...}.as_str{}` shape). The
+        // shared VarType / containsVarTypeDeep guard keeps null the answer for
+        // ops whose return still carries an unsolved payload/error TyVar.
+        is TypedPerformOp -> expr.type.takeIf {
+            it !is VarType && !containsVarTypeDeep(it)
+        }
         is TypedCall -> {
             val fn = expr.function
             val calleeReturn = when {
@@ -3074,7 +3118,13 @@ class TypedASTCompiler(
                         ?: (expr.type as? FunctionType)?.returnType
                 else -> null
             }
+            // Fall back to the TypedCall's own solved type when the callee's
+            // FunctionType wasn't visible (indirect callee, chained method-of-method,
+            // etc.) but the enclosing solve pinned this call's result. Same VarType
+            // guard as everywhere else — a concrete inline call is what fires the
+            // recovery, nothing else.
             calleeReturn?.takeIf { it !is VarType && !containsVarTypeDeep(it) }
+                ?: expr.type.takeIf { it !is VarType && !containsVarTypeDeep(it) }
         }
         is TypedMatch -> run {
             val scrutineeConcrete: MezzeType? = run {

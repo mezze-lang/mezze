@@ -133,8 +133,20 @@ class TypedAstBuilder(
             methodInfo.candidateImpls.firstOrNull { it.targetTypeHash == receiverHash }?.implContentHash
         } else null
         return byHash ?: run {
-            val name = receiverTypeName(solvedReceiver)
-            methodInfo.candidateImpls.firstOrNull { it.targetTypeName == name }?.implContentHash
+            // Try the receiver's names in SPECIFICITY order — mangled form first
+            // (`Result_Response_HttpError` for a concrete-arg TypeApplication),
+            // constructor-only fallback second (`Result`). So a specific inherent
+            // impl on `Result X Y` wins over the generic `impl Result 'a 'e` when
+            // the receiver's args are known — this is what routes a chained
+            // `<perform>.eval{}.as_str{}` on `Result <Lang>Foreign InteropError`
+            // to the language-specific `Result`-impl instead of the same-named
+            // inherent on the underlying `Foreign`. Same helper the
+            // ConstraintSolver / DispatchResolver ladder uses.
+            for (name in com.mezze.language.typechecker.util.receiverTypeNames(solvedReceiver)) {
+                methodInfo.candidateImpls.firstOrNull { it.targetTypeName == name }
+                    ?.implContentHash?.let { return@run it }
+            }
+            null
         } ?: methodInfo.implContentHash
     }
 

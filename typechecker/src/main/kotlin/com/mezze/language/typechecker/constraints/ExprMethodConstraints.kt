@@ -147,7 +147,20 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             // structural field-access) — receiverHasSolvableType excludes it.
             if (receiverHasSolvableType(memberAccess.receiver, context) && concrete.size >= 2) {
                 val homogeneous = homogeneousCandidateGroup(concrete)
-                if (homogeneous.size >= 2) {
+                // Homogeneous fast path is only sound when the group covers EVERY
+                // concrete candidate. Otherwise the "representative signature"
+                // used to type the call comes from a strict subset, and emit
+                // picks the impl from that same subset — the OTHER same-name
+                // candidates (a parallel per-language impl set like
+                // `PyForeign`/`Result_PyForeign_InteropError` vs
+                // `JsForeign`/`Result_JsForeign_InteropError`) are lost. When
+                // the receiver later solves to one of the omitted branches,
+                // emit dispatches to the wrong impl (silently: the fast path
+                // never records those candidates). Fall to the fully-deferred
+                // path in that case — it emits an InherentMethodResolve
+                // constraint that carries every concrete candidate and picks
+                // by the solved receiver.
+                if (homogeneous.size >= 2 && homogeneous.size == concrete.size) {
                     return generateInherentMethodCall(
                         expr, memberAccess, homogeneous, context, deferImplByReceiver = true
                     )
