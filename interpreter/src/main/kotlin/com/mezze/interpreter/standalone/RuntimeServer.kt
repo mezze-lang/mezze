@@ -261,19 +261,30 @@ object RuntimeServer {
         }
         val engine = engineBuilder.build()
 
-        // Polyglot: enable GraalPy / GraalJS iff the project's Mezze.toml
-        // declares [polyglot.python] / [polyglot.js]. Same rationale as
-        // EmbeddedExec — opt-in because loading extra Truffle languages
-        // adds cost every non-polyglot program would pay. Config lives
-        // in Mezze.toml resolved via the `mezze.project.root` system
-        // property the parent set when spawning this child.
+        // Polyglot: enable a guest language iff the project's Mezze.toml
+        // declares its `[polyglot.<lang>]` section AND the language's
+        // Truffle provider is actually installed on this wire child's
+        // classpath. Bare `mez` ships only the Mezze provider — the
+        // Python/JS/Wasm engines arrive via user-installed provider
+        // packages (`mezze-python`, `mezze-js`, `mezze-wasm`) whose
+        // `[jars]` tables `mez sync` puts on this child's classpath.
+        // Config lives in Mezze.toml resolved via the `mezze.project.root`
+        // system property the parent set when spawning us.
         val projectRoot = System.getProperty("mezze.project.root")?.let { File(it) } ?: File(".")
         val polyglot = com.mezze.interpreter.polyglot.PolyglotManifest.load(projectRoot)
 
-        val extraLanguages = buildList {
+        val installedLanguages = engine.languages.keys
+        val requested = buildList {
             if (polyglot.enablePython) add("python")
             if (polyglot.enableJs) add("js")
             if (polyglot.enableWasm) add("wasm")
+        }
+        val extraLanguages = requested.filter { it in installedLanguages }
+        for (missing in requested - extraLanguages.toSet()) {
+            originalStderr.println(
+                "[mezze] [polyglot.$missing] declared but no provider on the " +
+                "classpath — install the mezze-$missing package and rerun `mez sync`."
+            )
         }
         val languageIds = (listOf(MezzeLanguage.ID) + extraLanguages).toTypedArray()
         val contextBuilder = Context.newBuilder(*languageIds)
@@ -288,7 +299,10 @@ object RuntimeServer {
             // inherited fd 2 (parent's terminal); avoids wire frames for
             // dev-tool startup banners.
             .out(wireOut)
-        if (polyglot.enablePython) {
+        val enablePython = "python" in extraLanguages
+        val enableJs = "js" in extraLanguages
+        val enableWasm = "wasm" in extraLanguages
+        if (enablePython) {
             contextBuilder
                 .option("python.PosixModuleBackend", "java")
                 .option("python.WarnExperimentalFeatures", "false")
@@ -299,7 +313,7 @@ object RuntimeServer {
                 contextBuilder.option("python.$k", v)
             }
         }
-        if (polyglot.enableJs) {
+        if (enableJs) {
             contextBuilder.option("js.ecmascript-version", "2024")
             if (!polyglot.jsNodeModules.isNullOrBlank()) {
                 contextBuilder.option("js.commonjs-require", "true")
@@ -309,7 +323,7 @@ object RuntimeServer {
                 contextBuilder.option("js.$k", v)
             }
         }
-        if (polyglot.enableWasm) {
+        if (enableWasm) {
             for ((k, v) in polyglot.wasmOptions) {
                 contextBuilder.option("wasm.$k", v)
             }

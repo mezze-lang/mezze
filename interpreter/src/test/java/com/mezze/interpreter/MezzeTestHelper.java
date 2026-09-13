@@ -78,37 +78,7 @@ public final class MezzeTestHelper {
         return runWith(sourceCode, null, jitEngine);
     }
 
-    /**
-     * Execute with GraalPy's `python.IsolateNativeModules` set to true.
-     * Needed for tests that load a Python C-extension (numpy, etc.) from
-     * more than one Context in the same process — without isolation the
-     * second load fails with "a second GraalPy context attempted to load
-     * a native module ...".
-     *
-     * Runs on a dedicated fresh Engine (not the shared one) so the
-     * isolate's classloader cannot leak into other tests' Mezze
-     * bytecode reflection lookups.
-     */
-    public static Object runWithPythonIsolate(String sourceCode) {
-        // Fresh Engine per call — safe because the isolate must not
-        // survive into shared-engine tests.
-        Engine engine = Engine.newBuilder()
-            .allowExperimentalOptions(true)
-            .option("engine.WarnInterpreterOnly", "false")
-            .option("engine.Compilation", "false")
-            .build();
-        try {
-            return runWith(sourceCode, null, engine, true);
-        } finally {
-            try { engine.close(); } catch (Exception ignored) {}
-        }
-    }
-
     private static Object runWith(String sourceCode, Path projectRoot, Engine engine) {
-        return runWith(sourceCode, projectRoot, engine, false);
-    }
-
-    private static Object runWith(String sourceCode, Path projectRoot, Engine engine, boolean pythonIsolate) {
         Path root = projectRoot != null
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));
@@ -122,43 +92,14 @@ public final class MezzeTestHelper {
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
-        Context.Builder builder = Context.newBuilder(MezzeLanguage.ID, "python", "js", "wasm")
+        // Bare-mez interpreter tests: only the Mezze language is on the
+        // classpath. Python/JS/Wasm engines are user-installed provider
+        // packages tested separately in `:polyglot-*-natives` modules.
+        Context.Builder builder = Context.newBuilder(MezzeLanguage.ID)
                 .engine(engine)
                 .allowAllAccess(true)
                 .allowCreateThread(true)
-                // Python (GraalPy) needs experimental options + a JVM-friendly
-                // posix backend when run embedded — the "java" backend avoids
-                // requiring a POSIX resource library at runtime.
-                .allowExperimentalOptions(true)
-                .option("python.PosixModuleBackend", "java")
-                .option("python.WarnExperimentalFeatures", "false")
-                // JS (GraalJS): pin ECMAScript version so tests are stable
-                // across GraalJS bumps. No require/import support wired up
-                // here — JsInteropTest exercises `eval` only.
-                .option("js.ecmascript-version", "2024");
-        if (pythonIsolate) {
-            builder.option("python.IsolateNativeModules", "true");
-        }
-
-        // If the org.graalvm.python plugin populated the venv, wire its
-        // site-packages onto PythonPath so `import numpy` succeeds.  The
-        // venv lives at <build>/graalpy-venv/venv/ (Linux/macOS layout).
-        String projectDir = System.getProperty("mezze.project.root", ".");
-        Path venvSitePackages = Paths.get(projectDir,
-            "interpreter", "build", "graalpy-venv", "venv", "lib");
-        if (java.nio.file.Files.isDirectory(venvSitePackages)) {
-            try (var stream = java.nio.file.Files.list(venvSitePackages)) {
-                var pyDir = stream
-                    .filter(p -> p.getFileName().toString().startsWith("python"))
-                    .findFirst();
-                if (pyDir.isPresent()) {
-                    Path sitePackages = pyDir.get().resolve("site-packages");
-                    if (java.nio.file.Files.isDirectory(sitePackages)) {
-                        builder.option("python.PythonPath", sitePackages.toString());
-                    }
-                }
-            } catch (java.io.IOException ignored) {}
-        }
+                .allowExperimentalOptions(true);
 
         Context context = builder.build();
 
