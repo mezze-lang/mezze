@@ -2,6 +2,8 @@ plugins {
     java
 }
 
+group = "dev.mezze"
+
 // Standalone gradle module producing `polyglot-python-natives.jar` — the slim
 // SPI jar the `mezze-python` polyglot provider package ships to register
 // GraalPy natives with a running :interpreter via `NativeDispatch.overrideHandler`.

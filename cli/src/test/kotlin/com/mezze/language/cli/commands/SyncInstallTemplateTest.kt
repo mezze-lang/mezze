@@ -6,13 +6,12 @@ import java.io.File
 import java.nio.file.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
  * `mez sync` install-template execution: after fetching packages and
  * jars, sync walks the user manifest's `[polyglot.<lang>]` sections and
- * — for each with a non-empty `packages` list — invokes the matching
+ * for each with a non-empty `packages` list invokes the matching
  * provider's install template. Prefix/dest substitution, cache-skip on
  * a `.mez-installed.json` marker, and hard error on conflicting
  * providers all live here.
@@ -107,11 +106,27 @@ class SyncInstallTemplateTest {
         val root = tmp.toFile()
         val store = File(root, "store")
         val logFile = File(root, "install.log")
-        // The install template writes prefix + dest + packages to logFile
-        // so we can assert exact substitution.
+        // mez sync single-quotes every substituted value BEFORE splicing
+        // so pip specifiers with metachars (`>=`, `~=`) survive `sh -c`.
+        // Templates therefore MUST NOT wrap {prefix} / {dest} / {packages}
+        // in their own outer quotes. The dump script below records
+        // exactly how many shell args each placeholder expanded to and
+        // the values, so assertions pin substitution + word-splitting.
+        val dumpScript = File(root, "dump.sh").also { f ->
+            f.writeText(
+                "#!/bin/sh\n" +
+                "{\n" +
+                "  echo \"prefix=[\$1]\"; shift\n" +
+                "  echo \"dest=[\$1]\"; shift\n" +
+                "  echo \"packages_argc=\$#\"\n" +
+                "  for p in \"\$@\"; do echo \"package=[\$p]\"; done\n" +
+                "} > " + "\"" + logFile.absolutePath + "\"\n"
+            )
+            f.setExecutable(true)
+        }
         val provider = File(root, "mezze-python").also {
             writeProviderPkg(it, name = "mezze_python", lang = "python",
-                installTemplate = "printf '%s\\n%s\\n%s\\n' '{prefix}' '{dest}' '{packages}' > '${logFile.absolutePath}'")
+                installTemplate = "${dumpScript.absolutePath} {prefix} {dest} {packages}")
         }
         val app = File(root, "app").also {
             writeAppPkg(it, lang = "python", packages = listOf("numpy>=1.24.0", "requests"),
@@ -121,11 +136,15 @@ class SyncInstallTemplateTest {
         assertEquals(0, SyncCommand().execute(emptyList(), currentDir = app, storeRootOverride = store))
 
         assertTrue(logFile.isFile, "install template must have run")
-        val lines = logFile.readLines()
-        assertEquals(3, lines.size, "template writes 3 lines: prefix, dest, packages")
-        assertEquals(provider.canonicalPath, File(lines[0]).canonicalPath, "{prefix} = provider dir")
-        assertEquals(File(app, ".deps/python").absolutePath, lines[1], "{dest} = <app>/<runtime_dir>")
-        assertEquals("numpy>=1.24.0 requests", lines[2], "{packages} space-joined")
+        val out = logFile.readText()
+        assertTrue(out.contains("prefix=[${provider.canonicalPath}]"),
+            "{prefix} substitutes to the provider dir; got:\n$out")
+        assertTrue(out.contains("dest=[${File(app, ".deps/python").absolutePath}]"),
+            "{dest} substitutes to <app>/<runtime_dir>; got:\n$out")
+        assertTrue(out.contains("packages_argc=2"),
+            "{packages} expands to exactly one shell arg per user package; got:\n$out")
+        assertTrue(out.contains("package=[numpy>=1.24.0]") && out.contains("package=[requests]"),
+            "each package survives shell splitting with metachars intact; got:\n$out")
     }
 
     @Test
@@ -148,13 +167,13 @@ class SyncInstallTemplateTest {
 
         // Second sync with identical inputs must skip.
         assertEquals(0, SyncCommand().execute(emptyList(), currentDir = app, storeRootOverride = store))
-        assertEquals("x", counter.readText(), "second sync skips — marker matched")
+        assertEquals("x", counter.readText(), "second sync skips: marker matched")
 
         // Changing the packages list invalidates the cache.
         writeAppPkg(app, lang = "python", packages = listOf("numpy", "scipy"),
             providerName = "mezze_python", providerPath = provider.absolutePath)
         assertEquals(0, SyncCommand().execute(emptyList(), currentDir = app, storeRootOverride = store))
-        assertEquals("xx", counter.readText(), "third sync re-runs — packages changed")
+        assertEquals("xx", counter.readText(), "third sync re-runs: packages changed")
     }
 
     @Test
@@ -233,6 +252,6 @@ class SyncInstallTemplateTest {
         )
 
         assertEquals(0, SyncCommand().execute(emptyList(), currentDir = app, storeRootOverride = store))
-        assertFalse(marker.exists(), "no packages declared → no install")
+        assertFalse(marker.exists(), "no packages declared: no install")
     }
 }

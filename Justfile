@@ -223,13 +223,17 @@ mez-run-numpy-demo: _mez
 # Args:  group  artifact  version  src-jar  repo-dir
 # Example:
 #   just publish-maven \
-#       land.meridia.mezze polyglot-python-natives 0.2.0 \
+#       dev.mezze polyglot-python-natives 0.2.0 \
 #       polyglot-python-natives/build/libs/polyglot-python-natives-0.2.0.jar \
 #       ../mezze-maven
 [group('mez')]
 publish-maven group artifact version srcjar repo_dir:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Just does NOT export recipe params as env vars (as of 1.46) — pull the
+    # template substitution into a shell var first, then transform dots to
+    # slashes for the maven directory layout.
+    group="{{group}}"
     group_path="${group//./\/}"
     target_dir="{{repo_dir}}/${group_path}/{{artifact}}/{{version}}"
     mkdir -p "$target_dir"
