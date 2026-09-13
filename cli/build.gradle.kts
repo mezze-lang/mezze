@@ -91,6 +91,19 @@ dependencies {
     // rewired.
     implementation("org.apache.commons:commons-compress:1.28.0") // tar.gz handling
 
+    // Apache Aether — maven-coord resolution for `[maven]` entries in
+    // Mezze.toml. Cache lives under `~/.mezze/cache/maven/`, isolated
+    // from the user's `~/.m2/`; default remote is Maven Central plus
+    // any `[[maven-repo]]` the manifest declares.
+    implementation("org.apache.maven.resolver:maven-resolver-api:1.9.20")
+    implementation("org.apache.maven.resolver:maven-resolver-spi:1.9.20")
+    implementation("org.apache.maven.resolver:maven-resolver-util:1.9.20")
+    implementation("org.apache.maven.resolver:maven-resolver-impl:1.9.20")
+    implementation("org.apache.maven.resolver:maven-resolver-transport-http:1.9.20")
+    implementation("org.apache.maven.resolver:maven-resolver-transport-file:1.9.20")
+    implementation("org.apache.maven.resolver:maven-resolver-connector-basic:1.9.20")
+    implementation("org.apache.maven:maven-resolver-provider:3.9.6")
+
     // Store module for content-addressed storage (SQLite implementation)
     implementation(project(":store-sqlite"))
 
