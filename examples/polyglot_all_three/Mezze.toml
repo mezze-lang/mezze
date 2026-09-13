@@ -7,7 +7,12 @@ name = "polyglot_all_three"
 path = "src/app.mz"
 entry = "main"
 
+# JVM interop ships built-in — `std::polyglot::jvm` is always available.
+# Python + JavaScript arrive as user-installed provider packages;
+# `mez sync` pulls the `.mz` sources + the graalpy / graaljs jars.
 [dependencies]
+mezze-python = "github:mezze-lang/mezze-python@0.2.1"
+mezze-js     = "github:mezze-lang/mezze-js@0.1.0"
 
 # JVM interop needs no config beyond declaring the section.
 [polyglot.jvm]

@@ -7,12 +7,18 @@ name = "polyglot_python_pure"
 path = "src/app.mz"
 entry = "main"
 
-[dependencies]
-
 # Pure-Python stdlib demo — no third-party packages. GraalPy ships the
 # standard library as classpath resources, so this demo needs no venv
-# and works out of the box under `mez exec` AND `mez build --native`.
+# and works out of the box under `mez sync` + `mez exec`.
 #
+# The `mezze-python` provider package supplies:
+#   - `.mz` source files: `use mezze_python::python::{ Python, GraalPy, ... }`
+#   - `[maven]` block: the GraalPy jars (python-language + resources +
+#     launcher) and `polyglot-python-natives` — put on the wire child's
+#     classpath by `mez sync` so `[polyglot.python]` boots successfully.
+[dependencies]
+mezze-python = "github:mezze-lang/mezze-python@0.2.1"
+
 # The presence of `[polyglot.python]` alone opts the run in; we do NOT
 # set `python_path` because there are no site-packages to point at.
 [polyglot.python]

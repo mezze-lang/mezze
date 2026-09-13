@@ -16,7 +16,7 @@
 # Run:  just mez-run-numpy-demo
 use std::effects::log::{println, Console, Log}
 use std::polyglot::core::{ InteropError }
-use std::polyglot::python::{ Python, GraalPy, PyForeign }
+use mezze_python::python::{ Python, GraalPy, PyForeign }
 use std::float
 use std::int
 

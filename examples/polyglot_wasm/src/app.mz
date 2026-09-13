@@ -27,7 +27,7 @@
 use std::collections::bytes as bytes
 use std::effects::log::{println, Console, Log}
 use std::polyglot::core::{ InteropError }
-use std::polyglot::wasm::{ Wasm, GraalWasm, WasmForeign, from_int }
+use mezze_wasm::wasm::{ Wasm, GraalWasm, WasmForeign, from_int }
 use std::int
 
 ## Coerce a WasmForeign result to a Mezze Int and print it.

@@ -35,7 +35,7 @@ narrow by design:
   blob. The caller supplies the bytes (from a file, HTTP fetch,
   in-memory assembly, or an embedded literal like this demo).
 
-The Mezze API mirrors those constraints. `std::polyglot::wasm` gives
+The Mezze API mirrors those constraints. `mezze_wasm::wasm` gives
 you:
 
 - `Wasm.load_module { bytes, name }` / `Wasm.load_file { path, name }`

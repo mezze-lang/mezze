@@ -7,18 +7,20 @@ name = "polyglot_numpy"
 path = "src/app.mz"
 entry = "main"
 
+# `mezze-python` supplies the Python interop surface and the graalpy
+# jars.  `packages = ["numpy"]` under `[polyglot.python]` asks
+# `mez sync` to invoke the provider's install template
+# (`graalpy -m pip install --target .deps/python numpy`), landing
+# numpy site-packages under `.deps/python/` — the runtime points
+# `python.PythonPath` there automatically.
 [dependencies]
+mezze-python = "github:mezze-lang/mezze-python@0.2.1"
 
 # `[polyglot.python]` opts this project in to the GraalPy Truffle
-# language and points `sys.path` at the venv site-packages numpy was
-# installed into. Bootstrap the venv with `just polyglot-setup-python`
-# (see README).
-#
-# `python_path` is resolved relative to THIS manifest's directory, so
-# committing `../../interpreter/build/graalpy-venv/…` is enough — the
-# caller's cwd doesn't matter.
+# language. The `packages` list drives the provider's install phase.
+# Requires the toolchain graalpy on PATH — see README.md.
 [polyglot.python]
-python_path = "../../interpreter/build/graalpy-venv/venv/lib/python3.12/site-packages"
+packages = ["numpy"]
 
 # Additional `python.<KEY>` Context options forwarded to Truffle. The
 # Java POSIX backend keeps embedded GraalPy off host libc — required

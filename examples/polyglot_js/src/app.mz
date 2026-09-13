@@ -13,7 +13,7 @@
 # Run:  just mez-run-js-demo
 use std::effects::log::{println, Console, Log}
 use std::polyglot::core::{ InteropError }
-use std::polyglot::js::{ Js, GraalJs, JsForeign, from_int, from_str }
+use mezze_js::js::{ Js, GraalJs, JsForeign, from_int, from_str }
 use std::float
 use std::int
 

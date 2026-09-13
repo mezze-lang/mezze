@@ -7,12 +7,17 @@ name = "polyglot_js"
 path = "src/app.mz"
 entry = "main"
 
+# `mezze-js` supplies:
+#   - `.mz` source files: `use mezze_js::js::{ Js, GraalJs, JsForeign, ... }`
+#   - `[maven]` block: the GraalJS jars (js-language + js-scriptengine)
+#     and `polyglot-js-natives` — put on the wire child's classpath by
+#     `mez sync` so `[polyglot.js]` boots successfully.
 [dependencies]
+mezze-js = "github:mezze-lang/mezze-js@0.1.0"
 
 # `[polyglot.js]` opts this project in to the GraalJS Truffle language.
 # GraalJS ships with no external prerequisites — pure ECMAScript is
-# available out of the box, no venv, no node_modules, so the section
-# is presence-only for this demo.
+# available out of the box once `mez sync` has fetched the jars.
 #
 # For CommonJS `require(...)` support, set `node_modules`:
 #

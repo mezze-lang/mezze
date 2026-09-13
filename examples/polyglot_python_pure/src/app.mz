@@ -2,9 +2,14 @@
 # `math` and `statistics` modules — no numpy, no site-packages — so
 # it works end-to-end from a naked GraalPy install and can be built
 # with `mez build --native` on any machine.
+#
+# The `mezze-python` package (declared as a github dep in
+# Mezze.toml) provides `Python`, `GraalPy`, and `PyForeign`;
+# `mez sync` fetches its `.mz` source and the graalpy jars it lists
+# under `[maven]`.
 use std::effects::log::{println, Console, Log}
 use std::polyglot::core::{ InteropError }
-use std::polyglot::python::{ Python, GraalPy, PyForeign }
+use mezze_python::python::{ Python, GraalPy, PyForeign }
 use std::float
 use std::int
 
