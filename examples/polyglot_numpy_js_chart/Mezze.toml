@@ -19,12 +19,15 @@ entry = "main"
 # at the GitHub repo whose actual name uses hyphens. Mezze module
 # segments can't contain hyphens, so the key stays underscore.
 #
-# 0.3.0 / 0.2.0 pins pull in the Result-flavored inherent impls on
+# 0.3.0 / 0.2.1 pins pull in the Result-flavored inherent impls on
 # `Result <Lang>Foreign InteropError`, so `Python.eval { … }.as_str {}`
 # and `Js.eval { … }.as_str {}` chain-coerce without a helper `match`.
+# mezze-js 0.2.1 also switches `runtime_dir` to `.deps/node` so
+# npm's natural layout applies and no `node_modules` override is
+# needed on the consumer side.
 [dependencies]
 mezze_python = "github:mezze-lang/mezze-python@0.3.0"
-mezze_js     = "github:mezze-lang/mezze-js@0.2.0"
+mezze_js     = "github:mezze-lang/mezze-js@0.2.1"
 
 # `[polyglot.python]` opts this project in to GraalPy. `packages` is
 # the "polyglot-as-a-package" surface: `mez sync` runs the
@@ -45,13 +48,10 @@ PosixModuleBackend = "java"
 
 # `[polyglot.js]` opts this project in to GraalJS. `packages` drives
 # the `mezze-js` provider's install template
-# (`npm install --prefix .deps/node/node_modules <packages>`), which
-# lands modules under `.deps/node/node_modules/node_modules/asciichart/`
-# — npm reads `--prefix` as the target working directory and creates
-# its own `node_modules/` inside. `node_modules` below is
-# `js.commonjs-require-cwd` — it must be the directory that CONTAINS
-# the modules (not the CWD parent), so it points at the
-# `.deps/node/node_modules/node_modules/` that npm actually produced.
+# (`npm install --prefix .deps/node <packages>`) so modules land
+# at the natural `.deps/node/node_modules/<pkg>/`. mezze-js 0.2.1
+# pins `runtime_dir = .deps/node`; the runtime auto-derives
+# `js.commonjs-require-cwd` from the JS provider, so no
+# `node_modules = ...` override is needed here.
 [polyglot.js]
 packages     = ["asciichart"]
-node_modules = ".deps/node/node_modules/node_modules"
