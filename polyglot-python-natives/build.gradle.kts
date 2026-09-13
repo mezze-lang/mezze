@@ -45,11 +45,11 @@ tasks.withType<JavaCompile> {
 
 tasks.jar {
     archiveBaseName.set("polyglot-python-natives")
-    archiveVersion.set("0.1.0")
+    archiveVersion.set("0.2.0")
     manifest {
         attributes(
             "Implementation-Title" to "mezze polyglot-python-natives",
-            "Implementation-Version" to "0.1.0",
+            "Implementation-Version" to "0.2.0",
         )
     }
 }
