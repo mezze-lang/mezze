@@ -18,9 +18,13 @@ entry = "main"
 # resolver looks for `.deps/mezze/<key>-<version>/`; the VALUE points
 # at the GitHub repo whose actual name uses hyphens. Mezze module
 # segments can't contain hyphens, so the key stays underscore.
+#
+# 0.3.0 / 0.2.0 pins pull in the Result-flavored inherent impls on
+# `Result <Lang>Foreign InteropError`, so `Python.eval { … }.as_str {}`
+# and `Js.eval { … }.as_str {}` chain-coerce without a helper `match`.
 [dependencies]
-mezze_python = "github:mezze-lang/mezze-python@0.2.1"
-mezze_js     = "github:mezze-lang/mezze-js@0.1.0"
+mezze_python = "github:mezze-lang/mezze-python@0.3.0"
+mezze_js     = "github:mezze-lang/mezze-js@0.2.0"
 
 # `[polyglot.python]` opts this project in to GraalPy. `packages` is
 # the "polyglot-as-a-package" surface: `mez sync` runs the
@@ -51,4 +55,3 @@ PosixModuleBackend = "java"
 [polyglot.js]
 packages     = ["asciichart"]
 node_modules = ".deps/node/node_modules/node_modules"
-

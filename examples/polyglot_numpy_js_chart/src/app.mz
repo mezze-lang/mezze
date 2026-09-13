@@ -9,15 +9,33 @@
 # numpy, `npm` for asciichart). `mez exec` then boots the shared
 # polyglot Context and runs this file end-to-end.
 #
+# Every polyglot Result is drained via a `.as_str {}` / `.as_float {}`
+# chain rather than a helper `match` function. The Result-flavored
+# inherent impls added in mezze-python 0.3.0 / mezze-js 0.2.0 mean
+# an effect op's `Result <Foreign> InteropError` carries the chain
+# through to a plain `Str` / `Float` in one line — the only `match`
+# left is at the terminal consumer.
+#
+# The Python numeric compute stays inside a single expression:
+# numpy's `default_rng` sits behind a lazy `__getattr__` that Truffle
+# `readMember` doesn't trigger, and numpy scalars (`numpy.float64`)
+# don't coerce cleanly through `InteropLibrary.asDouble` when they
+# arrive via chained `.method {}` calls. `float(...)` in the Python
+# source normalises the scalar; `json.dumps(..., ...tolist())`
+# normalises the counts array; then the Mezze chain just coerces
+# the final `Str`/`Float` out. Values crossing to JS travel as a
+# JSON string spliced into the eval source.
+#
 # Flow:
-#   1. Python side — draw 1000 samples from N(0, 1), reduce with
-#      numpy to (mean, std), bucket with `numpy.histogram(_, 20)`,
-#      and serialise the whole tuple to a JSON string.
-#   2. Mezze side — coerce the JSON string out of PyForeign and
-#      splice it (unquoted — JSON is a subset of JS object literal
-#      syntax) into a JS eval source.
-#   3. JS side — `require('asciichart')`, plot the 20-bin histogram
-#      to a Unicode line chart, hand the rendered string back.
+#   1. Python side — one `Python.eval` builds a JSON blob
+#      {'mean': ..., 'std': ..., 'counts': [...]}, chained to
+#      `.as_str {}` to hand back a Mezze `Str`. Two more evals
+#      pull the mean and std out as float scalars, each chained to
+#      `.as_float {}`.
+#   2. Mezze side — splice the JSON payload into the JS eval source.
+#   3. JS side — `Js.eval` requires `asciichart`, plots the counts
+#      array, and the chain to `.as_str {}` hands the rendered
+#      chart back as a Mezze `Str`.
 #   4. Mezze side — print it.
 #
 # Run:  devenv shell -- just mez sync   # once, per clean checkout
@@ -30,7 +48,7 @@ use std::float
 use std::int
 use std::str
 
-## Python: one big deterministic expression that draws 1000 samples,
+## Python: one deterministic expression that draws 1000 samples,
 ## reduces + bins them, and emits a JSON string. `numpy` here is
 ## whichever install `mez sync` (or `just polyglot-setup-python`)
 ## put under the resolved `python.PythonPath`. RNG seeded so the
@@ -43,24 +61,6 @@ let python_stats_src: Str =
 ## of GraalJS's global scope between evals.
 let js_chart_src: { json_blob: Str } -> Str = { json_blob } ->
   "(function(){const asciichart=require('asciichart');const stats=$(json_blob);return asciichart.plot(stats.counts,{height:12});})()"
-
-## Coerce PyForeign to Mezze Str.
-let py_str: { r: Result PyForeign InteropError } -> Result Str InteropError
-  = { r } -> match r is
-    Ok  { val = f } -> f.as_str{}
-    Err { error }   -> Err { error = error }
-
-## Coerce JsForeign to Mezze Str.
-let js_str: { r: Result JsForeign InteropError } -> Result Str InteropError
-  = { r } -> match r is
-    Ok  { val = f } -> f.as_str{}
-    Err { error }   -> Err { error = error }
-
-## Coerce PyForeign to Mezze Float.
-let py_float: { r: Result PyForeign InteropError } -> Result Float InteropError
-  = { r } -> match r is
-    Ok  { val = f } -> f.as_float{}
-    Err { error }   -> Err { error = error }
 
 let main = {} -> perform Console, GraalPy, GraalJs in do
   println { msg = "== Mezze x NumPy x asciichart — polyglot pipeline ==" }
@@ -76,37 +76,48 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
   # allowed for language(s) js". Discardable side effect only.
   let _ = Js.eval { source = "1" }
 
-  # ---- Step 1 + 2: NumPy → JSON, coerce to Mezze Str ----
+  # ---- Step 1: NumPy → JSON, chain-coerce to Mezze Str ----
   println { msg = "[1] numpy: sampling N(0, 1), 1000 points, seed=42" }
-  let json_r = Python.eval { source = python_stats_src }
-  match py_str { r = json_r } is
+  # Bind the effect Result then chain `.as_str {}` — the Result-flavored
+  # inherent impl drops out a `Result Str InteropError` directly.
+  let json_pf_r = Python.eval { source = python_stats_src }
+  let json_r    = json_pf_r.as_str {}
+  match json_r is
     Err { error = _ } -> println { msg = "  python side failed" }
     Ok  { val = json_blob } -> do
 
-      # Pull mean + std back as scalars too — mostly for the printed
-      # summary. Exercises a second Python.eval round-trip against
-      # the same seed.
-      let mean_r = Python.eval {
+      # Pull mean + std back as scalar `Float`s. Same
+      # bind-then-`.as_float {}` chain — Python already produced
+      # plain `float` on the guest side (via `float(d.mean())`),
+      # so Truffle's `asDouble` accepts it and the Result-flavored
+      # `.as_float {}` on the JVM side just unwraps.
+      let mean_pf_r = Python.eval {
         source = "float(__import__('numpy').random.default_rng(42).normal(0.0, 1.0, 1000).mean())"
       }
-      let std_r  = Python.eval {
+      let mean_r = mean_pf_r.as_float {}
+      let std_pf_r = Python.eval {
         source = "float(__import__('numpy').random.default_rng(42).normal(0.0, 1.0, 1000).std())"
       }
-      let _ = match py_float { r = mean_r } is
+      let std_r = std_pf_r.as_float {}
+      let _ = match mean_r is
         Ok  { val = m } -> println { msg = "    mean = $(float::to_str { n = m })" }
         Err { error = _ } -> println { msg = "    mean: coerce failed" }
-      let _ = match py_float { r = std_r } is
+      let _ = match std_r is
         Ok  { val = s } -> println { msg = "    std  = $(float::to_str { n = s })" }
         Err { error = _ } -> println { msg = "    std : coerce failed" }
       let n_bytes = str::size { s = json_blob }
       println { msg = "    histogram: 20 bins ($(int::to_str { n = n_bytes })-byte JSON payload)" }
       println { msg = "" }
 
-      # ---- Step 3: hand JSON to JS, get back a rendered chart ----
+      # ---- Step 2: hand JSON to JS, chain to a rendered chart ----
+      # Same bind-then-`.as_str {}` shape on the `Result JsForeign
+      # InteropError` — this is `impl Result JsForeign InteropError`
+      # from mezze-js 0.2.0.
       println { msg = "[2] asciichart (via GraalJS `require('asciichart')`):" }
       println { msg = "" }
-      let chart_r = Js.eval { source = js_chart_src { json_blob = json_blob } }
-      let _ = match js_str { r = chart_r } is
+      let chart_pf_r = Js.eval { source = js_chart_src { json_blob = json_blob } }
+      let chart_r    = chart_pf_r.as_str {}
+      let _ = match chart_r is
         Ok  { val = chart } -> println { msg = chart }
         Err { error } -> match error is
           NotFound { name = n } -> println { msg = "  js: not found: $(n)" }
