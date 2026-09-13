@@ -151,6 +151,23 @@ class SyncCommand {
             // classpath, and a partial install would silently break.
             val lockedJars = fetchJarsForGraph(root, manifest, graph, storeRoot, isClean, failures)
 
+            // ── [polyglot.<lang>].packages install phase ────
+            //
+            // For every language the user declared `packages` under
+            // (`[polyglot.python]`, `[polyglot.js]`, …), find its
+            // provider in the resolved graph and run its declared
+            // install template with `{prefix}` / `{dest}` / `{packages}`
+            // substituted. Idempotent: skipped when the marker file at
+            // `.deps/<runtime_dir>/.mez-installed.json` already records
+            // the same provider commit + package list.
+            //
+            // Only meaningful when the resolve phase itself succeeded —
+            // a provider dep that failed to materialize can't have its
+            // install template read.
+            if (failures.isEmpty()) {
+                runProviderInstalls(root, manifest, graph, storeRoot, isLocked, failures)
+            }
+
             val freshLock = MezzeLock(
                 version = 2,
                 root = manifest.`package`.name,
@@ -673,6 +690,251 @@ class SyncCommand {
             else -> null
         }
         return tomlFile?.let { readToml(it) }
+    }
+
+    /**
+     * Execute every `[polyglot.provider].install` template that
+     * matches a `[polyglot.<lang>].packages` list in the user's
+     * manifest. One provider per language; a graph that carries two
+     * providers claiming the same language is a hard error surfaced
+     * before either runs, so the user never sees partial state.
+     *
+     *   - `{prefix}` = the provider package's on-disk location
+     *     (`~/.mezze/store/<sha>/` for content-addressed deps, the
+     *     absolute path for a path-dep). This is the same directory
+     *     `.deps/mezze/<name>-<version>` symlinks to.
+     *   - `{dest}`   = `<project_root>/<runtime_dir>`, the absolute
+     *     path package files land under. Created if missing.
+     *   - `{packages}` = the user's `packages` list, space-joined.
+     *
+     * A cache marker at `<dest>/.mez-installed.json` records the
+     * provider's identity (path / commit / checksum) + the resolved
+     * package list; a rerun with the same inputs is skipped. Any
+     * change to those inputs recomputes.
+     *
+     * On non-zero exit code the sync fails loudly with the last 20
+     * lines of stderr and the command that ran — the whole point of
+     * the template is that install failures shouldn't be silent.
+     */
+    private fun runProviderInstalls(
+        projectRoot: File,
+        rootToml: MezzeToml,
+        graph: List<LockedNode>,
+        storeRoot: File,
+        isLocked: Boolean,
+        failures: MutableList<String>,
+    ) {
+        // Discover every provider on the graph, keyed by language. A
+        // fresh miss is fine (no packages of that language declared);
+        // two providers for the same language is a hard error either
+        // way, so we surface it up-front.
+        val providers = mutableMapOf<String, ProviderRef>()
+        val duplicates = mutableSetOf<String>()
+        for (node in graph) {
+            if (node.source == "root") continue
+            val depToml = tomlForNode(projectRoot, node, storeRoot) ?: continue
+            val p = depToml.polyglot?.provider ?: continue
+            val lang = p.language ?: continue
+            val install = p.install ?: continue
+            val env = p.runtimeEnv ?: continue
+            val dir = p.runtimeDir ?: continue
+            val prefix = providerPrefix(projectRoot, node, storeRoot) ?: continue
+            val existing = providers[lang]
+            if (existing != null) {
+                duplicates += lang
+                println("  ${Glyphs.ERROR} [polyglot.$lang]: multiple providers claim language '$lang' — ${existing.declaringNodeName} and ${node.name}")
+                continue
+            }
+            providers[lang] = ProviderRef(
+                declaringNodeName = node.name,
+                declaringNodeCommit = node.commit,
+                declaringNodeChecksum = node.checksum,
+                declaringNodePath = node.path,
+                prefix = prefix,
+                install = install,
+                runtimeEnv = env,
+                runtimeDir = dir,
+            )
+        }
+        if (duplicates.isNotEmpty()) {
+            failures.addAll(duplicates.map { "[polyglot.$it]" })
+            return
+        }
+
+        // Only languages with a user-declared, non-empty `packages` list get invoked.
+        val declared = collectDeclaredPackages(rootToml)
+        if (declared.isEmpty()) return
+
+        for ((lang, packages) in declared) {
+            val prov = providers[lang]
+            if (prov == null) {
+                // Cross-check in the validator already surfaces this, but
+                // guard again in case a manifest slipped through with a
+                // custom-named provider dep that resolves at runtime.
+                println("  ${Glyphs.WARN}  [polyglot.$lang].packages declared but no provider on graph — skipping install")
+                continue
+            }
+
+            val destDir = File(projectRoot, prov.runtimeDir).absoluteFile
+            val identity = providerIdentity(prov)
+            val marker = File(destDir, ".mez-installed.json")
+
+            if (marker.isFile) {
+                val prior = try { readInstalledMarker(marker) } catch (_: Exception) { null }
+                if (prior != null && prior.provider == identity && prior.packages == packages && prior.language == lang) {
+                    println("  ${Glyphs.OK} [polyglot.$lang] install cached (${packages.size} package${if (packages.size == 1) "" else "s"}) — ${destDir.absolutePath}")
+                    continue
+                }
+            }
+
+            if (isLocked) {
+                // --locked promises no writes to the project tree; a
+                // stale/missing install is drift.
+                println("${Glyphs.ERROR} --locked: [polyglot.$lang] would run install template, but --locked forbids side effects.")
+                failures.add("[polyglot.$lang]")
+                continue
+            }
+
+            destDir.mkdirs()
+            // Each package specifier is single-quoted before being
+            // spliced in — otherwise `numpy>=1.24.0` looks like output
+            // redirection to `sh -c`, and pip only sees "numpy".
+            // {prefix}/{dest} are already absolute paths; quote them
+            // too so a project living under a path with a space stays
+            // valid.
+            val substituted = prov.install
+                .replace("{prefix}", shellQuote(prov.prefix.absolutePath))
+                .replace("{dest}", shellQuote(destDir.absolutePath))
+                .replace("{packages}", packages.joinToString(" ") { shellQuote(it) })
+            println("  ${Glyphs.GEAR} [polyglot.$lang] $substituted")
+
+            val execResult = try {
+                executeShell(substituted, workDir = projectRoot)
+            } catch (e: Exception) {
+                println("${Glyphs.ERROR} mez sync: provider install failed for [polyglot.$lang]: ${e.message}")
+                failures.add("[polyglot.$lang]")
+                continue
+            }
+            if (execResult.exitCode != 0) {
+                val tail = execResult.stderrTail(20)
+                println("${Glyphs.ERROR} mez sync: provider install failed for [polyglot.$lang] (exit ${execResult.exitCode}): $tail")
+                failures.add("[polyglot.$lang]")
+                continue
+            }
+
+            writeInstalledMarker(
+                marker,
+                InstalledMarker(language = lang, provider = identity, packages = packages),
+            )
+            println("  ${Glyphs.OK} [polyglot.$lang] installed ${packages.size} package${if (packages.size == 1) "" else "s"} → ${destDir.absolutePath}")
+        }
+    }
+
+    /** Providers keyed on manifest language — enough to run one install. */
+    private data class ProviderRef(
+        val declaringNodeName: String,
+        val declaringNodeCommit: String?,
+        val declaringNodeChecksum: String?,
+        val declaringNodePath: String?,
+        val prefix: File,
+        val install: String,
+        val runtimeEnv: String,
+        val runtimeDir: String,
+    )
+
+    /** Stable identity for the cache marker — commit / checksum / path in preference order. */
+    private fun providerIdentity(p: ProviderRef): String =
+        p.declaringNodeCommit?.let { "${p.declaringNodeName}@$it" }
+            ?: p.declaringNodeChecksum?.let { "${p.declaringNodeName}#$it" }
+            ?: p.declaringNodePath?.let { "${p.declaringNodeName}:$it" }
+            ?: p.declaringNodeName
+
+    /** Locate a provider's on-disk directory the same way jar-collection does. */
+    private fun providerPrefix(projectRoot: File, node: LockedNode, storeRoot: File): File? {
+        return when (node.source) {
+            "path" -> node.path?.let { File(it).canonicalFile }?.takeIf { it.isDirectory }
+            "registry" -> {
+                val checksum = node.checksum?.removePrefix("sha256:") ?: return null
+                File(storeRoot, checksum).takeIf { it.isDirectory }
+            }
+            "github" -> {
+                val checksum = node.checksum?.removePrefix("sha256:")
+                if (checksum != null) File(storeRoot, checksum).takeIf { it.isDirectory }
+                else node.ref?.let { r ->
+                    File(projectRoot, ".deps/mezze/${node.name}-$r").takeIf { it.isDirectory }
+                }
+            }
+            else -> null
+        }
+    }
+
+    /** User's `[polyglot.<lang>].packages` map — only non-empty entries. */
+    private fun collectDeclaredPackages(toml: MezzeToml): Map<String, List<String>> {
+        val out = LinkedHashMap<String, List<String>>()
+        toml.polyglot?.python?.packages?.takeIf { it.isNotEmpty() }?.let { out["python"] = it }
+        toml.polyglot?.js?.packages?.takeIf { it.isNotEmpty() }?.let { out["js"] = it }
+        toml.polyglot?.wasm?.packages?.takeIf { it.isNotEmpty() }?.let { out["wasm"] = it }
+        toml.polyglot?.jvm?.packages?.takeIf { it.isNotEmpty() }?.let { out["jvm"] = it }
+        return out
+    }
+
+    /** One process invocation — stdout streams to the parent, stderr is buffered so we can tail it on failure. */
+    private data class ExecResult(val exitCode: Int, val stderr: String) {
+        fun stderrTail(n: Int): String {
+            val lines = stderr.lines()
+            val slice = if (lines.size <= n) lines else lines.takeLast(n)
+            return slice.joinToString("\n").ifBlank { "(no stderr)" }
+        }
+    }
+
+    /**
+     * Wrap a string as a single-quoted Bourne shell argument, escaping
+     * embedded single quotes with the `'\''` trick. `sh -c` is our
+     * install-template driver, and pip specifiers like `numpy>=1.24.0`
+     * carry redirection metacharacters that must survive re-parsing.
+     */
+    private fun shellQuote(s: String): String =
+        "'" + s.replace("'", "'\\''") + "'"
+
+    private fun executeShell(command: String, workDir: File): ExecResult {
+        val pb = ProcessBuilder("sh", "-c", command)
+            .directory(workDir)
+            .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+            .redirectErrorStream(false)
+        val proc = pb.start()
+        // Capture stderr for the failure-tail; let stdout flow through
+        // so users see progress from long-running installs.
+        val errBuf = StringBuilder()
+        val errThread = Thread {
+            proc.errorStream.bufferedReader().use { r ->
+                while (true) {
+                    val line = r.readLine() ?: break
+                    System.err.println(line)
+                    synchronized(errBuf) { errBuf.appendLine(line) }
+                }
+            }
+        }.apply { isDaemon = true; start() }
+        val code = proc.waitFor()
+        errThread.join(1_000)
+        return ExecResult(code, synchronized(errBuf) { errBuf.toString() })
+    }
+
+    /** Marker file schema at `<dest>/.mez-installed.json`. */
+    @kotlinx.serialization.Serializable
+    private data class InstalledMarker(
+        val language: String,
+        val provider: String,
+        val packages: List<String>,
+    )
+
+    private fun readInstalledMarker(f: File): InstalledMarker =
+        kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            .decodeFromString(InstalledMarker.serializer(), f.readText())
+
+    private fun writeInstalledMarker(f: File, m: InstalledMarker) {
+        val json = kotlinx.serialization.json.Json { prettyPrint = true }
+        f.parentFile.mkdirs()
+        f.writeText(json.encodeToString(InstalledMarker.serializer(), m) + "\n")
     }
 
     /**
