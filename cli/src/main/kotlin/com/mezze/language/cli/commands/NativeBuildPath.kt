@@ -168,6 +168,11 @@ object NativeBuildPath {
         optimized: Boolean,
         polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved =
             com.mezze.language.cli.`package`.PolyglotResolver.Resolved.NONE,
+        /** Polyglot/[jars]/[maven] language jars (from ~/.mezze/cache/maven +
+         *  store/jars) to add to the native-image classpath. `mez dev` sees
+         *  these via ResolvedJarsClasspath; the native build must too or polyglot
+         *  degrades in the AOT binary. Empty for non-polyglot projects. */
+        extraClasspath: List<File> = emptyList(),
         timing: Boolean,
         relativeTime: () -> Long,
     ): File? {
@@ -202,7 +207,7 @@ object NativeBuildPath {
         // keys so user code that didn't change still picks up a fresh
         // build automatically after upgrade.
         invalidateOnRuntimeShift(cacheDir, findRuntimeJar(), timing, relativeTime)
-        val cacheKey = computeNativeCacheKey(fnBytes, metaBytes, nativeImage, optimized, polyglot)
+        val cacheKey = computeNativeCacheKey(fnBytes, metaBytes, nativeImage, optimized, polyglot, extraClasspath)
         val cacheFile = cacheDir?.let { File(it, "$cacheKey.bin") }
         if (cacheFile != null && cacheFile.exists()) {
             if (timing) System.err.println("[${relativeTime()}ms] native: cache hit ($cacheKey) — copying instead of building")
@@ -239,6 +244,7 @@ object NativeBuildPath {
             optimized = optimized,
             logbackConfig = logbackConfig,
             polyglot = polyglot,
+            extraClasspath = extraClasspath,
         )
 
         if (timing) System.err.println("[${relativeTime()}ms] invoking native-image (${cmd.size} args)")
@@ -371,6 +377,7 @@ object NativeBuildPath {
         nativeImage: File,
         optimized: Boolean,
         polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved,
+        extraClasspath: List<File> = emptyList(),
     ): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         digest.update(fnBytes)
@@ -384,6 +391,11 @@ object NativeBuildPath {
         // incompatible cached binary.
         digest.update(if (polyglot.enablePython) byteArrayOf(1) else byteArrayOf(0))
         for (cp in polyglot.jvmClasspath.sorted()) digest.update(cp.toByteArray())
+        // The resolved [jars]/[maven] language jars are now on the image
+        // classpath too — a change there must bust the cache or we'd reuse a
+        // binary built against the old set. Key on their absolute paths (which
+        // are content-addressed store/cache paths, so path == content).
+        for (cp in extraClasspath.map { it.absolutePath }.sorted()) digest.update(cp.toByteArray())
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
@@ -733,6 +745,7 @@ object NativeBuildPath {
         optimized: Boolean,
         logbackConfig: File,
         polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved,
+        extraClasspath: List<File> = emptyList(),
     ): List<String> {
         // Polyglot GraalPy → disable Truffle runtime compilation.
         //
@@ -763,7 +776,11 @@ object NativeBuildPath {
         // separately-installed JAR.
         val userJvmCpFiles = polyglot.jvmClasspath
             .mapNotNull { p -> File(p).takeIf { it.exists() } }
-        val cp = (classpathJars + sanitisedUserJar + embeddedJar + userJvmCpFiles)
+        // Polyglot/[jars]/[maven] language jars resolved from the store/cache —
+        // put them on the image classpath so guest languages work in the AOT
+        // binary, matching what `mez dev` does. (See ResolvedJarsClasspath.)
+        val extraCpFiles = extraClasspath.filter { it.exists() }
+        val cp = (classpathJars + sanitisedUserJar + embeddedJar + userJvmCpFiles + extraCpFiles)
             .joinToString(File.pathSeparator) { it.absolutePath }
 
         val cmd = mutableListOf(nativeImage.absolutePath)
