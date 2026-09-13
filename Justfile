@@ -213,6 +213,69 @@ polyglot-setup-python:
 mez-run-numpy-demo: _mez
     {{mez}} exec examples/polyglot_numpy/src/app.mz
 
+# Publish one polyglot-native jar into a local mezze-maven checkout.
+# Standard maven layout — jar, pom, sha1s, and a per-artifact
+# maven-metadata.xml at `<group>/<artifact>/`. The checkout at
+# `<repo-dir>` is then pushed to
+# git@github.com:mezze-lang/mezze-maven.git; consumers reach the
+# published bytes via `raw.githubusercontent.com/mezze-lang/mezze-maven/main/`.
+#
+# Args:  group  artifact  version  src-jar  repo-dir
+# Example:
+#   just publish-maven \
+#       land.meridia.mezze polyglot-python-natives 0.2.0 \
+#       polyglot-python-natives/build/libs/polyglot-python-natives-0.2.0.jar \
+#       ../mezze-maven
+[group('mez')]
+publish-maven group artifact version srcjar repo_dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    group_path="${group//./\/}"
+    target_dir="{{repo_dir}}/${group_path}/{{artifact}}/{{version}}"
+    mkdir -p "$target_dir"
+    jar="$target_dir/{{artifact}}-{{version}}.jar"
+    pom="$target_dir/{{artifact}}-{{version}}.pom"
+    cp "{{srcjar}}" "$jar"
+    cat > "$pom" <<POM
+    <?xml version="1.0" encoding="UTF-8"?>
+    <project xmlns="http://maven.apache.org/POM/4.0.0">
+      <modelVersion>4.0.0</modelVersion>
+      <groupId>{{group}}</groupId>
+      <artifactId>{{artifact}}</artifactId>
+      <version>{{version}}</version>
+      <packaging>jar</packaging>
+      <name>Mezze polyglot {{artifact}}</name>
+    </project>
+    POM
+    for f in "$jar" "$pom"; do
+        printf '%s' "$(sha1sum "$f" | awk '{print $1}')" > "$f.sha1"
+        printf '%s' "$(md5sum  "$f" | awk '{print $1}')" > "$f.md5"
+    done
+    meta="{{repo_dir}}/${group_path}/{{artifact}}/maven-metadata.xml"
+    now="$(date -u +%Y%m%d%H%M%S)"
+    cat > "$meta" <<META
+    <?xml version="1.0" encoding="UTF-8"?>
+    <metadata>
+      <groupId>{{group}}</groupId>
+      <artifactId>{{artifact}}</artifactId>
+      <versioning>
+        <latest>{{version}}</latest>
+        <release>{{version}}</release>
+        <versions>
+          <version>{{version}}</version>
+        </versions>
+        <lastUpdated>$now</lastUpdated>
+      </versioning>
+    </metadata>
+    META
+    printf '%s' "$(sha1sum "$meta" | awk '{print $1}')" > "$meta.sha1"
+    printf '%s' "$(md5sum  "$meta" | awk '{print $1}')" > "$meta.md5"
+    echo "→ published {{group}}:{{artifact}}:{{version}}"
+    echo "  jar:  $jar"
+    echo "  pom:  $pom"
+    echo "  meta: $meta"
+    echo "Next: cd {{repo_dir}} && git add -A && git commit -m 'publish {{artifact}} {{version}}' && git push"
+
 # Run the pure-Python-stdlib demo (Mezze x math/statistics/functools).
 # No venv required — GraalPy ships stdlib as classpath resources.
 # Serves as the polyglot smoke test that works out-of-the-box.
