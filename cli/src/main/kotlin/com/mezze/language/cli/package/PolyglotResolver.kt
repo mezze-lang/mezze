@@ -30,15 +30,47 @@ object PolyglotResolver {
         val pythonPath: String?,
         /** Additional `python.<KEY>` options. */
         val pythonOptions: Map<String, String>,
-        /** Absolute JVM classpath entries from `[polyglot.jvm].classpath`. */
+        /** User-declared pip-style specifiers under `[polyglot.python].packages`. */
+        val pythonPackages: List<String>,
+        /** Absolute JVM classpath entries from `[polyglot.jvm].classpath` (legacy). */
         val jvmClasspath: List<String>,
+        /** URL#sha256 JAR entries under `[polyglot.jvm].packages` (new). */
+        val jvmPackages: List<String>,
+        /** User-declared npm-style specifiers under `[polyglot.js].packages`. */
+        val jsPackages: List<String>,
+        /** URL#sha256 `.wasm` entries under `[polyglot.wasm].packages`. */
+        val wasmPackages: List<String>,
+        /** Universal `[jars]` map — `name → "url#sha256:hex64"`. */
+        val jars: Map<String, String>,
+        /** `[polyglot.provider]` section (only in provider packages). */
+        val provider: ProviderResolved?,
         /** Absolute path to the manifest directory (for resolving venv location). */
         val manifestDir: File?,
     ) {
         companion object {
-            val NONE = Resolved(false, null, emptyMap(), emptyList(), null)
+            val NONE = Resolved(
+                enablePython = false,
+                pythonPath = null,
+                pythonOptions = emptyMap(),
+                pythonPackages = emptyList(),
+                jvmClasspath = emptyList(),
+                jvmPackages = emptyList(),
+                jsPackages = emptyList(),
+                wasmPackages = emptyList(),
+                jars = emptyMap(),
+                provider = null,
+                manifestDir = null,
+            )
         }
     }
+
+    /** Resolved `[polyglot.provider]` — all four fields non-null (validated). */
+    data class ProviderResolved(
+        val language: String,
+        val install: String,
+        val runtimeEnv: String,
+        val runtimeDir: String,
+    )
 
     /**
      * Walk up from [startDir] looking for `Mezze.toml`, parse every
@@ -62,11 +94,27 @@ object PolyglotResolver {
         val enablePython = py != null
         val resolvedPy = py?.pythonPath?.let { resolvePath(it, manifestDir) }
         val jvm = toml.polyglot?.jvm?.classpath.orEmpty()
+        // Provider is fully-populated only when all four required fields
+        // are present. Commit 2's validator surfaces missing ones as a
+        // source-location error; here we simply drop half-declared blocks.
+        val prov = toml.polyglot?.provider?.let { p ->
+            val l = p.language ?: return@let null
+            val i = p.install ?: return@let null
+            val e = p.runtimeEnv ?: return@let null
+            val d = p.runtimeDir ?: return@let null
+            ProviderResolved(language = l, install = i, runtimeEnv = e, runtimeDir = d)
+        }
         return Resolved(
             enablePython = enablePython,
             pythonPath = resolvedPy,
             pythonOptions = py?.options.orEmpty(),
+            pythonPackages = py?.packages.orEmpty(),
             jvmClasspath = jvm.map { resolvePath(it, manifestDir) },
+            jvmPackages = toml.polyglot?.jvm?.packages.orEmpty(),
+            jsPackages = toml.polyglot?.js?.packages.orEmpty(),
+            wasmPackages = toml.polyglot?.wasm?.packages.orEmpty(),
+            jars = toml.jars,
+            provider = prov,
             manifestDir = manifestDir.absoluteFile,
         )
     }

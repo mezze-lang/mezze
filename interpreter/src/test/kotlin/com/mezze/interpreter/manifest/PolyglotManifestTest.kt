@@ -254,4 +254,102 @@ class PolyglotManifestTest {
         assertTrue(resolved.enablePython)
         assertEquals(venvSite.canonicalPath, resolved.pythonPath)
     }
+
+    // ─── New schema: per-language `packages`, [polyglot.provider], [jars] ─────
+
+    @Test
+    fun `parses per-language packages arrays`() {
+        val toml = """
+            [package]
+            name = "demo"
+            version = "0.1.0"
+
+            [polyglot.python]
+            packages = ["numpy>=1.24.0", "requests"]
+
+            [polyglot.js]
+            packages = ["lodash@4.17.21"]
+
+            [polyglot.wasm]
+            packages = ["https://example.com/foo.wasm#sha256:abc"]
+
+            [polyglot.jvm]
+            packages = ["https://repo1.maven.org/foo.jar#sha256:def"]
+        """.trimIndent()
+        val sections = PolyglotManifest.parse(toml)
+        assertEquals(listOf("numpy>=1.24.0", "requests"), sections.pythonPackages)
+        assertEquals(listOf("lodash@4.17.21"), sections.jsPackages)
+        assertEquals(listOf("https://example.com/foo.wasm#sha256:abc"), sections.wasmPackages)
+        assertEquals(listOf("https://repo1.maven.org/foo.jar#sha256:def"), sections.jvmPackages)
+    }
+
+    @Test
+    fun `parses polyglot provider section`() {
+        val toml = """
+            [package]
+            name = "mezze-python"
+            version = "0.1.0"
+
+            [polyglot.provider]
+            language      = "python"
+            install       = "{prefix}/bin/graalpy -m pip install --target {dest} {packages}"
+            runtime_env   = "PYTHONPATH"
+            runtime_dir   = ".deps/python"
+        """.trimIndent()
+        val sections = PolyglotManifest.parse(toml)
+        val p = sections.provider
+        assertNotNull(p, "[polyglot.provider] should be captured")
+        assertEquals("python", p!!.language)
+        assertEquals("{prefix}/bin/graalpy -m pip install --target {dest} {packages}", p.install)
+        assertEquals("PYTHONPATH", p.runtimeEnv)
+        assertEquals(".deps/python", p.runtimeDir)
+
+        val resolved = PolyglotManifest.resolve(sections, File("."))
+        assertNotNull(resolved.provider)
+        assertEquals("python", resolved.provider!!.language)
+    }
+
+    @Test
+    fun `parses universal jars table`() {
+        val toml = """
+            [package]
+            name = "mezze-python"
+            version = "0.1.0"
+
+            [jars]
+            "python-language"  = "https://example.com/python-language-25.0.3.jar#sha256:aaa"
+            "python-resources" = "https://example.com/python-resources-25.0.3.jar#sha256:bbb"
+        """.trimIndent()
+        val sections = PolyglotManifest.parse(toml)
+        assertEquals(2, sections.jars.size)
+        assertEquals(
+            "https://example.com/python-language-25.0.3.jar#sha256:aaa",
+            sections.jars["python-language"],
+        )
+        assertEquals(
+            "https://example.com/python-resources-25.0.3.jar#sha256:bbb",
+            sections.jars["python-resources"],
+        )
+    }
+
+    @Test
+    fun `provider with a missing required field yields resolved provider null`() {
+        // language + install present but runtime_env/runtime_dir absent.
+        val toml = """
+            [package]
+            name = "half"
+            version = "0.1.0"
+
+            [polyglot.provider]
+            language = "python"
+            install  = "pip install --target {dest} {packages}"
+        """.trimIndent()
+        val sections = PolyglotManifest.parse(toml)
+        // Raw section still records what was seen (nullable fields).
+        assertNotNull(sections.provider)
+        assertNull(sections.provider!!.runtimeEnv)
+        // Resolve declines to synthesise a partial ResolvedProvider.
+        val resolved = PolyglotManifest.resolve(sections, File("."))
+        assertNull(resolved.provider, "half-declared provider should not resolve")
+    }
 }

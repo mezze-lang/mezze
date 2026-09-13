@@ -58,16 +58,38 @@ data class MezzeToml(
      * `PolyglotManifest` — the field lives here purely so `mez check`
      * and friends can validate schema shape. Absence == no polyglot.
      *
-     *     [polyglot.python]
-     *     python_path = "./venv/lib/python3.12/site-packages"
+     * User project schema — one field per language, `packages`, whose
+     * entries are language-native specifiers interpreted by that
+     * language's provider package (mezze-python / mezze-js / …):
      *
-     *     [polyglot.python.options]
-     *     PosixModuleBackend = "java"
+     *     [polyglot.python]
+     *     packages = ["numpy>=1.24.0", "requests"]
+     *
+     *     [polyglot.js]
+     *     packages = ["lodash@4.17.21"]
+     *
+     *     [polyglot.wasm]
+     *     packages = ["https://.../foo.wasm#sha256:..."]
      *
      *     [polyglot.jvm]
-     *     classpath = ["libs/gson-2.10.jar"]
+     *     packages = ["https://repo1.maven.org/.../commons-lang3-3.14.0.jar#sha256:..."]
+     *
+     * Provider packages (mezze-python etc.) declare `[polyglot.provider]`
+     * with the install command template + runtime env; user projects
+     * never write this section.
+     *
+     * Legacy fields (`python_path`, `classpath`, `node_modules`, `modules`)
+     * stay parseable so pre-migration projects and bundled examples keep
+     * running while the provider ecosystem grows.
      */
     val polyglot: PolyglotSection? = null,
+    /**
+     * Universal `[jars]` table — a map of `name = "url#sha256:hex64"`.
+     * Works both in user projects (as extra JVM classpath entries) and
+     * in provider packages (declaring the graal-language jars to fetch).
+     * `mez sync` verifies each sha256 against `~/.mezze/store/jars/<sha>/`.
+     */
+    val jars: Map<String, String> = emptyMap(),
 )
 
 /**
@@ -84,37 +106,111 @@ data class ToolchainConfig(
     val channel: String? = null,
 )
 
-/** Manifest-level polyglot block. Each language sub-section is optional. */
+/**
+ * Manifest-level polyglot block. Each language sub-section is optional.
+ * `provider` is only meaningful in a provider package (mezze-python,
+ * mezze-js, …); user projects leave it null.
+ */
 @Serializable
 data class PolyglotSection(
     val python: PythonSection? = null,
     val jvm: JvmSection? = null,
+    val js: JsSection? = null,
+    val wasm: WasmSection? = null,
+    val provider: ProviderSection? = null,
 )
 
 /**
  * `[polyglot.python]`. Presence of the section itself opts the run in
  * to the `python` Truffle language — no boolean flag needed.
  *
- * `python_path` is resolved relative to the DIRECTORY of the containing
- * `Mezze.toml`, so package authors can commit repo-relative paths without
- * worrying about the caller's cwd. Absolute paths pass through.
+ * `packages` is the new user-facing field: a list of pip specifiers
+ * (`"numpy>=1.24.0"`, `"requests==2.31.0"`, …) that the provider
+ * package's install template turns into a real install at sync time.
+ *
+ * `python_path` is legacy — pre-provider projects that ship their own
+ * venv still use it. Resolved relative to this manifest's directory;
+ * absolute paths pass through.
  */
 @Serializable
 data class PythonSection(
+    /** Pip-style package specifiers; the mezze-python provider installs them. */
+    val packages: List<String> = emptyList(),
     @SerialName("python_path")
     val pythonPath: String? = null,
     val options: Map<String, String> = emptyMap(),
 )
 
 /**
- * `[polyglot.jvm]`. `classpath` entries are appended to the wire-child
- * JVM's `-cp` before it spawns, so user Java classes callable via
- * `java::type("com.foo.Bar")` become resolvable. Paths follow the same
- * resolution rules as [PythonSection.pythonPath].
+ * `[polyglot.jvm]`. `packages` are `url#sha256:hex64` JAR URLs (the new
+ * scheme); `classpath` is the legacy list of local jar paths. Both
+ * appear on the wire-child JVM's `-cp` so `java::type("com.foo.Bar")`
+ * resolves. Legacy paths follow the same resolution rules as
+ * [PythonSection.pythonPath].
  */
 @Serializable
 data class JvmSection(
+    /** URL#sha256 jar entries fetched into `~/.mezze/store/jars/<sha>/`. */
+    val packages: List<String> = emptyList(),
     val classpath: List<String> = emptyList(),
+)
+
+/**
+ * `[polyglot.js]`. Presence enables the `js` Truffle language.
+ * `packages` are npm-style specifiers (`"lodash@4.17.21"`), interpreted
+ * by the mezze-js provider. `node_modules` is legacy — pre-provider
+ * projects that ship their own `node_modules/` still use it.
+ */
+@Serializable
+data class JsSection(
+    /** npm-style specifiers; the mezze-js provider installs them. */
+    val packages: List<String> = emptyList(),
+    @SerialName("node_modules")
+    val nodeModules: String? = null,
+    val options: Map<String, String> = emptyMap(),
+)
+
+/**
+ * `[polyglot.wasm]`. Presence enables the `wasm` Truffle language.
+ * `packages` are `url#sha256:hex64` entries pointing at `.wasm` modules;
+ * `modules` is legacy — pre-provider projects that hand-list local
+ * modules still use it.
+ */
+@Serializable
+data class WasmSection(
+    /** URL#sha256 .wasm module entries. */
+    val packages: List<String> = emptyList(),
+    val modules: List<String> = emptyList(),
+    val options: Map<String, String> = emptyMap(),
+)
+
+/**
+ * `[polyglot.provider]` — declared ONLY in a provider package's
+ * `Mezze.toml`. Tells `mez sync` how to install the user's declared
+ * `packages` and tells the runtime how to expose the install location
+ * to the underlying Graal language. User projects never write this.
+ *
+ *     [polyglot.provider]
+ *     language     = "python"                                                     # graalvm language id
+ *     install      = "{prefix}/bin/graalpy -m pip install --target {dest} {packages}"
+ *     runtime_env  = "PYTHONPATH"
+ *     runtime_dir  = ".deps/python"
+ *
+ * `install` MUST contain both `{packages}` and `{dest}` placeholders;
+ * `{prefix}` is optional (expands to the provider's install prefix).
+ */
+@Serializable
+data class ProviderSection(
+    /** GraalVM language id (`"python"`, `"js"`, `"wasm"`, `"java"`). */
+    val language: String? = null,
+    /** Shell install command template with `{packages}` + `{dest}` placeholders. */
+    val install: String? = null,
+    /** Env-var name the runtime sets to the resolved install dir. */
+    @SerialName("runtime_env")
+    val runtimeEnv: String? = null,
+    /** Relative dir where installed packages land (under project root). */
+    @SerialName("runtime_dir")
+    val runtimeDir: String? = null,
 )
 
 /**

@@ -31,36 +31,75 @@ data class ResolvedPolyglot(
     val pythonPath: String?,
     /** Additional `python.<KEY>` options (KEY as declared in `[polyglot.python.options]`). */
     val pythonOptions: Map<String, String>,
+    /** User-declared pip-style specifiers (`packages = [...]`) for the mezze-python provider. */
+    val pythonPackages: List<String> = emptyList(),
     /** Absolute JVM classpath entries appended before spawning the wire child. */
     val jvmClasspath: List<String>,
+    /** URL#sha256 JAR entries under `[polyglot.jvm].packages` — verified/fetched by `mez sync`. */
+    val jvmPackages: List<String> = emptyList(),
     /** True iff `[polyglot.js]` is present in the manifest. */
     val enableJs: Boolean = false,
     /** Absolute path to `node_modules/` for CommonJS require, or null. */
     val jsNodeModules: String? = null,
     /** Additional `js.<KEY>` options (KEY as declared in `[polyglot.js.options]`). */
     val jsOptions: Map<String, String> = emptyMap(),
+    /** User-declared npm-style specifiers (`packages = [...]`) for the mezze-js provider. */
+    val jsPackages: List<String> = emptyList(),
     /** True iff `[polyglot.wasm]` is present in the manifest. */
     val enableWasm: Boolean = false,
     /** Absolute paths to `.wasm` modules the manifest asked us to preload. */
     val wasmModules: List<String> = emptyList(),
     /** Additional `wasm.<KEY>` options (KEY as declared in `[polyglot.wasm.options]`). */
     val wasmOptions: Map<String, String> = emptyMap(),
+    /** URL#sha256 `.wasm` entries under `[polyglot.wasm].packages`. */
+    val wasmPackages: List<String> = emptyList(),
+    /**
+     * `[polyglot.provider]` — populated ONLY in provider-package manifests
+     * (`mezze-python`, `mezze-js`, `mezze-wasm`, `mezze-jvm`). Runtime
+     * consumers ignore this; `mez sync` reads it to invoke the install
+     * template and pass the runtime env-var + dir back to the child.
+     */
+    val provider: ResolvedProvider? = null,
+    /**
+     * Universal `[jars]` map — `name → "url#sha256:hex64"`. Works both in
+     * user projects (extra JVM classpath) and in provider packages (the
+     * graal-language jars to fetch).
+     */
+    val jars: Map<String, String> = emptyMap(),
 ) {
     companion object {
         val NONE = ResolvedPolyglot(
             enablePython = false,
             pythonPath = null,
             pythonOptions = emptyMap(),
+            pythonPackages = emptyList(),
             jvmClasspath = emptyList(),
+            jvmPackages = emptyList(),
             enableJs = false,
             jsNodeModules = null,
             jsOptions = emptyMap(),
+            jsPackages = emptyList(),
             enableWasm = false,
             wasmModules = emptyList(),
             wasmOptions = emptyMap(),
+            wasmPackages = emptyList(),
+            provider = null,
+            jars = emptyMap(),
         )
     }
 }
+
+/** Provider-package `[polyglot.provider]` view. See [ResolvedPolyglot.provider]. */
+data class ResolvedProvider(
+    /** GraalVM language id (`"python"`, `"js"`, `"wasm"`, `"java"`). */
+    val language: String,
+    /** Shell install template — must contain `{packages}` and `{dest}`. */
+    val install: String,
+    /** Env-var the runtime sets to the resolved install dir. */
+    val runtimeEnv: String,
+    /** Relative dir where installed packages land (under project root). */
+    val runtimeDir: String,
+)
 
 object PolyglotManifest {
 
@@ -159,10 +198,13 @@ object PolyglotManifest {
             enablePython = enablePython,
             pythonPath = pythonPath,
             pythonOptions = emptyMap(),
+            pythonPackages = emptyList(),
             jvmClasspath = jvmClasspath,
+            jvmPackages = emptyList(),
             enableJs = false,
             jsNodeModules = null,
             jsOptions = emptyMap(),
+            jsPackages = emptyList(),
         )
     }
 
@@ -200,13 +242,19 @@ object PolyglotManifest {
             enablePython = enablePython,
             pythonPath = pythonPath,
             pythonOptions = pythonOptions,
+            pythonPackages = if (manifest.pythonPackages.isNotEmpty()) manifest.pythonPackages else sidecar.pythonPackages,
             jvmClasspath = jvm,
+            jvmPackages = if (manifest.jvmPackages.isNotEmpty()) manifest.jvmPackages else sidecar.jvmPackages,
             enableJs = enableJs,
             jsNodeModules = jsNodeModules,
             jsOptions = jsOptions,
+            jsPackages = if (manifest.jsPackages.isNotEmpty()) manifest.jsPackages else sidecar.jsPackages,
             enableWasm = enableWasm,
             wasmModules = wasmModules,
             wasmOptions = wasmOptions,
+            wasmPackages = if (manifest.wasmPackages.isNotEmpty()) manifest.wasmPackages else sidecar.wasmPackages,
+            provider = manifest.provider ?: sidecar.provider,
+            jars = if (manifest.jars.isNotEmpty()) manifest.jars else sidecar.jars,
         )
     }
 
@@ -224,17 +272,32 @@ object PolyglotManifest {
     fun parse(tomlText: String): PolyglotSections {
         val parser = MiniTomlParser(tomlText)
         parser.parse()
+        val provider = if (parser.providerLanguage != null || parser.providerInstall != null ||
+                parser.providerRuntimeEnv != null || parser.providerRuntimeDir != null) {
+            RawProviderSection(
+                language = parser.providerLanguage,
+                install = parser.providerInstall,
+                runtimeEnv = parser.providerRuntimeEnv,
+                runtimeDir = parser.providerRuntimeDir,
+            )
+        } else null
         return PolyglotSections(
             pythonPresent = parser.pythonPresent,
             pythonPath = parser.pythonPath,
             pythonOptions = parser.pythonOptions.toMap(),
+            pythonPackages = parser.pythonPackages.toList(),
             jvmClasspath = parser.jvmClasspath.toList(),
+            jvmPackages = parser.jvmPackages.toList(),
             jsPresent = parser.jsPresent,
             jsNodeModules = parser.jsNodeModules,
             jsOptions = parser.jsOptions.toMap(),
+            jsPackages = parser.jsPackages.toList(),
             wasmPresent = parser.wasmPresent,
             wasmModules = parser.wasmModules.toList(),
             wasmOptions = parser.wasmOptions.toMap(),
+            wasmPackages = parser.wasmPackages.toList(),
+            provider = provider,
+            jars = parser.jars.toMap(),
         )
     }
 
@@ -256,17 +319,34 @@ object PolyglotManifest {
         val resolvedClasspath = sections.jvmClasspath.map { resolvePath(it, base) }
         val resolvedJsNodeModules = sections.jsNodeModules?.let { resolvePath(it, base) }
         val resolvedWasmModules = sections.wasmModules.map { resolvePath(it, base) }
+        // Provider is treated as fully-declared only when every required
+        // field is present; the CLI-side validator rejects partial ones
+        // with a source-location error so we never see a half-populated
+        // section here during a real sync.
+        val provider = sections.provider?.let { raw ->
+            val lang = raw.language ?: return@let null
+            val inst = raw.install ?: return@let null
+            val env = raw.runtimeEnv ?: return@let null
+            val dir = raw.runtimeDir ?: return@let null
+            ResolvedProvider(language = lang, install = inst, runtimeEnv = env, runtimeDir = dir)
+        }
         return ResolvedPolyglot(
             enablePython = sections.pythonPresent,
             pythonPath = resolvedPython,
             pythonOptions = sections.pythonOptions,
+            pythonPackages = sections.pythonPackages,
             jvmClasspath = resolvedClasspath,
+            jvmPackages = sections.jvmPackages,
             enableJs = sections.jsPresent,
             jsNodeModules = resolvedJsNodeModules,
             jsOptions = sections.jsOptions,
+            jsPackages = sections.jsPackages,
             enableWasm = sections.wasmPresent,
             wasmModules = resolvedWasmModules,
             wasmOptions = sections.wasmOptions,
+            wasmPackages = sections.wasmPackages,
+            provider = provider,
+            jars = sections.jars,
         )
     }
 
@@ -293,13 +373,31 @@ data class PolyglotSections(
     val pythonPresent: Boolean,
     val pythonPath: String?,
     val pythonOptions: Map<String, String>,
+    val pythonPackages: List<String> = emptyList(),
     val jvmClasspath: List<String>,
+    val jvmPackages: List<String> = emptyList(),
     val jsPresent: Boolean = false,
     val jsNodeModules: String? = null,
     val jsOptions: Map<String, String> = emptyMap(),
+    val jsPackages: List<String> = emptyList(),
     val wasmPresent: Boolean = false,
     val wasmModules: List<String> = emptyList(),
     val wasmOptions: Map<String, String> = emptyMap(),
+    val wasmPackages: List<String> = emptyList(),
+    val provider: RawProviderSection? = null,
+    val jars: Map<String, String> = emptyMap(),
+)
+
+/**
+ * `[polyglot.provider]` values as they appeared in the TOML — before
+ * validation. Every field is nullable; the CLI validator (Commit 2)
+ * rejects manifests where any required field is missing.
+ */
+data class RawProviderSection(
+    val language: String? = null,
+    val install: String? = null,
+    val runtimeEnv: String? = null,
+    val runtimeDir: String? = null,
 )
 
 /**
@@ -316,16 +414,25 @@ private class MiniTomlParser(private val text: String) {
     var pythonPresent = false
     var pythonPath: String? = null
     val pythonOptions = LinkedHashMap<String, String>()
+    val pythonPackages = mutableListOf<String>()
     val jvmClasspath = mutableListOf<String>()
+    val jvmPackages = mutableListOf<String>()
     var jsPresent = false
     var jsNodeModules: String? = null
     val jsOptions = LinkedHashMap<String, String>()
+    val jsPackages = mutableListOf<String>()
     var wasmPresent = false
     val wasmModules = mutableListOf<String>()
     val wasmOptions = LinkedHashMap<String, String>()
+    val wasmPackages = mutableListOf<String>()
+    var providerLanguage: String? = null
+    var providerInstall: String? = null
+    var providerRuntimeEnv: String? = null
+    var providerRuntimeDir: String? = null
+    val jars = LinkedHashMap<String, String>()
 
     private enum class Section {
-        OUTSIDE, PYTHON, PYTHON_OPTIONS, JVM, JS, JS_OPTIONS, WASM, WASM_OPTIONS,
+        OUTSIDE, PYTHON, PYTHON_OPTIONS, JVM, JS, JS_OPTIONS, WASM, WASM_OPTIONS, PROVIDER, JARS,
     }
 
     fun parse() {
@@ -355,6 +462,8 @@ private class MiniTomlParser(private val text: String) {
                     "polyglot.js.options" -> { jsPresent = true; Section.JS_OPTIONS }
                     "polyglot.wasm" -> { wasmPresent = true; Section.WASM }
                     "polyglot.wasm.options" -> { wasmPresent = true; Section.WASM_OPTIONS }
+                    "polyglot.provider" -> Section.PROVIDER
+                    "jars" -> Section.JARS
                     else -> Section.OUTSIDE
                 }
                 continue
@@ -384,8 +493,9 @@ private class MiniTomlParser(private val text: String) {
 
         when (section) {
             Section.PYTHON -> {
-                if (key == "python_path") {
-                    pythonPath = parseString(rhs) ?: pythonPath
+                when (key) {
+                    "python_path" -> pythonPath = parseString(rhs) ?: pythonPath
+                    "packages" -> pythonPackages.addAll(parseStringArray(rhs))
                 }
             }
             Section.PYTHON_OPTIONS -> {
@@ -393,13 +503,15 @@ private class MiniTomlParser(private val text: String) {
                 pythonOptions[key] = v
             }
             Section.JVM -> {
-                if (key == "classpath") {
-                    jvmClasspath.addAll(parseStringArray(rhs))
+                when (key) {
+                    "classpath" -> jvmClasspath.addAll(parseStringArray(rhs))
+                    "packages" -> jvmPackages.addAll(parseStringArray(rhs))
                 }
             }
             Section.JS -> {
-                if (key == "node_modules") {
-                    jsNodeModules = parseString(rhs) ?: jsNodeModules
+                when (key) {
+                    "node_modules" -> jsNodeModules = parseString(rhs) ?: jsNodeModules
+                    "packages" -> jsPackages.addAll(parseStringArray(rhs))
                 }
             }
             Section.JS_OPTIONS -> {
@@ -407,13 +519,27 @@ private class MiniTomlParser(private val text: String) {
                 jsOptions[key] = v
             }
             Section.WASM -> {
-                if (key == "modules") {
-                    wasmModules.addAll(parseStringArray(rhs))
+                when (key) {
+                    "modules" -> wasmModules.addAll(parseStringArray(rhs))
+                    "packages" -> wasmPackages.addAll(parseStringArray(rhs))
                 }
             }
             Section.WASM_OPTIONS -> {
                 val v = parseString(rhs) ?: return
                 wasmOptions[key] = v
+            }
+            Section.PROVIDER -> {
+                val v = parseString(rhs) ?: return
+                when (key) {
+                    "language" -> providerLanguage = v
+                    "install" -> providerInstall = v
+                    "runtime_env" -> providerRuntimeEnv = v
+                    "runtime_dir" -> providerRuntimeDir = v
+                }
+            }
+            Section.JARS -> {
+                val v = parseString(rhs) ?: return
+                jars[key] = v
             }
             Section.OUTSIDE -> Unit
         }
