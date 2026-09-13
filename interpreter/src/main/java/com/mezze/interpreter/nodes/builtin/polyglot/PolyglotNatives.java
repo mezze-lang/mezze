@@ -51,7 +51,7 @@ public final class PolyglotNatives {
     }
 
     @TruffleBoundary
-    static MezzeVariant errorTypeError(String message) {
+    public static MezzeVariant errorTypeError(String message) {
         return makeErrorVariant("TypeError", new String[]{"message"}, new Object[]{message});
     }
 
@@ -119,7 +119,7 @@ public final class PolyglotNatives {
 
     // ==================== Foreign helpers ====================
 
-    static MezzeForeign asForeign(MezzeRecord r) {
+    public static MezzeForeign asForeign(MezzeRecord r) {
         Object val = getField(r, "val");
         if (val instanceof MezzeForeign f) return f;
         // Auto-wrap a raw value — makes it possible for tests to pass
@@ -127,7 +127,7 @@ public final class PolyglotNatives {
         return new MezzeForeign(val, "auto");
     }
 
-    static Object getField(MezzeRecord r, String name) {
+    public static Object getField(MezzeRecord r, String name) {
         int idx = r.getFieldIndex(name);
         if (idx < 0) {
             throw new NativeTypeMismatchException("Missing field '" + name + "'");
@@ -135,19 +135,19 @@ public final class PolyglotNatives {
         return r.getField(idx);
     }
 
-    static String getString(MezzeRecord r, String name) {
+    public static String getString(MezzeRecord r, String name) {
         Object v = getField(r, name);
         if (v instanceof String s) return s;
         throw new NativeTypeMismatchException("Expected String for field '" + name + "'");
     }
 
-    static long getLong(MezzeRecord r, String name) {
+    public static long getLong(MezzeRecord r, String name) {
         Object v = getField(r, name);
         if (v instanceof Long l) return l;
         throw new NativeTypeMismatchException("Expected Long for field '" + name + "'");
     }
 
-    static double getDouble(MezzeRecord r, String name) {
+    public static double getDouble(MezzeRecord r, String name) {
         Object v = getField(r, name);
         if (v instanceof Double d) return d;
         if (v instanceof Long l) return l.doubleValue();
