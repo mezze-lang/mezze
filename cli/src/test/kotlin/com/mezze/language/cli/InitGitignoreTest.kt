@@ -16,9 +16,16 @@ class InitGitignoreTest {
 
     @Test fun `empty gitignore gets all mez patterns`() {
         val add = InitCommand.gitignoreAdditions("")!!
-        for (p in listOf(".build/", "*.jar", "Mezze.lock", ".deps/", ".mez/")) {
+        for (p in listOf(".build/", "*.jar", ".deps/", ".mez/")) {
             assertTrue(add.contains(p), "should add $p")
         }
+    }
+
+    @Test fun `lockfile is never added to gitignore (it is committed)`() {
+        // Mezze.lock pins resolved versions and IS committed — mez init must
+        // never propose ignoring it.
+        val add = InitCommand.gitignoreAdditions("") ?: ""
+        assertFalse(add.lineSequence().any { it.trim() == "Mezze.lock" }, "must not ignore Mezze.lock")
     }
 
     @Test fun `fully-covered gitignore needs no additions`() {
@@ -26,7 +33,6 @@ class InitGitignoreTest {
             node_modules/
             .build/
             *.jar
-            Mezze.lock
             .deps/
             .mez/
         """.trimIndent()
@@ -40,7 +46,6 @@ class InitGitignoreTest {
         assertFalse(add.contains("\n.mez/\n"), "must not re-add an already-present pattern")
         assertTrue(add.contains(".deps/"), "adds the missing .deps/")
         assertTrue(add.contains("*.jar"), "adds the missing *.jar")
-        assertTrue(add.contains("Mezze.lock"), "adds the missing Mezze.lock")
     }
 
     @Test fun `a pattern inside a comment does not count as present`() {
