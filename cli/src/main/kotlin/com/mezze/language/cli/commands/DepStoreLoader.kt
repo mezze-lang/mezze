@@ -13,10 +13,11 @@ import java.io.File
  * into [PrecompiledDeps], so the typechecker serves that IR instead of
  * re-lowering the dep (see TypedModuleEmitter + computeReachableClosure).
  *
- * Walks the whole dependency tree: a project's `.deps/mezze/<name>-<ver>`
- * symlinks point at each dep's real dir (a shared content-store entry or a path
- * dep), and each dep's OWN `.deps/mezze` holds its transitive deps. Dedup is by
- * canonical path, so a diamond's shared content-store entry loads once.
+ * Reads the project's FLAT `.deps/mezze/<name>-<ver>` — every dep (direct and
+ * transitive) is linked into the top project's single `.deps`, so one pass over
+ * it sees the whole graph. (The recursive walk below is now a harmless no-op for
+ * flat trees; it's kept so a not-yet-resynced nested tree still loads. Dedup is
+ * by canonical path, so a diamond's shared content-store entry loads once.)
  *
  * Purely additive: a dep with no compiled store (or an unreadable one) is simply
  * skipped, and the consumer compiles it from source. Because the stored IR is

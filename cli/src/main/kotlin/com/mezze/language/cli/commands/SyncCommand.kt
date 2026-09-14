@@ -326,13 +326,17 @@ class SyncCommand {
                 return emptyList()
             }
             val version = depToml.`package`.version
-            // Link into the DECLARING package's own .deps/mezze so its `use` resolves.
-            File(declaringDir, ".deps/mezze").also { it.mkdirs() }.let {
+            // FLAT layout: link EVERY dep (direct + transitive) into the TOP
+            // project's single .deps/mezze, never the declarer's. Content is
+            // addressed by <module>-<version>, so different versions of the same
+            // package coexist as distinct entries — no need to nest .deps inside
+            // dep dirs (which polluted sibling path-dep source trees). The
+            // resolver looks in the top project's .deps for all deps.
+            File(rootDir, ".deps/mezze").also { it.mkdirs() }.let {
                 materializeSymlink(it, name, target, version)
             }
             count.incrementAndGet()
-            val where = if (declaringDir == rootDir) "" else "  (into ${declaringDir.name}/.deps)"
-            reporter.resolved("  ${Glyphs.OK} $name-$version -> ${target.path}$where", name)
+            reporter.resolved("  ${Glyphs.OK} $name-$version -> ${target.path}", name)
 
             val edges = (depToml.pathDependencies.keys + depToml.dependencies.keys).sorted()
             safeNodes.add(

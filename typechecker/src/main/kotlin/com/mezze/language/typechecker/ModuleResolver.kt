@@ -724,9 +724,21 @@ class ModuleResolver(
         if (segments.isNotEmpty()) {
             val packageName = segments[0]
             val restOfPath = if (segments.size > 1) segments.drop(1).joinToString("/") + ".mz" else "$packageName.mz"
-            val depsDir = projectRoot.resolve(".deps/mezze")
 
-            if (Files.exists(depsDir) && Files.isDirectory(depsDir)) {
+            // FLAT deps: every dep (direct + transitive) lives in the TOP
+            // project's single `.deps/mezze`. When resolving from inside a dep
+            // (this module's path contains `/.deps/`), the nearest project root is
+            // the dep itself, whose `.deps` no longer exists — so search the
+            // TOP-LEVEL project's `.deps` (walk up past the `.deps` segment). Also
+            // try the nearest `projectRoot`'s `.deps` for backward-compat with any
+            // not-yet-resynced tree.
+            val depsDirs = buildList {
+                add(projectRoot.resolve(".deps/mezze"))
+                topProjectDepsDir()?.let { if (it != projectRoot.resolve(".deps/mezze")) add(it) }
+            }
+
+            for (depsDir in depsDirs) {
+              if (Files.exists(depsDir) && Files.isDirectory(depsDir)) {
                 // Find directories matching {packageName}-* (e.g., json-1.2.0)
                 Files.list(depsDir).use { stream ->
                     val matchingDirs = stream
@@ -752,10 +764,28 @@ class ModuleResolver(
                         }
                     }
                 }
+              }
             }
         }
 
         return null
+    }
+
+    /**
+     * For a module being resolved from INSIDE a dep (its path contains a
+     * `.deps` segment), the top-level project's `.deps/mezze` — i.e. walk up
+     * past the outermost `.deps` to the enclosing project. Null when this module
+     * is not inside any `.deps` tree (then projectRoot's own `.deps` is enough).
+     */
+    private fun topProjectDepsDir(): Path? {
+        val cur = try { projectRoot.toAbsolutePath() } catch (_: Exception) { return null }
+        val parts = (0 until cur.nameCount).map { cur.getName(it).toString() }
+        val depsIdx = parts.indexOf(".deps")
+        if (depsIdx <= 0) return null
+        // The dir just above the outermost `.deps` is the top project root.
+        var top = cur.root ?: return null
+        for (i in 0 until depsIdx) top = top.resolve(parts[i])
+        return top.resolve(".deps").resolve("mezze")
     }
 
         private fun getSearchPaths(modulePath: String): List<String> {

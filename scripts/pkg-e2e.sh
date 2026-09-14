@@ -45,10 +45,14 @@ EOF
 cd app
 echo "package management e2e — transitive graph app → greet → core:"
 
-# sync should materialize BOTH greet (into app) and core (transitively, into greet)
+# FLAT layout: sync hoists BOTH greet AND core (transitive) into the app's single
+# .deps/mezze — nothing is nested inside greet/ (no polluting sibling source dirs).
 "$MEZ" sync >/dev/null 2>&1
-[ -e "$W/greet/.deps/mezze"/core-* ] && echo "  ✅ core linked transitively into greet/.deps" \
-  || { echo "  ❌ core not linked into greet/.deps"; fail=1; }
+[ -e "$W/app/.deps/mezze"/greet-* ] && [ -e "$W/app/.deps/mezze"/core-* ] \
+  && echo "  ✅ greet + core both hoisted flat into app/.deps" \
+  || { echo "  ❌ greet/core not both in app/.deps (flat)"; fail=1; }
+[ -e "$W/greet/.deps" ] && { echo "  ❌ greet/ was polluted with a nested .deps"; fail=1; } \
+  || echo "  ✅ greet/ source dir NOT polluted with a nested .deps"
 
 # type-check
 if "$MEZ" check 2>&1 | grep -qF "Check passed"; then echo "  ✅ check (app→greet→core resolves)"
