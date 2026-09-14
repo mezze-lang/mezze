@@ -1010,8 +1010,17 @@ private class ServerState(
      * On the FIRST run, keep the context built at startup (already fresh). On
      * every subsequent run (a `mez dev` reload), discard the current Context and
      * build a fresh one (reusing the shared Engine), so guest state doesn't
-     * accumulate across reloads — imported Python modules, JS `require` globals,
-     * native modules. The Engine (JIT'd CallTargets) is preserved. Best-effort
+     * accumulate across reloads — imported Python modules, JS `require` globals.
+     * The Engine (JIT'd CallTargets) is preserved.
+     *
+     * EXCEPTION: when a guest polyglot language is active, DON'T recreate the
+     * Context. A guest language that loaded a native C extension (e.g. numpy's
+     * _multiarray_umath.so) cannot have that module re-loaded into a second
+     * Context in the same process on macOS — GraalPy would need to patch the
+     * Mach-O ("Modifying Mach-O files is not yet supported"), and isolating
+     * native modules per-context also fails there. So a polyglot program reuses
+     * one Context across reloads (accepting minor guest-state accumulation);
+     * a pure-Mezze / non-native program gets a fresh Context each run. Best-effort
      * close of the old context — a wedged guest shouldn't block the next run.
      */
     fun maybeResetContextForNewRun() {
@@ -1019,6 +1028,9 @@ private class ServerState(
             startupContextUnused = false
             return
         }
+        // Guest polyglot languages present → reuse the Context (native modules
+        // can't safely reload into a fresh Context on macOS). See docstring.
+        if (polyglotLanguagesToWarm.isNotEmpty()) return
         val old = context
         context = contextFactory()
         polyglotWarmed = false  // the new context must re-warm its guest languages
