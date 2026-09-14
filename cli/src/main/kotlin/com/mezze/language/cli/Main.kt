@@ -170,6 +170,7 @@ fun main(rawArgs: Array<String>) {
             "fmt" -> handleFmtCommand(remainingArgs)
             "toolchain" -> handleToolchainCommand(remainingArgs)
             "doctor" -> com.mezze.language.cli.commands.DoctorCommand().execute()
+            "setup" -> handleSetupCommand(remainingArgs)
             "sync" -> handleSyncCommand(remainingArgs)
             "add" -> handleAddCommand(remainingArgs)
             "remove" -> handleRemoveCommand(remainingArgs)
@@ -223,6 +224,7 @@ private fun showHelp() {
     println()
     println("ENVIRONMENT:")
     println("  doctor    Report the JDK/GraalVM mez found + how to set up JIT/native")
+    println("  setup     Install or register a GraalVM (mez setup graalvm)")
     println("  toolchain Manage installed mez toolchain versions")
     println()
     println("GLOBAL OPTIONS:")
@@ -469,6 +471,19 @@ private fun showCommandHelp(command: String) {
             println()
         }
 
+        "doctor" -> {
+            println("USAGE: mez doctor")
+            println()
+            println("Report the JDK/GraalVM mez found, whether JIT + native-image are")
+            println("available, and — if degraded — how to set up GraalVM your way.")
+            println("Installs nothing. See also: mez setup graalvm.")
+        }
+
+        "setup" -> {
+            // Delegate to the setup handler's own help text (single source).
+            handleSetupCommand(emptyList())
+        }
+
         else -> {
             println("Error: Unknown command: $command")
             println()
@@ -487,6 +502,31 @@ private fun handleIndexCommand(args: List<String>) {
 
 private fun handleToolchainCommand(args: List<String>) {
     com.mezze.language.cli.toolchain.ToolchainCommand().execute(args)
+}
+
+private fun handleSetupCommand(args: List<String>) {
+    when (args.firstOrNull()) {
+        "graalvm" -> com.mezze.language.cli.commands.SetupGraalvmCommand().execute(args.drop(1))
+        null, "--help", "-h" -> {
+            println("USAGE: mez setup <target> [options]")
+            println()
+            println("TARGETS:")
+            println("  graalvm    Install or register a GraalVM for JIT + native builds")
+            println()
+            println("mez setup graalvm:")
+            println("  (default)         download GraalVM CE for this OS/arch → ~/.mezze/graalvm/<line>")
+            println("  --path <dir>      register a GraalVM you already have (prints MEZZE_GRAALVM_HOME)")
+            println("  --url <url>       download from an explicit tarball URL (mirror / air-gapped)")
+            println("  --line <x.y>      GraalVM line to fetch (default: what this mez bundles)")
+            println()
+            println("mez never installs a GraalVM on its own — this command is opt-in.")
+            println("See `mez doctor` for what's currently detected.")
+        }
+        else -> throw com.mezze.language.cli.MezzeCliError(
+            "unknown setup target '${args.first()}'",
+            hint = "try `mez setup graalvm` (see `mez setup --help`)",
+        )
+    }
 }
 
 private fun handleSyncCommand(args: List<String>) {
