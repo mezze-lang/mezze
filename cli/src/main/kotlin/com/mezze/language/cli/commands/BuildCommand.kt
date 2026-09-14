@@ -116,9 +116,20 @@ class BuildCommand {
                     "or set MEZZE_GRAALVM_HOME",
             )
         }
-        // -O2 always needs native-image; -O1 needs it only when no cached shell
-        // binary exists (first build triggers an automatic -O2 to create it).
-        val needsNativeImage = nativeBuild && (nativeO2 || !NativeBuildPath.hasShellBinary())
+        // Resolve polyglot config + language jars once, up front. Used for the
+        // jar launcher's -cp (jar builds ship these too) AND to key the -O1 shell
+        // (a project's shell must match its languages/versions), so the "do we
+        // need native-image?" decision depends on whether a shell for THIS
+        // capability set already exists.
+        val polyglot = com.mezze.language.cli.`package`.PolyglotResolver.resolve(currentDir)
+        val polyglotJars = com.mezze.language.cli.`package`.ResolvedJarsClasspath
+            .collect(currentDir).also { r -> r.warnings.forEach { System.err.println("[mez] $it") } }
+            .jars.map { it.jarPath }
+
+        // -O2 always needs native-image; -O1 needs it only when no capability-
+        // matching cached shell exists (first build for this language/version set
+        // triggers an automatic -O2 to create it).
+        val needsNativeImage = nativeBuild && (nativeO2 || !NativeBuildPath.hasShellBinary(polyglot, polyglotJars))
         if (needsNativeImage && !resolved.native) {
             throw com.mezze.language.cli.MezzeCliError(
                 "mez build --native needs GraalVM ${com.mezze.language.cli.BuildInfo.GRAAL_LINE} " +
@@ -324,9 +335,7 @@ class BuildCommand {
             // jar build must too, or polyglot silently stops working once you
             // ship the jar. Copy them next to the launcher and add to its -cp so
             // the built app is self-contained. Empty for non-polyglot projects.
-            val polyglotJars = com.mezze.language.cli.`package`.ResolvedJarsClasspath
-                .collect(currentDir).also { r -> r.warnings.forEach { System.err.println("[mez] $it") } }
-                .jars.map { it.jarPath }
+            // (polyglotJars resolved once up front.)
             val bundledLibDir = if (polyglotJars.isNotEmpty()) File(targetDir, "lib").apply { mkdirs() } else null
             val launcherExtraCp = polyglotJars.mapNotNull { src ->
                 val dest = File(bundledLibDir, src.name)
@@ -345,13 +354,9 @@ class BuildCommand {
             var nativeBinary: File? = null
             if (nativeBuild) {
                 println()
-                // Read polyglot config ONCE and pass through to the native
-                // build. `NativeBuildPath` uses it to (a) enable
-                // `--language:python` at native-image time and (b) bundle
-                // the venv + user JVM classpath next to the produced
-                // binary so it can ship without those files hanging off
-                // the project tree.
-                val polyglot = com.mezze.language.cli.`package`.PolyglotResolver.resolve(currentDir)
+                // polyglot config resolved once up front. NativeBuildPath uses it
+                // to (a) enable the guest language at native-image time and (b)
+                // bundle the venv + JVM classpath next to the binary.
                 if (nativeO2) {
                     val optimizedNI = !quickBuild
                     if (optimizedNI) {
@@ -395,6 +400,7 @@ class BuildCommand {
                         loweredFunctions = loweredFunctions,
                         performerRecords = performerRecords,
                         polyglot = polyglot,
+                        extraClasspath = polyglotJars,
                         timing = timing,
                         relativeTime = { (System.nanoTime() - startTime) / 1_000_000 },
                     )

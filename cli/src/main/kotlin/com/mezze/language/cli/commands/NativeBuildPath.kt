@@ -63,12 +63,16 @@ object NativeBuildPath {
         performerRecords: List<Array<String>>,
         polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved =
             com.mezze.language.cli.`package`.PolyglotResolver.Resolved.NONE,
+        /** Language jars to bake into the shell (see build's extraClasspath). */
+        extraClasspath: List<File> = emptyList(),
         timing: Boolean,
         relativeTime: () -> Long,
     ): File? {
-        var shell = locateShellBinary()
+        var shell = locateShellBinary(polyglot, extraClasspath)
         if (shell == null) {
-            println("No cached shell binary found — building one via -O2 (this is a one-time cost)...")
+            val what = if (polyglot.enablePython || extraClasspath.isNotEmpty())
+                "a polyglot shell (bundles the guest language runtime)" else "a shell"
+            println("No matching shell binary for this project — building $what via -O2 (one-time for this language/version set)...")
             val shellBinary = build(
                 jarFile = jarFile,
                 outputDir = outputDir,
@@ -80,22 +84,25 @@ object NativeBuildPath {
                 performerRecords = performerRecords,
                 optimized = true,
                 polyglot = polyglot,
+                extraClasspath = extraClasspath,
                 timing = timing,
                 relativeTime = relativeTime,
             )
             if (shellBinary == null) {
-                System.err.println("Error: failed to build shell binary. Check that native-image is installed.")
+                // build() already reported the native-image failure (graceful,
+                // trace under --verbose). Returning null propagates to the
+                // false-success guard in BuildCommand → clean exit 1.
                 return null
             }
-            // build() already caches to ~/.mezze/lib/mez-shell-native
-            shell = locateShellBinary()
+            // build() caches the shell under its capability key.
+            shell = locateShellBinary(polyglot, extraClasspath)
             // Clean up the temp binary — the real output gets the CBOR append below
             try { shellBinary.delete() } catch (_: Exception) {}
             if (shell == null) {
-                System.err.println("Error: shell binary was built but not cached. Check ~/.mezze/lib/ permissions.")
+                System.err.println("${Glyphs.CROSS} shell binary was built but not cached — check .mez/shell/ permissions")
                 return null
             }
-            println("Shell binary cached. Future -O1 builds will be instant.")
+            println("Shell cached in .mez/shell — future builds of this project reuse it.")
         }
         val outBinary = File(outputDir, outputName)
         outputDir.mkdirs()
@@ -116,7 +123,11 @@ object NativeBuildPath {
         return outBinary
     }
 
-    fun hasShellBinary(): Boolean = locateShellBinary() != null
+    fun hasShellBinary(
+        polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved =
+            com.mezze.language.cli.`package`.PolyglotResolver.Resolved.NONE,
+        extraClasspath: List<File> = emptyList(),
+    ): Boolean = locateShellBinary(polyglot, extraClasspath) != null
 
     private var projectShellDir: File? = null
 
@@ -124,15 +135,51 @@ object NativeBuildPath {
         projectShellDir = File(projectDir, ".mez/shell")
     }
 
-    private fun locateShellBinary(): File? {
+    /**
+     * The per-project shell binary for a given capability fingerprint. Shells are
+     * project-local (`.mez/shell/`) and NAMED by a hash of everything baked into
+     * the shell — the enabled languages, the exact language-jar identities (the
+     * content-addressed `.deps`/maven jar paths, which encode e.g. GraalPy
+     * 25.0.3), the GraalVM version that built it, and the mezze compiler version.
+     * So a pure-Mezze project, a `[polyglot.python]` project, and the same
+     * project after a GraalPy/GraalVM bump each get their OWN shell and never
+     * reuse an incompatible one — a stale shell can't silently drop a language.
+     */
+    private fun shellBinaryFor(key: String): File? =
+        projectShellDir?.let { File(it, "mez-shell-$key") }
+
+    /**
+     * Fingerprint of what a shell must contain — see shellBinaryFor. The
+     * language SET and their VERSIONS are captured by [extraClasspath]: those are
+     * the content-addressed `.deps`/maven jar paths (e.g. `…/python-language/
+     * 25.0.3/…jar`), so the path already encodes both which languages and which
+     * versions. Plus the GraalVM version that builds the image and the mezze
+     * compiler version. `enablePython` adds the pure-stdlib case (Python on with
+     * no extra jars) so it still differs from a bare Mezze shell.
+     */
+    fun shellCapabilityKey(
+        polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved,
+        extraClasspath: List<File>,
+    ): String {
+        val d = java.security.MessageDigest.getInstance("SHA-256")
+        d.update(com.mezze.language.cli.BuildInfo.VERSION.toByteArray())
+        d.update(com.mezze.language.cli.BuildInfo.GRAAL_VERSION.toByteArray())
+        d.update(if (polyglot.enablePython) 1 else 0)
+        for (p in extraClasspath.map { it.absolutePath }.sorted()) d.update(p.toByteArray())
+        return d.digest().joinToString("") { "%02x".format(it) }.take(16)
+    }
+
+    private fun locateShellBinary(
+        polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved =
+            com.mezze.language.cli.`package`.PolyglotResolver.Resolved.NONE,
+        extraClasspath: List<File> = emptyList(),
+    ): File? {
         System.getenv("MEZZE_SHELL_BIN")?.let { path ->
             val f = File(path)
             if (f.isFile) return f
         }
-        projectShellDir?.let { dir ->
-            val shell = File(dir, "mez-shell-native")
-            if (shell.isFile) return shell
-        }
+        val key = shellCapabilityKey(polyglot, extraClasspath)
+        shellBinaryFor(key)?.let { if (it.isFile) return it }
         return null
     }
 
@@ -336,7 +383,10 @@ object NativeBuildPath {
             val shellDir = projectShellDir
             if (shellDir != null) {
                 shellDir.mkdirs()
-                val shellDest = File(shellDir, "mez-shell-native")
+                // Cache under the capability key so a later -O1 build reuses this
+                // shell only when its languages/versions/GraalVM match.
+                val key = shellCapabilityKey(polyglot, extraClasspath)
+                val shellDest = File(shellDir, "mez-shell-$key")
                 outBinary.copyTo(shellDest, overwrite = true)
                 shellDest.setExecutable(true, false)
                 if (timing) System.err.println("[${relativeTime()}ms] native: cached as shell at ${shellDest.absolutePath}")
