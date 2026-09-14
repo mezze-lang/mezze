@@ -569,11 +569,17 @@ class SyncCommand {
      * target — that would delete the dep's own source).
      */
     private fun materializeSymlink(packagesDir: File, name: String, target: File, version: String) {
-        packagesDir.listFiles { f -> f.name.startsWith("$name-") }?.forEach { stale ->
+        // Name the dir by the MODULE spelling (`-`→`_`) so `use <module>::…`
+        // resolves it — the resolver searches `.deps/mezze/<module>-*`, and a
+        // module path segment can't contain a hyphen. A dep declared
+        // `mezze-python` is imported as `mezze_python`, so its dir is
+        // `mezze_python-<version>`. See packageNameToModule.
+        val moduleName = com.mezze.language.cli.`package`.packageNameToModule(name)
+        packagesDir.listFiles { f -> f.name.startsWith("$moduleName-") }?.forEach { stale ->
             val p = stale.toPath()
             if (java.nio.file.Files.isSymbolicLink(p)) java.nio.file.Files.delete(p) else stale.deleteRecursively()
         }
-        java.nio.file.Files.createSymbolicLink(File(packagesDir, "$name-$version").toPath(), target.toPath())
+        java.nio.file.Files.createSymbolicLink(File(packagesDir, "$moduleName-$version").toPath(), target.toPath())
     }
 
     /**
@@ -816,7 +822,8 @@ class SyncCommand {
                 val checksum = node.checksum?.removePrefix("sha256:")
                 if (checksum != null) File(storeRoot, "$checksum/Mezze.toml").takeIf { it.isFile }
                 else node.ref?.let { r ->
-                    File(projectRoot, ".deps/mezze/${node.name}-$r/Mezze.toml").takeIf { it.isFile }
+                    val m = com.mezze.language.cli.`package`.packageNameToModule(node.name)
+                    File(projectRoot, ".deps/mezze/$m-$r/Mezze.toml").takeIf { it.isFile }
                 }
             }
             else -> null
@@ -993,7 +1000,8 @@ class SyncCommand {
                 val checksum = node.checksum?.removePrefix("sha256:")
                 if (checksum != null) File(storeRoot, checksum).takeIf { it.isDirectory }
                 else node.ref?.let { r ->
-                    File(projectRoot, ".deps/mezze/${node.name}-$r").takeIf { it.isDirectory }
+                    val m = com.mezze.language.cli.`package`.packageNameToModule(node.name)
+                    File(projectRoot, ".deps/mezze/$m-$r").takeIf { it.isDirectory }
                 }
             }
             else -> null

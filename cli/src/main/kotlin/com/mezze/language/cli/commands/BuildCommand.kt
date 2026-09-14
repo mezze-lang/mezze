@@ -160,7 +160,9 @@ class BuildCommand {
             // (edit → save → mez build) hits this fast-path.
             val source = appFile.readText()
             val sourceHash = sha256(source)
-            val modulePath = manifest.`package`.name
+            // Module spelling (`-`→`_`) so a hyphenated package keys its modules
+            // the same way consumers import it.
+            val modulePath = com.mezze.language.cli.`package`.packageNameToModule(manifest.`package`.name)
 
             val cached = BuildCache.tryLoad(store, appConfig.name)
             val loweredFunctions: List<FunctionIR>

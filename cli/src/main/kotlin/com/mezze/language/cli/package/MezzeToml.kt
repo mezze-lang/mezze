@@ -435,13 +435,13 @@ fun extractPackageNameFromUrl(fullUrl: String): String {
     // Extract version from package name (e.g., "json-1.2.3" -> "json")
     val nameWithoutVersion = packageName.replace(Regex("-\\d+\\.\\d+\\.\\d+.*$"), "")
 
-    if (!nameWithoutVersion.matches(Regex("[a-z][a-z0-9_]*"))) {
+    if (!nameWithoutVersion.matches(Regex("[a-z][a-z0-9_-]*"))) {
         throw IllegalArgumentException(
             "Invalid package name: $nameWithoutVersion\n\n" +
             "💡 Package names must:\n" +
             "   - Start with a lowercase letter\n" +
-            "   - Contain only lowercase letters, numbers, and underscores\n" +
-            "   - Use snake_case (e.g., http_client, json_parser)"
+            "   - Contain only lowercase letters, numbers, underscores, and hyphens\n" +
+            "   - Hyphens are treated as underscores in imports (mezze-python → use mezze_python)"
         )
     }
 
@@ -451,20 +451,35 @@ fun extractPackageNameFromUrl(fullUrl: String): String {
 /**
  * Validate package name format
  */
+/**
+ * The MODULE spelling of a package name — how it appears in `use` and as its
+ * `.deps/mezze/<dir>` directory. Cargo's model: a declared package name may
+ * contain hyphens (natural for a GitHub repo like `mezze-python`), but a module
+ * path segment can't (`mezze-python` would parse as `mezze` minus `python`), so
+ * the import spelling replaces `-` with `_` (`mezze_python`). Normalizing HERE,
+ * at every boundary where a declared name becomes a dir or is matched against an
+ * import, is what lets `use mezze_python::…` resolve a dep declared
+ * `mezze-python`. Idempotent — a name already in module form is unchanged.
+ */
+fun packageNameToModule(name: String): String = name.replace('-', '_')
+
 fun validatePackageName(name: String) {
-    if (!name.matches(Regex("[a-z][a-z0-9_]*"))) {
+    // The DECLARED name may use hyphens (Cargo-style, matching a repo name); the
+    // module/import spelling is its `-`→`_` normalization (packageNameToModule).
+    // We validate the declared form here and reject anything the normalization
+    // still couldn't turn into a legal module segment.
+    if (!name.matches(Regex("[a-z][a-z0-9_-]*"))) {
         throw IllegalArgumentException(
             "Invalid package name: $name\n\n" +
             "💡 Package names must:\n" +
             "   - Start with a lowercase letter\n" +
-            "   - Contain only lowercase letters, numbers, and underscores\n" +
-            "   - Use snake_case (e.g., http_client, json_parser)\n\n" +
+            "   - Contain only lowercase letters, numbers, underscores, and hyphens\n" +
+            "   - Hyphens are treated as underscores in imports (mezze-python → use mezze_python)\n\n" +
             "Examples:\n" +
             "   ✅ json_parser\n" +
             "   ✅ http_client\n" +
-            "   ✅ test_framework2\n" +
+            "   ✅ mezze-python   (imported as mezze_python)\n" +
             "   ❌ JsonParser (no camelCase)\n" +
-            "   ❌ http-client (no hyphens)\n" +
             "   ❌ 2fast (cannot start with number)"
         )
     }

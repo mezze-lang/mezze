@@ -150,9 +150,11 @@ object ResolvedJarsClasspath {
                 if (commit != null) {
                     File(defaultStoreRoot(), "$commit/Mezze.toml").takeIf { it.isFile }
                 } else {
-                    // Fallback: use the symlink `.deps/mezze/<name>-<ref>/`.
+                    // Fallback: use the symlink `.deps/mezze/<module>-<ref>/`
+                    // (dir named by the module spelling, `-`→`_`).
                     node.ref?.let { r ->
-                        File(projectRoot, ".deps/mezze/${node.name}-$r/Mezze.toml").takeIf { it.isFile }
+                        val m = com.mezze.language.cli.`package`.packageNameToModule(node.name)
+                        File(projectRoot, ".deps/mezze/$m-$r/Mezze.toml").takeIf { it.isFile }
                     }
                 }
             }

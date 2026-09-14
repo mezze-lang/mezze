@@ -86,7 +86,9 @@ class DevCommand {
             return
         }
 
-        val modulePath = manifest.`package`.name
+        // Module path uses the module spelling (`-`→`_`) so a hyphenated package
+        // name keys its modules the same way consumers import them.
+        val modulePath = com.mezze.language.cli.`package`.packageNameToModule(manifest.`package`.name)
         val entryName = appConfig.entry
 
         // Resolve the JDK/GraalVM and adapt: a too-old/missing JDK is a hard,

@@ -348,7 +348,8 @@ class CheckCommand {
             val sourceHash = sha256(source)
             val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()
             StorePopulator.populate(
-                store, typeCheckResult, manifest.`package`.name,
+                store, typeCheckResult,
+                com.mezze.language.cli.`package`.packageNameToModule(manifest.`package`.name),
                 appFile.absolutePath, sourceHash,
                 entrySource = source,
                 parsedModule = ast,
