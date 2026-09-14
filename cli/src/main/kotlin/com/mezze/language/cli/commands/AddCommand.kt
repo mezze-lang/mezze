@@ -43,9 +43,23 @@ class AddCommand {
                 if (!checkName(n) || !checkUrl(url)) return
                 Triple(n, url, if (isDev) DEV else DEPS)
             }
+            p.positionals.firstOrNull()?.startsWith("github:") == true -> {
+                // `mez add github:<owner>/<repo>@<ref>` — a GitHub dependency.
+                // Name derives from the repo, normalized to its module spelling
+                // (`-`→`_`) so `use <name>::…` resolves. An explicit positional
+                // name before the spec overrides (rare).
+                val spec = p.positionals.first { it.startsWith("github:") }
+                val explicitName = p.positionals.firstOrNull { !it.startsWith("github:") }
+                val parsed = try {
+                    com.mezze.language.cli.`package`.parseGithubDep(spec)
+                } catch (e: IllegalArgumentException) { println(e.message); return }
+                val n = explicitName ?: com.mezze.language.cli.`package`.packageNameToModule(parsed.second)
+                if (!checkName(n)) return
+                Triple(n, spec, if (isDev) DEV else DEPS)
+            }
             else -> {
                 val url = p.positionals.firstOrNull()
-                    ?: return usage("add <name> --path <dir>   |   add <url>#sha256:<hash>")
+                    ?: return usage("add <name> --path <dir>   |   add github:<owner>/<repo>@<ref>   |   add <url>#sha256:<hash>")
                 if (!checkUrl(url)) return
                 val n = try { extractPackageNameFromUrl(url) } catch (e: IllegalArgumentException) { println(e.message); return }
                 Triple(n, url, if (isDev) DEV else DEPS)
