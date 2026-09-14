@@ -224,27 +224,27 @@ class TypeChecker(
             }
             precompiled.compiledPrelude.mergeInto(parentContext)
         } else if (hasUserImports || shouldInjectPrelude) {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "."))
-            // A module inside a dependency (…/.deps/mezze/<pkg>/…) is NOT part of the
-            // top project, even though path-deps symlink it under the project dir. It
-            // must resolve ITS OWN imports against ITS OWN .deps, so it can never use
-            // the project-rooted global resolver — re-root to its own dir instead.
-            // Without this, a dep-of-a-dep (app→greet→core) type-checks but fails to
-            // compile/run: greet's `use core` is searched in app/.deps, where core
-            // isn't linked (it's under greet/.deps).
-            val insideDependency = currentPath.toString()
-                .contains("${java.io.File.separator}.deps${java.io.File.separator}")
-            val importResolver = if (precompiled != null && !insideDependency &&
-                    (currentPath == projectRoot || currentPath.startsWith(projectRoot))) {
-                precompiled.importResolver
-            } else {
-                val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
-                val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
-                    parentContext,
-                    moduleLoader.getResolver()
-                )
-                ImportResolver(moduleLoader, moduleTypeChecker)
-            }
+            // User imports (`use <dep>::…`) MUST resolve against the module's own
+            // directory — its `.deps/mezze`, `src/`, `lib/` — so we always build a
+            // resolver rooted at `currentPath`. It still resolves `use std::…`
+            // (stdlib is loaded from embedded resources, not from any project root)
+            // and still shares the warm precompiled `parentContext`, so there's no
+            // stdlib/perf loss.
+            //
+            // The old code reused a single GLOBAL resolver (`precompiled.importResolver`,
+            // rooted at `mezze.project.root` — which is the STDLIB/compiler-install
+            // root, not the user's project) whenever `currentPath.startsWith` that
+            // sysprop. For a user project nested INSIDE the mezze repo tree that test
+            // wrongly fired, so `.deps` was searched in the repo root instead of the
+            // project → spurious "module not found". Rooting at `currentPath`
+            // unconditionally is correct for the top project AND for a dependency
+            // module (…/.deps/mezze/<pkg>/…), which must resolve its own `.deps`.
+            val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
+            val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
+                parentContext,
+                moduleLoader.getResolver()
+            )
+            val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
 
             val importResult = if (hasUserImports) {
                 importResolver.resolveImports(module)
