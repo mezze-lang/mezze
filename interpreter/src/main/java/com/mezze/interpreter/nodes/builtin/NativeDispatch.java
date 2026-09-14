@@ -4350,6 +4350,22 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_jvm_null_val",
             (r, c) -> PolyglotNatives.nullVal(r, "jvm"));
 
+        // Per-language value constructors used by each provider's `to_py {}` /
+        // `to_js {}` codec (`mezze_python::codec` etc.). The provider .mz emits a
+        // language-namespaced `__native_<lang>_from_int` so the resulting Foreign
+        // is tagged with the guest language; they all delegate to the generic
+        // PolyglotNatives constructor. Registered in-tree (not left to the
+        // provider plugin, which only overrides eval/import) so a codec `.to_py {}`
+        // works without a no-handler crash.
+        for (String lang : new String[] { "python", "js", "wasm" }) {
+            final String l = lang;
+            HANDLERS.put("__native_" + l + "_from_int",   (r, c) -> PolyglotNatives.fromInt(r, l));
+            HANDLERS.put("__native_" + l + "_from_float", (r, c) -> PolyglotNatives.fromFloat(r, l));
+            HANDLERS.put("__native_" + l + "_from_str",   (r, c) -> PolyglotNatives.fromStr(r, l));
+            HANDLERS.put("__native_" + l + "_from_bool",  (r, c) -> PolyglotNatives.fromBool(r, l));
+            HANDLERS.put("__native_" + l + "_null_val",   (r, c) -> PolyglotNatives.nullVal(r, l));
+        }
+
         // Python / JavaScript / WebAssembly and any other non-JVM guest
         // language arrive via user-installed polyglot provider packages
         // (`mezze-python`, `mezze-js`, `mezze-wasm`, …). Each package
