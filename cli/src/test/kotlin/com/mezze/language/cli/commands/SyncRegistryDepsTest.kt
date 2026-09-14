@@ -157,13 +157,15 @@ class SyncRegistryDepsTest {
         // leaf extracted exactly once (shared content-store entry), despite two
         // concurrent middles both pulling it — the per-sha lock serialized it.
         assertEquals(1, store.listFiles()?.count { it.name == leafHash }, "leaf stored once")
-        // …and linked into BOTH middles' store-entry .deps
-        assertNotNull(File(store, "$m1Hash/.deps/mezze").listFiles()?.firstOrNull { it.name.startsWith("leaf-") })
-        assertNotNull(File(store, "$m2Hash/.deps/mezze").listFiles()?.firstOrNull { it.name.startsWith("leaf-") })
+        // FLAT: the shared leaf is hoisted into the app's single .deps exactly once,
+        // NOT nested inside each middle's store entry.
+        assertNotNull(depLink(app, "leaf"), "shared leaf hoisted flat into app/.deps")
+        assertEquals(1, File(app, ".deps/mezze").listFiles()?.count { it.name.startsWith("leaf-") },
+            "leaf appears once in the flat .deps")
     }
 
     @Test
-    fun `transitive remote dep lands in the store entry's own deps`(@TempDir tmp: Path) {
+    fun `transitive remote dep is hoisted flat into the app deps`(@TempDir tmp: Path) {
         val root = tmp.toFile()
         val store = File(root, "store")
 
@@ -185,10 +187,11 @@ class SyncRegistryDepsTest {
         // app -> mid
         assertNotNull(depLink(app, "mid"), "app should link mid")
         assertTrue(File(store, "$midHash/Mezze.toml").exists())
-        // mid (in the store) -> leaf, linked into mid's OWN store-entry .deps (shared)
-        val midLeaf = File(store, "$midHash/.deps/mezze").listFiles()?.firstOrNull { it.name.startsWith("leaf-") }
-        assertNotNull(midLeaf, "mid's store entry should transitively link leaf")
-        assertEquals(File(store, leafHash).canonicalFile, midLeaf!!.canonicalFile)
+        // FLAT: mid's transitive leaf is hoisted into the app's single .deps
+        // (not nested in the store entry), pointing at the shared store entry.
+        val appLeaf = depLink(app, "leaf")
+        assertNotNull(appLeaf, "transitive leaf hoisted flat into app/.deps")
+        assertEquals(File(store, leafHash).canonicalFile, appLeaf!!.canonicalFile)
         assertTrue(File(store, "$leafHash/Mezze.toml").exists())
     }
 }

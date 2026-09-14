@@ -185,6 +185,14 @@ class SyncCommand {
                 runProviderInstalls(root, manifest, graph, storeRoot, isLocked, failures)
             }
 
+            // Config contributions: each installed dep may ship `[[contributes]]`
+            // (default config for a linter / LSP extension / polyglot language).
+            // Merge them into the consumer's Mezze.toml — mez does the write,
+            // namespaced + merge-not-override (see ConfigContributions).
+            if (failures.isEmpty() && !isLocked) {
+                applyConfigContributions(root)
+            }
+
             val freshLock = MezzeLock(
                 version = 2,
                 root = manifest.`package`.name,
@@ -572,6 +580,13 @@ class SyncCommand {
      * `<name>-*` entry first. Symlinks are removed as links (never recurse into the
      * target — that would delete the dep's own source).
      */
+    // FLAT deps: many declarers link into ONE shared .deps/mezze concurrently, so
+    // a diamond (a→core, b→core) races on the same `<module>-<version>` entry.
+    // Serialize the create + make it idempotent: an existing link to the SAME
+    // target is a no-op (the dedup a flat layout wants), a wrong/stale one is
+    // replaced. Guards the whole check-then-create against FileAlreadyExists.
+    private val symlinkLock = Any()
+
     private fun materializeSymlink(packagesDir: File, name: String, target: File, version: String) {
         // Name the dir by the MODULE spelling (`-`→`_`) so `use <module>::…`
         // resolves it — the resolver searches `.deps/mezze/<module>-*`, and a
@@ -579,11 +594,25 @@ class SyncCommand {
         // `mezze-python` is imported as `mezze_python`, so its dir is
         // `mezze_python-<version>`. See packageNameToModule.
         val moduleName = com.mezze.language.cli.`package`.packageNameToModule(name)
-        packagesDir.listFiles { f -> f.name.startsWith("$moduleName-") }?.forEach { stale ->
-            val p = stale.toPath()
-            if (java.nio.file.Files.isSymbolicLink(p)) java.nio.file.Files.delete(p) else stale.deleteRecursively()
+        val linkPath = File(packagesDir, "$moduleName-$version").toPath()
+        val targetPath = target.toPath()
+        synchronized(symlinkLock) {
+            // Already the right link? nothing to do (flat-layout dedup).
+            if (java.nio.file.Files.isSymbolicLink(linkPath)) {
+                val cur = runCatching { java.nio.file.Files.readSymbolicLink(linkPath) }.getOrNull()
+                if (cur != null && runCatching { cur.toRealPath() }.getOrNull() ==
+                        runCatching { targetPath.toRealPath() }.getOrNull()) {
+                    return
+                }
+            }
+            // Replace any stale `<module>-*` entry (different version, or a
+            // non-symlink) before creating.
+            packagesDir.listFiles { f -> f.name.startsWith("$moduleName-") }?.forEach { stale ->
+                val p = stale.toPath()
+                if (java.nio.file.Files.isSymbolicLink(p)) java.nio.file.Files.delete(p) else stale.deleteRecursively()
+            }
+            java.nio.file.Files.createSymbolicLink(linkPath, targetPath)
         }
-        java.nio.file.Files.createSymbolicLink(File(packagesDir, "$moduleName-$version").toPath(), target.toPath())
     }
 
     /**
@@ -1097,6 +1126,37 @@ class SyncCommand {
      * uses a non-standard provider name, the validator surfaces the mismatch
      * so they see the convention up-front.
      */
+    /**
+     * Read every resolved dep's `[[contributes]]` (from the flat `.deps/mezze/`)
+     * and merge them into the consumer's Mezze.toml. mez does the write; each
+     * entry is namespaced to the contributing package and merged key-by-key, so
+     * a user's existing config is never overwritten (see ConfigContributions).
+     */
+    private fun applyConfigContributions(root: File) {
+        val depsDir = File(root, ".deps/mezze")
+        if (!depsDir.isDirectory) return
+        val rootToml = File(root, "Mezze.toml")
+        if (!rootToml.isFile) return
+
+        var text = rootToml.readText()
+        val allAdded = mutableListOf<Pair<String, String>>()  // (ownerName, section)
+        for (dep in depsDir.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name }.orEmpty()) {
+            val depToml = readToml(File(dep, "Mezze.toml")) ?: continue
+            if (depToml.contributes.isEmpty()) continue
+            val owner = depToml.`package`.name
+            val (updated, applied) = com.mezze.language.cli.`package`.ConfigContributions
+                .apply(text, owner, depToml.contributes, providerLanguage = depToml.polyglot?.provider?.language)
+            text = updated
+            applied.sectionsAdded.forEach { allAdded += owner to it }
+        }
+        if (allAdded.isNotEmpty()) {
+            rootToml.writeText(text)
+            allAdded.forEach { (owner, section) ->
+                println("  ${Glyphs.OK} added [$section] to Mezze.toml (from $owner)")
+            }
+        }
+    }
+
     private fun inferProviderLanguages(manifest: com.mezze.language.cli.`package`.MezzeToml): Set<String> {
         val names = manifest.dependencies.keys +
             manifest.devDependencies.keys +

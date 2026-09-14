@@ -84,6 +84,16 @@ data class MezzeToml(
      */
     val polyglot: PolyglotSection? = null,
     /**
+     * Package config CONTRIBUTIONS — `[[contributes]]` entries a package ships
+     * so that installing it scaffolds default config into the CONSUMER's
+     * Mezze.toml (e.g. mezze-python contributes `[polyglot.python]`; a linter
+     * contributes `[lint.<name>]`; an LSP extension contributes `[lsp.<name>]`).
+     * mez does the write (a package never edits your file directly), MERGES key-
+     * by-key (your existing values always win), and only into namespaced
+     * sections the package owns. See ConfigContributions.
+     */
+    val contributes: List<ContributesEntry> = emptyList(),
+    /**
      * Universal `[jars]` table — a map of `name = "url#sha256:hex64"`.
      * Works both in user projects (as extra JVM classpath entries) and
      * in provider packages (declaring the graal-language jars to fetch).
@@ -269,6 +279,21 @@ data class ProviderSection(
     /** Relative dir where installed packages land (under project root). */
     @SerialName("runtime_dir")
     val runtimeDir: String? = null,
+)
+
+/**
+ * One `[[contributes]]` entry — default config a package scaffolds into a
+ * consumer's Mezze.toml on install. [section] is the dotted TOML path to merge
+ * into (e.g. `polyglot.python`, `lint.foo`); [values] are the key/values to
+ * write there; [subsections] are nested tables (e.g. `options`) rendered as
+ * `[<section>.<sub>]`. mez merges these key-by-key — an existing key in the
+ * consumer's file is never overwritten. See ConfigContributions.
+ */
+@Serializable
+data class ContributesEntry(
+    val section: String? = null,
+    val values: Map<String, String> = emptyMap(),
+    val subsections: Map<String, Map<String, String>> = emptyMap(),
 )
 
 /**

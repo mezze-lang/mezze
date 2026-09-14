@@ -3,6 +3,7 @@ package com.mezze.language.cli.commands
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -67,7 +68,7 @@ class SyncPathDepsTest {
     }
 
     @Test
-    fun `transitive deps set up from one top-level sync`(@TempDir tmp: Path) {
+    fun `transitive deps hoisted FLAT into the top project — no sibling pollution`(@TempDir tmp: Path) {
         val root = tmp.toFile()
         val core = lib(root, "core")
         val utils = lib(root, "utils", pathDeps = mapOf("core" to "../core"))
@@ -75,14 +76,18 @@ class SyncPathDepsTest {
 
         sync(app)
 
-        assertNotNull(link(app, "utils"), "app should link utils")
-        val coreLink = link(utils, "core")
-        assertNotNull(coreLink, "utils should link core transitively (into utils/.deps)")
+        // Both utils AND core land in the TOP project's single .deps (flat).
+        assertNotNull(link(app, "utils"), "app/.deps should hold utils")
+        val coreLink = link(app, "core")
+        assertNotNull(coreLink, "app/.deps should hold core transitively (flat, hoisted)")
         assertEquals(core.canonicalFile, coreLink!!.canonicalFile)
+        // The dep source dirs must NOT be polluted with nested .deps.
+        assertFalse(File(utils, ".deps").exists(), "utils/ must not get a nested .deps")
+        assertFalse(File(core, ".deps").exists(), "core/ must not get a nested .deps")
     }
 
     @Test
-    fun `diamond dedups — shared dep linked once per declarer`(@TempDir tmp: Path) {
+    fun `diamond dedups — shared dep linked once in the flat top-level deps`(@TempDir tmp: Path) {
         val root = tmp.toFile()
         val core = lib(root, "core")
         val a = lib(root, "a", pathDeps = mapOf("core" to "../core"))
@@ -91,14 +96,18 @@ class SyncPathDepsTest {
 
         sync(app)
 
-        assertNotNull(link(a, "core"), "a should link core")
-        assertNotNull(link(b, "core"), "b should link core")
-        // exactly one core-* entry under each declarer (no duplicate versions left)
-        assertEquals(1, File(a, ".deps/mezze").listFiles()?.count { it.name.startsWith("core-") })
+        // a, b, and the shared core all in app/.deps; core exactly once.
+        assertNotNull(link(app, "a"), "app should link a")
+        assertNotNull(link(app, "b"), "app should link b")
+        assertNotNull(link(app, "core"), "app should link the shared core")
+        assertEquals(1, File(app, ".deps/mezze").listFiles()?.count { it.name.startsWith("core-") },
+            "shared core appears exactly once in the flat .deps")
+        assertFalse(File(a, ".deps").exists(), "a/ not polluted")
+        assertFalse(File(b, ".deps").exists(), "b/ not polluted")
     }
 
     @Test
-    fun `dependency cycle terminates and links both directions`(@TempDir tmp: Path) {
+    fun `dependency cycle terminates and links all in the flat top-level deps`(@TempDir tmp: Path) {
         val root = tmp.toFile()
         val a = lib(root, "a", pathDeps = mapOf("b" to "../b"))
         val b = lib(root, "b", pathDeps = mapOf("a" to "../a"))
@@ -107,9 +116,9 @@ class SyncPathDepsTest {
         // Must not hang — the seen-set breaks the a <-> b cycle.
         assertDoesNotThrow { sync(app) }
 
-        assertNotNull(link(app, "a"), "app -> a")
-        assertNotNull(link(a, "b"), "a -> b")
-        assertNotNull(link(b, "a"), "b -> a")
+        // Both a and b hoisted flat into app/.deps.
+        assertNotNull(link(app, "a"), "app -> a in flat .deps")
+        assertNotNull(link(app, "b"), "b (via a) hoisted into flat .deps")
     }
 
     @Test
