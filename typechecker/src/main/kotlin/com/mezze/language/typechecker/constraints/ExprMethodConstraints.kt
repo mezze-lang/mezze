@@ -79,6 +79,21 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             val genReceiverType = generate(memberAccess.receiver, context.notInTailPosition()).type
             val effectiveReceiverType = genReceiverType
             if (effectiveReceiverType !is MezzeType.VarType) {
+                // Prefer the SPECIFICITY-ordered names (`Result_PyForeign_InteropError`
+                // before `Result`): candidates are registered under their FULLY-MANGLED
+                // `targetTypeName`, so a bare-constructor name from `candidateTypeNames`
+                // ("Result") never matches `impl Result <T> <E>` and two per-language
+                // Result impls (`Result PyForeign` vs `Result JsForeign`) stay
+                // ambiguous → a load-order tiebreak picks the wrong one. Walk names
+                // most-specific first and take the first that lands on a UNIQUE target.
+                val orderedNames = com.mezze.language.typechecker.util.receiverTypeNames(effectiveReceiverType)
+                    .ifEmpty { candidateTypeNames(effectiveReceiverType, context).toList() }
+                for (nm in orderedNames) {
+                    val filtered = inherentMethods.filter { it.targetTypeName == nm }
+                    if (filtered.isNotEmpty() && filtered.map { it.targetTypeName }.distinct().size == 1) {
+                        return generateInherentMethodCall(expr, memberAccess, filtered, context)
+                    }
+                }
                 val names = candidateTypeNames(effectiveReceiverType, context)
                 if (names.isNotEmpty()) {
                     val filtered = inherentMethods.filter { it.targetTypeName in names }

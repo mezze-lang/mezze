@@ -282,7 +282,17 @@ data class TypingContext(
         // Builtins with no decl hash keep the plain-name key. Readers: by-name scans
         // (findAnonymousMethodsByName / findAnonymousMethod fallback) match on the
         // info's fields regardless of key. See project_classparam_runtime_dispatch_tuple.
-        val keyType = info.targetTypeHash?.hex ?: info.targetTypeName
+        //
+        // The `targetTypeName` component is REQUIRED alongside the hash: for a
+        // TYPE-APPLICATION target the hash is the CONSTRUCTOR's decl hash (so a
+        // `Result …` receiver can select an `impl Result …` — see ContextBuilder),
+        // which is IDENTICAL across `impl Result PyForeign` and `impl Result JsForeign`.
+        // Keying on the hash alone would collide and drop one impl (two polyglot
+        // providers in one module → a pure-Py chain loses its `as_float` candidate).
+        // `targetTypeName` is the FULLY-MANGLED name (`Result_PyForeign_InteropError`
+        // vs `Result_JsForeign_InteropError`), so hash+name is distinct per full
+        // type application while still cross-module-safe.
+        val keyType = info.targetTypeHash?.let { "${it.hex}:${info.targetTypeName}" } ?: info.targetTypeName
         val key = "$keyType::${info.methodName}"
         val existingMethods = anonymousImplMethodsByType[info.targetTypeName] ?: emptyList()
         val newHashIndex = if (info.targetTypeHash != null) {

@@ -242,7 +242,7 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
                 // bare var). Give them their REAL signature so the foreign type flows
                 // through the chain and it all infers with ZERO annotations in the
                 // provider `impl <Lang>Foreign`. See [polyglotNativeSignature].
-                val polyglotType = polyglotNativeSignature(expr.localName)
+                val polyglotType = polyglotNativeSignature(expr.localName, context)
                 val nativeType = polyglotType ?: MezzeType.VarType(TypeVar.fresh())
                 return ConstraintResult(
                     type = nativeType,
@@ -328,18 +328,31 @@ internal fun ExpressionConstraintGenerator.generatePipeExpression(expr: ParsedPi
 /**
  * Synthesized type for a polyglot member native — the ones that take a foreign
  * value in `val` and return another foreign, so their result type is
- * `Result 'F 'e` with the SAME `'F` as the `val` argument. Consulted in the
- * `__native_*` fast path (the NotFound branch above), which otherwise types every
- * intrinsic as a bare fresh var. Giving THESE a real signature is what lets
+ * `Result 'F InteropError` with the SAME `'F` as the `val` argument. Consulted in
+ * the `__native_*` fast path (the NotFound branch above), which otherwise types
+ * every intrinsic as a bare fresh var. Giving THESE a real signature is what lets
  * `x.attr{}.call{}.…` chains INFER: the foreign type flows through each step, so
  * the next inherent method resolves its dispatch dict WITHOUT any return-type
  * annotation in the provider (`impl PyForeign` / `impl JvmForeign`).
  *
+ * The error arm is pinned to the concrete `InteropError` (not a free var). This
+ * matters for MULTI-PROVIDER dispatch: an intermediate chain type is then
+ * `Result <Foreign> InteropError` — fully concrete — so its mangled receiver name
+ * `Result_<Foreign>_InteropError` matches the specific `impl Result <Foreign>
+ * InteropError` candidate exactly. Left as a free var, the receiver mangles to
+ * `Result_<Foreign>_'?`, which matches NEITHER provider's specific candidate, so
+ * dispatch fell through to a load-order tiebreak between `impl Result PyForeign`
+ * and `impl Result JsForeign` (whichever provider was imported first won). Pinning
+ * the error is faithful — every `__native_polyglot_*` op returns exactly this.
+ *
  * The param record is OPEN (rowVar) so the other, type-irrelevant args (`name`,
- * `args`, `index`, …) unify freely; only `val: 'F` and the `Result 'F` return
- * are pinned. `null` for any other native (they keep the generic fresh-var path).
+ * `args`, `index`, …) unify freely; only `val: 'F` and the `Result 'F InteropError`
+ * return are pinned. `null` for any other native (generic fresh-var path).
  */
-private fun polyglotNativeSignature(name: String): MezzeType.FunctionType? {
+private fun ExpressionConstraintGenerator.polyglotNativeSignature(
+    name: String,
+    context: ConstraintContext,
+): MezzeType.FunctionType? {
     val foreignReturning = setOf(
         "__native_polyglot_read_member",
         "__native_polyglot_invoke_member",
@@ -350,7 +363,13 @@ private fun polyglotNativeSignature(name: String): MezzeType.FunctionType? {
     )
     if (name !in foreignReturning) return null
     val f = MezzeType.VarType(TypeVar.fresh())          // the foreign type 'F
-    val e = MezzeType.VarType(TypeVar.fresh())          // the error type 'e (unifies w/ InteropError)
+    // Concrete InteropError when its decl is in scope (it always is where the
+    // polyglot natives are used — the provider `use`s std::polyglot::core), else
+    // a fresh var so this never fails a build that references the native oddly.
+    val e: MezzeType =
+        if (context.typeDeclarations.containsKey("InteropError"))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("InteropError")
+        else MezzeType.VarType(TypeVar.fresh())
     val param = MezzeType.RecordType(
         fields = mapOf("val" to f),
         rowVar = RowVar.fresh(),                         // open: other args unify freely
