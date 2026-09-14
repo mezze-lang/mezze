@@ -346,13 +346,21 @@ internal fun ExpressionConstraintGenerator.generatePipeExpression(expr: ParsedPi
  * the error is faithful — every `__native_polyglot_*` op returns exactly this.
  *
  * The param record is OPEN (rowVar) so the other, type-irrelevant args (`name`,
- * `args`, `index`, …) unify freely; only `val: 'F` and the `Result 'F InteropError`
- * return are pinned. `null` for any other native (generic fresh-var path).
+ * `args`, `index`, …) unify freely; only `val: 'F` and the return are pinned.
+ * `null` for any other native (generic fresh-var path).
+ *
+ * The fallible COERCION natives (`as_string`/`as_long`/`as_double`/`as_boolean`)
+ * return a Result of a CONCRETE primitive, not `'F`. Pinning those (`.as_str{}` →
+ * `Result Str InteropError`) is what lets a GENERIC combinator chain PAST a coercion
+ * — `x.as_str{}.get_or{def="…"}` — resolve `Result.get_or` on a concrete `Result Str`
+ * instead of an unsolved `Result 'a` → runtime DictFallback. (`is_null`/`has_member`
+ * return a BARE Bool, not a Result, so they stay on the generic fresh-var path.)
  */
 private fun ExpressionConstraintGenerator.polyglotNativeSignature(
     name: String,
     context: ConstraintContext,
 ): MezzeType.FunctionType? {
+    // Foreign in `val` → Result <same foreign> InteropError.
     val foreignReturning = setOf(
         "__native_polyglot_read_member",
         "__native_polyglot_invoke_member",
@@ -361,8 +369,20 @@ private fun ExpressionConstraintGenerator.polyglotNativeSignature(
         "__native_polyglot_read_array",
         "__native_polyglot_write_array",
     )
-    if (name !in foreignReturning) return null
-    val f = MezzeType.VarType(TypeVar.fresh())          // the foreign type 'F
+    // Foreign in `val` → Result <concrete primitive> InteropError. ONLY the
+    // fallible coercions belong here — `is_null`/`has_member` return a BARE Bool
+    // (not a Result), so they keep the generic fresh-var path.
+    val coercionReturn: Map<String, MezzeType> = mapOf(
+        "__native_polyglot_as_string" to MezzeType.StringType,
+        "__native_polyglot_as_long" to MezzeType.IntType,
+        "__native_polyglot_as_double" to MezzeType.FloatType,
+        "__native_polyglot_as_boolean" to MezzeType.BoolType,
+    )
+    val isForeign = name in foreignReturning
+    if (!isForeign && name !in coercionReturn) return null
+
+    val f = MezzeType.VarType(TypeVar.fresh())          // the foreign type 'F (the `val` arg)
+    val okType: MezzeType = if (isForeign) f else coercionReturn.getValue(name)
     // Concrete InteropError when its decl is in scope (it always is where the
     // polyglot natives are used — the provider `use`s std::polyglot::core), else
     // a fresh var so this never fails a build that references the native oddly.
@@ -374,6 +394,6 @@ private fun ExpressionConstraintGenerator.polyglotNativeSignature(
         fields = mapOf("val" to f),
         rowVar = RowVar.fresh(),                         // open: other args unify freely
     )
-    val ret = com.mezze.language.typechecker.util.WellKnownTypeApp.result(f, e)
+    val ret = com.mezze.language.typechecker.util.WellKnownTypeApp.result(okType, e)
     return MezzeType.FunctionType(paramType = param, returnType = ret)
 }
