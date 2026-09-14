@@ -337,9 +337,17 @@ object RuntimeServer {
                 contextBuilder.option("wasm.$k", v)
             }
         }
-        val context = contextBuilder.build()
+        // Build the FIRST context, but keep the fully-configured builder as a
+        // factory so each subsequent run (`mez dev` reload) gets a FRESH context.
+        // A long-lived server that reused one context accumulated guest state
+        // across reloads — imported Python modules, JS `require` globals, native
+        // modules — a resource leak that eventually stack-overflowed on reload.
+        // The Engine (JIT'd CallTargets) stays shared; only the Context is
+        // per-run. See ServerState.resetContextForNewRun.
+        val contextFactory: () -> Context = { contextBuilder.build() }
+        val context = contextFactory()
 
-        val state = ServerState(context, engine, runIdCarrier, jitEnabled)
+        val state = ServerState(context, contextFactory, engine, runIdCarrier, jitEnabled)
         // Stash the declared guest languages so the eval worker can
         // auto-warm them on ITS thread before the first user eval.
         // (Warming here on `main` would pin GraalJS to the wrong
@@ -467,7 +475,9 @@ object RuntimeServer {
             originalStderr.println("[RuntimeServer] fatal: ${e.javaClass.simpleName}: ${e.message}")
             e.printStackTrace(originalStderr)
         } finally {
-            try { context.close(true) } catch (_: Exception) {}
+            // Close the CURRENT context (state.context may have been swapped by a
+            // dev reload; the local `context` is only the startup one).
+            try { state.context.close(true) } catch (_: Exception) {}
             try { send(WireFrame.of(MessageType.BYE, Bye())) } catch (_: Exception) {}
         }
     }
@@ -759,6 +769,13 @@ object RuntimeServer {
         // trigger. A no-op eval per language stakes the claim on the
         // right thread. Once per Context — flip a flag so subsequent
         // LOADs don't repeat the work.
+        // Per-run context isolation: on every run AFTER the first (a `mez dev`
+        // reload), swap in a fresh Context so guest state (Python modules, JS
+        // require globals, native modules) doesn't accumulate across reloads.
+        // The first run uses the context built at startup. resetContextForNewRun
+        // clears polyglotWarmed so the fresh context re-warms below.
+        state.maybeResetContextForNewRun()
+
         if (!state.polyglotWarmed && state.polyglotLanguagesToWarm.isNotEmpty()) {
             warmupPolyglotLanguages(state.context, state.polyglotLanguagesToWarm)
             state.polyglotWarmed = true
@@ -972,11 +989,41 @@ object RuntimeServer {
 // ─── Mutable server state ────────────────────────────────────────────
 
 private class ServerState(
-    val context: Context,
+    context: Context,
+    private val contextFactory: () -> Context,
     val engine: Engine,
     private val runIdCarrier: AtomicLong,
     private val jitEnabled: Boolean,
 ) {
+    /**
+     * The live polyglot Context. A `var` so a fresh one can replace it per run
+     * — see [resetContextForNewRun]. The old context's guest state (imported
+     * modules, JS globals, native modules) must not leak into the next run.
+     */
+    @Volatile var context: Context = context
+        private set
+
+    /** True until the first run consumes the startup context. */
+    @Volatile private var startupContextUnused: Boolean = true
+
+    /**
+     * On the FIRST run, keep the context built at startup (already fresh). On
+     * every subsequent run (a `mez dev` reload), discard the current Context and
+     * build a fresh one (reusing the shared Engine), so guest state doesn't
+     * accumulate across reloads — imported Python modules, JS `require` globals,
+     * native modules. The Engine (JIT'd CallTargets) is preserved. Best-effort
+     * close of the old context — a wedged guest shouldn't block the next run.
+     */
+    fun maybeResetContextForNewRun() {
+        if (startupContextUnused) {
+            startupContextUnused = false
+            return
+        }
+        val old = context
+        context = contextFactory()
+        polyglotWarmed = false  // the new context must re-warm its guest languages
+        try { old.close(true) } catch (_: Exception) {}
+    }
     @Volatile var activeRunId: Long? = null
         private set
     @Volatile private var interrupting: Boolean = false
