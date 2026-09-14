@@ -239,6 +239,47 @@ class PolyglotCoreTest {
     }
 
     @Test
+    fun `jvm StringBuilder append chain via flat Result chain`() {
+        // A flat chain on `Result JvmForeign InteropError` — no `match`
+        // between steps. Exercises `impl Result JvmForeign` dispatch: each
+        // chained method dispatches on a Result receiver whose type must be
+        // INFERRED (the provider has NO return-type annotations). If chain
+        // dispatch falls back to the shared MezzeForeign dict, this crashes
+        // at runtime (DictFallback). StringBuilder.append is fluent — it
+        // returns the builder itself — so the chain is logically valid.
+        val result = eval(
+            """
+            use std::polyglot::jvm as jvm
+            use std::polyglot::jvm::{ from_str }
+            jvm::class { name = "java.lang.StringBuilder" }
+              .new { args = [from_str { val = "a" }] }
+              .method { name = "append", args = [from_str { val = "b" }] }
+              .method { name = "append", args = [from_str { val = "c" }] }
+              .method { name = "toString", args = [] }
+              .as_str {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals("abc", v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `jvm empty ArrayList size via flat Result chain`() {
+        // Simpler flat chain, no fluent-return dependency: new → size → as_int.
+        val result = eval(
+            """
+            use std::polyglot::jvm as jvm
+            jvm::class { name = "java.util.ArrayList" }
+              .new { args = [] }
+              .method { name = "size", args = [] }
+              .as_int {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(0L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
     fun `jvm ArrayList add then read back element`() {
         val result = eval(
             """

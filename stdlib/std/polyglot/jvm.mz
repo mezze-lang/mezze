@@ -106,6 +106,65 @@ impl JvmForeign where {
   type_name     = { it } -> __native_polyglot_type_name  { val = it },
 }
 
+## Chainable inherent methods on `Result JvmForeign InteropError` — the
+## exact return type of every fallible operation above. Mirrors every
+## member-access method on `impl JvmForeign` so a host-interop pipeline
+## reads as a flat chain
+##
+##     klass.new { args = [] }
+##       .method { name = "add", args = [x] }
+##       .method { name = "size", args = [] }
+##       .as_int {}
+##
+## instead of a `match` between every step. Each method threads through
+## the Result: on `Ok` it delegates to the underlying `JvmForeign`
+## method; on `Err` it propagates the error unchanged. NO return-type
+## annotations — the return type infers from the delegated call.
+impl Result JvmForeign InteropError where {
+  method = { it, name, args } -> match it is
+    Ok  { val = f } -> f.method { name = name, args = args }
+    Err { error }   -> Err { error = error },
+  new = { it, args } -> match it is
+    Ok  { val = f } -> f.new { args = args }
+    Err { error }   -> Err { error = error },
+  static = { it, name, args } -> match it is
+    Ok  { val = f } -> f.static { name = name, args = args }
+    Err { error }   -> Err { error = error },
+  field = { it, name } -> match it is
+    Ok  { val = f } -> f.field { name = name }
+    Err { error }   -> Err { error = error },
+  invoke_member = { it, method, args } -> match it is
+    Ok  { val = f } -> f.invoke_member { method = method, args = args }
+    Err { error }   -> Err { error = error },
+  get_member = { it, name } -> match it is
+    Ok  { val = f } -> f.get_member { name = name }
+    Err { error }   -> Err { error = error },
+  execute = { it, args } -> match it is
+    Ok  { val = f } -> f.execute { args = args }
+    Err { error }   -> Err { error = error },
+  instantiate = { it, args } -> match it is
+    Ok  { val = f } -> f.instantiate { args = args }
+    Err { error }   -> Err { error = error },
+  array_at = { it, index } -> match it is
+    Ok  { val = f } -> f.array_at { index = index }
+    Err { error }   -> Err { error = error },
+  array_size = { it } -> match it is
+    Ok  { val = f } -> f.array_size {}
+    Err { error }  -> Err { error = error },
+  as_int = { it } -> match it is
+    Ok  { val = f } -> f.as_int {}
+    Err { error }  -> Err { error = error },
+  as_str = { it } -> match it is
+    Ok  { val = f } -> f.as_str {}
+    Err { error }  -> Err { error = error },
+  as_float = { it } -> match it is
+    Ok  { val = f } -> f.as_float {}
+    Err { error }  -> Err { error = error },
+  as_bool = { it } -> match it is
+    Ok  { val = f } -> f.as_bool {}
+    Err { error }  -> Err { error = error },
+}
+
 ## Constructors — lift a Mezze primitive into a JvmForeign so it
 ## can be passed as an argument to `.method{}` / `.new{}` etc.
 pub let from_int:   { val: Int   } -> JvmForeign = { val } -> __native_jvm_from_int   { val = val }

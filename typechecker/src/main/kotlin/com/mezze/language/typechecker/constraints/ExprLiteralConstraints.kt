@@ -234,9 +234,18 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
             // #109 stdlib-only gate on the native prefix.
             if (expr.localName == com.mezze.language.ast.MagicParams.CRASH ||
                 (expr.localName.startsWith(com.mezze.language.ast.MagicParams.NATIVE_PREFIX) && isStdlibModule)) {
-                val freshType = MezzeType.VarType(TypeVar.fresh())
+                // Polyglot member natives (`__native_polyglot_read_member` etc.)
+                // take a foreign value and return `Result <same foreign> InteropError`.
+                // The generic native path below hands back a bare fresh var, erasing
+                // the foreign's type — which breaks `x.attr{}.call{}` chaining (the
+                // next `.attr`/`.as_str` can't resolve its inherent-method dict on a
+                // bare var). Give them their REAL signature so the foreign type flows
+                // through the chain and it all infers with ZERO annotations in the
+                // provider `impl <Lang>Foreign`. See [polyglotNativeSignature].
+                val polyglotType = polyglotNativeSignature(expr.localName)
+                val nativeType = polyglotType ?: MezzeType.VarType(TypeVar.fresh())
                 return ConstraintResult(
-                    type = freshType,
+                    type = nativeType,
                     constraints = emptyList(),
                     referencedBindings = setOf(DefinitionRef.ByName(null, lookupKeyString))
                 )
@@ -314,4 +323,38 @@ internal fun ExpressionConstraintGenerator.generatePipeExpression(expr: ParsedPi
         expr.loc,
         code = ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE,
     )
+}
+
+/**
+ * Synthesized type for a polyglot member native — the ones that take a foreign
+ * value in `val` and return another foreign, so their result type is
+ * `Result 'F 'e` with the SAME `'F` as the `val` argument. Consulted in the
+ * `__native_*` fast path (the NotFound branch above), which otherwise types every
+ * intrinsic as a bare fresh var. Giving THESE a real signature is what lets
+ * `x.attr{}.call{}.…` chains INFER: the foreign type flows through each step, so
+ * the next inherent method resolves its dispatch dict WITHOUT any return-type
+ * annotation in the provider (`impl PyForeign` / `impl JvmForeign`).
+ *
+ * The param record is OPEN (rowVar) so the other, type-irrelevant args (`name`,
+ * `args`, `index`, …) unify freely; only `val: 'F` and the `Result 'F` return
+ * are pinned. `null` for any other native (they keep the generic fresh-var path).
+ */
+private fun polyglotNativeSignature(name: String): MezzeType.FunctionType? {
+    val foreignReturning = setOf(
+        "__native_polyglot_read_member",
+        "__native_polyglot_invoke_member",
+        "__native_polyglot_execute",
+        "__native_polyglot_instantiate",
+        "__native_polyglot_read_array",
+        "__native_polyglot_write_array",
+    )
+    if (name !in foreignReturning) return null
+    val f = MezzeType.VarType(TypeVar.fresh())          // the foreign type 'F
+    val e = MezzeType.VarType(TypeVar.fresh())          // the error type 'e (unifies w/ InteropError)
+    val param = MezzeType.RecordType(
+        fields = mapOf("val" to f),
+        rowVar = RowVar.fresh(),                         // open: other args unify freely
+    )
+    val ret = com.mezze.language.typechecker.util.WellKnownTypeApp.result(f, e)
+    return MezzeType.FunctionType(paramType = param, returnType = ret)
 }

@@ -703,6 +703,20 @@ class ContextBuilder {
         @Suppress("UNUSED_PARAMETER") file: String = "<module>"
     ): TypingContext {
         val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
+        // The hash that dispatch keys on: the target type's DECLARED-identity hash.
+        // A locally-declared nominal target (`impl JvmForeign`) is keyed by its
+        // own decl hash — the AUTHORITATIVE source, kept FIRST so this change is
+        // behaviour-neutral for every existing simple-nominal impl. Only when the
+        // name isn't a local decl — a TYPE-APPLICATION target like
+        // `impl Result JvmForeign InteropError`, whose mangled `targetTypeName`
+        // (`Result_JvmForeign_InteropError`) is never a decl key — do we fall back
+        // to the CONSTRUCTOR's decl hash (`Result`), the same quantity the receiver
+        // produces via declaredHashOf. That fallback is what makes an
+        // `impl Result …` block selectable for a `Result …` receiver (previously the
+        // target hash came out null and dispatch picked the wrong candidate). See
+        // [implTargetDeclaredHash].
+        val targetTypeHash = currentTypeDecls[targetTypeName]?.contentHash
+            ?: implTargetDeclaredHash(implDecl)
 
         var result = ctx
         for (op in implDecl.operations) {
@@ -724,7 +738,7 @@ class ContextBuilder {
                 // dispatch can disambiguate two same-named types from different modules
                 // (name stays the fallback for builtins with no decl hash). Additive —
                 // the name-keyed maps are unchanged. project_classparam_runtime_dispatch_tuple.
-                targetTypeHash = currentTypeDecls[targetTypeName]?.contentHash,
+                targetTypeHash = targetTypeHash,
                 implStartLine = implDecl.loc.startLine, implStartCol = implDecl.loc.startCol,
                 implSourceFile = implDecl.loc.file
             ))
@@ -766,6 +780,15 @@ class ContextBuilder {
         val targetTypeName = implDecl.targetTypes.map { getTypeName(it) }.firstOrNull() ?: return ctx
 
         val implTargetType = implDecl.targetTypes.firstOrNull()?.let { convertParsedTypeAnnotation(it) }
+        // Constructor-level declared hash (see the identical note + rationale in
+        // addAnonymousImpl/implTargetDeclaredHash). Local decl hash first
+        // (authoritative, behaviour-neutral); fall back to the constructor's
+        // declared hash ONLY for a genuine type application with args
+        // (`impl Result <T> <E>`) — never a bare nominal, whose cross-module hash
+        // could differ from the receiver's and break name-fallback dispatch.
+        val targetTypeHash = currentTypeDecls[targetTypeName]?.contentHash
+            ?: implTargetType?.takeIf { it is MezzeType.TypeApplication && it.args.isNotEmpty() }
+                ?.let { com.mezze.language.typechecker.util.declaredHashOf(it) }
         val targetTypeVarsByName = mutableMapOf<String, TypeVar>()
         if (implTargetType != null) collectVarTypesByName(implTargetType, targetTypeVarsByName)
         val targetVarsInOrder = if (implTargetType != null) collectVarTypesInOrder(implTargetType) else emptyList()
@@ -811,7 +834,7 @@ class ContextBuilder {
                 implContentHash = implKey,
                 // See addAnonymousImpl — populate the target type's content hash for
                 // hash-preferring dispatch (currentTypeDecls covers imported types).
-                targetTypeHash = currentTypeDecls[targetTypeName]?.contentHash,
+                targetTypeHash = targetTypeHash,
                 implStartLine = implDecl.loc.startLine, implStartCol = implDecl.loc.startCol,
                 implSourceFile = implDecl.loc.file, isImported = true
             ))
@@ -834,6 +857,36 @@ class ContextBuilder {
 
     private fun getTypeName(annotation: ParsedTypeAnnotation): String =
         AbilityImplFactory.typeNameOf(annotation)
+
+    /**
+     * The CONSTRUCTOR-level declared hash of a TYPE-APPLICATION impl target —
+     * ONLY for a genuine application with type args (`impl Result JvmForeign
+     * InteropError`, `impl Option 'a`), never for a bare nominal target
+     * (`impl Client`, `impl JvmForeign`). This is a NARROW fallback used only when
+     * `currentTypeDecls[mangledName]` misses — which it always does for the mangled
+     * `Result_JvmForeign_InteropError` form. It reads the constructor's declared
+     * hash (`Result`) via [declaredHashOf], the same STABLE quantity a `Result …`
+     * receiver produces at the dispatch site, so an `impl Result <T> <E>` block
+     * becomes selectable for a `Result <T> <E>` receiver.
+     *
+     * Restricting to `args.isNotEmpty()` is load-bearing: a bare nominal target's
+     * cross-module conversion can mint a hash that DIFFERS from the receiver's
+     * (module-local decl hashes need not agree across the import boundary), so
+     * supplying it would turn a working name-match (null hash) into a hash-veto
+     * MISMATCH — the #-regression on cross-module `impl Client`/`impl Req` chains.
+     * A type application's constructor is a nominal DECLARATION whose hash is
+     * stable wherever the constructor is declared (stdlib `Result`/`Option`), so
+     * only that case is safe here. Bare nominals return null → the existing
+     * name-fallback path (unchanged from before this fix).
+     */
+    private fun implTargetDeclaredHash(implDecl: ParsedImplAbilityDecl): Hash? =
+        implDecl.targetTypes.firstOrNull()
+            ?.let { convertParsedTypeAnnotation(it) }
+            ?.let { converted ->
+                if (converted is MezzeType.TypeApplication && converted.args.isNotEmpty())
+                    com.mezze.language.typechecker.util.declaredHashOf(converted)
+                else null
+            }
 
     private fun buildConversionConfig() = TypeAnnotationConverter.ConversionConfig(
         resolveTypeHash = { currentTypeDecls[it]?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
