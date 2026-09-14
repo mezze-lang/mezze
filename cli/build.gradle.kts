@@ -606,6 +606,20 @@ tasks.register<Copy>("installRuntime") {
     into(toolchainDir.map { File(it, "lib") })
 }
 
+// Stage mezze-runtime.jar into the DEV installDist output's lib/ too, so a
+// `just build` dev launcher (cli/build/install/mez/bin/mez) finds its runtime via
+// MezzeHome.selfLib (bin/mez -> ../lib) — without it, `mez dev` from a dev build
+// fell back to ~/.mezze/lib (only the installed toolchain has the jar) and
+// errored "mezze-runtime.jar not found". installDist depends on this below.
+tasks.register<Copy>("installRuntimeDev") {
+    group = "install"
+    description = "Install mezze-runtime.jar into the dev installDist lib/ (so `mez dev` works from a dev build)"
+    dependsOn(":interpreter:runtimeShadowJar")
+    from(project(":interpreter").layout.buildDirectory.file("libs/mezze-runtime.jar"))
+    into(layout.buildDirectory.dir("install/mez/lib"))
+}
+tasks.named("installDist") { finalizedBy("installRuntimeDev") }
+
 // A separate configuration that pulls in the GraalVM Truffle dev tools
 // (chromeinspector, profiler, coverage, dap, insight) without putting
 // them on the main runtime classpath. The slim mezze-runtime.jar
