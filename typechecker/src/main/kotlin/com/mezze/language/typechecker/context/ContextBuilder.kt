@@ -884,7 +884,16 @@ class ContextBuilder {
             ?.let { convertParsedTypeAnnotation(it) }
             ?.let { converted ->
                 if (converted is MezzeType.TypeApplication && converted.args.isNotEmpty())
-                    com.mezze.language.typechecker.util.declaredHashOf(converted)
+                    // BUG 1: prefer the APPLIED hash, so `impl Result PyForeign IErr`
+                    // and `impl Result JsForeign IErr` file under DIFFERENT keys
+                    // instead of both landing on `Result`'s constructor hash, where
+                    // the second silently overwrote the first. A generic
+                    // `impl Result 'a 'e` has no concrete arg, mints no applied hash,
+                    // and keeps the constructor hash — the receiver side tries the
+                    // applied hash first and falls back, so the generic impl stays
+                    // reachable exactly as before.
+                    com.mezze.language.typechecker.util.appliedHashOf(converted)
+                        ?: com.mezze.language.typechecker.util.declaredHashOf(converted)
                 else null
             }
 

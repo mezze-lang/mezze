@@ -58,6 +58,31 @@ data class Hash(val hex: String) {
             builder.append(opName)
             return Hash(builder.build().toFullHexString())
         }
+
+        /**
+         * The identity of an APPLIED type — a constructor's declaration hash
+         * combined with its arguments' identity tokens. `Result PyForeign IErr`
+         * and `Result JsForeign IErr` share a constructor hash, so every key
+         * derived from that hash alone collides for them; this is what tells the
+         * two apart.
+         *
+         * Single source of truth, deliberately: registration (filing an
+         * `impl Result <T> <E>`) and resolution (a `Result …` receiver looking one
+         * up) must mint the SAME bytes or the impl is unreachable. Both reach it
+         * through `com.mezze.language.typechecker.util.appliedHashOf`.
+         */
+        @JvmStatic
+        fun computeAppliedHash(constructorHash: Hash, argTokens: List<String>): Hash {
+            val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+            builder.append(constructorHash.hex)
+            builder.append("<")
+            for (token in argTokens) {
+                builder.append(token)
+                builder.append(",")
+            }
+            builder.append(">")
+            return Hash(builder.build().toFullHexString())
+        }
     }
 }
 

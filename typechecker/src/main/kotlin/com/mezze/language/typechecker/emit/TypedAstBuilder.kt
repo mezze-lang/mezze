@@ -128,10 +128,12 @@ class TypedAstBuilder(
     ): Hash? {
         if (methodInfo.candidateImpls.isEmpty()) return methodInfo.implContentHash
         val solvedReceiver = substitution.apply(receiverExpr.type)
-        val receiverHash = com.mezze.language.typechecker.util.declaredHashOf(solvedReceiver)
-        val byHash = if (receiverHash != null) {
-            methodInfo.candidateImpls.firstOrNull { it.targetTypeHash == receiverHash }?.implContentHash
-        } else null
+        // BUG 1: walk the receiver's hashes most-specific first — the applied hash
+        // of `Result PyForeign IErr` before the bare `Result` constructor hash —
+        // so two same-constructor impls resolve without a name comparison.
+        val byHash = com.mezze.language.typechecker.util
+            .pickByReceiverHash(solvedReceiver, methodInfo.candidateImpls) { it.targetTypeHash }
+            ?.implContentHash
         return byHash ?: run {
             // Try the receiver's names in SPECIFICITY order — mangled form first
             // (`Result_Response_HttpError` for a concrete-arg TypeApplication),

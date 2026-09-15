@@ -283,16 +283,16 @@ data class TypingContext(
         // (findAnonymousMethodsByName / findAnonymousMethod fallback) match on the
         // info's fields regardless of key. See project_classparam_runtime_dispatch_tuple.
         //
-        // The `targetTypeName` component is REQUIRED alongside the hash: for a
-        // TYPE-APPLICATION target the hash is the CONSTRUCTOR's decl hash (so a
-        // `Result …` receiver can select an `impl Result …` — see ContextBuilder),
-        // which is IDENTICAL across `impl Result PyForeign` and `impl Result JsForeign`.
-        // Keying on the hash alone would collide and drop one impl (two polyglot
-        // providers in one module → a pure-Py chain loses its `as_float` candidate).
-        // `targetTypeName` is the FULLY-MANGLED name (`Result_PyForeign_InteropError`
-        // vs `Result_JsForeign_InteropError`), so hash+name is distinct per full
-        // type application while still cross-module-safe.
-        val keyType = info.targetTypeHash?.let { "${it.hex}:${info.targetTypeName}" } ?: info.targetTypeName
+        // BUG 1: this key used to carry the mangled `targetTypeName` alongside the
+        // hash, because for a TYPE-APPLICATION target the hash was the
+        // CONSTRUCTOR's — identical across `impl Result PyForeign` and
+        // `impl Result JsForeign`, so hash-alone collided and dropped one impl
+        // (two polyglot providers in one module → a pure-Py chain lost its
+        // `as_float` candidate). The target hash is now the APPLIED hash
+        // (`appliedHashOf`: constructor ⊕ argument identities), which is distinct
+        // per full type application on its own — so the name is gone from the key
+        // and dispatch is keyed on structure end to end.
+        val keyType = info.targetTypeHash?.hex ?: info.targetTypeName
         val key = "$keyType::${info.methodName}"
         val existingMethods = anonymousImplMethodsByType[info.targetTypeName] ?: emptyList()
         val newHashIndex = if (info.targetTypeHash != null) {

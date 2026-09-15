@@ -878,7 +878,12 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
                 // receivers (builtins / transparent aliases), exactly as the primary
                 // path does.
                 val innerHash = com.mezze.language.typechecker.util.declaredHashOf(innerType)
-                val byHash = if (innerHash != null) allCandidates.filter { it.targetTypeHash == innerHash } else emptyList()
+                val byHash = if (innerHash != null)
+                    allCandidates.filter { c ->
+                        c.targetTypeHash != null &&
+                            com.mezze.language.typechecker.util.receiverMatchesHash(innerType, c.targetTypeHash)
+                    }
+                else emptyList()
                 val candidates = if (byHash.isNotEmpty()) byHash
                     else allCandidates.filter { it.targetTypeName in innerNames }
                 val method = candidates.singleOrNull() ?: return null
@@ -1018,7 +1023,9 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         val eligible = recvIsPlainNominal(receiverType) && !cand.targetTypeName.contains('_')
         if (!eligible) return true
         if (receiverTypeHash != null && cand.targetTypeHash != null)
-            return receiverTypeHash == cand.targetTypeHash
+            // BUG 1: the candidate may be filed under the APPLIED hash, which the
+            // receiver's bare declaredHashOf never equals — ask for either.
+            return com.mezze.language.typechecker.util.receiverMatchesHash(receiverType, cand.targetTypeHash)
         if (receiverTypeName != null) {
             // Name decides only when the hash pair is unavailable (receiver or
             // candidate is hashless — a builtin/scalar target). If the receiver DID
@@ -1044,7 +1051,11 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         // DIFFERENT declaration (two modules' `Widget`), and rescuing it by name
         // is exactly the silent mis-dispatch the hash veto exists to prevent.
         // No hash-match ⇒ unresolved (null), never a name-based guess.
-        inherentMethods.firstOrNull { it.targetTypeHash == receiverTypeHash }
+        // BUG 1: walk the receiver's hashes most-specific FIRST — the applied hash
+        // (`Result PyForeign IErr`) before the bare constructor hash (`Result`) —
+        // so a per-provider impl wins over a generic `impl Result 'a 'e` without
+        // any name being compared.
+        com.mezze.language.typechecker.util.pickByReceiverHash(receiverType, inherentMethods) { it.targetTypeHash }
     } else if (receiverTypeName != null) {
         // Hashless receiver (builtins / pre-hash): name is the only identity we
         // have, so a name match is the correct fallback here. This arm is guarded by

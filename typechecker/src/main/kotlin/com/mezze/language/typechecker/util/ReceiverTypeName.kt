@@ -28,6 +28,95 @@ fun declaredHashOf(type: MezzeType): Hash? = when (type) {
 }
 
 /**
+ * BUG 1 — the identity of an APPLIED type, distinguishing two impls that share a
+ * constructor but differ in their arguments (`Result PyForeign InteropError` vs
+ * `Result JsForeign InteropError`). [declaredHashOf] returns the CONSTRUCTOR's
+ * hash for both, so anything keyed on it alone collides and one impl silently
+ * overwrites the other; the mangled string `Result_PyForeign_InteropError` was
+ * the only thing keeping them apart, in violation of "key on structure, never on
+ * a name".
+ *
+ * Returns null unless this is a type application with at least one CONCRETE
+ * argument. A generic impl (`impl Result 'a 'e`) has only TypeVar args and keeps
+ * its bare constructor hash — so the applied hash is a strictly MORE-SPECIFIC
+ * key layered over [declaredHashOf], never a replacement for it. Callers try the
+ * applied hash first and fall back; see [receiverDispatchHashes].
+ *
+ * Both sides of dispatch call this — ContextBuilder when filing an impl, the
+ * resolvers when looking one up — so the two mint identical bytes by
+ * construction, rather than by two parallel implementations staying in
+ * agreement.
+ */
+fun appliedHashOf(type: MezzeType): Hash? {
+    if (type !is MezzeType.TypeApplication) return null
+    if (type.args.isEmpty() || type.args.all { it is MezzeType.VarType }) return null
+    val constructorHash = declaredHashOf(type) ?: return null
+    val tokens = type.args.map { argIdentityToken(it) ?: return null }
+    return Hash.computeAppliedHash(constructorHash, tokens)
+}
+
+/**
+ * The identity token for one type ARGUMENT: its declaration hash when it has
+ * one, else its reserved builtin name.
+ *
+ * The name fallback is the same accepted rule as [receiverTypeName] — `Int`,
+ * `Str` and `Seq` are declared nowhere, so their reserved name IS their identity
+ * and there is no hash to prefer. A declared type always contributes its hash,
+ * so two modules' same-named `Widget` yield different applied hashes. Returns
+ * null for anything with neither (a type variable, a structural record), which
+ * makes [appliedHashOf] decline rather than mint a key that could compare equal
+ * to an unrelated type's.
+ */
+private fun argIdentityToken(arg: MezzeType): String? =
+    declaredHashOf(arg)?.hex
+        ?: when (arg) {
+            is MezzeType.VarType -> null
+            is MezzeType.RecordType -> null
+            is MezzeType.SeqType -> argIdentityToken(arg.elementType)?.let { "Seq<$it>" }
+            is MezzeType.ListType -> argIdentityToken(arg.elementType)?.let { "List<$it>" }
+            is MezzeType.SetType -> argIdentityToken(arg.elementType)?.let { "Set<$it>" }
+            is MezzeType.MapType -> {
+                val k = argIdentityToken(arg.keyType)
+                val v = argIdentityToken(arg.valueType)
+                if (k != null && v != null) "Map<$k,$v>" else null
+            }
+            is MezzeType.TypeApplication -> appliedHashOf(arg)?.hex
+            else -> receiverTypeName(arg)
+        }
+
+/**
+ * The hashes dispatch can match a receiver against, in SPECIFICITY order —
+ * most-specific FIRST, exactly parallel to [receiverTypeNames] but structural.
+ * Callers take the first hit.
+ *
+ * For `Result PyForeign InteropError` that is [applied, constructor]: the
+ * per-provider impl wins, and an `impl Result 'a 'e` filed under the bare
+ * constructor hash stays reachable when no specific impl matches.
+ */
+fun receiverDispatchHashes(type: MezzeType): List<Hash> =
+    listOfNotNull(appliedHashOf(type), declaredHashOf(type)).distinct()
+
+/** True when [candidateHash] identifies a declaration this receiver dispatches to. */
+fun receiverMatchesHash(receiver: MezzeType, candidateHash: Hash): Boolean =
+    candidateHash in receiverDispatchHashes(receiver)
+
+/**
+ * The candidate whose target hash identifies [receiver]'s declaration, preferring
+ * a specific `impl Result PyForeign IErr` over a generic `impl Result 'a 'e`.
+ *
+ * Every hash-keyed dispatch site goes through here so the specificity order is
+ * decided once. Returns null when no candidate matches — an unresolved call, not
+ * a licence to fall back to a name (a differently-hashed same-name impl is a
+ * different declaration; that veto is the whole point of hashing).
+ */
+fun <T> pickByReceiverHash(receiver: MezzeType, candidates: List<T>, hashOf: (T) -> Hash?): T? {
+    for (hash in receiverDispatchHashes(receiver)) {
+        candidates.firstOrNull { hashOf(it) == hash }?.let { return it }
+    }
+    return null
+}
+
+/**
  * Nominal type name of a solved receiver — used to pick a deferred
  * inherent-impl / method-impl candidate by its `targetTypeName`.
  * Returns null for unresolved / structural types.

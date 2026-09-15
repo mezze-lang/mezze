@@ -13,6 +13,7 @@ import com.mezze.language.typechecker.constraints.ResolutionKind
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.util.declaredHashOf
 import com.mezze.language.typechecker.util.receiverTypeName
+import com.mezze.language.typechecker.util.receiverDispatchHashes
 import com.mezze.language.typedast.Hash
 
 /**
@@ -116,17 +117,24 @@ object DispatchResolver {
      *  structural). */
     private fun receiverKey(solvedReceiver: MezzeType): ReceiverKey? {
         if (solvedReceiver is MezzeType.VarType) return null
-        val hash = declaredHashOf(solvedReceiver)
+        // BUG 1: a receiver has MORE than one dispatch hash — the applied hash of
+        // `Result PyForeign IErr` and, less specifically, `Result`'s constructor
+        // hash. Carrying only the constructor hash made two per-argument impls
+        // indistinguishable here, which `pickInherent` would have reported as a
+        // DispatchAmbiguityException had the name pre-filter in
+        // ExprMethodConstraints not resolved them first.
+        val hashes = receiverDispatchHashes(solvedReceiver)
         val name = receiverTypeName(solvedReceiver)
         return when {
-            hash != null -> ReceiverKey.ByHash(hash, name)
+            hashes.isNotEmpty() -> ReceiverKey.ByHash(hashes, name)
             name != null -> ReceiverKey.ByName(name)
             else -> null
         }
     }
 
     private sealed interface ReceiverKey {
-        data class ByHash(val hash: Hash, val name: String?) : ReceiverKey
+        /** [hashes] in SPECIFICITY order, most-specific first. */
+        data class ByHash(val hashes: List<Hash>, val name: String?) : ReceiverKey
         data class ByName(val name: String) : ReceiverKey
     }
 
@@ -263,9 +271,14 @@ object DispatchResolver {
         //     (e.g. `Seq`, `Int`) identified by that name — it is NOT a
         //     blanket/any impl.
         val matches: List<ResolutionCandidate> = when (key) {
-            is ReceiverKey.ByHash -> inherent.filter {
-                (it.targetTypeIdentity as? TypeIdentity.Declared)?.hash == key.hash
-            }
+            // BUG 1: take the FIRST hash that matches anything, not the union —
+            // a specific `impl Result PyForeign IErr` and a generic
+            // `impl Result 'a 'e` both match if the constructor hash is consulted
+            // alongside the applied one, and the union would read as ambiguity.
+            is ReceiverKey.ByHash -> key.hashes.firstNotNullOfOrNull { h ->
+                inherent.filter { (it.targetTypeIdentity as? TypeIdentity.Declared)?.hash == h }
+                    .takeIf { it.isNotEmpty() }
+            } ?: emptyList()
             is ReceiverKey.ByName -> {
                 // ALLOWED: ReceiverKey.ByName is produced by receiverKey() ONLY when
                 // declaredHashOf(receiver) == null — a hashless builtin/scalar whose
@@ -348,8 +361,10 @@ object DispatchResolver {
         solvedReceiver: MezzeType,
     ): Hash? {
         if (info.candidateImpls.isNotEmpty()) {
-            val hash = declaredHashOf(solvedReceiver)
-            val picked = hash?.let { h -> info.candidateImpls.firstOrNull { it.targetTypeHash == h } }
+            // BUG 1: applied hash before constructor hash, matching the other
+            // three ladders — all four must agree or the S2.3 invariant fires.
+            val picked = com.mezze.language.typechecker.util
+                .pickByReceiverHash(solvedReceiver, info.candidateImpls) { it.targetTypeHash }
                 ?: run {
                     // Names in SPECIFICITY order: `Result_Response_HttpError`
                     // wins over `Result` when the receiver's args are concrete.

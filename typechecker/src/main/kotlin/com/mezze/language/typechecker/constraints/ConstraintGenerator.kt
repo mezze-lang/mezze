@@ -871,7 +871,16 @@ class ConstraintGenerator(
                 else -> null
             }
         }
-        val targetTypeHash = targetTypeName?.let { registry.typeDeclarations[it]?.contentHash }
+        // BUG 1: for `impl Result PyF IErr`, `targetTypeName` is the bare
+        // CONSTRUCTOR ("Result"), so its decl hash is the same for every
+        // per-argument impl — this lookup returned whichever provider happened to
+        // land in the index last, and was benign only because the two providers'
+        // signatures happen to match. Mint the APPLIED hash from the converted
+        // target, the same key ContextBuilder files the impl under.
+        val targetTypeHash = item.targetTypes.firstOrNull()
+            ?.let { ann -> runCatching { convertTypeAnnotation(ann) }.getOrNull() }
+            ?.let { converted -> com.mezze.language.typechecker.util.appliedHashOf(converted) }
+            ?: targetTypeName?.let { registry.typeDeclarations[it]?.contentHash }
 
         for (op in item.operations) {
             val targetType = if (item.targetTypes.isNotEmpty()) {

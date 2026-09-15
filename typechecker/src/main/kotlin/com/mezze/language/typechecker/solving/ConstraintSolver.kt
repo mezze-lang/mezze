@@ -856,7 +856,11 @@ class ConstraintSolver(
         val receiverHash = ((receiver as? MezzeType.VariantType)?.identity as? TypeIdentity.Declared)?.hash
             ?: ((receiver as? MezzeType.TypeApplication)?.identity as? TypeIdentity.Declared)?.hash
         val typeName = receiverTypeName(receiver)
-        val picked = (receiverHash?.let { h -> constraint.candidates.firstOrNull { it.targetTypeHash == h } })
+        // BUG 1: most-specific hash first (applied before constructor), so an
+        // `impl Result PyForeign IErr` outranks a generic `impl Result 'a 'e`
+        // structurally instead of via the mangled-name ladder below.
+        val picked = com.mezze.language.typechecker.util
+            .pickByReceiverHash(receiver, constraint.candidates) { it.targetTypeHash }
             ?: run {
                 // Specificity ladder: mangled name first (`Result_A_B` for a
                 // concrete-arg TypeApplication), constructor-only fallback second
