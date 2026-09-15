@@ -1,0 +1,32 @@
+int	42
+int-negative	-7
+float	3.5
+str	"hi"
+str-empty	""
+str-with-escape	"a\nb"
+bool-true	True
+bool-false	False
+seq-empty	[]
+seq-ints	[1, 2, 3]
+seq-strs	["a", "b"]
+seq-nested	[[1], [2, 3]]
+list	List(1, 2)
+set	Set{1, 2}
+deque	Deque[1, 2]
+option-some	Some { val = 1 }
+option-none	None
+result-ok	Ok { val = 1 }
+result-err	Err { error = "bad" }
+record	{ x = 1, y = "a" }
+record-nested	{ inner = { x = 1 }, n = 2 }
+record-of-seq	{ xs = [1, 2] }
+seq-of-record	[{ x = 1 }, { x = 2 }]
+option-of-record	Some { val = { x = 1 } }
+seq-of-option	[Some { val = 1 }, None]
+variant-with-payload	A { n = 1 }
+variant-no-payload	Red
+variant-in-seq	[Red, Green]
+newtype	Money.(5)
+record-of-newtype	{ id = Id.(7) }
+record-with-function-field	{ name = "d", run = <function:lambda> }
+recursive-variant	Node { l = Leaf { n = 1 }, r = Leaf { n = 2 } }

@@ -658,7 +658,21 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
 - **C.3** Compiler EMITS evidence (`refToDictedOp` = materialize); no
   re-resolution at call sites. **C.4** Mono keyed on (generic hash, evidence at
   site). **C.5** Delete prescan, `refToDictedOp` guessing, `@var` names.
-- **D.1** Derived Inspect generated. **D.2** Structural fast path from a PROVEN
+- **D.1** PRECURSOR LANDED; the change itself is sized and not started.
+  Inspect has no generated impl: it is an implicit "everything derives it" in the
+  typechecker plus a deep-printer in the runtime, and the two agree only because
+  the printer never refuses — a record holding a function renders
+  `{ name = "d", run = <function:lambda> }`, which no field-by-field derivation
+  produces. **617 assertion sites across 110 test files depend on the exact
+  strings**, so replacing the printer without knowing what it emits is a 617-site
+  guess. `InspectRenderingGoldenTest` + `inspect-rendering-golden.txt` record the
+  rendering of 33 shapes, which turns D.1 into "reproduce this file" — mechanical
+  and verifiable — and catches any accidental change to user-visible output as
+  one readable diff instead of scattered failures. Facts worth knowing from it:
+  the three container kinds print with three different bracket styles
+  (`List(1, 2)`, `Set{1, 2}`, `Deque[1, 2]`), a newtype prints through its
+  constructor (`Money.(5)`), and `<function:lambda>` is the case with no
+  derivable equivalent. **D.2** Structural fast path from a PROVEN
   property of the evidence tree + perf gate. **D.3** Test typed hand-written
   bodies (`impl Eq for N { it.q == r.q }`).
 - **F** PARTLY LANDED.
