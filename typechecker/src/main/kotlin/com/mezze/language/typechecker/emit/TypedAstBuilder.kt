@@ -413,7 +413,10 @@ class TypedAstBuilder(
         }
 
         val isPublic = decl.visibility == ParsedVisibility.PUBLIC
-        decls.add(TypedTypeDecl(hash, decl.name, emptyList(), def, isPublic, loc))
+        // The declaration's type parameters, positional (`Box 'a` → ['a]): what lets
+        // a consumer open the nominal `Box 'a` into its shape `{v: 'a}` and bind
+        // `'a` against an expanded value. Was always empty.
+        decls.add(TypedTypeDecl(hash, decl.name, decl.typeParams.map { TypeParam(it, TypeKind.Star) }, def, isPublic, loc))
         if (isPublic) {
             exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar.freshWithName(decl.name)), ExportKind.TYPE)
         }
@@ -549,19 +552,30 @@ class TypedAstBuilder(
                     )
                 else -> MezzeType.VarType(TypeVar.freshWithName("op_${op.name}"))
             }
-            // Only COMPILER-DERIVED impls are seeded for now. Seeding hand-written
-            // impl bodies too is right in principle (their `it.q == r.q` on a
-            // newtype field falls to structural equality today) but measured
-            // wrong in practice: the compiler's dispatch was tuned on untyped impl
-            // bodies — a typed receiver makes `val.decode { config }` inside
-            // `impl FromJson for Str` resolve by receiver (every generated decoder
-            // has receiver `Json`) instead of through the enclosing `__dict_decode`,
-            // and typed `it: ['a]` shifts the container Eq/Ord impls' dict needs
-            // (18 stdlib ops lose their `eq`/`lt` dicts). That is the compiler
-            // re-deriving dispatch from reconstructed types; it is fixed by
-            // elaborating evidence once, not by widening this seed.
-            val seedThisOp = seedOpParams && decl.derived && !isInherent && op.implementation is ParsedLambda &&
-                declaredOpType != null
+            // Every ability-impl op body is typed: a hand-written `it.q == r.q` on a
+            // newtype field, or `a < b` on pattern-bound payloads in a user's
+            // `impl Ord for Tree`, must dispatch the component's instance, never
+            // fall to a structural compare. Two dispatch rules had to learn about
+            // typed receivers for this: a return-driven codec method goes through
+            // the enclosing dict even on a typed receiver (compileCall), and a
+            // param typed by a SHAPE with variables (`['a]`) is not "concrete"
+            // (scan). Codec bodies themselves stay untyped.
+            // An op whose own signature carries a return-driven codec constraint
+            // (`from_json … with Decode JsonC 'a`) dispatches `val.decode { config }`
+            // by the TARGET type through that dict; a typed `val: Json` receiver would
+            // make the compiler pick a decoder by receiver instead. Such ops keep the
+            // untyped body until dispatch reads evidence (elaboration plan, C).
+            val opCarriesCodecConstraint = op.abilityConstraints.any { c ->
+                val h = registry.lookupAbility(c.abilityName)?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+                    ?: importContext?.importedAbilities?.get(c.abilityName)?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+                WellKnownHashConstants.isCodecAbility(h)
+            }
+            val seedThisOp = seedOpParams && !isInherent && op.implementation is ParsedLambda &&
+                declaredOpType != null &&
+                // Codec-flavored abilities (Encode/Decode/Format…) dispatch through
+                // `config` and were shaped for untyped bodies — leave them as they are.
+                !WellKnownHashConstants.isCodecAbility(abilityHash) &&
+                !opCarriesCodecConstraint
             if (seedThisOp) {
                 pendingOpParamTypes = (declaredOpType.paramType as? MezzeType.RecordType)?.fields
             }

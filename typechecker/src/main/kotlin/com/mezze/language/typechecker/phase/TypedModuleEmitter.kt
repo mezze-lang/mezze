@@ -261,11 +261,31 @@ private fun compileModule(
             }
         }
     }
+    // Declared GENERIC shapes by name — `Box 'a` → (['a], {v: 'a}) — so mono can
+    // open an impl target like `Box 'a` against a receiver that arrived expanded
+    // (`RecordType{v: P}`) and bind `'a = P` through the instance head.
+    val declShapesForMono = HashMap<String, Pair<List<String>, com.mezze.language.ast.MezzeType>>()
+    for (m in (listOf(typedModule) + importedModules + stdlibModulesForMono)) {
+        for (d in m.decls) {
+            if (d is com.mezze.language.typedast.TypedTypeDecl) {
+                val params = d.typeParams.map { it.name }
+                val identity = com.mezze.language.ast.TypeIdentity.declared(d.name, d.hash)
+                when (val def = d.definition) {
+                    is com.mezze.language.typedast.TypedRecordDef ->
+                        declShapesForMono.putIfAbsent(d.name, params to com.mezze.language.ast.MezzeType.RecordType(def.fields, identity = identity))
+                    is com.mezze.language.typedast.TypedVariantDef ->
+                        declShapesForMono.putIfAbsent(d.name, params to com.mezze.language.ast.MezzeType.VariantType(def.constructors, identity = identity))
+                    is com.mezze.language.typedast.TypedNewtypeDef, is com.mezze.language.typedast.TypedAliasDef -> Unit
+                }
+            }
+        }
+    }
     val monoResult = MonoDriver.run(
         entry = wrapped,
         imported = importedModules,
         resolutionOnly = stdlibModulesForMono,
         recordShapes = recordShapesForMono,
+        declShapes = declShapesForMono,
     )
 
     val stdlibFns = (try { PrecompiledStdlib.preloweredFunctions } catch (_: Throwable) { emptyMap<Hash, FunctionIR>() }) +
@@ -288,9 +308,11 @@ private fun compileModule(
     // (newtypes/records/variants/aliases). Collected from the un-wrapped
     // modules (wrapTopLevel strips TypedTypeDecls from `wrapped`).
     val printTypeDefs = HashMap<String, com.mezze.language.ast.MezzeType>()
+    val typeDeclParams = HashMap<String, List<String>>()
     for (m in (listOf(typedModule) + importedModules + stdlibModulesForMono)) {
         for (d in m.decls) {
             if (d is com.mezze.language.typedast.TypedTypeDecl) {
+                typeDeclParams.putIfAbsent(d.name, d.typeParams.map { it.name })
                 val resolved: com.mezze.language.ast.MezzeType? = when (val def = d.definition) {
                     is com.mezze.language.typedast.TypedNewtypeDef ->
                         com.mezze.language.ast.MezzeType.NewtypeType(
@@ -317,7 +339,7 @@ private fun compileModule(
             }
         }
     }
-    compiler.setPrintTypeDefs(printTypeDefs)
+    compiler.setPrintTypeDefs(printTypeDefs, typeDeclParams)
 
     val result = compiler.compile(
         module = wrapped,

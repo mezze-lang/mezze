@@ -60,6 +60,21 @@ import com.mezze.language.typedast.TypedVariantConstruct
  * transitively through the Monomorphizer's worklist.
  */
 object MonoDriver {
+    /**
+     * Declared generic record / variant shapes of the run: name → (type-param
+     * names, generic shape over those params). An impl target `Box 'a` is opened
+     * through this before unifying against a receiver that arrived EXPANDED
+     * (`RecordType{v: P}` — the two-representations landmine), so `'a = P` binds.
+     */
+    private val currentDeclShapes = ThreadLocal<Map<String, Pair<List<String>, MezzeType>>>()
+
+    private fun openDeclaredTarget(target: MezzeType): MezzeType {
+        if (target !is MezzeType.TypeApplication) return target
+        val (params, shape) = currentDeclShapes.get()?.get(target.constructor) ?: return target
+        if (params.size != target.args.size) return target
+        val subst = params.zip(target.args).toMap()
+        return com.mezze.language.typechecker.solving.substituteTypeParamsByName(shape, subst)
+    }
 
     /**
      * @param entry the post-`wrapTopLevel` user module being compiled.
@@ -101,12 +116,17 @@ object MonoDriver {
          *  modules. Used to structurally recover the nominal identity of an
          *  identity-less record receiver at ability-impl resolution. */
         recordShapes: Map<Hash, Map<String, MezzeType>> = emptyMap(),
+        /** Declared generic record / variant shapes by name: name → (type-param
+         *  names, shape over those params). See [openDeclaredTarget]. */
+        declShapes: Map<String, Pair<List<String>, MezzeType>> = emptyMap(),
     ): Result {
         // Index ordinary let decls.
         val declIndex = HashMap<Hash, TypedLetDecl>()
         // Merge any record shapes still present on the passed modules (defensive; the
         // caller's map is the authoritative source since `entry` is wrapped).
         val recordShapeByHash = HashMap<Hash, Map<String, MezzeType>>(recordShapes)
+        val declShapes = HashMap<String, Pair<List<String>, MezzeType>>(declShapes)
+        currentDeclShapes.set(declShapes)
         for (m in (listOf(entry) + imported + resolutionOnly)) {
             for (d in m.decls) {
                 if (d is TypedLetDecl) declIndex[d.hash] = d
@@ -114,6 +134,12 @@ object MonoDriver {
                     val def = d.definition
                     if (def is com.mezze.language.typedast.TypedRecordDef) {
                         recordShapeByHash.putIfAbsent(d.hash, def.fields)
+                        declShapes.putIfAbsent(d.name, d.typeParams.map { it.name } to
+                            MezzeType.RecordType(def.fields, identity = com.mezze.language.ast.TypeIdentity.declared(d.name, d.hash)))
+                    }
+                    if (def is com.mezze.language.typedast.TypedVariantDef) {
+                        declShapes.putIfAbsent(d.name, d.typeParams.map { it.name } to
+                            MezzeType.VariantType(def.constructors, identity = com.mezze.language.ast.TypeIdentity.declared(d.name, d.hash)))
                     }
                 }
             }
@@ -689,57 +715,6 @@ object MonoDriver {
         }
     }
 
-    /** Collect every VarType name reachable from [type], in first-encounter
-     *  order. Deterministic ordering matters because these names become
-     *  the synthetic ability-op decl's typeParams, and typeParam order
-     *  drives the specialization hash. */
-    /**
-     * The synthetic ability-op decl's typeParams, PLUS the impl's element-level
-     * forallVars (`'a`) that the laundered op surface type omits. Returns the full
-     * typeParam list (base field-named vars, then appended forallVars) and the
-     * concrete args for those appended forallVars, recovered by unifying the impl's
-     * TARGET type against the concrete receiver. Base and request derivation share
-     * this so their typeParam arity stays aligned. When `receiverType` is null
-     * (decl-build time — no call site), the appended forallVars carry a fresh var
-     * placeholder and an empty extra-args list. See project_impl_op_with_constraint_dropped.
-     */
-    /** The element type-var NAME of a built-in container type whose element is a bare
-     *  VarType (`[ 'a ]` → "a"), else null. Excludes `Option 'a` / records / nominal
-     *  TypeApplications — only Seq/List/Set/SortedSet/Map/SortedMap containers. */
-    private fun elementVarName(type: MezzeType): String? {
-        val elem = when (type) {
-            is MezzeType.SeqType -> type.elementType
-            is MezzeType.ListType -> type.elementType
-            is MezzeType.SetType -> type.elementType
-            is MezzeType.SortedSetType -> type.elementType
-            is MezzeType.MapType -> type.valueType
-            is MezzeType.SortedMapType -> type.valueType
-            // The same built-in containers in their OTHER representation. An impl
-            // target like `List 'a` reaches here as `TypeApplication("List", ['a])`,
-            // not `ListType` (two representations; MonoTypeOps.unify bridges them
-            // the same way at its SEQ/LIST/SET/MAP arms). Without this arm the
-            // element var of a List/Set/Map impl was never recovered, the spec never
-            // bound `'a`, and its comparator closure stayed GENERIC — so
-            // `List P == List P` fell back to structural equality. Still excludes
-            // `Option 'a`, records and nominal user types, exactly as before.
-            is MezzeType.TypeApplication -> when {
-                type.args.size == 1 && (
-                    type.constructor == com.mezze.language.ast.BuiltinTypes.SEQ ||
-                    type.constructor == com.mezze.language.ast.BuiltinTypes.LIST ||
-                    type.constructor == com.mezze.language.ast.BuiltinTypes.SET ||
-                    type.constructor == com.mezze.language.ast.BuiltinTypes.SORTED_SET
-                ) -> type.args[0]
-                type.args.size == 2 && (
-                    type.constructor == com.mezze.language.ast.BuiltinTypes.MAP ||
-                    type.constructor == com.mezze.language.ast.BuiltinTypes.SORTED_MAP
-                ) -> type.args[1]
-                else -> null
-            }
-            else -> null
-        }
-        return (elem as? MezzeType.VarType)?.variable?.name
-    }
-
     private fun opDeclTypeParamsWithForall(
         opType: MezzeType,
         impl: TypedAbilityImpl,
@@ -758,16 +733,20 @@ object MonoDriver {
         // typeParams untouched — appending a forallVar there changes the spec arity and
         // corrupts an already-working derived op. Only recover forallVars that (a) are
         // missing from the base AND (b) actually appear as the container's element var.
-        val containerElementVarNames = impl.targetTypes
-            .mapNotNull { elementVarName(it) }
-            .toHashSet()
-        val missing = impl.forallVars.filter { it.name !in baseNames && it.name in containerElementVarNames }
+        // Any forall var the laundered op surface dropped but the impl TARGET still
+        // names (`['a]`, `List 'a`, `Option 'a`, `Box 'a`, `Result 'a 'e`) is
+        // recovered from the receiver through the instance head. (Formerly only
+        // the six builtin containers.)
+        val targetVarNames = impl.targetTypes.flatMap { collectVarTypeNames(it) }.toHashSet()
+        val missing = impl.forallVars.filter { it.name !in baseNames && it.name in targetVarNames }
         if (missing.isEmpty()) return base to emptyList()
         // Recover each missing forallVar's concrete type by unifying the impl target
         // against the receiver (e.g. `['a]` vs `[P]` → `'a = P`).
         val bindings = HashMap<String, MezzeType>()
         if (receiverType != null) {
-            for (target in impl.targetTypes) unify(target, receiverType, bindings)
+            for (target in impl.targetTypes) {
+                if (!unify(target, receiverType, bindings)) unify(openDeclaredTarget(target), receiverType, bindings)
+            }
         }
         val extraArgs = missing.map { tp ->
             bindings[tp.name] ?: MezzeType.VarType(TypeVar.freshWithName(tp.name))
@@ -966,6 +945,13 @@ object MonoDriver {
             val abilityImplsForHash = abilityImpls.filter {
                 it.abilityHash == abilityHash && it.targetTypes.size == concreteArgs.size
             }
+            // An UNBOUND constraint variable must not pick an impl: a VarType matches
+            // every target, so `firstOrNull` handed back whatever impl came first —
+            // for `impl Eq for Box 'a` that was Box's own eq, then applied to its
+            // payload. Leave the call for the compiler, which binds the variable
+            // through the instance head at spec-compile time. Only an ability with
+            // a single instance is not a guess.
+            if (concreteArgs.any { it is MezzeType.VarType } && abilityImplsForHash.size != 1) continue
             val match = abilityImplsForHash.firstOrNull { impl ->
                 impl.targetTypes.zip(concreteArgs).all { (target, concrete) ->
                     typeMatchesTarget(concrete, target)

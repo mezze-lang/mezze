@@ -756,7 +756,10 @@ class TypedASTCompiler(
                         // need the field's exact type — concrete base ⇒ concrete
                         // receiver for dispatch purposes.
                         val baseAnn = paramEnv[base.name]?.let { substitution.apply(it) } ?: return@run false
-                        baseAnn !is VarType
+                        // "Concrete" means no type variable anywhere in it: `['a]` or
+                        // `Box 'a` is a shape, not a concrete type, and a field read off
+                        // it can still be the element `'a` that needs the dict.
+                        baseAnn !is VarType && !containsVarType(baseAnn)
                     }
                     if (receiverType is VarType && !recoveredConcrete &&
                         shouldDictDispatchVarTypeOp(methodName, arrowIsConstrained)) {
@@ -1786,7 +1789,15 @@ class TypedASTCompiler(
             // the type variable wasn't fully substituted but only one impl exists),
             // and if that fails, try arg-based resolution (concrete types in the arg
             // record can pin the ability's type parameter — see #346).
-            val opHashConcrete = tryResolveAbilityOp(methodName, receiverType, expr.arg)
+            // A return-driven codec ability (`Decode 'config 'a for 'in`): its impl is
+            // chosen by the TARGET type, which the receiver cannot tell (every
+            // generated decoder has receiver `Json`). When the enclosing function
+            // holds this method's dict, that dict IS the choice — go through it even
+            // though the receiver is typed.
+            val viaEnclosingDecodeDict = receiverType !is VarType &&
+                enclosingDictSlot(methodName, null) != null &&
+                abilityOpIndex[methodName]?.any { decodeImplByOpHash.containsKey(it.opHash) } == true
+            val opHashConcrete = if (viaEnclosingDecodeDict) null else tryResolveAbilityOp(methodName, receiverType, expr.arg)
             val opHash = opHashConcrete
                 ?: if (receiverType is VarType) {
                     val candidates = abilityOpIndex[methodName]
@@ -1976,7 +1987,7 @@ class TypedASTCompiler(
             val inlineableNeedsDict = opIsInlineable &&
                 abilityOpIndex[methodName]?.isNotEmpty() == true &&
                 enclosingDictSlot(methodName, (receiverType as? VarType)?.variable?.name) != null
-            if (receiverType is VarType && (!opIsInlineable || inlineableNeedsDict)) {
+            if ((receiverType is VarType || viaEnclosingDecodeDict) && (!opIsInlineable || inlineableNeedsDict)) {
                 val opCandidates = abilityOpIndex[methodName]
                 // Bug B (#86): also enter this branch when there are no impl
                 // candidates yet (blanket-impl body precompiled with the
@@ -1987,7 +1998,7 @@ class TypedASTCompiler(
                 // "Field not found: <method>".
                 // The slot for THIS receiver's type variable when the function holds
                 // one per variable, else the plain slot.
-                val dictParamName = enclosingDictSlot(methodName, receiverType.variable.name)
+                val dictParamName = enclosingDictSlot(methodName, (receiverType as? VarType)?.variable?.name)
                     ?: com.mezze.language.ast.MagicParams.dictParamName(methodName)
                 val hasDictParam =
                     currentParamNames.indexOf(dictParamName) >= 0 ||
@@ -2456,6 +2467,13 @@ class TypedASTCompiler(
      *  to gate mono SEEDING; here we only want whatever concrete bindings the
      *  call site does pin down). Handles both container representations
      *  (SeqType/... and TypeApplication("Seq", ...)). First binding wins. */
+    private fun MezzeType.declaredName(): String? = when (this) {
+        is RecordType -> identity.displayNameOrNull()
+        is VariantType -> identity.displayNameOrNull()
+        is TypeApplication -> identity.displayNameOrNull() ?: constructor
+        else -> null
+    }
+
     private fun harvestVarBindings(pattern: MezzeType, value: MezzeType, out: MutableMap<String, MezzeType>) {
         when (pattern) {
             is VarType -> {
@@ -2485,7 +2503,31 @@ class TypedASTCompiler(
                     harvestVarBindings(pattern.args[0], value.elementType, out)
                 pattern.constructor == com.mezze.language.ast.BuiltinTypes.LIST && pattern.args.size == 1 && value is ListType ->
                     harvestVarBindings(pattern.args[0], value.elementType, out)
+                // A declared generic record / variant arrives EXPANDED (`Box P` as
+                // `RecordType{v: P}`, the two-representations landmine) while the impl
+                // target is the nominal `Box 'a`. Open the declaration's generic shape
+                // (`{v: 'p}` over its own params), unify that against the expanded
+                // value to learn each DECL param, then map decl params to the
+                // pattern's args positionally — so `'a = P`.
+                (value is RecordType || value is VariantType) && value.declaredName() == pattern.constructor -> {
+                    val shape = printTypeDefs[pattern.constructor]
+                    val params = typeDeclParams[pattern.constructor]
+                    if (shape != null && params != null && params.size == pattern.args.size) {
+                        val declBindings = HashMap<String, MezzeType>()
+                        harvestVarBindings(shape, value, declBindings)
+                        for ((param, arg) in params.zip(pattern.args)) {
+                            val bound = declBindings[param] ?: declBindings[param.removePrefix("'")] ?: declBindings["'" + param.removePrefix("'")]
+                            if (bound != null) harvestVarBindings(arg, bound, out)
+                        }
+                    }
+                }
                 else -> {}
+            }
+            is VariantType -> if (value is VariantType) {
+                for ((ctor, payload) in pattern.constructors) {
+                    val vp = value.constructors[ctor]
+                    if (payload != null && vp != null) harvestVarBindings(payload, vp, out)
+                }
             }
             else -> {}
         }
@@ -4435,7 +4477,12 @@ class TypedASTCompiler(
      *  PrintType builder resolve a nominal `TypeApplication(name)` receiver
      *  (all a use site carries) to a printable shape. */
     private var printTypeDefs: Map<String, MezzeType> = emptyMap()
-    fun setPrintTypeDefs(defs: Map<String, MezzeType>) { printTypeDefs = defs }
+    /** Declared type name → its type-parameter names, positional (`Box 'a` → [`'a`]). */
+    private var typeDeclParams: Map<String, List<String>> = emptyMap()
+    fun setPrintTypeDefs(defs: Map<String, MezzeType>, params: Map<String, List<String>> = emptyMap()) {
+        printTypeDefs = defs
+        typeDeclParams = params
+    }
 
     /**
      * True when the variant declared as [name] has exactly [constructors].
