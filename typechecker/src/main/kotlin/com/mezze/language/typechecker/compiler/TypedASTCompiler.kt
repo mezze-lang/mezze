@@ -312,10 +312,15 @@ class TypedASTCompiler(
         // dispatch. Collect the constraint typevars from the op's own FunctionType
         // and thread them so `receiver.method` on any of those typevars is marked
         // regardless of impl-index size.
+        // Impl operation bodies, paired with their hashes, so phase 2 below can
+        // propagate through them as well. Keeping the list is the whole point: an
+        // impl op that needs no dict of its own may still CALL something that does.
+        val implOpBodies = mutableListOf<Pair<Hash, TypedExpr>>()
         for (impl in abilityImpls) {
             for ((opName, opBody) in impl.operations) {
                 val opHash = computeOpHash(impl.hash, opName)
                 val bodyExpr = if (opBody is TypedLambda) opBody.body else opBody
+                implOpBodies.add(opHash to bodyExpr)
                 val constrained = arrowHasAbilityConstraint(opBody.type)
                 val methods = scanExprForVarTypeMethodCalls(bodyExpr, constrained)
                 if (methods.isNotEmpty()) {
@@ -339,20 +344,31 @@ class TypedASTCompiler(
         while (changed && passes < maxPasses) {
             changed = false
             passes++
-            for (decl in allDecls) {
-                val value = decl.value
-                if (value is TypedLambda) {
-                    val calleeDictMethods = scanExprForCallsToDictFunctions(value.body)
-                    if (calleeDictMethods.isNotEmpty()) {
-                        val existing = dictMethodsForHash[decl.hash] ?: emptySet()
-                        val merged = existing + calleeDictMethods
-                        if (merged.size > existing.size) {
-                            dictMethodsForHash[decl.hash] = merged
-                            changed = true
-                        }
-                    }
+            fun propagate(hash: Hash, body: TypedExpr) {
+                val calleeDictMethods = scanExprForCallsToDictFunctions(body)
+                if (calleeDictMethods.isEmpty()) return
+                val existing = dictMethodsForHash[hash] ?: emptySet()
+                val merged = existing + calleeDictMethods
+                if (merged.size > existing.size) {
+                    dictMethodsForHash[hash] = merged
+                    changed = true
                 }
             }
+            for (decl in allDecls) {
+                val value = decl.value
+                if (value is TypedLambda) propagate(decl.hash, value.body)
+            }
+            // IMPL OPERATIONS propagate too. Phase 1b only asked whether an op's
+            // body uses an ability op DIRECTLY; it never asked whether the body
+            // CALLS something that needs a dict. An inherent op is exactly that
+            // shape — `impl Seq 'a { min = { it } -> min { xs = it } }` forwards to
+            // the constrained `seq::min` and does nothing else — so it was never
+            // told it must forward `__dict_lt`. The caller of `xs.min {}` then
+            // passed no dict, `seq::min` found none to use, and `x < acc` inside it
+            // fell through to the primitive comparison node: a crash on a record or
+            // variant element, and a SILENTLY WRONG answer for a newtype whose
+            // ordering differs from the type it wraps.
+            for ((opHash, body) in implOpBodies) propagate(opHash, body)
         }
         if (changed && System.getenv("MEZZE_DEBUG") != null) {
             System.err.println(

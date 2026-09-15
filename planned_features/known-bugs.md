@@ -470,6 +470,98 @@ is an inference bug (`feedback_no_required_type_annotations`).
 
 ---
 
+## BUG 7 — a hand-written `impl Ord` is ignored by generic consumers reached through an inherent method
+
+**The most serious defect found in this effort, because it is SILENTLY WRONG and
+not only a crash.** Found 2026-09-15 while re-checking GAP #30, which turns out
+to have been mis-filed ("fails to type" — it type-checks and then misbehaves at
+runtime), and to be far narrower than the real problem.
+
+### Symptom
+
+```mezze
+type P = { k: Int, tag: Int }
+impl Ord for P where { lt = { it, r } -> it.k < r.k, le = …, gt = …, ge = … }
+
+let xs: [P] = [{ k = 3, tag = 30 }, { k = 1, tag = 10 }]
+xs.min {}                  # RuntimeException: Cannot compare MezzeRecord < MezzeRecord
+xs.sort {}                 # Cannot compare MezzeRecord <= MezzeRecord
+sorted_set::from_seq { xs = xs }.min {}   # same
+```
+
+For a newtype it does not crash — it returns the WRONG ANSWER:
+
+```mezze
+newtype N = Int
+impl Ord for N where { lt = { it, r } -> match … -> a > b, … }   # deliberately REVERSED
+sorted_set::from_seq { xs = [N.(3), N.(1), N.(2)] }.min {}       # gives 1; must give 3
+```
+
+A newtype wraps an Int at runtime, so the primitive fallback agrees with a normal
+ordering and the bug is invisible — until someone writes an ordering that is not
+the wrapped type's.
+
+### What is and is not affected (measured; `SortedContainerReadBackTest`)
+
+| case | result |
+|---|---|
+| the impl called directly (`a < b` on two records) | PASS |
+| primitive element (`[Int]`) | PASS |
+| newtype element, ordinary Ord | PASS — **by accident** |
+| newtype element, REVERSED Ord | **WRONG ANSWER** |
+| record element | CRASH |
+| variant element | CRASH |
+| a USER ability with a hand-written impl through a generic consumer | PASS |
+| the Ord METHOD (`a.lt { r = b }`) through a generic consumer | PASS |
+| `seq::min { xs = … }` as a FUNCTION | PASS |
+| `xs.min {}` as a METHOD | **FAIL** |
+
+So the dict resolves correctly everywhere except across the INHERENT-METHOD
+boundary, and it is the OPERATOR that breaks while the method call does not.
+
+### Root cause, as far as it is pinned
+
+`impl Seq 'a where { min = { it } -> min { xs = it } }` is an INHERENT impl whose
+op carries no `with Ord 'a` of its own. So `xs.min {}` passes no dict; inside the
+op, the call to the constrained `seq::min` has nothing to forward; and `x < acc`
+inside `seq::min` falls through to the primitive comparison node — correct for
+Int, a crash for a record or variant, and silently wrong for a newtype.
+
+Two contributing gaps found:
+
+1. **`prescanForDictMethods` phase 2 did not propagate through impl-op bodies.**
+   Phase 1b asks whether an op's body uses an ability op DIRECTLY; nothing asked
+   whether it CALLS something that needs a dict, which is exactly the inherent
+   forwarding shape. FIXED (impl operation bodies now take part in the transitive
+   propagation) — necessary but NOT sufficient: the cases above still fail.
+2. **The remaining hop is monomorphization.** With the propagation fixed, no dict
+   is missing at any `emitCallDirect` boundary, and 133 Ord dict entries are
+   seeded for user compilation — yet the call still reaches the primitive node.
+   The call site is rewritten to a mono-specialized hash
+   (`monoCallSiteRewrites`), and the specialized body is where the operator is
+   being lowered without the instance. That is the next thing to look at, and it
+   is C.4's territory ("mono keyed on the evidence at each site").
+
+`ImplValidator.validateAbilityImplementation` returns immediately for inherent
+impls (`if (impl.isInherent) return`), so the "asymmetry fix" that infers
+`with Ord 'a` preconditions from an ability impl's op body never runs for them.
+Whether inherent ops should get inferred preconditions is the design question
+behind a proper fix.
+
+### Why the existing gates missed it
+
+`ElementInstanceMatrixTest` has exactly the two blind spots that hide this: its
+element type is a NEWTYPE (where the primitive fallback agrees), and it exercises
+`min_by`/`max_by` (an explicit key function) rather than the operator-based
+`min`/`max`/`sort`. Both should be widened as part of the fix.
+
+### Acceptance
+
+`SortedContainerReadBackTest` — 17 cases, 10 currently `@Disabled` pointing here.
+The 7 that pass are what narrow the cause; re-enable the 10 with the fix.
+
+---
+
 ## BUG 6 — Types are RECONSTRUCTED, not carried; instances decided by shape, name, or Java
 
 **This is the class BUG 1 and the `.size {}` crash are instances of.** Landed
