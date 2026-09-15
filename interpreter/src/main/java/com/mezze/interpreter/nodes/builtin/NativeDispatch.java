@@ -1106,7 +1106,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_list_dedup", (r, c) ->
             ListNatives.dedup(getList(r, "xs"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_list_dedup_by", (r, c) ->
-            ListNatives.dedupBy(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.dedupBy(getList(r, "xs"), getFunction(r, "f"), getFunction(r, "eq"), c));
 
         // Singleton/Nth/Fill
         HANDLERS.put("__native_list_singleton", (r, c) ->
@@ -1122,7 +1122,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_list_group_consecutive", (r, c) ->
             ListNatives.groupConsecutive(getList(r, "xs"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_list_group_consecutive_by", (r, c) ->
-            ListNatives.groupConsecutiveBy(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.groupConsecutiveBy(getList(r, "xs"), getFunction(r, "f"), getFunction(r, "eq"), c));
 
         // FlatMap/TakeWhile/DropWhile
         HANDLERS.put("__native_list_flat_map", (r, c) ->
@@ -1780,9 +1780,9 @@ public final class NativeDispatch extends MezzeNode {
 
         // Task #9: Basic operations
         HANDLERS.put("__native_deque_min_by", (r, c) ->
-            DequeNatives.minBy(getDeque(r, "d"), getFunction(r, "f"), c));
+            DequeNatives.minBy(getDeque(r, "d"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_deque_max_by", (r, c) ->
-            DequeNatives.maxBy(getDeque(r, "d"), getFunction(r, "f"), c));
+            DequeNatives.maxBy(getDeque(r, "d"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_deque_get", (r, c) ->
             DequeNatives.get(getDeque(r, "d"), getLong(r, "i")));
         HANDLERS.put("__native_deque_slice", (r, c) ->

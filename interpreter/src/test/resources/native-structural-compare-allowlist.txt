@@ -7,15 +7,11 @@ DequeNatives.java:dedup
 DequeNatives.java:dedupBy
 DequeNatives.java:deepEquals
 DequeNatives.java:indexOf
-DequeNatives.java:maxBy
-DequeNatives.java:minBy
 ListNatives.java:binarySearch
 ListNatives.java:binarySearchInsertPoint
 ListNatives.java:compare
 ListNatives.java:compareElements
-ListNatives.java:dedupBy
 ListNatives.java:deepEquals
-ListNatives.java:groupConsecutiveBy
 ListNatives.java:maxBy
 ListNatives.java:minBy
 ListNatives.java:sortByKey

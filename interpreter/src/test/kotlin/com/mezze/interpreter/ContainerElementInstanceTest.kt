@@ -50,10 +50,24 @@ class ContainerElementInstanceTest {
     @Test fun listDedup() = assertEquals(2L, runL("let main = {} -> list::size { xs = list::dedup { xs = xs } }\nmain {}"))
     @Test fun listGroupConsecutive() = assertEquals(2L, runL("let main = {} -> list::size { xs = list::group_consecutive { xs = xs } }\nmain {}"))
 
-    // The key-function variants (`dedup_by`, `group_consecutive_by`) still compare
-    // keys structurally: threading the key's `eq` binds the CONTAINER's Eq instead,
-    // because the key type var occurs only in `f`'s return type. See task #29 —
-    // they are converted once call-site dict resolution looks there.
+    // Key-function variants compare the KEYS by the key type's Eq.
+    @Test fun listDedupBy() = assertEquals(2L, runL("let main = {} -> list::size { xs = list::dedup_by { xs = xs, f = { x } -> x } }\nmain {}"))
+    @Test fun listGroupConsecutiveBy() = assertEquals(2L, runL("let main = {} -> list::size { xs = list::group_consecutive_by { xs = xs, f = { x } -> x } }\nmain {}"))
+
+    // ---- Deque, Ord-driven on a KEY type ------------------------------------
+    // The key is a P whose Ord compares only x, so the minimum by key is the
+    // element with the smallest x — a structural key compare returns 0 for
+    // records and would just yield the first element.
+    // Element is a record carrying a P key; `f = { val } -> val.k` is the
+    // field-access shape the call-site key recovery understands.
+    private fun runD(body: String) = run("use std::collections::deque\ntype E = { k: P, tag: Int }\nlet mk: { x: Int, t: Int } -> E = { x, t } -> { k = p { x = x, y = 0 }, tag = t }\nlet d = deque::from_seq { xs = [ mk { x = 3, t = 30 }, mk { x = 1, t = 10 }, mk { x = 2, t = 20 } ] }\n$body")
+
+    @Test fun dequeMinByKey() = assertEquals(10L, runD("let main = {} -> match deque::min_by { d = d, f = { val } -> val.k } is\n  Some { val = e } -> e.tag\n  None -> 0 - 1\nmain {}"))
+    @Test fun dequeMaxByKey() = assertEquals(30L, runD("let main = {} -> match deque::max_by { d = d, f = { val } -> val.k } is\n  Some { val = e } -> e.tag\n  None -> 0 - 1\nmain {}"))
+
+    // Identity key function: the key IS the element. The key type var is bound
+    // from the container arg, not from a field access — see recoverLambdaReturnType.
+    @Test fun dequeMinByIdentity() = assertEquals(1L, run("use std::collections::deque\nlet d = deque::from_seq { xs = [ p { x = 3, y = 1 }, p { x = 1, y = 2 } ] }\nlet main = {} -> match deque::min_by { d = d, f = { val } -> val } is\n  Some { val = e } -> px { p = e }\n  None -> 0 - 1\nmain {}"))
 
     // ---- regressions: primitives still work --------------------------------
 

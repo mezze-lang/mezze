@@ -2448,6 +2448,18 @@ class TypedASTCompiler(
         val direct = substitution.apply(lam.body.type)
         if (direct !is VarType) return direct
         val body = lam.body
+        // Identity key (`f = { x } -> x`, i.e. `min_by`/`dedup_by` keyed on the
+        // element itself): the return type IS the param's type, which the type-level
+        // harvest already bound from the container arg. Without this the key var
+        // stays unbound and dict resolution falls back to scavenging the arg types,
+        // where the CONTAINER falsely matches its own blanket impl — a `Deque P`
+        // handed `impl Ord for Deque 'a` as the key comparator.
+        if (body is TypedVar) {
+            val paramT = lam.params.find { it.name == body.name }?.type?.let { substitution.apply(it) }
+            if (paramT != null && paramT !is VarType) return paramT
+            val bound = (paramT as? VarType)?.let { bindings[it.variable.name] }?.let { substitution.apply(it) }
+            if (bound != null && bound !is VarType) return bound
+        }
         if (body is TypedFieldAccess) {
             val base = body.record
             if (base is TypedVar) {

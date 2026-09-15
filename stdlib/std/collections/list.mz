@@ -363,13 +363,13 @@ let dedup_with_eq: { xs: List 'a, eq: { a: 'a, b: 'a } -> Bool } -> List 'a = { 
 pub let dedup: { xs: List 'a } with Eq 'a -> List 'a = { xs } ->
   dedup_with_eq { xs = xs, eq = { a, b } -> a == b }
 
-## KNOWN GAP (T1.2): keys are compared STRUCTURALLY, so a key type with a
-## custom Eq is ignored. Threading the key's `eq` here binds the WRONG dict —
-## `'b` occurs only in the RETURN type of `f`, which the compiler's call-site
-## dict resolution does not look inside, so it scavenges the arg types and finds
-## `impl Eq for List 'a` instead. Fixed by evidence-based dispatch (plan C.1-C.3).
-pub let dedup_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'a <...> = { xs, f } ->
-  __native_list_dedup_by { xs = xs, f = f }
+let dedup_by_with_eq
+  : { xs: List 'a, f: { x: 'a } -> 'b <...>, eq: { a: 'b, b: 'b } -> Bool } -> List 'a <...>
+  = { xs, f, eq } -> __native_list_dedup_by { xs = xs, f = f, eq = eq }
+
+## Removes consecutive duplicates by a key function (keys compared by their Eq).
+pub let dedup_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } with Eq 'b -> List 'a <...> = { xs, f } ->
+  dedup_by_with_eq { xs = xs, f = f, eq = { a, b } -> a == b }
 
 ## Returns the nth element, or None if out of bounds (alias for get).
 pub let nth: { xs: List 'a, i: Int } -> Option 'a = { xs, i } ->
@@ -390,11 +390,16 @@ let group_consecutive_with_eq
 pub let group_consecutive: { xs: List 'a } with Eq 'a -> List (List 'a) = { xs } ->
   group_consecutive_with_eq { xs = xs, eq = { a, b } -> a == b }
 
-## KNOWN GAP (T1.2), same cause as `dedup_by` above: keys compared structurally.
-pub let group_consecutive_by
-  : { xs: List 'a, f: { x: 'a } -> 'b <...> }
+let group_consecutive_by_with_eq
+  : { xs: List 'a, f: { x: 'a } -> 'b <...>, eq: { a: 'b, b: 'b } -> Bool }
   -> List (List 'a) <...>
-  = { xs, f } -> __native_list_group_consecutive_by { xs = xs, f = f }
+  = { xs, f, eq } -> __native_list_group_consecutive_by { xs = xs, f = f, eq = eq }
+
+## Groups consecutive elements by a key function (keys compared by their Eq).
+pub let group_consecutive_by
+  : { xs: List 'a, f: { x: 'a } -> 'b <...> } with Eq 'b
+  -> List (List 'a) <...>
+  = { xs, f } -> group_consecutive_by_with_eq { xs = xs, f = f, eq = { a, b } -> a == b }
 
 ## Takes elements from the front while the predicate holds.
 pub let take_while: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->

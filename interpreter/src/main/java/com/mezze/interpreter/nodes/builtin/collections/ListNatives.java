@@ -622,11 +622,11 @@ public final class ListNatives {
         return MezzeList.of(result.toArray());
     }
 
-    // Keys compared structurally — see the gap note on `list::dedup_by` (T1.2).
-    public static MezzeList dedupBy(MezzeList list, MezzeFunction keyFn,
+    public static MezzeList dedupBy(MezzeList list, MezzeFunction keyFn, MezzeFunction eqFn,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return list;
         var key = ScalarCall.prepare1(keyFn, "x");
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
         Object[] src = list.toArray();
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
         Object lastElem = src[0];
@@ -635,7 +635,7 @@ public final class ListNatives {
         for (int i = 1; i < src.length; i++) {
             Object elem = src[i];
             Object k = key.call1(callNode, elem);
-            if (!java.util.Objects.equals(k, lastKey)) {
+            if (!eq.callEq(callNode, k, lastKey)) {
                 result.add(elem);
                 lastElem = elem;
                 lastKey = k;
@@ -667,11 +667,11 @@ public final class ListNatives {
         return MezzeList.of(groups.toArray());
     }
 
-    // Keys compared structurally — see the gap note on `list::group_consecutive_by` (T1.2).
-    public static MezzeList groupConsecutiveBy(MezzeList list, MezzeFunction keyFn,
+    public static MezzeList groupConsecutiveBy(MezzeList list, MezzeFunction keyFn, MezzeFunction eqFn,
                                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return MezzeList.empty();
         var key = ScalarCall.prepare1(keyFn, "x");
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
         Object[] src = list.toArray();
         java.util.ArrayList<Object> groups = new java.util.ArrayList<>();
         java.util.ArrayList<Object> currentGroup = new java.util.ArrayList<>();
@@ -681,7 +681,7 @@ public final class ListNatives {
         for (int i = 1; i < src.length; i++) {
             Object elem = src[i];
             Object k = key.call1(callNode, elem);
-            if (java.util.Objects.equals(k, currentKey)) {
+            if (eq.callEq(callNode, k, currentKey)) {
                 currentGroup.add(elem);
             } else {
                 groups.add(MezzeList.of(currentGroup.toArray()));

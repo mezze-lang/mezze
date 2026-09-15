@@ -461,15 +461,16 @@ public final class DequeNatives {
 
     // ==================== Min/Max By ====================
 
-    public static MezzeVariant minBy(MezzeDeque deque, MezzeFunction f,
+    public static MezzeVariant minBy(MezzeDeque deque, MezzeFunction f, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (deque.isEmpty()) return MezzeVariant.none();
         var ctx = ScalarCall.prepare1(f, "val");
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         Object minElem = null;
         Object minKey = null;
         for (Object elem : deque) {
             Object key = ctx.call1(callNode, elem);
-            if (minKey == null || compare(key, minKey) < 0) {
+            if (minKey == null || cmp.callCmp(callNode, key, minKey) < 0) {
                 minKey = key;
                 minElem = elem;
             }
@@ -477,15 +478,16 @@ public final class DequeNatives {
         return MezzeVariant.some(minElem);
     }
 
-    public static MezzeVariant maxBy(MezzeDeque deque, MezzeFunction f,
+    public static MezzeVariant maxBy(MezzeDeque deque, MezzeFunction f, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (deque.isEmpty()) return MezzeVariant.none();
         var ctx = ScalarCall.prepare1(f, "val");
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         Object maxElem = null;
         Object maxKey = null;
         for (Object elem : deque) {
             Object key = ctx.call1(callNode, elem);
-            if (maxKey == null || compare(key, maxKey) > 0) {
+            if (maxKey == null || cmp.callCmp(callNode, key, maxKey) > 0) {
                 maxKey = key;
                 maxElem = elem;
             }
