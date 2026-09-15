@@ -490,7 +490,20 @@ class TypeChecker(
                 // which is what makes the idempotence invariant below hold. This runs
                 // once at the boundary; downstream `substitution.apply(...)` is
                 // unchanged in result, just guaranteed idempotent.
-                val substitution = solveResult.substitution.compose(perBindingSubstitution).saturate()
+                // A.1: fold in the impl-op body solves ImplValidator used to discard.
+                // Each was a full, independent solve whose TypeVars carry globally
+                // unique ids, so composing them cannot rebind another declaration's
+                // variables — it only ADDS the bindings for variables nothing else
+                // mentions. `compose` keeps the receiver's mappings on any overlap,
+                // so the module solve stays authoritative wherever the two meet.
+                val implOpSubstitution = if (ElaborationFlags.carryImplOpSolves) {
+                    programConstraintResult.implOpSolutions
+                        .fold(Substitution.empty) { acc, sol -> acc.compose(sol.substitution) }
+                } else Substitution.empty
+                val substitution = solveResult.substitution
+                    .compose(perBindingSubstitution)
+                    .compose(implOpSubstitution)
+                    .saturate()
                 InvariantChecker.checkSubstitution(substitution, "post-solve")
                 // S0.4/#373 — POST-SOLVE SUBSTITUTION IDEMPOTENCE, now that
                 // saturate() above establishes it. `apply(apply(t)) == apply(t)`: no
@@ -557,7 +570,35 @@ class TypeChecker(
 
                 InvariantChecker.checkConstraintResultsConsistent(globallyResolvedConstraintResults, "post-resolve")
 
-                val aggregated = aggregateConstraintResults(constraintResults, substitution)
+                // A.1: the impl-op solves join the same aggregation as every other
+                // declaration's, under synthetic keys so they cannot displace one.
+                // Their side tables are keyed by their bodies' own source locations,
+                // which no other node shares (LocKeyCollisionMeasurementTest), so the
+                // fold below merges rather than overwrites.
+                val resultsForAggregation = if (ElaborationFlags.carryImplOpSolves) {
+                    constraintResults + programConstraintResult.implOpSolutions
+                        .mapIndexed { index, sol ->
+                            // matchCaseBindings is EXCLUDED, and the reason is
+                            // measured rather than assumed. It is the one table
+                            // whose merge breaks the codec decode bodies, which
+                            // depend on their match bindings arriving as fresh
+                            // variables: bisecting the merge, everything else
+                            // together passes, and this table alone fails
+                            // JsonDecodeExhaustiveTest and UserDecodeAbilityTest
+                            // with a CallIndirect on a record. Supplying the
+                            // binding's real type — even only where the structural
+                            // read had nothing — routes the decoder wiring
+                            // differently. That dependency on an absence is the
+                            // hack A.3 removes by generating codec impls into the
+                            // resolved module like derived ones; this line comes
+                            // out with it. (The isolated solve also returns some
+                            // types in the OTHER representation —
+                            // `TypeApplication("Nat")` against the declared nominal
+                            // `Nat` — which is disease 2, and B.1's job.)
+                            "__impl_op_$index" to sol.result.copy(matchCaseBindings = emptyMap())
+                        }
+                } else constraintResults
+                val aggregated = aggregateConstraintResults(resultsForAggregation, substitution)
 
                 // S2.2/S2.3 (#357/#358): the SINGLE post-solve dispatch resolution
                 // pass. For each recorded MethodResolveBucket it resolves the SOLVED

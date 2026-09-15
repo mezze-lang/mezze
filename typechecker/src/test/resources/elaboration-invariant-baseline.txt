@@ -20,9 +20,9 @@
 #                     something the compiler cannot name. These reach the
 #                     runtime as a dispatch with nothing to dispatch on.
 #
-# Counts at baseline: 687 UNBOUND_TYPE_VAR, 272 UNTYPED_PARAM, 24 VARTYPE_RECEIVER
-# (983 declarations). Almost all sit in impl operations, whose bodies are
-# not solved in the module solve — which is what task A.1 changes. A.2 drives
+# Counts: 689 UNBOUND_TYPE_VAR, 272 UNTYPED_PARAM, 3 VARTYPE_RECEIVER
+# (964 declarations). Almost all sit in impl operations, whose bodies are
+# keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
 # this file to empty and makes a miss a hard ElaborationError.
 UNBOUND_TYPE_VAR	impl Bool.and
 UNBOUND_TYPE_VAR	impl Bool.eq
@@ -224,6 +224,7 @@ UNBOUND_TYPE_VAR	impl Map.max_value
 UNBOUND_TYPE_VAR	impl Map.min_key
 UNBOUND_TYPE_VAR	impl Map.min_value
 UNBOUND_TYPE_VAR	impl Map.neq
+UNBOUND_TYPE_VAR	impl Map.to_iter
 UNBOUND_TYPE_VAR	impl Map.to_sorted_map
 UNBOUND_TYPE_VAR	impl Map.update
 UNBOUND_TYPE_VAR	impl MutBytes.is_empty
@@ -279,7 +280,6 @@ UNBOUND_TYPE_VAR	impl Option.map
 UNBOUND_TYPE_VAR	impl Option.neq
 UNBOUND_TYPE_VAR	impl Option.or_else
 UNBOUND_TYPE_VAR	impl Option.to_result
-UNBOUND_TYPE_VAR	impl Option.try
 UNBOUND_TYPE_VAR	impl Option.zip
 UNBOUND_TYPE_VAR	impl Option.zip_with
 UNBOUND_TYPE_VAR	impl Result.eq
@@ -374,6 +374,7 @@ UNBOUND_TYPE_VAR	impl SortedMap.map_keys
 UNBOUND_TYPE_VAR	impl SortedMap.map_values
 UNBOUND_TYPE_VAR	impl SortedMap.neq
 UNBOUND_TYPE_VAR	impl SortedMap.remove
+UNBOUND_TYPE_VAR	impl SortedMap.to_iter
 UNBOUND_TYPE_VAR	impl SortedSet.add
 UNBOUND_TYPE_VAR	impl SortedSet.collect_list
 UNBOUND_TYPE_VAR	impl SortedSet.collect_seq
@@ -398,6 +399,7 @@ UNBOUND_TYPE_VAR	impl Str.into
 UNBOUND_TYPE_VAR	impl Str.le
 UNBOUND_TYPE_VAR	impl Str.lt
 UNBOUND_TYPE_VAR	impl Str.neq
+UNBOUND_TYPE_VAR	impl c3d08106.list
 UNBOUND_TYPE_VAR	let:abs
 UNBOUND_TYPE_VAR	let:add
 UNBOUND_TYPE_VAR	let:add_with_cmp
@@ -983,27 +985,6 @@ UNTYPED_PARAM	let:unzip
 UNTYPED_PARAM	let:update
 UNTYPED_PARAM	let:upper_bound
 UNTYPED_PARAM	let:upper_bound_with_cmp
-VARTYPE_RECEIVER	impl Bytes.ge
-VARTYPE_RECEIVER	impl Bytes.gt
-VARTYPE_RECEIVER	impl Bytes.le
-VARTYPE_RECEIVER	impl Bytes.lt
-VARTYPE_RECEIVER	impl Char.ge
-VARTYPE_RECEIVER	impl Char.gt
-VARTYPE_RECEIVER	impl Char.le
-VARTYPE_RECEIVER	impl Char.lt
-VARTYPE_RECEIVER	impl Float.add
-VARTYPE_RECEIVER	impl Float.div
-VARTYPE_RECEIVER	impl Float.mod
-VARTYPE_RECEIVER	impl Float.mul
-VARTYPE_RECEIVER	impl Float.sub
 VARTYPE_RECEIVER	impl Nat.is_even
 VARTYPE_RECEIVER	impl Nat.is_odd
-VARTYPE_RECEIVER	impl SortedMap.ge
-VARTYPE_RECEIVER	impl SortedMap.gt
-VARTYPE_RECEIVER	impl SortedMap.le
-VARTYPE_RECEIVER	impl SortedMap.lt
-VARTYPE_RECEIVER	impl SortedSet.ge
-VARTYPE_RECEIVER	impl SortedSet.gt
-VARTYPE_RECEIVER	impl SortedSet.le
-VARTYPE_RECEIVER	impl SortedSet.lt
 VARTYPE_RECEIVER	let:enumerate

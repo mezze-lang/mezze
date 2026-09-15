@@ -31,7 +31,11 @@ data class ProgramConstraintResult(
     // asymmetry fix: ability preconditions inferred from impl-op bodies, keyed by
     // impl content hash. TypeChecker folds these into the frozen context's
     // AbilityImplInfo.operationConstraints before the final use-site solve.
-    val inferredImplConstraints: Map<Hash, List<ParsedFnAbilityConstraint>> = emptyMap()
+    val inferredImplConstraints: Map<Hash, List<ParsedFnAbilityConstraint>> = emptyMap(),
+    // A.1: the impl-op body solves ImplValidator used to discard. TypeChecker
+    // merges their side tables and substitutions into the module's, so emit can
+    // read an impl body's types instead of rebuilding them from nothing.
+    val implOpSolutions: List<ImplOpSolution> = emptyList(),
 ) {
 }
 
@@ -350,7 +354,8 @@ class ConstraintGenerator(
             perBindingSolveErrors = perBindingSolveErrors,
             perBindingSubstitution = perBindingSubstitution,
             collectedTypeCheckErrors = collectedTypeCheckErrors,
-            inferredImplConstraints = implValidator.drainInferredImplConstraints()
+            inferredImplConstraints = implValidator.drainInferredImplConstraints(),
+            implOpSolutions = implValidator.drainImplOpSolutions(),
         )
     }
 

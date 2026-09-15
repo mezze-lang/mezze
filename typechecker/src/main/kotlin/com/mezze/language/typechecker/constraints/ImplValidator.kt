@@ -4,12 +4,25 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
+import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typedast.Hash
+
+/**
+ * Task A.1 — one impl operation's body solve: the ConstraintResult its
+ * constraint generation produced and the Substitution that solved it.
+ *
+ * Public because [ProgramConstraintResult] carries it out to TypeChecker, while
+ * [ImplValidator] itself is internal.
+ */
+data class ImplOpSolution(
+    val result: ConstraintResult,
+    val substitution: Substitution,
+)
 
 internal class ImplValidator(
     private val expressionGenerator: ExpressionConstraintGenerator,
@@ -34,6 +47,28 @@ internal class ImplValidator(
     fun drainInferredImplConstraints(): Map<Hash, List<ParsedFnAbilityConstraint>> {
         val snapshot = inferredImplConstraints.mapValues { it.value.toList() }
         inferredImplConstraints.clear()
+        return snapshot
+    }
+
+    /**
+     * Task A.1 — the impl-op body solve, kept instead of discarded.
+     *
+     * [validateImplOperationBody] already runs a FULL solve of every impl
+     * operation: it generates the body's constraints, solves them, and checks the
+     * result against the declared return type. Then it throws both the
+     * ConstraintResult and the Substitution away, and emit later rebuilds those
+     * bodies from nothing — which is why 566 of the 983 elaboration gaps task 0.2
+     * measured sit in impl operations, and why `TypedAstBuilder` has to type
+     * match-bound names structurally there ("the solver never produced entries for
+     * these bodies").
+     *
+     * The work was always being done. This is the channel that keeps it.
+     */
+    private val implOpSolutions = mutableListOf<ImplOpSolution>()
+
+    fun drainImplOpSolutions(): List<ImplOpSolution> {
+        val snapshot = implOpSolutions.toList()
+        implOpSolutions.clear()
         return snapshot
     }
 
@@ -389,6 +424,12 @@ internal class ImplValidator(
             }
             is ConstraintSolver.SolveResult.Success -> {
                 val substitution = solveResult.substitution
+                // A.1: keep this solve. Its side tables are keyed by the body's own
+                // source locations, which no other node shares (measured — see
+                // LocKeyCollisionMeasurementTest), and its TypeVars carry globally
+                // unique ids, so merging into the module's tables cannot collide
+                // with another declaration's entries.
+                implOpSolutions.add(ImplOpSolution(bodyResult, substitution))
                 val actualBodyType = substitution.apply(bodyResult.type)
 
                 val unificationSolver = ConstraintSolver(bodyContext, registry)

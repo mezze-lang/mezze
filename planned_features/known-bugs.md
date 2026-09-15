@@ -602,9 +602,25 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   answers differently rather than quietly working). A control proves the
   fixture discriminates. A.4 deletes a heuristic and runs the test named after
   it, instead of deleting and hoping.
-- **A.1** Impl-op bodies solved in the MODULE solve (`ImplValidator` results
-  land in the same per-node table); params from the ability signature for ALL
-  impls (behind `MEZZE_ELAB=1` until C.3).
+- **A.1** LANDED (partly; the rest is blocked on A.3 and B.1).
+  `ImplValidator.validateImplOperationBody` always ran a full solve of every impl
+  operation and then discarded it; that solve is now kept (`ImplOpSolution`) and
+  merged into the module's side tables and substitution. Gated by
+  `ElaborationFlags.carryImplOpSolves`, default ON, `MEZZE_ELAB=0` to disable.
+  **Result: VARTYPE_RECEIVER 24 → 3.** Every Char/Bytes/SortedMap/SortedSet
+  comparison op and `impl NumAdd Int for Float`'s `r.to_float {}` now elaborate
+  with a known receiver.
+  **`matchCaseBindings` is excluded from the merge**, and the reason is measured,
+  not assumed: bisecting the merge, every other table together passes and that
+  one alone fails `JsonDecodeExhaustiveTest` + `UserDecodeAbilityTest` with a
+  CallIndirect on a record. The codec decode bodies depend on their match
+  bindings arriving as FRESH VARIABLES — supplying the real type, even only
+  where the structural read had nothing, routes the decoder wiring differently.
+  That dependency on an absence is what **A.3** removes, and the exclusion comes
+  out with it. The isolated solve also returns some types in the OTHER
+  representation (`TypeApplication("Nat")` vs the declared nominal `Nat`), which
+  is disease 2 and **B.1**'s job. So A.1's remainder is sequenced behind A.3 and
+  B.1, not behind C.3.
 - **A.2** Builder reads by NodeId; a miss is an `ElaborationError`, never a
   fresh var; drive misses to zero across stdlib + both gates. (Turns the
   `.size {}` match-arm crash into a compile error.)
