@@ -760,17 +760,32 @@ tasks.register("installNative") {
         //    the newest install always refreshes it.
         install(File(mezzeHome.get(), "bin/$exe"))
 
-        // 3. Seed the global default to this version the first time, so a fresh
-        //    install resolves to something without requiring `toolchain default`.
+        // 3. Point the global default at the version just installed — ALWAYS, not
+        //    only on a first install. The proxy (~/.mezze/bin/mez) resolves through
+        //    this setting, so leaving a stale `default` meant `mez`, and every LSP
+        //    launched through it, kept running an older toolchain while the repo
+        //    was rebuilt. That is invisible from the CLI's own output and cost a
+        //    day of chasing a "dispatch bug" that was a stale binary (BUG 1c).
+        //    An explicit `mez toolchain default <v>` afterwards still wins; this
+        //    only guarantees a freshly-installed toolchain is the one that runs.
         val settings = File(mezzeHome.get(), "settings.toml")
-        if (!settings.exists() || settings.readLines().none { it.trimStart().startsWith("default") }) {
-            settings.parentFile.mkdirs()
-            val existing = if (settings.exists()) settings.readText().trimEnd('\n') + "\n" else ""
-            settings.writeText(existing + "default = \"$mezzeToolchainVersion\"\n")
-        }
+        settings.parentFile.mkdirs()
+        val defaultLine = "default = \"$mezzeToolchainVersion\""
+        val previousDefault = if (settings.exists()) {
+            settings.readLines().firstOrNull { it.trimStart().startsWith("default") }
+        } else null
+        val kept = if (settings.exists()) {
+            settings.readLines().filterNot { it.trimStart().startsWith("default") }
+        } else emptyList()
+        settings.writeText((kept + defaultLine).joinToString("\n").trimStart('\n') + "\n")
 
         logger.lifecycle("Installed toolchain $mezzeToolchainVersion → ${toolchainDir.get()}")
         logger.lifecycle("Proxy → ${File(mezzeHome.get(), "bin/mez")}  (put ~/.mezze/bin on PATH)")
+        if (previousDefault != null && !previousDefault.contains(mezzeToolchainVersion)) {
+            logger.lifecycle("Default toolchain → $mezzeToolchainVersion  (was ${previousDefault.substringAfter('=').trim()})")
+        } else {
+            logger.lifecycle("Default toolchain → $mezzeToolchainVersion")
+        }
     }
 }
 

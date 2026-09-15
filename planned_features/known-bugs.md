@@ -286,16 +286,30 @@ service-loader manifest (move it to a test-only source set / resources dir).
 
 ---
 
-## BUG 5 — `installNative` does not update the toolchain proxy default (context for BUG 1c)
+## BUG 5 — FIXED: `installNative` now always sets the freshly-installed toolchain as the default
 
 `./gradlew :cli:installNative` builds a correct native binary and installs it as a
 NEW toolchain, but the `~/.mezze/bin/mez` proxy keeps resolving the OLD global
 default, so `mez` (and any LSP launched via it) runs stale code until
-`mez toolchain default <new-version>` is run manually. It also stamps two
-mismatched versions per install run. This is why BUG 1c (LSP shows T0206 while the
-CLI at the same HEAD works) is most likely a stale-toolchain artifact rather than
-a live dispatch bug. Fix: `installNative` should set the freshly-installed
-toolchain as the default (and stamp one consistent version).
+`mez toolchain default <new-version>` is run manually. This is why BUG 1c (LSP
+shows T0206 while the CLI at the same HEAD works) is most likely a stale-toolchain
+artifact rather than a live dispatch bug.
+
+FIXED (cli/build.gradle.kts, `installNative`): the task seeded
+`~/.mezze/settings.toml` with `default = <version>` ONLY when no `default` line
+existed, so every install after the first left the proxy resolving the old
+toolchain. It now rewrites the line every time and logs the transition
+(`Default toolchain → <new>  (was <old>)`), so a stale default is visible rather
+than silent. An explicit `mez toolchain default <v>` afterwards still wins.
+
+On the "two mismatched versions" note: the version is a single configure-time
+`val mezzeVersion` shared by every module, and `BuildInfo.VERSION` is generated
+from it, so a version bump regenerates the source and forces a recompile — the two
+cannot diverge within one invocation. Nothing to fix there.
+
+NEXT for BUG 1c: reinstall, restart the LSP, and re-run the BUG 1 repro. If T0206
+persists in the editor at a HEAD where the CLI is clean, there IS a second
+dispatch path only the LSP reaches — record which it was.
 
 ---
 
