@@ -23,7 +23,7 @@ import java.util.Objects;
  * @param <V> Value type
  */
 @ExportLibrary(InteropLibrary.class)
-public final class MezzeSortedMap<K extends Comparable<K>, V> implements TruffleObject, Iterable<MezzeSortedMap.Entry<K, V>> {
+public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<MezzeSortedMap.Entry<K, V>> {
 
     @CompilationFinal(dimensions = 1)
     private final Object[] keys;
@@ -94,21 +94,21 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Returns an empty sorted map.
      */
-    public static <K extends Comparable<K>, V> MezzeSortedMap<K, V> empty() {
+    public static <K, V> MezzeSortedMap<K, V> empty() {
         return new MezzeSortedMap<>(new Object[0], new Object[0], null);
     }
 
     /**
      * Returns an empty sorted map with custom comparator.
      */
-    public static <K extends Comparable<K>, V> MezzeSortedMap<K, V> empty(Comparator<? super K> comparator) {
+    public static <K, V> MezzeSortedMap<K, V> empty(Comparator<? super K> comparator) {
         return new MezzeSortedMap<>(new Object[0], new Object[0], comparator);
     }
 
     /**
      * Creates a sorted map with a single entry.
      */
-    public static <K extends Comparable<K>, V> MezzeSortedMap<K, V> of(K key, V value) {
+    public static <K, V> MezzeSortedMap<K, V> of(K key, V value) {
         return new MezzeSortedMap<>(new Object[]{key}, new Object[]{value}, null);
     }
 
@@ -116,13 +116,17 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Creates a sorted map from entries.
      */
     @SafeVarargs
-    public static <K extends Comparable<K>, V> MezzeSortedMap<K, V> of(Entry<K, V>... entries) {
+    @SuppressWarnings("unchecked")
+    public static <K, V> MezzeSortedMap<K, V> of(Entry<K, V>... entries) {
         if (entries.length == 0) return empty();
         if (entries.length == 1) return of(entries[0].key, entries[0].value);
 
         // Sort by key
         Entry<K, V>[] sorted = entries.clone();
-        Arrays.sort(sorted, Comparator.comparing(e -> e.key));
+        // K is unbounded (see the note on MezzeSortedSet): this varargs builder is a
+        // Java-side convenience used only with naturally-comparable keys, so it
+        // compares through Comparable explicitly rather than requiring the bound.
+        Arrays.sort(sorted, (x, y) -> ((Comparable<Object>) x.key).compareTo(y.key));
 
         // Build arrays, handling duplicates (last wins)
         Object[] keys = new Object[sorted.length];
@@ -195,6 +199,18 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Returns true if the key is present.
      */
+    /** This map's key ordering — see the note on MezzeSortedSet.comparator(). */
+    public Comparator<Object> comparator() {
+        return comparator;
+    }
+
+    /** The same entries ordered by [cmp]; a field swap, not a re-sort (see
+     *  MezzeSortedSet.withComparator). */
+    public MezzeSortedMap<K, V> withComparator(Comparator<? super K> cmp) {
+        if (cmp == null || cmp == this.comparator) return this;
+        return new MezzeSortedMap<>(keys, values, length, cmp, null);
+    }
+
     public boolean containsKey(K key) {
         revokeOwnership();
         return binarySearch(key) >= 0;

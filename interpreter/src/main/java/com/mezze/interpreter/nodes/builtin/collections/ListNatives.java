@@ -1158,8 +1158,8 @@ public final class ListNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedSet toSortedSet(MezzeList list) {
-        return SortedSetNatives.fromList(list);
+    public static MezzeSortedSet toSortedSet(MezzeList list, MezzeFunction cmpFn) {
+        return SortedSetNatives.fromList(list, cmpFn);
     }
 
     @TruffleBoundary
@@ -1181,7 +1181,7 @@ public final class ListNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedMap toSortedMap(MezzeList list) {
+    public static MezzeSortedMap toSortedMap(MezzeList list, MezzeFunction cmpFn) {
         // Expects list of {k, v} records.
         Object[] src = list.toArray();
         MezzeSortedMap result = SortedMapNatives.empty();
@@ -1191,7 +1191,7 @@ public final class ListNatives {
                 int keyIdx = rec.getFieldIndex("k");
                 int valIdx = rec.getFieldIndex("v");
                 if (keyIdx >= 0 && valIdx >= 0) {
-                    result = SortedMapNatives.insert(result, rec.getField(keyIdx), rec.getField(valIdx));
+                    result = SortedMapNatives.insert(result, rec.getField(keyIdx), rec.getField(valIdx), cmpFn);
                 }
             }
         }

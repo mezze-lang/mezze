@@ -499,16 +499,24 @@ pub let to_set: { xs: List 'a } -> Set 'a = { xs } -> __native_list_to_set { xs 
 pub let to_deque: { xs: List 'a } -> Deque 'a = { xs } -> __native_list_to_deque { xs = xs }
 
 ## Converts to a SortedSet.
-pub let to_sorted_set: { xs: List 'a } -> SortedSet 'a = { xs } ->
-  __native_list_to_sorted_set { xs = xs }
+let to_sorted_set_with_cmp
+  : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Int } -> SortedSet 'a = { xs, cmp } ->
+  __native_list_to_sorted_set { xs = xs, cmp = cmp }
+
+pub let to_sorted_set: { xs: List 'a } with Ord 'a -> SortedSet 'a = { xs } ->
+  to_sorted_set_with_cmp { xs = xs, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Converts a list of {k, v} records to a Map.
 pub let to_map: { xs: List { k: 'k, v: 'v } } -> Map 'k 'v = { xs } ->
   __native_list_to_map { xs = xs }
 
 ## Converts a list of {k, v} records to a SortedMap.
-pub let to_sorted_map: { xs: List { k: 'k, v: 'v } } -> SortedMap 'k 'v = { xs } ->
-  __native_list_to_sorted_map { xs = xs }
+let to_sorted_map_with_cmp
+  : { xs: List { k: 'k, v: 'v }, cmp: { a: 'k, b: 'k } -> Int } -> SortedMap 'k 'v = { xs, cmp } ->
+  __native_list_to_sorted_map { xs = xs, cmp = cmp }
+
+pub let to_sorted_map: { xs: List { k: 'k, v: 'v } } with Ord 'k -> SortedMap 'k 'v = { xs } ->
+  to_sorted_map_with_cmp { xs = xs, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Creates a list from a Set.
 pub let from_set: { xs: Set 'a } -> List 'a = { xs } -> __native_list_from_set { xs = xs }

@@ -29,13 +29,13 @@ public final class SortedSetNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedSet singleton(Object element) {
-        return MezzeSortedSet.<Comparable>empty().addObject(element);
+    public static MezzeSortedSet singleton(Object element, MezzeFunction cmpFn) {
+        return MezzeSortedSet.<Comparable>empty(ElementComparator.of(cmpFn)).addObject(element);
     }
 
     @TruffleBoundary
-    public static MezzeSortedSet fromList(MezzeList list) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
+    public static MezzeSortedSet fromList(MezzeList list, MezzeFunction cmpFn) {
+        MezzeSortedSet result = MezzeSortedSet.<Comparable>empty(ElementComparator.of(cmpFn));
         for (int i = 0; i < list.size(); i++) {
             result = result.addObject(list.get(i));
         }
@@ -62,18 +62,18 @@ public final class SortedSetNatives {
     }
 
     @TruffleBoundary
-    public static boolean contains(MezzeSortedSet set, Object element) {
-        return set.containsObject(element);
+    public static boolean contains(MezzeSortedSet set, Object element, MezzeFunction cmpFn) {
+        return set.withComparator(ElementComparator.of(cmpFn)).containsObject(element);
     }
 
     @TruffleBoundary
-    public static MezzeSortedSet add(MezzeSortedSet set, Object element) {
-        return set.addObject(element);
+    public static MezzeSortedSet add(MezzeSortedSet set, Object element, MezzeFunction cmpFn) {
+        return set.withComparator(ElementComparator.of(cmpFn)).addObject(element);
     }
 
     @TruffleBoundary
-    public static MezzeSortedSet remove(MezzeSortedSet set, Object element) {
-        return set.removeObject(element);
+    public static MezzeSortedSet remove(MezzeSortedSet set, Object element, MezzeFunction cmpFn) {
+        return set.withComparator(ElementComparator.of(cmpFn)).removeObject(element);
     }
 
     // ==================== Min/Max Operations ====================
@@ -123,9 +123,10 @@ public final class SortedSetNatives {
      */
     @TruffleBoundary
     public static long compare(MezzeSortedSet set1, MezzeSortedSet set2) {
+        var order = set1.comparator();
         int minLen = Math.min(set1.size(), set2.size());
         for (int i = 0; i < minLen; i++) {
-            int cmp = compareElements(set1.get(i), set2.get(i));
+            int cmp = order.compare(set1.get(i), set2.get(i));
             if (cmp != 0) {
                 return cmp < 0 ? -1L : 1L;
             }
@@ -133,24 +134,6 @@ public final class SortedSetNatives {
         return Integer.compare(set1.size(), set2.size());
     }
 
-    private static int compareElements(Object a, Object b) {
-        if (a instanceof Long && b instanceof Long) {
-            return Long.compare((Long) a, (Long) b);
-        }
-        if (a instanceof Double && b instanceof Double) {
-            return Double.compare((Double) a, (Double) b);
-        }
-        if (a instanceof String && b instanceof String) {
-            return ((String) a).compareTo((String) b);
-        }
-        if (a instanceof Long && b instanceof Double) {
-            return Double.compare(((Long) a).doubleValue(), (Double) b);
-        }
-        if (a instanceof Double && b instanceof Long) {
-            return Double.compare((Double) a, ((Long) b).doubleValue());
-        }
-        return 0;
-    }
 
     // ==================== Conversion ====================
 
@@ -164,8 +147,8 @@ public final class SortedSetNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedSet fromArray(Object[] arr) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
+    public static MezzeSortedSet fromArray(Object[] arr, MezzeFunction cmpFn) {
+        MezzeSortedSet result = MezzeSortedSet.<Comparable>empty(ElementComparator.of(cmpFn));
         for (Object elem : arr) {
             result = result.addObject(elem);
         }
@@ -380,15 +363,16 @@ public final class SortedSetNatives {
         );
     }
 
-    public static MezzeVariant minBy(MezzeSortedSet set, MezzeFunction f,
+    public static MezzeVariant minBy(MezzeSortedSet set, MezzeFunction f, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (set.isEmpty()) return MezzeVariant.none();
         var ctx = ScalarCall.prepare1(f, "val");
+        var keyOrder = ScalarCall.prepare2(cmpFn, "a", "b");
         Object minElem = null;
         Object minKey = null;
         for (Object elem : set) {
             Object key = ctx.call1(callNode, elem);
-            if (minKey == null || compare(key, minKey) < 0) {
+            if (minKey == null || keyOrder.callCmp(callNode, key, minKey) < 0) {
                 minKey = key;
                 minElem = elem;
             }
@@ -396,15 +380,16 @@ public final class SortedSetNatives {
         return MezzeVariant.some(minElem);
     }
 
-    public static MezzeVariant maxBy(MezzeSortedSet set, MezzeFunction f,
+    public static MezzeVariant maxBy(MezzeSortedSet set, MezzeFunction f, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (set.isEmpty()) return MezzeVariant.none();
         var ctx = ScalarCall.prepare1(f, "val");
+        var keyOrder = ScalarCall.prepare2(cmpFn, "a", "b");
         Object maxElem = null;
         Object maxKey = null;
         for (Object elem : set) {
             Object key = ctx.call1(callNode, elem);
-            if (maxKey == null || compare(key, maxKey) > 0) {
+            if (maxKey == null || keyOrder.callCmp(callNode, key, maxKey) > 0) {
                 maxKey = key;
                 maxElem = elem;
             }
@@ -439,10 +424,11 @@ public final class SortedSetNatives {
 
     @TruffleBoundary
     public static MezzeSortedSet range(MezzeSortedSet set, Object lo, Object hi) {
+        var order = set.comparator();
         // Range is inclusive on both ends: [lo, hi]
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object elem : set) {
-            if (compare(elem, lo) >= 0 && compare(elem, hi) <= 0) {
+            if (order.compare(elem, lo) >= 0 && order.compare(elem, hi) <= 0) {
                 result = result.addObject(elem);
             }
         }
@@ -465,10 +451,11 @@ public final class SortedSetNatives {
 
     @TruffleBoundary
     public static MezzeSortedSet headSet(MezzeSortedSet set, Object toElement) {
+        var order = set.comparator();
         // headSet is strictly less than toElement (Java standard behavior)
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object elem : set) {
-            if (compare(elem, toElement) < 0) {
+            if (order.compare(elem, toElement) < 0) {
                 result = result.addObject(elem);
             }
         }
@@ -477,10 +464,11 @@ public final class SortedSetNatives {
 
     @TruffleBoundary
     public static MezzeSortedSet tailSet(MezzeSortedSet set, Object fromElement) {
+        var order = set.comparator();
         // above returns elements greater than, but tailSet should include fromElement
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object elem : set) {
-            if (compare(elem, fromElement) >= 0) {
+            if (order.compare(elem, fromElement) >= 0) {
                 result = result.addObject(elem);
             }
         }
@@ -492,22 +480,6 @@ public final class SortedSetNatives {
 
     @TruffleBoundary
     @SuppressWarnings("unchecked")
-    private static int compare(Object a, Object b) {
-        if (a instanceof Long && b instanceof Long) {
-            return Long.compare((Long) a, (Long) b);
-        }
-        if (a instanceof Double && b instanceof Double) {
-            return Double.compare((Double) a, (Double) b);
-        }
-        if (a instanceof String && b instanceof String) {
-            return ((String) a).compareTo((String) b);
-        }
-        if (a instanceof Boolean && b instanceof Boolean) {
-            return Boolean.compare((Boolean) a, (Boolean) b);
-        }
-        // Fallback: compare hash codes
-        return Integer.compare(System.identityHashCode(a), System.identityHashCode(b));
-    }
 
     // ==================== Task #30: Collect Operations ====================
 

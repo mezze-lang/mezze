@@ -626,7 +626,7 @@ public final class MapNatives {
      * Convert Map to SortedMap.
      */
     @TruffleBoundary
-    public static MezzeSortedMap toSortedMap(MezzeMap map) {
-        return SortedMapNatives.fromMap(map);
+    public static MezzeSortedMap toSortedMap(MezzeMap map, MezzeFunction cmpFn) {
+        return SortedMapNatives.fromMap(map, cmpFn);
     }
 }

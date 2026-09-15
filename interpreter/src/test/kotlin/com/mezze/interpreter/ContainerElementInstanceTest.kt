@@ -112,6 +112,42 @@ class ContainerElementInstanceTest {
     @Test fun listUpperBound() = assertEquals(2L, runLo("let main = {} -> list::upper_bound { xs = xs, target = p { x = 2, y = 99 } }\nmain {}"))
     @Test fun listSortByKey() = assertEquals(30L, runLo("let main = {} -> match list::head { xs = list::sort_by_key { xs = list::reverse { xs = xs }, f = { x } -> x } } is\n  Some { val = e } -> py { p = e }\n  None -> 0 - 1\nmain {}"))
 
+    // ---- SortedSet: the structure carries the element's comparator -----------
+    // Before T1.3 every one of these threw ClassCastException: the structure's
+    // default ordering is `((Comparable) a).compareTo(b)`, which no Mezze record or
+    // variant satisfies — sorted containers were usable with primitives only.
+    private fun runS(body: String) = run("use std::collections::sorted_set\n$body")
+    private val threeP = "[ p { x = 3, y = 0 }, p { x = 1, y = 0 }, p { x = 2, y = 0 } ]"
+
+    // Three elements DISTINCT by P's Ord survive as three (a comparator that
+    // returned 0 for every record would collapse them to one).
+    @Test fun sortedSetKeepsDistinctRecords() = assertEquals(3L,
+        runS("let main = {} -> sorted_set::size { s = sorted_set::from_seq { xs = $threeP } }\nmain {}"))
+    @Test fun sortedSetDedupesByElementOrd() = assertEquals(1L,
+        runS("let main = {} -> sorted_set::size { s = sorted_set::from_seq { xs = [ p { x = 1, y = 10 }, p { x = 1, y = 99 } ] } }\nmain {}"))
+    @Test fun sortedSetContainsUsesElementOrd() = assertEquals(true,
+        runS("let main = {} -> sorted_set::contains { s = sorted_set::from_seq { xs = $threeP }, x = p { x = 2, y = 99 } }\nmain {}"))
+    @Test fun sortedSetAddThenContains() = assertEquals(true,
+        runS("let main = {} -> sorted_set::contains { s = sorted_set::add { s = sorted_set::empty {}, x = p { x = 7, y = 1 } }, x = p { x = 7, y = 2 } }\nmain {}"))
+    @Test fun sortedSetRemoveUsesElementOrd() = assertEquals(2L,
+        runS("let main = {} -> sorted_set::size { s = sorted_set::remove { s = sorted_set::from_seq { xs = $threeP }, x = p { x = 2, y = 99 } } }\nmain {}"))
+    // Primitive elements keep working, including reading values back out.
+    @Test fun sortedSetIntsStillWork() = assertEquals(3L,
+        runS("let main = {} -> sorted_set::size { s = sorted_set::from_seq { xs = [ 3, 1, 2 ] } }\nmain {}"))
+    @Test fun sortedSetIntMin() = assertEquals(1L,
+        runS("let main = {} -> match sorted_set::min { s = sorted_set::from_seq { xs = [ 3, 1, 2 ] } } is\n  Some { val = v } -> v\n  None -> 0 - 1\nmain {}"))
+
+    // ---- SortedMap: keys ordered by the KEY's own Ord ------------------------
+    private fun runSm(body: String) = run("use std::collections::sorted_map\n$body")
+    private val pKeyMap = "let m = sorted_map::insert { m = sorted_map::insert { m = sorted_map::empty {}, k = p { x = 3, y = 0 }, v = 30 }, k = p { x = 1, y = 0 }, v = 10 }"
+
+    @Test fun sortedMapKeepsDistinctRecordKeys() = assertEquals(2L, runSm("$pKeyMap\nlet main = {} -> sorted_map::size { m = m }\nmain {}"))
+    // Looking up (1,99) finds the (1,0) key by P's Ord.
+    @Test fun sortedMapGetUsesKeyOrd() = assertEquals(10L, runSm("$pKeyMap\nlet main = {} -> match sorted_map::get { m = m, k = p { x = 1, y = 99 } } is\n  Some { val = v } -> v\n  None -> 0 - 1\nmain {}"))
+    @Test fun sortedMapContainsKeyUsesKeyOrd() = assertEquals(true, runSm("$pKeyMap\nlet main = {} -> sorted_map::contains_key { m = m, k = p { x = 3, y = 42 } }\nmain {}"))
+    @Test fun sortedMapRemoveUsesKeyOrd() = assertEquals(1L, runSm("$pKeyMap\nlet main = {} -> sorted_map::size { m = sorted_map::remove { m = m, k = p { x = 3, y = 42 } } }\nmain {}"))
+    @Test fun sortedMapIntKeysStillWork() = assertEquals(20L, runSm("let main = {} -> match sorted_map::get { m = sorted_map::insert { m = sorted_map::empty {}, k = 2, v = 20 }, k = 2 } is\n  Some { val = v } -> v\n  None -> 0 - 1\nmain {}"))
+
     // ---- regressions: primitives still work --------------------------------
 
     @Test fun listContainsInt() = assertEquals(true, run("let main = {} -> list::contains { xs = list::from_seq { xs = [1, 2, 3] }, x = 2 }\nmain {}"))

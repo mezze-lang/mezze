@@ -22,7 +22,13 @@ import java.util.Objects;
  * @param <A> Element type (must be Comparable)
  */
 @ExportLibrary(InteropLibrary.class)
-public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObject, Iterable<A> {
+public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
+    // NOTE: A is deliberately UNBOUNDED. It used to be `A extends Comparable<A>`,
+    // which made javac insert a checkcast to Comparable in the iterator and every
+    // element read — ClassCastException for any Mezze record or variant, so a
+    // sorted set of user values could not even be iterated. Ordering comes from
+    // the `comparator` field (the element's own Ord, installed at construction),
+    // never from the Java type.
 
     @CompilationFinal(dimensions = 1)
     private final Object[] elements;
@@ -76,21 +82,21 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns an empty sorted set.
      */
-    public static <A extends Comparable<A>> MezzeSortedSet<A> empty() {
+    public static <A> MezzeSortedSet<A> empty() {
         return new MezzeSortedSet<>(new Object[0], null);
     }
 
     /**
      * Returns an empty sorted set with custom comparator.
      */
-    public static <A extends Comparable<A>> MezzeSortedSet<A> empty(Comparator<? super A> comparator) {
+    public static <A> MezzeSortedSet<A> empty(Comparator<? super A> comparator) {
         return new MezzeSortedSet<>(new Object[0], comparator);
     }
 
     /**
      * Creates a sorted set with a single element.
      */
-    public static <A extends Comparable<A>> MezzeSortedSet<A> of(A element) {
+    public static <A> MezzeSortedSet<A> of(A element) {
         return new MezzeSortedSet<>(new Object[]{element}, null);
     }
 
@@ -98,7 +104,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Creates a sorted set from varargs.
      */
     @SafeVarargs
-    public static <A extends Comparable<A>> MezzeSortedSet<A> of(A... elements) {
+    public static <A> MezzeSortedSet<A> of(A... elements) {
         if (elements.length == 0) return empty();
         if (elements.length == 1) return of(elements[0]);
 
@@ -134,7 +140,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     }
 
     @TruffleBoundary
-    private static <A extends Comparable<A>> MezzeSortedSet<A> fromSortedArrayWithDuplicates(
+    private static <A> MezzeSortedSet<A> fromSortedArrayWithDuplicates(
             Object[] sorted, Comparator<? super A> comparator) {
         // Count unique elements
         int uniqueCount = 1;
@@ -222,6 +228,25 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns true if the element is present (raw type version).
      */
+    /** This set's ordering. Natives that answer range / bound / min-by questions
+     *  must use it rather than their own comparison, or they disagree with how the
+     *  set is actually ordered. */
+    public Comparator<Object> comparator() {
+        return comparator;
+    }
+
+    /**
+     * The same elements ordered by [cmp]. A pure field swap — NOT a re-sort:
+     * callers pass the comparator derived from the element's own Ord, which is
+     * the ordering that built the set, so the array is already consistent with it.
+     * Used to install a Mezze-derived comparator on a set that was created with the
+     * natural one (`empty {}` knows no element type yet).
+     */
+    public MezzeSortedSet<A> withComparator(Comparator<? super A> cmp) {
+        if (cmp == null || cmp == this.comparator) return this;
+        return new MezzeSortedSet<>(elements, length, cmp, null);
+    }
+
     public boolean containsObject(Object elem) {
         revokeOwnership();
         return binarySearchObject(elem) >= 0;
@@ -299,7 +324,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Creates a sorted set from raw Object iterable (for interpreter use).
      */
     @SuppressWarnings("unchecked")
-    public static <A extends Comparable<A>> MezzeSortedSet<A> fromIterable(Iterable<?> elements) {
+    public static <A> MezzeSortedSet<A> fromIterable(Iterable<?> elements) {
         MezzeSortedSet<A> result = empty();
         for (Object elem : elements) {
             result = result.addObject(elem);

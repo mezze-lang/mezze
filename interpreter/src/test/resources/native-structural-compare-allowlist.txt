@@ -1,17 +1,3 @@
 # Natives that still decide equality/ordering of a Mezze value in Java.
 # May only SHRINK — see NativeEvidenceGateTest. Tasks T1.2 (containers) / T1.3 (sorted).
-SortedMapNatives.java:ceilingKey
 SortedMapNatives.java:compare
-SortedMapNatives.java:compareMaps
-SortedMapNatives.java:floorKey
-SortedMapNatives.java:headMap
-SortedMapNatives.java:range
-SortedMapNatives.java:subMap
-SortedMapNatives.java:tailMap
-SortedSetNatives.java:compare
-SortedSetNatives.java:compareElements
-SortedSetNatives.java:headSet
-SortedSetNatives.java:maxBy
-SortedSetNatives.java:minBy
-SortedSetNatives.java:range
-SortedSetNatives.java:tailSet

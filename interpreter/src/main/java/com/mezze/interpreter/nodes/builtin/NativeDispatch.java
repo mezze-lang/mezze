@@ -1180,11 +1180,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_list_to_deque", (r, c) ->
             ListNatives.toDeque(getList(r, "xs")));
         HANDLERS.put("__native_list_to_sorted_set", (r, c) ->
-            ListNatives.toSortedSet(getList(r, "xs")));
+            ListNatives.toSortedSet(getList(r, "xs"), getFunction(r, "cmp")));
         HANDLERS.put("__native_list_to_map", (r, c) ->
             ListNatives.toMap(getList(r, "xs")));
         HANDLERS.put("__native_list_to_sorted_map", (r, c) ->
-            ListNatives.toSortedMap(getList(r, "xs")));
+            ListNatives.toSortedMap(getList(r, "xs"), getFunction(r, "cmp")));
         HANDLERS.put("__native_list_from_seq", (r, c) ->
             ListNatives.fromSeq(getSeq(r, "xs")));
         HANDLERS.put("__native_list_from_set", (r, c) ->
@@ -1348,17 +1348,17 @@ public final class NativeDispatch extends MezzeNode {
     private static void registerSortedSetHandlers() {
         HANDLERS.put("__native_sorted_set_empty", (r, c) -> SortedSetNatives.empty());
         HANDLERS.put("__native_sorted_set_singleton", (r, c) ->
-            SortedSetNatives.singleton(getField(r, "x")));
+            SortedSetNatives.singleton(getField(r, "x"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_set_size", (r, c) ->
             SortedSetNatives.size(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_is_empty", (r, c) ->
             SortedSetNatives.isEmpty(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_contains", (r, c) ->
-            SortedSetNatives.contains(getSortedSet(r, "s"), getField(r, "x")));
+            SortedSetNatives.contains(getSortedSet(r, "s"), getField(r, "x"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_set_add", (r, c) ->
-            SortedSetNatives.add(getSortedSet(r, "s"), getField(r, "x")));
+            SortedSetNatives.add(getSortedSet(r, "s"), getField(r, "x"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_set_remove", (r, c) ->
-            SortedSetNatives.remove(getSortedSet(r, "s"), getField(r, "x")));
+            SortedSetNatives.remove(getSortedSet(r, "s"), getField(r, "x"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_set_min", (r, c) ->
             SortedSetNatives.min(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_max", (r, c) ->
@@ -1378,7 +1378,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_set_to_set", (r, c) ->
             SortedSetNatives.toSet(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_from_list", (r, c) ->
-            SortedSetNatives.fromList(getList(r, "xs")));
+            SortedSetNatives.fromList(getList(r, "xs"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_set_from_set", (r, c) ->
             SortedSetNatives.fromSet(getSet(r, "s")));
 
@@ -1416,7 +1416,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_set_to_seq", (r, c) ->
             SortedSetNatives.toSeq(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_from_seq", (r, c) ->
-            SortedSetNatives.fromArray(getArray(r, "xs")));
+            SortedSetNatives.fromArray(getArray(r, "xs"), getFunction(r, "cmp")));
 
         // ForEach
         HANDLERS.put("__native_sorted_set_for_each", (r, c) ->
@@ -1426,9 +1426,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_set_partition", (r, c) ->
             SortedSetNatives.partition(getSortedSet(r, "s"), getFunction(r, "p"), c));
         HANDLERS.put("__native_sorted_set_min_by", (r, c) ->
-            SortedSetNatives.minBy(getSortedSet(r, "s"), getFunction(r, "f"), c));
+            SortedSetNatives.minBy(getSortedSet(r, "s"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_sorted_set_max_by", (r, c) ->
-            SortedSetNatives.maxBy(getSortedSet(r, "s"), getFunction(r, "f"), c));
+            SortedSetNatives.maxBy(getSortedSet(r, "s"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_sorted_set_take", (r, c) ->
             SortedSetNatives.take(getSortedSet(r, "s"), getLong(r, "n")));
         HANDLERS.put("__native_sorted_set_drop", (r, c) ->
@@ -1570,7 +1570,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_map_flat_map", (r, c) ->
             MapNatives.flatMap(getMap(r, "m"), getFunction(r, "f"), c));
         HANDLERS.put("__native_map_to_sorted_map", (r, c) ->
-            MapNatives.toSortedMap(getMap(r, "m")));
+            MapNatives.toSortedMap(getMap(r, "m"), getFunction(r, "cmp")));
     }
 
     // ==================== SortedMap ====================
@@ -1582,13 +1582,13 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_map_is_empty", (r, c) ->
             SortedMapNatives.isEmpty(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_contains_key", (r, c) ->
-            SortedMapNatives.containsKey(getSortedMap(r, "m"), getField(r, "k")));
+            SortedMapNatives.containsKey(getSortedMap(r, "m"), getField(r, "k"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_map_get", (r, c) ->
-            SortedMapNatives.get(getSortedMap(r, "m"), getField(r, "k")));
+            SortedMapNatives.get(getSortedMap(r, "m"), getField(r, "k"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_map_insert", (r, c) ->
-            SortedMapNatives.insert(getSortedMap(r, "m"), getField(r, "k"), getField(r, "v")));
+            SortedMapNatives.insert(getSortedMap(r, "m"), getField(r, "k"), getField(r, "v"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_map_remove", (r, c) ->
-            SortedMapNatives.remove(getSortedMap(r, "m"), getField(r, "k")));
+            SortedMapNatives.remove(getSortedMap(r, "m"), getField(r, "k"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_map_keys", (r, c) ->
             SortedMapNatives.keys(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_values", (r, c) ->
@@ -1634,7 +1634,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_map_merge_with", (r, c) ->
             SortedMapNatives.mergeWith(getSortedMap(r, "m1"), getSortedMap(r, "m2"), getFunction(r, "f"), c));
         HANDLERS.put("__native_sorted_map_singleton", (r, c) ->
-            SortedMapNatives.singleton(getField(r, "k"), getField(r, "v")));
+            SortedMapNatives.singleton(getField(r, "k"), getField(r, "v"), getFunction(r, "cmp")));
 
         // Conversion
         HANDLERS.put("__native_sorted_map_to_seq", (r, c) ->
@@ -1684,7 +1684,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_map_to_list", (r, c) ->
             SortedMapNatives.toList(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_from_list", (r, c) ->
-            SortedMapNatives.fromList(getList(r, "xs")));
+            SortedMapNatives.fromList(getList(r, "xs"), getFunction(r, "cmp")));
     }
 
     // ==================== Deque ====================
@@ -3025,7 +3025,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // === SortedMap from_map ===
         HANDLERS.put("__native_sorted_map_from_map", (r, c) ->
-            SortedMapNatives.fromMap(getMap(r, "m")));
+            SortedMapNatives.fromMap(getMap(r, "m"), getFunction(r, "cmp")));
     }
 
     // ==================== Buffer, JSON, HTTP ====================

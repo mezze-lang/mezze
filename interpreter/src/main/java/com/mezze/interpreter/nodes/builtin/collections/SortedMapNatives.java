@@ -26,19 +26,21 @@ public final class SortedMapNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedMap singleton(Object key, Object value) {
-        return MezzeSortedMap.<Comparable, Object>empty().putObject(key, value);
+    public static MezzeSortedMap singleton(Object key, Object value, MezzeFunction cmpFn) {
+        return MezzeSortedMap.<Comparable, Object>empty(ElementComparator.of(cmpFn)).putObject(key, value);
     }
 
     // ==================== Basic Operations ====================
 
     @TruffleBoundary
-    public static MezzeSortedMap insert(MezzeSortedMap map, Object key, Object value) {
+    public static MezzeSortedMap insert(MezzeSortedMap map, Object key, Object value, MezzeFunction cmpFn) {
+        map = map.withComparator(ElementComparator.of(cmpFn));
         return map.putObject(key, value);
     }
 
     @TruffleBoundary
-    public static MezzeVariant get(MezzeSortedMap map, Object key) {
+    public static MezzeVariant get(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
+        map = map.withComparator(ElementComparator.of(cmpFn));
         Object value = map.getObject(key);
         if (value == null && !map.containsKeyObject(key)) {
             return MezzeVariant.none();
@@ -47,12 +49,14 @@ public final class SortedMapNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedMap remove(MezzeSortedMap map, Object key) {
+    public static MezzeSortedMap remove(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
+        map = map.withComparator(ElementComparator.of(cmpFn));
         return map.removeObject(key);
     }
 
     @TruffleBoundary
-    public static boolean containsKey(MezzeSortedMap map, Object key) {
+    public static boolean containsKey(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
+        map = map.withComparator(ElementComparator.of(cmpFn));
         return map.containsKeyObject(key);
     }
 
@@ -101,17 +105,18 @@ public final class SortedMapNatives {
      */
     @TruffleBoundary
     public static long compareMaps(MezzeSortedMap map1, MezzeSortedMap map2) {
+        var order = map1.comparator();
         Object[] keys1 = map1.getKeysInternal();
         Object[] keys2 = map2.getKeysInternal();
         Object[] vals1 = map1.getValuesInternal();
         Object[] vals2 = map2.getValuesInternal();
         int minLen = Math.min(keys1.length, keys2.length);
         for (int i = 0; i < minLen; i++) {
-            int cmp = compare(keys1[i], keys2[i]);
+            int cmp = order.compare(keys1[i], keys2[i]);
             if (cmp != 0) {
                 return cmp < 0 ? -1L : 1L;
             }
-            cmp = compare(vals1[i], vals2[i]);
+            cmp = order.compare(vals1[i], vals2[i]);
             if (cmp != 0) {
                 return cmp < 0 ? -1L : 1L;
             }
@@ -152,8 +157,8 @@ public final class SortedMapNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedMap fromMap(MezzeMap map) {
-        MezzeSortedMap result = MezzeSortedMap.empty();
+    public static MezzeSortedMap fromMap(MezzeMap map, MezzeFunction cmpFn) {
+        MezzeSortedMap result = MezzeSortedMap.<Comparable, Object>empty(ElementComparator.of(cmpFn));
         for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             result = result.putObject(entry.key(), entry.value());
         }
@@ -180,8 +185,9 @@ public final class SortedMapNatives {
 
     public static MezzeSortedMap filter(MezzeSortedMap map, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var order = map.comparator();
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             Object res = ctx.call2(callNode, entry.key(), entry.value());
             if (res instanceof Boolean && (Boolean) res) {
@@ -203,8 +209,9 @@ public final class SortedMapNatives {
 
     public static MezzeSortedMap mapValues(MezzeSortedMap map, MezzeFunction f,
                                            com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var order = map.comparator();
         var ctx = ScalarCall.prepare1(f, "val");
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             Object mapped = ctx.call1(callNode, entry.value());
             result = result.putObject(entry.key(), mapped);
@@ -289,7 +296,7 @@ public final class SortedMapNatives {
     public static MezzeSortedMap update(MezzeSortedMap map, Object key, MezzeFunction f,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
-        MezzeVariant current = get(map, key);
+        MezzeVariant current = get(map, key, null);
         Object newValue = ctx.call1(callNode, current);
         return map.putObject(key, newValue);
     }
@@ -371,12 +378,13 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap range(MezzeSortedMap map, Object loKey, Object hiKey) {
+        var order = map.comparator();
         // Use the value class's range method which returns [lo, hi)
         // We need [lo, hi] inclusive, so we filter manually
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             Object key = entry.key();
-            if (compare(key, loKey) >= 0 && compare(key, hiKey) <= 0) {
+            if (order.compare(key, loKey) >= 0 && order.compare(key, hiKey) <= 0) {
                 result = result.putObject(key, entry.value());
             }
         }
@@ -385,11 +393,12 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeVariant floorKey(MezzeSortedMap map, Object key) {
+        var order = map.comparator();
         // Find largest key <= given key
         Object result = null;
         for (Object k : map.keys()) {
-            if (compare(k, key) <= 0) {
-                if (result == null || compare(k, result) > 0) {
+            if (order.compare(k, key) <= 0) {
+                if (result == null || order.compare(k, result) > 0) {
                     result = k;
                 }
             }
@@ -402,11 +411,12 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeVariant ceilingKey(MezzeSortedMap map, Object key) {
+        var order = map.comparator();
         // Find smallest key >= given key
         Object result = null;
         for (Object k : map.keys()) {
-            if (compare(k, key) >= 0) {
-                if (result == null || compare(k, result) < 0) {
+            if (order.compare(k, key) >= 0) {
+                if (result == null || order.compare(k, result) < 0) {
                     result = k;
                 }
             }
@@ -451,9 +461,10 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap headMap(MezzeSortedMap map, Object toKey) {
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        var order = map.comparator();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
-            if (compare(entry.key(), toKey) < 0) {
+            if (order.compare(entry.key(), toKey) < 0) {
                 result = result.putObject(entry.key(), entry.value());
             }
         }
@@ -462,9 +473,10 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap tailMap(MezzeSortedMap map, Object fromKey) {
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        var order = map.comparator();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
-            if (compare(entry.key(), fromKey) >= 0) {
+            if (order.compare(entry.key(), fromKey) >= 0) {
                 result = result.putObject(entry.key(), entry.value());
             }
         }
@@ -473,11 +485,12 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap subMap(MezzeSortedMap map, Object loKey, Object hiKey) {
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        var order = map.comparator();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             Object key = entry.key();
             // subMap is [lo, hi) - lo inclusive, hi exclusive
-            if (compare(key, loKey) >= 0 && compare(key, hiKey) < 0) {
+            if (order.compare(key, loKey) >= 0 && order.compare(key, hiKey) < 0) {
                 result = result.putObject(key, entry.value());
             }
         }
@@ -486,7 +499,8 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap take(MezzeSortedMap map, long n) {
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        var order = map.comparator();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         int count = 0;
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             if (count >= n) break;
@@ -498,7 +512,8 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap drop(MezzeSortedMap map, long n) {
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        var order = map.comparator();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         int count = 0;
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             if (count >= n) {
@@ -513,8 +528,12 @@ public final class SortedMapNatives {
 
     public static MezzeSortedMap mapKeys(MezzeSortedMap map, MezzeFunction f,
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // mapKeys / invert produce keys of a DIFFERENT type, so the source map's
+        // comparator does not apply; these fall back to natural ordering and are
+        // therefore still primitive-only (tracked with the sorted-container gap).
+        java.util.Comparator<Object> order = null;
         var ctx = ScalarCall.prepare1(f, "val");
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             Object newKey = ctx.call1(callNode, entry.key());
             result = result.putObject(newKey, entry.value());
@@ -524,8 +543,9 @@ public final class SortedMapNatives {
 
     public static MezzeSortedMap filterKeys(MezzeSortedMap map, MezzeFunction predicate,
                                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var order = map.comparator();
         var ctx = ScalarCall.prepare1(predicate, "val");
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             Object res = ctx.call1(callNode, entry.key());
             if (res instanceof Boolean && (Boolean) res) {
@@ -537,8 +557,9 @@ public final class SortedMapNatives {
 
     public static MezzeSortedMap filterValues(MezzeSortedMap map, MezzeFunction predicate,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var order = map.comparator();
         var ctx = ScalarCall.prepare1(predicate, "val");
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             Object res = ctx.call1(callNode, entry.value());
             if (res instanceof Boolean && (Boolean) res) {
@@ -550,7 +571,11 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap invert(MezzeSortedMap map) {
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        // mapKeys / invert produce keys of a DIFFERENT type, so the source map's
+        // comparator does not apply; these fall back to natural ordering and are
+        // therefore still primitive-only (tracked with the sorted-container gap).
+        java.util.Comparator<Object> order = null;
+        MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             result = result.putObject(entry.value(), entry.key());
         }
@@ -573,8 +598,8 @@ public final class SortedMapNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedMap fromList(MezzeList list) {
-        MezzeSortedMap result = MezzeSortedMap.empty();
+    public static MezzeSortedMap fromList(MezzeList list, MezzeFunction cmpFn) {
+        MezzeSortedMap result = MezzeSortedMap.<Comparable, Object>empty(ElementComparator.of(cmpFn));
         for (Object item : list) {
             if (item instanceof MezzeRecord) {
                 MezzeRecord record = (MezzeRecord) item;
