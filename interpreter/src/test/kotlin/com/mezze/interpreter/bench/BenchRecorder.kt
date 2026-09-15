@@ -12,7 +12,7 @@ import kotlin.system.measureNanoTime
  * result to a JVM-wide queue.
  *
  * After all benches run, [writeMarkdown] dumps the accumulated results
- * to a markdown file (default: docs/runtime/perf-baseline.md). The
+ * to a markdown file (default: planned_features/runtime/perf-baseline.md). The
  * bench harness uses a JUnit lifecycle hook in `BenchSummaryWriter` to
  * trigger this once at the end of the test run.
  *

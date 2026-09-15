@@ -11,8 +11,8 @@ import java.io.File
  * places it after all other bench classes when JUnit sorts) and writes
  * the accumulated [BenchRecorder] results to a markdown file.
  *
- * Output path: `docs/runtime/perf-baseline.md` from the repo root. The
- * test working dir is `:interpreter/`, so we resolve `../docs/...`.
+ * Output path: `planned_features/runtime/perf-baseline.md` from the repo
+ * root. The test working dir is `:interpreter/`, so we resolve `../planned_features/...`.
  *
  * Override the output path via system property `mezze.bench.out`.
  *
@@ -31,7 +31,7 @@ class ZZZBenchSummaryWriter {
     @AfterAll
     fun writeSummary() {
         val outPath = System.getProperty("mezze.bench.out")
-            ?: "../docs/runtime/perf-baseline.md"
+            ?: "../planned_features/runtime/perf-baseline.md"
         val out = File(outPath).absoluteFile
         val gitSha = runCatching {
             ProcessBuilder("git", "rev-parse", "--short", "HEAD")

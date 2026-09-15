@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Assertions.*
 
 /**
  * Microbenchmarks for the concrete Async/Channel/Mutex operations called
- * out in the perf budget (docs/runtime/perf-baseline.md). Each test
+ * out in the perf budget (planned_features/runtime/perf-baseline.md). Each test
  * pushes one budget item and records it via [BenchRecorder].
  *
  * These are written to be insensitive to absolute interpreter overhead

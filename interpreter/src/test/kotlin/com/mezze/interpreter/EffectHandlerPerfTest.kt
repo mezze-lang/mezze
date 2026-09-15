@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Assertions.*
  *   5. Async.spawn + await round-trip. Cross-thread fiber coordination.
  *
  * Runs as part of `:interpreter:bench`. Results recorded via
- * [BenchRecorder] and aggregated into docs/runtime/perf-baseline.md.
+ * [BenchRecorder] and aggregated into planned_features/runtime/perf-baseline.md.
  */
 class EffectHandlerPerfTest {
 
