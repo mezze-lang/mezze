@@ -199,6 +199,29 @@ public final class ScalarCall {
     }
 
     /** Call with 3 args. Zero-alloc on the scalar path (args reused). */
+    /**
+     * Call a prepared two-argument ELEMENT COMPARATOR — the Mezze `eq` the
+     * ability system resolved for this element type — and read its Bool.
+     * A native that needs to know whether two Mezze values are equal asks the
+     * element's instance through here; deciding it in Java ignores a newtype's
+     * declared Eq. Non-Bool (a broken impl) reads as not-equal rather than
+     * throwing inside a collection walk.
+     */
+    public boolean callEq(IndirectCallNode callNode, Object a, Object b) {
+        return call2(callNode, a, b) instanceof Boolean result && result;
+    }
+
+    /**
+     * Call a prepared two-argument ELEMENT COMPARATOR returning -1/0/1, and
+     * normalize it to a Java comparator result. Same contract as [callEq] for
+     * ordering; a non-Int result reads as "equal", which keeps a sort stable
+     * instead of corrupting it.
+     */
+    public int callCmp(IndirectCallNode callNode, Object a, Object b) {
+        Object result = call2(callNode, a, b);
+        return result instanceof Long value ? Long.signum(value) : 0;
+    }
+
     public Object call3(IndirectCallNode callNode, Object arg0, Object arg1, Object arg2) {
         if (scalar) {
             args[slot0] = arg0;

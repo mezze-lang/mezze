@@ -1025,8 +1025,6 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.drop(getList(r, "xs"), getLong(r, "n")));
         HANDLERS.put("__native_list_reverse", (r, c) ->
             ListNatives.reverse(getList(r, "xs")));
-        HANDLERS.put("__native_list_contains", (r, c) ->
-            ListNatives.contains(getList(r, "xs"), getField(r, "x")));
         HANDLERS.put("__native_list_sort", (r, c) ->
             ListNatives.sort(getList(r, "xs")));
         HANDLERS.put("__native_list_range", (r, c) ->
@@ -1106,7 +1104,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Dedup
         HANDLERS.put("__native_list_dedup", (r, c) ->
-            ListNatives.dedup(getList(r, "xs")));
+            ListNatives.dedup(getList(r, "xs"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_list_dedup_by", (r, c) ->
             ListNatives.dedupBy(getList(r, "xs"), getFunction(r, "f"), c));
 
@@ -1122,7 +1120,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Group Consecutive
         HANDLERS.put("__native_list_group_consecutive", (r, c) ->
-            ListNatives.groupConsecutive(getList(r, "xs")));
+            ListNatives.groupConsecutive(getList(r, "xs"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_list_group_consecutive_by", (r, c) ->
             ListNatives.groupConsecutiveBy(getList(r, "xs"), getFunction(r, "f"), c));
 
@@ -1151,10 +1149,8 @@ public final class NativeDispatch extends MezzeNode {
         // Task #17: Additional operations
         HANDLERS.put("__native_list_equals", (r, c) ->
             ListNatives.equals(getList(r, "xs"), getList(r, "ys"), getFunction(r, "eq"), c));
-        HANDLERS.put("__native_list_index_of", (r, c) ->
-            ListNatives.indexOf(getList(r, "xs"), getField(r, "x")));
         HANDLERS.put("__native_list_last_index_of", (r, c) ->
-            ListNatives.lastIndexOf(getList(r, "xs"), getField(r, "x")));
+            ListNatives.lastIndexOf(getList(r, "xs"), getField(r, "x"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_list_slice", (r, c) ->
             ListNatives.slice(getList(r, "xs"), getLong(r, "start"), getLong(r, "end")));
 

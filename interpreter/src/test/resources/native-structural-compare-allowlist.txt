@@ -13,14 +13,9 @@ ListNatives.java:binarySearch
 ListNatives.java:binarySearchInsertPoint
 ListNatives.java:compare
 ListNatives.java:compareElements
-ListNatives.java:contains
-ListNatives.java:dedup
 ListNatives.java:dedupBy
 ListNatives.java:deepEquals
-ListNatives.java:groupConsecutive
 ListNatives.java:groupConsecutiveBy
-ListNatives.java:indexOf
-ListNatives.java:lastIndexOf
 ListNatives.java:maxBy
 ListNatives.java:minBy
 ListNatives.java:sortByKey

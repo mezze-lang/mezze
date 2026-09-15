@@ -279,41 +279,6 @@ public final class ListNatives {
         return MezzeVariant.some(acc);
     }
 
-    // ==================== Search Operations ====================
-
-    @TruffleBoundary
-    public static boolean contains(MezzeList list, Object element) {
-        // head/tail walk — O(n) instead of O(n²) via get(i).
-        // Specialized fast paths avoid deepEquals overhead per element.
-        MezzeList current = list;
-        if (element instanceof Long target) {
-            long t = target;
-            while (!current.isEmpty()) {
-                if (current instanceof MezzeLongCons lc) {
-                    if (lc.headLong() == t) return true;
-                } else {
-                    Object h = current.head();
-                    if (h instanceof Long l && l.longValue() == t) return true;
-                }
-                current = current.tail();
-            }
-            return false;
-        }
-        if (element instanceof String target) {
-            while (!current.isEmpty()) {
-                Object h = current.head();
-                if (h instanceof String s && s.equals(target)) return true;
-                current = current.tail();
-            }
-            return false;
-        }
-        // Generic path for records, variants, etc.
-        while (!current.isEmpty()) {
-            if (deepEquals(current.head(), element)) return true;
-            current = current.tail();
-        }
-        return false;
-    }
 
     public static MezzeVariant find(MezzeList list, MezzeFunction predicate,
 
@@ -630,6 +595,105 @@ public final class ListNatives {
 
 
 
+    public static MezzeVariant lastIndexOf(MezzeList list, Object element, MezzeFunction eqFn,
+                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
+        Object[] src = list.toArray();
+        for (int i = src.length - 1; i >= 0; i--) {
+            if (eq.callEq(callNode, src[i], element)) return MezzeVariant.some((long) i);
+        }
+        return MezzeVariant.none();
+    }
+
+    public static MezzeList dedup(MezzeList list, MezzeFunction eqFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (list.isEmpty()) return list;
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
+        Object[] src = list.toArray();
+        java.util.ArrayList<Object> result = new java.util.ArrayList<>();
+        Object last = src[0];
+        result.add(last);
+        for (int i = 1; i < src.length; i++) {
+            Object curr = src[i];
+            if (!eq.callEq(callNode, curr, last)) {
+                result.add(curr);
+                last = curr;
+            }
+        }
+        return MezzeList.of(result.toArray());
+    }
+
+    // Keys compared structurally — see the gap note on `list::dedup_by` (T1.2).
+    public static MezzeList dedupBy(MezzeList list, MezzeFunction keyFn,
+                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (list.isEmpty()) return list;
+        var key = ScalarCall.prepare1(keyFn, "x");
+        Object[] src = list.toArray();
+        java.util.ArrayList<Object> result = new java.util.ArrayList<>();
+        Object lastElem = src[0];
+        Object lastKey = key.call1(callNode, lastElem);
+        result.add(lastElem);
+        for (int i = 1; i < src.length; i++) {
+            Object elem = src[i];
+            Object k = key.call1(callNode, elem);
+            if (!java.util.Objects.equals(k, lastKey)) {
+                result.add(elem);
+                lastElem = elem;
+                lastKey = k;
+            }
+        }
+        return MezzeList.of(result.toArray());
+    }
+
+    public static MezzeList groupConsecutive(MezzeList list, MezzeFunction eqFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (list.isEmpty()) return MezzeList.empty();
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
+        Object[] src = list.toArray();
+        java.util.ArrayList<Object> groups = new java.util.ArrayList<>();
+        java.util.ArrayList<Object> currentGroup = new java.util.ArrayList<>();
+        Object currentKey = src[0];
+        currentGroup.add(currentKey);
+        for (int i = 1; i < src.length; i++) {
+            Object elem = src[i];
+            if (eq.callEq(callNode, elem, currentKey)) {
+                currentGroup.add(elem);
+            } else {
+                groups.add(MezzeList.of(currentGroup.toArray()));
+                currentGroup = new java.util.ArrayList<>();
+                currentGroup.add(elem);
+                currentKey = elem;
+            }
+        }
+        groups.add(MezzeList.of(currentGroup.toArray()));
+        return MezzeList.of(groups.toArray());
+    }
+
+    // Keys compared structurally — see the gap note on `list::group_consecutive_by` (T1.2).
+    public static MezzeList groupConsecutiveBy(MezzeList list, MezzeFunction keyFn,
+                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (list.isEmpty()) return MezzeList.empty();
+        var key = ScalarCall.prepare1(keyFn, "x");
+        Object[] src = list.toArray();
+        java.util.ArrayList<Object> groups = new java.util.ArrayList<>();
+        java.util.ArrayList<Object> currentGroup = new java.util.ArrayList<>();
+        Object firstElem = src[0];
+        Object currentKey = key.call1(callNode, firstElem);
+        currentGroup.add(firstElem);
+        for (int i = 1; i < src.length; i++) {
+            Object elem = src[i];
+            Object k = key.call1(callNode, elem);
+            if (java.util.Objects.equals(k, currentKey)) {
+                currentGroup.add(elem);
+            } else {
+                groups.add(MezzeList.of(currentGroup.toArray()));
+                currentGroup = new java.util.ArrayList<>();
+                currentGroup.add(elem);
+                currentKey = k;
+            }
+        }
+        groups.add(MezzeList.of(currentGroup.toArray()));
+        return MezzeList.of(groups.toArray());
+    }
+
     private static int compare(Object a, Object b) {
         if (a instanceof Long && b instanceof Long) {
             return Long.compare((Long) a, (Long) b);
@@ -839,45 +903,7 @@ public final class ListNatives {
         );
     }
 
-    // ==================== Dedup ====================
 
-    @TruffleBoundary
-    public static MezzeList dedup(MezzeList list) {
-        if (list.isEmpty()) return list;
-        Object[] src = list.toArray();
-        java.util.ArrayList<Object> result = new java.util.ArrayList<>();
-        Object last = src[0];
-        result.add(last);
-        for (int i = 1; i < src.length; i++) {
-            Object curr = src[i];
-            if (!java.util.Objects.equals(curr, last)) {
-                result.add(curr);
-                last = curr;
-            }
-        }
-        return MezzeList.of(result.toArray());
-    }
-
-    public static MezzeList dedupBy(MezzeList list, MezzeFunction keyFn,
-                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (list.isEmpty()) return list;
-        var ctx = ScalarCall.prepare1(keyFn, "x");
-        Object[] src = list.toArray();
-        java.util.ArrayList<Object> result = new java.util.ArrayList<>();
-        Object lastElem = src[0];
-        Object lastKey = ctx.call1(callNode, lastElem);
-        result.add(lastElem);
-        for (int i = 1; i < src.length; i++) {
-            Object elem = src[i];
-            Object key = ctx.call1(callNode, elem);
-            if (!java.util.Objects.equals(key, lastKey)) {
-                result.add(elem);
-                lastElem = elem;
-                lastKey = key;
-            }
-        }
-        return MezzeList.of(result.toArray());
-    }
 
     // ==================== Singleton/Nth/Fill ====================
 
@@ -906,58 +932,7 @@ public final class ListNatives {
         return MezzeList.of(arr);
     }
 
-    // ==================== Group Consecutive ====================
 
-    @TruffleBoundary
-    public static MezzeList groupConsecutive(MezzeList list) {
-        if (list.isEmpty()) return MezzeList.empty();
-        Object[] src = list.toArray();
-        java.util.ArrayList<Object> groups = new java.util.ArrayList<>();
-        java.util.ArrayList<Object> currentGroup = new java.util.ArrayList<>();
-        Object currentKey = src[0];
-        currentGroup.add(currentKey);
-
-        for (int i = 1; i < src.length; i++) {
-            Object elem = src[i];
-            if (java.util.Objects.equals(elem, currentKey)) {
-                currentGroup.add(elem);
-            } else {
-                groups.add(MezzeList.of(currentGroup.toArray()));
-                currentGroup = new java.util.ArrayList<>();
-                currentGroup.add(elem);
-                currentKey = elem;
-            }
-        }
-        groups.add(MezzeList.of(currentGroup.toArray()));
-        return MezzeList.of(groups.toArray());
-    }
-
-    public static MezzeList groupConsecutiveBy(MezzeList list, MezzeFunction keyFn,
-                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (list.isEmpty()) return MezzeList.empty();
-        var ctx = ScalarCall.prepare1(keyFn, "x");
-        Object[] src = list.toArray();
-        java.util.ArrayList<Object> groups = new java.util.ArrayList<>();
-        java.util.ArrayList<Object> currentGroup = new java.util.ArrayList<>();
-        Object firstElem = src[0];
-        Object currentKey = ctx.call1(callNode, firstElem);
-        currentGroup.add(firstElem);
-
-        for (int i = 1; i < src.length; i++) {
-            Object elem = src[i];
-            Object key = ctx.call1(callNode, elem);
-            if (java.util.Objects.equals(key, currentKey)) {
-                currentGroup.add(elem);
-            } else {
-                groups.add(MezzeList.of(currentGroup.toArray()));
-                currentGroup = new java.util.ArrayList<>();
-                currentGroup.add(elem);
-                currentKey = key;
-            }
-        }
-        groups.add(MezzeList.of(currentGroup.toArray()));
-        return MezzeList.of(groups.toArray());
-    }
 
     // ==================== FlatMap/TakeWhile/DropWhile ====================
 
@@ -1087,27 +1062,7 @@ public final class ListNatives {
         return true;
     }
 
-    @TruffleBoundary
-    public static MezzeVariant indexOf(MezzeList list, Object element) {
-        Object[] src = list.toArray();
-        for (int i = 0; i < src.length; i++) {
-            if (deepEquals(src[i], element)) {
-                return MezzeVariant.some((long) i);
-            }
-        }
-        return MezzeVariant.none();
-    }
 
-    @TruffleBoundary
-    public static MezzeVariant lastIndexOf(MezzeList list, Object element) {
-        Object[] src = list.toArray();
-        for (int i = src.length - 1; i >= 0; i--) {
-            if (deepEquals(src[i], element)) {
-                return MezzeVariant.some((long) i);
-            }
-        }
-        return MezzeVariant.none();
-    }
 
     @TruffleBoundary
     public static MezzeList slice(MezzeList list, long start, long end) {

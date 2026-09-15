@@ -145,10 +145,10 @@ pub let any: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p
 pub let all: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   __native_list_all { xs = xs, p = p }
 
-## Returns True if the list contains the element.
-## Native head/tail walk with Long-specialized fast path (no callback dispatch).
-pub let contains: { xs: List 'a, x: 'a } with Eq 'a -> Bool = { xs, x } ->
-  __native_list_contains { xs = xs, x = x }
+## Returns True if the list contains the element, by the element's Eq impl.
+pub let contains: { xs: List 'a, x: 'a } with Eq 'a -> Bool = { xs, x } -> do
+  let target = x
+  any { xs = xs, p = { x } -> x == target }
 
 ## Reverses the list.
 pub let reverse: { xs: List 'a } -> List 'a = { xs } -> __native_list_reverse { xs = xs }
@@ -356,10 +356,18 @@ pub let span
     r = drop_while { xs = xs, p = p },
   }
 
-## Removes consecutive duplicate elements.
-pub let dedup: { xs: List 'a } -> List 'a = { xs } -> __native_list_dedup { xs = xs }
+let dedup_with_eq: { xs: List 'a, eq: { a: 'a, b: 'a } -> Bool } -> List 'a = { xs, eq } ->
+  __native_list_dedup { xs = xs, eq = eq }
 
-## Removes consecutive duplicates by a key function.
+## Removes consecutive duplicate elements, by the element's Eq impl.
+pub let dedup: { xs: List 'a } with Eq 'a -> List 'a = { xs } ->
+  dedup_with_eq { xs = xs, eq = { a, b } -> a == b }
+
+## KNOWN GAP (T1.2): keys are compared STRUCTURALLY, so a key type with a
+## custom Eq is ignored. Threading the key's `eq` here binds the WRONG dict —
+## `'b` occurs only in the RETURN type of `f`, which the compiler's call-site
+## dict resolution does not look inside, so it scavenges the arg types and finds
+## `impl Eq for List 'a` instead. Fixed by evidence-based dispatch (plan C.1-C.3).
 pub let dedup_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'a <...> = { xs, f } ->
   __native_list_dedup_by { xs = xs, f = f }
 
@@ -374,11 +382,15 @@ pub let fill: { n: Int, x: 'a } -> List 'a = { n, x } -> __native_list_fill { n 
 pub let fill_with: { n: Int, f: { i: Int } -> 'a <...> } -> List 'a <...> = { n, f } ->
   __native_list_fill_with { n = n, f = f }
 
-## Groups consecutive equal elements into sub-lists.
-pub let group_consecutive: { xs: List 'a } -> List (List 'a) = { xs } ->
-  __native_list_group_consecutive { xs = xs }
+let group_consecutive_with_eq
+  : { xs: List 'a, eq: { a: 'a, b: 'a } -> Bool } -> List (List 'a) = { xs, eq } ->
+  __native_list_group_consecutive { xs = xs, eq = eq }
 
-## Groups consecutive elements by a key function.
+## Groups consecutive equal elements into sub-lists, by the element's Eq impl.
+pub let group_consecutive: { xs: List 'a } with Eq 'a -> List (List 'a) = { xs } ->
+  group_consecutive_with_eq { xs = xs, eq = { a, b } -> a == b }
+
+## KNOWN GAP (T1.2), same cause as `dedup_by` above: keys compared structurally.
 pub let group_consecutive_by
   : { xs: List 'a, f: { x: 'a } -> 'b <...> }
   -> List (List 'a) <...>
@@ -414,12 +426,19 @@ pub let equals: { xs: List 'a, ys: List 'a } with Eq 'a -> Bool = { xs, ys } ->
   list_equals_with_eq { xs = xs, ys = ys, eq = { a, b } -> a == b }
 
 ## Returns the index of the first occurrence, or None.
-pub let index_of: { xs: List 'a, x: 'a } -> Option Int = { xs, x } ->
-  __native_list_index_of { xs = xs, x = x }
+pub let index_of: { xs: List 'a, x: 'a } with Eq 'a -> Option Int = { xs, x } -> do
+  let target = x
+  find_index { xs = xs, p = { x } -> x == target }
+
+## The comparator param is DECLARED so it ties to the element type; the public
+## wrapper then passes the element's own `==`. Same trick as seq (#23).
+let last_index_of_with_eq
+  : { xs: List 'a, x: 'a, eq: { a: 'a, b: 'a } -> Bool } -> Option Int = { xs, x, eq } ->
+  __native_list_last_index_of { xs = xs, x = x, eq = eq }
 
 ## Returns the index of the last occurrence, or None.
-pub let last_index_of: { xs: List 'a, x: 'a } -> Option Int = { xs, x } ->
-  __native_list_last_index_of { xs = xs, x = x }
+pub let last_index_of: { xs: List 'a, x: 'a } with Eq 'a -> Option Int = { xs, x } ->
+  last_index_of_with_eq { xs = xs, x = x, eq = { a, b } -> a == b }
 
 ## Returns a slice from start (inclusive) to end (exclusive).
 pub let slice: { xs: List 'a, start: Int, end: Int } -> List 'a = { xs, start, end } ->
