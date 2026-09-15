@@ -69,6 +69,27 @@ class ContainerElementInstanceTest {
     // from the container arg, not from a field access — see recoverLambdaReturnType.
     @Test fun dequeMinByIdentity() = assertEquals(1L, run("use std::collections::deque\nlet d = deque::from_seq { xs = [ p { x = 3, y = 1 }, p { x = 1, y = 2 } ] }\nlet main = {} -> match deque::min_by { d = d, f = { val } -> val } is\n  Some { val = e } -> px { p = e }\n  None -> 0 - 1\nmain {}"))
 
+    // ---- Deque / NonEmptyList / Set / Map -----------------------------------
+
+    private fun runDq(body: String) = run("use std::collections::deque\nlet d = deque::from_seq { xs = [ p { x = 1, y = 10 }, p { x = 1, y = 20 }, p { x = 2, y = 30 } ] }\n$body")
+
+    @Test fun dequeContains() = assertEquals(true, runDq("let main = {} -> deque::contains { d = d, x = p { x = 2, y = 99 } }\nmain {}"))
+    @Test fun dequeIndexOf() = assertEquals(0L, runDq("let main = {} -> match deque::index_of { d = d, x = p { x = 1, y = 99 } } is\n  Some { val = i } -> i\n  None -> 0 - 1\nmain {}"))
+    @Test fun dequeDedup() = assertEquals(2L, runDq("let main = {} -> deque::size { d = deque::dedup { d = d } }\nmain {}"))
+    // Deque's Ord threads the element Ord; the native comparator returned 0 for
+    // every record, so `<` on two deques of records was always False.
+    @Test fun dequeLt() = assertEquals(true, run("use std::collections::deque\nlet main = {} -> deque::from_seq { xs = [ p { x = 1, y = 0 } ] } < deque::from_seq { xs = [ p { x = 2, y = 0 } ] }\nmain {}"))
+
+    private fun runN(body: String) = run("use std::collections::nonemptylist\n$body")
+    @Test fun nelEq() = assertEquals(true, runN("let main = {} -> match nonemptylist::from_seq { xs = [ p { x = 1, y = 10 } ] } is\n  Some { val = a } -> match nonemptylist::from_seq { xs = [ p { x = 1, y = 99 } ] } is\n    Some { val = b } -> a == b\n    None -> False\n  None -> False\nmain {}"))
+    @Test fun nelContains() = assertEquals(true, runN("let main = {} -> match nonemptylist::from_seq { xs = [ p { x = 1, y = 10 } ] } is\n  Some { val = a } -> nonemptylist::contains { xs = a, x = p { x = 1, y = 99 } }\n  None -> False\nmain {}"))
+
+    // Map min_key / min_value order by the key's / value's own Ord.
+    private fun runM(body: String) = run("use std::collections::map\n$body")
+    private val twoEntryMap = "let m = map::insert { m = map::insert { m = map::empty {}, k = \"a\", v = p { x = 3, y = 0 } }, k = \"b\", v = p { x = 1, y = 0 } }"
+    @Test fun mapMinValue() = assertEquals(1L, runM("$twoEntryMap\nlet main = {} -> match map::min_value { m = m } is\n  Some { val = v } -> px { p = v }\n  None -> 0 - 1\nmain {}"))
+    @Test fun mapContainsValue() = assertEquals(true, runM("$twoEntryMap\nlet main = {} -> map::contains_value { m = m, v = p { x = 3, y = 99 } }\nmain {}"))
+
     // ---- regressions: primitives still work --------------------------------
 
     @Test fun listContainsInt() = assertEquals(true, run("let main = {} -> list::contains { xs = list::from_seq { xs = [1, 2, 3] }, x = 2 }\nmain {}"))

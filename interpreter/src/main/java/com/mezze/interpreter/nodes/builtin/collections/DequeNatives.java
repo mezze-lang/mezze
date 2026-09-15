@@ -171,10 +171,11 @@ public final class DequeNatives {
      * Lexicographic comparison returning -1, 0, or 1.
      */
     @TruffleBoundary
-    public static long compare(MezzeDeque deque1, MezzeDeque deque2) {
+    public static long compare(MezzeDeque deque1, MezzeDeque deque2, MezzeFunction cmpFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var cmpCall = ScalarCall.prepare2(cmpFn, "a", "b");
         int minLen = Math.min(deque1.size(), deque2.size());
         for (int i = 0; i < minLen; i++) {
-            int cmp = compareElements(deque1.get(i), deque2.get(i));
+            int cmp = cmpCall.callCmp(callNode, deque1.get(i), deque2.get(i));
             if (cmp != 0) {
                 return cmp < 0 ? -1L : 1L;
             }
@@ -648,12 +649,13 @@ public final class DequeNatives {
     }
 
     @TruffleBoundary
-    public static MezzeDeque dedup(MezzeDeque deque) {
+    public static MezzeDeque dedup(MezzeDeque deque, MezzeFunction eqFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
         MezzeDeque result = MezzeDeque.empty();
         Object prev = null;
         boolean first = true;
         for (Object elem : deque) {
-            if (first || !deepEquals(elem, prev)) {
+            if (first || !eq.callEq(callNode, elem, prev)) {
                 result = result.pushBack(elem);
                 prev = elem;
                 first = false;

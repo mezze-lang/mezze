@@ -359,10 +359,12 @@ public final class NonEmptyListNatives {
     // ==================== Equality & Comparison ====================
 
     @TruffleBoundary
-    public static boolean equals(MezzeNonEmptyList list1, MezzeNonEmptyList list2) {
+    public static boolean equals(MezzeNonEmptyList list1, MezzeNonEmptyList list2, MezzeFunction eqFn,
+                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list1.size() != list2.size()) return false;
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
         for (int i = 0; i < list1.size(); i++) {
-            if (!deepEquals(list1.get(i), list2.get(i))) {
+            if (!eq.callEq(callNode, list1.get(i), list2.get(i))) {
                 return false;
             }
         }
@@ -373,10 +375,12 @@ public final class NonEmptyListNatives {
      * Lexicographic comparison returning -1, 0, or 1.
      */
     @TruffleBoundary
-    public static long compare(MezzeNonEmptyList list1, MezzeNonEmptyList list2) {
+    public static long compare(MezzeNonEmptyList list1, MezzeNonEmptyList list2, MezzeFunction cmpFn,
+                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var cmpCall = ScalarCall.prepare2(cmpFn, "a", "b");
         int minLen = Math.min(list1.size(), list2.size());
         for (int i = 0; i < minLen; i++) {
-            int cmp = compareElements(list1.get(i), list2.get(i));
+            int cmp = cmpCall.callCmp(callNode, list1.get(i), list2.get(i));
             if (cmp != 0) {
                 return cmp < 0 ? -1L : 1L;
             }

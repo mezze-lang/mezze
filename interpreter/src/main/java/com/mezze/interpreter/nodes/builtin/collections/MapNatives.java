@@ -251,9 +251,10 @@ public final class MapNatives {
     // ==================== Contains Value ====================
 
     @TruffleBoundary
-    public static boolean containsValue(MezzeMap map, Object value) {
+    public static boolean containsValue(MezzeMap map, Object value, MezzeFunction eqFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
         for (Object v : map.values()) {
-            if (java.util.Objects.equals(v, value)) {
+            if (eq.callEq(callNode, v, value)) {
                 return true;
             }
         }
@@ -338,11 +339,12 @@ public final class MapNatives {
     // ==================== Task #21: Min/Max Operations ====================
 
     @TruffleBoundary
-    public static MezzeVariant minKey(MezzeMap map) {
+    public static MezzeVariant minKey(MezzeMap map, MezzeFunction cmpFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (map.isEmpty()) return MezzeVariant.none();
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         Object minKey = null;
         for (Object key : map.keys()) {
-            if (minKey == null || compare(key, minKey) < 0) {
+            if (minKey == null || cmp.callCmp(callNode, key, minKey) < 0) {
                 minKey = key;
             }
         }
@@ -350,11 +352,12 @@ public final class MapNatives {
     }
 
     @TruffleBoundary
-    public static MezzeVariant maxKey(MezzeMap map) {
+    public static MezzeVariant maxKey(MezzeMap map, MezzeFunction cmpFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (map.isEmpty()) return MezzeVariant.none();
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         Object maxKey = null;
         for (Object key : map.keys()) {
-            if (maxKey == null || compare(key, maxKey) > 0) {
+            if (maxKey == null || cmp.callCmp(callNode, key, maxKey) > 0) {
                 maxKey = key;
             }
         }
@@ -362,11 +365,12 @@ public final class MapNatives {
     }
 
     @TruffleBoundary
-    public static MezzeVariant minValue(MezzeMap map) {
+    public static MezzeVariant minValue(MezzeMap map, MezzeFunction cmpFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (map.isEmpty()) return MezzeVariant.none();
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         Object minVal = null;
         for (Object val : map.values()) {
-            if (minVal == null || compare(val, minVal) < 0) {
+            if (minVal == null || cmp.callCmp(callNode, val, minVal) < 0) {
                 minVal = val;
             }
         }
@@ -374,11 +378,12 @@ public final class MapNatives {
     }
 
     @TruffleBoundary
-    public static MezzeVariant maxValue(MezzeMap map) {
+    public static MezzeVariant maxValue(MezzeMap map, MezzeFunction cmpFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (map.isEmpty()) return MezzeVariant.none();
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         Object maxVal = null;
         for (Object val : map.values()) {
-            if (maxVal == null || compare(val, maxVal) > 0) {
+            if (maxVal == null || cmp.callCmp(callNode, val, maxVal) > 0) {
                 maxVal = val;
             }
         }

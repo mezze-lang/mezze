@@ -1310,9 +1310,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_set_reduce", (r, c) ->
             SetNatives.reduce(getSet(r, "s"), getFunction(r, "f"), c));
         HANDLERS.put("__native_set_min_by", (r, c) ->
-            SetNatives.minBy(getSet(r, "s"), getFunction(r, "f"), c));
+            SetNatives.minBy(getSet(r, "s"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_set_max_by", (r, c) ->
-            SetNatives.maxBy(getSet(r, "s"), getFunction(r, "f"), c));
+            SetNatives.maxBy(getSet(r, "s"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_set_partition", (r, c) ->
             SetNatives.partition(getSet(r, "s"), getFunction(r, "p"), c));
         HANDLERS.put("__native_set_sum_float", (r, c) ->
@@ -1506,7 +1506,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Additional operations
         HANDLERS.put("__native_map_contains_value", (r, c) ->
-            MapNatives.containsValue(getMap(r, "m"), getField(r, "v")));
+            MapNatives.containsValue(getMap(r, "m"), getField(r, "v"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_map_update", (r, c) ->
             MapNatives.update(getMap(r, "m"), getField(r, "k"), getFunction(r, "f"), c));
         HANDLERS.put("__native_map_get_or_default", (r, c) ->
@@ -1524,13 +1524,13 @@ public final class NativeDispatch extends MezzeNode {
 
         // Task #21: Min/Max operations
         HANDLERS.put("__native_map_min_key", (r, c) ->
-            MapNatives.minKey(getMap(r, "m")));
+            MapNatives.minKey(getMap(r, "m"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_map_max_key", (r, c) ->
-            MapNatives.maxKey(getMap(r, "m")));
+            MapNatives.maxKey(getMap(r, "m"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_map_min_value", (r, c) ->
-            MapNatives.minValue(getMap(r, "m")));
+            MapNatives.minValue(getMap(r, "m"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_map_max_value", (r, c) ->
-            MapNatives.maxValue(getMap(r, "m")));
+            MapNatives.maxValue(getMap(r, "m"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_map_invert", (r, c) ->
             MapNatives.invert(getMap(r, "m")));
 
@@ -1716,7 +1716,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_deque_equals", (r, c) ->
             DequeNatives.equals(getDeque(r, "d1"), getDeque(r, "d2")));
         HANDLERS.put("__native_deque_compare", (r, c) ->
-            DequeNatives.compare(getDeque(r, "d1"), getDeque(r, "d2")));
+            DequeNatives.compare(getDeque(r, "d1"), getDeque(r, "d2"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_deque_to_list", (r, c) ->
             DequeNatives.toList(getDeque(r, "d")));
         HANDLERS.put("__native_deque_to_seq", (r, c) ->
@@ -1749,8 +1749,6 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.product(getDeque(r, "d")));
 
         // Contains
-        HANDLERS.put("__native_deque_contains", (r, c) ->
-            DequeNatives.contains(getDeque(r, "d"), getField(r, "x")));
 
         // Conversion
         HANDLERS.put("__native_deque_to_seq", (r, c) ->
@@ -1787,8 +1785,6 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.get(getDeque(r, "d"), getLong(r, "i")));
         HANDLERS.put("__native_deque_slice", (r, c) ->
             DequeNatives.slice(getDeque(r, "d"), getLong(r, "start"), getLong(r, "end")));
-        HANDLERS.put("__native_deque_index_of", (r, c) ->
-            DequeNatives.indexOf(getDeque(r, "d"), getField(r, "x")));
         HANDLERS.put("__native_deque_find_index", (r, c) ->
             DequeNatives.findIndex(getDeque(r, "d"), getFunction(r, "p"), c));
 
@@ -1806,7 +1802,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_deque_scan", (r, c) ->
             DequeNatives.scan(getDeque(r, "d"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_deque_dedup", (r, c) ->
-            DequeNatives.dedup(getDeque(r, "d")));
+            DequeNatives.dedup(getDeque(r, "d"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_deque_dedup_by", (r, c) ->
             DequeNatives.dedupBy(getDeque(r, "d"), getFunction(r, "f"), c));
         HANDLERS.put("__native_deque_intersperse", (r, c) ->
@@ -1880,8 +1876,6 @@ public final class NativeDispatch extends MezzeNode {
             NonEmptyListNatives.prependList(getList(r, "xs"), getField(r, "y")));
         HANDLERS.put("__native_nel_reverse", (r, c) ->
             NonEmptyListNatives.reverse(getNonEmptyList(r, "xs")));
-        HANDLERS.put("__native_nel_contains", (r, c) ->
-            NonEmptyListNatives.contains(getNonEmptyList(r, "xs"), getField(r, "x")));
         HANDLERS.put("__native_nel_intersperse", (r, c) ->
             NonEmptyListNatives.intersperse(getNonEmptyList(r, "xs"), getField(r, "sep")));
         HANDLERS.put("__native_nel_sort", (r, c) ->
@@ -1911,9 +1905,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_nel_sort_by", (r, c) ->
             NonEmptyListNatives.sortBy(getNonEmptyList(r, "xs"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_nel_equals", (r, c) ->
-            NonEmptyListNatives.equals(getNonEmptyList(r, "xs"), getNonEmptyList(r, "ys")));
+            NonEmptyListNatives.equals(getNonEmptyList(r, "xs"), getNonEmptyList(r, "ys"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_nel_compare", (r, c) ->
-            NonEmptyListNatives.compare(getNonEmptyList(r, "xs"), getNonEmptyList(r, "ys")));
+            NonEmptyListNatives.compare(getNonEmptyList(r, "xs"), getNonEmptyList(r, "ys"), getFunction(r, "cmp"), c));
     }
 
     // ==================== Nat ====================

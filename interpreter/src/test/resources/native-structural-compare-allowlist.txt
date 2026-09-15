@@ -3,7 +3,6 @@
 DequeNatives.java:compare
 DequeNatives.java:compareElements
 DequeNatives.java:contains
-DequeNatives.java:dedup
 DequeNatives.java:dedupBy
 DequeNatives.java:deepEquals
 DequeNatives.java:indexOf
@@ -17,16 +16,9 @@ ListNatives.java:minBy
 ListNatives.java:sortByKey
 ListNatives.java:upperBound
 MapNatives.java:compare
-MapNatives.java:containsValue
-MapNatives.java:maxKey
-MapNatives.java:maxValue
-MapNatives.java:minKey
-MapNatives.java:minValue
-NonEmptyListNatives.java:compare
 NonEmptyListNatives.java:compareElements
 NonEmptyListNatives.java:contains
 NonEmptyListNatives.java:deepEquals
-NonEmptyListNatives.java:equals
 SeqNatives.java:cmpInt
 SeqNatives.java:compare
 SeqNatives.java:dedupBy
@@ -37,8 +29,6 @@ SeqNatives.java:median
 SeqNatives.java:sortByKey
 SeqNatives.java:split
 SetNatives.java:compare
-SetNatives.java:maxBy
-SetNatives.java:minBy
 SortedMapNatives.java:ceilingKey
 SortedMapNatives.java:compare
 SortedMapNatives.java:compareMaps

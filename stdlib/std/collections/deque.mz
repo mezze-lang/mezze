@@ -18,15 +18,21 @@ impl Eq for Deque 'a where {
 }
 
 ## Lexicographic ordering for deques.
+## Lexicographic ordering threading the ELEMENT's Ord (the native comparator only
+## knows primitives and returns 0 for anything else — every record compared equal).
+let deque_compare_with_cmp
+  : { d1: Deque 'a, d2: Deque 'a, cmp: { a: 'a, b: 'a } -> Int } -> Int = { d1, d2, cmp } ->
+  __native_deque_compare { d1 = d1, d2 = d2, cmp = cmp }
+
 impl Ord for Deque 'a where {
   lt: { it: Deque 'a, r: Deque 'a } with Ord 'a -> Bool = { it, r } ->
-    __native_deque_compare { d1 = it, d2 = r } == (0 - 1),
+    deque_compare_with_cmp { d1 = it, d2 = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } == (0 - 1),
   le: { it: Deque 'a, r: Deque 'a } with Ord 'a -> Bool = { it, r } ->
-    __native_deque_compare { d1 = it, d2 = r } != 1,
+    deque_compare_with_cmp { d1 = it, d2 = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } != 1,
   gt: { it: Deque 'a, r: Deque 'a } with Ord 'a -> Bool = { it, r } ->
-    __native_deque_compare { d1 = it, d2 = r } == 1,
+    deque_compare_with_cmp { d1 = it, d2 = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } == 1,
   ge: { it: Deque 'a, r: Deque 'a } with Ord 'a -> Bool = { it, r } ->
-    __native_deque_compare { d1 = it, d2 = r } != (0 - 1),
+    deque_compare_with_cmp { d1 = it, d2 = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } != (0 - 1),
 }
 
 ## Creates an empty deque.
@@ -146,8 +152,9 @@ pub let slice: { d: Deque 'a, start: Int, end: Int } -> Deque 'a = { d, start, e
   __native_deque_slice { d = d, start = start, end = end }
 
 ## Returns the index of the first occurrence, or None.
-pub let index_of: { d: Deque 'a, x: 'a } -> Option Int = { d, x } ->
-  __native_deque_index_of { d = d, x = x }
+pub let index_of: { d: Deque 'a, x: 'a } with Eq 'a -> Option Int = { d, x } -> do
+  let target = x
+  find_index { d = d, p = { val } -> val == target }
 
 ## Returns the index of the first element matching the predicate, or None.
 pub let find_index
@@ -182,7 +189,12 @@ pub let scan
   = { d, init, f } -> __native_deque_scan { d = d, init = init, f = f }
 
 ## Removes consecutive duplicate elements.
-pub let dedup: { d: Deque 'a } -> Deque 'a = { d } -> __native_deque_dedup { d = d }
+let dedup_with_eq: { d: Deque 'a, eq: { a: 'a, b: 'a } -> Bool } -> Deque 'a = { d, eq } ->
+  __native_deque_dedup { d = d, eq = eq }
+
+## Removes consecutive duplicate elements, by the element's Eq impl.
+pub let dedup: { d: Deque 'a } with Eq 'a -> Deque 'a = { d } ->
+  dedup_with_eq { d = d, eq = { a, b } -> a == b }
 
 ## Removes consecutive duplicates by a key function.
 pub let dedup_by: { d: Deque 'a, f: { val: 'a } -> 'b <...> } -> Deque 'a <...> = { d, f } ->
@@ -304,8 +316,9 @@ pub let max: { d: Deque 'a } with Ord 'a -> Option 'a = { d } ->
   reduce { d = d, f = { acc, x } -> if x > acc then x else acc }
 
 ## Returns True if the deque contains the element.
-pub let contains: { d: Deque 'a, x: 'a } with Eq 'a -> Bool = { d, x } ->
-  __native_deque_contains { d = d, x = x }
+pub let contains: { d: Deque 'a, x: 'a } with Eq 'a -> Bool = { d, x } -> do
+  let target = x
+  any { d = d, p = { x } -> x == target }
 
 ## Executes f for each element, for side effects only.
 pub let for_each: { d: Deque 'a, f: { x: 'a } -> 'b <...> } -> {} <...> = { d, f } ->
