@@ -280,31 +280,7 @@ public final class DequeNatives {
         return cnt;
     }
 
-    // ==================== Min/Max/Sum/Product ====================
 
-    @TruffleBoundary
-    public static MezzeVariant min(MezzeDeque deque) {
-        if (deque.isEmpty()) return MezzeVariant.none();
-        Object minVal = null;
-        for (Object elem : deque) {
-            if (minVal == null || compare(elem, minVal) < 0) {
-                minVal = elem;
-            }
-        }
-        return MezzeVariant.some(minVal);
-    }
-
-    @TruffleBoundary
-    public static MezzeVariant max(MezzeDeque deque) {
-        if (deque.isEmpty()) return MezzeVariant.none();
-        Object maxVal = null;
-        for (Object elem : deque) {
-            if (maxVal == null || compare(elem, maxVal) > 0) {
-                maxVal = elem;
-            }
-        }
-        return MezzeVariant.some(maxVal);
-    }
 
     @TruffleBoundary
     public static long sum(MezzeDeque deque) {

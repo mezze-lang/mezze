@@ -628,34 +628,25 @@ public final class ListNatives {
         return false;
     }
 
-    // ==================== Min/Max ====================
 
-    @TruffleBoundary
-    public static MezzeVariant min(MezzeList list) {
-        if (list.isEmpty()) return MezzeVariant.none();
-        Object[] src = list.toArray();
-        Object minVal = src[0];
-        for (int i = 1; i < src.length; i++) {
-            Object curr = src[i];
-            if (compare(curr, minVal) < 0) {
-                minVal = curr;
-            }
-        }
-        return MezzeVariant.some(minVal);
-    }
 
-    @TruffleBoundary
-    public static MezzeVariant max(MezzeList list) {
-        if (list.isEmpty()) return MezzeVariant.none();
-        Object[] src = list.toArray();
-        Object maxVal = src[0];
-        for (int i = 1; i < src.length; i++) {
-            Object curr = src[i];
-            if (compare(curr, maxVal) > 0) {
-                maxVal = curr;
-            }
+    private static int compare(Object a, Object b) {
+        if (a instanceof Long && b instanceof Long) {
+            return Long.compare((Long) a, (Long) b);
         }
-        return MezzeVariant.some(maxVal);
+        if (a instanceof Double && b instanceof Double) {
+            return Double.compare((Double) a, (Double) b);
+        }
+        if (a instanceof String && b instanceof String) {
+            return ((String) a).compareTo((String) b);
+        }
+        if (a instanceof Long && b instanceof Double) {
+            return Double.compare(((Long) a).doubleValue(), (Double) b);
+        }
+        if (a instanceof Double && b instanceof Long) {
+            return Double.compare((Double) a, ((Long) b).doubleValue());
+        }
+        return 0;
     }
 
     public static MezzeVariant minBy(MezzeList list, MezzeFunction keyFn,
@@ -1074,26 +1065,6 @@ public final class ListNatives {
         return MezzeList.of(results.toArray());
     }
 
-    // ==================== Helper for fillWith ====================
-
-    private static int compare(Object a, Object b) {
-        if (a instanceof Long && b instanceof Long) {
-            return Long.compare((Long) a, (Long) b);
-        }
-        if (a instanceof Double && b instanceof Double) {
-            return Double.compare((Double) a, (Double) b);
-        }
-        if (a instanceof String && b instanceof String) {
-            return ((String) a).compareTo((String) b);
-        }
-        if (a instanceof Long && b instanceof Double) {
-            return Double.compare(((Long) a).doubleValue(), (Double) b);
-        }
-        if (a instanceof Double && b instanceof Long) {
-            return Double.compare((Double) a, ((Long) b).doubleValue());
-        }
-        return 0;
-    }
 
     // ==================== Task #17: Additional Operations ====================
 
@@ -1465,17 +1436,6 @@ public final class ListNatives {
         return Integer.compare(src1.length, src2.length);
     }
 
-    @TruffleBoundary
-    public static boolean isSorted(MezzeList list) {
-        if (list.size() <= 1) return true;
-        Object[] src = list.toArray();
-        for (int i = 1; i < src.length; i++) {
-            if (compareElements(src[i - 1], src[i]) > 0) {
-                return false;
-            }
-        }
-        return true;
-    }
 
     public static boolean isSortedBy(MezzeList list, MezzeFunction cmp,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -1491,17 +1451,6 @@ public final class ListNatives {
         return true;
     }
 
-    @TruffleBoundary
-    public static boolean isSortedDescending(MezzeList list) {
-        if (list.size() <= 1) return true;
-        Object[] src = list.toArray();
-        for (int i = 1; i < src.length; i++) {
-            if (compareElements(src[i - 1], src[i]) < 0) {
-                return false;
-            }
-        }
-        return true;
-    }
 
     // Helper for element comparison
     private static int compareElements(Object a, Object b) {

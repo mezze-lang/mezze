@@ -717,10 +717,6 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.unzip(getSeq(r, "xs")));
 
         // Min/Max/Sum/Product
-        HANDLERS.put("__native_seq_min", (r, c) ->
-            SeqNatives.min(getSeq(r, "xs")));
-        HANDLERS.put("__native_seq_max", (r, c) ->
-            SeqNatives.max(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_min_by", (r, c) ->
             SeqNatives.minBy(getSeq(r, "xs"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_seq_max_by", (r, c) ->
@@ -793,8 +789,6 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.rotateRight(getSeq(r, "xs"), getLong(r, "n")));
 
         // Binary Search
-        HANDLERS.put("__native_seq_binary_search", (r, c) ->
-            SeqNatives.binarySearch(getSeq(r, "xs"), getField(r, "x")));
         HANDLERS.put("__native_seq_binary_search_by", (r, c) ->
             SeqNatives.binarySearchBy(getSeq(r, "xs"), getField(r, "x"), getFunction(r, "cmp"), c));
 
@@ -857,8 +851,6 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.isSortedDescending(getSeq(r, "xs"), getFunction(r, "cmp"), c));
 
         // Counting
-        HANDLERS.put("__native_seq_count_element", (r, c) ->
-            SeqNatives.countElement(getSeq(r, "xs"), getField(r, "x")));
 
         // Update Operations
         HANDLERS.put("__native_seq_update", (r, c) ->
@@ -1079,10 +1071,6 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.sortBy(getList(r, "xs"), getFunction(r, "cmp"), c));
 
         // Min/Max/Sum/Product
-        HANDLERS.put("__native_list_min", (r, c) ->
-            ListNatives.min(getList(r, "xs")));
-        HANDLERS.put("__native_list_max", (r, c) ->
-            ListNatives.max(getList(r, "xs")));
         HANDLERS.put("__native_list_min_by", (r, c) ->
             ListNatives.minBy(getList(r, "xs"), getFunction(r, "f"), c));
         HANDLERS.put("__native_list_max_by", (r, c) ->
@@ -1229,16 +1217,10 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.productFloat(getList(r, "xs")));
 
         // Task #36: Comparison operations
-        HANDLERS.put("__native_list_compare", (r, c) ->
-            ListNatives.compare(getList(r, "xs"), getList(r, "ys")));
         HANDLERS.put("__native_list_lexicographic_compare", (r, c) ->
             ListNatives.lexicographicCompare(getList(r, "xs"), getList(r, "ys"), getFunction(r, "cmp"), c));
-        HANDLERS.put("__native_list_is_sorted", (r, c) ->
-            ListNatives.isSorted(getList(r, "xs")));
         HANDLERS.put("__native_list_is_sorted_by", (r, c) ->
             ListNatives.isSortedBy(getList(r, "xs"), getFunction(r, "cmp"), c));
-        HANDLERS.put("__native_list_is_sorted_descending", (r, c) ->
-            ListNatives.isSortedDescending(getList(r, "xs")));
 
         // Task #33: Binary search operations
         HANDLERS.put("__native_list_binary_search", (r, c) ->
@@ -1317,10 +1299,6 @@ public final class NativeDispatch extends MezzeNode {
             SetNatives.count(getSet(r, "s"), getFunction(r, "p"), c));
 
         // Min/Max/Sum/Product
-        HANDLERS.put("__native_set_min", (r, c) ->
-            SetNatives.min(getSet(r, "s")));
-        HANDLERS.put("__native_set_max", (r, c) ->
-            SetNatives.max(getSet(r, "s")));
         HANDLERS.put("__native_set_sum", (r, c) ->
             SetNatives.sum(getSet(r, "s")));
         HANDLERS.put("__native_set_product", (r, c) ->
@@ -1469,8 +1447,6 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.headSet(getSortedSet(r, "s"), getField(r, "to")));
         HANDLERS.put("__native_sorted_set_tail_set", (r, c) ->
             SortedSetNatives.tailSet(getSortedSet(r, "s"), getField(r, "from")));
-        HANDLERS.put("__native_sorted_set_sub_set", (r, c) ->
-            SortedSetNatives.subSet(getSortedSet(r, "s"), getField(r, "lo"), getField(r, "hi")));
 
         // Task #30: Collect operations
         HANDLERS.put("__native_sorted_set_filter_map", (r, c) ->
@@ -1653,8 +1629,6 @@ public final class NativeDispatch extends MezzeNode {
             SortedMapNatives.count(getSortedMap(r, "m"), getFunction(r, "p"), c));
 
         // Additional operations
-        HANDLERS.put("__native_sorted_map_contains_value", (r, c) ->
-            SortedMapNatives.containsValue(getSortedMap(r, "m"), getField(r, "v")));
         HANDLERS.put("__native_sorted_map_get_or_default", (r, c) ->
             SortedMapNatives.getOrDefault(getSortedMap(r, "m"), getField(r, "k"), getField(r, "default")));
         HANDLERS.put("__native_sorted_map_update", (r, c) ->
@@ -1683,10 +1657,6 @@ public final class NativeDispatch extends MezzeNode {
             SortedMapNatives.floorKey(getSortedMap(r, "m"), getField(r, "k")));
         HANDLERS.put("__native_sorted_map_ceiling_key", (r, c) ->
             SortedMapNatives.ceilingKey(getSortedMap(r, "m"), getField(r, "k")));
-        HANDLERS.put("__native_sorted_map_lower_key", (r, c) ->
-            SortedMapNatives.lowerKey(getSortedMap(r, "m"), getField(r, "k")));
-        HANDLERS.put("__native_sorted_map_higher_key", (r, c) ->
-            SortedMapNatives.higherKey(getSortedMap(r, "m"), getField(r, "k")));
         HANDLERS.put("__native_sorted_map_floor_entry", (r, c) ->
             SortedMapNatives.floorEntry(getSortedMap(r, "m"), getField(r, "k")));
         HANDLERS.put("__native_sorted_map_ceiling_entry", (r, c) ->
@@ -1777,10 +1747,6 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.count(getDeque(r, "d"), getFunction(r, "p"), c));
 
         // Min/Max/Sum/Product
-        HANDLERS.put("__native_deque_min", (r, c) ->
-            DequeNatives.min(getDeque(r, "d")));
-        HANDLERS.put("__native_deque_max", (r, c) ->
-            DequeNatives.max(getDeque(r, "d")));
         HANDLERS.put("__native_deque_sum", (r, c) ->
             DequeNatives.sum(getDeque(r, "d")));
         HANDLERS.put("__native_deque_product", (r, c) ->

@@ -487,16 +487,6 @@ public final class SortedSetNatives {
         return result;
     }
 
-    @TruffleBoundary
-    public static MezzeSortedSet subSet(MezzeSortedSet set, Object lo, Object hi) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
-        for (Object elem : set) {
-            if (compare(elem, lo) >= 0 && compare(elem, hi) < 0) {
-                result = result.addObject(elem);
-            }
-        }
-        return result;
-    }
 
     // ==================== Comparison Helper ====================
 

@@ -839,51 +839,7 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(arr);
     }
 
-    // ==================== Min/Max/Sum/Product ====================
 
-    @TruffleBoundary
-    public static MezzeVariant min(MezzeSeq seq) {
-        if (seq.isEmpty()) return MezzeVariant.none();
-        // OPTIMIZED: Use specialized nodes for unboxed storage
-        SeqStorage storage = seq.getStorage();
-        if (storage instanceof LongSeqStorage longStorage) {
-            return MezzeVariant.some(SeqMinLongNode.getUncached().execute(longStorage));
-        }
-        if (storage instanceof DoubleSeqStorage doubleStorage) {
-            return MezzeVariant.some(SeqMinDoubleNode.getUncached().execute(doubleStorage));
-        }
-        // Fallback for boxed storage
-        Object minVal = seq.get(0);
-        for (int i = 1; i < seq.size(); i++) {
-            Object curr = seq.get(i);
-            if (compare(curr, minVal) < 0) {
-                minVal = curr;
-            }
-        }
-        return MezzeVariant.some(minVal);
-    }
-
-    @TruffleBoundary
-    public static MezzeVariant max(MezzeSeq seq) {
-        if (seq.isEmpty()) return MezzeVariant.none();
-        // OPTIMIZED: Use specialized nodes for unboxed storage
-        SeqStorage storage = seq.getStorage();
-        if (storage instanceof LongSeqStorage longStorage) {
-            return MezzeVariant.some(SeqMaxLongNode.getUncached().execute(longStorage));
-        }
-        if (storage instanceof DoubleSeqStorage doubleStorage) {
-            return MezzeVariant.some(SeqMaxDoubleNode.getUncached().execute(doubleStorage));
-        }
-        // Fallback for boxed storage
-        Object maxVal = seq.get(0);
-        for (int i = 1; i < seq.size(); i++) {
-            Object curr = seq.get(i);
-            if (compare(curr, maxVal) > 0) {
-                maxVal = curr;
-            }
-        }
-        return MezzeVariant.some(maxVal);
-    }
 
     // Keys are compared via the threaded comparator (the key type's Ord impl),
     // not the primitive-only compare() — see SeqKeyOrdTest.
@@ -1241,20 +1197,6 @@ public final class SeqNatives {
         return seq.drop(size - rot).concat(seq.take(size - rot));
     }
 
-    // ==================== Binary Search ====================
-
-    @TruffleBoundary
-    public static MezzeVariant binarySearch(MezzeSeq seq, Object target) {
-        int lo = 0, hi = seq.size() - 1;
-        while (lo <= hi) {
-            int mid = lo + (hi - lo) / 2;
-            int cmp = compare(seq.get(mid), target);
-            if (cmp == 0) return MezzeVariant.some((long) mid);
-            if (cmp < 0) lo = mid + 1;
-            else hi = mid - 1;
-        }
-        return MezzeVariant.none();
-    }
 
     public static MezzeVariant binarySearchBy(MezzeSeq seq, Object target, MezzeFunction cmpFn,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -1808,18 +1750,6 @@ public final class SeqNatives {
         );
     }
 
-    // ==================== Counting ====================
-
-    @TruffleBoundary
-    public static long countElement(MezzeSeq seq, Object target) {
-        long count = 0;
-        for (int i = 0; i < seq.size(); i++) {
-            if (java.util.Objects.equals(seq.get(i), target)) {
-                count++;
-            }
-        }
-        return count;
-    }
 
     // ==================== Update Operations ====================
 

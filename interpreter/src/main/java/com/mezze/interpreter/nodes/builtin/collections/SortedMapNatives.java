@@ -276,17 +276,6 @@ public final class SortedMapNatives {
         return cnt;
     }
 
-    // ==================== Additional Operations ====================
-
-    @TruffleBoundary
-    public static boolean containsValue(MezzeSortedMap map, Object value) {
-        for (Object v : map.values()) {
-            if (java.util.Objects.equals(v, value)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     @TruffleBoundary
     public static Object getOrDefault(MezzeSortedMap map, Object key, Object defaultValue) {
@@ -428,39 +417,7 @@ public final class SortedMapNatives {
         return MezzeVariant.some(result);
     }
 
-    @TruffleBoundary
-    public static MezzeVariant lowerKey(MezzeSortedMap map, Object key) {
-        // Find largest key < given key
-        Object result = null;
-        for (Object k : map.keys()) {
-            if (compare(k, key) < 0) {
-                if (result == null || compare(k, result) > 0) {
-                    result = k;
-                }
-            }
-        }
-        if (result == null) {
-            return MezzeVariant.none();
-        }
-        return MezzeVariant.some(result);
-    }
 
-    @TruffleBoundary
-    public static MezzeVariant higherKey(MezzeSortedMap map, Object key) {
-        // Find smallest key > given key
-        Object result = null;
-        for (Object k : map.keys()) {
-            if (compare(k, key) > 0) {
-                if (result == null || compare(k, result) < 0) {
-                    result = k;
-                }
-            }
-        }
-        if (result == null) {
-            return MezzeVariant.none();
-        }
-        return MezzeVariant.some(result);
-    }
 
     @TruffleBoundary
     public static MezzeVariant floorEntry(MezzeSortedMap map, Object key) {

@@ -240,31 +240,7 @@ public final class SetNatives {
         return MezzeRecord.empty();
     }
 
-    // ==================== Min/Max/Sum/Product ====================
 
-    @TruffleBoundary
-    public static MezzeVariant min(MezzeSet set) {
-        if (set.isEmpty()) return MezzeVariant.none();
-        Object minVal = null;
-        for (Object elem : set) {
-            if (minVal == null || compare(elem, minVal) < 0) {
-                minVal = elem;
-            }
-        }
-        return MezzeVariant.some(minVal);
-    }
-
-    @TruffleBoundary
-    public static MezzeVariant max(MezzeSet set) {
-        if (set.isEmpty()) return MezzeVariant.none();
-        Object maxVal = null;
-        for (Object elem : set) {
-            if (maxVal == null || compare(elem, maxVal) > 0) {
-                maxVal = elem;
-            }
-        }
-        return MezzeVariant.some(maxVal);
-    }
 
     @TruffleBoundary
     public static long sum(MezzeSet set) {
