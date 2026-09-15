@@ -658,6 +658,7 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         tailCalls = bodyResult.tailCalls,
         usedVariables = bodyResult.usedVariables,
         unusedVariables = bodyResult.unusedVariables + unusedParams,
+        unusedHandlers = bodyResult.unusedHandlers,
         patternWarnings = bodyResult.patternWarnings,
         referencedBindings = bodyResult.referencedBindings,
         methodCallResolutions = bodyResult.methodCallResolutions,

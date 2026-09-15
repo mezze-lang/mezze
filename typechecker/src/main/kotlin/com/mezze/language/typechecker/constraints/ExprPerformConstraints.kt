@@ -84,6 +84,26 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     // require it. This rejects `perform Console in 1 + 2` cleanly while
     // staying permissive around code that calls other functions or
     // handlers whose transitive effect chain we can't fully see.
+    // BUG 3: the same question, asked per-handler instead of all-or-nothing. When
+    // the body performs SOME effects, the check above is skipped entirely and a
+    // dead handler sitting next to a live one is never noticed. Ask it for each
+    // handler under the same confidence conditions, and report the dead ones as a
+    // W0401 warning — an inferred row is not solid enough ground for a hard error
+    // once other effects are in play, but it is plenty to tell the reader that
+    // `GraalJs` in their `perform` list does nothing.
+    val deadHandlers = mutableListOf<ConstraintResult.UnusedHandler>()
+    if (shouldValidate && !isNestedPerform && allEffects.isNotEmpty()) {
+        val transitivelyNeeded = expr.handlers
+            .flatMap { context.performerAddedEffects[it.performer.localName] ?: emptySet() }
+            .toSet()
+        val effectivelyPerformed = allEffects + transitivelyNeeded
+        for ((handlerName, effectName) in handlerEffects) {
+            if (effectName !in effectivelyPerformed) {
+                deadHandlers.add(ConstraintResult.UnusedHandler(handlerName, effectName, expr.loc))
+            }
+        }
+    }
+
     if (shouldValidate && !isNestedPerform && allEffects.isEmpty()) {
         val transitivelyNeeded = expr.handlers
             .flatMap { context.performerAddedEffects[it.performer.localName] ?: emptySet() }
@@ -326,6 +346,9 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         // callReturnTypes: generatePerform encapsulates body generation, so body
         // side-tables must be threaded through its return or they are lost.
         performFullyDischarged = exprResult.performFullyDischarged + (expr.loc to fullyDischargedHere),
+        // BUG 3: like the side tables above, a nested perform's dead handlers are
+        // lost unless threaded through this return.
+        unusedHandlers = exprResult.unusedHandlers + deadHandlers,
     )
 }
 

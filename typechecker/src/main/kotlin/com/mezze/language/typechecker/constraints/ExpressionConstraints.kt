@@ -134,6 +134,7 @@ class ExpressionConstraintGenerator {
         // collectConstraintWarnings turns them into W0101 warnings. Without this,
         // an unused binding inside a do-block was silently dropped.
         val unusedVars = mutableListOf<ConstraintResult.UnusedVariable>()
+        val unusedHandlers = mutableListOf<ConstraintResult.UnusedHandler>()
         // Do-block intermediate `let` bindings + the effects their value surfaced,
         // forwarded to an enclosing `perform` (which pins the discharged-effect
         // associated type). Deliberately NOT merged in merge() — set only by
@@ -167,6 +168,7 @@ class ExpressionConstraintGenerator {
             duplicateBindings.addAll(result.duplicateBindings)
             tailCalls.addAll(result.tailCalls)
             unusedVars.addAll(result.unusedVariables)
+            unusedHandlers.addAll(result.unusedHandlers)
             doBindingSolvedTypes.putAll(result.doBindingSolvedTypes)
             performFullyDischarged.putAll(result.performFullyDischarged)
         }
@@ -190,6 +192,7 @@ class ExpressionConstraintGenerator {
             duplicateBindings = duplicateBindings,
             tailCalls = tailCalls,
             unusedVariables = unusedVars,
+            unusedHandlers = unusedHandlers,
             doBindingEffects = doBindingEffects,
             doBindingSolvedTypes = doBindingSolvedTypes,
             performFullyDischarged = performFullyDischarged,

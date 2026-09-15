@@ -341,6 +341,8 @@ data class ConstraintResult(
     val tailCalls: Set<Loc> = emptySet(),
     val usedVariables: Set<String> = emptySet(),
     val unusedVariables: List<UnusedVariable> = emptyList(),
+    // BUG 3: dead handlers in a `perform` list — see Constraint.UnusedHandler.
+    val unusedHandlers: List<UnusedHandler> = emptyList(),
     val patternWarnings: List<String> = emptyList(),
     val referencedBindings: Set<DefinitionRef.ByName> = emptySet(),
     val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap(),
@@ -478,6 +480,21 @@ data class ConstraintResult(
 
     data class UnusedVariable(
         val name: String,
+        val loc: Loc?
+    )
+
+    /**
+     * BUG 3: a handler in a `perform` list whose effect the body never performs.
+     * The existing V0510 ERROR only fires when the body performs NOTHING at all,
+     * so `perform Console, GraalPy, GraalJs in <uses Console + Py>` slipped
+     * through silently — the dead `GraalJs` reads to a human as "JS is in play".
+     * Reported per-handler as W0401 rather than escalated to an error: the body's
+     * row is an inference result, and a warning that is occasionally imprecise is
+     * recoverable where a spurious hard error is not.
+     */
+    data class UnusedHandler(
+        val performerName: String,
+        val effectName: String,
         val loc: Loc?
     )
     companion object {

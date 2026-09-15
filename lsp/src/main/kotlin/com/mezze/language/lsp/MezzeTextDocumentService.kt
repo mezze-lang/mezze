@@ -3459,8 +3459,20 @@ class MezzeTextDocumentService(
                 val path = useDecl?.path
                 if (useDecl != null && path is com.mezze.language.parsedast.ParsedUsePath.Selective) {
                     val unused = try {
+                        // Same ability name → ops map the typechecker's linter uses.
+                        // Without it this fix removes an ability imported purely so
+                        // its methods dispatch (`j.from_json {}`), whose name appears
+                        // nowhere — and the build then fails on the very edit we
+                        // offered as a fix.
+                        val abilityOps: Map<String, Set<String>> =
+                            (((state.typeCheckResult as? com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success)
+                                ?.importContext?.importedAbilities ?: emptyMap()).values +
+                                (state.parsedModule?.decls
+                                    ?.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
+                                    ?: emptyList()))
+                                .associate { decl -> decl.name to decl.operations.map { it.name }.toSet() }
                         com.mezze.language.typechecker.validation.UnusedImportLinter
-                            .unusedItemsFor(state.parsedModule!!, useDecl).toSet()
+                            .unusedItemsFor(state.parsedModule!!, useDecl, abilityOps).toSet()
                     } catch (_: Exception) { emptySet() }
                     val kept = path.items.filter { (it.alias ?: it.name) !in unused }
                     if (unused.isNotEmpty() && kept.isNotEmpty()) {

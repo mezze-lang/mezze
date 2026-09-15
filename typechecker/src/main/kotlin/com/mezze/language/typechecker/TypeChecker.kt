@@ -834,7 +834,19 @@ class TypeChecker(
         val patternWarnings = constraintResults.values.flatMap { it.patternWarnings }.map { warningMsg ->
             TypeCheckWarning(message = warningMsg, loc = null)
         }
-        return unusedVarWarnings + patternWarnings
+        // BUG 3: a handler installed for an effect the body never performs. Dedup
+        // by (performer, effect, loc) — the same perform can be reached through
+        // more than one accumulated result.
+        val unusedHandlerWarnings = constraintResults.values.flatMap { it.unusedHandlers }.distinct().map { dead ->
+            TypeCheckWarning(
+                message = "Handler '${dead.performerName}' handles '${dead.effectName}', but nothing in " +
+                    "the `perform` body performs a '${dead.effectName}' operation — the handler never fires. " +
+                    "Remove '${dead.performerName}' from the `perform` list.",
+                loc = dead.loc,
+                code = com.mezze.language.parsedast.diagnostics.WarningCode.W0401_UNUSED_HANDLER
+            )
+        }
+        return unusedVarWarnings + patternWarnings + unusedHandlerWarnings
     }
 
     private fun collectGlobalConstraints(

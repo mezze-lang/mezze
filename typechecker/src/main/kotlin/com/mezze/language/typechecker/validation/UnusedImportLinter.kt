@@ -67,9 +67,24 @@ object UnusedImportLinter {
      * is unused. Lets the LSP build a surgical "remove just these items" fix
      * instead of deleting a whole line that still has used imports.
      */
-    fun unusedItemsFor(module: ParsedModule, useDecl: ParsedUseDecl): List<String> {
+    /**
+     * The unused items of ONE `use` clause. Callers must pass the same
+     * ability name → operation names map [lint] gets: an ability imported only so
+     * its methods resolve (`j.from_json {}`) has its own name nowhere in the
+     * source, and dropping it breaks the build. A caller that recomputes this
+     * without the map — as the LSP's remove-unused-import fix used to — deletes
+     * imports the diagnostic never flagged.
+     */
+    fun unusedItemsFor(
+        module: ParsedModule,
+        useDecl: ParsedUseDecl,
+        abilityOperations: Map<String, Set<String>> = emptyMap(),
+    ): List<String> {
         val referenced = HashSet<String>()
         for (decl in module.decls) collectReferenced(decl, referenced)
+        for ((abilityName, ops) in abilityOperations) {
+            if (ops.any { it in referenced }) referenced.add(abilityName)
+        }
         return unusedItems(useDecl, referenced)
     }
 

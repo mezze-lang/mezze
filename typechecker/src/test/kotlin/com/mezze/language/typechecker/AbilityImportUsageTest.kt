@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.parsedast.ParsedUseDecl
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.validation.UnusedImportLinter
 import org.junit.jupiter.api.Test
@@ -47,5 +48,24 @@ class AbilityImportUsageTest {
         // No ability ops in play — the ordinary syntactic check must still fire.
         val fs = findings(src, emptyMap())
         assertTrue(fs.any { it.contains("Deque") }, "a genuinely unused import must warn:\n$fs")
+    }
+
+    @Test
+    fun `unusedItemsFor also counts dot-dispatch as a use`() {
+        // The LSP's remove-unused-import fix calls unusedItemsFor, not lint. Before
+        // it was given the ability-ops map it recomputed a narrower answer and
+        // offered to delete an import the diagnostic never flagged — applying the
+        // fix then broke the build.
+        val src = """
+            use std::codec::json::{ Json, FromJson }
+            let decode = { j: Json } -> j.from_json {}
+        """.trimIndent()
+        val module = MezzeParser().parseParsedModule(src, "t.mz")
+        val useDecl = module.decls.filterIsInstance<ParsedUseDecl>().single()
+        val abilityOps = mapOf("FromJson" to setOf("from_json", "from_json_with"))
+        assertTrue(
+            "FromJson" !in UnusedImportLinter.unusedItemsFor(module, useDecl, abilityOps),
+            "an ability used only via dot-dispatch must not be reported unused",
+        )
     }
 }
