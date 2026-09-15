@@ -158,11 +158,20 @@ public final class NativeDispatch extends MezzeNode {
         for (var plugin : iter) {
             try {
                 plugin.register();
+                // BUG 4: FINE, not INFO. Which plugins loaded is a debugging
+                // question; a clean run has no reason to narrate its own
+                // startup, and the default handler put these on the terminal
+                // ahead of the program's first line of output.
                 java.util.logging.Logger.getLogger("NativeDispatch")
-                    .info("Registered native plugin: " + plugin.name());
+                    .fine("Registered native plugin: " + plugin.name());
             } catch (Throwable t) {
+                // A plugin that failed to register STAYS visible: its natives
+                // are missing, so the program is about to fail somewhere far
+                // from the cause. Say which plugin and what to do about it.
                 java.util.logging.Logger.getLogger("NativeDispatch")
-                    .warning("Native plugin " + plugin.name() + " failed to register: " + t);
+                    .warning("Native plugin '" + plugin.name() + "' failed to register: " + t
+                        + " — calls into it will fail at runtime. Reinstall or remove the"
+                        + " provider package that ships it.");
             }
         }
     }

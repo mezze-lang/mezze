@@ -12,9 +12,38 @@ The demo lives at `~/Projects/mezze-showcase`.
 
 ---
 
-## BUG 1 — Ability dispatch keyed on a MANGLED NAME, not structural identity
+## BUG 1 — FIXED: applied types are keyed on structure, not on a mangled name
 
-**This is the big one.** The whole `Result <Lang>Foreign InteropError` dot-chain
+**Fixed on `feat/soundness`.** `Hash.computeAppliedHash` mints
+`hash(constructor ⊕ argument identities)`, and `appliedHashOf`
+(`typechecker/.../util/ReceiverTypeName.kt`) is the single function both sides
+go through — `ContextBuilder` when filing an impl, and all four resolution
+ladders (ExprMethodConstraints, ConstraintSolver, TypedAstBuilder,
+DispatchResolver) when looking one up, via `pickByReceiverHash`. Measured on the
+real pipeline: `Result PyF IErr` → `225f0bdb`, `Result JsF IErr` → `eea33543`,
+both still sharing declared `25a44d83`.
+
+It is a MORE-SPECIFIC key layered over the constructor hash, not a replacement.
+An impl with a type variable in any argument (`impl Result 'a 'e`,
+`impl Result 'a IErr`) mints no applied hash and keeps the constructor hash,
+because it has to serve every receiver in that position; receivers offer
+`[applied, constructor]` and callers take the first that matches.
+
+Consequences: the mangled `targetTypeName` is gone from the TypingContext
+registry key; `anonymousImplMethodsByHash` no longer collides; and
+`processInherentImpl` mints the same applied hash the impl was filed under
+instead of the bare constructor's, which returned whichever provider landed in
+the index last. Arguments with no declaration anywhere (`Int`, `Str`, `Seq`)
+contribute their reserved name — the accepted fallback `receiverTypeName`
+documents — and an argument with neither makes `appliedHashOf` decline rather
+than mint a key that could compare equal to an unrelated type's.
+
+Pinned by `AppliedTypeDispatchTest` (10 cases: the hash itself, plus end-to-end
+dispatch through two same-constructor impls).
+
+### Original report
+
+**This was the big one.** The whole `Result <Lang>Foreign InteropError` dot-chain
 dispatch leans on comparing the *mangled type-application name* string
 (`Result_PyForeign_InteropError`) rather than a structural content hash. That
 violates the project rule "NEVER name-match to ID; key on structure"
@@ -146,7 +175,25 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
 
 ---
 
-## BUG 2 — Codec `.to_py {}` / `.to_js {}` do not work for containers (lists, maps, records)
+## BUG 2 — PARTIALLY FIXED: the runtime primitive exists; provider impls remain
+
+**Runtime half fixed on `feat/soundness`.** `ForeignContainers` (interpreter)
+adds guest-readable list and dict VIEWS, and `PolyglotNatives.makeList` /
+`makeDict` expose them as `__native_polyglot_make_list` / `make_dict` plus the
+per-language `__native_<lang>_make_list` / `make_dict`. They are interop views,
+not copies, so one implementation serves Python, JS and WASM: the guest reads
+elements on demand rather than going through any one language's list builder.
+
+Reachable in-tree through `std::polyglot::jvm`'s `jvm_list` / `jvm_dict`, and
+covered by `PolyglotCoreTest` — including a case that hands a built list to
+`java.util.Arrays.asList`, which only works if the value genuinely answers the
+interop array messages.
+
+**Still open, and outside this repo:** steps 2 and 3 below — the `EncodeList` /
+`EncodeMap` / `EncodeRecord` impls and their decode mirrors live in the
+`mezze-python` and `mezze-js` provider packages. They now have a native to call.
+
+### Original report
 
 ### Symptom
 
@@ -209,7 +256,28 @@ syntax — a convenient coincidence, not a designed conversion path.
 
 ---
 
-## BUG 3 — An effect performed but never used is silently accepted
+## BUG 3 — FIXED: both directions of the usage-tracking gap
+
+**Fixed on `feat/soundness`.** Two halves of one weak spot — usage tracking did
+not model effect discharge or method dispatch as a reference.
+
+*Performed but never discharged:* `generatePerform` now asks the V0510 question
+once PER HANDLER (it previously fired only when the body performed nothing at
+all, so a dead handler beside a live one was never examined) and reports each
+dead one as **W0401** — a warning code that had an explanation written for it but
+was emitted by nothing. Warning, not error, on purpose: the body's effect row is
+inferred, and once other effects are flowing it is weaker ground than the
+all-pure case V0510 rejects outright. Pinned by `UnusedHandlerLintTest`,
+including the case where one handler's effect is reached only transitively
+through another's impl. The full typechecker gate shows no false positive.
+
+*The inverse:* the LSP's remove-unused-import quick fix called `unusedItemsFor`
+without the ability-operations map, recomputing a narrower answer than the
+diagnostic that triggered it — and offering to delete an ability imported purely
+for dot-dispatch, breaking the build on the very edit presented as the fix. It
+now takes and is passed that map (`AbilityImportUsageTest`).
+
+### Original report
 
 ### Symptom
 
@@ -254,7 +322,34 @@ discharged warns (no false silence).
 
 ---
 
-## BUG 4 — Production runs print JVM/plugin log noise
+## BUG 4 — FIXED (the part that is ours): packaging leak closed, plugin chatter demoted
+
+**Fixed on `feat/soundness`.**
+
+*The packaging leak, which was the real bug:* `TestNativePlugin` and its
+`META-INF/services` entry lived in `interpreter/src/main` and so shipped on the
+production service-loader path. Both moved to the test source set. Verified by
+scanning every jar under `cli/build/install` — neither the class nor the service
+entry appears in any shipped artifact, and `NativePluginTest` still finds the
+plugin on the test classpath.
+
+*The plugin chatter:* `loadPluginsViaServiceLoader` logs registrations at FINE
+instead of INFO. A registration FAILURE stays at WARNING and now names the
+plugin and what to do about it — its natives are missing, so the program is
+about to fail somewhere far from the cause. A fresh `mez dev --no-watch` is
+clean.
+
+*The incubator notice is NOT ours and was deliberately left alone.* `WARNING:
+Using incubator modules: jdk.incubator.vector` is written to stderr by
+ModuleBootstrap before any Mezze code runs. Measured against `-Xlog:disable`,
+`-Xlog:all=off`, `-XX:-PrintWarnings` and `--enable-preview`: none suppress it.
+Both workarounds cost more than the line is worth — piping the launcher's stderr
+through a filter gives up the `exec`, so signals reach the wrapping shell rather
+than the JVM (Ctrl-C breaks) and every launch grows a process; dropping
+`--add-modules` silently disables the SIMD path. The reasoning is recorded in the
+generated launcher's own comments so it is not re-litigated.
+
+### Original report
 
 ### Symptom
 
@@ -315,7 +410,15 @@ dispatch path only the LSP reaches — record which it was.
 
 ## Pre-existing dispatch bug (folded from deleted `docs/bugs/`)
 
-### `.size {}` / `.is_empty {}` on a match-arm-bound seq crashes in CallIndirect
+### FIXED: `.size {}` / `.is_empty {}` on a match-arm-bound seq crashes in CallIndirect
+
+**No longer reproduces** — closed by the dispatch work in this effort. Verified
+against the report's source verbatim (with and without the seq import) and locked
+by `MatchArmSizeDispatchTest`, which covers the two methods that crashed plus the
+`.map{…}.size{}` shape that always worked, so a regression is caught as a
+regression rather than rediscovered.
+
+### Original report
 
 ```mezze
 type T = | Wrap { items: [Int] } |

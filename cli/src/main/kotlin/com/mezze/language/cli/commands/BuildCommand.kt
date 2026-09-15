@@ -643,6 +643,16 @@ class BuildCommand {
             # NewRatio=1: 50% of heap for young gen (default 33%). FP-style
             # code allocates many short-lived values; a larger nursery keeps
             # minor GC frequency low. With 4g heap → ~2g nursery.
+            # NOTE: the JVM prints "WARNING: Using incubator modules:
+            # jdk.incubator.vector" at startup whenever that module is added.
+            # It is unsuppressible — ModuleBootstrap writes it to stderr before
+            # any of our code runs, and no flag turns it off (-Xlog:disable,
+            # -Xlog:all=off and -XX:-PrintWarnings were all measured against it).
+            # Do NOT pipe stderr through a filter to hide it: that costs the
+            # `exec` below, so signals reach the wrapping shell instead of the
+            # JVM, and adds a process to every launch. One cosmetic line is not
+            # worth breaking Ctrl-C. Dropping --add-modules instead would silently
+            # disable the SIMD path, which is a performance regression.
             # NOTE: Do NOT use -XX:TieredStopAtLevel=1 here. While it saves
             # ~100ms startup, it disables the Graal/JVMCI JIT compiler that
             # Truffle uses for Mezze code — causing a 10-20× regression on
