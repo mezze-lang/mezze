@@ -1010,6 +1010,7 @@ class TypedASTCompiler(
             specLambdaSalt = spec.specializedHash
             specTypeArgs = spec.typeArgs
             specGenericHash = spec.genericHash
+            specAbilityImpls = spec.abilityImpls
             val fn = try {
                 if (body is TypedLambda) {
                     compileFunctionBody(spec.specializedHash, "", body.params, body.body, body.loc)
@@ -1020,6 +1021,7 @@ class TypedASTCompiler(
                 specLambdaSalt = null
                 specTypeArgs = null
                 specGenericHash = null
+                specAbilityImpls = emptyList()
             }
             functions.add(fn)
             compiledHashes.add(spec.specializedHash)
@@ -1999,6 +2001,37 @@ class TypedASTCompiler(
             // `__dict_<op>` param (populated by the collection pass through the same
             // shouldDictDispatchVarTypeOp predicate) — otherwise we fall through to the
             // structural/native default, preserving prior behavior for un-constrained vars.
+            // BUG 7: inside a mono spec, a receiver still typed by the generic's
+            // own type variable has no dict slot (the spec stripped it, the
+            // constraint being concrete now) and cannot inline (it is not a
+            // primitive). Before falling through to the structural default, ask
+            // the spec what it already decided: `Specialization.abilityImpls`
+            // records which impl discharged each constraint. This is evidence the
+            // monomorphizer produced, not a guess from shapes.
+            // Narrowly scoped, and the narrowing is load-bearing: this applies ONLY
+            // where the call would otherwise reach the primitive comparison node —
+            // an INLINEABLE operator, backed by a real ability op, on a receiver
+            // whose dict slot is gone. A broader version fired for any var-typed
+            // receiver inside a spec and resolved unrelated ops against the spec's
+            // type args, which broke seven map/set filter tests.
+            val wouldFallToPrimitive = receiverType is VarType &&
+                methodName in inlineableOps &&
+                abilityOpIndex[methodName]?.isNotEmpty() == true &&
+                enclosingDictSlot(methodName, (receiverType as? VarType)?.variable?.name) == null
+            if (wouldFallToPrimitive) {
+                specEvidenceOpHash(methodName)?.let { evidenceOpHash ->
+                    val receiverIR = compileReceiverExpr(fn.record)
+                    val evidenceFields = mutableListOf<FieldIR>()
+                    evidenceFields.add(FieldIR(Keywords.IT, receiverIR))
+                    val argRecord = compileExpr(expr.arg)
+                    if (argRecord is MakeRecordIR) {
+                        for (f in argRecord.fields) if (f.name != Keywords.IT) evidenceFields.add(f)
+                    }
+                    return emitCallDirect(
+                        evidenceOpHash, MakeRecordIR(evidenceFields, src), expr.isTailCall, src,
+                    )
+                }
+            }
             val opIsInlineable = methodName in inlineableOps
             val inlineableNeedsDict = opIsInlineable &&
                 abilityOpIndex[methodName]?.isNotEmpty() == true &&
@@ -3111,6 +3144,57 @@ class TypedASTCompiler(
      *  the primitive-only runtime fallback (`sort { xs = [[P]] }`). When normal
      *  resolution fails INSIDE a spec, resolve against these typeArgs element-first:
      *  the spec knows exactly what `'a` is. */
+    /**
+     * BUG 7 — the ability impls the monomorphizer ALREADY RESOLVED for the
+     * specialization currently being compiled.
+     *
+     * A spec records, per ability constraint it discharged, which impl satisfies
+     * it (`Specialization.abilityImpls`). That is exactly the evidence a call
+     * site inside the spec needs, and it was not being threaded in: the spec
+     * strips the generic body's `__dict_<op>` params because the constraint is
+     * now concrete, but a receiver left typed by the generic's own type variable
+     * can then neither inline (it is not a primitive) nor dict-dispatch (the slot
+     * is gone), and `x < acc` falls through to the primitive comparison node —
+     * a crash on a record or variant element, and a silently wrong answer for a
+     * newtype whose ordering differs from the type it wraps.
+     */
+    private var specAbilityImpls: List<AbilityImplRef> = emptyList()
+
+    /**
+     * The op hash for [methodName] according to the current spec's recorded
+     * evidence, or null outside a spec / when no recorded impl provides it.
+     *
+     * Cross-checked against the op index rather than trusted on the name alone:
+     * a ref only answers for a method its own impl actually declares, so a spec
+     * carrying several constraints cannot have one ability's evidence answer for
+     * another's identically-named op.
+     */
+    private fun specEvidenceOpHash(methodName: String): Hash? {
+        val candidates = abilityOpIndex[methodName] ?: return null
+        // Preferred source: the impls the monomorphizer recorded as discharging
+        // this spec's constraints. Cross-checked against the op index rather than
+        // trusted on the name, so a spec carrying several constraints cannot have
+        // one ability's evidence answer for another's identically-named op.
+        // (`Specialization.abilityImpls` is declared but currently always empty —
+        // the monomorphizer does not fill it in. That is task C.1, and when it
+        // does, this arm takes over from the type-args fallback below.)
+        for (ref in specAbilityImpls) {
+            candidates.firstOrNull { it.implHash == ref.implHash }?.let { return it.opHash }
+        }
+        // Fallback: the spec's TYPE ARGUMENTS say what the generic was specialized
+        // to, which identifies the instance — but only unambiguously when there is
+        // exactly ONE of them. With two (`map::filter` at `Map K V`) the receiver's
+        // variable could be either, and resolving against the pile picked the wrong
+        // op: seven map/set filter tests failed that way. One type argument, one
+        // possible answer.
+        //
+        // Element-first so a container spec resolves the ELEMENT's impl before the
+        // container's, matching every other dict-resolution path.
+        val args = specTypeArgs ?: return null
+        val only = args.singleOrNull() ?: return null
+        return resolveOpHashFromConcreteTypes(methodName, elementFirst(listOf(only)))
+    }
+
     private var specTypeArgs: List<MezzeType>? = null
     /** The generic function / impl op the spec being compiled was cut from. */
     private var specGenericHash: Hash? = null

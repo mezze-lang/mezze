@@ -470,7 +470,7 @@ is an inference bug (`feedback_no_required_type_annotations`).
 
 ---
 
-## BUG 7 — a hand-written `impl Ord` is ignored by generic consumers reached through an inherent method
+## BUG 7 — PARTLY FIXED: a hand-written `impl Ord` ignored by generic consumers
 
 **The most serious defect found in this effort, because it is SILENTLY WRONG and
 not only a crash.** Found 2026-09-15 while re-checking GAP #30, which turns out
@@ -555,10 +555,47 @@ element type is a NEWTYPE (where the primitive fallback agrees), and it exercise
 `min_by`/`max_by` (an explicit key function) rather than the operator-based
 `min`/`max`/`sort`. Both should be widened as part of the fix.
 
+### What is fixed (2026-09-15)
+
+**Every `seq` operator path.** `seq::min`, `seq::max` and `seq::sort` over records
+now dispatch the element's own Ord. Those calls are MONOMORPHIZED, and the spec
+now resolves the instance from evidence rather than falling through:
+`specEvidenceOpHash` consults, in order, the impls the monomorphizer recorded as
+discharging the spec's constraints (`Specialization.abilityImpls`) and then the
+spec's own TYPE ARGUMENTS — the latter only when there is exactly ONE of them,
+and only for an inlineable operator with no dict slot left. Both narrowings are
+load-bearing and were found by regression: a broader version resolved unrelated
+ops against the spec's type-arg pile and broke seven map/set filter tests, since
+`Map K V` has two arguments and the receiver's variable could be either. A receiver still typed by the generic's type variable
+had no dict slot (the spec strips it, the constraint being concrete) and could
+not inline (not a primitive), so it reached the primitive comparison node.
+
+Worth recording: **`Specialization.abilityImpls` is declared but almost always
+EMPTY** — the monomorphizer does not populate it, which is exactly disease 3
+("the solver already knows the evidence and discards it") and task **C.1**. Of 8
+specs in the repro, one carried an impl ref and seven carried none. The type-args
+fallback is what actually does the work today; when C.1 lands, the evidence arm
+takes over and the fallback can go.
+
+### What remains, and why
+
+**The sorted containers.** Their comparator lives in a PRELOWERED stdlib function
+that monomorphization never respecializes — probing the repro, NO comparison site
+is compiled at all during user compilation, so there is no compile for the fix to
+apply to. The generic prelowered body reads its `__dict_lt` slot, and the caller
+never fills it. Closing this needs either the dict actually supplied to prelowered
+stdlib calls, or those functions respecialized like the `seq` ones — the same
+question C.3/C.4 answer.
+
+Also still open: `ImplValidator.validateAbilityImplementation` returns immediately
+for inherent impls, so the "asymmetry fix" that infers `with Ord 'a` preconditions
+from an ability impl's op body never runs for them. Whether inherent ops should
+get inferred preconditions is the design question behind a complete fix.
+
 ### Acceptance
 
-`SortedContainerReadBackTest` — 17 cases, 10 currently `@Disabled` pointing here.
-The 7 that pass are what narrow the cause; re-enable the 10 with the fix.
+`SortedContainerReadBackTest` — 17 cases, 7 still `@Disabled` pointing here (was
+10). The 10 that pass are what narrow what is left.
 
 ---
 

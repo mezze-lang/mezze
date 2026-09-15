@@ -34,8 +34,15 @@ import kotlin.test.assertEquals
  *
  * Severity: silent wrongness, not just a crash. See known-bugs.md "BUG 7".
  *
- * The failing cases are @Disabled rather than deleted — they are the acceptance
- * criteria for the fix, and every passing case above is what narrows it.
+ * PARTLY FIXED. Every `seq` operator path now works — `seq::min`, `seq::max` and
+ * `seq::sort` over records all dispatch the element's own Ord — because those
+ * calls are MONOMORPHIZED, and a spec now resolves the instance from its own
+ * recorded type arguments instead of falling through to the primitive node.
+ *
+ * The sorted-container paths still fail, and the reason is specific: their
+ * comparator lives in a PRELOWERED stdlib function that monomorphization never
+ * respecializes, so no compile happens for the fix to apply to. The remaining
+ * cases are @Disabled pointing at that, and are the acceptance criteria for it.
  */
 class SortedContainerReadBackTest {
 
@@ -61,7 +68,7 @@ class SortedContainerReadBackTest {
     """.trimIndent()
 
     @Test
-    @Disabled("BUG 7: a hand-written impl Ord is not used by a generic `with Ord 'a` consumer reached through an inherent method — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
     fun `min of a sorted set of records, field read off the result`() {
         assertEquals(
             10L,
@@ -78,7 +85,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7: a hand-written impl Ord is not used by a generic `with Ord 'a` consumer reached through an inherent method — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
     fun `max of a sorted set of records`() {
         assertEquals(
             30L,
@@ -95,7 +102,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7: a hand-written impl Ord is not used by a generic `with Ord 'a` consumer reached through an inherent method — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
     fun `to_seq then first, field read off the result`() {
         assertEquals(
             10L,
@@ -112,7 +119,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7: a hand-written impl Ord is not used by a generic `with Ord 'a` consumer reached through an inherent method — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
     fun `the ordering actually used is the element's own Ord`() {
         // P orders by `k` only. If the sorted set fell back to a structural or
         // insertion order, min would be the first-inserted element (tag 30).
@@ -155,7 +162,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7: a hand-written impl Ord is not used by a generic `with Ord 'a` consumer reached through an inherent method — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
     fun `step 3 - to_seq then size (no element read)`() {
         assertEquals(
             2L,
@@ -231,7 +238,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7: a hand-written impl Ord is not used by a generic `with Ord 'a` consumer reached through an inherent method — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
     fun `contrast - a VARIANT element with its own Ord`() {
         assertEquals(
             1L,
@@ -266,7 +273,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7: a hand-written impl Ord is not used by a generic `with Ord 'a` consumer reached through an inherent method — see known-bugs.md")
     fun `contrast - a record element sorted via sort_by_cmp instead of a sorted set`() {
         // Same record, same Ord, but through a seq operation that takes the
         // comparator explicitly. Tells apart "P's Ord never resolves" from
@@ -286,7 +292,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7: a hand-written impl Ord is not used by a generic `with Ord 'a` consumer reached through an inherent method — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
     fun `contrast - a newtype whose Ord is REVERSED`() {
         // The plain newtype case passes, but a newtype wraps an Int at runtime, so
         // a primitive fallback would give the same answer and the test could not
@@ -379,7 +385,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7: a hand-written impl Ord is not used by a generic `with Ord 'a` consumer reached through an inherent method — see known-bugs.md")
     fun `contrast - seq min on records, the shape that was fixed for issue 18`() {
         // `seq::min` is written exactly like `sort`: `x < acc` inside an inline
         // lambda handed to `reduce`. If this works and `sort` does not, the
@@ -399,7 +404,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7: a hand-written impl Ord is not used by a generic `with Ord 'a` consumer reached through an inherent method — see known-bugs.md")
     fun `contrast - seq max on records`() {
         assertEquals(
             30L,
