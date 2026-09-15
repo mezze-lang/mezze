@@ -173,6 +173,22 @@ pub let from_str:   { val: Str   } -> JvmForeign = { val } -> __native_jvm_from_
 pub let from_bool:  { val: Bool  } -> JvmForeign = { val } -> __native_jvm_from_bool  { val = val }
 pub let null_val:   {}            -> JvmForeign = {}     -> __native_jvm_null_val    {}
 
+## Build a Java-visible list from already-wrapped Foreign elements.
+##
+## The interop surface could always READ an array (`array_at`, `array_size`)
+## but never build one, so there was no way to hand a guest a sequence of
+## values — which is exactly what a codec's `encode_list` has to do. The result
+## is an interop view over the elements, not a copy into a `java.util.List`:
+## pass it anywhere a Java method takes an array or an Iterable.
+pub let jvm_list: { elems: [JvmForeign] } -> JvmForeign = { elems } ->
+  __native_jvm_make_list { elems = elems }
+
+## Build a Java-visible mapping from parallel key and value sequences.
+## Companion to `jvm_list`, backing a codec's `encode_map` / `encode_record`.
+## Keys keep the order they were given in.
+pub let jvm_dict: { keys: [JvmForeign], vals: [JvmForeign] } -> JvmForeign = { keys, vals } ->
+  __native_jvm_make_dict { keys = keys, vals = vals }
+
 ## Convenience: look up a host class outside a `perform Jvm` scope
 ## — uses the enclosing Env's host-lookup permissions directly.
 pub let class: { name: Str } -> Result JvmForeign InteropError = { name } ->

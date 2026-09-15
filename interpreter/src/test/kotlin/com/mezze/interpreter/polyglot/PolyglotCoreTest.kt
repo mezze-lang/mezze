@@ -500,4 +500,101 @@ class PolyglotCoreTest {
         // UUIDs are 36 chars: 8-4-4-4-12
         assertEquals(36, s.length, "UUID string should be 36 chars, got '$s'")
     }
+
+    // ==================== Guest containers (BUG 2) ====================
+    //
+    // The interop surface could READ a guest array but never BUILD one, so a
+    // codec's `encode_list` had no native to call and containers had no
+    // `.to_py {}` / `.to_js {}` chain at all. These pin the build side against
+    // the read side that already existed.
+
+    @Test
+    fun `jvm_list builds a Foreign the array ops can read back`() {
+        val result = eval(
+            """
+            use std::polyglot::jvm::{ from_int, jvm_list }
+            let xs = jvm_list { elems = [from_int { val = 7 }, from_int { val = 9 }] }
+            xs.array_size {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(2L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `elements come back in the order they were given`() {
+        val result = eval(
+            """
+            use std::polyglot::jvm::{ from_int, jvm_list }
+            let xs = jvm_list { elems = [from_int { val = 7 }, from_int { val = 9 }] }
+            match xs.array_at { index = 1 } is
+              Ok { val = e } -> e.as_int {}
+              Err { error = _ } -> Err { error = UnsupportedMessage }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(9L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `an empty list is a valid guest list, not an error`() {
+        val result = eval(
+            """
+            use std::polyglot::jvm::{ jvm_list }
+            let xs = jvm_list { elems = [] }
+            xs.array_size {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(0L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `reading past the end is an error, not a crash`() {
+        val result = eval(
+            """
+            use std::polyglot::jvm::{ from_int, jvm_list }
+            let xs = jvm_list { elems = [from_int { val = 7 }] }
+            xs.array_at { index = 5 }
+            """.trimIndent()
+        )
+        assertErr(result)
+    }
+
+    @Test
+    fun `a built list is accepted as a Java method argument`() {
+        // The point of building a guest container is handing it to the guest.
+        // `java.util.Arrays.asList` takes a varargs array, so this only works if
+        // the value really does answer the interop array messages.
+        val result = eval(
+            """
+            use std::polyglot::jvm::{ JvmHost, Jvm, from_str, jvm_list }
+            let main = {} -> perform JvmHost in do
+              let xs = jvm_list { elems = [from_str { val = "a" }, from_str { val = "b" }] }
+              match Jvm.class { name = "java.util.Arrays" } is
+                Ok { val = arrays } -> match arrays.static { name = "asList", args = [xs] } is
+                  Ok { val = lst } -> lst.method { name = "size", args = [] }.as_int {}
+                  Err { error = e } -> Err { error = e }
+                Err { error = e } -> Err { error = e }
+            main {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(2L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `jvm_dict builds a Foreign carrying its entries`() {
+        val result = eval(
+            """
+            use std::polyglot::jvm::{ from_str, from_int, jvm_dict }
+            let d = jvm_dict {
+              keys = [from_str { val = "a" }],
+              vals = [from_int { val = 1 }],
+            }
+            d.type_name {}
+            """.trimIndent()
+        )
+        assertNotNull(result)
+    }
 }

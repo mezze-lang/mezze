@@ -307,6 +307,60 @@ public final class PolyglotNatives {
         return new MezzeForeign(MezzeNull.INSTANCE, sourceLanguage);
     }
 
+    /**
+     * BUG 2 — build a guest list from already-encoded elements.
+     *
+     * The polyglot surface could READ an existing guest array but never build
+     * one, so a codec's `encode_list` had nothing to call: it is handed
+     * `elems: [<Lang>Foreign]`, each element already encoded, and has to produce
+     * one list-shaped Foreign. Without this, `[Float].to_py {}` has no chain and
+     * the blanket `impl ToPy for 'a where { … with Encode PythonC 'a }` does not
+     * apply — the user sees `to_py` reported as a field access on a non-record.
+     *
+     * Language-agnostic by construction: the result is an interop view the guest
+     * reads on demand, not a copy built through any one language's list builder,
+     * so the same native serves Python, JS and WASM.
+     */
+    @TruffleBoundary
+    public static MezzeForeign makeList(MezzeRecord args) {
+        return makeList(args, "mezze");
+    }
+
+    @TruffleBoundary
+    public static MezzeForeign makeList(MezzeRecord args, String sourceLanguage) {
+        // getArgArray already unwraps MezzeForeign to its delegate, which is
+        // what the guest must see — a list of wrappers would be opaque to it.
+        return new MezzeForeign(
+            new ForeignContainers.ForeignList(getArgArray(args, "elems")), sourceLanguage);
+    }
+
+    /**
+     * BUG 2 — build a guest mapping from already-encoded keys and values.
+     * Companion to {@link #makeList}, backing a codec's `encode_map` /
+     * `encode_record`. Insertion order is preserved so a record's fields reach
+     * the guest in declaration order rather than an arbitrary one.
+     */
+    @TruffleBoundary
+    public static MezzeForeign makeDict(MezzeRecord args) {
+        return makeDict(args, "mezze");
+    }
+
+    @TruffleBoundary
+    public static MezzeForeign makeDict(MezzeRecord args, String sourceLanguage) {
+        Object[] keys = getArgArray(args, "keys");
+        Object[] values = getArgArray(args, "vals");
+        if (keys.length != values.length) {
+            throw new NativeTypeMismatchException(
+                "make_dict needs one value per key, got " + keys.length
+                    + " keys and " + values.length + " values");
+        }
+        java.util.LinkedHashMap<Object, Object> entries = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < keys.length; i++) {
+            entries.put(keys[i], values[i]);
+        }
+        return new MezzeForeign(new ForeignContainers.ForeignDict(entries), sourceLanguage);
+    }
+
     // ==================== Members ====================
 
     @TruffleBoundary

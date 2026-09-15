@@ -4277,6 +4277,13 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.readArray(r));
         HANDLERS.put("__native_polyglot_write_array",
             (r, c) -> PolyglotNatives.writeArray(r));
+        // BUG 2: the read side existed, the build side did not — so a codec's
+        // `encode_list` / `encode_map` had no native to call and containers had
+        // no `.to_py {}` / `.to_js {}` chain at all.
+        HANDLERS.put("__native_polyglot_make_list",
+            (r, c) -> PolyglotNatives.makeList(r));
+        HANDLERS.put("__native_polyglot_make_dict",
+            (r, c) -> PolyglotNatives.makeDict(r));
 
         // Execution
         HANDLERS.put("__native_polyglot_is_executable",
@@ -4303,6 +4310,10 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.fromStr(r, "jvm"));
         HANDLERS.put("__native_jvm_from_bool",
             (r, c) -> PolyglotNatives.fromBool(r, "jvm"));
+        HANDLERS.put("__native_jvm_make_list",
+            (r, c) -> PolyglotNatives.makeList(r, "jvm"));
+        HANDLERS.put("__native_jvm_make_dict",
+            (r, c) -> PolyglotNatives.makeDict(r, "jvm"));
         HANDLERS.put("__native_jvm_null_val",
             (r, c) -> PolyglotNatives.nullVal(r, "jvm"));
 
@@ -4320,6 +4331,11 @@ public final class NativeDispatch extends MezzeNode {
             HANDLERS.put("__native_" + l + "_from_str",   (r, c) -> PolyglotNatives.fromStr(r, l));
             HANDLERS.put("__native_" + l + "_from_bool",  (r, c) -> PolyglotNatives.fromBool(r, l));
             HANDLERS.put("__native_" + l + "_null_val",   (r, c) -> PolyglotNatives.nullVal(r, l));
+            // BUG 2: the container constructors a provider's `encode_list` /
+            // `encode_map` needs, tagged with the guest language like the
+            // scalar constructors above.
+            HANDLERS.put("__native_" + l + "_make_list",  (r, c) -> PolyglotNatives.makeList(r, l));
+            HANDLERS.put("__native_" + l + "_make_dict",  (r, c) -> PolyglotNatives.makeDict(r, l));
         }
 
         // Python / JavaScript / WebAssembly and any other non-JVM guest
