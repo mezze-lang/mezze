@@ -579,13 +579,25 @@ takes over and the fallback can go.
 
 ### What remains, and why
 
-**The sorted containers.** Their comparator lives in a PRELOWERED stdlib function
-that monomorphization never respecializes — probing the repro, NO comparison site
-is compiled at all during user compilation, so there is no compile for the fix to
-apply to. The generic prelowered body reads its `__dict_lt` slot, and the caller
-never fills it. Closing this needs either the dict actually supplied to prelowered
-stdlib calls, or those functions respecialized like the `seq` ones — the same
-question C.3/C.4 answer.
+**The sorted containers.** Narrowed but not closed. What the probes establish:
+
+- `sorted_set::from_seq` IS monomorphized — the user call goes to a specialized
+  hash with `typeArgs=[P]`, so the spec exists and the call reaches it.
+- Yet NO `lt`/`le`/`gt`/`ge` method-call site is compiled during user
+  compilation, so the comparator's `<` never reaches the dispatch branch the
+  `seq` fix works through.
+- Every callee at `emitCallDirect` is a specialized hash with no dict
+  requirement — correct, since a spec needs none.
+- So the comparator body reaching the runtime is NOT the one the spec compiled.
+  The next thing to check is how the extracted comparator lambda is emitted for a
+  spec: `specLambdaSalt` exists precisely because the SAME source lambda must
+  compile to a different FunctionIR per specialization, and the sorted-container
+  comparator is the case that machinery was written for
+  (`{a,b} -> if a<b …`). Whether the salted copy is the one actually installed
+  into the native is where to look next.
+
+Closing it is the same question C.3/C.4 answer: emit the evidence rather than
+re-deriving it per site.
 
 Also still open: `ImplValidator.validateAbilityImplementation` returns immediately
 for inherent impls, so the "asymmetry fix" that infers `with Ord 'a` preconditions
