@@ -341,9 +341,155 @@ value whose concrete type the emitter never pinned.
 4. **BUG 3** usage tracking (both directions) and **BUG 4** log noise — DX.
 5. The pre-existing `.size {}`-in-match-arm lowering bug — likely shares BUG 1's
    "no resolvable impl → CallIndirect" root; check if one fix covers both.
+6. **BUG 6** (below) is the class all of the above belong to; its master task
+   list (Track 1 → Track 2) is the plan. BUG 1's structural type-application
+   hash is task B.1 there; the `.size {}` crash is closed by A.2.
 
 Gates for every change: `:typechecker:test` and `:interpreter:test` run
 SEPARATELY with `--no-daemon` (`feedback_gate_run_suites_separately`). Strip debug
 prints before the full suite (`feedback_no_debug_prints_in_full_suite`). No type
 annotation may ever be required to typecheck — if adding one "fixes" a chain, that
 is an inference bug (`feedback_no_required_type_annotations`).
+
+---
+
+## BUG 6 — Types are RECONSTRUCTED, not carried; instances decided by shape, name, or Java
+
+**This is the class BUG 1 and the `.size {}` crash are instances of.** Landed
+work on `feat/soundness` (`1c8ce2802` on main, `8270986b2` on the branch)
+fixed the visible symptoms for Eq/Ord; the master task list below removes the
+class. Cross-references: BUG 1's "structural type-application hash" is task
+**B.1**; the `.size {}` match-arm crash is what task **A.2**'s invariant turns
+into a compile error.
+
+### Symptom (measured 2026-09-12/13, all fixed unless marked OPEN)
+
+- `[T] == [T]`, `[[T]] == [[T]]`, `List T == List T` ignored the element's Eq
+  (structural natives, receiver dropped by the Monomorphizer's ByHash rewrite).
+- A derived record/variant `==` was a Java `deepEquals`: `{ p = P(1,10) } ==
+  { p = P(1,99) }` with a newtype `P` whose Eq compares only `x` answered
+  `false`; same for `Some P`, `Ok P`, user `Tree`/`Box 'a`/`Pair 'a 'b`.
+- A hand-written `impl Ord for Tree` with `a < b` on pattern-bound payloads
+  crashed (`Cannot compare MezzeRecord < MezzeRecord`) — impl bodies were
+  compiled UNTYPED, so every `==`/`<` inside fell to the structural default.
+- `Result 'a 'e` could hold only ONE `__dict_eq` (dicts keyed by method NAME).
+- `impl Eq` on a record that derives Eq was silently accepted as an override.
+- OPEN: ~50 collection natives still compare/order elements structurally
+  (`interpreter/src/test/resources/native-structural-compare-allowlist.txt`);
+  `SortedSet`/`SortedMap` order every non-primitive as EQUAL
+  (`SortedSetNatives.compareElements` returns 0 → a sorted set of records
+  collapses to one element); `Map`/`Set` hash keys with Java `hashCode` and
+  there is no `Hash` ability.
+
+### Root cause (five diseases, one class)
+
+1. **Types reconstructed, not carried.** The solver produces a substitution +
+   side tables keyed by `Loc` (`matchCaseBindings`, `constraintResults[name]`);
+   `TypedAstBuilder` re-walks the parsed AST, looks types up, and falls back to
+   a fresh `unknown` VarType on every miss; impl bodies are solved by
+   `ImplValidator` and the solution is thrown away. `TypedASTCompiler` then
+   guesses types back from shapes: `resolveVariantReceiverType`,
+   `extractConcreteElementTypeFromExpr`, `structuralElem`,
+   `structuralConstraintTypes`, `bindConstraintArgsViaArg`,
+   `containerElementType`, `resolveDictFromSpecTypeArgs`,
+   `specBoundReceiverType`, the #13/#346 recoveries. Each covers one shape.
+2. **Two representations per type.** `SeqType` vs `TypeApplication("Seq")`,
+   `RecordType(Declared)` vs `TypeApplication("R")`, `VariantType` vs
+   `TypeApplication("Option")`, `NewtypeType` vs its application — and (BUG 1)
+   a type application whose identity is only its constructor's hash.
+3. **Dictionaries keyed by method name** (`__dict_eq`, one per function); call
+   sites re-resolve impls from arg types. Now per-type-var (`__dict_eq@a`) as a
+   stopgap; the solver already knows the evidence and discards it.
+4. **Implicit instances.** Derived Eq existed only as a boolean in the checker;
+   the compiler had a parallel notion (deep-equals) and they disagreed. Fixed
+   for Eq (`DerivedImplGenerator`); Inspect still implicit.
+5. **Duplicated logic.** Two `canDeriveAbility`, three `substituteTypeParams`,
+   several unifiers; mono keys specializations on laundered surface types.
+
+### What is landed (on main `1c8ce2802` + branch `8270986b2`)
+
+- Coherence: `impl Eq` on a deriving record/variant → V0407 duplicate; the
+  stdlib's redundant `impl Eq for Option/Result` removed.
+- Derived Eq is a compiler-GENERATED impl (`typechecker/derive/
+  DerivedImplGenerator.kt`, `ContextBuilder.deriveAbilityImpls`, anonymous
+  shapes via `AbilityChecker.registerDerivedShapeImpl`), with explicit
+  `with Eq 'a` so a newtype without Eq poisons every containing shape at the
+  use site (`DerivedEqRequiresFieldEqTest`).
+- All ability-impl op bodies are typed (params from the ability's declared
+  signature, structural match-binding typing) except codec-flavored ones.
+- Per-type-var dict slots (`MagicParams.dictKey`), instance-head binding at
+  call sites and inside mono specs; `TypedTypeDecl.typeParams` populated (was
+  always empty); mono no longer picks an impl for an unbound constraint var.
+- `NativeEvidenceGateTest`: ratchet — a collection native that compares/orders/
+  hashes elements structurally beyond the allowlist fails the build.
+- Tests: `SeqUserTypeCompareTest` (52), `UserContainerInstanceTest` (14),
+  `DerivedEqRequiresFieldEqTest` (9), fixtures moved to newtypes.
+
+### Master task list
+
+Track 1 — element instances flow everywhere (~2 weeks)
+
+- **T1.1** DONE — ratchet gate + user-container tests + typed impl bodies.
+- **T1.2** Thread evidence through the remaining structural natives until the
+  allowlist is empty (List/Deque/NEL/Seq: contains, index_of, last_index_of,
+  min_by/max_by, sort_by_key, is_sorted*, binary_search/lower/upper_bound,
+  dedup/distinct; Map/Set: min/max key/value, min_by/max_by). Pattern = Seq's
+  post-#23 shape (`stdlib/std/collections/seq.mz`: `*_with_cmp`/`*_with_eq`
+  helpers with a declared comparator param, `with Eq/Ord 'a` on the pub let).
+  Delete the 24 dead natives (`__native_list_min/max/sort/is_sorted*`, …).
+- **T1.3** Sorted containers CARRY their comparator from construction
+  (`add`/`from_*`/`singleton` already have `with Ord 'a`; store the Mezze cmp
+  in `MezzeSortedSet`/`MezzeSortedMap`, use it for every later op; delete
+  `compareElements`).
+- **T1.4** `Hash` ability (`std::abilities::hash`, derived structurally like
+  Eq; newtypes derive nothing → OWNER DECISION: `newtype X = T deriving Eq,
+  Ord, Hash` opt-in); `Map 'k`/`Set 'a` require `Hash + Eq`; natives take
+  hash+eq, structural fast path only when provable from the type.
+- **T1.5** Combinatorial gate: shapes {record, variant, newtype, Option,
+  Result, anon record, user Tree/Box} × containers {seq, list, map, set,
+  sorted*, deque, NEL} × abilities {Eq, Ord, Inspect} × ops, asserting the
+  instance is honoured.
+
+Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
+
+- **0.1** `NodeId` on every parsed/typed node; side tables keyed by NodeId,
+  never `Loc`.
+- **0.2** Invariant pass in both gates (ratchet): `unknown` VarTypes, untyped
+  impl params, VarType-receiver method calls with no enclosing binder.
+- **0.3** One test per compiler heuristic above = its deletion acceptance test.
+- **A.1** Impl-op bodies solved in the MODULE solve (`ImplValidator` results
+  land in the same per-node table); params from the ability signature for ALL
+  impls (behind `MEZZE_ELAB=1` until C.3).
+- **A.2** Builder reads by NodeId; a miss is an `ElaborationError`, never a
+  fresh var; drive misses to zero across stdlib + both gates. (Turns the
+  `.size {}` match-arm crash into a compile error.)
+- **A.3** Codec impls generated into the resolved module like derived ones.
+- **A.4** Delete the heuristics from 0.3, one per gated test.
+- **B.1** One canonical type form: builtin containers as `TypeApplication`
+  (dedicated nodes deleted = backlog #315); declared types nominal with
+  identity the sole carrier, opened only through one `open(type, registry)`;
+  **type-application identity = `hash(constructor ⊕ args)`** (BUG 1's fix).
+- **B.2** Canonical-form test over every solver output. **B.3** Delete the
+  dual-arm code (`harvestVarBindings` container arms, `declaredShape`, …).
+- **C.1** Solver records per constraint per node
+  `Evidence = Impl(hash, sub) | Param(abilityHash, typeVar) | Structural(type)`.
+- **C.2** Dict params identified by `(abilityHash, typeVar)`; prescan
+  (`dictMethodsForHash`, `scanExprForVarTypeMethods`) replaced by declared
+  constraints.
+- **C.3** Compiler EMITS evidence (`refToDictedOp` = materialize); no
+  re-resolution at call sites. **C.4** Mono keyed on (generic hash, evidence at
+  site). **C.5** Delete prescan, `refToDictedOp` guessing, `@var` names.
+- **D.1** Derived Inspect generated. **D.2** Structural fast path from a PROVEN
+  property of the evidence tree + perf gate. **D.3** Test typed hand-written
+  bodies (`impl Eq for N { it.q == r.q }`).
+- **F** One `canDeriveAbility`, one `substituteTypeParams`, one unifier;
+  `ImplValidator` a consumer of elaboration.
+
+Guarantee after Track 2: every ability use is resolved to one instance or a
+dictionary parameter AT ELABORATION TIME, the compiler only reads evidence, a
+gap is a compile error, and the runtime never decides equality/ordering/hashing
+itself (the ratchet). Not covered: lawfulness of user instances (an `Eq`
+inconsistent with `Hash`), and performance — hence D.2's proof, not a guess.
+
+Gates for every change: `:typechecker:test` and `:interpreter:test` SEPARATELY,
+`--no-daemon`; stdlib type changes need `:cli:clean :cli:compileStdlib`.
