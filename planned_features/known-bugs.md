@@ -571,9 +571,25 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
 
 - **0.1** `NodeId` on every parsed/typed node; side tables keyed by NodeId,
   never `Loc`.
-- **0.2** Invariant pass in both gates (ratchet): `unknown` VarTypes, untyped
-  impl params, VarType-receiver method calls with no enclosing binder.
-- **0.3** One test per compiler heuristic above = its deletion acceptance test.
+- **0.2** DONE — `ElaborationInvariants` + a ratchet in both gates.
+  Measured over the typed stdlib: **687** declarations with an unbound type
+  variable, **272** with an untyped parameter, **24** reading a field off a
+  receiver with no type (baseline:
+  `typechecker/src/test/resources/elaboration-invariant-baseline.txt`). Almost
+  all of it is in impl operations, which is what A.1 changes. The 24 include
+  `impl NumAdd Int for Float { add = { it, r } -> it + r.to_float {} }` —
+  `r.to_float` dispatching on something the compiler cannot name.
+  `UserCodeElaborationGateTest` asks the same of ordinary programs and states
+  each one's gaps inline: a match-arm-bound seq still types as literal
+  `unknown` at `.size {}`, a fully annotated polymorphic helper's parameters
+  are still bare fresh variables, and one chained call with an inline lambda
+  leaves seven nodes untyped.
+- **0.3** DONE — `HeuristicDeletionAcceptanceTest`: one test per heuristic,
+  named after it, each running a program whose ANSWER depends on the right
+  instance (a newtype whose `eq` compares mod 10, so a structural fallback
+  answers differently rather than quietly working). A control proves the
+  fixture discriminates. A.4 deletes a heuristic and runs the test named after
+  it, instead of deleting and hoping.
 - **A.1** Impl-op bodies solved in the MODULE solve (`ImplValidator` results
   land in the same per-node table); params from the ability signature for ALL
   impls (behind `MEZZE_ELAB=1` until C.3).
