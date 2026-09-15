@@ -1611,9 +1611,24 @@ class TypedAstBuilder(
                 }
             }
             is ParsedSeqPattern -> {
-                val elementType = when (shape) {
-                    is MezzeType.SeqType -> shape.elementType
-                    is MezzeType.ListType -> shape.elementType
+                // A container has two representations, and this read handled only
+                // the dedicated nodes. The name-carried form is the DOMINANT one in
+                // what actually flows (5,722 occurrences against 1,546 across the
+                // typed stdlib — TypeRepresentationAuditTest), and `declaredShape`
+                // above cannot normalize it away: it expands a TypeApplication to a
+                // record or a variant, and a container is neither, so a
+                // `TypeApplication("Seq", [T])` scrutinee arrives here intact and
+                // every binding in the pattern came back with no type — which is
+                // what makes `==` inside an impl body fall to the structural
+                // default. Same shape as the bug `containerElementType` already
+                // carries a comment about. B.1 removes the choice; until then, read
+                // both.
+                val elementType = when {
+                    shape is MezzeType.SeqType -> shape.elementType
+                    shape is MezzeType.ListType -> shape.elementType
+                    shape is MezzeType.TypeApplication &&
+                        shape.constructor in com.mezze.language.ast.BuiltinTypes.sequenceConstructors ->
+                        shape.args.firstOrNull()
                     else -> null
                 }
                 val elements = pattern.elements.fold(emptyMap<String, MezzeType>()) { acc, e -> acc + patternBindingTypes(e, elementType) }

@@ -19,6 +19,15 @@ object BuiltinTypes {
     const val ITER = "Iter"
 
     val coreTypeNames = setOf(OPTION, RESULT, LIST, MAP, SET, SEQ, SORTED_MAP, SORTED_SET, DEQUE, NON_EMPTY_LIST, ITER)
+
+    /**
+     * The constructors a SEQUENCE pattern (`[head, ...tail]`) can match against
+     * in the name-carried representation. Counterpart to the `SeqType`/`ListType`
+     * arms in [builtinConstructorName], for readers that meet a container as
+     * `TypeApplication("Seq", [T])` — the dominant form in solved types — rather
+     * than as a dedicated node.
+     */
+    val sequenceConstructors = setOf(SEQ, LIST)
     val primitiveTypeNames = PrimitiveTypes.allNames
     val allBuiltinTypeNames = coreTypeNames + primitiveTypeNames
 

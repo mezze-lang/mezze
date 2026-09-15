@@ -648,8 +648,23 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   (dedicated nodes deleted = backlog #315); declared types nominal with
   identity the sole carrier, opened only through one `open(type, registry)`;
   **type-application identity = `hash(constructor ⊕ args)`** (BUG 1's fix).
-- **B.2** Canonical-form test over every solver output. **B.3** Delete the
-  dual-arm code (`harvestVarBindings` container arms, `declaredShape`, …).
+- **B.2 / B.3** MEASURED; B.1's direction confirmed, the dual-arm code is
+  smaller than assumed. `TypeRepresentationAuditTest` counts both forms across
+  the typed stdlib: **5,722 name-carried `TypeApplication("Seq", …)` against
+  1,546 dedicated nodes**, with **158 declarations carrying both** — mostly the
+  container CONVERSION functions (`to_list`/`from_list`/…), which mention two
+  container types and get them in different forms. So the dedicated nodes are
+  the minority in what actually flows and B.1's "delete them" is the right
+  direction, even though the SOURCE has 247 dedicated-node sites against 44
+  TypeApplication constructions.
+  A scan for one-sided consumers (functions branching on ≥2 dedicated container
+  nodes with no TypeApplication arm) found only **two**: `builtinConstructorName`,
+  which is one-sided by design, and `TypedAstBuilder.patternBindingTypes`, whose
+  seq-pattern arm read the element type from `SeqType`/`ListType` only. Fixed —
+  but honestly, it is HARDENING, not a bug fix: six programs covering every route
+  to that code (impl target, record field, variant payload) all passed before the
+  fix, because `[P]` parses straight to a dedicated node. `SeqPatternInImplBodyTest`
+  keeps them as forward protection for when B.1 moves these types around.
 - **C.1** Solver records per constraint per node
   `Evidence = Impl(hash, sub) | Param(abilityHash, typeVar) | Structural(type)`.
 - **C.2** Dict params identified by `(abilityHash, typeVar)`; prescan
