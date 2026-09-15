@@ -376,20 +376,6 @@ public final class SetNatives {
         return result;
     }
 
-    // ==================== Helper for comparison ====================
-
-    private static int compare(Object a, Object b) {
-        if (a instanceof Long && b instanceof Long) {
-            return Long.compare((Long) a, (Long) b);
-        }
-        if (a instanceof Double && b instanceof Double) {
-            return Double.compare((Double) a, (Double) b);
-        }
-        if (a instanceof String && b instanceof String) {
-            return ((String) a).compareTo((String) b);
-        }
-        return 0;
-    }
 
     // ==================== Task #20: Additional Operations ====================
 

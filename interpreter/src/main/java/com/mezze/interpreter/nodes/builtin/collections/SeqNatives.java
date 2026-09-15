@@ -1067,9 +1067,10 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(result.toArray());
     }
 
-    public static MezzeSeq dedupBy(MezzeSeq seq, MezzeFunction keyFn,
+    public static MezzeSeq dedupBy(MezzeSeq seq, MezzeFunction keyFn, MezzeFunction eqFn,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return seq;
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
         java.util.ArrayList<Object> result = new java.util.ArrayList<>();
         Object lastElem = seq.get(0);
         Object lastKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, lastElem));
@@ -1077,7 +1078,7 @@ public final class SeqNatives {
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
             Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
-            if (!java.util.Objects.equals(key, lastKey)) {
+            if (!eq.callEq(callNode, key, lastKey)) {
                 result.add(elem);
                 lastElem = elem;
                 lastKey = key;
@@ -1116,8 +1117,9 @@ public final class SeqNatives {
     // ==================== Group Consecutive ====================
 
     @TruffleBoundary
-    public static MezzeSeq groupConsecutive(MezzeSeq seq) {
+    public static MezzeSeq groupConsecutive(MezzeSeq seq, MezzeFunction eqFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeSeq.empty();
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
         java.util.ArrayList<Object> groups = new java.util.ArrayList<>();
         java.util.ArrayList<Object> currentGroup = new java.util.ArrayList<>();
         Object currentKey = seq.get(0);
@@ -1125,7 +1127,7 @@ public final class SeqNatives {
 
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            if (java.util.Objects.equals(elem, currentKey)) {
+            if (eq.callEq(callNode, elem, currentKey)) {
                 currentGroup.add(elem);
             } else {
                 groups.add(MezzeSeq.fromArray(currentGroup.toArray()));
@@ -1138,19 +1140,20 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(groups.toArray());
     }
 
-    public static MezzeSeq groupConsecutiveBy(MezzeSeq seq, MezzeFunction keyFn,
+    public static MezzeSeq groupConsecutiveBy(MezzeSeq seq, MezzeFunction keyFn, MezzeFunction eqFn,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeSeq.empty();
         java.util.ArrayList<Object> groups = new java.util.ArrayList<>();
         java.util.ArrayList<Object> currentGroup = new java.util.ArrayList<>();
         Object firstElem = seq.get(0);
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
         Object currentKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, firstElem));
         currentGroup.add(firstElem);
 
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
             Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
-            if (java.util.Objects.equals(key, currentKey)) {
+            if (eq.callEq(callNode, key, currentKey)) {
                 currentGroup.add(elem);
             } else {
                 groups.add(MezzeSeq.fromArray(currentGroup.toArray()));
@@ -1349,26 +1352,6 @@ public final class SeqNatives {
         return sb.toString();
     }
 
-    // ==================== Helper Methods ====================
-
-    private static int compare(Object a, Object b) {
-        if (a instanceof Long && b instanceof Long) {
-            return Long.compare((Long) a, (Long) b);
-        }
-        if (a instanceof Double && b instanceof Double) {
-            return Double.compare((Double) a, (Double) b);
-        }
-        if (a instanceof String && b instanceof String) {
-            return ((String) a).compareTo((String) b);
-        }
-        if (a instanceof Long && b instanceof Double) {
-            return Double.compare(((Long) a).doubleValue(), (Double) b);
-        }
-        if (a instanceof Double && b instanceof Long) {
-            return Double.compare((Double) a, ((Long) b).doubleValue());
-        }
-        return 0;
-    }
 
     private static Object[] prepareArgsIndex(MezzeFunction fn, long index) {
         Object[] closureValues = fn.getClosureValues();
@@ -1648,7 +1631,10 @@ public final class SeqNatives {
             return MezzeVariant.none();
         }
         Object[] arr = seq.toArray();
-        java.util.Arrays.sort(arr, (a, b) -> compare(a, b));
+        // `median` is declared over [Float]; ordering Doubles is not a decision
+        // about any element's Ord instance, so compare them directly.
+        java.util.Arrays.sort(arr, (a, b) -> Double.compare(
+            a instanceof Long la ? la : (Double) a, b instanceof Long lb ? lb : (Double) b));
         int mid = arr.length / 2;
         if (arr.length % 2 == 0) {
             double v1 = arr[mid - 1] instanceof Long l ? l : (Double) arr[mid - 1];
@@ -1770,13 +1756,14 @@ public final class SeqNatives {
     // ==================== Split Operations ====================
 
     @TruffleBoundary
-    public static MezzeSeq split(MezzeSeq seq, Object separator) {
+    public static MezzeSeq split(MezzeSeq seq, Object separator, MezzeFunction eqFn, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
         java.util.List<Object> result = new java.util.ArrayList<>();
         java.util.List<Object> current = new java.util.ArrayList<>();
 
         for (int i = 0; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            if (java.util.Objects.equals(elem, separator)) {
+            if (eq.callEq(callNode, elem, separator)) {
                 result.add(MezzeSeq.fromArray(current.toArray()));
                 current.clear();
             } else {

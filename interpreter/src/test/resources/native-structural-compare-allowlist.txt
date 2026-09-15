@@ -1,34 +1,5 @@
 # Natives that still decide equality/ordering of a Mezze value in Java.
 # May only SHRINK — see NativeEvidenceGateTest. Tasks T1.2 (containers) / T1.3 (sorted).
-DequeNatives.java:compare
-DequeNatives.java:compareElements
-DequeNatives.java:contains
-DequeNatives.java:dedupBy
-DequeNatives.java:deepEquals
-DequeNatives.java:indexOf
-ListNatives.java:binarySearch
-ListNatives.java:binarySearchInsertPoint
-ListNatives.java:compare
-ListNatives.java:compareElements
-ListNatives.java:deepEquals
-ListNatives.java:maxBy
-ListNatives.java:minBy
-ListNatives.java:sortByKey
-ListNatives.java:upperBound
-MapNatives.java:compare
-NonEmptyListNatives.java:compareElements
-NonEmptyListNatives.java:contains
-NonEmptyListNatives.java:deepEquals
-SeqNatives.java:cmpInt
-SeqNatives.java:compare
-SeqNatives.java:dedupBy
-SeqNatives.java:fromArray
-SeqNatives.java:groupConsecutive
-SeqNatives.java:groupConsecutiveBy
-SeqNatives.java:median
-SeqNatives.java:sortByKey
-SeqNatives.java:split
-SetNatives.java:compare
 SortedMapNatives.java:ceilingKey
 SortedMapNatives.java:compare
 SortedMapNatives.java:compareMaps

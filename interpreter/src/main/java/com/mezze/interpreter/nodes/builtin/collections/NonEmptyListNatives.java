@@ -239,17 +239,6 @@ public final class NonEmptyListNatives {
         return acc;
     }
 
-    // ==================== Search Operations ====================
-
-    @TruffleBoundary
-    public static boolean contains(MezzeNonEmptyList list, Object element) {
-        for (int i = 0; i < list.size(); i++) {
-            if (deepEquals(list.get(i), element)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     public static boolean any(MezzeNonEmptyList list, MezzeFunction predicate,
                                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -388,35 +377,5 @@ public final class NonEmptyListNatives {
         return Integer.compare(list1.size(), list2.size());
     }
 
-    private static int compareElements(Object a, Object b) {
-        if (a instanceof Long && b instanceof Long) {
-            return Long.compare((Long) a, (Long) b);
-        }
-        if (a instanceof Double && b instanceof Double) {
-            return Double.compare((Double) a, (Double) b);
-        }
-        if (a instanceof String && b instanceof String) {
-            return ((String) a).compareTo((String) b);
-        }
-        if (a instanceof Long && b instanceof Double) {
-            return Double.compare(((Long) a).doubleValue(), (Double) b);
-        }
-        if (a instanceof Double && b instanceof Long) {
-            return Double.compare((Double) a, ((Long) b).doubleValue());
-        }
-        return 0;
-    }
 
-    // ==================== Helper Methods ====================
-
-    @TruffleBoundary
-    private static boolean deepEquals(Object a, Object b) {
-        if (a == b) return true;
-        if (a == null || b == null) return false;
-        if (a instanceof Long && b instanceof Long) return a.equals(b);
-        if (a instanceof Double && b instanceof Double) return a.equals(b);
-        if (a instanceof String && b instanceof String) return a.equals(b);
-        if (a instanceof Boolean && b instanceof Boolean) return a.equals(b);
-        return false;
-    }
 }

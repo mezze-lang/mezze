@@ -368,8 +368,13 @@ pub let dedup: { xs: ['a] } with Eq 'a -> ['a] = { xs } ->
   dedup_with_eq { xs = xs, eq = { a, b } -> a == b }
 
 ## Removes consecutive duplicates by a key function.
-pub let dedup_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['a] <...> = { xs, f } ->
-  __native_seq_dedup_by { xs = xs, f = f }
+let dedup_by_with_eq
+  : { xs: ['a], f: { x: 'a } -> 'b <...>, eq: { a: 'b, b: 'b } -> Bool } -> ['a] <...>
+  = { xs, f, eq } -> __native_seq_dedup_by { xs = xs, f = f, eq = eq }
+
+## Removes consecutive duplicates by a key function (keys compared by their Eq).
+pub let dedup_by: { xs: ['a], f: { x: 'a } -> 'b <...> } with Eq 'b -> ['a] <...> = { xs, f } ->
+  dedup_by_with_eq { xs = xs, f = f, eq = { a, b } -> a == b }
 
 ## Creates a single-element sequence.
 pub let singleton: { x: 'a } -> ['a] = { x } -> __native_seq_singleton { x = x }
@@ -385,14 +390,24 @@ pub let fill_with: { n: Int, f: { i: Int } -> 'a <...> } -> ['a] <...> = { n, f 
   __native_seq_fill_with { n = n, f = f }
 
 ## Groups consecutive equal elements into sub-sequences.
-pub let group_consecutive: { xs: ['a] } -> [['a]] = { xs } ->
-  __native_seq_group_consecutive { xs = xs }
+let group_consecutive_with_eq: { xs: ['a], eq: { a: 'a, b: 'a } -> Bool } -> [['a]] = { xs, eq } ->
+  __native_seq_group_consecutive { xs = xs, eq = eq }
+
+## Groups consecutive equal elements into sub-sequences, by the element's Eq.
+pub let group_consecutive: { xs: ['a] } with Eq 'a -> [['a]] = { xs } ->
+  group_consecutive_with_eq { xs = xs, eq = { a, b } -> a == b }
 
 ## Groups consecutive elements by a key function.
-pub let group_consecutive_by
-  : { xs: ['a], f: { x: 'a } -> 'b <...> }
+let group_consecutive_by_with_eq
+  : { xs: ['a], f: { x: 'a } -> 'b <...>, eq: { a: 'b, b: 'b } -> Bool }
   -> [['a]] <...>
-  = { xs, f } -> __native_seq_group_consecutive_by { xs = xs, f = f }
+  = { xs, f, eq } -> __native_seq_group_consecutive_by { xs = xs, f = f, eq = eq }
+
+## Groups consecutive elements by a key function (keys compared by their Eq).
+pub let group_consecutive_by
+  : { xs: ['a], f: { x: 'a } -> 'b <...> } with Eq 'b
+  -> [['a]] <...>
+  = { xs, f } -> group_consecutive_by_with_eq { xs = xs, f = f, eq = { a, b } -> a == b }
 
 ## Returns all sliding windows of the given size (alias for sliding).
 pub let windows: { xs: ['a], size: Int } -> [['a]] = { xs, size } ->
@@ -602,8 +617,13 @@ pub let remove_at: { xs: ['a], i: Int } -> Option ['a] = { xs, i } ->
   __native_seq_remove_at { xs = xs, i = i }
 
 ## Splits by a separator element.
-pub let split: { xs: ['a], sep: 'a } -> [['a]] = { xs, sep } ->
-  __native_seq_split { xs = xs, sep = sep }
+let split_with_eq
+  : { xs: ['a], sep: 'a, eq: { a: 'a, b: 'a } -> Bool } -> [['a]] = { xs, sep, eq } ->
+  __native_seq_split { xs = xs, sep = sep, eq = eq }
+
+## Splits on a separator element, compared by the element's Eq impl.
+pub let split: { xs: ['a], sep: 'a } with Eq 'a -> [['a]] = { xs, sep } ->
+  split_with_eq { xs = xs, sep = sep, eq = { a, b } -> a == b }
 
 ## Converts to a List.
 pub let to_list: { xs: ['a] } -> List 'a = { xs } -> __native_seq_to_list { xs = xs }

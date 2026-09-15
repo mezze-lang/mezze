@@ -197,8 +197,13 @@ pub let dedup: { d: Deque 'a } with Eq 'a -> Deque 'a = { d } ->
   dedup_with_eq { d = d, eq = { a, b } -> a == b }
 
 ## Removes consecutive duplicates by a key function.
-pub let dedup_by: { d: Deque 'a, f: { val: 'a } -> 'b <...> } -> Deque 'a <...> = { d, f } ->
-  __native_deque_dedup_by { d = d, f = f }
+let dedup_by_with_eq
+  : { d: Deque 'a, f: { val: 'a } -> 'b <...>, eq: { a: 'b, b: 'b } -> Bool } -> Deque 'a <...>
+  = { d, f, eq } -> __native_deque_dedup_by { d = d, f = f, eq = eq }
+
+## Removes consecutive duplicates by a key function (keys compared by their Eq).
+pub let dedup_by: { d: Deque 'a, f: { val: 'a } -> 'b <...> } with Eq 'b -> Deque 'a <...> = { d, f } ->
+  dedup_by_with_eq { d = d, f = f, eq = { a, b } -> a == b }
 
 ## Inserts a separator between every pair of elements.
 pub let intersperse: { d: Deque 'a, sep: 'a } -> Deque 'a = { d, sep } ->

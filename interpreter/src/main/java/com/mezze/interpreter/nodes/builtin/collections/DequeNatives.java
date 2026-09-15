@@ -183,24 +183,6 @@ public final class DequeNatives {
         return Integer.compare(deque1.size(), deque2.size());
     }
 
-    private static int compareElements(Object a, Object b) {
-        if (a instanceof Long && b instanceof Long) {
-            return Long.compare((Long) a, (Long) b);
-        }
-        if (a instanceof Double && b instanceof Double) {
-            return Double.compare((Double) a, (Double) b);
-        }
-        if (a instanceof String && b instanceof String) {
-            return ((String) a).compareTo((String) b);
-        }
-        if (a instanceof Long && b instanceof Double) {
-            return Double.compare(((Long) a).doubleValue(), (Double) b);
-        }
-        if (a instanceof Double && b instanceof Long) {
-            return Double.compare((Double) a, ((Long) b).doubleValue());
-        }
-        return 0;
-    }
 
     // ==================== Conversion ====================
 
@@ -214,16 +196,6 @@ public final class DequeNatives {
         return deque.toArray();
     }
 
-    @TruffleBoundary
-    private static boolean deepEquals(Object a, Object b) {
-        if (a == b) return true;
-        if (a == null || b == null) return false;
-        if (a instanceof Long && b instanceof Long) return a.equals(b);
-        if (a instanceof Double && b instanceof Double) return a.equals(b);
-        if (a instanceof String && b instanceof String) return a.equals(b);
-        if (a instanceof Boolean && b instanceof Boolean) return a.equals(b);
-        return false;
-    }
 
     // ==================== Predicate Operations ====================
 
@@ -304,17 +276,6 @@ public final class DequeNatives {
         return result;
     }
 
-    // ==================== Contains ====================
-
-    @TruffleBoundary
-    public static boolean contains(MezzeDeque deque, Object element) {
-        for (Object elem : deque) {
-            if (deepEquals(elem, element)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     // ==================== To Seq ====================
 
@@ -527,17 +488,6 @@ public final class DequeNatives {
         return result;
     }
 
-    @TruffleBoundary
-    public static MezzeVariant indexOf(MezzeDeque deque, Object element) {
-        int i = 0;
-        for (Object elem : deque) {
-            if (deepEquals(elem, element)) {
-                return MezzeVariant.some((long) i);
-            }
-            i++;
-        }
-        return MezzeVariant.none();
-    }
 
     public static MezzeVariant findIndex(MezzeDeque deque, MezzeFunction predicate,
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -664,15 +614,16 @@ public final class DequeNatives {
         return result;
     }
 
-    public static MezzeDeque dedupBy(MezzeDeque deque, MezzeFunction f,
+    public static MezzeDeque dedupBy(MezzeDeque deque, MezzeFunction f, MezzeFunction eqFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
+        var eq = ScalarCall.prepare2(eqFn, "a", "b");
         MezzeDeque result = MezzeDeque.empty();
         Object prevKey = null;
         boolean first = true;
         for (Object elem : deque) {
             Object key = ctx.call1(callNode, elem);
-            if (first || !deepEquals(key, prevKey)) {
+            if (first || !eq.callEq(callNode, key, prevKey)) {
                 result = result.pushBack(elem);
                 prevKey = key;
                 first = false;
@@ -746,20 +697,6 @@ public final class DequeNatives {
         return rotateLeft(deque, -n);
     }
 
-    // ==================== Helper for comparison ====================
-
-    private static int compare(Object a, Object b) {
-        if (a instanceof Long && b instanceof Long) {
-            return Long.compare((Long) a, (Long) b);
-        }
-        if (a instanceof Double && b instanceof Double) {
-            return Double.compare((Double) a, (Double) b);
-        }
-        if (a instanceof String && b instanceof String) {
-            return ((String) a).compareTo((String) b);
-        }
-        return 0;
-    }
 
     // ==================== Cross-Collection Conversions ====================
 

@@ -498,20 +498,6 @@ public final class MapNatives {
         return result;
     }
 
-    // ==================== Comparison Helper ====================
-
-    private static int compare(Object a, Object b) {
-        if (a instanceof Long && b instanceof Long) {
-            return Long.compare((Long) a, (Long) b);
-        }
-        if (a instanceof Double && b instanceof Double) {
-            return Double.compare((Double) a, (Double) b);
-        }
-        if (a instanceof String && b instanceof String) {
-            return ((String) a).compareTo((String) b);
-        }
-        return 0;
-    }
 
     // ==================== Task #37: Multi-Map Operations ====================
 

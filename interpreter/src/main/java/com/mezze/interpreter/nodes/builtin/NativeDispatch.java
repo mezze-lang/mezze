@@ -760,7 +760,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_dedup", (r, c) ->
             SeqNatives.dedup(getSeq(r, "xs"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_dedup_by", (r, c) ->
-            SeqNatives.dedupBy(getSeq(r, "xs"), getFunction(r, "f"), c));
+            SeqNatives.dedupBy(getSeq(r, "xs"), getFunction(r, "f"), getFunction(r, "eq"), c));
 
         // Singleton/Nth/Fill
         HANDLERS.put("__native_seq_singleton", (r, c) ->
@@ -774,9 +774,9 @@ public final class NativeDispatch extends MezzeNode {
 
         // Group Consecutive
         HANDLERS.put("__native_seq_group_consecutive", (r, c) ->
-            SeqNatives.groupConsecutive(getSeq(r, "xs")));
+            SeqNatives.groupConsecutive(getSeq(r, "xs"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_seq_group_consecutive_by", (r, c) ->
-            SeqNatives.groupConsecutiveBy(getSeq(r, "xs"), getFunction(r, "f"), c));
+            SeqNatives.groupConsecutiveBy(getSeq(r, "xs"), getFunction(r, "f"), getFunction(r, "eq"), c));
 
         // Windows/Chunks/Rotate
         HANDLERS.put("__native_seq_windows", (r, c) ->
@@ -860,7 +860,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Split Operations
         HANDLERS.put("__native_seq_split", (r, c) ->
-            SeqNatives.split(getSeq(r, "xs"), getField(r, "sep")));
+            SeqNatives.split(getSeq(r, "xs"), getField(r, "sep"), getFunction(r, "eq"), c));
 
         // Float-specific Operations
         HANDLERS.put("__native_seq_min_float", (r, c) ->
@@ -1070,9 +1070,9 @@ public final class NativeDispatch extends MezzeNode {
 
         // Min/Max/Sum/Product
         HANDLERS.put("__native_list_min_by", (r, c) ->
-            ListNatives.minBy(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.minBy(getList(r, "xs"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_list_max_by", (r, c) ->
-            ListNatives.maxBy(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.maxBy(getList(r, "xs"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_list_sum", (r, c) ->
             ListNatives.sum(getList(r, "xs")));
         HANDLERS.put("__native_list_sum_float", (r, c) ->
@@ -1166,7 +1166,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // Task #19: Transformation operations
         HANDLERS.put("__native_list_sort_by_key", (r, c) ->
-            ListNatives.sortByKey(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.sortByKey(getList(r, "xs"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_list_rotate_left", (r, c) ->
             ListNatives.rotateLeft(getList(r, "xs"), getLong(r, "n")));
         HANDLERS.put("__native_list_rotate_right", (r, c) ->
@@ -1220,15 +1220,15 @@ public final class NativeDispatch extends MezzeNode {
 
         // Task #33: Binary search operations
         HANDLERS.put("__native_list_binary_search", (r, c) ->
-            ListNatives.binarySearch(getList(r, "xs"), getField(r, "target")));
+            ListNatives.binarySearch(getList(r, "xs"), getField(r, "target"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_list_binary_search_insert_point", (r, c) ->
-            ListNatives.binarySearchInsertPoint(getList(r, "xs"), getField(r, "target")));
+            ListNatives.binarySearchInsertPoint(getList(r, "xs"), getField(r, "target"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_list_lower_bound", (r, c) ->
-            ListNatives.lowerBound(getList(r, "xs"), getField(r, "target")));
+            ListNatives.lowerBound(getList(r, "xs"), getField(r, "target"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_list_upper_bound", (r, c) ->
-            ListNatives.upperBound(getList(r, "xs"), getField(r, "target")));
+            ListNatives.upperBound(getList(r, "xs"), getField(r, "target"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_list_equal_range", (r, c) ->
-            ListNatives.equalRange(getList(r, "xs"), getField(r, "target")));
+            ListNatives.equalRange(getList(r, "xs"), getField(r, "target"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_list_binary_search_by", (r, c) ->
             ListNatives.binarySearchBy(getList(r, "xs"), getField(r, "target"), getFunction(r, "cmp"), c));
     }
@@ -1804,7 +1804,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_deque_dedup", (r, c) ->
             DequeNatives.dedup(getDeque(r, "d"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_deque_dedup_by", (r, c) ->
-            DequeNatives.dedupBy(getDeque(r, "d"), getFunction(r, "f"), c));
+            DequeNatives.dedupBy(getDeque(r, "d"), getFunction(r, "f"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_deque_intersperse", (r, c) ->
             DequeNatives.intersperse(getDeque(r, "d"), getField(r, "sep")));
 

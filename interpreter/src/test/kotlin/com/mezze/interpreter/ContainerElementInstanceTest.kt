@@ -90,6 +90,28 @@ class ContainerElementInstanceTest {
     @Test fun mapMinValue() = assertEquals(1L, runM("$twoEntryMap\nlet main = {} -> match map::min_value { m = m } is\n  Some { val = v } -> px { p = v }\n  None -> 0 - 1\nmain {}"))
     @Test fun mapContainsValue() = assertEquals(true, runM("$twoEntryMap\nlet main = {} -> map::contains_value { m = m, v = p { x = 3, y = 99 } }\nmain {}"))
 
+    // ---- Seq: the remaining Eq-driven ops -----------------------------------
+    private val ps = "[ p { x = 1, y = 10 }, p { x = 1, y = 20 }, p { x = 2, y = 30 } ]"
+
+    @Test fun seqGroupConsecutive() = assertEquals(2L, run("let main = {} -> seq::size { xs = seq::group_consecutive { xs = $ps } }\nmain {}"))
+    @Test fun seqDedupBy() = assertEquals(2L, run("let main = {} -> seq::size { xs = seq::dedup_by { xs = $ps, f = { x } -> x } }\nmain {}"))
+    @Test fun seqGroupConsecutiveBy() = assertEquals(2L, run("let main = {} -> seq::size { xs = seq::group_consecutive_by { xs = $ps, f = { x } -> x } }\nmain {}"))
+    // Splitting on (2,99) finds the (2,30) separator by P's Eq → two pieces.
+    @Test fun seqSplit() = assertEquals(2L, run("let main = {} -> seq::size { xs = seq::split { xs = $ps, sep = p { x = 2, y = 99 } } }\nmain {}"))
+    @Test fun dequeDedupBy() = assertEquals(2L, run("use std::collections::deque\nlet main = {} -> deque::size { d = deque::dedup_by { d = deque::from_seq { xs = $ps }, f = { val } -> val } }\nmain {}"))
+
+    // ---- List, Ord-driven ---------------------------------------------------
+    // Sorted by P's Ord (x only); the y values are deliberately out of order so a
+    // structural comparison would disagree.
+    private fun runLo(body: String) = run("let xs = list::from_seq { xs = [ p { x = 1, y = 30 }, p { x = 2, y = 20 }, p { x = 3, y = 10 } ] }\n$body")
+
+    @Test fun listMinBy() = assertEquals(1L, runLo("let main = {} -> match list::min_by { xs = xs, f = { x } -> x } is\n  Some { val = e } -> px { p = e }\n  None -> 0 - 1\nmain {}"))
+    @Test fun listMaxBy() = assertEquals(3L, runLo("let main = {} -> match list::max_by { xs = xs, f = { x } -> x } is\n  Some { val = e } -> px { p = e }\n  None -> 0 - 1\nmain {}"))
+    @Test fun listBinarySearch() = assertEquals(1L, runLo("let main = {} -> match list::binary_search { xs = xs, target = p { x = 2, y = 99 } } is\n  Some { val = i } -> i\n  None -> 0 - 1\nmain {}"))
+    @Test fun listLowerBound() = assertEquals(1L, runLo("let main = {} -> list::lower_bound { xs = xs, target = p { x = 2, y = 99 } }\nmain {}"))
+    @Test fun listUpperBound() = assertEquals(2L, runLo("let main = {} -> list::upper_bound { xs = xs, target = p { x = 2, y = 99 } }\nmain {}"))
+    @Test fun listSortByKey() = assertEquals(30L, runLo("let main = {} -> match list::head { xs = list::sort_by_key { xs = list::reverse { xs = xs }, f = { x } -> x } } is\n  Some { val = e } -> py { p = e }\n  None -> 0 - 1\nmain {}"))
+
     // ---- regressions: primitives still work --------------------------------
 
     @Test fun listContainsInt() = assertEquals(true, run("let main = {} -> list::contains { xs = list::from_seq { xs = [1, 2, 3] }, x = 2 }\nmain {}"))

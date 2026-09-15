@@ -570,7 +570,15 @@ class TypedAstBuilder(
                     ?: importContext?.importedAbilities?.get(c.abilityName)?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
                 WellKnownHashConstants.isCodecAbility(h)
             }
-            val seedThisOp = seedOpParams && !isInherent && op.implementation is ParsedLambda &&
+            // A NEWTYPE receiver is never seeded. Its impl bodies exist to UNWRAP
+            // (`match it is Money.(a) -> a < b`), and with `it` typed as Money the
+            // binding `a` is not the wrapped Int, so the body's `a < b` dispatches
+            // Money's OWN lt through the enclosing dict slot — unbounded recursion,
+            // StackOverflow (NewtypeInUseRuntimeTest). Records and variants, where
+            // the payload types are read off the declaration, are unaffected.
+            val receiverIsNewtype = (decl.targetTypes.lastOrNull() as? ParsedNamedType)
+                ?.let { registry.lookupType(it.name)?.definition is ParsedNewtypeDef } == true
+            val seedThisOp = !receiverIsNewtype && seedOpParams && !isInherent && op.implementation is ParsedLambda &&
                 declaredOpType != null &&
                 // Codec-flavored abilities (Encode/Decode/Format…) dispatch through
                 // `config` and were shaped for untyped bodies — leave them as they are.

@@ -39,11 +39,17 @@ class NativeEvidenceGateTest {
         Paths.get("interpreter/src/main/java/com/mezze/interpreter/nodes/builtin/collections"),
     ).first { Files.isDirectory(it) }
 
+    /** Comments are not code: a note saying "not the primitive-only compare()"
+     *  must not count as an offender. */
+    private fun stripComments(src: String): String =
+        src.replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL)) { m -> m.value.replace(Regex("""[^\n]"""), " ") }
+            .replace(Regex("""//[^\n]*""")) { m -> " ".repeat(m.value.length) }
+
     private fun offenders(): Set<String> {
         val out = sortedSetOf<String>()
         Files.list(collectionsDir()).use { files ->
             files.filter { it.toString().endsWith(".java") }.sorted().forEach { path ->
-                val src = Files.readString(path)
+                val src = stripComments(Files.readString(path))
                 // Only comparators this file actually declares can be called unqualified.
                 val declared = structuralComparators.filter {
                     Regex("""\n    (?:private|public|protected)?\s*static (?:boolean|int) $it\(Object """).containsMatchIn(src)
