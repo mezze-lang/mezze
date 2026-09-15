@@ -93,7 +93,19 @@ internal fun emitTypedModuleAndLower(
                     else -> continue
                 }
                 builder.buildCodecImpl(parsedImpl, extraImpls)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                // A codec impl that fails to generate does not fail here — the
+                // program keeps going and dies later at the use site with
+                // "Field not found: decode", a long way from the cause. Keep the
+                // swallow (a generation failure is not always fatal: the codec
+                // ability may simply not apply to this target) but stop hiding it,
+                // matching the outer handler below.
+                if (System.getenv("MEZZE_DEBUG") != null) {
+                    System.err.println(
+                        "[CODEC] ${ci.abilityName} for ${ci.targetTypes}: " +
+                            "${e.javaClass.simpleName}: ${e.message}",
+                    )
+                }
             }
         }
 

@@ -624,7 +624,25 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
 - **A.2** Builder reads by NodeId; a miss is an `ElaborationError`, never a
   fresh var; drive misses to zero across stdlib + both gates. (Turns the
   `.size {}` match-arm crash into a compile error.)
-- **A.3** Codec impls generated into the resolved module like derived ones.
+- **A.3** RE-STATED from evidence. Codec impls ARE already generated into the
+  module (`TypedModuleEmitter` → `codecGen.generateEncodeImpl/generateDecodeImpl`
+  → `typed.copy(abilityImpls = …)`), but at EMIT time, whereas derived impls are
+  generated into the RESOLVED module before the solve
+  (`ContextBuilder.deriveAbilityImpls`). Moving codec generation to match is
+  chicken-and-egg, and that is the actual work: `from_json` returns
+  `Result 'a DecodeError` where `'a` is inferred purely from USAGE, and
+  `DecodeTargetResolver`'s own header states the target "NEVER lands on the call
+  node or in the solve substitution: it must stay a bare var there, or the
+  `Decode` ability check rejects it and codegen reads a record where the input is
+  a string." So the solve cannot see the codec impls, because the target the
+  impls are generated FOR is only known after the solve. A.3 therefore requires
+  making `from_json`'s target inferable INSIDE the constraint system — a design
+  change, not a move — after which `DecodeTargetResolver` (423 lines of
+  structural recovery from field accesses on the callback binder) and A.1's
+  `matchCaseBindings` exclusion both come out.
+  Demonstrated by A.1: supplying those bodies ANY binding type — ground,
+  declared-shape, or only where nothing existed — breaks `JsonDecodeExhaustiveTest`
+  and `UserDecodeAbilityTest`. The codec path depends on not knowing.
 - **A.4** Delete the heuristics from 0.3, one per gated test.
 - **B.1** One canonical type form: builtin containers as `TypeApplication`
   (dedicated nodes deleted = backlog #315); declared types nominal with
@@ -643,8 +661,33 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
 - **D.1** Derived Inspect generated. **D.2** Structural fast path from a PROVEN
   property of the evidence tree + perf gate. **D.3** Test typed hand-written
   bodies (`impl Eq for N { it.q == r.q }`).
-- **F** One `canDeriveAbility`, one `substituteTypeParams`, one unifier;
-  `ImplValidator` a consumer of elaboration.
+- **F** PARTLY LANDED.
+  *`canDeriveAbility` — done, and it was hiding a divergence.* `TypeValidator`'s
+  copy had the same decision arms as `AbilityChecker`'s but no cycle guard, no
+  record expansion, and **no newtype rule** — and it gates the
+  unsatisfied-ability-constraint check, so a newtype with no `impl Eq` used where
+  Eq is required was silently ACCEPTED. Both now call
+  `derive/DerivabilityRules.canDeriveAbilityStructurally`; only the
+  component-satisfied test stays per-caller, because one consults registered
+  impls and the other matches target annotations in scope.
+  `DeriveRuleAgreementTest` pins the newtype case in both directions.
+  *`substituteTypeParams` — done.* The two differed in OPPOSITE directions: the
+  `ImplValidator` copy rebuilt a `TypeApplication` through `WellKnownTypeApp.of`
+  so a well-known constructor regains its identity hash, the `Unification` one
+  tolerated the `'` prefix on lookup. The survivor does both.
+  *One unifier — RE-STATED.* `MonoTypeOps.unify` and `Unification.unify` are NOT
+  duplicates: one is a one-way pattern MATCHER with deliberate mono-specific
+  asymmetries (refuse to bind a free value var; symmetric free-var acceptance;
+  distinct-declared-record veto), the other is the solver's two-way unifier.
+  Merging them would be wrong. The real duplication is **`typeMatchesTarget`**,
+  which exists twice (`MonoTypeOps.kt:63`, `TypedASTCompiler.kt:4285`) with
+  overlapping prim/identity/TypeApplication arms — the mono copy's own comment
+  says it "must agree with the compiler's typeMatchesTarget", i.e. the coupling
+  is already known and maintained by hand. They are not mergeable by union: the
+  compiler's extra arms (Bool-variant normalisation, VariantType/TypeApplication
+  alias recovery for a stripped identity) exist for specific fixed bugs, and
+  giving them to mono would make it match more eagerly and seed wrong
+  specializations. Needs its own pass with targeted tests per arm.
 
 Guarantee after Track 2: every ability use is resolved to one instance or a
 dictionary parameter AT ELABORATION TIME, the compiler only reads evidence, a

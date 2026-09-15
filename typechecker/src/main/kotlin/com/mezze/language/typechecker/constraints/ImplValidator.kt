@@ -859,19 +859,12 @@ internal class ImplValidator(
         return stamped.transformChildren { stampTypeHashes(it) }
     }
 
+    // Task F: was a near-copy of substituteTypeParamsByName. The two differed in
+    // opposite directions — this one rebuilt a TypeApplication through
+    // WellKnownTypeApp.of, the other tolerated the `'` prefix on lookup — so the
+    // survivor does both and this is now a call.
     private fun substituteTypeParams(type: MezzeType, substitution: Map<String, MezzeType>): MezzeType =
-        when (type) {
-            // A type var is replaced by its substitute (by name); everything else
-            // just recurses into its children. transformChildren rebuilds each
-            // node via copy(), preserving all non-child fields (typeName,
-            // typeHash, rowVar, effects). TypeApplication keeps its own case so
-            // WellKnownTypeApp.of still fills in a well-known hash when absent.
-            is MezzeType.VarType -> substitution[type.variable.name] ?: type
-            is MezzeType.TypeApplication -> WellKnownTypeApp.of(
-                type.constructor, type.args.map { substituteTypeParams(it, substitution) },
-                (type.identity as? TypeIdentity.Declared)?.hash)
-            else -> type.transformChildren { substituteTypeParams(it, substitution) }
-        }
+        com.mezze.language.typechecker.solving.substituteTypeParamsByName(type, substitution)
 
     private fun isFunctionLike(type: MezzeType): Boolean {
         return when (type) {

@@ -342,38 +342,21 @@ class TypeValidator(
             }
         }
 
-    private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
-        var unwrappedType = type
-        (unwrappedType as? MezzeType.TypeApplication)?.let { expandTypeApplicationToVariant(it, registry)?.let { e -> unwrappedType = e } }
-
-        return when {
-            WellKnownHashConstants.isInspect(abilityHash) -> true
-
-            WellKnownHashConstants.isEq(abilityHash) -> {
-                unwrappedType is MezzeType.VarType ||
-                BuiltInAbilities.isBoolVariant(unwrappedType) ||
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Eq", it, abilityHash) }) ||
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Eq", it, abilityHash) }) ||
-                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Eq", unwrappedType.elementType, abilityHash)) ||
-                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Eq", unwrappedType.elementType, abilityHash))
-            }
-
-            WellKnownHashConstants.isOrd(abilityHash) -> {
-                // Ord is NOT structurally derivable for composite types — the
-                // runtime Direct{LessThan,…}Node only handle long/double/String/Frac
-                // and throw otherwise, so deriving Ord for a record/variant/list/seq
-                // type-checks a program that crashes at runtime. Require explicit
-                // `impl Ord`. (Mirrors AbilityChecker.canDeriveAbility.)
-                unwrappedType is MezzeType.VarType
-            }
-
-            abilityHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
-            abilityHash == WellKnownHashConstants.ABILITY_LOGICALOR -> {
-                unwrappedType is MezzeType.BoolType || BuiltInAbilities.isBoolVariant(unwrappedType)
-            }
-
-            else -> false
-        }
+    // Task F: was a weaker copy of AbilityChecker's rule — same arms, but no cycle
+    // guard, no record expansion, and crucially NO NEWTYPE RULE, so this believed a
+    // newtype derives Eq while the checker that actually decides says it does not.
+    // Both now call the one rule; only the component test stays local, because this
+    // decides a component by matching target annotations in scope while
+    // AbilityChecker consults registered impls.
+    private fun canDeriveAbility(
+        abilityName: String,
+        type: MezzeType,
+        abilityHash: Hash? = null,
+        seen: MutableSet<Any> = mutableSetOf(),
+    ): Boolean = com.mezze.language.typechecker.derive.canDeriveAbilityStructurally(
+        abilityName, type, abilityHash, registry, seen,
+    ) { name, componentType, hash, seenSoFar ->
+        canDeriveAbility(name, componentType, hash, seenSoFar) || hasImplInContext(name, componentType)
     }
 
     private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean =

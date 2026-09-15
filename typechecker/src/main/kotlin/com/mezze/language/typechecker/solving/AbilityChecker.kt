@@ -987,73 +987,9 @@ class AbilityChecker internal constructor(
         type: MezzeType,
         abilityHash: Hash? = null,
         seen: MutableSet<Any> = mutableSetOf(),
-    ): Boolean {
-        val resolvedHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
-        var unwrappedType = type
-
-        var isNewtype = unwrappedType is MezzeType.NewtypeType
-
-        if (unwrappedType is MezzeType.TypeApplication) {
-            // Cycle guard: a recursive nominal type (e.g.
-            // `type Tree = | Node { child: Tree } | Leaf`) re-enters here through
-            // its own fields/payloads. A back-edge to a type already on the current
-            // derivation path is treated as satisfied (coinductive) — derivability
-            // is decided by the non-recursive components. Without this the recursion
-            // never terminates (StackOverflow) and recursive types can't derive Eq.
-            if (!seen.add(unwrappedType.constructor)) return true
-            val typeDecl = registry.lookupType(unwrappedType.constructor)
-                ?: ModuleResolver.lookupTypeDeclaration(unwrappedType.constructor)
-            if (typeDecl?.definition is ParsedNewtypeDef) {
-                isNewtype = true
-            }
-
-            val expandedVariant = expandTypeApplicationToVariant(unwrappedType, registry)
-            if (expandedVariant != null) {
-                unwrappedType = expandedVariant
-            } else {
-                val expandedRecord = expandTypeApplicationToRecord(unwrappedType, registry)
-                if (expandedRecord != null) {
-                    unwrappedType = expandedRecord
-                }
-            }
-        }
-
-        if (isNewtype && !WellKnownHashConstants.isInspect(abilityHash)) {
-            return false
-        }
-
-        return when {
-            WellKnownHashConstants.isInspect(abilityHash) -> true
-
-            WellKnownHashConstants.isEq(abilityHash) -> {
-                unwrappedType is MezzeType.VarType || BuiltInAbilities.isBoolVariant(unwrappedType) ||
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it, abilityHash, seen) }) ||
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it, abilityHash, seen) }) ||
-                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash, seen)) ||
-                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash, seen))
-            }
-
-            WellKnownHashConstants.isOrd(abilityHash) -> {
-                // Ord is NOT structurally derivable for composite types. Unlike Eq
-                // (DirectEqualNode has an Objects.equals fallback that reaches
-                // MezzeVariant/MezzeRecord), the runtime Direct{LessThan,GreaterThan,
-                // Le,Ge}Node only specialize long/double/String/Frac and THROW on
-                // anything else. Auto-deriving Ord for a record/variant/list/seq
-                // therefore type-checks a program that crashes at runtime (`a < b`
-                // on a variant). Require an explicit `impl Ord` for those (newtypes
-                // already require it). A VarType stays derivable so a type var can
-                // be resolved to something that HAS Ord.
-                unwrappedType is MezzeType.VarType
-            }
-
-            resolvedHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
-            resolvedHash == WellKnownHashConstants.ABILITY_LOGICALOR -> {
-                unwrappedType is MezzeType.BoolType || BuiltInAbilities.isBoolVariant(unwrappedType)
-            }
-
-            else -> false
-        }
-    }
+    ): Boolean = com.mezze.language.typechecker.derive.canDeriveAbilityStructurally(
+        abilityName, type, abilityHash, registry, seen,
+    ) { name, componentType, hash, seenSoFar -> canDeriveOrHasImpl(name, componentType, hash, seenSoFar) }
 
     private fun canDeriveOrHasImpl(
         abilityName: String,

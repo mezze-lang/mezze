@@ -1,0 +1,108 @@
+package com.mezze.language.typechecker.derive
+
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.parsedast.ParsedNewtypeDef
+import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.typechecker.WellKnownHashConstants
+import com.mezze.language.typechecker.abilities.BuiltInAbilities
+import com.mezze.language.typechecker.context.DeclarationRegistry
+import com.mezze.language.typechecker.solving.expandTypeApplicationToRecord
+import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
+import com.mezze.language.typedast.Hash
+
+/**
+ * THE structural-derivability rule (task F). Whether the compiler derives an
+ * ability for a type — never whether a declared impl exists, which is the
+ * caller's half.
+ *
+ * There were two of these. `AbilityChecker`'s carried the cycle guard, the
+ * newtype rule, and record-as-well-as-variant expansion; `TypeValidator`'s
+ * carried none of them while making the same decisions from the same arms. The
+ * difference that mattered: without the newtype rule, `TypeValidator` believed a
+ * newtype derives Eq, which the checker that actually decides says it does not.
+ * A validator and a checker disagreeing about derivability is how an impl gets
+ * accepted in one place and rejected in another.
+ *
+ * The two callers still differ in how they decide a COMPONENT is satisfied — one
+ * consults registered impls, the other matches target annotations in scope — so
+ * that half stays theirs and arrives as [componentSatisfies]. Only the rule is
+ * shared, which is the part that was diverging.
+ */
+internal fun canDeriveAbilityStructurally(
+    abilityName: String,
+    type: MezzeType,
+    abilityHash: Hash?,
+    registry: DeclarationRegistry,
+    seen: MutableSet<Any>,
+    componentSatisfies: (String, MezzeType, Hash?, MutableSet<Any>) -> Boolean,
+): Boolean {
+    val resolvedHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
+    var unwrappedType = type
+    var isNewtype = unwrappedType is MezzeType.NewtypeType
+
+    if (unwrappedType is MezzeType.TypeApplication) {
+        // Cycle guard: a recursive nominal type (`type Tree = | Node { child: Tree
+        // } | Leaf`) re-enters through its own fields. A back-edge to a type
+        // already on the path counts as satisfied — derivability is decided by the
+        // non-recursive components. Without it the recursion never terminates and
+        // a recursive type cannot derive Eq at all.
+        if (!seen.add(unwrappedType.constructor)) return true
+        val typeDecl = registry.lookupType(unwrappedType.constructor)
+            ?: ModuleResolver.lookupTypeDeclaration(unwrappedType.constructor)
+        if (typeDecl?.definition is ParsedNewtypeDef) {
+            isNewtype = true
+        }
+
+        val expandedVariant = expandTypeApplicationToVariant(unwrappedType, registry)
+        if (expandedVariant != null) {
+            unwrappedType = expandedVariant
+        } else {
+            expandTypeApplicationToRecord(unwrappedType, registry)?.let { unwrappedType = it }
+        }
+    }
+
+    // A newtype derives NOTHING but Inspect. It is a distinct type from what it
+    // wraps, so wrapping an Int does not make it ordered or comparable — the
+    // author says what it means by writing the impl.
+    if (isNewtype && !WellKnownHashConstants.isInspect(abilityHash)) {
+        return false
+    }
+
+    return when {
+        WellKnownHashConstants.isInspect(abilityHash) -> true
+
+        WellKnownHashConstants.isEq(abilityHash) ->
+            unwrappedType is MezzeType.VarType ||
+                BuiltInAbilities.isBoolVariant(unwrappedType) ||
+                (unwrappedType is MezzeType.RecordType &&
+                    (unwrappedType as MezzeType.RecordType).fields.values
+                        .all { componentSatisfies(abilityName, it, abilityHash, seen) }) ||
+                (unwrappedType is MezzeType.VariantType &&
+                    (unwrappedType as MezzeType.VariantType).constructors.values
+                        .all { it == null || componentSatisfies(abilityName, it, abilityHash, seen) }) ||
+                (unwrappedType is MezzeType.ListType &&
+                    componentSatisfies(
+                        abilityName, (unwrappedType as MezzeType.ListType).elementType, abilityHash, seen,
+                    )) ||
+                (unwrappedType is MezzeType.SeqType &&
+                    componentSatisfies(
+                        abilityName, (unwrappedType as MezzeType.SeqType).elementType, abilityHash, seen,
+                    ))
+
+        WellKnownHashConstants.isOrd(abilityHash) ->
+            // Ord is NOT structurally derivable for composite types. Unlike Eq —
+            // whose DirectEqualNode has an Objects.equals fallback reaching
+            // MezzeVariant/MezzeRecord — the runtime Direct{LessThan,GreaterThan,
+            // Le,Ge}Node only specialize long/double/String/Frac and THROW on
+            // anything else. Deriving Ord for a record/variant/list/seq would
+            // type-check a program that crashes at `a < b`. A VarType stays
+            // derivable so it can resolve to something that does have Ord.
+            unwrappedType is MezzeType.VarType
+
+        resolvedHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
+            resolvedHash == WellKnownHashConstants.ABILITY_LOGICALOR ->
+            unwrappedType is MezzeType.BoolType || BuiltInAbilities.isBoolVariant(unwrappedType)
+
+        else -> false
+    }
+}

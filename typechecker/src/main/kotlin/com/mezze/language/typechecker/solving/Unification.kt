@@ -1331,6 +1331,14 @@ private fun formatFieldMismatch(
     return if (isShallow) baseMessage else "$baseMessage ($cleanedInner)"
 }
 
+/**
+ * THE type-parameter substitution (task F). There were two: this one, and a copy
+ * in `ImplValidator` that differed in both directions — the copy rebuilt a
+ * `TypeApplication` through [WellKnownTypeApp.of] so a well-known constructor
+ * regains its identity hash when it has none, while this one tolerated the `'`
+ * prefix on either side of the lookup. Each was right about the thing the other
+ * missed, so the merged version does both and the copy is gone.
+ */
 internal fun substituteTypeParamsByName(type: MezzeType, subst: Map<String, MezzeType>): MezzeType {
     // Only a type var is replaced (by name, tolerating the `'` prefix either
     // way); every other node just recurses via transformChildren, which
@@ -1338,6 +1346,18 @@ internal fun substituteTypeParamsByName(type: MezzeType, subst: Map<String, Mezz
     if (type is MezzeType.VarType) {
         val name = type.variable.name
         return subst[name] ?: subst["'$name"] ?: subst[name.removePrefix("'")] ?: type
+    }
+    // TypeApplication keeps its own case so a well-known constructor that arrived
+    // WITHOUT an identity hash regains one — transformChildren would rebuild it
+    // hashless, and a hashless application is the shape dispatch cannot key on.
+    // An application that already carries a Declared hash keeps it: `of` only
+    // fills in what is absent.
+    if (type is MezzeType.TypeApplication) {
+        return com.mezze.language.typechecker.util.WellKnownTypeApp.of(
+            type.constructor,
+            type.args.map { substituteTypeParamsByName(it, subst) },
+            (type.identity as? TypeIdentity.Declared)?.hash,
+        )
     }
     return type.transformChildren { substituteTypeParamsByName(it, subst) }
 }
