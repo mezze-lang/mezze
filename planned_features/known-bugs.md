@@ -569,8 +569,20 @@ Track 1 — element instances flow everywhere (~2 weeks)
 
 Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
 
-- **0.1** `NodeId` on every parsed/typed node; side tables keyed by NodeId,
-  never `Loc`.
+- **0.1** RE-SCOPED by measurement (2026-09-15). The stated motivation — that
+  side tables keyed by `Loc` lose entries when two nodes share a location —
+  **does not hold today**. Across 21,389 stdlib expression nodes, no location is
+  used by more than one node (`LocKeyCollisionMeasurementTest`, kept as a
+  ratchet); and with temporary instrumentation in the constraint accumulator
+  over 67 stdlib modules, no side-table write ever replaced an entry with a
+  DIFFERENT value. The 983 gaps 0.2 found are therefore NOT Loc collisions —
+  they are the solver having no entry to record in the first place. `NodeId` is
+  still worth having as the identity A.2's `ElaborationError` names, but it is
+  not producing wrong types today, and a 60-site key-type refactor ahead of
+  **A.1** (where 566 of the findings live) would be effort spent off the
+  critical path. Near miss worth knowing: `ParsedIf.toMatchExpr` gives the
+  synthesized match AND both of its cases the same `loc` as the original `if` —
+  harmless only because those cases bind nothing.
 - **0.2** DONE — `ElaborationInvariants` + a ratchet in both gates.
   Measured over the typed stdlib: **687** declarations with an unbound type
   variable, **272** with an untyped parameter, **24** reading a field off a
