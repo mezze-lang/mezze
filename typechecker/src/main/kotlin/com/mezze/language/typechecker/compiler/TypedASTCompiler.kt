@@ -282,6 +282,17 @@ class TypedASTCompiler(
      */
     fun getDictMethodsForHash(): Map<Hash, Set<String>> = dictMethodsForHash.toMap()
 
+    /**
+     * C.5 measured the third guess and it is NOT deletable yet. Bypassing this
+     * pass entirely breaks `SeqUserTypeCompareTest` (nestedSort, variantSort,
+     * nestedLtFalse, nested3Sort, variantLtFalse …) — so it is load-bearing.
+     *
+     * The reason it survives C.1 is that it answers a DIFFERENT question.
+     * Evidence says WHICH IMPL discharges a constraint; the prescan says WHICH
+     * FUNCTIONS need a `__dict_*` parameter at all, transitively. Nothing emitted
+     * so far carries that, so deleting the prescan is blocked on C.3/C.4 emitting
+     * per-site dict requirements, not on more evidence.
+     */
     private fun prescanForDictMethods(modules: List<TypedModule>) {
         dictMethodsForHash.clear()
         // Seed with pre-lowered stdlib dict methods so call sites in the user
