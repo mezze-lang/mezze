@@ -115,7 +115,7 @@ class HeuristicDeletionAcceptanceTest {
     // ── TypedASTCompiler structuralElem (the nested-container binding) ───────
 
     @Test
-    fun `structuralElem - a nested container must bind the INNER container's instance`() {
+    fun `a nested container binds the INNER container's instance - structuralElem DELETED`() {
         // The flat pile of candidate types mixes levels, and first-match lands one
         // level too deep: `[[P]]` bound P's eq instead of eq-for-`[P]`, so the
         // comparator was handed a P where it expected a seq. This is the shape

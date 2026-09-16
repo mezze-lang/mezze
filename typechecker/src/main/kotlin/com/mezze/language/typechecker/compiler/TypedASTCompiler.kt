@@ -2048,16 +2048,6 @@ class TypedASTCompiler(
                     // GUARDED to single-type-param impls with a fully concrete binding;
                     // every other shape falls through to the old path verbatim, so no
                     // currently-resolving call site changes behaviour.
-                    val structuralElem: MezzeType? = run {
-                        val op = abilityOpIndex[methodName]?.firstOrNull { it.opHash == opHash }
-                            ?: return@run null
-                        val pattern = op.targetTypes.lastOrNull() ?: return@run null
-                        val impl = abilityImpls.firstOrNull { it.hash == op.implHash } ?: return@run null
-                        val varName = impl.forallVars.singleOrNull()?.name ?: return@run null
-                        val bindings = mutableMapOf<String, MezzeType>()
-                        harvestVarBindings(pattern, receiverType, bindings)
-                        bindings[varName]?.takeIf { it !is VarType && !containsVarType(it) }
-                    }
                     val opVarBindings = bindImplVarsForOp(opHash, listOf(receiverType))
                     for (dictMethodName in opDictMethods.sorted()) {
                         val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(dictMethodName)
@@ -2077,7 +2067,6 @@ class TypedASTCompiler(
                             perSiteDecode
                         } else {
                             (perVarBound?.let { resolveOpHashFromConcreteTypes(dictMethod, listOf(it)) }
-                                ?: structuralElem?.let { resolveOpHashFromConcreteTypes(dictMethod, listOf(it)) }
                                 ?: resolveOpHashFromConcreteTypes(dictMethod, concreteTypesForDict))
                         }
                         if (resolvedHash != null) {
@@ -2085,7 +2074,7 @@ class TypedASTCompiler(
                             // own dicts (nested containers: `[[[P]]]`). Seed it with the
                             // structural binding so each recursion peels exactly one
                             // container level instead of re-guessing from the flat pile.
-                            val subTypes = perVarBound?.let { listOf(it) } ?: structuralElem?.let { listOf(it) } ?: concreteTypesForDict
+                            val subTypes = perVarBound?.let { listOf(it) } ?: concreteTypesForDict
                             fields.add(FieldIR(dictParamName, refToDictedOp(resolvedHash, subTypes, src)))
                         } else {
                             // Forward from caller's dict params if available
