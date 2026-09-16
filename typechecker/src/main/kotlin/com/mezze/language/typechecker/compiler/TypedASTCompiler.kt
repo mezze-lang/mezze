@@ -539,7 +539,17 @@ class TypedASTCompiler(
     /** Raw scan keys are `method@var`. A function needing a method for ONE type
      *  variable keeps the plain `method` slot (unchanged wire shape); only a
      *  function needing the same method at two or more variables gets a slot per
-     *  variable — the case one shared slot cannot serve (`Result 'a 'e`). */
+     *  variable — the case one shared slot cannot serve (`Result 'a 'e`).
+     *
+     *  BUG 9 / task C.2: this groups by METHOD NAME, which is exactly where two
+     *  abilities declaring the same operation collapse into one slot. A function
+     *  constrained `with Weigh 'a, Price 'a` raises `rank@a` from both calls, they
+     *  group together, `vars.size == 1`, and the result is a single plain `rank`
+     *  that serves both — so whichever fills it answers for the other, silently.
+     *  The grouping key has to become (ability, method); getting the ability here
+     *  needs it carried on the emitted node, because the op index this scan
+     *  consults is keyed on the name and by construction cannot tell them apart.
+     *  The CONCRETE-receiver half of the same bug is already fixed in emit. */
     private fun normalizeDictKeys(raw: Set<String>): Set<String> =
         raw.groupBy { com.mezze.language.ast.MagicParams.methodOfKey(it) }.flatMap { (method, keys) ->
             val vars = keys.mapNotNull { com.mezze.language.ast.MagicParams.typeVarOfKey(it) }.toSet()
@@ -787,14 +797,6 @@ class TypedASTCompiler(
                     }
                     if (receiverType is VarType && !recoveredConcrete &&
                         shouldDictDispatchVarTypeOp(methodName, arrowIsConstrained)) {
-                        if (System.getenv("MEZZE_PROBE_DICTKEY") == "1") {
-                            val cands = abilityOpIndex[methodName].orEmpty()
-                            System.err.println(
-                                "DICTKEY method=$methodName var=${receiverType.variable.name}" +
-                                    " candidates=${cands.size}" +
-                                    " impls=${cands.map { it.implHash.hex.take(6) }.distinct()}",
-                            )
-                        }
                         out.add(com.mezze.language.ast.MagicParams.dictKey(methodName, receiverType.variable.name))
                     }
                     scanExprForVarTypeMethods(fn.record, out, arrowIsConstrained, paramEnv)

@@ -725,18 +725,28 @@ The per-VARIABLE half of the keying already works — one ability's `rank` on tw
 different type variables resolves correctly (`__dict_rank@a` vs `__dict_rank@b`),
 which the second test in `DictKeyAbilityCollisionTest` pins.
 
-### What the remaining fix needs
+### What the remaining fix needs — located to one function
 
-The key must be `(ability hash, type variable)`. That means threading ability
-identity to three places: the prescan that mints the key
-(`scanExprForVarTypeMethods`, which today has only the method name), the lookup
-(`enclosingDictSlotIn`), and the call-site injection. The method name must remain
-recoverable from the key — `methodOfKey` feeds the op index and the runtime's
-primitive fallback.
+`TypedASTCompiler.normalizeDictKeys` is where the two collapse:
 
-Note the prescan cannot recover the ability from the name alone: when two
-abilities in scope declare it, that ambiguity IS the bug. The identity has to come
-from the call, or from the enclosing arrow's declared constraints.
+```kotlin
+raw.groupBy { methodOfKey(it) }.flatMap { (method, keys) ->
+    val vars = keys.mapNotNull { typeVarOfKey(it) }.toSet()
+    if (vars.size >= 2) keys.filter { … } else listOf(method)   // ← one plain slot
+}
+```
+
+Traced: a function constrained `with Weigh 'a, Price 'a` raises `rank@a` from both
+calls; they group under `rank`; `vars.size == 1`; the result is a single plain
+`rank` slot serving both. Confirmed by probe — `dictMethodsForHash[generic]` is
+exactly `[rank]`.
+
+The grouping key has to become `(ability, method)`. The obstacle is getting the
+ability THERE: the scan consults `abilityOpIndex`, which is keyed on the operation
+name and by construction cannot separate them, so the identity has to be carried
+on the emitted node — a typed-AST field, which is what C.3 ("the compiler emits
+evidence") means concretely. `methodOfKey` must keep working either way: it feeds
+the op index and the runtime's primitive fallback.
 
 ### Acceptance
 
