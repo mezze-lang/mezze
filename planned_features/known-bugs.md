@@ -1105,7 +1105,27 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   `matchCaseBindings` exclusion both come out.
   Demonstrated by A.1: supplying those bodies ANY binding type — ground,
   declared-shape, or only where nothing existed — breaks `JsonDecodeExhaustiveTest`
-  and `UserDecodeAbilityTest`. The codec path depends on not knowing.
+  and `UserDecodeAbilityTest`. The codec path depends on not knowing. The failure
+  mode is concrete: an `UnsupportedSpecializationException` at `CallIndirect`
+  with a RECORD where a function was expected — the decoder gets mis-wired.
+
+  SHARPENED 2026-09-16, and this rules out the obvious shortcut. "Generate the
+  impls eagerly, pre-solve, for every declared type, like derived impls" does NOT
+  work, and the reason is not scale — today's on-demand generation produces only
+  17 impls across `JsonDecodeExhaustiveTest`, and `generateEncodeImpl` /
+  `generateDecodeImpl` take only TYPES, so they could run from `ContextBuilder`.
+  It fails because **the decode target is frequently an ANONYMOUS RECORD SHAPE**:
+  `'a` is pinned by `HasField` constraints from the usage (`p.name`, `p.age`),
+  so the type the impl must be generated FOR does not exist as a declaration and
+  is not known until those constraints resolve. Enumerating declared types cannot
+  cover it.
+
+  So A.3 is not "move the generation earlier". It is **instance synthesis on
+  demand inside the solver**: a `Decode` constraint has to be deferrable, and
+  discharged by SYNTHESISING the impl once its target is known. That is a change
+  to the constraint system, and it is the largest single item left in this plan.
+  Sequencing note: A.2's remaining 101 sites and A.1's `matchCaseBindings`
+  exclusion both sit behind it.
 - **A.4** Delete the heuristics from 0.3, one per gated test.
 - **B.1** One canonical type form: builtin containers as `TypeApplication`
   (dedicated nodes deleted = backlog #315); declared types nominal with
