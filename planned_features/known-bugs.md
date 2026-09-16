@@ -498,13 +498,21 @@ return the largest.
 Those calls are monomorphized. Inside a spec, a receiver typed by the generic's
 own variable has no dict slot (the spec strips it, the constraint being concrete)
 and cannot inline (not a primitive), so `x < acc` fell to the primitive node.
-`specEvidenceOpHash` now resolves it from the spec's own evidence:
-`Specialization.abilityImpls` first, then the spec's TYPE ARGUMENTS. Two
-narrowings are load-bearing and were found by regression — only for an INLINEABLE
-op with no dict slot, and only when the spec has exactly ONE type argument. A
-broader version resolved unrelated ops against the spec's type-arg pile and broke
-seven map/set filter tests, since `Map K V` has two arguments and the receiver's
-variable could be either.
+`specEvidenceOpHash` now resolves it from the spec's own recorded evidence
+(`Specialization.abilityImpls`). One narrowing remains and is load-bearing: this
+applies only to an INLINEABLE op with no dict slot — the case that would
+otherwise reach the primitive comparison node.
+
+A second narrowing is GONE. `specEvidenceOpHash` also used to fall back to the
+spec's TYPE ARGUMENTS, gated to specs with exactly ONE argument, because with two
+(`map::filter` at `Map K V`) the receiver's variable could be either and
+resolving against the pile broke seven map/set filter tests. That was a guess
+with a guard on it, and **C.1 deleted it outright**: once a specialization
+resolves its OWN constraints instead of inheriting its caller's, the evidence is
+present wherever it is meaningful. Measured both ways before choosing —
+broadening the fallback reproduced exactly those seven failures
+(MapIntegrationTest x2, SetMapAdvancedOperationsTest x4, MapModuleTest x1);
+deleting it produced none.
 
 Also needed: `prescanForDictMethods` phase 2 now propagates a callee's dict needs
 through IMPL-OP bodies, not only top-level lets.
