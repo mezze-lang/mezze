@@ -622,12 +622,102 @@ Earlier probe results, still true:
 - Every callee at `emitCallDirect` is a specialized hash with no dict
   requirement — correct, since a spec needs none.
 - So the comparator body reaching the runtime is NOT the one the spec compiled.
-  The next thing to check is how the extracted comparator lambda is emitted for a
-  spec: `specLambdaSalt` exists precisely because the SAME source lambda must
-  compile to a different FunctionIR per specialization, and the sorted-container
-  comparator is the case that machinery was written for
-  (`{a,b} -> if a<b …`). Whether the salted copy is the one actually installed
-  into the native is where to look next.
+
+**Three more hypotheses eliminated (2026-09-16), each by changing the compiler and
+measuring rather than by reading it:**
+
+- *The comparator closure is missing, so the container falls back to natural
+  ordering.* No. `ElementComparator.of(null)` returns null and the data structure
+  then compares with `((Comparable) a).compareTo(b)`, which throws
+  ClassCastException. The observed error is `Cannot compare MezzeRecord <
+  MezzeRecord`, raised by `DirectLessThanNode` — Mezze code. So a comparator
+  closure IS installed and IS being called; its `a < b` compiled to the primitive
+  node.
+- *The eight identical comparator lambdas in `sorted_set.mz` collide on one
+  FunctionIR.* They genuinely do collide — `singleton`, `from_list`, `add`,
+  `remove`, `contains`, `min_by`, `max_by` and `from_seq` each write the
+  byte-identical `{ a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0`,
+  `hashExpr` is type- and environment-blind, and only some of those declarations
+  carry `with Ord 'a`. First-registration-wins across that set is an exact-looking
+  explanation for "the answer depends on what else is in the program". It is
+  still not the cause: salting the lambda hash with `currentFunctionHash`
+  separates all eight and changes NOTHING — the same 7 cases fail. Reverted
+  rather than kept as hardening, because it also ties a nested lambda's identity
+  to its enclosing declaration's hash, and declaring a `newtype` changes that
+  hash, so two programs identical after newtype erasure would emit different IR.
+  `NewtypeErasureIRTest` catches that, correctly.
+- *The extracted comparator lambda is compiled in the later extracted-lambda
+  phase, after the spec loop's `finally` clears `specTypeArgs`.* No —
+  `compileLambda` compiles the extracted body eagerly, inside the spec's scope,
+  so the spec evidence is in scope when the comparator is lowered.
+
+### The comparator is NOT the culprit (measured 2026-09-16 — supersedes the above)
+
+Probing the runtime boundary directly, with two programs that differ only in
+whether they end at `size` (passes) or go on to `min` (fails):
+
+| measured at the native boundary | program A (passes) | program B (fails) |
+|---|---|---|
+| `cmp` argument | `LazyStub[lambda]` | `LazyStub[lambda]` |
+| its hash | `1880a62e…4c4c68` | `1880a62e…4c4c68` — **identical** |
+| closure values captured | 0 | 0 |
+| stub resolution route | 2, the prelowered stdlib cache | 2, the prelowered stdlib cache |
+| `ElementComparator.compare` calls | 1 | 1 |
+| what it compared | `MezzeRecord` vs `MezzeRecord` | `MezzeRecord` vs `MezzeRecord` |
+| outcome | returns normally | — |
+
+**The comparator is byte-for-byte the same function, resolved the same way, called
+once with two records, and it returns normally in the passing program.** So the
+whole "the spec's comparator is not the one installed" line of inquiry is wrong:
+there is only ever one comparator, it is the prelowered generic, and it handles
+records fine.
+
+More than that: the container is **correctly ordered**. `to_seq` on the same set
+and reading the first element back gives `tag = 10`, the element with the smaller
+`k` — so P's own `Ord` DID order the set. `contains` (which also runs the stored
+comparator) answers correctly too.
+
+### Where it actually is: only some result types
+
+Probing the natives directly, on one sorted set of records built the same way
+every time:
+
+| operation on `SortedSet P` | result type | outcome |
+|---|---|---|
+| `size` | `Int` | OK — 2 |
+| `contains` | `Bool` | OK — True |
+| `to_seq`, then read a field off the first element | `['a]` | **OK — 10, correctly sorted** |
+| `min` / `max` | `Option 'a` | THROWS |
+
+And `__native_sorted_set_min` is **never reached** — a probe inside it does not
+fire. The throw happens before the body runs: even `let m = min { s = s }`
+followed by an unrelated `1` throws.
+
+Three things this rules out, each tested:
+
+- **Not a name collision.** There are six `min` declarations in the stdlib and
+  five carry `with Ord 'a`, so `sorted_set::min` resolving to one of the others
+  would explain it exactly. It does not: adding
+  `pub let min_unique_probe: { s: SortedSet 'a } -> Option 'a` with the identical
+  body, under a name nothing else in the stdlib shares, fails identically.
+- **Not the constraint.** A probe declared `with Ord 'a` and one declared without
+  it both throw.
+- **Not `Option` itself, and not generics in general.** A plain user
+  `let wrap: { x: 'a } -> Option 'a = { x } -> Some { val = x }` applied to a
+  record with a hand-written `Ord` works, with or without the constraint. So does
+  a `SortedSet 'a` probe returning `['a]`.
+
+**The trigger is the combination**: an operation on `SortedSet 'a` whose result
+mentions `'a` inside a VARIANT (`Option 'a`). The same operation returning `['a]`
+is fine, and the same `Option 'a` signature away from a sorted container is fine.
+That is why "it depends on what else is in the program" looked true — adding
+`min` to a program is adding exactly this combination.
+
+This is C.4's territory: the failing call carries no evidence of its own, and its
+presence changes how the EARLIER `from_seq` comparator was compiled. The next
+step is to diff the monomorphizer's spec set for the two programs — same source,
+same set, one extra `Option 'a` call site — rather than to look at comparators
+again.
 
 Closing it is the same question C.3/C.4 answer: emit the evidence rather than
 re-deriving it per site.
@@ -639,8 +729,9 @@ get inferred preconditions is the design question behind a complete fix.
 
 ### Acceptance
 
-`SortedContainerReadBackTest` — 17 cases, 7 still `@Disabled` pointing here (was
-10). The 10 that pass are what narrow what is left.
+`SortedContainerReadBackTest` — 19 cases, 7 still `@Disabled` pointing here (was
+10 of 17). The 12 that pass are what narrow what is left; every one of the 7 is a
+sorted container.
 
 ---
 

@@ -3555,6 +3555,16 @@ class TypedASTCompiler(
     private fun saltedLambdaHash(expr: TypedExpr, dictCaptures: List<Pair<String, Int>> = emptyList()): Hash {
         val base = com.mezze.language.typedast.TypedASTHasher.hashExpr(expr)
         val salt = specLambdaSalt
+        // NOT salted by the enclosing function, though `sorted_set.mz` holds eight
+        // textually identical `{ a, b } -> if a < b …` comparators (singleton,
+        // from_list, add, remove, contains, min_by, max_by, from_seq) that all
+        // collide on one hash. Folding `currentFunctionHash` in separates them,
+        // but it also ties a nested lambda's identity to its declaration's hash,
+        // and adding a `newtype` changes that hash — so two programs identical
+        // after newtype erasure emit different IR, which NewtypeErasureIRTest
+        // rightly rejects. Tried for BUG 7 and reverted: it separated the eight
+        // and changed no behaviour, so the collision is not what picks the wrong
+        // comparator.
         if (salt == null && dictCaptures.isEmpty()) return base
         val b = com.mezze.language.ast.hashing.MezzeHashBuilder()
         b.append("spec_lambda")
