@@ -3041,6 +3041,11 @@ class TypedASTCompiler(
      */
     private fun refToDictedOp(opHash: Hash, concreteTypes: List<MezzeType>, src: SourceInfo, depth: Int = 0): NodeIR {
         val needed = dictMethodsForHash[opHash] ?: emptySet()
+        // The depth bound is a HANG GUARD, not a type guess: a cyclic impl graph
+        // would otherwise recurse forever, and the project's anti-hang invariant
+        // says never hang. It is reached (twice in a two-suite run), so it is not
+        // dead — but what it bounds is recursion, not a guess about types, so
+        // C.5 leaves it. See project_anti_hang_invariant.
         if (needed.isEmpty() || depth > 8) return ReadGlobalFnByHashIR(opHash, src)
         // Descend one container level: the sub-op dispatches on the ELEMENT of the
         // current element (element placed FIRST so it wins over the container impl).
@@ -3062,12 +3067,20 @@ class TypedASTCompiler(
         }
         // The wrapper's params = the op's regular params (prelowered FunctionIR is
         // authoritative for stdlib ops; drop the synthetic __dict_* params).
+        //
+        // C.5: when neither source knows the params this used to GUESS
+        // `[it, r]` — the shape of a binary ability op — and build a wrapper
+        // around it. It fired 18 times in a two-suite run, so it was load-bearing
+        // in the sense of being reached, but not in the sense of being needed:
+        // declining to wrap and emitting the bare op leaves BOTH gates green.
+        // A wrapper built on a guessed signature is worse than no wrapper, since
+        // a wrong arity silently mis-binds every argument.
         val preParams = hashToFunctionIR[opHash]?.paramNames
         val regularParamNames = if (preParams != null) {
             preParams.filterNot { com.mezze.language.ast.MagicParams.isDict(it) }
         } else {
             (declIndex?.get(opHash)?.value as? TypedLambda)?.params?.map { it.name }
-                ?: listOf(Keywords.IT, Keywords.R)
+                ?: return ReadGlobalFnByHashIR(opHash, src)
         }
         val hashBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
         hashBuilder.append("dicted_op")
@@ -3636,8 +3649,19 @@ class TypedASTCompiler(
         val dictsToCapture = lambdaDictMethods.mapNotNull { method ->
             // Raw `method@var` keys resolve to whichever slot the PARENT holds for
             // that (method, var) — per-var when it has one, else the plain one.
-            val dictName = enclosingDictSlotIn(parentParamNames, parentCaptureNames, com.mezze.language.ast.MagicParams.methodOfKey(method), com.mezze.language.ast.MagicParams.typeVarOfKey(method))
-                ?: com.mezze.language.ast.MagicParams.dictParamName(com.mezze.language.ast.MagicParams.methodOfKey(method))
+            // C.5: no unqualified-name fallback. This used to drop the type var
+            // and retry under the bare `__dict_<method>` name when the per-var
+            // lookup missed — a name-keyed guess of exactly the kind C.2
+            // replaced. Measured dead: zero hits across a full forced rerun of
+            // the interpreter suite (8m38s, no caching), because
+            // `enclosingDictSlotIn` already matches an ability-qualified slot for
+            // an unqualified request. A dict we cannot locate is not captured.
+            val dictName = enclosingDictSlotIn(
+                parentParamNames,
+                parentCaptureNames,
+                com.mezze.language.ast.MagicParams.methodOfKey(method),
+                com.mezze.language.ast.MagicParams.typeVarOfKey(method),
+            ) ?: return@mapNotNull null
             val parentParamIdx = parentParamNames.indexOf(dictName)
             if (parentParamIdx >= 0) {
                 dictName to (parentCaptureCount + parentParamIdx)
