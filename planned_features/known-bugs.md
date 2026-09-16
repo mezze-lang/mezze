@@ -730,6 +730,24 @@ and per-call-site dump):
 So the solver, the monomorphizer and the call-site rewriting are all right, and
 the defect is downstream of them.
 
+Two further facts, each from a probe placed inside the method itself (the
+`NativeDispatch` and `NativeDispatchScalarNode` classes are NOT on the live path
+— natives are bytecode operations, so probes there never fire and are
+misleading):
+
+- **The comparator succeeds.** Wrapping `ElementComparator.compare`'s call in a
+  try/catch shows it RETURNS 1 — the correct answer for P's Ord on `k=3` vs
+  `k=1`. It is called exactly once, for the two-element construction, and does
+  not throw. The ordering works.
+- **`SortedSetNatives.min` never runs.** A probe on the first line of the method
+  never fires.
+
+And the guest frame in the crash is `__entry__` at the line of the
+CONSTRUCTION, not of the `min` call. So: construction completes correctly, the
+`min` body is never entered, and a record `<` is executed in the entry between
+them. Locating that `<` needs the entry function's emitted IR — which is where
+this should resume.
+
 ### What the probing did turn up: extracted-lambda hash collisions, measured
 
 Printing every extracted `{ a, b }` comparator's hash during compilation:
