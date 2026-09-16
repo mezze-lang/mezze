@@ -579,6 +579,76 @@ the REVERSED-Ord newtype that detects silent wrongness rather than a crash.
 
 ---
 
+## BUG 10 — OPEN: the `_by` fusions compare the KEY with a primitive `<`
+
+Found 2026-09-16, immediately after BUG 7's sorted-container half, by asking
+whether that fix's siblings shared the hazard. They do.
+
+### Symptom
+
+```mezze
+type K = { n: Int }
+impl Ord for K where { lt = { it, r } -> it.n < r.n, … }
+type P = { k: K, tag: Int }
+let xs: [P] = [{ k = { n = 3 }, tag = 30 }, { k = { n = 1 }, tag = 10 }]
+
+xs.min_by { f = { x } -> x.k }        # Cannot compare MezzeRecord < MezzeRecord
+xs.max_by { f = { x } -> x.k }        # same
+xs.sort_by_key { f = { x } -> x.k }   # same
+xs.min_by { f = { x } -> x.tag }      # OK — primitive key
+```
+
+And the serious case, which does not crash: a NEWTYPE key whose Ord disagrees
+with the wrapped type's returns the WRONG ELEMENT, exactly as BUG 7 did.
+
+### Cause
+
+`min_by`/`max_by`/`sort_by_key` are `{ xs: ['a], f: { x: 'a } -> 'b }
+with Ord 'b`. The stdlib implements each by handing `*_with_cmp` an explicit
+comparator built from the key's Ord — correct, and it is what the non-fused path
+runs. `ChainCanonicalizer` fuses the call into a `MinBy`/`MaxBy` sink, and
+`BytecodeCompiler`'s `MinMaxByKey` case emits the key comparison as
+`beginDirectLessThan()`, which only specializes long/double/String/Frac. **The
+supplied comparator is discarded.**
+
+Same family as BUG 7's sorted-container half and BUG 8: a fused fast path
+substituting a primitive operation for one that needed an instance.
+
+### Why it is not fixed alongside BUG 7
+
+BUG 7's half was fixable by refusing to fuse, because
+`__native_sorted_set_{min,max}` are the only bare min/max element natives and the
+native is O(1) — nothing profitable was lost. **That argument does not transfer.**
+`min_by` over an Int key is a genuine, perf-critical fast path, so the fusion has
+to stay and the decision has to be made on the KEY'S TYPE.
+
+That type is not available. Measured: the key lambda for an Int key and for a
+record key compile to STRUCTURALLY IDENTICAL IR —
+
+```
+ReadFieldIR(record=ReadLocalIR(slot=0, kind=OBJECT, typeTag=null),
+            fieldName=<tag|k>, fieldIndex=-1)
+```
+
+— differing only in the field NAME, and `FunctionIR.returnType` is null for both.
+There is nothing to branch on. A runtime dispatch on the key's class is not an
+option either: that is a name/structure lookup in the hottest loop the compiler
+has.
+
+So this is blocked on the key type being CARRIED rather than reconstructed —
+tasks **C.1** (solver records evidence per constraint per node) and **A.2**
+(builder reads types by NodeId; a miss is an ElaborationError, never a fresh
+var). It is the first demonstrated failing case those tasks own, and should serve
+as their acceptance test.
+
+### Acceptance
+
+`KeyedFusionOrdTest` — 3 enabled cases guarding the primitive-key fast path that
+must survive any fix, and 4 `@Disabled` cases pointing here, one of which is the
+silent reversed-newtype case.
+
+---
+
 ## BUG 8 — FIXED: the fused LONG pipeline fired on a seq of records
 
 Found 2026-09-16 while tracing BUG 7 — the sorted-container round trip was dying
