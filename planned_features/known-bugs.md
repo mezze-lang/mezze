@@ -805,9 +805,33 @@ generic fold-style minimum whose `<` lost the element's instance. That is BUG
 7's original shape (a `with Ord 'a` consumer falling to the primitive node),
 reached here through the sorted-set surface rather than the seq one.
 
-**The next action** is to find what the `min` call site actually emits — the
-mono spec `min@sorted_set.mz:96` exists and the site is rewritten to it, so the
-divergence is in `TypedASTCompiler`'s emission for that site, not in mono.
+### Narrowing the fold itself
+
+Dumping every function compiled during user compilation whose IR contains an LT
+node (filter on `op=LT` — an earlier pass filtered on `"LessThan"`, which is the
+runtime node's name and never appears in IR, so that pass wrongly reported none)
+gives exactly three for the failing program:
+
+| function | verdict |
+|---|---|
+| `lt` `86e681d8` | P's own impl op — CORRECT, `ReadField(k) < ReadField(k)` |
+| `sign` `ef0bd618` | `int::sign`, operates on Ints |
+| `lambda` `b9a9d73a` | a range/loop bound from `mutation.mz`, all LONG slots — unrelated |
+
+So no user-compiled function carries the offending record comparison. **The fold
+with the primitive `<` is a PRELOWERED stdlib function**, called with records it
+was never specialized for. It is also not reached through a lazy stub — only
+three stubs inflate (the `from_seq` spec, the comparator, and `lt`), so it is
+called directly.
+
+**The next action**: identify that prelowered function. The two shapes that fit
+are `set::min`-style fold bodies (`set.mz:129`, `seq.mz:293`, `list.mz:274`,
+`deque.mz:316` — all `{ container 'a } with Ord 'a -> Option 'a`, all folding
+with `<`) and the inherent impl ops that forward to them. Note `sorted_set::min`
+has the SAME shape modulo the container, which would explain why a uniquely
+named probe with that signature also fails while an `['a]`-returning one does
+not — a container mixed up at the type level (disease 2: `SetType` vs
+`SortedSetType` vs `TypeApplication`) rather than at the name level.
 
 ### What the probing did turn up: extracted-lambda hash collisions, measured
 
