@@ -3171,8 +3171,16 @@ class TypedASTCompiler(
                 resolvedDicts.add(dictParamName to ReadGlobalFnByHashIR(opHash, src))
             } else {
                 // Try forwarding from caller's dict params
-                val callerDictIdx = (enclosingDictSlot(dictMethod, com.mezze.language.ast.MagicParams.typeVarOfKey(methodName)) ?: dictParamName)
-                    .let { currentParamNames.indexOf(it) }
+                // No unqualified-name fallback. This used to drop the type var and
+                // retry under the bare `__dict_<method>` name — the name-keyed
+                // guess C.2 replaced. It FIRED (14 times across a full forced
+                // rerun), so it was not dead; removing it anyway leaves both
+                // gates green, which means those 14 wrappers were being built on
+                // a slot chosen by name rather than by (ability, method, var).
+                // Not wrapping is the honest answer.
+                val slotName = enclosingDictSlot(dictMethod, com.mezze.language.ast.MagicParams.typeVarOfKey(methodName))
+                    ?: return null
+                val callerDictIdx = currentParamNames.indexOf(slotName)
                 if (callerDictIdx >= 0) {
                     val slot = currentCaptureCount + callerDictIdx
                     resolvedDicts.add(dictParamName to ReadLocalIR(slot, SlotKind.OBJECT, src))
@@ -3186,7 +3194,11 @@ class TypedASTCompiler(
         // Find the original function's regular param names (excluding dict params)
         val originalDecl = declIndex?.values?.find { it.hash == binding.hash }
         val originalLambda = originalDecl?.value as? TypedLambda
-        val regularParamNames = originalLambda?.params?.map { it.name } ?: listOf("it")
+        // No invented parameter list. This used to fall back to `["it"]` when the
+        // original lambda was not found; measured DEAD — zero hits across a full
+        // forced rerun of the interpreter suite. A wrapper built on a guessed
+        // arity mis-binds every argument, so not wrapping is the correct answer.
+        val regularParamNames = originalLambda?.params?.map { it.name } ?: return null
 
         // Generate a unique hash for the wrapper lambda
         val hashBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
