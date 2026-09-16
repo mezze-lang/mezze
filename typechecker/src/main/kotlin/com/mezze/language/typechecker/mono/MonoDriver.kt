@@ -237,6 +237,13 @@ object MonoDriver {
         val result = Monomorphizer(
             resolveDecl = declIndex::get,
             implIndex = implIndex,
+            // C.1 — let a transitive specialization resolve its OWN constraints
+            // instead of inheriting the caller's. Same function the by-hash seed
+            // path already uses, so there is one rule for what discharges a
+            // constraint, not two.
+            resolveEvidence = { decl, args ->
+                resolveAbilityConstraints(decl, args, abilityImpls, recordShapeByHash)
+            },
         ).run(seeds)
 
         // Build the per-call-site lookup the compiler consumes. For each

@@ -579,7 +579,7 @@ the REVERSED-Ord newtype that detects silent wrongness rather than a crash.
 
 ---
 
-## BUG 10 — OPEN: the `_by` fusions compare the KEY with a primitive `<`
+## BUG 10 — FIXED: the `_by` fusions compare the KEY with a primitive `<`
 
 Found 2026-09-16, immediately after BUG 7's sorted-container half, by asking
 whether that fix's siblings shared the hazard. They do.
@@ -632,7 +632,7 @@ one the author wrote.
 Verified: the primitive-key fast path still fuses (`min_by`/`max_by` on an Int
 key pass), and the record-key path no longer silently discards the comparator.
 
-### Layer 2 — the fallback is equally wrong — OPEN, and this is C.1
+### Layer 2 — the fallback was equally wrong — FIXED by C.1
 
 Declining the fusion is not enough, because the NON-fused path loses the
 instance too. Measured:
@@ -658,9 +658,17 @@ The gap is precisely located:
   it; the module-level `min_by@310`, the one that actually carries
   `with Ord 'b`, never does.
 
-Both sites need to resolve the callee's constraints the way
-`MonoDriver:380` already does. That is task **C.1**, and this is its first
-concrete failing case.
+**Fixed**: `Monomorphizer` now takes a `resolveEvidence` callback — supplied by
+`MonoDriver`, which owns the impl set, so there is ONE rule for what discharges a
+constraint rather than two — and a transitive specialization resolves its own
+constraints instead of inheriting the caller's.
+
+The change is deliberately additive: a site that already carries evidence keeps
+it untouched, and only the empty case is filled in. `abilityImpls` feeds
+`specializedHash`, so re-deciding evidence for sites that already had an answer
+would renumber specializations wholesale — which is how a broader version of
+this resolution previously broke seven map/set filter tests. Both gates are green
+with no filter regressions.
 
 ### Why it was not fixed alongside BUG 7
 
@@ -691,9 +699,10 @@ as their acceptance test.
 
 ### Acceptance
 
-`KeyedFusionOrdTest` — 3 enabled cases guarding the primitive-key fast path
-(which still fuses), and 4 `@Disabled` on layer 2, one of which is the silent
-reversed-newtype case. They go green when C.1 lands.
+`KeyedFusionOrdTest` — 7 cases, all passing, none disabled: 3 guard the
+primitive-key fast path (which still fuses) and 4 cover the broken orderings,
+including the reversed-newtype case that detects silent wrongness rather than a
+crash.
 
 ---
 

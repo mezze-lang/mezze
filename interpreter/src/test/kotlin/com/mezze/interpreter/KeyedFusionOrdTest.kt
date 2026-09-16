@@ -1,7 +1,6 @@
 package com.mezze.interpreter
 
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 
@@ -23,27 +22,30 @@ import kotlin.test.assertEquals
  * NEWTYPE key whose Ord disagrees with the wrapped type's returns the WRONG
  * ANSWER silently, exactly as BUG 7 did.
  *
- * WHY THIS IS NOT FIXED HERE. BUG 7's sorted-container half could be fixed by
+ * FIXED in two layers. (1) The key's orderability is now DECIDED where the
+ * solved type is in hand and carried as `FunctionIR.returnOrd`, and the fused
+ * sink declines unless it is `DIRECT` — so it can no longer discard a correct
+ * comparator on a guess. (2) The non-fused fallback was equally wrong, because
+ * the specialization carried no evidence to dispatch through: `min_by`
+ * specialized with concrete `typeArgs = [P, K]` and `abilityImpls = []`. A
+ * transitive specialization now resolves its OWN constraints rather than
+ * inheriting the caller's (C.1).
+ *
+ * WHY LAYER 1 ALONE WAS NOT ENOUGH. BUG 7's sorted-container half could be fixed by
  * refusing to fuse, because `__native_sorted_set_{min,max}` are the only bare
  * min/max element natives and the native is O(1) anyway — nothing profitable was
  * lost. That argument does NOT transfer: `min_by` over an Int key is a genuine,
  * perf-critical fast path, so the fusion has to stay and the decision has to be
  * made on the KEY'S TYPE.
  *
- * That type is not available. Measured: the key lambda for an Int key and for a
- * record key compile to STRUCTURALLY IDENTICAL IR —
+ * That type WAS not available: the key lambda for an Int key and for a record key
+ * compiled to STRUCTURALLY IDENTICAL IR —
  * `ReadFieldIR(ReadLocalIR(slot=0, OBJECT), fieldName=…, fieldIndex=-1,
- * typeTag=null)` — differing only in the field NAME, and `FunctionIR.returnType`
- * is null for both. There is nothing to branch on.
+ * typeTag=null)` — differing only in the field NAME, with `returnType` null for
+ * both. Hence `returnOrd`: the compiler decides orderability once, where the type
+ * is known, and carries the decision.
  *
- * So this is blocked on the key type being CARRIED rather than reconstructed,
- * which is exactly tasks C.1 ("solver records evidence per constraint per node")
- * and A.2 ("builder reads types by NodeId; a miss is an ElaborationError, never
- * a fresh var"). It is the first demonstrated failing case those tasks own, and
- * should be their acceptance test.
- *
- * The passing cases below are enabled and guard the fast path that must survive
- * any fix.
+ * The primitive-key cases below guard the fast path that must keep fusing.
  */
 class KeyedFusionOrdTest {
 
@@ -141,9 +143,6 @@ class KeyedFusionOrdTest {
     // ── BUG 10 ────────────────────────────────────────────────────────────
 
     @Test
-    @Disabled(
-        "BUG 10, layer 2 — the FUSION half is fixed (the key's OrdKind is now\n        carried and the fused sink declines unless it is DIRECT), but the\n        non-fused fallback is equally wrong: min_by's comparator loses the\n        key's instance because the spec carries NO evidence. Blocked on C.1 —\n        see known-bugs.md BUG 10."
-    )
     fun `min_by with a record key uses the key's own Ord`() {
         assertEquals(
             10L,
@@ -159,9 +158,6 @@ class KeyedFusionOrdTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 10, layer 2 — the FUSION half is fixed (the key's OrdKind is now\n        carried and the fused sink declines unless it is DIRECT), but the\n        non-fused fallback is equally wrong: min_by's comparator loses the\n        key's instance because the spec carries NO evidence. Blocked on C.1 —\n        see known-bugs.md BUG 10."
-    )
     fun `max_by with a record key uses the key's own Ord`() {
         assertEquals(
             30L,
@@ -177,9 +173,6 @@ class KeyedFusionOrdTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 10, layer 2 — the FUSION half is fixed (the key's OrdKind is now\n        carried and the fused sink declines unless it is DIRECT), but the\n        non-fused fallback is equally wrong: min_by's comparator loses the\n        key's instance because the spec carries NO evidence. Blocked on C.1 —\n        see known-bugs.md BUG 10."
-    )
     fun `sort_by_key with a record key uses the key's own Ord`() {
         assertEquals(
             10L,
@@ -195,9 +188,6 @@ class KeyedFusionOrdTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 10, layer 2 — the FUSION half is fixed (the key's OrdKind is now\n        carried and the fused sink declines unless it is DIRECT), but the\n        non-fused fallback is equally wrong: min_by's comparator loses the\n        key's instance because the spec carries NO evidence. Blocked on C.1 —\n        see known-bugs.md BUG 10."
-    )
     fun `min_by with a REVERSED newtype key returns the largest`() {
         // R's Ord is reversed, so the "minimum" by that ordering is R.(3) — the
         // element tagged 30. A primitive comparison on the wrapped Int gives 10.

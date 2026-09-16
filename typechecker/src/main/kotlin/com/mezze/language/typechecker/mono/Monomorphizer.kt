@@ -58,6 +58,23 @@ class Monomorphizer(
      *  set of each `AbilityImplRef` in a `SpecRequest`. Default empty map keeps
      *  unit tests that don't care about constraint rewriting unchanged. */
     private val implIndex: Map<Hash, TypedAbilityImpl> = emptyMap(),
+    /**
+     * C.1 — resolves a CALLEE's own ability constraints against its concrete
+     * type arguments, returning the impls that discharge them.
+     *
+     * A transitive specialization used to inherit whatever evidence its CALLER
+     * carried, which is a different function's evidence and is empty whenever
+     * the caller had no constraints of its own. `seq::min_by` is the case that
+     * exposed it: specialized with fully concrete `typeArgs = [P, K]` and
+     * `abilityImpls = []`, so the comparator inside it could neither read
+     * evidence (there was none) nor guess from the type arguments (two of them,
+     * and `Ord 'b` binds only the second) and fell to the primitive `<`.
+     *
+     * Supplied by [MonoDriver], which owns the impl set — the knowledge stays
+     * where it already lived. Null in unit tests that do not exercise
+     * constraints.
+     */
+    private val resolveEvidence: ((TypedLetDecl, List<MezzeType>) -> List<AbilityImplRef>)? = null,
     /** Worklist depth limit. Default matches the spec's recommendation. */
     private val maxDepth: Int = 16,
 ) {
@@ -290,11 +307,21 @@ class Monomorphizer(
                     cArgs = emptyMap()
                     cBodies = emptyMap()
                 }
+                // C.1 — evidence for the CALLEE, not inherited from the caller.
+                // Strictly additive: when the site already carries evidence we
+                // keep it untouched, because `abilityImpls` feeds
+                // `specializedHash` and re-deciding it for sites that already
+                // had an answer would renumber specializations wholesale. Only
+                // the empty case — the one that left `min_by` with nothing to
+                // consult — is filled in.
+                val inherited = r.inst?.abilityImpls ?: emptyList()
+                val evidence = if (inherited.isNotEmpty()) inherited
+                    else resolveEvidence?.invoke(targetDecl, derived) ?: emptyList()
                 worklist.addLast(
                     SpecRequest(
                         r.ref.hash,
                         derived,
-                        r.inst?.abilityImpls ?: emptyList(),
+                        evidence,
                         cArgs,
                         cBodies,
                     ) to (depth + 1)
