@@ -216,12 +216,15 @@ class HeuristicDeletionAcceptanceTest {
     // ── TypedASTCompiler.specBoundReceiverType / resolveDictFromSpecTypeArgs ─
 
     @Test
-    fun `specBoundReceiverType - a receiver typed by the impl's OWN variable inside a spec`() {
-        // Inside a monomorphized `impl Eq for Result 'a 'e`, the receiver is still
-        // typed `'a`, which the name-based spec substitution never reaches. Its
-        // dict slot went away with the spec, and guessing element-first over the
-        // spec's type arguments cannot tell `'a` from `'e`. The binding has to come
-        // through the instance head: `Result 'a 'e` against `Result P Str`.
+    fun `a receiver typed by the impl's OWN variable inside a spec - specBoundReceiverType DELETED`() {
+        // This case still has to work, but the heuristic named in the original
+        // title is GONE (A.4). `specBoundReceiverType` bound such a receiver
+        // through the instance head, `Result 'a 'e` against `Result P Str`.
+        //
+        // Measured deletable: with it neutralised, BOTH gates stay green, so
+        // something upstream already pins this receiver — C.1's per-spec evidence
+        // is the likely reason, since it landed after the heuristic was written.
+        // The test stays as the guard that the case keeps working without it.
         assertTrue(
             """
             $pWithPartialEq

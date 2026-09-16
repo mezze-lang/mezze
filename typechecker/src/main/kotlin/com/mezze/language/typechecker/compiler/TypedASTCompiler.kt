@@ -1869,7 +1869,6 @@ class TypedASTCompiler(
                 (fromJsonInputType
                     ?: resolveVariantReceiverType(fn.record, rawReceiverType)
                     ?: rawReceiverType)
-                    .let { r -> specBoundReceiverType(r) ?: r }
                     .let { r ->
                         // Polyglot-newtype-dispatch recovery (see slotConcreteTypes
                         // field comment). Fires when the receiver stayed a bare
@@ -3391,25 +3390,6 @@ class TypedASTCompiler(
     private var specTypeArgs: List<MezzeType>? = null
     /** The generic function / impl op the spec being compiled was cut from. */
     private var specGenericHash: Hash? = null
-
-    /**
-     * Inside a mono specialization of an IMPL OP, a receiver still typed by one of
-     * the impl's own type variables — `'a` in `impl Eq for Result 'a 'e`, which
-     * the name-based spec substitution never reaches — is bound through the
-     * instance head against the spec's type args (`Result 'a 'e` vs `Result P Str`
-     * → `'a = P`), so the compare dispatches P's impl directly. Its dict slot was
-     * stripped with the spec, and the element-first guess over the type args
-     * cannot tell `'a` from `'e`. Null outside a spec, for a let spec, or when
-     * the variable does not bind to a concrete type.
-     */
-    private fun specBoundReceiverType(receiver: MezzeType): MezzeType? {
-        if (receiver !is VarType) return null
-        val origin = specGenericHash ?: return null
-        val args = specTypeArgs ?: return null
-        val bindings = bindImplVarsForOp(origin, args)
-        val name = receiver.variable.name
-        return (bindings[name] ?: bindings["'$name"])?.takeIf { it !is VarType && !containsVarType(it) }
-    }
 
     /**
      * Structural walk to derive a CONCRETE type for [expr] when the solver left
